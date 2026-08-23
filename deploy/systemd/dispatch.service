@@ -1,0 +1,162 @@
+# =============================================================================
+#  DisPatch Chat — SYSTEM-WIDE systemd unit
+# =============================================================================
+#  Install to /etc/systemd/system/dispatch.service
+#
+#  Use this variant when the server should start at BOOT with nobody logged in
+#  (a Pi, a NAS, a VPS). Runs as a dedicated unprivileged `dispatch` account.
+#
+#  Setup (see docs/deploy-bare-metal.md for the full walkthrough):
+#     sudo useradd --system --home-dir /var/lib/dispatch --shell /usr/sbin/nologin dispatch
+#     sudo install -d -o dispatch -g dispatch /opt/dispatch /var/lib/dispatch
+#     # copy the source to /opt/dispatch, then as the dispatch user:
+#     sudo -u dispatch env UV_PROJECT_ENVIRONMENT=/opt/dispatch/.venv \
+#          uv sync --frozen --no-dev --project /opt/dispatch/backend
+#     sudo systemctl daemon-reload && sudo systemctl enable --now dispatch
+#
+#  IMPORTANT — DO NOT ADD `--workers N`.
+#  This app keeps WebSocket connections, unlock sessions, rate-limit counters,
+#  the terminal PTY and the backup/mirror loops in PROCESS MEMORY. A second
+#  worker gets its own copy of all of it: unlock on one tab, still locked on
+#  the next; two processes racing the same SQLite file; duplicate backups.
+#  One process. Scale by not needing to.
+# =============================================================================
+
+[Unit]
+Description=DisPatch Chat — self-hosted chat server
+# Repoint at your own fork if you are running one.
+Documentation=https://github.com/LaserLloyd/dispatch-chat
+After=network-online.target
+Wants=network-online.target
+# If you run a local agent backend as another unit, order after it. This is a
+# soft dependency on purpose: DisPatch starts and serves chat fine without it.
+#After=openclaw-gateway.service
+#Wants=openclaw-gateway.service
+
+# StartLimit* live in [Unit], NOT [Service]. systemd moved them in v229 and
+# still logs "Unknown key name" if you put them under [Service] — where they
+# are silently ignored, so your crash-loop guard does nothing. Give up after
+# 5 restarts in 5 minutes rather than hammering a broken config: a corrupt
+# security.yaml crash-loops otherwise and fills the journal overnight.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=dispatch
+Group=dispatch
+
+WorkingDirectory=/opt/dispatch/backend
+
+# --- Storage ---------------------------------------------------------------
+# StateDirectory creates and chowns /var/lib/dispatch for us on every start,
+# which quietly fixes the #1 bare-metal support question ("permission denied
+# writing chats.db"). %S expands to /var/lib.
+StateDirectory=dispatch dispatch/tmp
+StateDirectoryMode=0750
+Environment=LOCAL_CHAT_DATA_DIR=%S/dispatch
+
+# Multipart uploads spool to TMPDIR before landing in the blob store, and the
+# per-file ceiling is 4 GiB. PrivateTmp gives us a private /tmp, but on Fedora
+# and friends /tmp is TMPFS — i.e. RAM — so a big upload would be an OOM, not
+# a file. Point the spool at real disk on the same filesystem as the
+# destination, which also makes the final move a rename instead of a copy.
+# (StateDirectory above creates dispatch/tmp with the right owner for us —
+# no ExecStartPre needed, and no root-owned directory to chase later.)
+Environment=TMPDIR=%S/dispatch/tmp
+
+# --- App configuration -----------------------------------------------------
+# The docs use the DISPATCH_ names; this unit sets the legacy LOCAL_CHAT_ ones
+# on purpose. The app reads DISPATCH_FOO first and LOCAL_CHAT_FOO second, so
+# defaults belong on the lower-priority name — that way a DISPATCH_ value in a
+# drop-in or EnvironmentFile overrides them, which is what you expect. Either
+# spelling works in the lines below; just do not set both.
+Environment=PYTHONUNBUFFERED=1
+Environment=LOCAL_CHAT_HOST=0.0.0.0
+Environment=LOCAL_CHAT_PORT=8765
+# Host-OS integrations. On a system unit running as a locked-down service
+# account these cannot work: there is no `systemctl --user` bus and no home
+# directory to drop a shell into. Off by default; see the bare-metal doc.
+Environment=LOCAL_CHAT_COMFY=0
+Environment=LOCAL_CHAT_TERMINAL=0
+# Uncomment and point at a real agent CLI to enable bot replies.
+#Environment=OPENCLAW_BIN=/usr/local/bin/openclaw
+#Environment=LOCAL_CHAT_MIRROR=1
+#
+# Anything else from .env.example works here too. For a long list, prefer:
+#EnvironmentFile=-/etc/dispatch/dispatch.env
+
+# --- Execution -------------------------------------------------------------
+# Invoke the venv's uvicorn DIRECTLY. Do NOT wrap this in `uv run`: that puts
+# another process between systemd and uvicorn, and the graceful-shutdown path
+# (cancel background tasks -> `PRAGMA wal_checkpoint(TRUNCATE)` -> close DB)
+# only runs if the signal actually lands on uvicorn.
+# --no-access-log is deliberate: a per-request journald line is pure write
+# amplification, and on flash storage it is the single biggest avoidable
+# source of writes this app produces.
+ExecStart=/opt/dispatch/.venv/bin/uvicorn app.main:app \
+          --host ${LOCAL_CHAT_HOST} --port ${LOCAL_CHAT_PORT} \
+          --no-access-log --timeout-graceful-shutdown 20
+
+# --- Shutdown --------------------------------------------------------------
+# Default KillSignal=SIGTERM is correct: uvicorn installs handlers for both
+# SIGINT and SIGTERM, so SIGTERM triggers the graceful path.
+# TimeoutStopSec must comfortably exceed --timeout-graceful-shutdown, or
+# systemd SIGKILLs mid-checkpoint and leaves a -wal file behind (recoverable,
+# but it defeats the point of checkpointing on exit).
+TimeoutStopSec=45
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=3
+
+# --- Hardening -------------------------------------------------------------
+# Verify anything you change with:  systemd-analyze security dispatch.service
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# AF_NETLINK is not optional despite looking like it: glibc's getaddrinfo()
+# uses a netlink socket for AI_ADDRCONFIG (deciding whether this host has a
+# usable IPv6 address). Omit it and outbound DNS starts failing in ways that
+# look like a network problem rather than a sandbox problem.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# ProtectSystem=strict makes everything read-only except these:
+ReadWritePaths=%S/dispatch
+# The app writes uploaded avatars into the source tree today (see
+# docs/deploy-bare-metal.md § "Avatars"). There is NO environment override for
+# that path yet, so uncommenting the line below is currently the only way to
+# make avatar upload work under ProtectSystem=strict.
+#ReadWritePaths=/opt/dispatch/frontend/static/avatars
+
+# MemoryDenyWriteExecute=yes is tempting and usually works with CPython, but
+# it breaks any dependency that maps executable pages (some accelerated image
+# codecs do). Enable it, then actually upload a picture before believing it.
+#MemoryDenyWriteExecute=yes
+
+# --- Relaxations you need for specific optional features -------------------
+# Enabling an agent backend that lives in a user's home:
+#   ProtectHome=read-only
+#   ReadOnlyPaths=/home/youruser/.openclaw
+# Enabling the coding terminal (spawns an interactive shell as this user —
+# understand that this is a remote shell before you do it):
+#   LOCAL_CHAT_TERMINAL=1, ProtectHome=no, drop SystemCallFilter=~@privileged
+
+[Install]
+WantedBy=multi-user.target

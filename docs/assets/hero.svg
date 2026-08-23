@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img"
+     aria-label="DisPatch Chat — a self-hosted chat app for your household and your AI agents. AGPL-3.0, one process, one SQLite file, no cloud.">
+  <defs>
+    <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse">
+      <path d="M 46 0 H 0 V 46" fill="none" stroke="#18202a" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="glow" cx="16%" cy="0%" r="92%">
+      <stop offset="0" stop-color="#2ea8ff" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#2ea8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="86%" cy="100%" r="60%">
+      <stop offset="0" stop-color="#00e6cf" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#00e6cf" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="420" fill="#0b0e12"/>
+  <rect width="1200" height="420" fill="url(#grid)"/>
+  <rect width="1200" height="420" fill="url(#glow)"/>
+  <rect width="1200" height="420" fill="url(#glow2)"/>
+
+  <!-- laser rule -->
+  <line x1="64" y1="86" x2="1136" y2="86" stroke="#26313e" stroke-width="2" stroke-dasharray="12 9"/>
+  <circle cx="64" cy="86" r="7" fill="#2ea8ff"/>
+  <circle cx="64" cy="86" r="14" fill="none" stroke="#2ea8ff" stroke-opacity=".45" stroke-width="2"/>
+
+  <!-- aperture marks -->
+  <g stroke="#5f7386" stroke-width="2" fill="none">
+    <circle cx="1136" cy="356" r="8"/>
+    <line x1="1122" y1="356" x2="1132" y2="356"/><line x1="1140" y1="356" x2="1150" y2="356"/>
+    <line x1="1136" y1="342" x2="1136" y2="352"/><line x1="1136" y1="360" x2="1136" y2="370"/>
+  </g>
+
+  <text x="64" y="62" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="19" letter-spacing="6" fill="#5f7386">DISPATCH-CHAT</text>
+
+  <rect x="62" y="118" width="292" height="38" rx="19" fill="none" stroke="#ffb64a" stroke-width="2"/>
+  <text x="208" y="144" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="3" fill="#ffb64a" text-anchor="middle">SELF-HOSTED &#183; OPEN SOURCE</text>
+
+  <text x="62" y="238" font-family="system-ui, &apos;Segoe UI&apos;, Roboto, &apos;Helvetica Neue&apos;, Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-1" fill="#eaf1f8">DisPatch Chat</text>
+  <line x1="64" y1="266" x2="214" y2="266" stroke="#ffb64a" stroke-width="5" stroke-linecap="round"/>
+  <text x="62" y="312" font-family="system-ui, &apos;Segoe UI&apos;, Roboto, &apos;Helvetica Neue&apos;, Arial, sans-serif" font-size="27" fill="#9aabbc">Your household, your hardware, your AI.</text>
+
+  <text x="64" y="372" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="4" fill="#5f7386">AGPL-3.0 &#183; ONE PROCESS &#183; ONE SQLITE FILE &#183; NO CLOUD</text>
+
+  <!-- conversation motif: a human bubble, an agent bubble, a locked tier -->
+  <g transform="translate(726 70)" opacity="0.95">
+    <path d="M 0 24 h 210 a 14 14 0 0 1 14 14 v 74 a 14 14 0 0 1 -14 14 h -142 l -34 32 v -32 h -34 a 14 14 0 0 1 -14 -14 v -74 a 14 14 0 0 1 14 -14 Z"
+          fill="#10151b" stroke="#2ea8ff" stroke-width="4" transform="translate(14 0)"/>
+    <line x1="52" y1="66" x2="196" y2="66" stroke="#26313e" stroke-width="6" stroke-linecap="round"/>
+    <line x1="52" y1="92" x2="150" y2="92" stroke="#26313e" stroke-width="6" stroke-linecap="round"/>
+
+    <path d="M 118 168 h 210 a 14 14 0 0 1 14 14 v 74 a 14 14 0 0 1 -14 14 h -34 v 32 l -34 -32 h -142 a 14 14 0 0 1 -14 -14 v -74 a 14 14 0 0 1 14 -14 Z"
+          fill="#10151b" stroke="#ffb64a" stroke-width="4"/>
+    <circle cx="168" cy="219" r="8" fill="#00e6cf"/>
+    <circle cx="212" cy="219" r="8" fill="#00e6cf"/>
+    <circle cx="256" cy="219" r="8" fill="#00e6cf"/>
+  </g>
+</svg>

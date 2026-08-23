@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" role="img"
+     aria-label="The two access tiers. Every request from either tier hits the same server-side gate. Safe Mode, with no PIN, gets read and send to safe characters only, media stripped server-side, a one-way file drop and daily per-device budgets; every mutating endpoint answers 403. Unlocked, with the PIN, gets full agents, files, settings, deletion, the host dashboard and the coding panes. The gate is enforced on the server, so a hand-crafted request from a locked device gets the same 403 as a button press.">
+  <defs>
+    <pattern id="g2" width="46" height="46" patternUnits="userSpaceOnUse">
+      <path d="M 46 0 H 0 V 46" fill="none" stroke="#18202a" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="gl2" cx="50%" cy="0%" r="80%">
+      <stop offset="0" stop-color="#2ea8ff" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#2ea8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="540" fill="#0b0e12"/>
+  <rect width="1200" height="540" fill="url(#g2)"/>
+  <rect width="1200" height="540" fill="url(#gl2)"/>
+
+  <text x="64" y="56" font-family="ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="17" letter-spacing="5" fill="#5f7386">TWO TIERS &#183; ONE GATE</text>
+  <line x1="64" y1="76" x2="1136" y2="76" stroke="#26313e" stroke-width="2" stroke-dasharray="12 9"/>
+  <circle cx="64" cy="76" r="6" fill="#2ea8ff"/>
+
+  <!-- devices -->
+  <g>
+    <rect x="64" y="112" width="300" height="72" rx="14" fill="#10151b" stroke="#5f7386" stroke-width="3"/>
+    <text x="214" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle">Kitchen tablet</text>
+    <text x="214" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#9aabbc" text-anchor="middle">NO PIN</text>
+  </g>
+  <g>
+    <rect x="836" y="112" width="300" height="72" rx="14" fill="#10151b" stroke="#2ea8ff" stroke-width="3"/>
+    <text x="986" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle">Your phone</text>
+    <text x="986" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#2ea8ff" text-anchor="middle">PIN ENTERED</text>
+  </g>
+
+  <!-- funnel into the gate -->
+  <path d="M 214 184 V 214 Q 214 236 320 236 H 600" fill="none" stroke="#5f7386" stroke-width="3"/>
+  <path d="M 986 184 V 214 Q 986 236 880 236 H 600" fill="none" stroke="#2ea8ff" stroke-width="3"/>
+  <circle cx="600" cy="236" r="6" fill="#9aabbc"/>
+
+  <!-- the gate -->
+  <rect x="360" y="262" width="480" height="86" rx="16" fill="#10151b" stroke="#ffb64a" stroke-width="4"/>
+  <text x="600" y="298" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" font-weight="700" fill="#ffb64a" text-anchor="middle">The gate — enforced on the server</text>
+  <text x="600" y="328" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#9aabbc" text-anchor="middle">not in the interface &#183; a hand-crafted request gets the same 403</text>
+  <path d="M 600 236 V 262" fill="none" stroke="#ffb64a" stroke-width="3"/>
+
+  <!-- outcomes -->
+  <path d="M 480 348 V 386" fill="none" stroke="#5f7386" stroke-width="3"/>
+  <path d="M 720 348 V 386" fill="none" stroke="#2ea8ff" stroke-width="3"/>
+
+  <g>
+    <rect x="64" y="386" width="500" height="122" rx="14" fill="#10151b" stroke="#5f7386" stroke-width="3"/>
+    <text x="88" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8">Safe Mode</text>
+    <text x="88" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">Read and send &#8212; safe characters only. Media stripped</text>
+    <text x="88" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">server-side. One-way file drop. Daily per-device budgets.</text>
+    <text x="88" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#ff6b6b">every mutating endpoint &#8594; 403</text>
+  </g>
+  <g>
+    <rect x="636" y="386" width="500" height="122" rx="14" fill="#10151b" stroke="#2ea8ff" stroke-width="3"/>
+    <text x="660" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8">Unlocked</text>
+    <text x="660" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">Full-power agents, files, settings, deletion, the host</text>
+    <text x="660" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">dashboard, and the coding panes if you enabled them.</text>
+    <text x="660" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#4ade80">everything</text>
+  </g>
+</svg>

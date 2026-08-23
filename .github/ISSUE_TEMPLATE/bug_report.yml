@@ -1,0 +1,82 @@
+name: Bug report
+description: Something is broken
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not a security issue, right?** If it is, close this and use the
+        Security tab → Report a vulnerability instead. See SECURITY.md.
+
+        Please redact hostnames, IP addresses and message content before
+        pasting logs. We do not want your private data in a public issue.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >
+        Steps against a fresh install if you can manage it. "Open a thread with
+        more than 200 messages and scroll up" is worth more than a paragraph of
+        description.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it
+      options:
+        - Docker / Compose
+        - Raspberry Pi
+        - Windows (Docker Desktop)
+        - Windows (WSL2)
+        - Bare Linux (systemd)
+        - Development server
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Browser / device
+      description: Only if the problem is in the interface.
+      placeholder: Firefox 141 on Android 16, installed as a PWA
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Server log around the failure, and the browser console if it is a UI
+        problem. Redact first — see the note at the top.
+      render: text
+
+  - type: textarea
+    id: dashboard
+    attributes:
+      label: Dashboard findings
+      description: >
+        Optional but very useful. Settings → Dashboard, and paste anything
+        showing as warn or fail.

@@ -1,0 +1,262 @@
+# =============================================================================
+#  DisPatch Chat — docker compose
+# =============================================================================
+#   cp .env.example .env      # edit it
+#   docker compose up -d
+#   docker compose logs -f
+#
+#  Add the optional Caddy reverse proxy (HTTPS, a real hostname):
+#   docker compose --profile proxy up -d
+#
+#  Requires Compose V2 (`docker compose`, two words). The old `docker-compose`
+#  v1 Python tool is end-of-life and does not understand `profiles:` or the
+#  `deploy.resources` limits below.
+#
+#  There is deliberately no `version:` key. It has been obsolete since Compose
+#  spec v2 and current versions print a warning if you include one.
+# =============================================================================
+
+name: dispatch
+
+services:
+
+  # ===========================================================================
+  #  The app
+  # ===========================================================================
+  app:
+    # With IMAGE unset (the default), Compose finds no `dispatch-chat:local`
+    # locally, BUILDS it from the `build:` block below and tags it that — so a
+    # plain `docker compose up -d` works offline, on any architecture, with no
+    # registry account. Set IMAGE in .env to pull a published image instead
+    # (see .env.example § 8), and rebuild explicitly with:
+    #   docker compose build && docker compose up -d
+    image: ${IMAGE:-dispatch-chat:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    container_name: dispatch
+    hostname: dispatch
+
+    restart: unless-stopped
+    # `unless-stopped`, not `always`: if you deliberately stop the container,
+    # a host reboot should leave it stopped. `always` resurrects it, which is
+    # infuriating when you stopped it to do maintenance.
+
+    # -----------------------------------------------------------------------
+    #  Signals and shutdown
+    # -----------------------------------------------------------------------
+    # init: true runs tini as PID 1. Two jobs:
+    #   1. Reap orphaned processes. This app can spawn an external agent CLI
+    #      as a subprocess; if that CLI leaves grandchildren behind they get
+    #      reparented to PID 1, and uvicorn does not reap arbitrary orphans.
+    #      Without tini they accumulate as zombies until the pid limit.
+    #   2. Forward SIGTERM properly.
+    init: true
+
+    # The app drains connections, cancels background tasks, folds the SQLite
+    # WAL back into chats.db and closes the DB on SIGTERM. Measured at well
+    # under a second on an idle instance, but give it real room: the default
+    # 10s is not enough if a large agent turn or upload is in flight, and a
+    # SIGKILL mid-checkpoint leaves a stale -wal beside the database.
+    # Must be LARGER than the image's --timeout-graceful-shutdown (20s).
+    stop_grace_period: 30s
+
+    # -----------------------------------------------------------------------
+    #  Networking
+    # -----------------------------------------------------------------------
+    ports:
+      # BIND_ADDR controls exposure:
+      #   0.0.0.0   (default) reachable from your LAN — what most people want
+      #   127.0.0.1           this host only; use this when Caddy fronts it
+      - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-8765}:8765"
+    #
+    # ⚠ Do NOT use `network_mode: host`. The app grants unauthenticated access
+    # to its machine-to-machine endpoints when the peer address is loopback.
+    # In bridge mode nothing outside can ever present as 127.0.0.1, so that
+    # exemption is safe. On the host network, anything on the box — including
+    # another container you gave host networking to — can.
+
+    # -----------------------------------------------------------------------
+    #  Configuration
+    # -----------------------------------------------------------------------
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Explicit values so the container is correct even with no .env at all.
+      #
+      # These use the LEGACY LOCAL_CHAT_ spelling on purpose, even though
+      # .env.example documents DISPATCH_. The app reads DISPATCH_FOO first and
+      # LOCAL_CHAT_FOO second, so a baked-in DISPATCH_ default would OUTRANK a
+      # legacy LOCAL_CHAT_ value in somebody's existing .env and silently
+      # ignore it. Defaults belong on the lower-priority name; overrides in
+      # either spelling then win, which is the behaviour people expect.
+      TZ: ${TZ:-UTC}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      LOCAL_CHAT_DATA_DIR: /data
+      LOCAL_CHAT_HOST: 0.0.0.0
+      LOCAL_CHAT_PORT: 8765
+
+    # RUN_AS=0:0 lets the entrypoint chown the data directory to PUID:PGID and
+    # then drop privileges — the escape hatch for a bind mount owned by a UID
+    # other than 1000. The default runs unprivileged from the very first
+    # instruction, which is what you want.
+    user: "${RUN_AS:-1000:1000}"
+
+    cap_drop: [ALL]
+    # With RUN_AS=0:0 the entrypoint needs to chown and then setuid, so add:
+    #   cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+    security_opt:
+      - no-new-privileges:true
+
+    # -----------------------------------------------------------------------
+    #  Storage
+    # -----------------------------------------------------------------------
+    volumes:
+      # If DATA_PATH is unset this resolves to the named volume `dispatch-data`
+      # declared at the bottom. If you set DATA_PATH to an absolute host path
+      # it becomes a bind mount. One line, both modes.
+      #
+      # Named volume  = Docker initialises it from the image's ownership, so
+      #                 permissions just work. Strongly preferred.
+      # Bind mount    = you control the location (put it on the SSD), but you
+      #                 own the UID/GID problem. See docs/deploy-docker.md.
+      - ${DATA_PATH:-dispatch-data}:/data
+
+      # Avatars: uploaded through the UI, i.e. user data — but the app serves
+      # them out of the source tree at frontend/static/avatars, which is in
+      # the read-only image. Without this mount they land in the container's
+      # writable layer and are LOST on the next `docker compose pull`.
+      #
+      # It must be a MOUNT. A symlink from the image path to /data/avatars was
+      # tested and returns HTTP 404: Starlette's StaticFiles resolves real
+      # paths and refuses anything escaping the static root. The subpath mount
+      # below serves the same file with HTTP 200.
+      #
+      # Requires Docker Engine 26+ / Compose v2.26+ for `subpath`, which keeps
+      # ALL state in the one volume so "back up /data" stays true.
+      #
+      # ⚠ IF YOU SET DATA_PATH (a bind mount), replace this whole block with
+      #   the matching bind, or your avatars end up in a named volume while
+      #   everything else is in your chosen directory:
+      #     - ${DATA_PATH}/avatars:/app/frontend/static/avatars
+      #
+      # On Docker older than 26, use a second named volume instead:
+      #     - dispatch-avatars:/app/frontend/static/avatars
+      - type: volume
+        source: dispatch-data
+        target: /app/frontend/static/avatars
+        volume:
+          subpath: avatars
+
+    # ⚠ Do NOT mount /tmp as tmpfs here. Uploads spool through TMPDIR before
+    # reaching the blob store and the per-file ceiling is 4 GiB — on tmpfs
+    # that is a 4 GiB RAM allocation, and on a Pi that is the OOM killer. The
+    # image points TMPDIR at /data/tmp for exactly this reason.
+
+    # -----------------------------------------------------------------------
+    #  Health
+    # -----------------------------------------------------------------------
+    # The image defines a HEALTHCHECK; this only widens the startup window,
+    # because first boot on a Pi 4 with an SD card does schema creation,
+    # reaction-pack seeding and crash recovery before it answers.
+    healthcheck:
+      start_period: 90s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    # -----------------------------------------------------------------------
+    #  Resource limits — sized for a 4 GB Raspberry Pi
+    # -----------------------------------------------------------------------
+    # Idle RSS is roughly 90-130 MB. The headroom is for Pillow: avatar and
+    # reaction-image processing decodes whole bitmaps into memory, and a big
+    # PNG is briefly expensive. 1 GB is comfortable; below ~512 MB you will
+    # eventually OOM on an image upload rather than on chat traffic.
+    #
+    # A hard memory limit is a FEATURE on a Pi: without one, the kernel OOM
+    # killer picks a victim across the whole system and it is often sshd.
+    deploy:
+      resources:
+        limits:
+          memory: ${MEM_LIMIT:-1g}
+          cpus: "${CPU_LIMIT:-2.0}"
+        reservations:
+          memory: ${MEM_RESERVATION:-256m}
+    # `deploy.resources` is honoured by Compose V2 outside swarm. If your
+    # version ignores it, use the v2-native keys instead:
+    #   mem_limit: 1g
+    #   cpus: 2.0
+
+    # -----------------------------------------------------------------------
+    #  Logging — bounded, because unbounded JSON logs fill an SD card
+    # -----------------------------------------------------------------------
+    # Docker's default json-file driver has NO size limit. A chatty container
+    # on a Pi will quietly consume the card over months. 3 x 10 MB is plenty
+    # for debugging and can never surprise you.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+  # ===========================================================================
+  #  Optional: Caddy reverse proxy  (docker compose --profile proxy up -d)
+  # ===========================================================================
+  #  Gets you HTTPS with automatic certificates. Worth it because the browser
+  #  features this app uses — clipboard image paste, PWA install, service
+  #  workers, notifications — are gated behind a secure context. Over plain
+  #  http:// on a LAN IP they are simply unavailable.
+  #
+  #  Caddy is the recommendation over nginx here for one specific reason:
+  #  Caddy v2's reverse_proxy PRESERVES the incoming Host header by default.
+  #  This app's WebSocket guard requires the Origin host to equal the Host
+  #  header, so a proxy that rewrites Host silently breaks live updates —
+  #  the page loads fine and then never updates again. See the Caddyfile.
+  # ===========================================================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: dispatch-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"     # HTTP/3
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      # The real path is deploy/caddy/Caddyfile. Getting this wrong is not a
+      # clean failure: Docker CREATES a missing bind source as an empty
+      # DIRECTORY, so `--profile proxy up` silently mounts a directory where a
+      # config file should be, Caddy exits, and the tree grows a stray
+      # `Caddyfile/` folder that the next person has to explain.
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy-data holds the certificates and ACME account key. LOSING THIS
+      # VOLUME means re-issuing certs, and Let's Encrypt rate-limits that
+      # (50 certs per registered domain per week). Back it up, or at minimum
+      # do not `docker compose down -v` casually.
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+volumes:
+  dispatch-data:
+    name: dispatch-data
+  caddy-data:
+    name: dispatch-caddy-data
+  caddy-config:
+    name: dispatch-caddy-config

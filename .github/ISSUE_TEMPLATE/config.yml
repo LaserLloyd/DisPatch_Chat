@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LaserLloyd/dispatch-chat/security/advisories/new
+    about: >
+      Report privately. Never open a public issue for a security problem —
+      see SECURITY.md.
+  - name: Question or idea
+    url: https://github.com/LaserLloyd/dispatch-chat/discussions
+    about: >
+      Not sure it's a bug, or want to propose a feature? Start a discussion
+      first — it saves you writing code we'd have to turn down.
+  - name: Translation help
+    url: https://github.com/LaserLloyd/dispatch-chat/blob/main/docs/i18n.md
+    about: >
+      Adding or fixing a language is one JSON file and no code. The easiest
+      way to contribute.

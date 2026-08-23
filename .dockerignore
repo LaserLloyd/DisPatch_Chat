@@ -1,0 +1,92 @@
+# .dockerignore — keep the build context small and secret-free.
+#
+# The build context is uploaded to the daemon on every build. This repo's
+# frontend/static/avatars/ alone is ~127 MB of PNGs, and backend/.venv can be
+# hundreds of MB, so an unfiltered context makes every build slow AND bakes
+# host-specific junk into the image.
+#
+# Style note: this file is DENY-based (like the rest of this project's deploy
+# tooling). If you prefer allow-based, the pattern is `*` followed by `!path`
+# lines — but that reliably surprises people when a new source dir appears, so
+# we keep deny-based and audit it.
+
+# ---------------------------------------------------------------- VCS / CI --
+.git
+.gitignore
+.gitattributes
+.github
+*.patch
+*.orig
+*.rej
+
+# ------------------------------------------------------- Python build junk --
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/htmlcov
+
+# -------------------------------------------------- Runtime / user data -----
+# NEVER copy live data into an image. Someone WILL run a build in a checkout
+# that has a symlinked or copied data dir sitting in it.
+data/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite3
+**/security.yaml
+**/RECOVERY-CODE.txt
+**/trusted-devices.yaml
+**/.env
+**/.env.*
+!.env.example
+
+# Runtime-written user content. Avatars are user-uploaded (see
+# docs/deploy-docker.md § "Avatars are user data"), they belong on the data
+# volume, and at ~127 MB they must not be in the image or the context.
+frontend/static/avatars/
+frontend/static/avatars.backup-*/
+media/
+files/
+backups/
+reactions/
+
+# ------------------------------------------------------------- Dev cruft ----
+.serve.pid
+*.bak
+*.bak-*
+*.log
+_backup-*/
+_review-backup-*/
+_audit-backup-*/
+.bak-archive/
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+.idea/
+.vscode/
+
+# ---------------------------------------------------- Docs & deploy meta ----
+# Not needed at runtime; excluding them means a typo fix in a doc does not
+# invalidate the dependency layer cache.
+docs/
+*.md
+!README.md
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+systemd/
+Caddyfile
+
+# Tests are excluded from the runtime image. If you want to run the suite
+# inside the container (see docs/deploy-docker.md § Testing) build the
+# `builder` stage instead, which gets the full context minus these rules —
+# so comment the next line out for a test-image build.
+backend/tests/
+backend/turn_probe.py

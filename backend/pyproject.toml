@@ -1,0 +1,127 @@
+[project]
+name = "dispatch-chat"
+version = "1.0.0"
+description = "Self-hosted chat for your household and your AI agents"
+license = "AGPL-3.0-only"
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "aiosqlite>=0.20.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "python-multipart>=0.0.9",
+    "pillow>=12.2.0",
+    "httpx>=0.27.0",
+    "anthropic>=0.120.2",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+# --------------------------------------------------------------------------- #
+# Ruff
+#
+# CI runs `uvx ruff check app tests`, i.e. whatever ruff is newest that day.
+# Without an explicit config that means the rule set moves under us and a green
+# branch can go red with no code change, so everything below is pinned on
+# purpose: the families we want, and a short reason for every rule we turn off.
+# An ignore here is a statement that the pattern is deliberate — not a snooze.
+# --------------------------------------------------------------------------- #
+[tool.ruff]
+target-version = "py312"
+# The code runs to ~90 columns for real code and lets prose comments trail past
+# it (p99 is 90, a handful of explanatory comments reach ~140). 120 is the
+# budget for actual code; E501 is off below so a long comment never fails CI.
+line-length = 120
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes — real dead code and typos
+    "I",      # import sorting
+    "UP",     # pyupgrade — we are py312+, no need for the old spellings
+    "B",      # bugbear
+    "C4",     # comprehension clarity
+    "PIE",    # misc lints
+    "DTZ",    # datetime awareness
+    "RUF",    # ruff's own
+]
+ignore = [
+    # Comments and docstrings carry the "why" in this codebase and are allowed
+    # to run long; line-length above still governs the formatter.
+    "E501",
+    # Nearly every hit is the deliberate "translate a caught error into a
+    # client-facing one" pattern (`except ValueError: raise HTTPException(400)`
+    # / `raise WorkflowError(...)`). The caught exception is the implementation
+    # detail being hidden; chaining it back in is noise, not context.
+    "B904",
+    # FastAPI's whole calling convention is `x = Depends(...)` / `Query(...)`
+    # in the signature default. Not a mutable-default bug.
+    "B008",
+    # Best-effort/fail-open paths catch `Exception` on purpose: a broken avatar,
+    # a dead rig or an unparseable transcript must never take the chat down.
+    # Narrowing these would change behaviour, which is the opposite of the goal.
+    # (Selected via B, so it needs turning off explicitly.)
+    "BLE001",
+    # `datetime.now()` here is the box-local clock on purpose — daily thread
+    # rollover, the night window and the JST-facing UI are all local-time
+    # concepts. UTC would be the bug.
+    "DTZ005",
+    # Unpacking a whole tuple (`rc, out, err = ...`) documents the shape of the
+    # return even when a slot is unused; renaming to `_err` reads worse.
+    "RUF059",
+    # The UI copy, log lines and docstrings use real typography (—, ’, …) and
+    # emoji on purpose; "ambiguous unicode" is the intended character.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# One parser function builds a list of dicts and advances an index on the same
+# line (`items.append({...}); idx += 1`) so the six near-identical branches stay
+# visually parallel. Splitting them doubles the height for no clarity.
+"app/openclaw.py" = ["E702"]
+"tests/*" = [
+    # Importing a pytest fixture into another module is how fixtures are shared;
+    # pyflakes reads it as an unused import and every use as a redefinition.
+    "F401",
+    "F811",
+    # Tests line up cheap setup on one line to keep the interesting assertion
+    # visible; that is a readability choice, not a mistake.
+    "E702",
+    # `[m for m in rows if ...][0]` is the assertion: the row must exist, and
+    # IndexError names the failure better than next()'s StopIteration.
+    "RUF015",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

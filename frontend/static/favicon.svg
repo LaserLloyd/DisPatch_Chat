@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Dark rounded background -->
+  <rect width="64" height="64" rx="14" fill="#0f0f1a"/>
+  
+  <!-- Body - round pufferfish -->
+  <circle cx="32" cy="33" r="18" fill="#f59e0b" stroke="#d97706" stroke-width="1"/>
+  
+  <!-- Belly (lighter) -->
+  <ellipse cx="32" cy="37" rx="12" ry="10" fill="#fbbf24"/>
+  
+  <!-- Spines on top -->
+  <line x1="20" y1="18" x2="18" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="26" y1="16" x2="25" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="32" y1="15" x2="32" y2="9" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="38" y1="16" x2="39" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="44" y1="18" x2="46" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Spines on sides -->
+  <line x1="14" y1="26" x2="9" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="14" y1="33" x2="8" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="50" y1="26" x2="55" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="50" y1="33" x2="56" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Spines on bottom -->
+  <line x1="20" y1="49" x2="18" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="28" y1="50" x2="27" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="36" y1="50" x2="37" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="44" y1="49" x2="46" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Eyes (big, cute) -->
+  <circle cx="26" cy="29" r="4.5" fill="white"/>
+  <circle cx="38" cy="29" r="4.5" fill="white"/>
+  <circle cx="27" cy="29" r="2.5" fill="#1e293b"/>
+  <circle cx="39" cy="29" r="2.5" fill="#1e293b"/>
+  <!-- Eye shine -->
+  <circle cx="28" cy="27.5" r="1" fill="white"/>
+  <circle cx="40" cy="27.5" r="1" fill="white"/>
+  
+  <!-- Mouth (tiny "o" mouth) -->
+  <circle cx="32" cy="36" r="2" fill="#b45309"/>
+  
+  <!-- Cheek blush -->
+  <ellipse cx="22" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
+  <ellipse cx="42" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
+  
+  <!-- Tail -->
+  <path d="M48 33 L54 28 L53 33 L54 38 Z" fill="#d97706"/>
+  
+  <!-- Tiny pectoral fins -->
+  <ellipse cx="16" cy="36" rx="3" ry="1.5" fill="#d97706" transform="rotate(-15 16 36)"/>
+  <ellipse cx="16" cy="29" rx="3" ry="1.5" fill="#d97706" transform="rotate(15 16 29)"/>
+</svg>

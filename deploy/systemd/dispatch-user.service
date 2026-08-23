@@ -1,0 +1,136 @@
+# =============================================================================
+#  DisPatch Chat — USER systemd unit  (systemd --user)
+# =============================================================================
+#  Install to ~/.config/systemd/user/dispatch.service
+#
+#  Use this variant on a machine you log into, when DisPatch should be able to
+#  reach things that live in YOUR home directory — an agent CLI, its session
+#  transcripts, `systemctl --user` for the ComfyUI panel, a shell for the
+#  coding terminal. That is the whole reason to pick user over system: the
+#  optional integrations are all home-directory-shaped.
+#
+#  Setup:
+#     cd /path/to/dispatch/backend && uv sync --frozen --no-dev
+#     mkdir -p ~/.config/systemd/user
+#     sed "s#__APP_DIR__#$PWD/..#g" ../deploy/systemd/dispatch-user.service \
+#         > ~/.config/systemd/user/dispatch.service
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now dispatch
+#
+#  ⚠ THE ONE THING EVERYONE MISSES:
+#     loginctl enable-linger $USER
+#  Without linger, systemd tears down your entire user manager when your last
+#  session ends, and the "always-on" chat server dies the moment you log out of
+#  SSH or the desktop. It also will not start at boot. Run it now:
+#     loginctl enable-linger $USER && loginctl show-user $USER -p Linger
+#
+#  Logs:  journalctl --user -u dispatch -f
+#
+#  ⚠ DO NOT ADD `--workers N` — see the comment in dispatch.service. Unlock
+#  sessions, WebSocket clients and the background loops are per-process.
+# =============================================================================
+
+[Unit]
+Description=DisPatch Chat — self-hosted chat server
+# Repoint at your own fork if you are running one.
+Documentation=https://github.com/LaserLloyd/dispatch-chat
+After=network-online.target
+Wants=network-online.target
+# Order after a local agent gateway if you run one. Keep it Wants= (soft):
+# DisPatch must still come up and serve chat when the agent backend is down.
+#After=openclaw-gateway.service
+#Wants=openclaw-gateway.service
+
+# StartLimit* live in [Unit], NOT [Service]. systemd moved them in v229 and
+# still logs "Unknown key name" if you put them under [Service] — where they
+# are silently ignored, so your crash-loop guard does nothing. Give up after
+# 5 restarts in 5 minutes rather than hammering a broken config: a corrupt
+# security.yaml crash-loops otherwise and fills the journal overnight.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+WorkingDirectory=__APP_DIR__/backend
+
+# --- Storage ---------------------------------------------------------------
+# %S is ~/.local/state under systemd --user, but this app's historical default
+# is ~/.local/share/local-chat and existing installs have data there. Set it
+# explicitly so a future default change cannot silently orphan your database.
+Environment=LOCAL_CHAT_DATA_DIR=%h/.local/share/local-chat
+
+# Upload spool. %h/.local/share keeps it on real disk and on the same
+# filesystem as the blob store, so the final move is a rename. Do not leave
+# this on /tmp: on Fedora, Arch and most modern distros /tmp is tmpfs (RAM),
+# and the per-file upload ceiling here is 4 GiB.
+Environment=TMPDIR=%h/.local/share/local-chat/tmp
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/local-chat/tmp
+
+# --- PATH ------------------------------------------------------------------
+# A user unit does NOT inherit your shell's PATH — no ~/.bashrc runs here.
+# Anything the app shells out to (the agent CLI, systemctl, an image
+# generator) must be findable, so spell the PATH out. This is the single most
+# common cause of "works in the terminal, agent replies fail as a service".
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+
+# --- App configuration -----------------------------------------------------
+# The docs use the DISPATCH_ names; this unit sets the legacy LOCAL_CHAT_ ones
+# on purpose. The app reads DISPATCH_FOO first and LOCAL_CHAT_FOO second, so
+# defaults belong on the lower-priority name — a DISPATCH_ value in the
+# EnvironmentFile below then overrides them. Either spelling works here; just
+# do not set both.
+Environment=PYTHONUNBUFFERED=1
+Environment=LOCAL_CHAT_HOST=0.0.0.0
+Environment=LOCAL_CHAT_PORT=8765
+
+# Optional agent backend. Use an ABSOLUTE path — it removes all PATH doubt,
+# and the app's own availability check handles absolute paths explicitly.
+#Environment=OPENCLAW_BIN=%h/.local/bin/openclaw
+#Environment=LOCAL_CHAT_MIRROR=1
+
+# Host-OS integrations. These are the reason you chose the user unit; they are
+# still OFF by default because both are powerful:
+#   LOCAL_CHAT_TERMINAL=1 exposes an interactive shell running as YOU over a
+#   WebSocket. It is gated behind the PIN, but treat enabling it as "I am
+#   putting a remote shell on my LAN" and set a strong PIN first.
+#Environment=LOCAL_CHAT_TERMINAL=1
+#Environment=LOCAL_CHAT_COMFY=1
+
+# Longer lists belong in a file rather than 30 Environment= lines. The leading
+# `-` means "do not fail if it is missing".
+EnvironmentFile=-%h/.config/dispatch/dispatch.env
+
+# --- Execution -------------------------------------------------------------
+# Call the venv's uvicorn directly rather than `uv run uvicorn`. Two reasons:
+#   1. No extra process between systemd and uvicorn, so SIGTERM lands on the
+#      thing that knows how to shut down. This app checkpoints the SQLite WAL
+#      on the way out; a swallowed signal skips that.
+#   2. `uv run` re-resolves the environment on every start, which turns a
+#      restart into a network operation. Offline boots then fail.
+ExecStart=__APP_DIR__/backend/.venv/bin/uvicorn app.main:app \
+          --host ${LOCAL_CHAT_HOST} --port ${LOCAL_CHAT_PORT} \
+          --no-access-log --timeout-graceful-shutdown 20
+
+# --- Shutdown --------------------------------------------------------------
+# uvicorn handles SIGTERM and SIGINT identically, so the default KillSignal is
+# right and there is no need for the SuccessExitStatus=130 trick that a
+# `uv run`-wrapped ExecStart requires.
+TimeoutStopSec=45
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=3
+
+# --- Light hardening -------------------------------------------------------
+# A user unit cannot use the full sandbox (no ProtectSystem=strict without
+# root), and heavy sandboxing here would defeat the point of running as your
+# own user. These are the ones that cost nothing.
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# PrivateTmp is NOT set: it would hide the host /tmp that a sibling agent
+# process uses to hand this app message files, and it interacts badly with
+# TMPDIR above. If you enable it, re-verify agent turns still work.
+
+[Install]
+WantedBy=default.target

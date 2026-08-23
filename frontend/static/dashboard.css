@@ -1,0 +1,243 @@
+/* ===================== Host dashboard =====================
+   Styles for js/dashboard.js. Self-contained: every colour comes from the
+   custom properties app.css defines in :root, so this file inherits both
+   themes for free (app.css sets `color-scheme: light dark` and the theme
+   toggle stamps data-theme, which is what makes light-dark() resolve).
+
+   The only new colours are the three severity tints. --success/--warning/
+   --error are tuned for dark backgrounds and don't carry enough contrast as
+   TEXT on the light skin, so each level gets a light-dark() pair: a darker
+   ink for the light theme, the existing accent for dark. Backgrounds and
+   borders are derived from those with color-mix, so a level always reads as
+   one colour.                                                              */
+
+/* The level tints hang off .dash-body because that IS the dashboard's root
+   now — it used to be .dash-modal, back when this panel had a dialog of its
+   own. Everything tinted is a descendant, so the custom properties still
+   resolve exactly as before. */
+.dash-body {
+  /* Level ink — used for text, dots and borders. */
+  --lvl-ok:   light-dark(#0f766e, #34d399);
+  --lvl-warn: light-dark(#9a5b00, #fbbf24);
+  --lvl-fail: light-dark(#b3261e, #f87171);
+  /* Level wash — the faint fill behind banners, pills and finding rows. */
+  --lvl-ok-bg:   color-mix(in oklab, var(--lvl-ok) 12%, transparent);
+  --lvl-warn-bg: color-mix(in oklab, var(--lvl-warn) 14%, transparent);
+  --lvl-fail-bg: color-mix(in oklab, var(--lvl-fail) 14%, transparent);
+
+  /* No overflow of its own: the Settings pane is the scroll container, and a
+     scroller inside a scroller is how you get a trapped wheel on a phone. */
+  padding: 12px 18px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---- Banner: the one-glance verdict ---- */
+.dash-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+}
+.dash-banner-dot {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 16px; line-height: 1;
+  color: var(--bg-tertiary);
+  background: var(--text-muted);
+}
+.dash-banner-text { flex: 1; min-width: 0; }
+.dash-banner-title { font-weight: 700; font-size: var(--step-1); }
+.dash-banner-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.dash-banner-counts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.dash-count {
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--border-light); color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.dash-banner.level-ok   { border-color: color-mix(in oklab, var(--lvl-ok) 45%, transparent);   background: var(--lvl-ok-bg); }
+.dash-banner.level-warn { border-color: color-mix(in oklab, var(--lvl-warn) 45%, transparent); background: var(--lvl-warn-bg); }
+.dash-banner.level-fail { border-color: color-mix(in oklab, var(--lvl-fail) 50%, transparent); background: var(--lvl-fail-bg); }
+.dash-banner.level-ok   .dash-banner-dot { background: var(--lvl-ok); }
+.dash-banner.level-warn .dash-banner-dot { background: var(--lvl-warn); }
+.dash-banner.level-fail .dash-banner-dot { background: var(--lvl-fail); }
+.dash-banner.level-ok   .dash-banner-title { color: var(--lvl-ok); }
+.dash-banner.level-warn .dash-banner-title { color: var(--lvl-warn); }
+.dash-banner.level-fail .dash-banner-title { color: var(--lvl-fail); }
+.dash-count.level-ok   { color: var(--lvl-ok);   border-color: color-mix(in oklab, var(--lvl-ok) 40%, transparent); }
+.dash-count.level-warn { color: var(--lvl-warn); border-color: color-mix(in oklab, var(--lvl-warn) 40%, transparent); }
+.dash-count.level-fail { color: var(--lvl-fail); border-color: color-mix(in oklab, var(--lvl-fail) 45%, transparent); }
+
+/* Shown when a refresh fails: the numbers above are still the last good ones. */
+.dash-stale {
+  font-size: 12.5px; font-weight: 600;
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  color: var(--lvl-warn);
+  background: var(--lvl-warn-bg);
+  border: 1px solid color-mix(in oklab, var(--lvl-warn) 35%, transparent);
+}
+
+/* ---- Cards ---- */
+.dash-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+}
+.dash-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 11px 13px;
+  min-width: 0;
+}
+.dash-card-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+.dash-card-note { font-size: 11.5px; margin-top: 8px; line-height: 1.45; word-break: break-word; }
+
+.dash-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; padding: 2.5px 0; font-size: 13px;
+}
+.dash-row-label { color: var(--text-muted); flex: 0 0 auto; }
+.dash-row-val {
+  /* Logical, not physical: RTL is first-class here, and `right` would pin the
+     value to the wrong edge in Arabic (see docs/i18n.md — RTL rules). */
+  font-weight: 600; text-align: end; min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dash-row-val.tone-warn { color: var(--lvl-warn); }
+.dash-row-val.tone-fail { color: var(--lvl-fail); }
+
+/* ---- Findings ---- */
+.dash-h3 {
+  font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: -6px;
+}
+.dash-findings { display: flex; flex-direction: column; gap: 7px; }
+.dash-finding {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+.dash-finding-pill {
+  width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  color: var(--bg-tertiary); background: var(--text-muted);
+}
+.dash-finding-main { flex: 1; min-width: 0; }
+.dash-finding-title { font-weight: 650; font-size: 13.5px; }
+.dash-finding-detail {
+  font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.dash-finding-fix {
+  display: flex; gap: 7px; align-items: flex-start;
+  margin-top: 7px; padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--tint-subtle);
+  border: 1px solid var(--border);
+  font-size: 12.5px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.dash-fix-glyph { flex-shrink: 0; }
+.dash-finding-id {
+  display: inline-block; margin-top: 6px;
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-muted);
+  /* An identifier is an LTR artefact whatever the UI language, and it sits
+     inside prose — isolate it so bidi cannot reorder it or the text around it
+     (see docs/i18n.md — RTL rules, inline identifiers). */
+  direction: ltr; unicode-bidi: isolate;
+}
+.dash-empty { padding: 14px; text-align: center; font-size: 13px; }
+
+.dash-finding.level-ok   { border-color: color-mix(in oklab, var(--lvl-ok) 26%, var(--border)); }
+.dash-finding.level-warn { border-color: color-mix(in oklab, var(--lvl-warn) 45%, transparent); background: var(--lvl-warn-bg); }
+.dash-finding.level-fail { border-color: color-mix(in oklab, var(--lvl-fail) 50%, transparent); background: var(--lvl-fail-bg); }
+.dash-finding.level-ok   .dash-finding-pill { background: var(--lvl-ok); }
+.dash-finding.level-warn .dash-finding-pill { background: var(--lvl-warn); }
+.dash-finding.level-fail .dash-finding-pill { background: var(--lvl-fail); }
+.dash-finding.level-warn .dash-finding-title { color: var(--lvl-warn); }
+.dash-finding.level-fail .dash-finding-title { color: var(--lvl-fail); }
+/* A passing check is context, not news: quieter than the rest of the list. */
+.dash-finding.level-ok .dash-finding-title { font-weight: 600; color: var(--text-secondary); }
+.dash-finding.level-ok .dash-finding-detail { color: var(--text-muted); }
+
+/* ---- Log tail ---- */
+.dash-log-head { display: flex; }
+.dash-log-toggle {
+  background: none; border: none; padding: 2px 0;
+  color: var(--text-secondary); font-size: 12.5px; font-weight: 600;
+}
+.dash-log-toggle:hover { color: var(--text-primary); }
+.dash-log {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.dash-log-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.dash-log-path {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* A filesystem path is an LTR island — §7.1 again. */
+  direction: ltr; unicode-bidi: isolate;
+}
+.dash-log-lines {
+  background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  font: inherit; font-size: 12px; padding: 4px 6px;
+}
+.dash-mini { padding: 5px 10px; font-size: 12px; }
+.dash-log-body {
+  margin: 0; padding: 10px 12px;
+  max-height: 40vh; overflow: auto;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--text-secondary); background: var(--bg-tertiary);
+}
+/* "No log file here, look in journalctl" reads as prose, not as log output. */
+.dash-log-note { font-family: var(--font-sans); font-size: 12.5px; color: var(--text-muted); }
+
+/* ---- Footer group (the Health tab's slot in the Settings footer) ---- */
+#sfoot-health { justify-content: flex-start; gap: 10px; align-items: center; }
+.dash-updated { flex: 1; font-size: 11.5px; text-align: end; }
+
+/* ---- Small screens: one column, and the footer stops crowding ---- */
+@media (max-width: 768px) {
+  .dash-cards { grid-template-columns: 1fr; }
+  .dash-banner { align-items: flex-start; flex-wrap: wrap; }
+  .dash-banner-counts { justify-content: flex-start; width: 100%; }
+  .dash-row { font-size: 12.5px; }
+  #sfoot-health { flex-wrap: wrap; }
+  .dash-updated { order: 3; width: 100%; text-align: start; }
+  .dash-log-body { max-height: 50vh; }
+}
+
+/* Windows/Linux keyboard users: the focus ring must survive the custom
+   backgrounds above (app.css's global :focus-visible rule is colour-only). */
+.dash-log-toggle:focus-visible,
+.dash-log-body:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

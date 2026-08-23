@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# DisPatch Chat — .gitignore
+#
+# This file is a SECOND line of defence, not the first. The first is
+# scripts/sync_from_live.py, which copies an explicit allowlist of paths out of
+# a running install, and scripts/scrub_check.py, which fails the build if
+# anything that looks like private data reaches the tree. If you find yourself
+# adding a rule here to hide user data, add it to the scrubber too.
+# ---------------------------------------------------------------------------
+
+# --- Runtime data. NEVER commit any of this. ---
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+backups/
+media/
+files/
+logs/
+reactions/
+avatars/*
+!avatars/.gitkeep
+!avatars/README.md
+frontend/static/avatars/*
+!frontend/static/avatars/.gitkeep
+!frontend/static/avatars/defaults/
+
+# --- Secrets and local configuration ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+security.yaml
+config.yaml
+trusted-devices.yaml
+gateway-mirror.json
+RECOVERY-CODE.txt
+secrets/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- Node (only used for optional tooling; the app itself has no build step) ---
+node_modules/
+npm-debug.log*
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Local scratch ---
+*.bak
+*.bak-*
+*.orig
+*.rej
+*.part
+/tmp/
+scratch/
+
+# Per-fork scrubber identifiers — never publish the list itself.
+scripts/scrub-rules.local.txt
+
+# Single-instance flock, created at runtime in the data dir.
+.instance.lock

@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f0f1a" />
+  <!-- Content-Security-Policy. Delivered as a meta tag rather than a header so
+       it travels with the file: DisPatch is deployed behind whatever the
+       operator already runs (bare uvicorn, nginx, a Pi, Docker), and a policy
+       that only exists in someone's reverse proxy is a policy most installs do
+       not get. `frame-ancestors` is the one directive meta cannot carry — it
+       must be a real header, so clickjacking protection stays the server's job.
+
+       Notes on the parts that are not simply 'self':
+       · script-src carries a HASH for each of the four inline scripts below
+         (theme/NIM no-FOUC, language/direction no-FOUC, the boot-veil fail-safe
+         timer, the service-worker registration). Hashes, not 'unsafe-inline',
+         so an injected <script> still cannot run. THEY ARE WHITESPACE-EXACT:
+         reindenting an inline script silently breaks the page. frontend/tests/
+         csp.test.js recomputes them and fails when they drift.
+       · style-src is 'self' plus ONE hash — the <style> block of the ComfyUI
+         holding page written into a popup window (js/main.js), which inherits
+         this policy because it is opened as about:blank. No 'unsafe-inline':
+         every dynamic style in this app goes through element.style.* (CSSOM),
+         which CSP does not govern, and the handful of inline style="" attributes
+         that existed were moved into app.css.
+       · img-src/media-src allow data: and blob: — inline data: pictures from
+         agent markdown, and object URLs for composer previews. markdown.js
+         confines data: to real image/video/audio types (see its DOMPurify hook).
+       · connect-src allows ws:/wss: for the live socket. It cannot be narrowed
+         to the page origin here: DisPatch is reached by IP, by LAN hostname and
+         over the tailnet, and the scheme-only form is what covers all three.
+       · frame-src names the DeepSeek Harness UI (loopback :3080, only ever
+         framed when the browser is on the host itself). -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'sha256-737X6nvcta4AdRTK/iBev34616mDyUYtk/vNSDWHzsI=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
+    style-src 'self' 'sha256-OHtUOj4BEpZAaAuMi/M8PJJTG1FgR0iicL0GQo9O8jo=';
+    img-src 'self' data: blob:;
+    media-src 'self' blob:;
+    connect-src 'self' ws: wss:;
+    frame-src 'self' http://127.0.0.1:3080 http://localhost:3080;
+    font-src 'self';
+    object-src 'none';
+    base-uri 'none';
+    form-action 'self'" />
+  <!-- Which locale the last visit settled on. i18n.js keeps it current so an
+       installed PWA can read the choice back without waiting for the app. -->
+  <meta name="i18n-lang" content="en" />
+  <title data-i18n="app.title">DisPatch Chat</title>
+  <!-- No-FOUC: apply the stored theme before the stylesheet paints. Default is
+       dark (preserves prior behaviour); "system" = no attribute (follows OS). -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('dispatch-theme') || 'dark';
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        var a = localStorage.getItem('dispatch-avatar-style');
+        if (a === 'minimal') document.documentElement.setAttribute('data-avatar-style', a);
+        // No-Image Mode, same no-FOUC reason one step further: this one hides
+        // pictures, so applying it a frame late would flash the very images the
+        // setting exists to suppress. See js/nim.js.
+        if (localStorage.getItem('dispatch-nim') === '1') {
+          document.documentElement.setAttribute('data-nim', 'on');
+          // NIM implies minimal avatars. Borrowing the attribute (never the
+          // stored key) reuses every existing minimal rule, so the sidebar is
+          // already the right width on the first painted frame.
+          document.documentElement.setAttribute('data-avatar-style', 'minimal');
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <!-- No-FOUC, same idea one axis over: direction is a LAYOUT property, so an
+       Arabic session that learned its language from a module would paint one
+       LTR frame first and visibly flip. Resolve it here instead — stored choice
+       wins, else the browser's ordered preference list, matched on the base
+       language (pt-BR → pt). js/i18n.js re-derives exactly this at module-eval
+       time; keep the two lists in step. -->
+  <script>
+    (function () {
+      var SUPPORTED = ['en', 'ar', 'de', 'es', 'fr', 'ja', 'pt', 'zh'];
+      var RTL = ['ar', 'he', 'fa', 'ur', 'yi', 'dv', 'ckb'];
+      function pick(tag) {
+        var base = String(tag || '').toLowerCase().split(/[-_]/)[0];
+        return SUPPORTED.indexOf(base) >= 0 ? base : null;
+      }
+      var lang = null;
+      try { lang = pick(localStorage.getItem('dispatch-lang')); } catch (e) {}
+      if (!lang) {
+        var prefs = (navigator.languages && navigator.languages.length)
+          ? navigator.languages : [navigator.language || 'en'];
+        for (var i = 0; i < prefs.length && !lang; i++) lang = pick(prefs[i]);
+      }
+      lang = lang || 'en';
+      var dir = RTL.indexOf(lang) >= 0 ? 'rtl' : 'ltr';
+      var h = document.documentElement;
+      h.setAttribute('lang', lang);
+      h.setAttribute('dir', dir);
+      h.setAttribute('data-dir', dir);
+      var m = document.querySelector('meta[name="i18n-lang"]');
+      if (m) m.setAttribute('content', lang);
+    })();
+  </script>
+  <link rel="icon" href="/static/favicon.svg" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <!-- The runtime and its fallback dictionary are on the critical path: main.js
+       awaits i18nInit() before the first render, so fetching them only when the
+       import graph resolves would add a serial round-trip behind the boot veil.
+       English is ALWAYS loaded (it is the per-key fallback), hence en.json here
+       and not the active locale — that one is fetched in parallel by init(). -->
+  <link rel="modulepreload" href="/static/js/i18n.js?v=3" />
+  <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
+  <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
+       bundles they belong to — see js/util.js loadStyle(). -->
+  <link rel="stylesheet" href="/static/app.css?v=44" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=4" />
+  <script type="module" src="/static/js/theme.js?v=12"></script>
+</head>
+<body>
+  <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
+       lists, view flips) until the first real render, then fades out. Removed
+       by main.js at the end of startApp; the fail-safe timer below guarantees
+       it can never trap the user if boot JS dies. -->
+  <div id="boot-veil" aria-hidden="true">
+    <div class="boot-mark">
+      <!-- The mark is INLINE, not <img src="/static/favicon.svg">: No-Image
+           Mode promises that nothing is downloaded, and the boot veil paints
+           before any module (including nim.js) has run, so an <img> here would
+           fetch a picture on every cold start of a NIM device. Inline SVG is
+           zero network by construction. Keep it in step with favicon.svg. -->
+      <svg class="boot-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
+           width="72" height="72" role="img" aria-hidden="true" focusable="false">
+        <rect width="64" height="64" rx="14" fill="#0f0f1a"/>
+        <circle cx="32" cy="33" r="18" fill="#f59e0b" stroke="#d97706" stroke-width="1"/>
+        <ellipse cx="32" cy="37" rx="12" ry="10" fill="#fbbf24"/>
+        <line x1="20" y1="18" x2="18" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="26" y1="16" x2="25" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="32" y1="15" x2="32" y2="9" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="38" y1="16" x2="39" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="44" y1="18" x2="46" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="14" y1="26" x2="9" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="14" y1="33" x2="8" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="50" y1="26" x2="55" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="50" y1="33" x2="56" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="20" y1="49" x2="18" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="28" y1="50" x2="27" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="36" y1="50" x2="37" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="44" y1="49" x2="46" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="26" cy="29" r="4.5" fill="white"/>
+        <circle cx="38" cy="29" r="4.5" fill="white"/>
+        <circle cx="27" cy="29" r="2.5" fill="#1e293b"/>
+        <circle cx="39" cy="29" r="2.5" fill="#1e293b"/>
+        <circle cx="28" cy="27.5" r="1" fill="white"/>
+        <circle cx="40" cy="27.5" r="1" fill="white"/>
+        <circle cx="32" cy="36" r="2" fill="#b45309"/>
+        <ellipse cx="22" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
+        <ellipse cx="42" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
+        <path d="M48 33 L54 28 L53 33 L54 38 Z" fill="#d97706"/>
+        <ellipse cx="16" cy="36" rx="3" ry="1.5" fill="#d97706" transform="rotate(-15 16 36)"/>
+        <ellipse cx="16" cy="29" rx="3" ry="1.5" fill="#d97706" transform="rotate(15 16 29)"/>
+      </svg>
+      <div class="boot-name" data-i18n="app.name">DisPatch Chat</div>
+      <div class="boot-spin"></div>
+    </div>
+  </div>
+  <script>
+    setTimeout(function () {
+      var v = document.getElementById('boot-veil');
+      if (v) v.classList.add('gone');
+    }, 9000);
+  </script>
+
+  <div id="app" class="app" data-view="bots">
+
+    <!-- Bot sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <div class="bot-list" id="bot-list"></div>
+      <!-- The rail buttons, grouped so a phone can lay them out as ONE ROW of
+           icons instead of a stack of full-width bars. The wrapper is
+           `display: contents` everywhere else, so on desktop these remain
+           direct flex children of .sidebar and the vertical rail is byte-for-
+           byte the layout it always was. -->
+      <div class="gear-row" id="gear-row">
+      <!-- theme.js rewrites this button's data-i18n-attr to theme.dark/theme.light
+           as soon as it knows the active theme — the pair below is the pre-script
+           state, not the one a user normally sees. -->
+      <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme &amp; avatars" aria-label="Theme and avatar style" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">☾</button>
+      <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
+      <button class="gear-btn unlock-btn hidden" id="unlock-btn" title="Enter PIN for admin mode" aria-label="Unlock — enter PIN" data-i18n-attr="title=nav.unlock_title;aria-label=nav.unlock_aria">🔓</button>
+      <!-- Locked-side upload. Safe Mode only: unlocked sessions have the full
+           File Server (📁) and the composer ＋, so the rail stays uncluttered. -->
+      <button class="gear-btn drop-btn hidden" id="drop-btn" title="Send a file to your assistants" aria-label="Send a file" data-i18n-attr="title=nav.drop_title;aria-label=nav.drop_aria">⬆</button>
+      <button class="gear-btn fs-chip hidden" id="fs-chip" title="File Server — drop files for your assistants" aria-label="Open File Server" data-i18n-attr="title=nav.fileserver_title;aria-label=nav.fileserver_aria">📁</button>
+      <!-- ⚡ Reaction manager, 🩺 Host dashboard and 🔌 Connect an AI used to sit
+           here. They are tabs inside Settings now: all three are admin surfaces
+           opened rarely, and on a phone this rail IS the Bots page — six glyphs
+           above the roster read as clutter, not navigation. -->
+      <button class="gear-btn" id="manage-bots" title="Settings" aria-label="Settings" data-i18n-attr="title=nav.settings;aria-label=nav.settings">⚙</button>
+      </div>
+    </nav>
+
+    <!-- Thread list -->
+    <section class="panel threadlist" id="threadlist">
+      <header class="tl-header">
+        <img class="tl-avatar" id="tl-avatar" alt="" />
+        <div class="tl-headinfo">
+          <div class="tl-botname" id="tl-botname" data-i18n="app.name">DisPatch Chat</div>
+          <div class="muted tl-model" id="tl-model" data-i18n="threads.pick_bot">Pick a bot to begin</div>
+        </div>
+        <button class="icon-btn ghost" id="search-btn" title="Search messages" aria-label="Search messages" data-i18n-attr="title=threads.search;aria-label=threads.search">🔍</button>
+        <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat" data-i18n-attr="title=threads.new_chat;aria-label=threads.new_chat">＋</button>
+        <button class="icon-btn ghost collapse-btn" id="collapse-threads" title="Collapse chat list" aria-label="Collapse chat list" data-i18n-attr="title=threads.collapse;aria-label=threads.collapse">«</button>
+      </header>
+      <div class="threads" id="threads"></div>
+    </section>
+
+    <!-- Chat view -->
+    <section class="panel chatview" id="chatview">
+      <header class="chat-header">
+        <button class="back-btn" id="back-btn" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+        <button class="icon-btn ghost expand-btn" id="expand-threads" title="Show chat list" aria-label="Show chat list" data-i18n-attr="title=threads.expand;aria-label=threads.expand" hidden>»</button>
+        <img class="ch-avatar" id="ch-avatar" alt="" />
+        <!-- dir="auto" on the two header lines: both hold CONTENT (a bot's name,
+             a thread title taken from the first message), not UI chrome, so
+             their direction belongs to the text, not to the interface. Without
+             it an English title inside an Arabic session gets bidi-reordered —
+             trailing periods jump to the front, "~1 minute" reads "minute 1~".
+             The [dir="rtl"] layout rules all key off the ROOT element, so
+             per-node dir here changes text order only, never layout. -->
+        <div class="ch-info">
+          <div class="ch-title" id="ch-title" dir="auto" data-i18n="chat.select">Select a chat</div>
+          <div class="muted ch-sub" id="ch-sub" dir="auto"></div>
+        </div>
+        <span class="conn-dot reconnecting" id="conn-dot" title="Connecting…" aria-label="Connection status" data-i18n-attr="title=conn.connecting;aria-label=conn.aria"></span>
+        <span class="model-pill" id="ch-model" hidden></span>
+        <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
+        <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
+        <div class="menu" id="thread-menu" hidden>
+          <button data-act="pin" id="thread-menu-pin" data-i18n="chat.pin">Pin</button>
+          <button data-act="rename" data-i18n="chat.rename">Rename</button>
+          <button data-act="sync" data-i18n="chat.sync">⤓ Recover missing messages</button>
+          <button data-act="transcript" data-i18n="chat.transcript">📜 View transcript</button>
+          <button data-act="archive" data-i18n="chat.archive">Archive</button>
+          <button data-act="delete" class="danger" data-i18n="common.delete">Delete</button>
+        </div>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="empty-state" id="chat-empty">
+          <div class="empty-emoji">💬</div>
+          <p data-i18n="chat.empty">Pick a bot and start chatting.</p>
+        </div>
+      </div>
+
+      <button class="scroll-bottom hidden" id="scroll-bottom" aria-label="Scroll to bottom" data-i18n-attr="aria-label=chat.scroll_bottom"><span class="sb-arrow">↓</span><span class="sb-count hidden" id="sb-count"></span></button>
+
+      <div class="composer" id="composer">
+        <div class="retry-chip hidden" id="retry-chip" role="status">
+          <span data-i18n="composer.not_delivered">⚠ Message not delivered</span>
+          <button type="button" id="retry-chip-btn" data-i18n="common.retry">Retry</button>
+        </div>
+        <div class="attach-preview hidden" id="attach-preview"></div>
+        <div class="composer-row">
+          <button class="icon-btn ghost attach-btn" id="attach-btn" title="Attach file" aria-label="Attach file" data-i18n-attr="title=composer.attach;aria-label=composer.attach">＋</button>
+          <!-- No reaction button here on purpose: firing reactions is a bot
+               trait (agents only). Curation lives in the gear rail (⚡). -->
+          <!-- dir="auto" so what you TYPE picks its own direction: an Arabic UI
+               is no reason to reorder an English URL as it is being typed (and
+               vice-versa on an English UI). Re-evaluated per keystroke by the
+               browser, from the first strong character. -->
+          <textarea id="input" rows="1" dir="auto" placeholder="Type a message…" aria-label="Message" data-i18n-attr="placeholder=composer.placeholder;aria-label=composer.aria" autocomplete="off"></textarea>
+          <button class="send-btn" id="send" aria-label="Send" data-i18n-attr="aria-label=composer.send" disabled>↑</button>
+        </div>
+        <div class="composer-foot">
+          <span class="char-count" id="char-count" hidden></span>
+          <span class="waiting" id="waiting" hidden data-i18n="composer.waiting">Waiting for response…</span>
+        </div>
+        <!-- No accept filter: the composer "＋" accepts any file type. Images and
+             videos render inline; everything else is shared as a download link. -->
+        <input type="file" id="file-input" multiple hidden />
+      </div>
+
+      <!-- Coding terminal: replaces the chat pane when the terminal pseudo-bot
+           is selected. Full-session only (never appears in Safe Mode). -->
+      <div class="terminal-view hidden" id="terminal-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="terminal-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini" aria-hidden="true">&gt;_</span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" data-i18n="terminal.name">Coding terminal</div>
+            <div class="muted terminal-subtitle" data-i18n="terminal.subtitle">server-side PTY</div>
+          </div>
+          <button class="icon-btn ghost" id="terminal-find-btn" title="Find in terminal (Ctrl/⌘+F)" aria-label="Find in terminal" data-i18n-attr="title=terminal.find_title;aria-label=terminal.find">🔍</button>
+        </header>
+        <div class="terminal-body">
+          <div class="terminal-host" id="terminal-host"></div>
+          <div class="terminal-find hidden" id="terminal-find" role="search">
+            <input type="text" id="terminal-find-input" autocomplete="off" spellcheck="false" placeholder="Find" aria-label="Find text" data-i18n-attr="placeholder=terminal.find_placeholder;aria-label=terminal.find_aria" />
+            <button class="icon-btn ghost" id="terminal-find-prev" title="Previous match" aria-label="Previous match" data-i18n-attr="title=terminal.find_prev;aria-label=terminal.find_prev">↑</button>
+            <button class="icon-btn ghost" id="terminal-find-next" title="Next match" aria-label="Next match" data-i18n-attr="title=terminal.find_next;aria-label=terminal.find_next">↓</button>
+            <button class="icon-btn ghost" id="terminal-find-close" title="Close find" aria-label="Close find" data-i18n-attr="title=terminal.find_close;aria-label=terminal.find_close">✕</button>
+          </div>
+        </div>
+        <div class="terminal-bar">
+          <span class="terminal-status">
+            <span class="terminal-dot stopped" id="terminal-dot"></span>
+            <span id="terminal-status-label" data-i18n="terminal.state_stopped">Stopped</span>
+          </span>
+          <div class="terminal-actions">
+            <!-- Spawn options grouped into one popover so the bar never crowds
+                 (YOLO / Model / Session resume-mode all apply on next Start/Restart). -->
+            <div class="term-opts-wrap">
+              <button class="btn-secondary term-opt" id="terminal-opts" aria-haspopup="menu" aria-expanded="false" title="Session options — YOLO, model and resume mode (apply on next Start/Restart)" data-i18n="terminal.options" data-i18n-attr="title=terminal.options_title">⚙ Options</button>
+              <div class="menu term-opts-menu" id="terminal-opts-menu" role="menu" hidden>
+                <button class="term-opts-item" id="terminal-yolo" role="menuitemcheckbox" aria-checked="false" title="Run without approval prompts" data-i18n-attr="title=terminal.yolo_title">
+                  <!-- The two .term-opts-val spans are live state, written by
+                       renderTerminalOptions(); the markup here is only what a
+                       no-JS load would show. -->
+                  <span class="term-opts-name" data-i18n="terminal.yolo">YOLO</span><span class="term-opts-val" id="terminal-yolo-val">off</span>
+                </button>
+                <button class="term-opts-item" id="terminal-model" role="menuitem" title="Choose the model the CLI launches with" data-i18n-attr="title=terminal.model_title">
+                  <span class="term-opts-name" data-i18n="terminal.model">Model</span><span class="term-opts-val" id="terminal-model-val">default</span>
+                </button>
+                <div class="term-opts-sep" role="separator"></div>
+                <div class="term-opts-grouphdr" data-i18n="terminal.session_group">Session on start</div>
+                <button class="term-opts-radio" data-resume="none" role="menuitemradio" aria-checked="true" data-i18n="terminal.session_new">New session</button>
+                <button class="term-opts-radio" data-resume="continue" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_continue">Continue latest (-c)</button>
+                <button class="term-opts-radio" data-resume="resume" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_resume">Resume… (pick in TUI)</button>
+                <button class="term-opts-radio" data-resume="copy" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_copy">Copy latest (--copy)</button>
+                <div class="term-opts-note muted" data-i18n="terminal.session_note">Applies on the next Start / Restart.</div>
+              </div>
+            </div>
+            <button class="btn-secondary" id="terminal-start" data-i18n="terminal.start">▶ Start</button>
+            <button class="btn-secondary" id="terminal-restart" data-i18n="terminal.restart">⟳ Restart</button>
+            <button class="btn-secondary danger-text" id="terminal-stop" data-i18n="terminal.stop">■ Stop</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DeepSeek Harness (dsh): replaces the chat pane when the Harness pseudo-bot
+           is selected. Full-session only (never appears in Safe Mode). The dsh Web
+           UI is embedded from loopback; the bar controls its systemd unit, the
+           default model, and one-shot headless jobs. -->
+      <div class="terminal-view harness-view hidden" id="harness-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="harness-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini harness-avatar-mini" aria-hidden="true">dsh</span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" data-i18n="harness.name">DeepSeek Harness</div>
+            <div class="muted terminal-subtitle" id="harness-subtitle" data-i18n="harness.subtitle">dsh web · loopback :3080</div>
+          </div>
+          <div class="harness-tabs" role="tablist" aria-label="Harness views">
+            <button class="harness-tab active" id="harness-tab-ui" role="tab" aria-selected="true" data-i18n="harness.tab_ui">Web UI</button>
+            <button class="harness-tab" id="harness-tab-jobs" role="tab" aria-selected="false" data-i18n="harness.tab_jobs">Headless jobs</button>
+          </div>
+          <a class="icon-btn ghost" id="harness-open" href="http://127.0.0.1:3080/" target="_blank" rel="noopener" title="Open the dsh Web UI in a new tab" aria-label="Open in new tab" data-i18n-attr="title=harness.open_title;aria-label=harness.open_title">↗</a>
+        </header>
+        <div class="terminal-body harness-body">
+          <!-- Pane 1: the embedded Web UI (or a reason it can't be shown). -->
+          <div class="harness-pane" id="harness-pane-ui">
+            <!-- The embedded dsh UI is a DIFFERENT origin (loopback :3080) running a
+                 developer-preview tool. It needs scripts, forms and its own
+                 same-origin storage/websocket to work at all, and it opens links,
+                 so those four are granted. allow-top-navigation is deliberately
+                 NOT: nothing inside that frame should ever be able to navigate
+                 the DisPatch tab away. `allow=""` drops every permission-policy
+                 feature (camera, mic, geolocation, …) the frame would otherwise
+                 inherit. -->
+            <iframe class="harness-frame hidden" id="harness-frame" title="DeepSeek Harness web UI" data-i18n-attr="title=harness.frame_title" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" allow=""></iframe>
+            <div class="harness-note hidden" id="harness-note">
+              <div class="empty-emoji" aria-hidden="true">dsh</div>
+              <p id="harness-note-text"></p>
+              <p class="muted" id="harness-note-hint"></p>
+            </div>
+          </div>
+          <!-- Pane 2: headless jobs — one task, one answer, kept in a short history. -->
+          <div class="harness-pane hidden" id="harness-pane-jobs">
+            <form class="harness-job-form" id="harness-job-form">
+              <label class="harness-label" for="harness-task" data-i18n="harness.task_label">Task for dsh (headless, one shot)</label>
+              <textarea id="harness-task" rows="3" data-i18n-attr="placeholder=harness.task_placeholder" placeholder="e.g. Summarize this repository and list its main packages."></textarea>
+              <div class="harness-job-row">
+                <label class="harness-label" for="harness-cwd" data-i18n="harness.cwd_label">Working directory</label>
+                <input type="text" id="harness-cwd" data-i18n-attr="placeholder=harness.cwd_placeholder" placeholder="~ (home) or a folder under it" autocomplete="off" spellcheck="false" />
+                <button type="submit" class="btn-primary" id="harness-run" data-i18n="harness.run">▶ Run</button>
+                <button type="button" class="btn-secondary danger-text hidden" id="harness-cancel" data-i18n="harness.cancel">■ Cancel</button>
+              </div>
+            </form>
+            <div class="harness-jobs" id="harness-jobs" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="terminal-bar harness-bar">
+          <span class="terminal-status">
+            <span class="terminal-dot stopped" id="harness-dot"></span>
+            <span id="harness-status-label" data-i18n="harness.state_unknown">Checking…</span>
+          </span>
+          <div class="terminal-actions">
+            <label class="harness-model-wrap" title="Default model for NEW dsh sessions (Web UI + headless). Writes ~/.dsh/settings.yaml; dsh hot-reloads it." data-i18n-attr="title=harness.model_title">
+              <span class="harness-model-lbl" data-i18n="harness.model">Model</span>
+              <select id="harness-model" class="harness-model-select" aria-label="Default model" data-i18n-attr="aria-label=harness.model"></select>
+            </label>
+            <button class="btn-secondary" id="harness-start" data-i18n="harness.start">▶ Start</button>
+            <button class="btn-secondary" id="harness-restart" data-i18n="harness.restart">⟳ Restart</button>
+            <button class="btn-secondary danger-text" id="harness-stop" data-i18n="harness.stop">■ Stop</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Mobile bottom tabs -->
+  <nav class="mobile-tabs" id="mobile-tabs">
+    <!-- The label needs its own element so the DOM pass can replace it without
+         eating the glyph span next to it (data-i18n writes textContent). -->
+    <button data-view="bots" class="tab active" aria-current="page"><span>🤖</span><span class="tab-label" data-i18n="nav.tab_bots">Bots</span></button>
+    <button data-view="threads" class="tab"><span>💬</span><span class="tab-label" data-i18n="nav.tab_chats">Chats</span></button>
+    <button data-view="chat" class="tab"><span>🗨️</span><span class="tab-label" data-i18n="nav.tab_messages">Messages</span></button>
+  </nav>
+
+  <!-- Settings modal — a tab container.
+       The gear rail used to carry ⚡ Reactions, 🩺 Dashboard and 🔌 Connect an AI
+       as three more buttons; on a phone that rail IS the Bots page, so six admin
+       glyphs stacked above the roster. Those three surfaces are panes in here
+       now, which is also why the roster hint/list moved into a pane of its own:
+       one modal, one scroll region per subject, instead of one endless scroll.
+
+       Panes are markup where a module already owns static markup (Bots, AI
+       models, Device, Security) and empty mount points where the module builds
+       its own DOM (Reactions, Health). Every pane keeps the ids its JS already
+       looks up, so moving the markup here rewires nothing below the surface. -->
+  <div class="modal-backdrop hidden" id="botmanager-backdrop">
+    <div class="modal settings-modal" id="botmanager" role="dialog" aria-modal="true" aria-label="Settings" data-i18n-attr="aria-label=settings.title">
+      <header class="modal-header">
+        <h2 data-i18n="settings.title">Settings</h2>
+        <button class="icon-btn ghost" id="bm-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+
+      <!-- Roving-tabindex tablist: only the selected tab is in the Tab order,
+           ←/→/Home/End move between them (main.js: wireSettingsTabs). The three
+           admin tabs are hidden for a Safe-Mode session exactly as the rail
+           buttons they replace were. -->
+      <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
+        <button class="settings-tab active" id="stab-bots" role="tab" data-tab="bots" aria-selected="true" aria-controls="spane-bots" tabindex="0"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="settings.tab_bots">Bots</span></button>
+        <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
+        <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
+        <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
+        <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
+        <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
+      </div>
+
+      <!-- ---- Bots ---- -->
+      <section class="settings-pane" id="spane-bots" role="tabpanel" aria-labelledby="stab-bots" tabindex="0">
+        <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar.
+          <strong>🛡️ Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed.
+          Order, visibility and Safe changes apply when you press <strong>Save</strong>.</p>
+        <div class="bm-list" id="bm-list"></div>
+        <!-- Avatar pools: status + prompt banks for pool-enabled bots
+             (main.js renders; hidden while no bot has a pool). -->
+        <div id="avatar-pool-panel" class="ap-panel hidden"></div>
+      </section>
+
+      <!-- ---- Reactions: reactions.js mounts the pack manager here ---- -->
+      <section class="settings-pane hidden" id="spane-reactions" role="tabpanel" aria-labelledby="stab-reactions" tabindex="0"></section>
+
+      <!-- ---- Health: dashboard.js mounts the host dashboard here ---- -->
+      <section class="settings-pane hidden" id="spane-health" role="tabpanel" aria-labelledby="stab-health" tabindex="0"></section>
+
+      <!-- ---- AI models (js/llm.js) ---- -->
+      <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
+        <p class="muted modal-hint" data-i18n="llm.hint">Point DisPatch at a model provider. It becomes a bot in your sidebar — no agent stack needed.</p>
+        <div class="llm-body">
+          <div class="sec-field">
+            <label for="llm-provider" data-i18n="llm.provider">Provider</label>
+            <select id="llm-provider"></select>
+            <a class="llm-docs" id="llm-docs" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="llm.docs_link">Where do I get a key?</a>
+          </div>
+          <div class="sec-field">
+            <label for="llm-base-url" data-i18n="llm.base_url">Base URL</label>
+            <input type="url" id="llm-base-url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:1234/v1" />
+            <p class="sec-note muted" id="llm-base-note" data-i18n="llm.base_url_hint">The API endpoint. Most OpenAI-compatible servers end in /v1.</p>
+          </div>
+          <div class="sec-field" id="llm-key-field">
+            <label for="llm-key" data-i18n="llm.api_key">API key</label>
+            <input type="password" id="llm-key" autocomplete="off" spellcheck="false" placeholder="Paste your key" data-i18n-attr="placeholder=llm.api_key_placeholder" />
+            <p class="sec-note muted" data-i18n="llm.api_key_hint">Stored in config.yaml in your data directory, which is owner-readable only.</p>
+            <label class="llm-sublabel" for="llm-key-env" data-i18n="llm.key_env_label">…or read it from an environment variable</label>
+            <input type="text" id="llm-key-env" autocomplete="off" spellcheck="false" placeholder="OPENAI_API_KEY" />
+          </div>
+          <div class="llm-test-row">
+            <button class="btn-secondary" id="llm-test" data-i18n="llm.test">Test connection</button>
+            <span class="llm-result" id="llm-result" role="status" aria-live="polite"></span>
+          </div>
+          <div class="sec-field">
+            <label for="llm-model" data-i18n="llm.model">Model</label>
+            <select id="llm-model" hidden></select>
+            <input type="text" id="llm-model-text" autocomplete="off" spellcheck="false" placeholder="Type a model name" data-i18n-attr="placeholder=llm.model_placeholder" />
+            <p class="sec-note muted" id="llm-model-note" data-i18n="llm.model_pick">Run Test connection to list the models this provider offers.</p>
+          </div>
+          <details class="llm-advanced" id="llm-advanced">
+            <summary data-i18n="llm.advanced">Advanced</summary>
+            <div class="sec-field">
+              <label for="llm-name" data-i18n="llm.name_label">Display name</label>
+              <input type="text" id="llm-name" autocomplete="off" placeholder="Assistant" data-i18n-attr="placeholder=llm.name_placeholder" />
+            </div>
+            <div class="sec-field">
+              <label for="llm-system" data-i18n="llm.system_prompt">System prompt</label>
+              <textarea id="llm-system" rows="3" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ---- Device: per-device preferences (all instant, nothing to Save) ---- -->
+      <section class="settings-pane hidden" id="spane-device" role="tabpanel" aria-labelledby="stab-device" tabindex="0">
+        <p class="muted modal-hint" data-i18n="settings.device_hint">These apply to this device only, and take effect straight away — there is nothing to save here.</p>
+        <!-- Language: the <select> itself is built by i18n.js languageSelect() and
+             appended here, so the option list can never drift from the shipped
+             locales. Like the avatar style below it, this is a device preference —
+             it applies immediately and is deliberately outside the Save/dirty flow. -->
+        <label class="bm-avatar-style bm-lang" id="bm-lang-row">
+          <span><strong data-i18n="settings.language">Language</strong> — <span data-i18n="settings.language_hint">Changes apply straight away.</span></span>
+        </label>
+        <!-- Avatar style moved here from the theme button: its old 4-state cycle
+             resized the sidebar mid-cycle, so switching theme shoved the rail
+             around. Applies instantly (pure CSS attribute swap, no Save needed). -->
+        <label class="bm-avatar-style" id="bm-avatar-style-row">
+          <input type="checkbox" id="bm-avatar-minimal" />
+          <span><strong data-i18n="settings.minimal_avatars">Minimal avatars</strong> <span data-i18n="settings.minimal_avatars_hint">— names instead of pictures in the
+            sidebar, no avatars on messages (applies immediately)</span></span>
+        </label>
+        <!-- ComfyUI and Recovery stay their own modals: both are full screens in
+             their own right (a service console and an export/restore flow), and
+             nesting either inside a settings pane would bury a footer of actions
+             under a second footer. -->
+        <div class="bm-actions">
+          <button class="btn-secondary comfy-chip inline hidden" id="comfy-chip" title="ComfyUI — click to open, right-click or long-press for controls" aria-label="Open ComfyUI" data-i18n-attr="title=comfy.chip_title;aria-label=comfy.chip_aria"><span class="comfy-chip-glyph">🖼</span>ComfyUI<span class="comfy-dot stopped" id="comfy-dot"></span></button>
+          <button class="btn-secondary" id="open-recovery" data-i18n="settings.recovery">🛟 Recovery &amp; Export</button>
+        </div>
+      </section>
+
+      <!-- ---- Security & PIN ---- -->
+      <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
+        <p class="muted modal-hint" id="sec-status-line"></p>
+        <div class="sec-body">
+          <div class="sec-field" id="sec-current-wrap" hidden>
+            <label for="sec-current" data-i18n="security.current_pin">Current PIN</label>
+            <input type="password" inputmode="numeric" id="sec-current" autocomplete="off" />
+          </div>
+          <div class="sec-field">
+            <label for="sec-new" id="sec-new-label" data-i18n="security.new_pin">New PIN</label>
+            <input type="password" inputmode="numeric" id="sec-new" autocomplete="off" />
+          </div>
+          <div class="sec-field">
+            <label for="sec-confirm" data-i18n="security.confirm_pin">Confirm PIN</label>
+            <input type="password" inputmode="numeric" id="sec-confirm" autocomplete="off" />
+          </div>
+          <div class="lock-error" id="sec-error" hidden></div>
+          <!-- The day count and the device count are interpolated, not wrapped in
+               their own <span>: a translation is free to move the number anywhere
+               in its sentence, which a fixed inner element cannot follow.
+               renderSecurityStrings() writes both labels through t(). -->
+          <div class="sec-remember" id="sec-remember-wrap" hidden>
+            <label class="sec-remember-row">
+              <input type="checkbox" id="sec-remember-enable" />
+              <span id="sec-remember-label">Offer “keep this device unlocked” at PIN entry
+                (30-day trust, renewed by use)</span>
+            </label>
+            <button class="btn-secondary sec-forget" id="sec-forget-devices" hidden>
+              Forget remembered devices (0)</button>
+          </div>
+          <div class="bm-actions sec-lock-row">
+            <button class="btn-secondary danger-text hidden" id="bm-lock" data-i18n="settings.lock_now">🔒 Lock now</button>
+          </div>
+          <!-- security.note carries markup we own (a <br> and the two <code id=…>
+               path elements the recovery instructions point at), so it is rendered
+               as HTML by renderSecurityNote() with the server-supplied paths
+               escaped first. check-locales.py enforces that translations keep both
+               elements. -->
+          <p class="muted sec-note" id="sec-note">
+            Auto-locks after 10 min of inactivity
+            (remembered devices stay unlocked and skip the timer).
+            When locked, the app shows a plain Safe-Mode view (only the SAFE characters,
+            with chat media hidden) and no sign it unlocks — the gear's “More” button reveals this keypad.
+            <br />Lost your PIN? Use the recovery code in
+            <code class="sec-path" id="sec-recovery-path">RECOVERY-CODE.txt</code>,
+            or edit <code class="sec-path" id="sec-config-path">security.yaml</code> in the data folder.
+          </p>
+        </div>
+      </section>
+
+      <!-- Contextual footer: exactly one group is visible, chosen by the active
+           tab. Tabs whose actions all live inline (Reactions, Device) get no
+           group at all and the footer collapses — a permanently-disabled or
+           no-op "Done" is the dead button this replaces. -->
+      <footer class="modal-footer bm-footer" id="bm-footer">
+        <div class="settings-actions" data-tab="bots">
+          <button class="btn-primary" id="bm-done" data-i18n="common.save">Save</button>
+        </div>
+        <div class="settings-actions hidden" data-tab="health" id="sfoot-health"></div>
+        <div class="settings-actions hidden" data-tab="ai">
+          <button class="btn-primary" id="llm-save" data-i18n="llm.save">Save &amp; chat</button>
+        </div>
+        <div class="settings-actions hidden" data-tab="security">
+          <button class="btn-secondary danger-text" id="sec-remove" hidden data-i18n="security.remove_pin">Remove PIN</button>
+          <button class="btn-primary" id="sec-save" data-i18n="security.set_pin">Set PIN</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- File Server modal -->
+  <div class="modal-backdrop hidden" id="fileserver-backdrop">
+    <div class="modal fs-modal" role="dialog" aria-modal="true" aria-label="File Server" data-i18n-attr="aria-label=files.aria">
+      <header class="modal-header">
+        <h2 data-i18n="files.title">📁 File Server</h2>
+        <div class="fs-header-actions">
+          <button class="btn-primary" id="fs-upload-btn" data-i18n="files.upload">⬆ Upload</button>
+          <button class="icon-btn ghost" id="fs-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        </div>
+      </header>
+      <p class="muted modal-hint" data-i18n="files.hint">Drop files here to share them with your assistants. Drag &amp; drop works too.</p>
+      <div class="fs-list" id="fs-list"></div>
+      <input type="file" id="fs-file-input" multiple hidden />
+    </div>
+  </div>
+
+  <!-- Locked-side drop sheet: per-file progress and result. The upload is
+       one-way, so the copy says so plainly rather than implying a file list. -->
+  <div class="modal-backdrop hidden" id="drop-backdrop">
+    <div class="modal drop-modal" role="dialog" aria-modal="true" aria-labelledby="drop-title">
+      <header class="modal-header">
+        <h2 id="drop-title" data-i18n="drop.title">⬆ Send a file</h2>
+        <button class="icon-btn ghost" id="drop-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <p class="muted modal-hint" data-i18n="drop.hint">Files go straight to your assistants, and a note
+        appears in the chat. Sending is one-way — a file can't be opened again from
+        this device.</p>
+      <div class="drop-list" id="drop-list" aria-live="polite"></div>
+      <footer class="modal-footer drop-footer">
+        <button class="btn-secondary" id="drop-more" data-i18n="drop.choose">Choose files</button>
+        <button class="btn-primary" id="drop-done" data-i18n="common.done">Done</button>
+      </footer>
+    </div>
+  </div>
+  <input type="file" id="drop-input" multiple hidden />
+
+  <!-- ComfyUI service panel -->
+  <div class="modal-backdrop hidden" id="comfy-backdrop">
+    <div class="modal comfy-modal" role="dialog" aria-modal="true" aria-label="ComfyUI" data-i18n-attr="aria-label=comfy.name">
+      <header class="modal-header">
+        <h2 data-i18n="comfy.title">🖼 ComfyUI</h2>
+        <button class="icon-btn ghost" id="comfy-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <!-- Everything between header and footer scrolls as ONE region, so short
+           viewports never clip content behind the pinned footer. -->
+      <div class="comfy-body">
+      <p class="comfy-dirty-banner hidden" id="comfy-dirty-banner" data-i18n="comfy.dirty_banner">⚠ Flags changed — restart to apply</p>
+      <div class="comfy-status" id="comfy-status"></div>
+      <div class="comfy-actions">
+        <button class="btn-secondary" id="comfy-start" data-i18n="comfy.start">▶ Start</button>
+        <button class="btn-secondary" id="comfy-restart" data-i18n="comfy.restart">⟳ Restart</button>
+        <button class="btn-secondary danger-text" id="comfy-stop" data-i18n="comfy.stop">■ Stop</button>
+        <button class="btn-secondary" id="comfy-gateway-toggle" disabled data-i18n="comfy.gateway_menu">Gateway…</button>
+        <button class="btn-secondary" id="comfy-logs-btn" data-i18n="comfy.logs_button">📜 Logs</button>
+      </div>
+      <h3 class="comfy-flags-title comfy-wf-title"><span data-i18n="comfy.workflows">Workflows</span>
+        <span class="comfy-wf-hint" id="comfy-wf-hint"></span>
+      </h3>
+      <div class="comfy-wf-actions">
+        <button class="btn-secondary" id="comfy-wf-import" data-i18n="comfy.wf_import">⬆ Import…</button>
+        <button class="btn-secondary" id="comfy-wf-backup" data-i18n="comfy.wf_backup">🗄 Back up now</button>
+      </div>
+      <div class="comfy-wf-list" id="comfy-wf-list"></div>
+      <input type="file" id="comfy-wf-file" accept=".json,application/json" hidden />
+
+      <h3 class="comfy-flags-title" data-i18n="comfy.flags">Launch flags</h3>
+      <div class="comfy-flags-list" id="comfy-flags-list"></div>
+      </div><!-- /.comfy-body -->
+      <footer class="modal-footer comfy-footer">
+        <button class="btn-secondary danger-text" id="comfy-flags-reset" data-i18n="comfy.flags_reset">Reset to known-good</button>
+        <div class="comfy-footer-save">
+          <button class="btn-secondary" id="comfy-flags-save" data-i18n="comfy.flags_save">Save</button>
+          <button class="btn-primary" id="comfy-flags-save-restart" data-i18n="comfy.flags_save_restart">Save &amp; Restart</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ComfyUI logs viewer -->
+  <div class="modal-backdrop hidden" id="comfy-logs-backdrop">
+    <div class="modal comfy-logs-modal" role="dialog" aria-modal="true" aria-label="ComfyUI logs" data-i18n-attr="aria-label=comfy.logs_aria">
+      <header class="modal-header">
+        <h2 data-i18n="comfy.logs_title">📜 ComfyUI logs</h2>
+        <div class="fs-header-actions">
+          <button class="btn-secondary" id="comfy-logs-refresh" data-i18n="comfy.logs_refresh">⟳ Refresh</button>
+          <button class="icon-btn ghost" id="comfy-logs-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        </div>
+      </header>
+      <pre class="comfy-logs-content" id="comfy-logs-content"></pre>
+    </div>
+  </div>
+
+  <!-- Coding terminal model picker -->
+  <div class="modal-backdrop hidden" id="terminal-model-backdrop">
+    <div class="modal term-model-modal" role="dialog" aria-modal="true" aria-label="Choose model" data-i18n-attr="aria-label=terminal.picker_aria">
+      <header class="modal-header">
+        <h2 data-i18n="terminal.model">Model</h2>
+        <button class="icon-btn ghost" id="terminal-model-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <div class="term-model-body">
+        <p class="muted modal-hint" id="terminal-model-hint" data-i18n="terminal.picker_hint">Pick the model the CLI launches with. Applies on the next Start / Restart.</p>
+        <div class="term-model-list" id="terminal-model-list"></div>
+        <div class="term-model-custom">
+          <label for="terminal-model-input" data-i18n="terminal.picker_custom_label">Or type a model name</label>
+          <input type="text" id="terminal-model-input" autocomplete="off" spellcheck="false" placeholder="provider/model" data-i18n-attr="placeholder=terminal.picker_placeholder" />
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn-secondary" id="terminal-model-clear" data-i18n="terminal.picker_use_default">Use default</button>
+        <button class="btn-primary" id="terminal-model-save" data-i18n="terminal.picker_select">Select</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Avatar crop modal -->
+  <div class="modal-backdrop hidden" id="crop-backdrop">
+    <div class="modal crop-modal" role="dialog" aria-modal="true" aria-label="Crop avatar" data-i18n-attr="aria-label=crop.aria">
+      <header class="modal-header">
+        <h2 id="crop-title" data-i18n="crop.title">Crop avatar</h2>
+        <button class="icon-btn ghost" id="crop-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <p class="muted modal-hint" data-i18n="crop.hint">Drag the square over the face. The full-resolution original is saved too.</p>
+      <div class="crop-stage" id="crop-stage">
+        <img id="crop-img" alt="" draggable="false" />
+        <div class="crop-box" id="crop-box"></div>
+      </div>
+      <div class="crop-controls">
+        <label class="muted" data-i18n="crop.size">Size</label>
+        <input type="range" id="crop-size" min="15" max="100" value="80" />
+      </div>
+      <footer class="modal-footer">
+        <button class="btn-primary" id="crop-save" data-i18n="crop.save">Save avatar</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Companions panel: the gear's Safe-Mode face. Plain roster, no lock hint.
+       The "More" button is the only (discreet) route to the PIN keypad. -->
+  <div class="modal-backdrop hidden" id="companions-backdrop">
+    <div class="modal companions-modal" role="dialog" aria-modal="true" aria-label="Companions" data-i18n-attr="aria-label=companions.title">
+      <header class="modal-header">
+        <h2 data-i18n="companions.title">Companions</h2>
+        <button class="icon-btn ghost" id="comp-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <div class="comp-list" id="comp-list"></div>
+      <footer class="modal-footer comp-footer">
+        <button class="comp-more" id="comp-more" data-i18n="companions.more">More</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Lock screen (shown when a PIN is set and the app is locked) -->
+  <div class="lock-screen hidden" id="lock-screen">
+    <div class="lock-card">
+      <div class="lock-emoji">🔒</div>
+      <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
+      <p class="lock-sub" id="lock-sub" data-i18n="lock.enter_pin">Enter your PIN</p>
+      <div class="lock-dots" id="lock-dots" aria-hidden="true"></div>
+      <div class="lock-error" id="lock-error" hidden></div>
+      <div class="keypad" id="keypad">
+        <button type="button" data-k="1">1</button>
+        <button type="button" data-k="2">2</button>
+        <button type="button" data-k="3">3</button>
+        <button type="button" data-k="4">4</button>
+        <button type="button" data-k="5">5</button>
+        <button type="button" data-k="6">6</button>
+        <button type="button" data-k="7">7</button>
+        <button type="button" data-k="8">8</button>
+        <button type="button" data-k="9">9</button>
+        <button type="button" data-k="clear" class="kp-action" data-i18n="lock.clear">Clear</button>
+        <button type="button" data-k="0">0</button>
+        <button type="button" data-k="back" class="kp-action" aria-label="Backspace" data-i18n-attr="aria-label=lock.backspace">⌫</button>
+      </div>
+      <button class="btn-primary lock-submit" id="lock-submit" data-i18n="lock.submit">Unlock</button>
+      <!-- Options, BELOW the button on purpose. Entering the PIN is what
+           everyone comes here to do; these two are occasional. Above the
+           button they sat between the keypad and the action, reading as a
+           step you had to consider on the way past. Below it they are what
+           they actually are: an afterthought you can ignore. -->
+      <div class="lock-options" id="lock-options">
+        <!-- Shown only when remember_device_days > 0 in security.yaml -->
+        <label class="lock-remember hidden" id="lock-remember-row">
+          <input type="checkbox" id="lock-remember" />
+          <span data-i18n="lock.remember">K_Unlocked</span>
+        </label>
+        <!-- No-Image Mode. Unlike the remember row this is ALWAYS shown: a
+             Safe-Mode family device must be able to turn pictures off without
+             a PIN. Turning it back OFF is what needs the PIN, so when it is
+             already on and the session is locked this renders checked+disabled
+             rather than hidden — a missing control would just look like a bug. -->
+        <label class="lock-remember lock-nim" id="lock-nim-row">
+          <input type="checkbox" id="lock-nim" />
+          <span data-i18n="nim.lock_label">NI_Mode</span>
+        </label>
+      </div>
+      <div class="lock-links">
+        <button class="lock-forgot" id="lock-forgot" data-i18n="lock.forgot">Forgot PIN?</button>
+        <button class="lock-forgot" id="lock-cancel" data-i18n="lock.cancel">Cancel</button>
+      </div>
+      <!-- Recovery via code stored on the machine -->
+      <div class="lock-recover hidden" id="lock-recover">
+        <p class="muted lock-recover-hint" id="lock-recover-hint"></p>
+        <!-- LC-XXXX-XXXX is a format mask, not prose — it stays literal in every
+             locale, so the placeholder key exists only to keep it in one place. -->
+        <input type="text" id="recover-code" placeholder="LC-XXXX-XXXX" data-i18n-attr="placeholder=lock.recover_placeholder" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <div class="lock-recover-row">
+          <button class="btn-secondary" id="recover-cancel" data-i18n="lock.recover_back">Back</button>
+          <button class="btn-primary" id="recover-submit" data-i18n="lock.recover_submit">Reset PIN</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command palette (Cmd/Ctrl+K) -->
+  <dialog id="cmdk" class="cmdk" aria-label="Command palette" data-i18n-attr="aria-label=cmdk.aria">
+    <input id="cmdk-input" class="cmdk-input" type="text" placeholder="Search bots, this bot’s chats, and actions…" data-i18n-attr="placeholder=cmdk.placeholder" autocomplete="off" spellcheck="false" />
+    <div id="cmdk-list" class="cmdk-list"></div>
+    <div class="cmdk-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="cmdk.navigate">navigate</span></span>
+      <span><kbd>↵</kbd> <span data-i18n="cmdk.open">open</span></span>
+      <span><kbd>esc</kbd> <span data-i18n="cmdk.close">close</span></span>
+    </div>
+  </dialog>
+
+  <!-- Search messages -->
+  <div class="modal-backdrop hidden" id="search-backdrop">
+    <div class="modal search-modal" role="dialog" aria-modal="true" aria-label="Search messages" data-i18n-attr="aria-label=search.aria">
+      <header class="modal-header">
+        <h2 data-i18n="search.title">🔍 Search messages</h2>
+        <button class="icon-btn ghost" id="search-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <div class="search-box">
+        <input id="search-input" type="text" placeholder="Search all conversations…" data-i18n-attr="placeholder=search.placeholder" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <!-- Recovery & Export -->
+  <div class="modal-backdrop hidden" id="recover-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Recovery and export" data-i18n-attr="aria-label=recovery.aria">
+      <header class="modal-header">
+        <h2 data-i18n="recovery.title">🛟 Recovery &amp; Export</h2>
+        <button class="icon-btn ghost" id="recover-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <div class="recover-section">
+        <p class="recover-hint" data-i18n="recovery.export_hint">Export every message to an open, re-readable file — generated locally.</p>
+        <div class="recover-row">
+          <button class="btn-secondary" data-export="json" data-i18n="recovery.export_json">⬇ JSON</button>
+          <button class="btn-secondary" data-export="md" data-i18n="recovery.export_md">⬇ Markdown</button>
+          <button class="btn-secondary" data-export="html" data-i18n="recovery.export_html">⬇ HTML</button>
+        </div>
+        <hr class="rule" />
+        <p class="recover-hint" data-i18n="recovery.restore_hint">Restore any messages that didn’t save to DisPatch from the backup copy (the OpenClaw transcripts). Safe to run repeatedly — it only adds what’s missing.</p>
+        <div class="recover-row">
+          <button class="btn-primary" id="recover-all" data-i18n="recovery.restore_all">⤓ Restore all missing messages</button>
+          <button class="btn-secondary" id="browse-sessions" data-i18n="recovery.browse_sessions">📜 Browse agent sessions</button>
+        </div>
+        <div class="recover-result" id="recover-result"></div>
+      </div>
+      <footer class="modal-footer"><button class="btn-primary" id="recover-done" data-i18n="common.done">Done</button></footer>
+    </div>
+  </div>
+
+  <!-- Transcript viewer (per-thread raw view + session browser) -->
+  <div class="modal-backdrop hidden" id="tx-backdrop">
+    <div class="modal tx-modal" role="dialog" aria-modal="true" aria-label="Transcript" data-i18n-attr="aria-label=transcript.aria">
+      <header class="modal-header">
+        <h2 id="tx-title" data-i18n="transcript.title">📜 Transcript</h2>
+        <button class="icon-btn ghost" id="tx-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+      </header>
+      <div class="tx-toolbar">
+        <span class="muted" id="tx-summary"></span>
+        <div class="tx-filter" id="tx-filter"></div>
+        <!-- margin-inline-start, not margin-left: this is the flex "push to the
+             far end" idiom, which has to follow the reading direction. -->
+        <button class="btn-primary push-end" id="tx-import" hidden data-i18n="transcript.import_missing">⤓ Import missing</button>
+      </div>
+      <div class="tx-list" id="tx-list"></div>
+    </div>
+  </div>
+
+  <!-- Screen-reader live regions: new/streamed messages (polite) + errors (assertive) -->
+  <div id="sr-live" class="sr-only" role="log" aria-live="polite" aria-atomic="false"></div>
+  <div id="sr-alert" class="sr-only" role="status" aria-live="assertive"></div>
+
+  <!-- ComfyUI launch banner: prominent, always-visible progress for the
+       "Open ComfyUI" flow (cold start can take ~60s). Complements the OS
+       desktop notification fired on ready/error. role=status + polite live
+       region announces the title transitions to screen readers; the seconds
+       counter is aria-hidden so it isn't re-read every tick. -->
+  <div class="comfy-launch hidden" id="comfy-launch" role="status" aria-live="polite">
+    <div class="comfy-launch-card">
+      <span class="comfy-launch-glyph" id="comfy-launch-glyph" aria-hidden="true">🖼</span>
+      <div class="comfy-launch-text">
+        <div class="comfy-launch-title" id="comfy-launch-title" data-i18n="comfy.launch_starting">Starting ComfyUI…</div>
+        <div class="comfy-launch-sub">
+          <span id="comfy-launch-secs" aria-hidden="true"></span>
+          <span id="comfy-launch-hint" data-i18n="comfy.launch_hint">cold start can take up to ~60s</span>
+        </div>
+      </div>
+      <button class="comfy-launch-x" id="comfy-launch-dismiss" aria-label="Dismiss" data-i18n-attr="aria-label=common.dismiss">✕</button>
+    </div>
+    <div class="comfy-launch-bar"><span class="comfy-launch-bar-fill" id="comfy-launch-bar-fill"></span></div>
+  </div>
+
+  <!-- Toast + connection overlay -->
+  <!-- role/aria-live so the toast is announced in place; toast() additionally
+       mirrors into #sr-live / #sr-alert for assistive tech that ignores a node
+       which is toggled between display:none and visible. -->
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+  <div class="reconnect-overlay hidden" id="reconnect">
+    <div class="reconnect-card"><span class="spinner"></span> <span data-i18n="conn.reconnecting">Reconnecting…</span></div>
+  </div>
+
+  <script>
+    // PWA: registers only on secure contexts (https/localhost); harmless no-op
+    // over plain LAN http.
+    //
+    // …and never in privacy mode. This runs during parsing, but privacy.js's
+    // purge only runs from main.js AFTER `await i18nInit()` — so a privacy
+    // device used to install the worker, let it precache the whole app shell,
+    // and only then delete it, every single load. Reading the flag here (the
+    // same key privacy.js owns: FLAG_KEY = 'dispatch-privacy') means the cache
+    // is never written in the first place. The purge stays where it is: it is
+    // still what cleans up a device that had the worker BEFORE privacy mode was
+    // switched on, and what unregisters an already-installed PWA.
+    var lcPrivate = false;
+    try { lcPrivate = localStorage.getItem('dispatch-privacy') === '1'; } catch (e) {}
+    if (!lcPrivate && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      // Was a worker already controlling this page at load? On a FIRST-ever visit
+      // there is none, yet clients.claim() still fires controllerchange — reloading
+      // then is a pointless flash. Only reload on a genuine worker SWAP (an update
+      // to an already-controlled tab), not the initial claim.
+      const hadController = !!navigator.serviceWorker.controller;
+      // scope '/' — the worker file lives under /static/ but must control the
+      // document at /. Paired with the Service-Worker-Allowed: / response header
+      // the backend sends for /static/sw.js. Without both, the SW registered but
+      // never controlled the page: no offline, no network-first, no auto-reload.
+      navigator.serviceWorker.register('/static/sw.js', { scope: '/' }).then((reg) => {
+        // A new SW that skipWaiting()s + clients.claim()s will *control* this tab
+        // but won't reload it — so the page keeps running the OLD in-memory JS
+        // until a manual refresh. That's how a shipped fix (e.g. the avatar
+        // render fix) can silently fail to reach an open tab. Reload exactly once
+        // when control passes to a new worker so updates apply automatically.
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloaded || !hadController) return;
+          reloaded = true;
+          location.reload();
+        });
+        // Proactively check for an update on load so a stale tab self-heals.
+        try { reg.update(); } catch {}
+      }).catch(() => {});
+    }
+  </script>
+  <!-- Only what the first paint genuinely needs. `defer` keeps these ordered
+       ahead of the module below without blocking the parser.
+         · marked + DOMPurify (~72KB) — every message body goes through them.
+         · highlight.js (127KB)  → fetched on the first code block.
+         · xterm + 4 addons (317KB) → fetched when the terminal is opened.
+       That is 444KB removed from every cold start, including phones that never
+       open a code block or the terminal. -->
+  <script defer src="/static/vendor/marked.min.js"></script>
+  <script defer src="/static/vendor/purify.min.js"></script>
+  <script type="module" src="/static/js/main.js?v=54"></script>
+</body>
+</html>

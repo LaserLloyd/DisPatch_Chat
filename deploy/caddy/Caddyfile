@@ -1,0 +1,148 @@
+# =============================================================================
+#  DisPatch Chat — Caddy reverse proxy
+# =============================================================================
+#  Used by the `proxy` profile in docker-compose.yml:
+#      docker compose --profile proxy up -d
+#
+#  Set SITE_ADDRESS in .env:
+#      chat.example.com   a real name you own -> real Let's Encrypt certificate
+#      localhost          -> Caddy's own local CA (browser will warn; fine for
+#                            testing, and you can trust the root it prints)
+#      :80                -> plain HTTP, no TLS at all
+#
+#  WHY A PROXY AT ALL, for a LAN-only app: browsers restrict a pile of things
+#  to "secure contexts". Over http:// on a bare LAN IP you lose clipboard
+#  image paste, PWA install, service-worker caching and notifications. Those
+#  are core to how this app is used on a phone. HTTPS turns them back on.
+# =============================================================================
+{
+	# ACME contact address. Optional but recommended: it is how you get told
+	# about renewal failures instead of finding out when the cert expires.
+	email {$ACME_EMAIL}
+
+	# Uncomment while testing to use Let's Encrypt's staging CA. The certs are
+	# untrusted, but staging has generous rate limits — production allows only
+	# 5 failed validations per account/hostname per hour, and it is very easy
+	# to burn that fighting a DNS or port-forward problem.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$SITE_ADDRESS} {
+	# -------------------------------------------------------------------
+	#  Logging — bounded on purpose. This will run on an SD card.
+	# -------------------------------------------------------------------
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+		# Chat URLs are not secret, but they are a record of who talked to
+		# which bot and when — and query strings carry search terms and the
+		# one-shot tokens some links use. The `filter` encoder below rewrites
+		# the logged URI to everything before the first `?`, so the path is
+		# kept and the query is never written to disk.
+		#
+		# This block used to be a bare `format json` under a comment claiming a
+		# filter was applied. It was not: full URIs, query strings included,
+		# went into access.log. If you would rather keep no access log at all,
+		# delete the whole `log` block — that is still the strongest option.
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "[?].*" ""
+			}
+		}
+	}
+
+	encode zstd gzip
+
+	# -------------------------------------------------------------------
+	#  The app
+	# -------------------------------------------------------------------
+	reverse_proxy app:8765 {
+		# ⚠⚠ READ THIS BEFORE CHANGING ANYTHING IN THIS BLOCK ⚠⚠
+		#
+		# DO NOT add `header_up Host {upstream_hostport}`.
+		#
+		# Caddy v2 passes the ORIGINAL Host header through by default, and
+		# this app depends on that. Its WebSocket handshake guard requires
+		#     URL(Origin).host  ==  Host header
+		# and closes the connection with code 1008 if they differ.
+		#
+		# Rewrite Host to `app:8765` and the browser sends
+		#     Origin: https://chat.example.com
+		#     Host:   app:8765
+		# which do not match. The failure is nasty precisely because it is
+		# partial: every page loads, every REST call works, and the chat
+		# simply never updates again. No error is shown to the user.
+		#
+		# This is the single most common way people break this app behind a
+		# proxy, and it is why these docs recommend Caddy over nginx — the
+		# widely copy-pasted nginx WebSocket snippet sets Host to the
+		# upstream, so nginx users hit it by default.
+
+		# WebSockets need no special configuration in Caddy v2 — Upgrade and
+		# Connection are handled automatically. If you are porting an nginx
+		# config, this is the block you delete, not translate.
+
+		# X-Forwarded-For / -Proto / -Host are set automatically.
+		#
+		# That matters for security here, not just for logs: the app treats
+		# any request carrying a forwarding header as definitely-not-local,
+		# which forces its API-token check on the machine-to-machine
+		# endpoints. Strip these headers and a proxied remote caller would
+		# arrive looking like a loopback process. Leave them alone.
+
+		# Agent turns can legitimately run for minutes. Caddy has no default
+		# response timeout, but if you add one, make it larger than the app's
+		# DISPATCH_AGENT_TIMEOUT (900s default) or long turns will fail at
+		# the proxy while still running on the server.
+		transport http {
+			# read_timeout / write_timeout intentionally unset (no limit).
+			# WebSockets are long-lived; a write timeout kills idle tabs.
+			dial_timeout 10s
+		}
+
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	# -------------------------------------------------------------------
+	#  Upload size
+	# -------------------------------------------------------------------
+	# The File Server accepts single files up to 4 GiB. Caddy does not limit
+	# request bodies by default, so nothing is needed here — but if you add a
+	# `request_body { max_size ... }` line, remember it silently truncates
+	# large uploads with a 413 the app never sees.
+
+	# -------------------------------------------------------------------
+	#  Headers
+	# -------------------------------------------------------------------
+	header {
+		# HSTS. Only enable once you are certain HTTPS works on this name —
+		# it is sticky in browsers and hard to undo. Commented by default,
+		# and NEVER enable it when SITE_ADDRESS is `localhost` or an IP.
+		# Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		# The app sets its own CSP on media routes. Do not add a global CSP
+		# here without testing: the frontend uses inline module scripts and a
+		# blanket `script-src 'self'` will white-screen the app.
+		-Server
+	}
+}
+
+# =============================================================================
+#  Exposing this to the internet
+# =============================================================================
+#  Think hard first. This app's access control is a shared PIN, and its
+#  "unlocked" mode can include a server-side shell. It was designed for a
+#  household LAN or a private tailnet, not the public web.
+#
+#  If you only want access from your own devices while away from home, a mesh
+#  VPN (Tailscale, WireGuard, Netbird) is a strictly better answer than a port
+#  forward: no open port, no certificate management, no brute-force surface.
+#  Skip this proxy entirely in that case and reach the app on its LAN port.
+# =============================================================================

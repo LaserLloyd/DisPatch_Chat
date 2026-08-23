@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "//": "Not a build step — DisPatch ships vanilla ES modules with no bundler, and that is deliberate. This file exists so `node --test frontend/tests/` can import those same modules directly instead of a copy: without it node resolves .js as CommonJS and the import fails. No dependencies, nothing to install.",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

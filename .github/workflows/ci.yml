@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Action majors are kept in step with .github/workflows/docker-publish.yml —
+# bump both together, or the two files drift into different runtimes.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The most important job in this file. A pull request that would publish
+  # somebody's chat history, a hostname or an API key fails here before a human
+  # ever reviews it. Runs first and blocks everything else.
+  privacy:
+    name: No private data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Scan the tree for private data
+        run: python3 scripts/scrub_check.py
+
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    needs: privacy
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Sync dependencies
+        working-directory: backend
+        run: uv sync --frozen --python ${{ matrix.python }}
+      - name: Run the test suite
+        working-directory: backend
+        run: uv run pytest -q
+
+  lint:
+    name: Lint
+    needs: privacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+      - name: Ruff
+        working-directory: backend
+        run: uvx ruff check app tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Frontend syntax check
+        # No build step by design, so this is the only thing standing between a
+        # typo and a blank page. Every module is parsed as ESM.
+        # setup-node, not `apt-get install nodejs`: the distro package is years
+        # behind and `node --test` (used below) needs a current runtime.
+        run: |
+          for f in frontend/static/js/*.js frontend/static/sw.js; do
+            cp "$f" /tmp/check.mjs
+            node --check /tmp/check.mjs || { echo "::error file=$f::syntax error"; exit 1; }
+          done
+          echo "All frontend modules parse."
+      - name: Frontend tests
+        # node --check only PARSES. It cannot see that a function being called
+        # does not exist — which is exactly the bug that shipped: two calls to
+        # functions that were never defined, in a path no reloading end-to-end
+        # test ever exercised. tests/callable.test.js is the guard for that
+        # class; the rest cover No-Image Mode's decision logic.
+        #
+        # Explicit file args, NOT `node --test tests/`: node resolves a bare
+        # directory as a MODULE and dies with MODULE_NOT_FOUND, which reads
+        # exactly like a failing suite.
+        working-directory: frontend
+        run: node --test tests/*.js
+
+  locales:
+    name: Translations
+    needs: privacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Validate locale files
+        # No `if [ -f ... ]` guard. This step used to skip when the checker was
+        # "missing" — and it always was, because it looked for check_locales.py
+        # while the script is check-locales.py. The job went green for weeks
+        # having validated nothing. A gate that can silently opt itself out is
+        # not a gate: if the checker is gone, that is a failure.
+        run: python3 scripts/check-locales.py
+
+      - name: Locale HTML allowlist self-test
+        # The locale checker is also an XSS boundary: translated values reach
+        # innerHTML through i18n.js, so a translation PR is an injection vector.
+        # These fixtures assert the allowlist still rejects the attacks it was
+        # written for — a regression here is invisible against real locale files,
+        # which are (correctly) clean.
+        run: python3 scripts/check-locales.py --selftest
+
+  docker:
+    name: Docker image builds
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (amd64 + arm64, no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

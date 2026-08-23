@@ -1,0 +1,265 @@
+# =============================================================================
+#  Build and publish multi-arch images to GHCR
+# =============================================================================
+#  Produces linux/amd64 + linux/arm64 at ghcr.io/<owner>/dispatch-chat.
+#
+#  Design: one runner per architecture, each pushing an untagged
+#  digest-addressed manifest, then a merge job that assembles the tagged
+#  manifest list.
+#
+#  WHY NOT just `platforms: linux/amd64,linux/arm64` on one runner?
+#  That builds arm64 under QEMU emulation. Docker's own docs warn:
+#
+#     "Emulation with QEMU can be much slower than native builds, especially
+#      for compute-heavy tasks like compilation... Use multiple native nodes
+#      or cross-compilation instead, if possible."
+#      https://docs.docker.com/build/building/multi-platform/
+#
+#  and QEMU has a nonzero *correctness* failure rate on top of the slowness
+#  (`qemu: uncaught target signal 11` during package installs is a classic).
+#
+#  GitHub now gives us native arm64 for free: `ubuntu-24.04-arm` went GA for
+#  public repositories on 2025-08-07 and for private repositories on
+#  2026-01-29. There is no reason to emulate any more.
+#     https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/
+#
+#  NOTE: there is no `ubuntu-latest-arm` meta-label. Pin the version.
+#
+#  This app happens to be a mild case — every dependency (pillow,
+#  pydantic-core, uvloop, httptools, watchfiles, websockets, pyyaml) ships
+#  prebuilt manylinux aarch64 wheels, so nothing compiles. The matrix still
+#  earns its keep: it roughly halves wall-clock time and removes an entire
+#  class of emulation bug.
+#
+#  If you fork this and want less YAML, `docker/github-builder@v1` is Docker's
+#  own reusable workflow that does the same fan-out in ~15 lines. The tradeoff
+#  is a supply-chain dependency on the @docker org for your build logic.
+# =============================================================================
+
+name: Publish container image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Least privilege at the top; jobs widen it where needed.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ===========================================================================
+  #  One job per architecture, on a native runner
+  # ===========================================================================
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Normalise platform name
+        run: |
+          # "linux/amd64" -> "linux-amd64". Artifact names cannot contain "/",
+          # and each matrix leg needs a UNIQUE artifact name: since
+          # upload-artifact v4 artifacts are immutable, two legs uploading the
+          # same name is a hard error rather than an overwrite.
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v6
+
+      # Action majors were bumped together in March 2026 for the Node 24
+      # runtime; they require Actions Runner v2.327.1+. If you pin older
+      # majors, also revert the input names (setup-buildx v4 removed
+      # `config` / `config-inline` in favour of `buildkitd-config*`).
+      - uses: docker/setup-buildx-action@v4
+
+      # No setup-qemu-action. Each leg builds natively, and current BuildKit
+      # bundles QEMU anyway if something ever needs it.
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN + `packages: write` is preferred over a PAT for
+          # same-repo pushes. Note it is READ-ONLY for pull requests from
+          # forks, which is why the push steps are gated on event_name.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          # Labels are applied here, per-platform. Tags are NOT — they are
+          # applied once by the merge job. Getting this backwards is the
+          # classic cause of "my GHCR package isn't linked to the repo":
+          # linking keys off org.opencontainers.image.source, which
+          # metadata-action emits into these labels.
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+          # push-by-digest publishes an UNTAGGED, digest-addressed manifest.
+          # `tags:` deliberately supplies only the repository name.
+          outputs: |
+            type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          # `scope` is MANDATORY with a matrix. Docker's docs: "If you build
+          # multiple images, each build will overwrite the cache of the
+          # previous, leaving only the final cache." Without per-arch scopes
+          # the two legs silently destroy each other's cache.
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=${{ env.PLATFORM_PAIR }},mode=max
+          # Provenance is attached at the MERGE step, not here. A
+          # push-by-digest build with provenance on emits an image *index*
+          # (platform manifest + an unknown/unknown attestation manifest)
+          # rather than a plain manifest, which changes what
+          # `imagetools create` assembles downstream.
+          provenance: false
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          # An empty file NAMED for the digest. The merge job globs these and
+          # reassembles "<image>@sha256:<name>" from the filenames.
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+
+  # ===========================================================================
+  #  Assemble the manifest list
+  # ===========================================================================
+  merge:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write        # Sigstore/OIDC identity for attestations
+      attestations: write    # GitHub's own attestation store
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=short
+            # `latest` only from a semver tag — never from a branch push. A
+            # `latest` that tracks main is how people end up running an
+            # untested commit in their house.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Create and push the manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect the result
+        id: inspect
+        run: |
+          docker buildx imagetools inspect \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          digest=$(docker buildx imagetools inspect \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # Provenance recorded in GitHub's attestation store rather than as an
+      # extra manifest inside the image index. Same guarantee, and it avoids
+      # the `unknown/unknown` platform entry that some registries and
+      # serverless runtimes (AWS ECR/Lambda, Google Cloud Run, older Harbor)
+      # still choke on.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.inspect.outputs.digest }}
+          push-to-registry: false
+
+# =============================================================================
+#  Notes for whoever maintains this next
+# =============================================================================
+#  * GHA cache is capped at 10 GB PER REPOSITORY and evicts anything not read
+#    in 7 days. `mode=max` exports every intermediate stage, and two arch
+#    scopes means two full sets. When builds mysteriously get slower over
+#    time, this is why — eviction is silent, never an error. If it becomes a
+#    problem, switch to a registry cache:
+#     (OWNER is the placeholder for the GitHub owner — this example is the only
+#     place in this file that needs substituting; the live code uses
+#     ${{ github.repository }} and resolves itself.)
+#       cache-from: type=registry,ref=ghcr.io/LaserLloyd/dispatch-chat:buildcache
+#       cache-to:   type=registry,ref=ghcr.io/LaserLloyd/dispatch-chat:buildcache,mode=max
+#
+#  * Caches are only readable from the current branch, its base branch, and
+#    the default branch. A PR cannot read a sibling PR's cache. In practice
+#    that means main's cache is the one that matters — if main's build is
+#    broken, every PR builds cold.
+#
+#  * NEVER pass a secret as a build-arg. On a public repository BuildKit adds
+#    provenance `mode=max` automatically, and build arguments are recorded in
+#    the attestation. Docker's docs are blunt about it: any secret passed that
+#    way is exposed and must be rotated. Use secret mounts.
+#
+#  * First publish: the GHCR package is private by default. Make it public at
+#    github.com/users/<owner>/packages/container/dispatch-chat/settings, or
+#    `docker pull` fails for everyone with "denied" and you will assume the
+#    build is broken.
+# =============================================================================
