@@ -31,7 +31,22 @@ import yaml
 # Project root (the repo checkout). config.py lives at backend/app/config.py.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "static"
-AVATAR_DIR = FRONTEND_DIR / "avatars"
+
+# Avatars are DATA, not code, so they live in the data directory beside media/
+# and files/ -- not under the code tree. They used to sit in frontend/static/,
+# which meant a running install kept hundreds of megabytes of personal pictures
+# inside the thing a deploy overwrites. Only a file allowlist stood between an
+# update and someone's roster; that is too thin a thread for the one part of
+# the install that cannot be regenerated.
+#
+# The URL does not change: /static/avatars/<file> is mounted from here
+# explicitly, ahead of the general /static mount. Nothing in the frontend, the
+# config schema or the Safe-Mode path checks had to move.
+#
+# LEGACY: an install whose avatars are still in the old location keeps working.
+# Preferring the old path when it exists and the new one does not means an
+# upgrade shows the same faces it did before, with no migration step and no
+# blank roster on first boot.
 
 
 def env(name: str, default: str = "") -> str:
@@ -73,6 +88,12 @@ def _default_data_dir() -> Path:
 DATA_DIR = Path(env("DATA_DIR", str(_default_data_dir())))
 DB_PATH = DATA_DIR / "chats.db"
 CONFIG_PATH = DATA_DIR / "config.yaml"
+_LEGACY_AVATAR_DIR = FRONTEND_DIR / "avatars"
+_DATA_AVATAR_DIR = DATA_DIR / "avatars"
+AVATAR_DIR = (_LEGACY_AVATAR_DIR
+              if _LEGACY_AVATAR_DIR.is_dir() and not _DATA_AVATAR_DIR.is_dir()
+              else _DATA_AVATAR_DIR)
+
 MEDIA_DIR = DATA_DIR / "media"          # user-uploaded / pasted images
 FILES_DIR = DATA_DIR / "files"          # File Server blobs (any type)
 LOG_DIR = DATA_DIR / "logs"
