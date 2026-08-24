@@ -139,10 +139,10 @@ SystemCallFilter=~@privileged @resources
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 # ProtectSystem=strict makes everything read-only except these:
 ReadWritePaths=%S/dispatch
-# The app writes uploaded avatars into the source tree today (see
-# docs/deploy-bare-metal.md § "Avatars"). There is NO environment override for
-# that path yet, so uncommenting the line below is currently the only way to
-# make avatar upload work under ProtectSystem=strict.
+# Uploaded avatars go to <data dir>/avatars/, which is already covered by the
+# ReadWritePaths above -- nothing extra is needed for avatar upload to work
+# under ProtectSystem=strict. An install still keeping avatars in the old
+# source-tree location needs this line instead:
 #ReadWritePaths=/opt/dispatch/frontend/static/avatars
 
 # MemoryDenyWriteExecute=yes is tempting and usually works with CPython, but

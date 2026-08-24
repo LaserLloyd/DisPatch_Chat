@@ -278,26 +278,23 @@ and it exists to let clients influence their apparent address.
 
 ---
 
-## Known wart: avatars live in the source tree
+## Avatars live in the data directory
 
-Uploaded avatars are written to `frontend/static/avatars/` — inside the code checkout,
-not the data directory. Consequences:
+Uploaded avatars are user data, and they are stored with the rest of it — in
+`<data dir>/avatars/`, beside `media/` and `files/`. They survive a `git pull`,
+a redeploy, and a reinstall, and they are included whenever you back up the
+data directory. No extra `ReadWritePaths=` line is needed.
 
-- a `git pull` or a redeploy can lose them
-- the system unit's `ProtectSystem=strict` makes that path read-only, so avatar upload
-  fails until you add a `ReadWritePaths=` line (there is a commented one in the unit)
+The URL is unchanged: `/static/avatars/<file>` is mounted from the data
+directory explicitly, ahead of the general `/static` mount. (A symlink would
+not work — Starlette's `StaticFiles` resolves real paths and returns 404 for
+anything escaping the static root. The separate mount is why this works.)
 
-**For now:** uncomment the `ReadWritePaths=` line in the system unit, and include
-`frontend/static/avatars/` in your backups. On the user unit it works as-is; just
-remember that directory is not inside your data directory.
-
-The container deployment works around this with a bind mount over that path. A symlink
-to the data directory does **not** work — tested, returns HTTP 404, because Starlette's
-`StaticFiles` resolves real paths and refuses anything escaping the static root.
-
-There is currently **no environment variable for the avatar directory at all**,
-so `ReadWritePaths=` is the only lever. Moving it into the data directory is a
-known open item.
+**Upgrading from an older install?** Nothing to do. If avatars are still in
+`frontend/static/avatars/` and the data directory has none, the app keeps using
+the old location, so your roster does not go blank. To move them, copy the
+directory into `<data dir>/avatars/` while the app is stopped; it prefers the
+data directory whenever it exists.
 
 ---
 

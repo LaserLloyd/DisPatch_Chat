@@ -149,7 +149,7 @@ export function isMediaOnly(msg, stripSource) {
  *   - a REACTION TRACE. A reaction is a picture; its trace message exists only
  *     to caption one. Declining to build the special trace row is not enough —
  *     the message then falls through to ordinary system rendering and shows its
- *     raw content ("⚡ Nova reacted · Check In") in a bubble, which is exactly
+ *     raw content ("⚡ <bot> reacted · Check In") in a bubble, which is exactly
  *     the visible trace NIM removes. That happened in use: the pictures were
  *     gone and their captions were still lining the thread.
  *

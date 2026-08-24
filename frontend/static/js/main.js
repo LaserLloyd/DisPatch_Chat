@@ -2521,7 +2521,7 @@ function renderBotManager() {
       });
       return b;
     };
-    // Per-bot reaction images. Off for everyone but Nova by default — a
+    // Per-bot reaction images. Off for every bot by default — a
     // reaction interrupts every screen in the house, so it's opt-in per bot.
     const rxBtn = el('button', {
       class: 'bm-safe-btn' + (bot.reactions ? ' on' : ''),

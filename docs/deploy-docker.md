@@ -193,31 +193,16 @@ develop on Windows and deploy on Linux, test the Linux path.
 
 ### Avatars are user data
 
-One wart worth understanding, because it is the one place the app's layout and the
-container model disagree.
+Uploaded avatars are user data, and the app stores them in the **data directory** at
+`/data/avatars` — on the volume, beside `media/` and `files/`. Nothing special is
+needed: the data volume already carries them, they survive `docker compose pull`, and
+they are in your backup the moment the data directory is.
 
-Uploaded avatars are user data, but the app serves them from the **source tree** at
-`frontend/static/avatars/` — which is inside the read-only image. Without help, an
-avatar uploaded through the UI lands in the container's writable layer and is lost on
-the next `docker compose pull`.
+The URL is unchanged. `/static/avatars/*` is mounted from the data directory
+explicitly, ahead of the general `/static` mount, and Starlette matches mounts in
+order — so the specific one claims the path.
 
-`docker-compose.yml` fixes this by mounting the data volume's `avatars` subpath over
-that path, so the files live on the volume with everything else:
-
-```yaml
-- type: volume
-  source: dispatch-data
-  target: /app/frontend/static/avatars
-  volume:
-    subpath: avatars
-```
-
-Requires Docker Engine 26+ / Compose v2.26+. On older versions use a second named
-volume (`- dispatch-avatars:/app/frontend/static/avatars`); if you set `DATA_PATH`,
-use the matching bind (`- ${DATA_PATH}/avatars:/app/frontend/static/avatars`) so all
-your data stays in one place.
-
-**A symlink does not work.** This was tested, not assumed:
+**This is why it is a mount and not a symlink.** A symlink was tested, not assumed:
 
 ```
 /app/frontend/static/avatars -> /data/avatars
@@ -225,7 +210,8 @@ GET /static/avatars/probe.png   =>  HTTP 404
 ```
 
 Starlette's `StaticFiles` resolves the real path of every request and refuses anything
-that escapes the mounted directory. That is a traversal defence doing its job. Use the
+that escapes the mounted directory. That is a traversal defence doing its job — and the
+reason the app mounts the data directory as its own route instead. Use the
 mount.
 
 The entrypoint checks whether the path is a real mount and warns loudly if it is not,

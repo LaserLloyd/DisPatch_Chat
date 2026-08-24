@@ -162,13 +162,13 @@ ENV LOCAL_CHAT_DATA_DIR=/data \
     LOCAL_CHAT_PORT=8765 \
     TMPDIR=/data/tmp
 
-# NOTE ON AVATARS: uploaded avatars are user data, but the app writes them to
-# frontend/static/avatars inside this image. There is no env var for it today
-# (see docs/pre-release-changes.md §1 for the fix upstream should make), and
-# a symlink out to /data does NOT work — Starlette's StaticFiles resolves real
-# paths and 404s anything escaping the static root. Verified.
-# docker-compose.yml therefore mounts the data volume's `avatars` subpath over
-# the path below. The entrypoint warns loudly if that mount is missing.
+# NOTE ON AVATARS: uploaded avatars are user data and are stored in the data
+# directory (/data/avatars), so the data volume already carries them and no
+# bind mount over the source tree is required.
+# A symlink would NOT have worked — Starlette's StaticFiles resolves real paths
+# and 404s anything escaping the static root (verified). The app instead mounts
+# /static/avatars from the data directory ahead of the general /static mount,
+# which keeps the URL identical.
 # Host-OS integrations, OFF in a container because they drive the host's
 # systemd and the host's shell. See docs/deploy-docker.md § "What does not
 # work in a container". Turning them on here produces broken UI, not features.

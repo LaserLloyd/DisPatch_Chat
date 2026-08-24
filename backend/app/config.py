@@ -90,8 +90,26 @@ DB_PATH = DATA_DIR / "chats.db"
 CONFIG_PATH = DATA_DIR / "config.yaml"
 _LEGACY_AVATAR_DIR = FRONTEND_DIR / "avatars"
 _DATA_AVATAR_DIR = DATA_DIR / "avatars"
+
+
+def _legacy_avatars_in_use() -> bool:
+    """Does the OLD location actually hold avatars?
+
+    Not "does the directory exist" -- the repository ships that directory with
+    a .gitkeep in it, so it exists in every checkout and every image. Keying
+    the fallback on existence sent every FRESH install straight back into the
+    code tree (and, in a container, into the read-only image), which is the
+    exact bug this move exists to fix. Only real files count.
+    """
+    if not _LEGACY_AVATAR_DIR.is_dir():
+        return False
+    ignore = {".gitkeep", ".gitignore", "README.md", ".DS_Store"}
+    return any(f.is_file() and f.name not in ignore
+               for f in _LEGACY_AVATAR_DIR.iterdir())
+
+
 AVATAR_DIR = (_LEGACY_AVATAR_DIR
-              if _LEGACY_AVATAR_DIR.is_dir() and not _DATA_AVATAR_DIR.is_dir()
+              if _legacy_avatars_in_use() and not _DATA_AVATAR_DIR.is_dir()
               else _DATA_AVATAR_DIR)
 
 MEDIA_DIR = DATA_DIR / "media"          # user-uploaded / pasted images

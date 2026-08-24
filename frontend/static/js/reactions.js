@@ -752,7 +752,7 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
   const meta = msg && msg.metadata;
   if (!meta || meta.kind !== 'reaction') return null;
   // In NIM the trace row goes too — chip, thumbnail and all. Half a reaction
-  // ("Nova reacted", no picture) is a visible trace of the thing NIM removed,
+  // ("<bot> reacted", no picture) is a visible trace of the thing NIM removed,
   // so the device behaves as though reactions do not exist. The caller already
   // tolerates null here (it is how non-reaction messages fall through).
   if (nimEnabled()) return null;

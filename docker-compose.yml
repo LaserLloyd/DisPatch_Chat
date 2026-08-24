@@ -126,31 +126,17 @@ services:
       #                 own the UID/GID problem. See docs/deploy-docker.md.
       - ${DATA_PATH:-dispatch-data}:/data
 
-      # Avatars: uploaded through the UI, i.e. user data — but the app serves
-      # them out of the source tree at frontend/static/avatars, which is in
-      # the read-only image. Without this mount they land in the container's
-      # writable layer and are LOST on the next `docker compose pull`.
+      # Avatars need no mount of their own. They are user data and the app
+      # stores them in the data directory (/data/avatars), which the volume
+      # above already carries -- so they survive `docker compose pull` and
+      # "back up /data" stays true.
       #
-      # It must be a MOUNT. A symlink from the image path to /data/avatars was
-      # tested and returns HTTP 404: Starlette's StaticFiles resolves real
-      # paths and refuses anything escaping the static root. The subpath mount
-      # below serves the same file with HTTP 200.
-      #
-      # Requires Docker Engine 26+ / Compose v2.26+ for `subpath`, which keeps
-      # ALL state in the one volume so "back up /data" stays true.
-      #
-      # ⚠ IF YOU SET DATA_PATH (a bind mount), replace this whole block with
-      #   the matching bind, or your avatars end up in a named volume while
-      #   everything else is in your chosen directory:
-      #     - ${DATA_PATH}/avatars:/app/frontend/static/avatars
-      #
-      # On Docker older than 26, use a second named volume instead:
-      #     - dispatch-avatars:/app/frontend/static/avatars
-      - type: volume
-        source: dispatch-data
-        target: /app/frontend/static/avatars
-        volume:
-          subpath: avatars
+      # This used to be a subpath mount over frontend/static/avatars, because
+      # the app served them from the source tree inside the read-only image.
+      # A symlink could not fix that (Starlette's StaticFiles resolves real
+      # paths and 404s anything escaping the static root); the app now mounts
+      # the data directory as its own route instead, which keeps the URL and
+      # removes the requirement for Docker Engine 26+ / Compose v2.26+.
 
     # ⚠ Do NOT mount /tmp as tmpfs here. Uploads spool through TMPDIR before
     # reaching the blob store and the per-file ceiling is 4 GiB — on tmpfs

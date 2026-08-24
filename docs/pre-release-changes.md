@@ -53,78 +53,31 @@ not a code change.
 
 ---
 
-## 1. Avatars should default to the data directory (REQUIRED for a clean container)
+## 1. Avatars default to the data directory — DONE
 
-**Problem.** `config.py` hardcodes the avatar directory into the source tree:
+**Was.** `config.py` hardcoded `AVATAR_DIR = FRONTEND_DIR / "avatars"`, so uploaded
+avatars were written into the source tree: inside the read-only image in a container,
+and inside the directory a bare-metal deploy overwrites everywhere else.
 
-```python
-AVATAR_DIR = FRONTEND_DIR / "avatars"        # …/frontend/static/avatars
-```
+**Now.** `AVATAR_DIR` is `<data dir>/avatars`, beside `media/` and `files/`.
+`/static/avatars/*` is mounted from there explicitly, ahead of the general `/static`
+mount — Starlette matches mounts in order, so the specific one claims the path and the
+URL is unchanged. No frontend change, no config-schema change, and the Safe-Mode path
+checks were untouched.
 
-and `main.py` writes uploaded avatars there (`config.AVATAR_DIR.mkdir(...)`,
-`im.save(config.AVATAR_DIR / full_name, "PNG")`).
+The shipped fix is **not** the `DISPATCH_AVATAR_DIR` env var this section originally
+proposed. An env var would have been one more thing to set correctly; deriving the path
+from the data directory that every other piece of state already uses needs no
+configuration at all.
 
-Three consequences:
+**Upgrades.** An install whose old location still holds real avatar files keeps using
+it, so nothing goes blank on first boot. "Holds real files" and not "the directory
+exists" matters: the repository ships that directory with a `.gitkeep`, so an
+existence check would have sent every fresh install straight back into the code tree.
 
-- **Container:** that path is inside the read-only image. Uploads land in the writable
-  layer and are lost on `docker compose pull`.
-- **Bare metal, system unit:** `ProtectSystem=strict` makes the code tree read-only, so
-  avatar upload fails until an extra `ReadWritePaths=` is added.
-- **Repo hygiene:** `frontend/static/avatars/` is 127 MB and already in `.gitignore`, so
-  it is runtime state living in the source tree by accident. `scripts/scrub_check.py`
-  now fails if anything in there is ever tracked or staged, which contains the damage
-  but does not fix the cause.
-
-**Workaround currently in use.** `docker-compose.yml` mounts the data volume's
-`avatars` subpath over the image path. It works (verified: HTTP 200) but requires
-Docker 26+ and an easily-forgotten compose block.
-
-**A symlink does not work — do not suggest it.** Verified empirically:
-
-```
-/app/frontend/static/avatars -> /data/avatars
-GET /static/avatars/probe.png   =>  HTTP 404
-```
-
-Starlette's `StaticFiles` resolves the real path of each request and rejects anything
-that escapes the mounted directory. `follow_symlink=True` would be needed, which is
-itself a traversal-safety decision you do not want to make casually.
-
-**Fix.** In `config.py`:
-
-```python
-AVATAR_DIR = Path(env("AVATAR_DIR", str(DATA_DIR / "avatars")))
-```
-
-(`config.env()` rather than `os.environ`, so it answers to `DISPATCH_AVATAR_DIR` with
-the legacy `LOCAL_CHAT_AVATAR_DIR` as fallback, like every other setting.)
-
-Add `AVATAR_DIR` to `ensure_dirs()`. Then in `main.py`, register a dedicated mount
-**before** the general `/static` mount so it wins on path matching:
-
-```python
-# /static/avatars → user-uploaded avatars on the data volume.
-# MUST be mounted before /static: Starlette matches routes in order.
-app.mount("/static/avatars", StaticFiles(directory=str(config.AVATAR_DIR)),
-          name="avatars")
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR), html=True),
-          name="static")
-```
-
-**The security gate keeps working unchanged.** `_gated_avatar_static()` and
-`_safe_avatar_static()` match on the request *path* (`/static/avatars/...`), not on the
-filesystem directory, so Safe-Mode avatar gating is unaffected. Worth an explicit test
-asserting a non-safe bot's avatar still 403s for a sessionless client after the change.
-
-**Migration.** On startup, if `FRONTEND_DIR/"avatars"` exists and `AVATAR_DIR` is empty,
-move the contents and leave a marker — the same pattern already used for
-`migrate_mood_folders()`.
-
-**While you are there:** add the resolved avatar directory to `/api/health`. It already
-reports `data_dir`, and "where did my avatars go" is the one path a container user
-cannot infer from the outside.
-
----
+The container plumbing that worked around the old layout — the subpath mount in
+`docker-compose.yml` and the entrypoint's missing-mount warning — is gone with it,
+along with the Docker Engine 26+ / Compose v2.26+ requirement it carried.
 
 ## 2. Make the agent backend pluggable (the big one)
 
@@ -136,7 +89,7 @@ a remote *agent* with tools.
 
 ## 3. Repository hygiene still outstanding
 
-- `backend/app/main.py` is 5,300 lines. Not a blocker for release, but it is the first
+- `backend/app/main.py` is 7,463 lines. Not a blocker for release, but it is the first
   thing a reviewer will comment on, and it is the reason `dashboard_routes.py` was
   split out rather than added to.
 

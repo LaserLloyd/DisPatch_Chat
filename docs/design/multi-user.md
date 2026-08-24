@@ -442,7 +442,7 @@ Legend: **O**=owner, **A**=admin+, **M**=member+, **G**=guest+, **S**=self/ACL,
 | `POST /api/threads/{id}/read` `mark_read` | decoy-thread check | `require_thread`, writes `thread_user_state` for `p.user_id` |
 | `GET /api/unread` `unread_summary` | safe-filtered | per-viewer SQL |
 | `DELETE /api/messages/{id}` `delete_message_endpoint` | `_deny_decoy_mutation` | message author, thread owner, or **A** |
-| `PATCH /api/messages/{id}/checklist` `delete_message_endpoint` | `_deny_decoy_mutation` | message author, thread owner, or **A** |
+| `PATCH /api/messages/{id}/checklist` `update_message_checklist` | `_deny_decoy_mutation` | message author, thread owner, or **A** |
 | `DELETE /api/threads/{id}` `delete_thread` | `_deny_decoy_mutation` | archive: thread owner+; `hard=true`: thread owner or **A**, audit-logged |
 | *new* `PUT /api/threads/{id}/share` | — | thread owner or **A** |
 | WS `_handle_send` | `_ws_bot_allowed` | `require_thread(write=True)` on the connection principal |

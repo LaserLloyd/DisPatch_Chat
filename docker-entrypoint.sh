@@ -104,45 +104,24 @@ export TMPDIR="${TMPDIR:-$DATA_DIR/tmp}"
 find "$DATA_DIR/tmp" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null || true
 
 # -----------------------------------------------------------------------------
-# 3. Avatars are USER DATA, but the app serves them from the source tree at
-#    frontend/static/avatars/ — which lives in the read-only image. An avatar
-#    uploaded through the UI therefore lands in the container's writable layer
-#    and vanishes on the next `docker compose pull`.
+# 3. Avatars are USER DATA and live on the volume at /data/avatars, beside
+#    media/ and files/. Nothing to mount, nothing to warn about: the data
+#    volume already carries them, so they survive `docker compose pull` and
+#    "back up /data" covers them.
 #
-#    The fix is a MOUNT, not a symlink. This was tested, and the obvious
-#    symlink approach does not work:
+#    This used to require a subpath mount over /app/frontend/static/avatars,
+#    because the app served avatars from the source tree inside the read-only
+#    image. A symlink could not stand in for that mount -- tested:
 #
 #      /app/frontend/static/avatars -> /data/avatars
 #      GET /static/avatars/probe.png  =>  HTTP 404
 #
 #    Starlette's StaticFiles resolves the real path of every request and
-#    refuses anything that escapes the mounted directory, so a symlink out of
-#    the static root is rejected by design. Mounting the volume's `avatars`
-#    subpath over that directory serves the same file with HTTP 200.
-#
-#    docker-compose.yml does this for you. All we do here is make sure the
-#    directory exists on the volume and warn clearly if the mount is absent.
+#    refuses anything escaping the mounted directory. The app now mounts the
+#    data directory as its own route ahead of /static, which keeps the URL and
+#    makes the whole problem go away -- including the Docker 26+ requirement.
 # -----------------------------------------------------------------------------
-AVATARS_IMAGE_DIR="/app/frontend/static/avatars"
 mkdir -p "$DATA_DIR/avatars"
-
-# A separate mount has a different device number from its parent directory.
-# The directory is absent from the image on purpose (it is 127 MB of user data
-# and .dockerignore excludes it), so "missing" also means "not mounted" —
-# check that first or the comparison silently passes.
-_dev_of() { stat -c '%d' "$1" 2>/dev/null || echo "none"; }
-if [ ! -d "$AVATARS_IMAGE_DIR" ] \
-   || [ "$(_dev_of "$AVATARS_IMAGE_DIR")" = "$(_dev_of /app/frontend/static)" ]; then
-    log "WARNING: ${AVATARS_IMAGE_DIR} is not a mount. Avatars uploaded in the UI"
-    log "         will be LOST on the next image update. Add this to your compose"
-    log "         service (requires Docker Engine 26+ / Compose v2.26+):"
-    log "           volumes:"
-    log "             - type: volume"
-    log "               source: dispatch-data"
-    log "               target: /app/frontend/static/avatars"
-    log "               volume: { subpath: avatars }"
-    log "         See docs/deploy-docker.md § Avatars are user data."
-fi
 
 # -----------------------------------------------------------------------------
 # 4. Sanity warnings for configurations that will disappoint you later
