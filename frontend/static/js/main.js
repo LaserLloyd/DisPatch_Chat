@@ -2,9 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=18';
+import { api, setOnLocked } from './api.js?v=19';
 import { ChatSocket } from './ws.js?v=7';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=19';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=20';
+import { installChecklists, applyChecklistState } from './checklist.js?v=1';
 import { el, escapeHtml, loadScript, loadStyle } from './util.js?v=10';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -19,7 +20,7 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=11';
+} from './reactions.js?v=12';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=5';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
@@ -27,6 +28,7 @@ import {
 } from './llm.js?v=2';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=3';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=3';
+import { renderPinnedRail, pinToggle } from './pins.js?v=1';
 import { aboutRow } from './about.js?v=1';
 
 // ===================== Popout mode =====================
@@ -1185,6 +1187,9 @@ function messageEl(msg) {
   bubble.querySelectorAll('video').forEach((v) =>
     v.addEventListener('click', () => openLightbox(v.getAttribute('src'), { video: true })));
   pinOnImageLoad(wrap);
+  // Interactive ```checklist tables: inject checkboxes + persistence. Safe Mode
+  // gets the widgets read-only (VIEW + SEND only — checking is a mutation).
+  installChecklists(wrap, { message: msg, readonly: state.decoy });
   return wrap;
 }
 
@@ -2158,6 +2163,13 @@ function mountLanguagePicker() {
   const nr = nimRow(t, { decoy: state.decoy, pinSet: !!state.auth.pinSet, onChange: applyNimChange });
   nr.id = 'nim-row';
   pr.after(nr);
+  // A 📌 on each pinnable row puts that switch on the rail. It lives on the
+  // row rather than in a list of its own so the thing you pin and the pin
+  // control are the same object — nothing to keep in step.
+  for (const [row, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
+    const pin = pinToggle(pinId, { t, onChange: renderPins });
+    if (pin) row.append(pin);
+  }
   // About: version + the AGPL §13 source offer. In the Device pane on purpose —
   // it is the one settings tab a Safe-Mode session can open, and §13 owes the
   // offer to every user of the running program, not just the operator.
@@ -4884,6 +4896,19 @@ function handleWs(data) {
       }
       break;
     }
+    case 'checklist_update': {
+      // Another device checked/unchecked a row. Update the in-memory message
+      // (so a re-render keeps the state) and repaint the live widget.
+      const mid = data.message_id;
+      if (!mid) break;
+      const m = state.messages.find((x) => x.id === mid);
+      if (m) m.metadata = { ...(m.metadata || {}), checklist: data.checklist };
+      if (data.thread_id === state.activeThreadId) {
+        const msgEl = dom['messages'].querySelector(`[data-id="${CSS.escape(mid)}"]`);
+        if (msgEl) applyChecklistState(msgEl, data.checklist);
+      }
+      break;
+    }
     case 'locked':
       // The full session expired server-side → fall back to Safe Mode.
       handleLocked();
@@ -5286,6 +5311,26 @@ function applyAuthChrome() {
   // devices have an obvious way into admin mode (opens the existing PIN
   // overlay). Hidden once unlocked — the 🔒 lock-now button takes over.
   if (dom['unlock-btn']) dom['unlock-btn'].classList.toggle('hidden', !state.decoy);
+  // Pinned settings live on the same rail and follow the same rule: rebuilt on
+  // every tier change, so a pin that Safe Mode may not have disappears the
+  // moment the device locks rather than lingering as a dead button.
+  renderPins();
+}
+
+// Draw the pinned settings onto the rail. Kept as one call site so every
+// path that changes a pinned setting, pins one, or crosses the lock boundary
+// repaints the same way.
+function renderPins() {
+  renderPinnedRail(document.getElementById('gear-row'), {
+    decoy: state.decoy,
+    t,
+    onChange: (id) => {
+      // A pinned toggle changes the same device setting the Settings pane
+      // shows, so anything open must be repainted or the two disagree.
+      if (id === 'nim') applyNimChange(nimEnabled());
+      if (document.getElementById('nim-row')) mountLanguagePicker();
+    },
+  });
 }
 
 // ---- Idle auto-lock (full mode only → drops back to Safe Mode) ----

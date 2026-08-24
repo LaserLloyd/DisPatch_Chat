@@ -876,5 +876,13 @@
     "not_answering": "antwortet nicht",
     "note_agent_providers": "Optional — und diese Bots brauchen keins: Sie rufen einen LLM-Anbieter direkt auf.",
     "note_agent_none": "Optional — Chatverlauf, Uploads und diese Seite funktionieren auch ohne. Nutze stattdessen KI verbinden (🔌), um einem Bot einen Anbieter zu geben."
+  },
+  "pins": {
+    "pin": "An die Leiste anheften",
+    "unpin": "Von der Leiste lösen"
+  },
+  "checklist": {
+    "done": "Erledigt",
+    "complete": "Erledigen"
   }
 }

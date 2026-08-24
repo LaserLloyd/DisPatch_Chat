@@ -900,5 +900,13 @@
     "not_answering": "ne répond pas",
     "note_agent_providers": "Facultatif — et ces bots n’en ont pas besoin : ils appellent directement un fournisseur de LLM.",
     "note_agent_none": "Facultatif — l’historique des chats, les envois et cette page fonctionnent sans. Utilise plutôt Connecter une IA (🔌) pour donner un fournisseur à un bot."
+  },
+  "pins": {
+    "pin": "Épingler à la barre",
+    "unpin": "Retirer de la barre"
+  },
+  "checklist": {
+    "done": "Terminé",
+    "complete": "Terminer"
   }
 }

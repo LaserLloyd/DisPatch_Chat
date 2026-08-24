@@ -838,6 +838,14 @@ class Database:
             "UPDATE messages SET content = ? WHERE id = ?", (content, msg_id))
         await self.db.commit()
 
+    async def update_message_metadata(self, msg_id: str,
+                                      metadata: dict[str, Any] | None) -> None:
+        """Replace a message's metadata blob (callers merge first)."""
+        await self.db.execute(
+            "UPDATE messages SET metadata = ? WHERE id = ?",
+            (_json.dumps(metadata) if metadata else None, msg_id))
+        await self.db.commit()
+
     async def get_last_user_message(self, thread_id: str) -> MessageOut | None:
         cur = await self.db.execute(
             "SELECT * FROM messages WHERE thread_id = ? AND role = 'user' "

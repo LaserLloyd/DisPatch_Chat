@@ -876,5 +876,13 @@
     "not_answering": "not answering",
     "note_agent_providers": "Optional — and these bots do not need one: they call an LLM provider directly.",
     "note_agent_none": "Optional — chat history, uploads and this page all work without one. Use Connect an AI (🔌) to give a bot a provider instead."
+  },
+  "pins": {
+    "pin": "Pin to the bar",
+    "unpin": "Unpin from the bar"
+  },
+  "checklist": {
+    "done": "Completed",
+    "complete": "Complete"
   }
 }

@@ -110,6 +110,10 @@ export const api = {
   remove: (tid) => j(`/api/threads/${tid}?hard=true`, { method: 'DELETE' }),
 
   deleteMessage: (mid) => j(`/api/messages/${mid}`, { method: 'DELETE' }),
+  // Takes either a row op ({index, checked, list}) or a whole array. The row
+  // op is what the widget sends: the server merges it, so a request cannot
+  // carry a stale view of rows it does not mention.
+  updateChecklist: (mid, body) => j(`/api/messages/${mid}/checklist`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(Array.isArray(body) ? { checked: body } : body) }),
 
   upload: (file, onProgress) => xhrUpload('/api/upload', file, onProgress),
 

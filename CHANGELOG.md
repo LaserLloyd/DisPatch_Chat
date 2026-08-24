@@ -7,7 +7,13 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Interactive checklist tables**: a ```` ```checklist ```` fenced block posts a
+  markdown table that renders as a checkable widget — sortable columns, a
+  checkbox per row (completed rows group at the bottom in check order), and
+  state persisted on the message so it survives a reload and syncs across
+  devices.
 
 ## [1.0.0] — unreleased
 

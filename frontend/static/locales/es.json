@@ -900,5 +900,13 @@
     "not_answering": "no responde",
     "note_agent_providers": "Opcional, y estos bots no lo necesitan: llaman directamente a un proveedor de LLM.",
     "note_agent_none": "Opcional: el historial de chats, las subidas y esta página funcionan sin él. Usa Conectar una IA (🔌) para darle un proveedor a un bot."
+  },
+  "pins": {
+    "pin": "Fijar a la barra",
+    "unpin": "Quitar de la barra"
+  },
+  "checklist": {
+    "done": "Completado",
+    "complete": "Completar"
   }
 }

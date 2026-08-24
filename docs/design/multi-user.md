@@ -442,6 +442,7 @@ Legend: **O**=owner, **A**=admin+, **M**=member+, **G**=guest+, **S**=self/ACL,
 | `POST /api/threads/{id}/read` `mark_read` | decoy-thread check | `require_thread`, writes `thread_user_state` for `p.user_id` |
 | `GET /api/unread` `unread_summary` | safe-filtered | per-viewer SQL |
 | `DELETE /api/messages/{id}` `delete_message_endpoint` | `_deny_decoy_mutation` | message author, thread owner, or **A** |
+| `PATCH /api/messages/{id}/checklist` `delete_message_endpoint` | `_deny_decoy_mutation` | message author, thread owner, or **A** |
 | `DELETE /api/threads/{id}` `delete_thread` | `_deny_decoy_mutation` | archive: thread owner+; `hard=true`: thread owner or **A**, audit-logged |
 | *new* `PUT /api/threads/{id}/share` | — | thread owner or **A** |
 | WS `_handle_send` | `_ws_bot_allowed` | `require_thread(write=True)` on the connection principal |
@@ -1186,3 +1187,13 @@ is the recommended path.
 - No per-user OpenClaw agent memory (§6.4).
 - No end-to-end encryption. The server reads everything; it runs the agents.
 - No group/team abstraction beyond `house` + per-thread membership.
+
+### Checklist state is global, not per user
+
+`PATCH /api/messages/{id}/checklist` writes to the MESSAGE, so a checked row is
+checked for everyone who can see it. That is the right behaviour for a shared
+household list and the wrong one for a per-person habit tracker, and nothing in
+the current model distinguishes them. Under per-person accounts this becomes a
+real decision: either keep it global (a shared list) or key the state by user
+id (a personal one). Recording it here because the choice is invisible in the
+code today.

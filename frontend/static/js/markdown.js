@@ -509,6 +509,24 @@ function renderCodeBlock(code, lang, { copyText } = {}) {
   return body;
 }
 
+// A ```checklist fence renders as an interactive table, NOT as a code block.
+// The inner text is a normal GFM table (plus an optional leading caption line),
+// so it is parsed with the same marked pipeline and parked behind a marker
+// class for checklist.js. Everything still passes through DOMPurify: the
+// widget is generated HTML, and the table inside it is exactly what a plain
+// markdown table would have produced. The checkbox column itself is injected
+// by checklist.js AFTER sanitization, so it never needs to trust model text.
+function renderChecklist(md) {
+  let inner;
+  try {
+    inner = marked.parse(String(md || ''));
+  } catch (e) {
+    console.warn('[markdown] checklist parse failed:', e && e.message);
+    inner = escapeHtml(String(md || ''));
+  }
+  return `<div class="checklist-widget">${inner}</div>`;
+}
+
 // --- marked renderer overrides (Control UI parity) -------------------------
 let _rendererReady = false;
 function ensureRenderer() {
@@ -521,10 +539,15 @@ function ensureRenderer() {
     html(token) { return escapeHtml(token.text ?? token.raw ?? ''); },
     code(token) {
       const text = token.text ?? '';
+      const lang = (token.lang || '').trim().split(/\s+/)[0] || '';
+      // A ```checklist fence is a table the reader interacts with, not quoted
+      // code: parse its inner markdown (a GFM table) and hand the widget to
+      // checklist.js, which injects the checkbox column and persistence.
+      if (lang === 'checklist') return renderChecklist(text);
       // Re-attach the newline marked strips, so line counts + copy payload
       // match the Control UI byte for byte.
       return renderCodeBlock(text.endsWith('\n') ? text : `${text}\n`,
-                             (token.lang || '').trim().split(/\s+/)[0] || '',
+                             lang,
                              { copyText: text });
     },
     // Upstream's task-list plugin tags the checkbox and adds a trailing space
@@ -657,7 +680,9 @@ function sanitize(html, noMedia) {
 // current width and switches the table to fixed layout, so dragging one edge
 // moves only that edge.
 const NUMERIC_RE = /^[-+]?[$€£¥]?\s*(\d{1,3}(?:[,\s]\d{3})+|\d+)?(\.\d+)?\s*(%|[a-zA-Z]{1,4})?$/;
-function cellSortValue(text) {
+// Exported so checklist.js reuses the ONE comparator (numbers with currency /
+// units / separators sort numerically, blanks last) instead of drifting its own.
+export function cellSortValue(text) {
   const s = (text || '').trim();
   if (!s) return { num: null, str: '' };
   if (NUMERIC_RE.test(s)) {
@@ -666,7 +691,7 @@ function cellSortValue(text) {
   }
   return { num: null, str: s.toLowerCase() };
 }
-function compareCells(a, b) {
+export function compareCells(a, b) {
   if (!a.str && !b.str) return 0;
   if (!a.str) return 1;   // blanks last regardless of direction…
   if (!b.str) return -1;
@@ -786,7 +811,14 @@ export function enhanceContent(container) {
     wrap.className = 'table-scroll';
     table.parentNode.insertBefore(wrap, table);
     wrap.appendChild(table);
-    enhanceTable(table);
+    // A checklist table is wired by checklist.js (checkbox column + a sort that
+    // keeps completed rows pinned at the bottom). It still gets the shared
+    // .md-table look; only the generic sort/resize wiring is skipped.
+    if (table.closest('.checklist-widget')) {
+      table.classList.add('md-table');
+    } else {
+      enhanceTable(table);
+    }
   });
   // First code block on the page pulls highlight.js in; everything already
   // rendered gets coloured once it arrives.

@@ -108,6 +108,39 @@ or a `bot_id` to find-or-create that bot's daily thread. From loopback this
 needs no credential; from anywhere else it requires an API key. See
 [configuration.md](configuration.md).
 
+## Interactive checklist tables
+
+An agent can post a **daily routine or task list** that renders as an
+interactive widget instead of a plain table: each row gets a checkbox, checking
+a row marks it complete and groups it at the bottom in check order, columns sort
+by clicking their headers, and the state is stored with the message so it
+survives a reload and is shared across every device.
+
+The syntax is one fenced block whose language tag is exactly `checklist`,
+containing an ordinary GFM table:
+
+````markdown
+```checklist
+| Exercise  | Sets | Reps | Rest |
+|-----------|------|------|------|
+| Squat     | 3    | 10   | 60s  |
+| Push-up   | 3    | 15   | 30s  |
+| Deadlift  | 5    | 5    | 3min |
+| Plank     | 1    | 60s  | —    |
+```
+````
+
+Rules:
+
+- The first token of the fence must be exactly `checklist` (```` ```checklist ```` or
+  `~~~checklist`); a caption paragraph before the table is allowed and renders
+  above the widget.
+- The body is a standard markdown table — the same one that already renders
+  elsewhere. The leading checkbox column is added automatically; do **not** add
+  one yourself.
+- Checking requires an unlocked (full) session. Safe Mode shows the checkboxes
+  read-only.
+
 ## Writing your own adapter
 
 The surface an agent backend has to satisfy is small: given a message, a session

@@ -852,5 +852,13 @@
     "not_answering": "无响应",
     "note_agent_providers": "可选 — 这些机器人也不需要它：它们直接调用 LLM 服务商。",
     "note_agent_none": "可选 — 聊天记录、上传和这个页面没有它也能用。要给机器人配服务商，请用「连接 AI」（🔌）。"
+  },
+  "pins": {
+    "pin": "固定到侧栏",
+    "unpin": "从侧栏取消固定"
+  },
+  "checklist": {
+    "done": "已完成",
+    "complete": "标记完成"
   }
 }

@@ -330,6 +330,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    long words in cells wrap instead of pushing the column back out. */
 .bubble table[data-fixed="1"] th.md-th { overflow: hidden; text-overflow: ellipsis; }
 .bubble table[data-fixed="1"] td { overflow-wrap: anywhere; word-break: break-word; }
+/* Checklist tables (```checklist fence): a leading checkbox column is injected
+   by js/checklist.js. Completed rows dim + strike through so "what's left"
+   reads at a glance, and the check column stays narrow and non-sortable. */
+.bubble table.cl-table th.cl-check, .bubble table.cl-table td.cl-check { width: 30px; text-align: center; padding: 5px 4px; }
+.bubble table.cl-table th.cl-check { cursor: default; user-select: none; }
+.bubble table.cl-table input.cl-checkbox { margin: 0; width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+.bubble table.cl-table input.cl-checkbox:disabled { cursor: default; opacity: .5; }
+.bubble table.cl-table tr.cl-done td:not(.cl-check) { color: var(--text-secondary); text-decoration: line-through; }
 /* Headings in a chat bubble: the browser defaults (h1 = 2em) shout; scale them
    to the bubble instead. h5/h6 only render at all since the sanitizer allowed them. */
 .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 12px 0 6px; line-height: 1.3; font-weight: 650; }
@@ -2790,3 +2798,37 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .push-end { margin-inline-start: auto; }
 .tx-badge-new.is-saved { color: var(--text-muted); }
 .tx-item-actions { margin-top: 6px; }
+
+/* ---- Pinned settings -----------------------------------------------------
+   A pinned setting is a rail button like any other, so it inherits .gear-btn
+   wholesale and only adds the on/off state. `pin-on` is a filled look rather
+   than a colour change alone: the rail is monochrome glyphs, and colour by
+   itself would not survive a theme that inverts it. */
+.gear-btn.pin-on {
+  background: var(--accent-soft, rgba(46, 168, 255, .12));
+  box-shadow: inset 0 0 0 1px var(--accent, #2ea8ff);
+}
+.gear-btn.pin-btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* The 📌 on a settings row. Pushed to the right edge so the row still reads
+   as "checkbox, label" left-to-right and the pin is an aside, not a second
+   control competing with the one it pins. */
+.pin-toggle {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .35;
+  filter: grayscale(1);
+  transition: opacity .12s ease, filter .12s ease;
+}
+.pin-toggle:hover,
+.pin-toggle:focus-visible { opacity: .8; }
+.pin-toggle.pinned { opacity: 1; filter: none; }
+
+/* The rows are labels wrapping a checkbox; they need to be flex for the pin's
+   `margin-left: auto` to push it over. */
+.bm-avatar-style:has(.pin-toggle) { display: flex; align-items: center; gap: 8px; }

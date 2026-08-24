@@ -83,3 +83,8 @@ scripts/scrub-rules.local.txt
 
 # Single-instance flock, created at runtime in the data dir.
 .instance.lock
+
+# Console output from local tooling run with the repo as cwd. Such logs
+# carry absolute home paths, so they trip the privacy scan -- and without
+# this rule one `git add -A` would publish one.
+*.log
