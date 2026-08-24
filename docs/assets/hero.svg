@@ -33,8 +33,8 @@
 
   <text x="64" y="62" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="19" letter-spacing="6" fill="#5f7386">DISPATCH-CHAT</text>
 
-  <rect x="62" y="118" width="292" height="38" rx="19" fill="none" stroke="#ffb64a" stroke-width="2"/>
-  <text x="208" y="144" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="3" fill="#ffb64a" text-anchor="middle">SELF-HOSTED &#183; OPEN SOURCE</text>
+  <rect x="62" y="118" width="355" height="38" rx="19" fill="none" stroke="#ffb64a" stroke-width="2"/>
+  <text x="239.5" y="144" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="3" fill="#ffb64a" text-anchor="middle" textLength="314.7" lengthAdjust="spacingAndGlyphs">SELF-HOSTED &#183; OPEN SOURCE</text>
 
   <text x="62" y="238" font-family="system-ui, &apos;Segoe UI&apos;, Roboto, &apos;Helvetica Neue&apos;, Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-1" fill="#eaf1f8">DisPatch Chat</text>
   <line x1="64" y1="266" x2="214" y2="266" stroke="#ffb64a" stroke-width="5" stroke-linecap="round"/>
