@@ -2,9 +2,6 @@
 
 Thanks for taking the time. This document is short on purpose.
 
-By participating you agree to abide by the
-[Code of Conduct](CODE_OF_CONDUCT.md).
-
 ## Before anything else: no private data
 
 DisPatch is developed against real, live installs — the maintainers' own chat
