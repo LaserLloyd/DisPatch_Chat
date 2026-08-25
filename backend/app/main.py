@@ -5423,7 +5423,10 @@ async def reaction_pool_status(request: Request, bot_id: str = Query("")):
 @app.put("/api/reactions/pool")
 async def reaction_pool_config(request: Request, payload: ReactionSettingsIn):
     _deny_agent_route_to_browser(request)
-    bot_id = str(payload.values.get("bot_id") or "")
+    try:
+        bot_id = payload.target_bot()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     try:
         cfg = reactions.pool_update_config(payload.values, bot_id)
     except reactions.ReactionError as e:

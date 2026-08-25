@@ -164,8 +164,27 @@ class ReactionPatchIn(BaseModel):
 
 
 class ReactionSettingsIn(BaseModel):
-    """Partial overlay — keys not present are left unchanged."""
+    """Partial overlay — keys not present are left unchanged.
+
+    ``bot_id`` selects WHOSE pool. Every sibling endpoint takes it at the query
+    or top level, so callers wrote `{"bot_id": "<bot>", "values": {...}}` — and
+    until 2026-08-26 this model had no such field, pydantic dropped it, and the
+    handler read it out of `values` only. The write silently landed on the
+    DEFAULT bot's config. Accepted in both places now; the handler 400s on a
+    disagreement rather than picking a winner.
+    """
+    bot_id: str | None = None
     values: dict[str, Any] = Field(default_factory=dict)
+
+    def target_bot(self) -> str:
+        """The bot this write is for. Raises ValueError if the two spellings
+        disagree — silently choosing one is how the original bug felt fine."""
+        top = str(self.bot_id or "").strip()
+        inner = str(self.values.get("bot_id") or "").strip()
+        if top and inner and top.casefold() != inner.casefold():
+            raise ValueError(
+                f"bot_id given twice and they disagree ({top!r} vs {inner!r})")
+        return top or inner
 
 
 class GenerateReactionIn(BaseModel):
