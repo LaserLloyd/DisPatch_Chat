@@ -151,9 +151,15 @@ def rig_lease_holder() -> str | None:
         return None
     try:
         import urllib.request
-        with urllib.request.urlopen(url, timeout=5.0) as r:   # noqa: S310
+        # `url` is built from our own config (lease_url()), never from a request,
+        # and the scheme is fixed there -- so the audit rule about opening a
+        # caller-supplied URL does not apply. (That rule's family is not
+        # enabled, so the reason lives in prose rather than a suppression.)
+        with urllib.request.urlopen(url, timeout=5.0) as r:
             data = json.loads(r.read().decode("utf-8", "replace") or "{}")
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:
+        # Blind `except Exception` on purpose (see the docstring): every failure
+        # mode here must fail OPEN, or an unreachable rig becomes a pool outage.
         log.debug("pool_guard: lease check failed (%s) — assuming unleased", e)
         return None
     for lease in (data.get("leases") or []):

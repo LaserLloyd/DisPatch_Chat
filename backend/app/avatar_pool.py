@@ -50,9 +50,15 @@ from typing import NamedTuple
 import yaml
 
 from . import avatar_snapshots, config, pool_common, pool_guard
-from .reactions import (_IMAGE_CLI, IMAGE_CLI_TIMEOUT_S, IMAGE_EXTS,
-                        _is_image_cli_error, image_cli_available,
-                        image_cli_state, note_image_cli_unavailable)
+from .reactions import (
+    _IMAGE_CLI,
+    IMAGE_CLI_TIMEOUT_S,
+    IMAGE_EXTS,
+    _is_image_cli_error,
+    image_cli_available,
+    image_cli_state,
+    note_image_cli_unavailable,
+)
 
 log = logging.getLogger("local-chat.avatar_pool")
 
@@ -725,7 +731,17 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
             st.last_error = err
             save_state(st, bot_id)
         return 0
-    want = deficit(bot_id, only_low=only_low)
+    need = deficit(bot_id, only_low=only_low)
+    # The CLI answered, so any CLI fault on record is disproved; and if the pool
+    # is already at target, nothing is attempted this round and nothing failed.
+    # Without this, only a successful mint ever cleared last_error -- so a full
+    # pool reported a stale error forever, still naming an image-CLI fault days
+    # after the CLI came back.
+    if pool_common.stale_error(st.last_error, cli_ok=True, at_target=need <= 0,
+                               cli_fault=_is_image_cli_error(st.last_error)):
+        st.last_error = ""
+        save_state(st, bot_id)
+    want = need
     if limit is not None:
         want = min(want, limit)
     want = min(want, st.config.max_per_cycle)
