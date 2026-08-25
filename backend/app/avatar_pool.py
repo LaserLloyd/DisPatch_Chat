@@ -50,7 +50,9 @@ from typing import NamedTuple
 import yaml
 
 from . import avatar_snapshots, config, pool_common, pool_guard
-from .reactions import _IMAGE_CLI, IMAGE_CLI_TIMEOUT_S, IMAGE_EXTS, image_cli_available
+from .reactions import (_IMAGE_CLI, IMAGE_CLI_TIMEOUT_S, IMAGE_EXTS,
+                        _is_image_cli_error, image_cli_available,
+                        image_cli_state, note_image_cli_unavailable)
 
 log = logging.getLogger("local-chat.avatar_pool")
 
@@ -562,6 +564,8 @@ def status(bot_id: str) -> dict:
         "needs_refill": needs_refill(bot_id),
         "due_daily": daily_due(bot_id),
         "available": image_cli_available(),
+        # WHY, not just THAT — see the reaction pool's status for the reason.
+        "image_cli": image_cli_state(),
         "has_prompts": bool(bank["base"].strip()),
         "last_error": st.last_error,
         "dir": str(ready_dir(bot_id)),    # where to hand-drop pairs
@@ -714,8 +718,11 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     if not st.config.enabled:
         return 0
     if not image_cli_available():
-        if st.last_error != "image-cli-unavailable":
-            st.last_error = "image-cli-unavailable"
+        # Same contract as the reaction pool: a pool that cannot generate says
+        # so loudly and records which way it is broken.
+        err = note_image_cli_unavailable(st.last_error)
+        if st.last_error != err:
+            st.last_error = err
             save_state(st, bot_id)
         return 0
     want = deficit(bot_id, only_low=only_low)
@@ -743,7 +750,9 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
         made += 1
     if made == 0:
         st = load_state(bot_id)
-        if st.last_error not in ("no-prompt-bank", "image-cli-unavailable"):
+        # Never let the generic "it produced nothing" overwrite the specific
+        # reason already on record (missing bank, or any image-CLI fault).
+        if st.last_error != "no-prompt-bank" and not _is_image_cli_error(st.last_error):
             st.last_error = "generation-failed"
             save_state(st, bot_id)
     return made

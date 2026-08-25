@@ -120,6 +120,50 @@ def _image_cli_status() -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
+# GPU leases — somebody else has booked the whole rig
+# --------------------------------------------------------------------------- #
+
+
+def lease_url() -> str | None:
+    """The image host's lease endpoint, from ``DISPATCH_GPU_LEASE_URL``.
+
+    Configured, never guessed. Unset = no lease view and the guard behaves
+    exactly as it always did.
+    """
+    return config.env("GPU_LEASE_URL") or None
+
+
+def rig_lease_holder() -> str | None:
+    """Who holds an exclusive lease on the image host's GPUs, or None.
+
+    A lease means another tenant (a benchmark run, a long job) has booked the
+    cards and expects nothing to be planned onto or evicted from them for the
+    duration. Minting a decorative image into that is exactly the eviction the
+    lease exists to prevent -- and this guard is allowed to UNLOAD models when
+    DISPATCH_POOL_FREE_VRAM is on, so without this check a nightly top-up
+    could throw out the very model the lease was protecting.
+
+    Fails OPEN on every error (unreachable host, bad JSON, timeout): a lease
+    view we cannot read must not become an outage for the pools.
+    """
+    url = lease_url()
+    if not url:
+        return None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=5.0) as r:   # noqa: S310
+            data = json.loads(r.read().decode("utf-8", "replace") or "{}")
+    except Exception as e:                                     # noqa: BLE001
+        log.debug("pool_guard: lease check failed (%s) — assuming unleased", e)
+        return None
+    for lease in (data.get("leases") or []):
+        holder = str(lease.get("holder") or "").strip()
+        if holder:
+            return holder[:80]
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # VRAM headroom — the GPU the next mint will land on
 # --------------------------------------------------------------------------- #
 
@@ -227,6 +271,14 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     if min_free_gb is None:
         min_free_gb = float(config.env("MINT_MIN_FREE_GB",
                                            MIN_MINT_FREE_GB))
+    # BEFORE anything else, including the headroom probe: a leased rig is
+    # off-limits no matter how much VRAM happens to be free, because the
+    # holder booked the cards, not the spare bytes.
+    holder = rig_lease_holder()
+    if holder:
+        return {"ok": False, "headroom_before": None, "headroom_after": None,
+                "unloaded": [], "skipped_pinned": [], "skipped_active": [],
+                "reason": f"rig leased by {holder}"}
     probe = mint_gpu_free_gb()
     if probe is None:
         return {"ok": True, "headroom_before": None, "headroom_after": None,

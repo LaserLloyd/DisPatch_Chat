@@ -1207,16 +1207,90 @@ def update_settings(values: dict) -> Settings:
 # --------------------------------------------------------------------------- #
 
 
+#: ``last_error``/status values for the two ways generation can be impossible.
+#: They are deliberately DISTINCT: "nobody configured this" and "the thing that
+#: was configured is gone" need different humans to do different things, and
+#: collapsing them into one flag is what made a missing DISPATCH_IMAGE_CLI read
+#: as "the image host is unreachable" for two days.
+IMAGE_CLI_OK = "ok"
+IMAGE_CLI_UNSET = "unset"
+IMAGE_CLI_MISSING = "missing"
+
+
+def image_cli_state() -> str:
+    """Why generation is (or is not) possible, as one of the ``IMAGE_CLI_*``
+    values above.
+
+    ``unset``   nothing is configured -- ``DISPATCH_IMAGE_CLI`` is empty. This
+                is an INSTALL gap, not a host outage: the image host may be
+                perfectly healthy and we would still never call it.
+    ``missing`` something is configured, but it does not resolve to a runnable
+                file (typo, uninstalled companion CLI, lost +x).
+    ``ok``      configured and executable.
+    """
+    # str() because tests (and callers) may inject a Path here.
+    name = str(_IMAGE_CLI or "").strip()
+    if not name:
+        return IMAGE_CLI_UNSET
+    resolved = name if os.sep in name else shutil.which(name)
+    if resolved and os.path.isfile(resolved) and os.access(resolved, os.X_OK):
+        return IMAGE_CLI_OK
+    return IMAGE_CLI_MISSING
+
+
 def image_cli_available() -> bool:
     """True only when an image CLI is configured AND executable. Everything that
     generates checks this first, so an unconfigured install degrades to 'no
     generation' instead of raising on a missing binary."""
-    # str() because tests (and callers) may inject a Path here.
-    name = str(_IMAGE_CLI or "").strip()
-    if not name:
-        return False
-    resolved = name if os.sep in name else shutil.which(name)
-    return bool(resolved) and os.path.isfile(resolved) and os.access(resolved, os.X_OK)
+    return image_cli_state() == IMAGE_CLI_OK
+
+
+def image_cli_error() -> str:
+    """The ``last_error`` a pool should record when it cannot generate.
+
+    Never called on the healthy path, so it always names a real problem.
+    """
+    state = image_cli_state()
+    if state == IMAGE_CLI_UNSET:
+        return "image-cli-unset"
+    if state == IMAGE_CLI_MISSING:
+        return f"image-cli-missing ({str(_IMAGE_CLI or '').strip()[:120]})"
+    # Reached only if the CLI came back between the check and this call.
+    return "image-cli-unavailable"
+
+
+#: Every ``last_error`` this module can set for a CLI problem. Refill paths use
+#: it to decide whether an "it produced nothing" error would overwrite a more
+#: specific cause that is already recorded.
+IMAGE_CLI_ERRORS = ("image-cli-unavailable", "image-cli-unset", "image-cli-missing")
+
+
+def _is_image_cli_error(err: str | None) -> bool:
+    return str(err or "").startswith(IMAGE_CLI_ERRORS)
+
+
+def note_image_cli_unavailable(current_error: str | None) -> str:
+    """Log -- LOUDLY, and once per transition -- that a pool cannot generate,
+    and return the ``last_error`` to store.
+
+    A pool that cannot generate is a broken pool, not a quiet no-op: it stops
+    refilling and runs dry. Before this it returned 0 in silence, so the first
+    sign of trouble was a dry pool days later. The log is an ERROR because the
+    fix is always a human editing configuration.
+
+    ``current_error`` is what the pool has recorded now; the message is only
+    emitted when the state CHANGES, so a 300s poll loop cannot spam the log.
+    """
+    err = image_cli_error()
+    if err != (current_error or ""):
+        log.error(
+            "image generation is UNAVAILABLE (%s): DISPATCH_IMAGE_CLI=%r. "
+            "Pools cannot refill and will run dry. This is a configuration "
+            "problem on this install, NOT an image-host outage -- set "
+            "DISPATCH_IMAGE_CLI to an executable image CLI and restart.",
+            err, str(_IMAGE_CLI or "").strip(),
+        )
+    return err
 
 
 def _files_in(result: dict, out_dir: Path) -> list[Path]:
@@ -2220,6 +2294,10 @@ def pool_status(bot_id: str | None = None) -> dict:
         "needs_refill": _pool_needs_refill(st, bot_id),
         "due_daily": _pool_daily_due(st),
         "available": image_cli_available(),
+        # WHY generation is unavailable, not just THAT it is: watchdogs report
+        # "unreachable image host" otherwise, which sends people to the rig
+        # when the actual problem is an unset DISPATCH_IMAGE_CLI here.
+        "image_cli": image_cli_state(),
         "last_error": st.last_error,
         # Where to hand-drop images (the manager shows it as a hint). Additive
         # — every pre-folder key above is unchanged.
@@ -2357,8 +2435,12 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
     if not cfg.enabled:
         return 0
     if not image_cli_available():
-        if st.last_error != "image-cli-unavailable":
-            st.last_error = "image-cli-unavailable"
+        # A pool that cannot generate is broken, not idle: say so in the log
+        # and record WHICH way it is broken, so "unset on this install" never
+        # again reads as "the image host is down".
+        err = note_image_cli_unavailable(st.last_error)
+        if st.last_error != err:
+            st.last_error = err
             pool_save(st, bot_id)
         return 0
 

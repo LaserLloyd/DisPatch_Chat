@@ -92,7 +92,12 @@ _LEGACY_AVATAR_DIR = FRONTEND_DIR / "avatars"
 _DATA_AVATAR_DIR = DATA_DIR / "avatars"
 
 
-def _legacy_avatars_in_use() -> bool:
+#: Files that can sit in the legacy avatar dir without meaning "avatars live
+#: here" -- the repository ships the directory with a .gitkeep in it.
+_NOT_AN_AVATAR = frozenset({".gitkeep", ".gitignore", "README.md", ".DS_Store"})
+
+
+def legacy_avatars_in_use(legacy: Path) -> bool:
     """Does the OLD location actually hold avatars?
 
     Not "does the directory exist" -- the repository ships that directory with
@@ -101,16 +106,31 @@ def _legacy_avatars_in_use() -> bool:
     code tree (and, in a container, into the read-only image), which is the
     exact bug this move exists to fix. Only real files count.
     """
-    if not _LEGACY_AVATAR_DIR.is_dir():
+    if not legacy.is_dir():
         return False
-    ignore = {".gitkeep", ".gitignore", "README.md", ".DS_Store"}
-    return any(f.is_file() and f.name not in ignore
-               for f in _LEGACY_AVATAR_DIR.iterdir())
+    try:
+        return any(f.is_file() and f.name not in _NOT_AN_AVATAR
+                   for f in legacy.iterdir())
+    except OSError:
+        return False
 
 
-AVATAR_DIR = (_LEGACY_AVATAR_DIR
-              if _legacy_avatars_in_use() and not _DATA_AVATAR_DIR.is_dir()
-              else _DATA_AVATAR_DIR)
+def resolve_avatar_dir(legacy: Path, data: Path) -> Path:
+    """Where the avatar roster lives.
+
+    The data directory, unless this is an install that still keeps real avatars
+    in the old code-tree location and has no data one yet.
+
+    A named function rather than an inline expression because it is a CONTRACT,
+    not a detail: companion tools outside this repo (``dispatch-avatar-rotate``
+    and friends) must resolve the same directory, and when this rule moved they
+    kept pointing at the old path -- so daily avatar rotation died silently for
+    two days while every other part of the app had already migrated.
+    """
+    return legacy if legacy_avatars_in_use(legacy) and not data.is_dir() else data
+
+
+AVATAR_DIR = resolve_avatar_dir(_LEGACY_AVATAR_DIR, _DATA_AVATAR_DIR)
 
 MEDIA_DIR = DATA_DIR / "media"          # user-uploaded / pasted images
 FILES_DIR = DATA_DIR / "files"          # File Server blobs (any type)
