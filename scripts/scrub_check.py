@@ -46,9 +46,12 @@ Design notes
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import subprocess
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -57,9 +60,32 @@ REPO = Path(__file__).resolve().parent.parent
 # which still bars whole categories from existing at all.
 SKIP_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".woff", ".woff2",
-    ".ttf", ".otf", ".mp4", ".webm", ".mp3", ".zip", ".gz", ".tar", ".whl",
+    ".ttf", ".otf", ".mp4", ".webm", ".mp3",
     ".pdf", ".lock",
 }
+# NOT skipped, scanned INSIDE: an archive is a directory that happens to be one
+# file, and skipping it by suffix was a hole you could drive a release through.
+# On 2026-08-25 a shipped `dispatch-2026-07.zip` was found to have been serving
+# the maintainer's name, his install path and his tailnet publicly since July —
+# it passed every scan because `.zip` was in the list above and nothing ever
+# opened it. `.whl` and `.jar` are zips too.
+ARCHIVE_SUFFIXES = {
+    ".zip", ".whl", ".jar", ".egg",
+    ".tar", ".tgz", ".gz", ".bz2", ".xz",
+}
+# Members worth decoding. Anything else is binary payload; the member PATH is
+# still checked against FORBIDDEN_PATHS either way, so `media/family.jpg`
+# inside a zip is still caught.
+ARCHIVE_SKIP_MEMBER_SUFFIXES = SKIP_SUFFIXES | ARCHIVE_SUFFIXES | {
+    ".so", ".dylib", ".dll", ".exe", ".bin", ".o", ".a", ".pyc", ".class",
+    ".wasm", ".db", ".sqlite", ".sqlite3", ".wav", ".ogg", ".mov", ".bmp",
+    ".tiff", ".eot", ".7z", ".rar",
+}
+# Bounds, so a hostile or merely huge archive cannot hang a pre-commit hook.
+ARCHIVE_MAX_MEMBER_BYTES = 4 * 1024 * 1024
+ARCHIVE_MAX_TOTAL_BYTES = 256 * 1024 * 1024
+ARCHIVE_MAX_MEMBERS = 20000
+ARCHIVE_MAX_RATIO = 400
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", ".pytest_cache",
     ".ruff_cache", ".mypy_cache", "vendor", "htmlcov", "dist", "build",
@@ -69,7 +95,11 @@ SKIP_DIRS = {
 FORBIDDEN_PATHS = [
     (re.compile(r"(^|/)chats\.db"),            "the live chat database"),
     (re.compile(r"\.db(-wal|-shm)?$"),         "a SQLite database"),
-    (re.compile(r"(^|/)security\.yaml"),       "the PIN/credential store"),
+    # `security.yaml` AND `security.yaml.bak`, but NOT `security.yaml.example`:
+    # the shipped template is the documented way to describe the file's shape,
+    # and archives (now scanned by member path) carry it. Same exemption the
+    # `.env` rule below already makes, for the same reason.
+    (re.compile(r"(^|/)security\.yaml(?!\.example$)"), "the PIN/credential store"),
     (re.compile(r"(^|/)trusted-devices\.yaml"), "remembered-device tokens"),
     (re.compile(r"(^|/)config\.yaml$"),        "an operator's bot roster"),
     (re.compile(r"(^|/)RECOVERY-CODE"),        "a recovery code"),
@@ -318,6 +348,148 @@ def rev_text(repo_root: Path, rev: str, rel: str) -> str | None:
         return None
 
 
+def staged_bytes(repo_root: Path, rel: str) -> bytes | None:
+    """The STAGED bytes of a file — archives are binary, so text won't do."""
+    r = subprocess.run(["git", "show", f":{rel}"], cwd=repo_root,
+                       capture_output=True, check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def rev_bytes(repo_root: Path, rev: str, rel: str) -> bytes | None:
+    """The bytes of one file AS OF a commit."""
+    r = subprocess.run(["git", "show", f"{rev}:{rel}"], cwd=repo_root,
+                       capture_output=True, check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def scan_member(text: str, label: str, rules) -> list[str]:
+    """Content rules over one archive member.
+
+    Deliberately NOT `scan_text()`: that one drops lines starting with `#`
+    because git strips its own comment lines from a commit message. Reusing it
+    here would make every full-line comment in every shipped source file
+    invisible — and a full-line comment naming the maintainer's own install
+    directory is exactly the kind of line that leaks (it is what did).
+    """
+    problems: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if OK_MARKER.search(line):
+            continue
+        for pattern, why in rules:
+            m = pattern.search(line)
+            if m:
+                snippet = m.group(0)
+                if len(snippet) > 60:
+                    snippet = snippet[:57] + "\u2026"
+                problems.append(f"{label}:{lineno}: looks like {why} \u2192 {snippet!r}")
+                break
+    return problems
+
+
+def _archive_members(blob: bytes, rel: str):
+    """Yield (member_name, text_or_None, error_or_None) from an archive in memory.
+
+    Dispatch is by MAGIC BYTES, not by suffix: a `.gz` that is really a tar and
+    a backup copy renamed `foo.zip.pre-audit` are both still archives, and an
+    archive whose name lies must not fall through to "unreadable" and be waved
+    past. Members are streamed; nothing is ever extracted to disk.
+    """
+    if blob[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            infos = [i for i in zf.infolist() if not i.is_dir()]
+            if len(infos) > ARCHIVE_MAX_MEMBERS:
+                yield (None, None, f"{len(infos)} members exceeds the "
+                                   f"{ARCHIVE_MAX_MEMBERS} cap")
+                return
+            total = 0
+            for info in infos:
+                if (info.compress_size
+                        and info.file_size / max(info.compress_size, 1) > ARCHIVE_MAX_RATIO):
+                    yield (info.filename, None,
+                           f"compression ratio "
+                           f"{info.file_size // max(info.compress_size, 1)}:1 "
+                           f"looks like a decompression bomb")
+                    continue
+                yield_name = info.filename
+                if Path(yield_name).suffix.lower() in ARCHIVE_SKIP_MEMBER_SUFFIXES:
+                    yield (yield_name, None, None)     # path rules only
+                    continue
+                total += min(info.file_size, ARCHIVE_MAX_MEMBER_BYTES)
+                if total > ARCHIVE_MAX_TOTAL_BYTES:
+                    yield (None, None, "decompressed budget exhausted")
+                    return
+                try:
+                    with zf.open(info) as fh:
+                        data = fh.read(ARCHIVE_MAX_MEMBER_BYTES)
+                except Exception as exc:               # noqa: BLE001 - fail closed
+                    yield (yield_name, None, f"unreadable member: {exc}")
+                    continue
+                yield (yield_name, _decode_member(data), None)
+        return
+
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:*") as tf:
+        total = 0
+        count = 0
+        for member in tf:
+            if not member.isfile():
+                continue
+            count += 1
+            if count > ARCHIVE_MAX_MEMBERS:
+                yield (None, None, f"more than {ARCHIVE_MAX_MEMBERS} members")
+                return
+            if Path(member.name).suffix.lower() in ARCHIVE_SKIP_MEMBER_SUFFIXES:
+                yield (member.name, None, None)
+                continue
+            total += min(member.size, ARCHIVE_MAX_MEMBER_BYTES)
+            if total > ARCHIVE_MAX_TOTAL_BYTES:
+                yield (None, None, "decompressed budget exhausted")
+                return
+            try:
+                fh = tf.extractfile(member)
+                data = fh.read(ARCHIVE_MAX_MEMBER_BYTES) if fh else b""
+            except Exception as exc:                   # noqa: BLE001 - fail closed
+                yield (member.name, None, f"unreadable member: {exc}")
+                continue
+            yield (member.name, _decode_member(data), None)
+
+
+def _decode_member(data: bytes) -> str | None:
+    if b"\x00" in data[:8192]:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def scan_archive(blob: bytes | None, rel: str, rules) -> list[str]:
+    """Scan one archive's MEMBERS. Unreadable is a FINDING, never a pass."""
+    problems: list[str] = []
+    if blob is None:
+        return [f"{rel}: archive could not be read \u2014 refusing to call it clean"]
+    try:
+        for name, text, err in _archive_members(blob, rel):
+            where = f"{rel}!{name}" if name else rel
+            if err:
+                problems.append(f"{where}: NOT PROVEN CLEAN \u2014 {err}")
+                continue
+            # A member PATH is disclosure on its own: `media/`, `chats.db`,
+            # `avatars/mum.png` inside a zip say what they are without being
+            # opened, which is why this runs even for binary members.
+            for pattern, why in FORBIDDEN_PATHS:
+                if pattern.search(name):
+                    problems.append(
+                        f"{where}: must not be shipped inside an archive \u2014 {why}")
+                    break
+            for pattern, why in FORBIDDEN_IF_COMMITTED:
+                if pattern.search(name):
+                    problems.append(
+                        f"{where}: must not be shipped inside an archive \u2014 {why}")
+                    break
+            if text is not None:
+                problems += scan_member(text, where, rules)
+    except Exception as exc:                           # noqa: BLE001 - fail closed
+        problems.append(f"{rel}: NOT PROVEN CLEAN \u2014 cannot open ({exc})")
+    return problems
+
+
 def scan_text(text: str, label: str) -> list[str]:
     """Run the CONTENT rules over free text (a commit message, not a file).
 
@@ -444,6 +616,19 @@ def scan(root: Path, staged: bool = False, rev: str | None = None) -> list[str]:
                     problems.append(
                         f"{rel}: {where}, and must not be — {why}")
                     break
+
+        if Path(rel).suffix.lower() in ARCHIVE_SUFFIXES:
+            if rev:
+                blob = rev_bytes(base, rev, rel)
+            elif staged:
+                blob = staged_bytes(base, rel)
+            else:
+                try:
+                    blob = (base / rel).read_bytes()
+                except OSError:
+                    blob = None
+            problems += scan_archive(blob, rel, rules)
+            continue
 
         if Path(rel).suffix.lower() in SKIP_SUFFIXES:
             continue
