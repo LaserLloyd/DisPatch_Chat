@@ -2980,6 +2980,22 @@ async def _startup_recovery() -> None:
             await _broadcast_thread_update(tid)
         except Exception:
             log.exception("startup recovery failed for thread %s", tid)
+    # Same reasoning one step on: a FAILED turn cannot resume across a restart
+    # either, so an 'error' still on a thread at boot is stale state from a turn
+    # that ended long ago (seven of them here, the oldest three weeks old). The
+    # failure itself is already in the messages and the log — the status badge
+    # is just noise that never clears itself.
+    try:
+        stale = await db.clear_stale_error_threads()
+    except Exception:
+        log.exception("startup: could not clear stale error threads")
+        return
+    if stale:
+        log.info("startup recovery: cleared stale error status on %d thread(s): %s",
+                 len(stale), ", ".join(t["id"] for t in stale[:5]))
+        for t in stale:
+            with contextlib.suppress(Exception):
+                await _broadcast_thread_update(t["id"])
 
 
 # A picture that degraded to a note. Kept out of the presence comparison below
@@ -3115,11 +3131,33 @@ async def _sweep_orphan_blobs() -> None:
                     removed += 1
     if removed:
         log.info("orphan sweep: deleted %d untracked File Server blob(s)", removed)
-    missing = [r for r in rows if not (FILES_DIR / r["stored_name"]).is_file()]
-    if missing:
-        log.warning("orphan sweep: %d file record(s) have NO blob on disk "
-                    "(download will 404) — e.g. %s", len(missing),
-                    ", ".join(r["name"] for r in missing[:5]))
+    # A row whose blob is gone is worse than useless: it lists in /api/files,
+    # its download 404s, an agent told to read it off disk fails on a path that
+    # cannot exist, and its `size` still eats the server-wide storage cap. This
+    # box reached 43 rows / 0 blobs — a File Server listing that was 100% dead.
+    # It used to only WARN, which is why they accumulated for two months.
+    #
+    # Guard first: if FILES_DIR itself does not resolve (unmounted share, broken
+    # symlink — it IS a symlink on this box) then EVERY blob looks absent and a
+    # blind purge would delete the whole table. That case skips entirely.
+    try:
+        dir_ok = FILES_DIR.is_dir()
+    except OSError:
+        dir_ok = False
+    if not dir_ok:
+        log.error("orphan sweep: %s does not resolve to a directory — skipping "
+                  "the phantom-record purge (every row would look orphaned)",
+                  FILES_DIR)
+        return
+    try:
+        purged = await db.delete_files_missing_from(FILES_DIR)
+    except Exception:
+        log.exception("orphan sweep: could not purge file records with no blob")
+        return
+    if purged:
+        log.warning("orphan sweep: removed %d file record(s) with NO blob on "
+                    "disk (their download would 404) — e.g. %s", len(purged),
+                    ", ".join(r["name"] for r in purged[:5]))
 
 
 # Health/monitoring state (surfaced by /api/health). None = not yet known.

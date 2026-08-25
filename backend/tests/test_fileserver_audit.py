@@ -383,3 +383,53 @@ def test_long_filename_capped(fs_env):
     r = client.post("/api/files", files={"file": (long_name, b"data", "application/octet-stream")})
     assert r.status_code == 200
     assert len(r.json()["name"]) <= 255
+
+
+# --------------------------------------------------------------------------- #
+# Boot sweep: phantom records (BOX-05)
+# --------------------------------------------------------------------------- #
+
+
+def test_boot_sweep_purges_records_with_no_blob(fs_env):
+    """The File Server listing must not be full of rows whose download 404s.
+
+    The live box had 43 records and an EMPTY blob directory: every entry dead,
+    and every agent told to "read it off disk" chasing a path that could not
+    exist. The sweep used to only log a warning.
+    """
+    make_client, tmp = fs_env
+    make_client()
+    (tmp / "files" / "real.bin").write_bytes(b"blob")
+
+    async def _seed():
+        kept = await main.db.add_file("Real.pdf", "real.bin", 4, "application/pdf")
+        await main.db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf")
+        return kept
+    kept = asyncio.run(_seed())
+
+    asyncio.run(main._sweep_orphan_blobs())
+
+    rows = asyncio.run(main.db.list_files())
+    assert [r["id"] for r in rows] == [kept["id"]]
+
+
+def test_boot_sweep_refuses_to_purge_when_the_blob_dir_is_gone(fs_env):
+    """If FILES_DIR itself does not resolve (unmounted share, broken symlink —
+    it IS a symlink on this box) then EVERY blob looks absent. Deleting the
+    whole table on a mount hiccup is the one unrecoverable outcome here, so the
+    sweep must skip rather than purge."""
+    make_client, tmp = fs_env
+    make_client()
+
+    async def _seed():
+        await main.db.add_file("A.pdf", "a.bin", 1, "application/pdf")
+        await main.db.add_file("B.pdf", "b.bin", 2, "application/pdf")
+    asyncio.run(_seed())
+
+    # Point at a path that does not exist — the "mount went away" shape.
+    main.FILES_DIR = tmp / "files-unmounted"
+    try:
+        asyncio.run(main._sweep_orphan_blobs())
+        assert len(asyncio.run(main.db.list_files())) == 2      # nothing deleted
+    finally:
+        main.FILES_DIR = tmp / "files"

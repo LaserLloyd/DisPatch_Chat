@@ -406,6 +406,52 @@ class Database:
             await self.db.commit()
         return rows
 
+    async def clear_stale_error_threads(self) -> list[dict]:
+        """Reset status='error' to 'idle' on boot.
+
+        `error` is per-TURN state: it is set when an agent turn fails, and the
+        client is told at the same moment by a WS `error` frame. The turn cannot
+        resume across a restart any more than a 'thinking' one can, so an
+        `error` still on a thread at boot describes a turn that ended long ago —
+        on this box, seven of them, the oldest from 2026-07-29. It is stale
+        state, not history: the failure itself lives in the thread's messages
+        and in the log.
+
+        Returns the affected threads so the caller can log and broadcast."""
+        cur = await self.db.execute(
+            "SELECT id, bot_id FROM threads WHERE status = 'error'"
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+        if rows:
+            await self.db.execute(
+                "UPDATE threads SET status = 'idle' WHERE status = 'error'"
+            )
+            await self.db.commit()
+        return rows
+
+    async def delete_files_missing_from(self, files_dir) -> list[dict]:
+        """Delete file rows whose blob is genuinely absent from ``files_dir``.
+
+        A row with no blob is not a record, it is a trap: /api/files lists it,
+        the File Server shows it, its download 404s, and an agent told to "read
+        it off disk" fails on a path that was never going to exist. Its `size`
+        also counts against the server-wide storage cap, so phantoms shrink the
+        real budget.
+
+        SAFETY: the caller checks that ``files_dir`` resolves to a real
+        directory FIRST. If it does not (an unmounted share, a broken symlink)
+        every blob looks absent and this would delete the whole table — so that
+        case must skip the purge entirely, not run it. Here we only ever test
+        one specific file at a time, and delete by primary key.
+        """
+        rows = await self.list_files()
+        gone = [r for r in rows if not (files_dir / r["stored_name"]).is_file()]
+        for r in gone:
+            await self.db.execute("DELETE FROM files WHERE id = ?", (r["id"],))
+        if gone:
+            await self.db.commit()
+        return gone
+
     # -- export (full, unpaginated dump) ----------------------------------- #
 
     async def all_threads(self, include_archived: bool = True) -> list[ThreadOut]:

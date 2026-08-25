@@ -250,3 +250,54 @@ async def _run_all() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(_run_all()))
+
+
+# --------------------------------------------------------------------------- #
+# Stale per-turn state and phantom file records (BOX-05)
+# --------------------------------------------------------------------------- #
+
+
+async def test_stale_error_status_is_cleared_on_boot():
+    """A failed turn cannot resume across a restart, so 'error' at boot is
+    stale — seven threads on the live box wore one for up to three weeks."""
+    db = await _fresh_db()
+    bad = await db.create_thread(bot_id="main")
+    good = await db.create_thread(bot_id="main")
+    await db.update_thread_status(bad.id, "error")
+
+    cleared = await db.clear_stale_error_threads()
+    assert [t["id"] for t in cleared] == [bad.id]
+    assert (await db.get_thread(bad.id)).status == "idle"
+    assert (await db.get_thread(good.id)).status == "idle"     # untouched
+    assert await db.clear_stale_error_threads() == []          # idempotent
+
+
+async def test_error_and_thinking_are_cleared_independently():
+    """The two resets must not swallow each other's rows: 'thinking' rows are
+    returned for transcript reconciliation, 'error' rows are not."""
+    db = await _fresh_db()
+    t_think = await db.create_thread(bot_id="main")
+    t_err = await db.create_thread(bot_id="main")
+    await db.update_thread_status(t_think.id, "thinking")
+    await db.update_thread_status(t_err.id, "error")
+
+    assert [t["id"] for t in await db.reset_inflight_threads()] == [t_think.id]
+    assert (await db.get_thread(t_err.id)).status == "error"   # still pending
+    assert [t["id"] for t in await db.clear_stale_error_threads()] == [t_err.id]
+
+
+async def test_only_file_rows_whose_blob_is_absent_are_purged(tmp_path):
+    """Delete the phantoms, keep every record that still has its blob."""
+    db = await _fresh_db()
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    (files_dir / "alive.bin").write_bytes(b"still here")
+    kept = await db.add_file("Alive.pdf", "alive.bin", 10, "application/pdf")
+    ghost = await db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf")
+
+    purged = await db.delete_files_missing_from(files_dir)
+    assert [r["id"] for r in purged] == [ghost["id"]]
+    assert [r["id"] for r in await db.list_files()] == [kept["id"]]
+    # The phantom's size was inflating the server-wide storage cap.
+    assert await db.total_file_bytes() == 10
+    assert await db.delete_files_missing_from(files_dir) == []   # idempotent
