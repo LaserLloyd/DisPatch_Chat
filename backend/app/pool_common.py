@@ -151,3 +151,36 @@ def daily_due(enabled: bool, batch_date: str, refresh_hour: int) -> bool:
     now = time.localtime()
     today = time.strftime("%Y-%m-%d", now)
     return batch_date != today and now.tm_hour >= refresh_hour
+
+
+#: ``last_error`` values that describe a CONFIGURATION defect rather than a
+#: failed attempt (no prompt bank to draw from). A full pool does not disprove
+#: one of these — the moment it needs to mint it will fail the same way — so
+#: they survive the reset below and only a real fill clears them.
+STICKY_ERRORS = ("no-prompt-bank", "no-prompt-categories")
+
+
+def stale_error(current: str, *, cli_ok: bool, at_target: bool,
+                cli_fault: bool = False,
+                sticky: tuple[str, ...] = STICKY_ERRORS) -> bool:
+    """Has the pool's present state DISPROVED the failure on record?
+
+    ``last_error`` is a report about the last attempt, not a permanent label,
+    and until now only a successful *generation* cleared it. A pool that sits
+    at target never generates, so a fault from weeks ago (`image-cli-unavailable`
+    on a night the CLI was missing) stuck forever: `--status` and the watchdog
+    both kept reporting a failure that had already been fixed, which is exactly
+    the phantom-alert noise that teaches people to ignore the watchdog.
+
+    Two things disprove a recorded failure:
+
+    * the image CLI is back (`cli_ok`) and the error on record was about the
+      CLI (`cli_fault`) — the condition that produced it is measurably gone; and
+    * the pool is at or over target (`at_target`) — nothing was attempted this
+      round, so nothing failed this round.
+
+    Returns True when the caller should clear it. Never invents a new error.
+    """
+    if not current or current in sticky:
+        return False
+    return at_target or (cli_ok and cli_fault)

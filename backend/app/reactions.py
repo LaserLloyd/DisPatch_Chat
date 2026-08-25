@@ -2450,7 +2450,16 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
         return 0
 
     deficits = pool_deficits(bot_id=bot_id, only_low=only_low)
-    want = sum(deficits.values())
+    need = sum(deficits.values())
+    # Same reset as the avatar pool: the CLI answered (so a CLI fault on record
+    # is disproved) and a pool at target attempted nothing (so nothing failed).
+    # Only a successful mint used to clear this, which left a full pool wearing
+    # a weeks-old error that watchdogs kept reporting.
+    if pool_common.stale_error(st.last_error, cli_ok=True, at_target=need <= 0,
+                               cli_fault=_is_image_cli_error(st.last_error)):
+        st.last_error = ""
+        pool_save(st, bot_id)
+    want = need
     if limit is not None:
         want = min(want, limit)
     want = min(want, cfg.max_per_cycle)

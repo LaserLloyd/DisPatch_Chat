@@ -1296,6 +1296,49 @@ def test_pool_routes_take_a_bot_id(rx_env):
     assert reactions._pool_path(COMPANION).exists()
 
 
+def test_pool_put_honours_a_top_level_bot_id(rx_env):
+    """`{"bot_id": ..., "values": {...}}` — the shape every SIBLING endpoint
+    takes — must write the named bot's config.
+
+    It used to write the DEFAULT bot's and return 200: ReactionSettingsIn had
+    no bot_id field, so pydantic dropped it and the handler only ever looked
+    inside `values`. Silent cross-bot writes, with a success response.
+    """
+    c = _unlocked(rx_env)
+    _enable_reactions(COMPANION)
+
+    r = c.put("/api/reactions/pool",
+              json={"bot_id": COMPANION, "values": {"per_mood": 7}})
+    assert r.status_code == 200, r.text
+    assert r.json()["pool"]["bot_id"] == COMPANION
+    assert reactions.pool_load(COMPANION).config.per_mood == 7
+    assert reactions.pool_load("main").config.per_mood == 20      # NOT touched
+
+
+def test_pool_put_refuses_two_disagreeing_bot_ids(rx_env):
+    """Both spellings, different bots: 400. Picking a winner silently is the
+    same class of mistake as ignoring the field."""
+    c = _unlocked(rx_env)
+    _enable_reactions(COMPANION)
+
+    r = c.put("/api/reactions/pool",
+              json={"bot_id": COMPANION, "values": {"bot_id": "main", "per_mood": 7}})
+    assert r.status_code == 400, r.text
+    assert reactions.pool_load("main").config.per_mood == 20
+    assert reactions.pool_load(COMPANION).config.per_mood == 20
+
+
+def test_pool_put_still_takes_bot_id_inside_values(rx_env):
+    """The old spelling keeps working — the Reaction Manager sends it."""
+    c = _unlocked(rx_env)
+    _enable_reactions(COMPANION)
+
+    r = c.put("/api/reactions/pool",
+              json={"values": {"bot_id": COMPANION, "per_mood": 5}})
+    assert r.status_code == 200, r.text
+    assert reactions.pool_load(COMPANION).config.per_mood == 5
+
+
 def test_prompt_bank_routes_take_a_bot_id(rx_env):
     c = _unlocked(rx_env)
     _enable_reactions(COMPANION)
@@ -1777,3 +1820,36 @@ def test_safe_ids_does_not_rewalk_unchanged_pools(rx_env, monkeypatch):
     grown = reactions.safe_ids()
     assert len(walks) > n
     assert grown > first
+
+
+def test_full_reaction_pool_clears_a_stale_error(rx_env, monkeypatch):
+    """The reaction pool carries the same phantom-error bug the avatar pool did:
+    only a successful mint cleared last_error, so a pool sitting at target wore
+    a weeks-old `image-cli-unavailable` forever."""
+    monkeypatch.setattr(reactions, "image_cli_available", lambda: True)
+    reactions.bank_save({"categories": {"solo": {"label": "Solo", "prompts": ["p"]}}})
+    st = reactions.pool_load()
+    st.config.per_mood = 1
+    st.config.min_per_mood = 1
+    st.last_error = "image-cli-unavailable"
+    reactions.pool_save(st)
+    _fake_pool_item(category="solo")                 # at target — nothing to mint
+
+    assert reactions.pool_refill() == 0
+    assert reactions.pool_load().last_error == ""
+
+
+def test_reaction_pool_keeps_a_missing_bank_error_when_full(rx_env, monkeypatch):
+    """`no-prompt-categories` is a missing input, not a failed attempt: a full
+    pool does not disprove it and must not clear it."""
+    monkeypatch.setattr(reactions, "image_cli_available", lambda: True)
+    reactions.bank_save({"categories": {"solo": {"label": "Solo", "prompts": ["p"]}}})
+    st = reactions.pool_load()
+    st.config.per_mood = 1
+    st.config.min_per_mood = 1
+    st.last_error = "no-prompt-categories"
+    reactions.pool_save(st)
+    _fake_pool_item(category="solo")                 # at target — nothing to mint
+
+    assert reactions.pool_refill() == 0
+    assert reactions.pool_load().last_error == "no-prompt-categories"

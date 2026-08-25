@@ -431,3 +431,58 @@ def test_snapshot_pair_stats_before_reading(pool_env, monkeypatch):
     pair = next(p for p in avatar_pool.list_pairs(avatar_pool.ready_dir("main")))
     assert avatar_pool._snapshot_pair(pair) is None
     assert not reads, f"an oversized half was read into memory: {reads}"
+
+
+# --------------------------------------------------------------------------- #
+# Stale last_error (OC-08)
+# --------------------------------------------------------------------------- #
+
+
+def test_full_pool_clears_a_stale_error(pool_env, monkeypatch):
+    """A pool at target reports NO error, even one recorded weeks ago.
+
+    Regression for the observed symptom: the pool watchdog kept reporting
+    `error=image-cli-unavailable` for two bots long after the CLI came back,
+    because only a successful MINT cleared last_error — and a full pool never
+    mints. The watchdog and the human both saw a phantom failure.
+    """
+    monkeypatch.setattr(avatar_pool, "image_cli_available", lambda: True)
+    st = avatar_pool.load_state("main")
+    st.config.target = 2
+    st.last_error = "image-cli-unavailable"
+    avatar_pool.save_state(st, "main")
+    for i in range(2):                       # at target — nothing to generate
+        _seed_pair("main", f"full{i}")
+
+    assert avatar_pool.refill(bot_id="main") == 0
+    assert avatar_pool.load_state("main").last_error == ""
+
+
+def test_cli_back_clears_a_cli_error_even_with_work_to_do(pool_env, monkeypatch):
+    """The CLI answering disproves a CLI fault immediately — the reset must not
+    wait for a pair to land, or a rig that is up but busy keeps the stale text."""
+    monkeypatch.setattr(avatar_pool, "image_cli_available", lambda: True)
+    monkeypatch.setattr(avatar_pool, "generate_pair", lambda bot_id: None)
+    st = avatar_pool.load_state("main")
+    st.config.target = 3
+    st.last_error = "image-cli-missing (/nope/clawforge)"
+    avatar_pool.save_state(st, "main")
+    _seed_pair("main", "one")                # deficit of 2 — real work queued
+
+    avatar_pool.refill(bot_id="main")
+    # The CLI error is gone; generation still failed, so the round says so.
+    assert avatar_pool.load_state("main").last_error == "generation-failed"
+
+
+def test_a_config_defect_survives_a_full_pool(pool_env, monkeypatch):
+    """`no-prompt-bank` is not a failed attempt, it is a missing input: a full
+    pool does not disprove it, and hiding it would just defer the surprise."""
+    monkeypatch.setattr(avatar_pool, "image_cli_available", lambda: True)
+    st = avatar_pool.load_state("main")
+    st.config.target = 1
+    st.last_error = "no-prompt-bank"
+    avatar_pool.save_state(st, "main")
+    _seed_pair("main", "only")
+
+    assert avatar_pool.refill(bot_id="main") == 0
+    assert avatar_pool.load_state("main").last_error == "no-prompt-bank"
