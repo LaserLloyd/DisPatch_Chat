@@ -173,7 +173,6 @@ ENV LOCAL_CHAT_DATA_DIR=/data \
 # systemd and the host's shell. See docs/deploy-docker.md § "What does not
 # work in a container". Turning them on here produces broken UI, not features.
 ENV LOCAL_CHAT_TERMINAL=0 \
-    LOCAL_CHAT_COMFY=0 \
     LOCAL_CHAT_MIRROR=0
 
 # NOTE: no `VOLUME /data`. A VOLUME instruction would silently create an

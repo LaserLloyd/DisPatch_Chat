@@ -177,27 +177,25 @@ _ATTR_RE = re.compile(
 
 # Values that are legitimately identical to English in most locales.
 IDENTICAL_OK = {
-    "app.name", "app.title", "comfy.name", "terminal.name",
+    "app.name", "app.title", "terminal.name",
     "recovery.export_json", "recovery.export_md", "recovery.export_html",
     "terminal.yolo", "terminal.picker_placeholder", "lock.recover_placeholder",
-    "comfy.start", "comfy.restart", "comfy.stop", "terminal.start",
+    "terminal.start",
     "terminal.restart", "terminal.stop", "msg.working", "msg.retry",
     "settings.safe_badge", "settings.react_badge", "composer.not_delivered",
     "transcript.filter_text", "transcript.filter_note", "transcript.filter_user",
     "transcript.filter_tool", "transcript.filter_tool_result",
     "transcript.filter_thinking", "reactions.upload", "reactions.generate",
     "reactions.pool_topup", "reactions.pool_replace", "reactions.reseed",
-    "comfy.wf_import", "comfy.wf_backup", "comfy.logs_button",
-    "comfy.logs_refresh", "settings.recovery", "settings.security",
+    "settings.recovery", "settings.security",
     "settings.lock_now", "settings.change_photo", "recovery.restore_all",
     "recovery.browse_sessions", "transcript.import_missing",
     "files.upload", "drop.title", "search.title", "files.title",
-    "security.title", "recovery.title", "transcript.title", "comfy.title",
-    "comfy.logs_title", "reactions.manager_title", "settings.move_up",
+    "security.title", "recovery.title", "transcript.title",
+    "reactions.manager_title", "settings.move_up",
     "settings.move_down", "chat.sync", "chat.transcript",
     # Byte/size units are conventionally untranslated (SI/IEC symbols).
     "unit.bytes", "unit.kb", "unit.mb", "unit.gb", "unit.tb", "unit.pb",
-    "comfy.memory_value",
 }
 
 PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")

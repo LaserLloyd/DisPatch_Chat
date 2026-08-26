@@ -13,7 +13,6 @@ Two variants, and the choice is not about taste:
 | Sandboxing | full systemd sandbox | limited |
 | Agent CLI in your home | awkward | natural |
 | Coding terminal | no | yes |
-| ComfyUI service panel | no (`systemctl --user` needs a user bus) | yes |
 | **Pick this if** | you want a chat server | you want the agent integrations |
 
 ---
@@ -225,15 +224,6 @@ Environment=DISPATCH_TERMINAL_PATH=%h/.local/share/your-cli/bin
 # optional: TOML the model picker reads for a CLI that keeps providers in a file
 Environment=DISPATCH_TERMINAL_CONFIG=%h/.config/your-cli/config.toml
 ```
-
-### ComfyUI service panel
-
-```ini
-Environment=DISPATCH_COMFY=1
-```
-
-Shells out to `systemctl --user` to control a local ComfyUI unit. Needs a user session
-bus, so it only works in the user unit.
 
 ---
 

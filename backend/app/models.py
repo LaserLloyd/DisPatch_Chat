@@ -119,17 +119,6 @@ class DailyThreadIn(BaseModel):
     _validate_date = field_validator("date")(_check_real_date)
 
 
-class ComfyFlagsIn(BaseModel):
-    """PUT body for the ComfyUI flags editor. `values` is a partial overlay —
-    keys not present are left unchanged. Schema-validated in comfy_service."""
-    values: dict[str, Any] = Field(default_factory=dict)
-    restart: bool = False
-
-
-class ComfyGatewayIn(BaseModel):
-    on: bool
-
-
 # --------------------------------------------------------------------------- #
 # Reaction images (ephemeral overlay pack)
 # --------------------------------------------------------------------------- #

@@ -63,16 +63,18 @@ test('script-src hashes match the inline scripts byte for byte', () => {
   assert.deepEqual(stale, [], `\nstale script hashes in the CSP (delete them):\n${stale.join('\n')}`);
 });
 
-test('style-src hashes the ComfyUI holding-page <style>', () => {
-  // That popup is opened as about:blank, so it INHERITS this document's policy.
-  // Its <style> block therefore needs a hash here or the holding page paints
-  // unstyled while ComfyUI cold-starts.
-  const styles = [...MAIN.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]);
-  assert.equal(styles.length, 1, 'expected exactly one inline <style> in main.js');
+test('style-src carries no hashes and the app writes no inline <style>', () => {
+  // The one hash style-src ever held belonged to the ComfyUI holding page, a
+  // popup opened as about:blank that INHERITED this policy. Local ComfyUI is
+  // gone from this box (ClawForge is the only image path), so the popup, its
+  // <style> and the hash all went with it. A hash that matches nothing is a
+  // hole pointing at markup that no longer exists — keep style-src bare.
+  const styles = [...MAIN.matchAll(/<style>([\s\S]*?)<\/style>/g)];
+  assert.equal(styles.length, 0, 'main.js writes an inline <style> again — it needs a style-src hash');
   const have = policy().get('style-src') || [];
-  assert.ok(have.includes(sha256(styles[0])),
-    `\nThe holding-page <style> changed. Put this in style-src:\n${sha256(styles[0])}\n`
-    + `Current style-src: ${have.join(' ')}`);
+  const hashes = have.filter((tok) => tok.startsWith("'sha256-"));
+  assert.deepEqual(hashes, [], `\nstale style hashes in the CSP (delete them):\n${hashes.join('\n')}`);
+  assert.deepEqual(have, ["'self'"]);
 });
 
 test("the policy keeps its non-negotiables", () => {

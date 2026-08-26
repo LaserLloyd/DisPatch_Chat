@@ -75,9 +75,8 @@ Environment=PYTHONUNBUFFERED=1
 Environment=LOCAL_CHAT_HOST=0.0.0.0
 Environment=LOCAL_CHAT_PORT=8765
 # Host-OS integrations. On a system unit running as a locked-down service
-# account these cannot work: there is no `systemctl --user` bus and no home
-# directory to drop a shell into. Off by default; see the bare-metal doc.
-Environment=LOCAL_CHAT_COMFY=0
+# account these cannot work: there is no home directory to drop a shell into.
+# Off by default; see the bare-metal doc.
 Environment=LOCAL_CHAT_TERMINAL=0
 # Uncomment and point at a real agent CLI to enable bot replies.
 #Environment=OPENCLAW_BIN=/usr/local/bin/openclaw

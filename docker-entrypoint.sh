@@ -25,7 +25,6 @@ set -eu
 # precisely the failure the check exists to prevent.
 DATA_DIR="${DISPATCH_DATA_DIR:-${LOCAL_CHAT_DATA_DIR:-/data}}"
 TERMINAL="${DISPATCH_TERMINAL:-${LOCAL_CHAT_TERMINAL:-0}}"
-COMFY="${DISPATCH_COMFY:-${LOCAL_CHAT_COMFY:-0}}"
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 
@@ -128,9 +127,6 @@ mkdir -p "$DATA_DIR/avatars"
 # -----------------------------------------------------------------------------
 case "$TERMINAL" in
     1|true|True|yes) log "WARNING: DISPATCH_TERMINAL is on. Inside a container this gives a shell in the CONTAINER, not on your host, and it is reachable over the network. 'docker exec' is the better tool." ;;
-esac
-case "$COMFY" in
-    1|true|True|yes) log "WARNING: DISPATCH_COMFY is on. That panel drives 'systemctl --user'. There is no systemd here, so every button in it will error." ;;
 esac
 if [ -n "${OPENCLAW_BIN:-}" ] && [ ! -x "${OPENCLAW_BIN}" ]; then
     log "WARNING: OPENCLAW_BIN=${OPENCLAW_BIN} is not an executable file in this container. Agent replies will fail with a clear error; chat itself is unaffected. See docs/deploy-docker.md § Agents in a container."

@@ -60,8 +60,6 @@ const state = {
   auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
   started: false,      // app has booted (bots loaded, socket connected)
-  comfyEnabled: false, // server-side feature flag (LOCAL_CHAT_COMFY)
-  comfy: { state: 'stopped', gatewayOn: false, flagsDirty: false },
   terminalEnabled: false, // server-side feature flag (LOCAL_CHAT_TERMINAL); full-session only
   terminal: { state: 'stopped', yolo: false, model: null, resume: 'none', pending: false },
   harnessEnabled: false, // server-side feature flag (DISPATCH_HARNESS); full-session only
@@ -177,16 +175,6 @@ const dom = {};
  'browse-sessions', 'recover-result', 'recover-done',
  'tx-backdrop', 'tx-close', 'tx-title', 'tx-summary', 'tx-filter',
  'tx-import', 'tx-list',
- // ComfyUI service panel
- 'comfy-chip', 'comfy-dot', 'comfy-backdrop', 'comfy-close', 'comfy-dirty-banner',
- 'comfy-status', 'comfy-start', 'comfy-restart', 'comfy-stop', 'comfy-gateway-toggle',
- 'comfy-logs-btn', 'comfy-flags-list', 'comfy-flags-reset', 'comfy-flags-save',
- 'comfy-flags-save-restart', 'comfy-logs-backdrop', 'comfy-logs-close',
- 'comfy-logs-refresh', 'comfy-logs-content',
- 'comfy-wf-hint', 'comfy-wf-import', 'comfy-wf-backup', 'comfy-wf-list', 'comfy-wf-file',
- // ComfyUI launch banner
- 'comfy-launch', 'comfy-launch-glyph', 'comfy-launch-title', 'comfy-launch-secs',
- 'comfy-launch-hint', 'comfy-launch-dismiss', 'comfy-launch-bar-fill',
  // Coding terminal
  'terminal-view', 'terminal-host', 'terminal-dot', 'terminal-status-label',
  'terminal-start', 'terminal-restart', 'terminal-stop',
@@ -3079,573 +3067,6 @@ function wireFileServer() {
   });
 }
 
-// ===================== ComfyUI service panel =====================
-let comfyPanelOpen = false;
-let comfyPollTimer = null;
-let comfyLaunchBusy = false;
-let comfyFlagsDraft = {};
-let comfyKnownGood = {};
-
-function comfyStateFromStatus(cs) {
-  if (cs.healthy) return 'running';
-  const as = cs.unit && cs.unit.active_state;
-  if (as === 'activating') return 'starting';
-  // Active-but-unhealthy WITH dirty flags = the running instance predates a
-  // saved flags change (e.g. a new port), so the health probe hits the wrong
-  // target. It's not starting — it's running with stale flags; a restart
-  // applies them. Without this, a healthy service shows 'Starting…' forever.
-  if (as === 'active' && cs.flags_dirty) return 'running';
-  // Type=simple: the unit is 'active' the instant the process spawns, but
-  // ComfyUI takes up to ~60s to answer /system_stats on a cold start. Show
-  // that window as amber "Starting…", not grey "Stopped".
-  if (as === 'active') return 'starting';
-  if (as === 'deactivating') return 'stopping';
-  if (as === 'failed') return 'error';
-  return 'stopped';
-}
-
-function renderComfyChip() {
-  const dot = dom['comfy-dot'];
-  if (dot) dot.className = 'comfy-dot ' + state.comfy.state;
-}
-
-function applyComfyStatus(cs) {
-  state.comfy.state = comfyStateFromStatus(cs);
-  state.comfy.gatewayOn = !!(cs.gateway && cs.gateway.on);
-  state.comfy.flagsDirty = !!cs.flags_dirty;
-  renderComfyChip();
-}
-
-// Prefer unit.start_epoch (clean int, added server-side) — systemd's locale
-// string ('Tue 2026-07-07 14:26:59 JST') is unparseable by new Date() in V8,
-// so the string is only a fallback for pre-restart backends / weird payloads.
-function comfyUptime(unit) {
-  const epoch = unit && unit.start_epoch;
-  if (typeof epoch === 'number' && isFinite(epoch) && epoch > 0) {
-    return relTime(new Date(epoch * 1000).toISOString());
-  }
-  const startStr = unit && unit.start_timestamp;
-  if (!startStr) return '';
-  const d = new Date(startStr);
-  return isNaN(d.getTime()) ? startStr : relTime(d.toISOString());
-}
-
-async function copyComfyUrl(url) {
-  try { await navigator.clipboard.writeText(url); toast(t('comfy.url_copied')); }
-  catch { toast(t('comfy.copy_failed'), true); }
-}
-
-function renderComfyStatusCard(cs) {
-  const box = dom['comfy-status'];
-  if (!box) return;
-  box.innerHTML = '';
-  const unit = cs.unit || {};
-  const stateKeys = { running: 'comfy.state_running', starting: 'comfy.state_starting',
-                      stopping: 'comfy.state_stopping', stopped: 'comfy.state_stopped',
-                      error: 'comfy.state_error' };
-  // Saved-but-unapplied flags on a live unit: say what's actually going on
-  // instead of a perpetual 'Starting…' (the probe targets the NEW config).
-  const staleFlags = !!cs.flags_dirty && unit.active_state === 'active' && !cs.healthy;
-  const rows = [
-    el('div', { class: 'comfy-row' }, [
-      el('span', { class: 'comfy-row-label', text: t('comfy.row_status') }),
-      el('span', { class: 'comfy-row-val comfy-state-' + state.comfy.state,
-                   text: staleFlags ? t('comfy.state_stale')
-                     : (stateKeys[state.comfy.state] ? t(stateKeys[state.comfy.state])
-                        : (unit.active_state || t('common.unknown'))) }),
-    ]),
-  ];
-  if (unit.start_epoch || unit.start_timestamp) {
-    rows.push(el('div', { class: 'comfy-row' }, [
-      el('span', { class: 'comfy-row-label', text: t('comfy.row_uptime') }),
-      el('span', { class: 'comfy-row-val', text: comfyUptime(unit),
-                   title: unit.start_timestamp || '' }),
-    ]));
-  }
-  rows.push(el('div', { class: 'comfy-row' }, [
-    el('span', { class: 'comfy-row-label', text: t('comfy.row_restarts') }),
-    el('span', { class: 'comfy-row-val', text: String(unit.n_restarts ?? 0) }),
-  ]));
-  const dev = cs.stats && Array.isArray(cs.stats.devices) && cs.stats.devices[0];
-  if (dev && dev.vram_total) {
-    // Numbers, not toFixed() strings: t() runs numeric vars through
-    // Intl.NumberFormat, so the decimal separator follows the locale.
-    const used = (dev.vram_total - dev.vram_free) / 1073741824;
-    const total = dev.vram_total / 1073741824;
-    rows.push(el('div', { class: 'comfy-row' }, [
-      el('span', { class: 'comfy-row-label', text: t('comfy.row_vram') }),
-      el('span', { class: 'comfy-row-val', text: t('comfy.memory_value', { used: gb(used), total: gb(total) }) }),
-    ]));
-  }
-  const sys = cs.stats && cs.stats.system;
-  if (sys && sys.ram_total) {
-    const used = (sys.ram_total - sys.ram_free) / 1073741824;
-    const total = sys.ram_total / 1073741824;
-    rows.push(el('div', { class: 'comfy-row' }, [
-      el('span', { class: 'comfy-row-label', text: t('comfy.row_ram') }),
-      el('span', { class: 'comfy-row-val', text: t('comfy.memory_value', { used: gb(used), total: gb(total) }) }),
-    ]));
-  }
-  const gw = cs.gateway || {};
-  rows.push(el('div', { class: 'comfy-row' }, [
-    el('span', { class: 'comfy-row-label', text: t('comfy.row_gateway') }),
-    el('span', { class: 'comfy-row-val' + (gw.error ? ' comfy-state-error' : ''),
-                 text: gw.error ? t('comfy.gateway_unavailable') : t(gw.on ? 'common.on' : 'common.off'),
-                 title: gw.error || '' }),
-  ]));
-  box.append(...rows);
-  if (gw.on && gw.url) {
-    box.append(el('div', { class: 'comfy-url-row' }, [
-      el('a', { class: 'comfy-url-link', href: gw.url, target: '_blank', rel: 'noopener', text: gw.url }),
-      el('button', { class: 'comfy-copy-btn', text: '⧉', title: t('comfy.copy_url'), onclick: () => copyComfyUrl(gw.url) }),
-    ]));
-  }
-
-  // Explicit verb so the button reads as an ACTION, not a state (it sits right
-  // next to the 'Gateway: On/Off' status row). Neutral + disabled while the
-  // gateway itself is unavailable (toggling it would just error).
-  const gwBtn = dom['comfy-gateway-toggle'];
-  gwBtn.textContent = gw.error ? t('comfy.gateway_menu') : t(gw.on ? 'comfy.gateway_off' : 'comfy.gateway_on');
-  gwBtn.disabled = !!gw.error;
-  dom['comfy-dirty-banner'].classList.toggle('hidden', !cs.flags_dirty);
-
-  // 'starting' covers both a genuine cold start AND a hung active-but-unhealthy
-  // service — Stop/Restart must stay available so a stuck start can be killed.
-  const s = state.comfy.state;
-  dom['comfy-start'].disabled = s === 'running' || s === 'starting' || s === 'stopping';
-  dom['comfy-stop'].disabled = s === 'stopped' || s === 'stopping';
-  dom['comfy-restart'].disabled = s === 'stopping';
-}
-
-async function refreshComfyPanel() {
-  try {
-    const cs = await api.comfyServiceStatus();
-    applyComfyStatus(cs);
-    renderComfyStatusCard(cs);
-  } catch (e) { /* transient poll failure — keep last known state on screen */ }
-}
-
-function openComfyPanel() {
-  if (state.decoy || !state.comfyEnabled) return;
-  comfyPanelOpen = true;
-  dom['comfy-backdrop'].classList.remove('hidden');
-  refreshComfyPanel();
-  loadComfyFlags();
-  refreshComfyWorkflows();
-  clearInterval(comfyPollTimer);
-  comfyPollTimer = setInterval(refreshComfyPanel, 5000);
-}
-function closeComfyPanel() {
-  comfyPanelOpen = false;
-  dom['comfy-backdrop'].classList.add('hidden');
-  clearInterval(comfyPollTimer); comfyPollTimer = null;
-}
-
-async function comfyAction(action) {
-  // Disable immediately — the request itself can take up to ~60s (cold start
-  // health wait), and a stale-state re-click mid-transition would race it.
-  dom['comfy-start'].disabled = true;
-  dom['comfy-stop'].disabled = true;
-  dom['comfy-restart'].disabled = true;
-  try { await api.comfyServiceAction(action); }
-  catch (e) { toast(cleanErr(e), true); }
-  await refreshComfyPanel();   // resolves real button state from the outcome
-}
-
-async function toggleComfyGateway() {
-  try { await api.comfyGateway(!state.comfy.gatewayOn); }
-  catch (e) { toast(cleanErr(e), true); }
-  await refreshComfyPanel();
-}
-
-function openComfyLogs() {
-  dom['comfy-logs-backdrop'].classList.remove('hidden');
-  refreshComfyLogs();
-}
-function closeComfyLogs() { dom['comfy-logs-backdrop'].classList.add('hidden'); }
-async function refreshComfyLogs() {
-  try {
-    const r = await api.comfyLogs(200);
-    dom['comfy-logs-content'].textContent = (r.lines || []).join('\n');
-    dom['comfy-logs-content'].scrollTop = dom['comfy-logs-content'].scrollHeight;
-  } catch (e) { dom['comfy-logs-content'].textContent = t('comfy.logs_failed', { error: e.message }); }
-}
-
-// ---- Workflow manager (list / download / import / trash / backup) ----
-// Source of truth is ComfyUI's own workflows dir; the backend does the file
-// ops. Only reachable from the panel, which is decoy-gated already.
-let comfyWorkflows = [];
-
-function comfyWfEmpty(text) {
-  const box = dom['comfy-wf-list'];
-  box.innerHTML = '';
-  box.append(el('div', { class: 'comfy-wf-empty', text }));
-}
-
-async function refreshComfyWorkflows() {
-  try {
-    const r = await api.comfyWorkflows();
-    comfyWorkflows = r.workflows || [];
-    renderComfyWorkflows(r);
-  } catch (e) {
-    comfyWorkflows = [];
-    dom['comfy-wf-hint'].textContent = '';
-    // 404 = the routes ship with a pending service update — say so, don't scare.
-    comfyWfEmpty(e.status === 404
-      ? t('comfy.wf_unavailable')
-      : t('comfy.wf_load_failed', { error: cleanErr(e) }));
-  }
-}
-
-function renderComfyWorkflows(r) {
-  const hint = dom['comfy-wf-hint'];
-  const epoch = r.last_backup_epoch;
-  hint.textContent = (typeof epoch === 'number' && epoch > 0)
-    ? t('comfy.wf_last_backup', { when: relTime(new Date(epoch * 1000).toISOString()) })
-    : t('comfy.wf_never_backed_up');
-  const box = dom['comfy-wf-list'];
-  box.innerHTML = '';
-  if (!comfyWorkflows.length) {
-    comfyWfEmpty(t('comfy.wf_empty'));
-    return;
-  }
-  for (const wf of comfyWorkflows) {
-    const display = wf.name.replace(/\.json$/i, '');
-    const modified = (typeof wf.modified_epoch === 'number' && wf.modified_epoch > 0)
-      ? relTime(new Date(wf.modified_epoch * 1000).toISOString()) : '';
-    box.append(el('div', { class: 'comfy-wf-row' }, [
-      el('div', { class: 'comfy-wf-info' }, [
-        el('div', { class: 'comfy-wf-name', text: display, title: wf.name }),
-        el('div', { class: 'comfy-wf-meta', text: [modified, fileSize(wf.size)].filter(Boolean).join(' · ') }),
-      ]),
-      el('a', { class: 'fs-act-btn', text: '⬇', title: t('common.download'), 'aria-label': t('comfy.wf_download_aria', { name: display }),
-                href: api.comfyWorkflowUrl(wf.name), download: wf.name }),
-      el('button', {
-        class: 'fs-del-btn', text: '🗑', title: t('comfy.wf_trash'), 'aria-label': t('comfy.wf_trash_aria', { name: display }),
-        onclick: async () => {
-          if (!await uiConfirm(t('comfy.wf_trash_confirm', { name: display }), { danger: true, okText: t('comfy.wf_trash_ok') })) return;
-          try { await api.comfyDeleteWorkflow(wf.name); toast(t('comfy.wf_trashed', { name: display })); }
-          catch (e) { toast(cleanErr(e), true); }
-          refreshComfyWorkflows();
-        },
-      }),
-    ]));
-  }
-}
-
-async function importComfyWorkflow(file) {
-  if (!file) return;
-  let name = (file.name || '').trim();
-  if (!/\.json$/i.test(name)) { toast(t('comfy.wf_must_be_json'), true); return; }
-  if (file.size > 5 * 1024 * 1024) { toast(t('comfy.wf_too_large'), true); return; }
-  if (comfyWorkflows.some((w) => w.name === name)) {
-    const ok = await uiConfirm(t('comfy.wf_overwrite', { name }), { okText: t('common.overwrite') });
-    if (!ok) return;
-  }
-  try {
-    const text = await file.text();
-    await api.comfyImportWorkflow(name, text);
-    toast(t('comfy.wf_imported', { name }));
-  } catch (e) { toast(t('comfy.wf_import_failed', { error: cleanErr(e) }), true); }
-  refreshComfyWorkflows();
-}
-
-async function backupComfyWorkflows() {
-  dom['comfy-wf-backup'].disabled = true;
-  try {
-    const r = await api.comfyBackupWorkflows();
-    toast(t('comfy.wf_backed_up', { count: r.count }));
-  } catch (e) { toast(t('comfy.wf_backup_failed', { error: cleanErr(e) }), true); }
-  finally { dom['comfy-wf-backup'].disabled = false; }
-  refreshComfyWorkflows();
-}
-
-// Rendered directly from the backend schema (GET .../flags) — no client-side
-// knowledge of individual flag names, so the control set stays in one place.
-function comfyControlEl(spec, value) {
-  const wrap = el('div', { class: 'comfy-flag-row' });
-  let input;
-  if (spec.kind === 'bool') {
-    input = el('input', { class: 'comfy-flag-input', type: 'checkbox' });
-    input.checked = !!value;
-    wrap.append(el('label', { class: 'comfy-flag-label' }, [input, document.createTextNode(' ' + spec.label)]));
-    input.addEventListener('change', () => { comfyFlagsDraft[spec.key] = input.checked; });
-  } else {
-    wrap.append(el('label', { class: 'comfy-flag-label', text: spec.label }));
-    if (spec.kind === 'enum') {
-      input = el('select', { class: 'comfy-flag-input' });
-      spec.choices.forEach((c) => {
-        const opt = el('option', { value: c, text: c === '' ? t('comfy.flags_default') : c });
-        if (c === value) opt.selected = true;
-        input.append(opt);
-      });
-      input.addEventListener('change', () => { comfyFlagsDraft[spec.key] = input.value; });
-    } else if (spec.kind === 'int' || spec.kind === 'float') {
-      input = el('input', { class: 'comfy-flag-input', type: 'number', step: spec.kind === 'int' ? '1' : 'any' });
-      if (spec.min != null) input.min = String(spec.min);
-      if (spec.max != null) input.max = String(spec.max);
-      input.value = value == null ? '' : value;
-      input.addEventListener('change', () => {
-        if (input.value === '') { comfyFlagsDraft[spec.key] = spec.kind === 'int' ? spec.default : null; return; }
-        comfyFlagsDraft[spec.key] = spec.kind === 'int' ? parseInt(input.value, 10) : parseFloat(input.value);
-      });
-    } else {
-      input = el('input', { class: 'comfy-flag-input', type: 'text' });
-      input.value = value || '';
-      input.addEventListener('change', () => { comfyFlagsDraft[spec.key] = input.value; });
-    }
-    wrap.append(input);
-  }
-  if (spec.note) wrap.append(el('div', { class: 'comfy-flag-note', text: spec.note }));
-  return wrap;
-}
-
-function renderComfyFlagsForm(schema, values, unmanaged) {
-  const box = dom['comfy-flags-list'];
-  box.innerHTML = '';
-  (schema || []).forEach((spec) => box.append(comfyControlEl(spec, values[spec.key])));
-  const entries = Object.entries(unmanaged || {});
-  if (entries.length) {
-    box.append(el('div', { class: 'comfy-unmanaged-head', text: t('comfy.flags_unmanaged') }));
-    entries.forEach(([k, v]) => {
-      box.append(el('div', { class: 'comfy-flag-row comfy-unmanaged-row' }, [
-        el('span', { class: 'comfy-flag-label', text: k }),
-        el('span', { class: 'comfy-flag-readonly', text: v }),
-      ]));
-    });
-  }
-}
-
-async function loadComfyFlags() {
-  try {
-    const r = await api.comfyFlags();
-    comfyFlagsDraft = { ...r.values };
-    comfyKnownGood = r.known_good || {};
-    renderComfyFlagsForm(r.schema, r.values, r.unmanaged);
-  } catch (e) { toast(t('comfy.flags_load_failed', { error: e.message }), true); }
-}
-
-async function saveComfyFlags(restart) {
-  if (restart) {
-    dom['comfy-start'].disabled = true;
-    dom['comfy-stop'].disabled = true;
-    dom['comfy-restart'].disabled = true;
-  }
-  try {
-    await api.comfySaveFlags(comfyFlagsDraft, restart);
-    toast(t(restart ? 'comfy.flags_saved_restarted' : 'comfy.flags_saved'));
-    await loadComfyFlags();
-  } catch (e) { toast(cleanErr(e), true); }
-  await refreshComfyPanel();
-}
-
-async function resetComfyKnownGood() {
-  if (!await uiConfirm(t('comfy.flags_reset_confirm'),
-                        { okText: t('comfy.flags_reset_ok'), danger: true })) return;
-  dom['comfy-start'].disabled = true;
-  dom['comfy-stop'].disabled = true;
-  dom['comfy-restart'].disabled = true;
-  try {
-    await api.comfySaveFlags(comfyKnownGood, true);
-    toast(t('comfy.flags_reset_done'));
-    await loadComfyFlags();
-  } catch (e) { toast(cleanErr(e), true); }
-  await refreshComfyPanel();
-}
-
-// ---- Desktop notifications (Web Notifications API) ----
-// True OS-level popups so the user knows ComfyUI is ready even when DisPatch
-// isn't the focused tab. Degrades silently where unsupported/denied — the
-// in-app launch banner is always the primary, permission-free feedback.
-let comfyNotifyAsked = false;
-function notifySupported() { return 'Notification' in window; }
-function ensureNotifyPermission() {
-  // Called from within the launch click (a user gesture) so the browser
-  // permission prompt is allowed. Fire-and-forget; we never block on it.
-  if (!notifySupported()) return;
-  if (Notification.permission !== 'default' || comfyNotifyAsked) return;
-  comfyNotifyAsked = true;
-  try { Notification.requestPermission().catch(() => {}); } catch { /* older API */ }
-}
-async function desktopNotify(title, body, { tag = 'dispatch', silent = false } = {}) {
-  try {
-    if (!notifySupported() || Notification.permission !== 'granted') return;
-    const opts = { body, tag, renotify: true, silent, icon: '/static/icon-192.png', badge: '/static/favicon-32.png' };
-    // Mobile Chrome forbids `new Notification()` — it requires the SW path.
-    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
-    if (reg && reg.showNotification) { await reg.showNotification(title, opts); return; }
-    new Notification(title, opts);
-  } catch { /* ignore — banner already covers it */ }
-}
-
-// ---- In-app launch banner ----
-let comfyLaunchHideTimer = null;
-const COMFY_LAUNCH_GLYPH = { starting: '🖼', ready: '✅', error: '⚠️' };
-function showComfyLaunch(phase, title, hint) {
-  const box = dom['comfy-launch'];
-  if (!box) return;
-  clearTimeout(comfyLaunchHideTimer);
-  box.classList.remove('hidden', 'starting', 'ready', 'error', 'clickable');
-  box.classList.add(phase);
-  delete box.dataset.url;
-  delete box.dataset.panel;
-  dom['comfy-launch-glyph'].textContent = COMFY_LAUNCH_GLYPH[phase] || '🖼';
-  dom['comfy-launch-title'].textContent = title;
-  dom['comfy-launch-hint'].textContent = hint || '';
-  if (phase !== 'starting') dom['comfy-launch-secs'].textContent = '';
-}
-function hideComfyLaunch() {
-  clearTimeout(comfyLaunchHideTimer);
-  const box = dom['comfy-launch'];
-  if (box) { box.classList.add('hidden'); delete box.dataset.url; delete box.dataset.panel; box.classList.remove('clickable'); }
-}
-
-// The chip IS the primary action: click launches (start if needed, ensure the
-// gateway, open the tab); long-press/right-click opens the control panel.
-async function comfyLaunchFlow() {
-  if (state.decoy || !state.comfyEnabled || comfyLaunchBusy) return;
-  comfyLaunchBusy = true;
-  const chip = dom['comfy-chip'];
-  chip.classList.add('busy');
-  chip.setAttribute('aria-busy', 'true');
-  // Reflect "starting" on the chip's own status dot immediately (amber pulse)
-  // instead of leaving the stale pre-click colour for the whole cold start.
-  state.comfy.state = 'starting';
-  renderComfyChip();
-  // Ask for desktop-notification permission on this user gesture (first launch
-  // only); the banner works regardless of the answer.
-  ensureNotifyPermission();
-  const startedAt = Date.now();
-  showComfyLaunch('starting', t('comfy.launch_starting'), t('comfy.launch_hint'));
-  announce(t('comfy.launch_announce_start'), true);
-  const elTimer = setInterval(() => {
-    const s = Math.round((Date.now() - startedAt) / 1000);
-    dom['comfy-launch-secs'].textContent = t('comfy.launch_seconds', { seconds: s });
-    chip.title = t('comfy.launch_chip_busy', { seconds: s });
-  }, 1000);
-  // Open a blank tab SYNCHRONOUSLY in the click handler so popup blockers
-  // (mobile Safari/Firefox especially) don't treat the post-await open as an
-  // untrusted navigation. Paint an interim holding page so it doesn't read as
-  // a broken blank tab during the (up to ~60s) cold start.
-  const win = window.open('', '_blank');
-  if (win) { try { win.document.write(comfyHoldingPage()); win.document.close(); } catch { /* opaque */ } }
-  try {
-    const r = await api.comfyLaunch();
-    // The launch can take up to ~60s; if the session locked mid-flight, the
-    // now-Safe-Mode tab must not be handed the gateway URL.
-    if (state.decoy) { if (win) win.close(); hideComfyLaunch(); return; }
-    const secs = Math.round((Date.now() - startedAt) / 1000);
-    if (win) {
-      showComfyLaunch('ready', t('comfy.launch_ready'), t('comfy.launch_opening'));
-      win.location.href = r.url;
-      comfyLaunchHideTimer = setTimeout(hideComfyLaunch, 4000);
-    } else {
-      // Popup blocked — turn the ready banner into the open affordance.
-      showComfyLaunch('ready', t('comfy.launch_ready'), t('comfy.launch_tap'));
-      const box = dom['comfy-launch'];
-      box.classList.add('clickable');
-      box.dataset.url = r.url;
-    }
-    announce(t('comfy.launch_announce_ready'), true);
-    desktopNotify(t('comfy.launch_ready'), t('comfy.launch_notify_ready', { seconds: secs }), { tag: 'comfy-launch' });
-  } catch (e) {
-    if (win) win.close();
-    showComfyLaunch('error', t('comfy.launch_failed'), cleanErr(e));
-    const box = dom['comfy-launch'];
-    box.classList.add('clickable');       // click opens the control panel + logs
-    box.dataset.panel = '1';
-    announce(t('comfy.launch_announce_failed'), true);
-    desktopNotify(t('comfy.launch_announce_failed'), cleanErr(e), { tag: 'comfy-launch' });
-    comfyLaunchHideTimer = setTimeout(hideComfyLaunch, 10000);
-  } finally {
-    clearInterval(elTimer);
-    chip.title = t('comfy.chip_title');
-    chip.classList.remove('busy');
-    chip.removeAttribute('aria-busy');
-    comfyLaunchBusy = false;
-    refreshComfyChipOnce();
-  }
-}
-async function refreshComfyChipOnce() {
-  try { applyComfyStatus(await api.comfyServiceStatus()); } catch { /* ignore */ }
-}
-
-// Static holding page shown in the freshly-opened tab while ComfyUI cold-starts.
-// Self-contained (no network) so it paints instantly even before the gateway is
-// up; the real ComfyUI URL replaces it once launch() resolves.
-// A function rather than a constant so its copy is resolved in the language
-// that is active AT LAUNCH, and so the new tab inherits this document's lang/dir
-// (an RTL session must not get an LTR holding page).
-function comfyHoldingPage() {
-  const root = document.documentElement;
-  const lang = escapeHtml(root.getAttribute('lang') || 'en');
-  const dir = escapeHtml(root.getAttribute('dir') || 'ltr');
-  const title = escapeHtml(t('comfy.launch_starting'));
-  const hint = escapeHtml(t('comfy.holding_page_hint'));
-  return `<!doctype html><html lang="${lang}" dir="${dir}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
-<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;
-justify-content:center;gap:18px;font:16px/1.5 system-ui,sans-serif;background:#0f0f1a;color:#e8e8f0}
-.g{font-size:56px}.s{width:34px;height:34px;border:3px solid rgba(255,255,255,.18);
-border-top-color:#8b7cff;border-radius:50%;animation:sp .8s linear infinite}
-.h{color:#9a9ab0;font-size:13px}@keyframes sp{to{transform:rotate(360deg)}}</style></head>
-<body><div class="g">🖼</div><div class="s"></div><div>${title}</div>
-<div class="h">${hint}</div></body></html>`;
-}
-
-function wireComfyPanel() {
-  let pressTimer = null;
-  let longPressed = false;
-  dom['comfy-chip'].addEventListener('pointerdown', () => {
-    longPressed = false;
-    pressTimer = setTimeout(() => { longPressed = true; openComfyPanel(); }, 550);
-  });
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) =>
-    dom['comfy-chip'].addEventListener(ev, () => {
-      clearTimeout(pressTimer);
-      // The suppressed click (if any) fires synchronously right after
-      // pointerup; if the release landed OFF the chip (finger slid away, or
-      // the just-opened panel backdrop swallowed it) no click ever comes, and
-      // a stale longPressed=true would eat the NEXT tap. Reset a beat later.
-      if (longPressed) setTimeout(() => { longPressed = false; }, 80);
-    }));
-  dom['comfy-chip'].addEventListener('click', () => {
-    if (longPressed) { longPressed = false; return; }
-    comfyLaunchFlow();
-  });
-  dom['comfy-chip'].addEventListener('contextmenu', (e) => { e.preventDefault(); openComfyPanel(); });
-
-  dom['comfy-close'].addEventListener('click', closeComfyPanel);
-  dom['comfy-backdrop'].addEventListener('click', (e) => { if (e.target === dom['comfy-backdrop']) closeComfyPanel(); });
-  dom['comfy-start'].addEventListener('click', () => comfyAction('start'));
-  dom['comfy-stop'].addEventListener('click', () => comfyAction('stop'));
-  dom['comfy-restart'].addEventListener('click', () => comfyAction('restart'));
-  dom['comfy-gateway-toggle'].addEventListener('click', toggleComfyGateway);
-  dom['comfy-logs-btn'].addEventListener('click', openComfyLogs);
-  dom['comfy-logs-close'].addEventListener('click', closeComfyLogs);
-  dom['comfy-logs-backdrop'].addEventListener('click', (e) => { if (e.target === dom['comfy-logs-backdrop']) closeComfyLogs(); });
-  dom['comfy-logs-refresh'].addEventListener('click', refreshComfyLogs);
-  dom['comfy-wf-import'].addEventListener('click', () => dom['comfy-wf-file'].click());
-  dom['comfy-wf-file'].addEventListener('change', (e) => {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = '';
-    importComfyWorkflow(f);
-  });
-  dom['comfy-wf-backup'].addEventListener('click', backupComfyWorkflows);
-  dom['comfy-flags-save'].addEventListener('click', () => saveComfyFlags(false));
-  dom['comfy-flags-save-restart'].addEventListener('click', () => saveComfyFlags(true));
-  dom['comfy-flags-reset'].addEventListener('click', resetComfyKnownGood);
-
-  // Launch banner: dismiss button, and click-to-act when it's an affordance
-  // (ready-but-popup-blocked → open ComfyUI; error → open the control panel).
-  dom['comfy-launch-dismiss'].addEventListener('click', (e) => { e.stopPropagation(); hideComfyLaunch(); });
-  dom['comfy-launch'].addEventListener('click', () => {
-    const box = dom['comfy-launch'];
-    if (box.dataset.url) { window.open(box.dataset.url, '_blank', 'noopener'); hideComfyLaunch(); }
-    else if (box.dataset.panel) { hideComfyLaunch(); openComfyPanel(); openComfyLogs(); }
-  });
-}
-
 // ===================== Coding terminal =====================
 // A server-side PTY running the configured coding CLI, mirrored over /ws/terminal into
 // an xterm.js instance. Selecting the terminal pseudo-bot replaces the chat
@@ -4218,8 +3639,8 @@ async function ensureFeatures() {
   } catch { /* fall back to probing */ }
 }
 
-// Probe the terminal feature flag at startup (same pattern as the ComfyUI
-// chip): only 404 (disabled) / 403 (no access) hide the pseudo-bot.
+// Probe the terminal feature flag at startup: only 404 (disabled) / 403
+// (no access) hide the pseudo-bot.
 async function refreshTerminalFeature() {
   if (state.decoy) { state.terminalEnabled = false; return; }
   // The server tells us up front now. Probing a disabled feature still worked
@@ -4913,14 +4334,6 @@ function handleWs(data) {
       // The full session expired server-side → fall back to Safe Mode.
       handleLocked();
       break;
-    case 'comfy_service': {
-      if (!data.state) break;
-      state.comfy.state = data.state;
-      state.comfy.gatewayOn = !!(data.gateway && data.gateway.on);
-      renderComfyChip();
-      if (comfyPanelOpen) refreshComfyPanel();
-      break;
-    }
     case 'terminal_state': {
       // Full-session only — Safe-Mode clients never receive this frame (the
       // server redactor drops it). Keeps the sidebar dot + open view live when
@@ -5066,7 +4479,6 @@ function wireEvents() {
   wireSettingsTabs();
   wireFileServer();
   wireDrop();
-  wireComfyPanel();
   wireTerminal();
 
   // Foldable / rotation: when the viewport crosses the mobile breakpoint
@@ -5175,9 +4587,6 @@ function wireEvents() {
       dom['tx-backdrop'].classList.add('hidden');
       dom['companions-backdrop'].classList.add('hidden');
       if (!dom['terminal-model-backdrop'].classList.contains('hidden')) closeModelPicker();
-      if (!dom['comfy-launch'].classList.contains('hidden')) hideComfyLaunch();
-      if (!dom['comfy-logs-backdrop'].classList.contains('hidden')) closeComfyLogs();
-      else if (!dom['comfy-backdrop'].classList.contains('hidden')) closeComfyPanel();
       toggleThreadMenu(false);
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newChat(); }
@@ -5250,9 +4659,6 @@ function getSocket() {
       onReconnect: () => {
         toast(t('toast.reconnected')); resync(); refreshUnread();
         resendPendingSends();   // WS send-ack protocol: replay unacked sends
-        // The chip can go stale while disconnected (service changed outside
-        // DisPatch) — comfy_service frames are only broadcast on control ops.
-        if (state.comfyEnabled && !state.decoy) refreshComfyChipOnce();
       },
     });
   }
@@ -5275,8 +4681,6 @@ function applyAuthChrome() {
   dom['bm-lock'].classList.toggle('hidden', !full);
   dom['attach-btn'].classList.remove('hidden');
   document.body.classList.toggle('decoy-mode', state.decoy);
-  // ComfyUI is full-access only, regardless of PIN being set at all.
-  dom['comfy-chip'].classList.toggle('hidden', state.decoy || !state.comfyEnabled);
   // File Server is full-access only too. It used to sit inside the Bot Manager,
   // which a locked session can never open (the gear routes to Companions), so
   // moving it to the sidebar would have exposed it in Safe Mode. /api/files* is
@@ -5479,11 +4883,6 @@ function closeAllOverlays() {
    'companions-backdrop', 'search-backdrop', 'recover-backdrop', 'tx-backdrop',
    'drop-backdrop']
     .forEach((k) => dom[k] && dom[k].classList.add('hidden'));
-  // Close the ComfyUI overlays through their own close paths — raw-hiding the
-  // backdrops left comfyPanelOpen + the 5s poll timer alive across a lock
-  // (a locked device polling /status forever, 403 each time).
-  closeComfyPanel();
-  closeComfyLogs();
   // The terminal is full-session only — never leave its socket/view alive
   // across a drop to Safe Mode.
   if (terminalOpen) closeTerminalView();
@@ -5803,33 +5202,10 @@ function wireAuthEvents() {
     if (state.auth.pinSet && state.started) {
       api.authStatus().then((s) => { if (!s.authenticated) handleLocked(); }).catch(() => {});
     }
-    // Returning to the tab: the ComfyUI service may have changed outside
-    // DisPatch (CLI stop, crash) with no WS frame — resync the chip.
-    if (state.started && state.comfyEnabled && !state.decoy) refreshComfyChipOnce();
   });
 }
 
 // ===================== Boot =====================
-// Resolve the ComfyUI feature flag + first chip state in the background.
-// Only 404 (feature off) / 403 (no access) mean "hide the chip"; a transient
-// 502/network blip must not disable the feature for the whole session — show
-// the chip in its error state instead.
-async function refreshComfyFeature() {
-  // The server now advertises this in /api/auth/status, so a default install
-  // (feature off) no longer discovers it by making a request that 404s.
-  if (state.auth.features && state.auth.features.comfy === false) {
-    state.comfyEnabled = false;
-    return;
-  }
-  try {
-    state.comfyEnabled = true;
-    applyComfyStatus(await api.comfyServiceStatus());
-  } catch (e) {
-    if (e.status === 404 || e.status === 403) state.comfyEnabled = false;
-    else { state.comfy.state = 'error'; renderComfyChip(); }
-  }
-  applyAuthChrome();   // chip visibility reflects the resolved flag
-}
 
 async function startApp() {
   if (state.started) return;
@@ -5873,12 +5249,10 @@ async function startApp() {
     // harmless; the console errors the browser writes for them are not — they
     // are the first thing anyone looks at when something else breaks.
     ensureFeatures().finally(() => {
-      refreshComfyFeature();
       refreshTerminalFeature();
       refreshHarnessFeature();
     });
   } else {
-    state.comfyEnabled = false;
     state.terminalEnabled = false;
     state.harnessEnabled = false;
   }
@@ -6230,14 +5604,13 @@ function applySearchShortcutTitle() {
 // and again on every language switch (reRenderForLocale), so the labels track
 // the picker. Desktop pays nothing: the ::after is only shown by the phone
 // media query, but the attribute is harmless there.
-// Three of these reuse a key that already says exactly the right word in all
-// eight locales (nav.settings "Settings", nav.theme "Theme", comfy.name
-// "ComfyUI") — a second key with identical text is just another thing to keep
-// translated. The rest are new nav.label_* keys, short on purpose.
+// Two of these reuse a key that already says exactly the right word in all
+// eight locales (nav.settings "Settings", nav.theme "Theme") — a second key
+// with identical text is just another thing to keep translated. The rest are
+// new nav.label_* keys, short on purpose.
 const RAIL_LABELS = {
   'manage-bots': 'nav.settings',
   'theme-toggle': 'nav.theme',
-  'comfy-chip': 'comfy.name',
   'lock-now': 'nav.label_lock',
   'unlock-btn': 'nav.label_unlock',
   'fs-chip': 'nav.label_files',
@@ -6411,7 +5784,6 @@ function reRenderForLocale() {
   // Same story for Connect an AI: its labels come from the DOM pass, but the
   // key placeholder and the two state-dependent notes are written from JS.
   repaintLlmPanel();
-  if (comfyPanelOpen) refreshComfyPanel();
   const cmdkDlg = $('cmdk');
   if (cmdkDlg && cmdkDlg.open) { cmdkItems = cmdkBuild($('cmdk-input').value); cmdkRender(); }
 }
@@ -6454,9 +5826,7 @@ async function init() {
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
-  // list's relative timestamps ("5m") drift. Piggyback a slow ComfyUI chip
-  // refresh — external service changes (CLI stop, crash) never broadcast a
-  // comfy_service frame, so the chip would otherwise stay stale indefinitely.
+  // list's relative timestamps ("5m") drift.
   let lastTick = '';
   setInterval(() => {
     if (!state.started) return;
@@ -6472,7 +5842,6 @@ async function init() {
       renderSidebar();
       renderThreads();
     }
-    if (state.comfyEnabled && !state.decoy) refreshComfyChipOnce();
   }, 60_000);
   await refreshAuthAndBoot();
 

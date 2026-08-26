@@ -4,7 +4,7 @@ MOUNTING IT (the exact change in main.py — one added name, one added line):
 
     1. add ``dashboard_routes`` to the existing package import near the top:
 
-           from . import (auth, comfy_service, config, dashboard_routes, openclaw,
+           from . import (auth, config, dashboard_routes, openclaw,
                           openclaw_text, reactions, terminal)
 
     2. THE ONE LINE, anywhere after ``app = FastAPI(...)`` and before the static
@@ -38,7 +38,7 @@ Access model, matching the rest of the app exactly (see main.auth_gate):
   * anything else (Safe Mode, expired session, no cookie) → 403.
 
 Everything here is a read. The expensive path (`/deep`) is serialised behind a
-lock and returns 409 rather than queueing, mirroring the ComfyUI panel's
+lock and returns 409 rather than queueing, mirroring the service panels'
 busy-op contract.
 """
 
@@ -58,7 +58,7 @@ COOKIE_NAME = "lc_session"
 
 # Poll-collapsing micro-cache for the summary. Several tabs (and a phone) can
 # have the dashboard open at once; one probe per window is plenty, and it keeps
-# the page cheap enough to poll. Same pattern as main's comfy status cache.
+# the page cheap enough to poll.
 SUMMARY_TTL_S = 2.0
 _summary_cache: dict = {"ts": 0.0, "body": None}
 

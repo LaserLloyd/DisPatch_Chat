@@ -22,7 +22,7 @@ from app.database import Database
 
 @pytest.fixture
 def app_client(tmp_path, monkeypatch):
-    """TestClient with full isolation (mirrors test_comfy_routes.route_client)."""
+    """TestClient with full isolation."""
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
     monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")

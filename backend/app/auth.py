@@ -227,7 +227,7 @@ def _write(cfg: SecurityConfig, plaintext_pin: str | None = None) -> None:
         remember_days=cfg.remember_days,
         api_token=_y(cfg.api_token),
     )
-    # Atomic + 0600 (mirrors comfy_service._write_atomic): the file holds the
+    # Atomic + 0600: the file holds the
     # api_token and PIN hash, and a crash mid-write (or a concurrent reader
     # during a PIN change) must never observe a truncated/partial file — an
     # unparseable security.yaml now fails CLOSED (see load()).

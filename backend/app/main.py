@@ -49,7 +49,6 @@ from . import (
     auth,
     avatar_pool,
     avatar_snapshots,
-    comfy_service,
     config,
     dashboard_routes,
     gateway_router,
@@ -65,8 +64,6 @@ from . import (
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .database import Database, local_date, new_id, now_iso
 from .models import (
-    ComfyFlagsIn,
-    ComfyGatewayIn,
     DailyThreadIn,
     FireReactionIn,
     GenerateReactionIn,
@@ -81,8 +78,8 @@ from .ws import manager
 
 log = logging.getLogger("local-chat")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-# httpx logs every request at INFO — with the ComfyUI chip polled by every open
-# tab that was a journald write per minute per tab, 24/7. Warnings still pass.
+# httpx logs every request at INFO — that was a journald write per minute
+# per open tab, 24/7. Warnings still pass.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 db = Database(config.DB_PATH)
@@ -3276,21 +3273,6 @@ async def _make_backup() -> Path | None:
         return None
 
 
-async def _auto_workflow_snapshot() -> None:
-    """Piggybacks on the backup loop: snapshot the ComfyUI workflows dir when
-    any workflow file is newer than the newest snapshot. Failures are logged
-    (and visible via the list route's last_backup_epoch) — never raised."""
-    if not SETTINGS.comfy_enabled:
-        return
-    try:
-        res = await asyncio.to_thread(comfy_service.maybe_snapshot_workflows)
-        if res:
-            log.info("workflow auto-snapshot: %s (%d file(s))",
-                     res["snapshot"], res["count"])
-    except Exception:
-        log.exception("workflow auto-snapshot failed")
-
-
 async def _backup_loop() -> None:
     interval = SETTINGS.backup_interval
     if interval <= 0:
@@ -3299,11 +3281,9 @@ async def _backup_loop() -> None:
         # First snapshot shortly after boot, then on the configured cadence.
         await asyncio.sleep(60)
         await _make_backup()
-        await _auto_workflow_snapshot()
         while True:
             await asyncio.sleep(interval)
             await _make_backup()
-            await _auto_workflow_snapshot()
     except asyncio.CancelledError:
         pass
 
@@ -3960,7 +3940,6 @@ async def auth_status(request: Request):
         # show, and every other state is exactly where it is not.
         "features": ({"terminal": terminal_available(),
                       "harness": harness_available(),
-                      "comfy": SETTINGS.comfy_enabled,
                       "api_bots": config.api_bot_count(),
                       "agent": openclaw.cli_available()}
                      if (authed or not cfg.pin_set) else {}),
@@ -6615,295 +6594,6 @@ async def _mirror_watchdog_loop() -> None:
         _mirror_beat = time.time()      # fresh grace window for the new task
         _mirror_task = asyncio.create_task(_gateway_mirror_loop())
         _track(_mirror_task)
-
-
-# --------------------------------------------------------------------------- #
-# ComfyUI service control (infrastructure panel — start/stop/flags/gateway).
-# Distinct from and complementary to a generation portal (POST /api/comfy/generate),
-# which if it exists lives in its own module; this is purely lifecycle control.
-# --------------------------------------------------------------------------- #
-
-
-def _require_comfy(request: Request) -> None:
-    """Every route here: Safe Mode gets 403 before any inspection — service
-    state, logs, and the tailnet URL are all sensitive, and reads are gated
-    just like mutations. The whole feature 404s if disabled."""
-    _deny_decoy_mutation(request)
-    if not SETTINGS.comfy_enabled:
-        raise HTTPException(404, "ComfyUI integration disabled")
-
-
-def _raise_for_comfy_error(e: Exception):
-    """Map comfy_service's typed errors to HTTP status — never a raw 500 trace."""
-    if isinstance(e, comfy_service.FlagValidationError):
-        raise HTTPException(422, {"errors": e.errors}) from e
-    if isinstance(e, comfy_service.HealthTimeoutError):
-        raise HTTPException(504, {"detail": str(e), "journal_tail": e.journal_tail}) from e
-    if isinstance(e, comfy_service.TailscaleUnavailableError):
-        raise HTTPException(503, str(e)) from e
-    if isinstance(e, comfy_service.ServiceBusyError):
-        raise HTTPException(409, str(e)) from e
-    raise HTTPException(502, str(e)) from e
-
-
-# Errors that reflect no actual change to the running service (a bad payload,
-# or another op already in flight) don't warrant a WS "error" state broadcast.
-_SILENT_COMFY_ERRORS = (comfy_service.ServiceBusyError, comfy_service.FlagValidationError)
-
-
-async def _handle_comfy_error(e: Exception) -> None:
-    if not isinstance(e, _SILENT_COMFY_ERRORS):
-        await _broadcast_comfy_state("error")
-    _raise_for_comfy_error(e)
-
-
-_COMFY_WS_STATE = {"active": "running", "inactive": "stopped", "activating": "starting",
-                   "deactivating": "stopping", "failed": "error"}
-
-
-async def _broadcast_comfy_state(state: str | None = None) -> None:
-    """WS frame for live chip/panel updates across all open tabs. The gateway
-    URL is deliberately NEVER included — Safe-Mode clients may receive this
-    frame unredacted (on/off + state carry nothing sensitive); the URL only
-    ever travels through the gated /status route.
-
-    Runs after every service mutation, so it also drops the status
-    micro-cache: tabs that re-poll on this frame must see the new state,
-    not a ≤5s-stale snapshot."""
-    _comfy_status_cache.update(ts=0.0, body=None)
-    gw_on = False
-    with contextlib.suppress(comfy_service.ServiceError):
-        gw_on = (await comfy_service.gateway_status()).get("on", False)
-    if state is None:
-        state = "stopped"
-        with contextlib.suppress(comfy_service.ServiceError):
-            unit = await comfy_service.unit_state()
-            state = _COMFY_WS_STATE.get(unit.get("active_state", ""), "stopped")
-    await manager.broadcast({"type": "comfy_service", "state": state, "gateway": {"on": gw_on}})
-
-
-# Aggregate-status micro-cache. Each open tab polls the chip every 60s and the
-# panel polls every 5s — each MISS costs 3-4 subprocess spawns (systemctl show,
-# tailscale) + an HTTP probe, 24/7. A TTL equal to the panel's own poll period
-# is invisible to the UI but collapses every tab onto one probe per window.
-_COMFY_STATUS_TTL = 5.0
-_comfy_status_cache: dict = {"ts": 0.0, "body": None}
-
-
-@app.get("/api/comfy/service/status")
-async def comfy_service_status(request: Request):
-    """Single aggregate call the panel polls (every 5s while open)."""
-    _require_comfy(request)
-    now = asyncio.get_event_loop().time()
-    if (_comfy_status_cache["body"] is not None
-            and now - _comfy_status_cache["ts"] < _COMFY_STATUS_TTL):
-        return _comfy_status_cache["body"]
-    try:
-        unit = await comfy_service.unit_state()
-        stats = await comfy_service.health()
-        dirty = await comfy_service.flags_dirty()
-    except comfy_service.ServiceError as e:
-        _raise_for_comfy_error(e)
-        return
-    # Machine-readable start time (int epoch seconds, null if unknown) so the
-    # frontend can render "up since" without parsing systemd's locale string.
-    start_epoch = None
-    with contextlib.suppress(comfy_service.ServiceError):
-        se = await comfy_service.start_timestamp_epoch()
-        start_epoch = int(se) if se is not None else None
-    unit["start_epoch"] = start_epoch
-    # Gateway state is best-effort: tailscaled being down must not take the
-    # whole panel with it — service control still works without the gateway.
-    try:
-        gw = await comfy_service.gateway_status()
-    except comfy_service.ServiceError as e:
-        gw = {"on": False, "url": None, "error": str(e)}
-    body = {"unit": unit, "healthy": stats is not None, "stats": stats,
-            "gateway": gw, "flags_dirty": dirty}
-    _comfy_status_cache["ts"] = asyncio.get_event_loop().time()
-    _comfy_status_cache["body"] = body
-    return body
-
-
-@app.post("/api/comfy/service/start")
-async def comfy_service_start(request: Request):
-    _require_comfy(request)
-    try:
-        result = await comfy_service.start()
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    await _broadcast_comfy_state("running")
-    return result
-
-
-@app.post("/api/comfy/service/stop")
-async def comfy_service_stop(request: Request):
-    _require_comfy(request)
-    # Tear the gateway down too — never leave a serve mapping pointing at a
-    # dead port. Best-effort: a Tailscale hiccup shouldn't block actually
-    # stopping the service.
-    with contextlib.suppress(comfy_service.ServiceError):
-        await comfy_service.gateway_off()
-    try:
-        await comfy_service.stop()
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    await _broadcast_comfy_state("stopped")
-    return {"ok": True}
-
-
-@app.post("/api/comfy/service/restart")
-async def comfy_service_restart(request: Request):
-    _require_comfy(request)
-    was_on = False
-    with contextlib.suppress(comfy_service.ServiceError):
-        was_on = (await comfy_service.gateway_status()).get("on", False)
-    try:
-        result = await comfy_service.restart()
-        if was_on:
-            with contextlib.suppress(comfy_service.ServiceError):
-                await comfy_service.gateway_on()
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    await _broadcast_comfy_state("running")
-    return result
-
-
-@app.post("/api/comfy/service/launch")
-async def comfy_service_launch(request: Request):
-    """The one-button path: ensure running, ensure the gateway is up, and
-    return the URL for the frontend to open in a new tab."""
-    _require_comfy(request)
-    try:
-        result = await comfy_service.launch()
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    await _broadcast_comfy_state("running")
-    return result
-
-
-@app.get("/api/comfy/service/flags")
-async def comfy_service_get_flags(request: Request):
-    _require_comfy(request)
-    return comfy_service.read_flags()
-
-
-@app.put("/api/comfy/service/flags")
-async def comfy_service_put_flags(payload: ComfyFlagsIn, request: Request):
-    _require_comfy(request)
-    try:
-        result = comfy_service.write_flags(payload.values)
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    if payload.restart:
-        was_on = False
-        with contextlib.suppress(comfy_service.ServiceError):
-            was_on = (await comfy_service.gateway_status()).get("on", False)
-        try:
-            await comfy_service.restart()
-            if was_on:
-                with contextlib.suppress(comfy_service.ServiceError):
-                    await comfy_service.gateway_on()
-        except comfy_service.ServiceError as e:
-            await _handle_comfy_error(e)
-            return
-        await _broadcast_comfy_state("running")
-        result = comfy_service.read_flags()
-    return result
-
-
-@app.post("/api/comfy/service/gateway")
-async def comfy_service_gateway(payload: ComfyGatewayIn, request: Request):
-    _require_comfy(request)
-    try:
-        if payload.on:
-            url = await comfy_service.gateway_on()
-            result = {"on": True, "url": url}
-        else:
-            await comfy_service.gateway_off()
-            result = {"on": False}
-    except comfy_service.ServiceError as e:
-        await _handle_comfy_error(e)
-        return
-    await _broadcast_comfy_state()
-    return result
-
-
-@app.get("/api/comfy/service/logs")
-async def comfy_service_logs(request: Request, lines: int = Query(100, ge=1, le=500)):
-    _require_comfy(request)
-    try:
-        text = await comfy_service.logs(lines)
-    except comfy_service.ServiceError as e:
-        _raise_for_comfy_error(e)
-        return
-    return {"lines": text.splitlines()}
-
-
-# --------------------------------------------------------------------------- #
-# REST: ComfyUI workflow manager (list / download / save / trash / snapshot)
-# Same gate as the rest of the comfy family: _require_comfy (403 for decoy /
-# no-session, 404 when the feature is disabled).
-# --------------------------------------------------------------------------- #
-
-
-def _raise_workflow_error(e: comfy_service.WorkflowError):
-    # str(e) is neutral by construction (see WorkflowError) — safe to surface.
-    raise HTTPException(e.status, str(e)) from e
-
-
-@app.get("/api/comfy/workflows")
-async def comfy_workflows_list(request: Request):
-    _require_comfy(request)
-    return await asyncio.to_thread(comfy_service.list_workflows)
-
-
-# NOTE: registered BEFORE the /{name} routes so "backup" is never captured as
-# a workflow name.
-@app.post("/api/comfy/workflows/backup")
-async def comfy_workflows_backup(request: Request):
-    _require_comfy(request)
-    try:
-        return await asyncio.to_thread(comfy_service.snapshot_workflows)
-    except comfy_service.WorkflowError as e:
-        _raise_workflow_error(e)
-
-
-@app.get("/api/comfy/workflows/{name}")
-async def comfy_workflow_download(name: str, request: Request):
-    _require_comfy(request)
-    try:
-        path = comfy_service.workflow_file(name)
-    except comfy_service.WorkflowError as e:
-        _raise_workflow_error(e)
-        return
-    return FileResponse(path, media_type="application/json", filename=path.name)
-
-
-@app.post("/api/comfy/workflows/{name}")
-async def comfy_workflow_save(name: str, request: Request):
-    """Save/import: the body is the raw workflow JSON (validated + size-capped
-    in comfy_service; a pre-existing file gets a rolling .bak copy first)."""
-    _require_comfy(request)
-    body = await request.body()
-    try:
-        return await asyncio.to_thread(comfy_service.save_workflow, name, body)
-    except comfy_service.WorkflowError as e:
-        _raise_workflow_error(e)
-
-
-@app.delete("/api/comfy/workflows/{name}")
-async def comfy_workflow_delete(name: str, request: Request):
-    _require_comfy(request)
-    try:
-        return await asyncio.to_thread(comfy_service.trash_workflow, name)
-    except comfy_service.WorkflowError as e:
-        _raise_workflow_error(e)
 
 
 # --------------------------------------------------------------------------- #

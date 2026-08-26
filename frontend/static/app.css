@@ -569,65 +569,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .spinner { width: 13px; height: 13px; border: 2px solid rgba(0,0,0,.3); border-top-color: #1a1a1a; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ComfyUI launch banner — top-center, above modals but below the lock/lightbox.
-   Sits under the reconnect card (which uses the same top strip) via a larger
-   top offset, so the rare simultaneous case stacks instead of overlapping. */
-.comfy-launch {
-  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
-  margin-top: calc(52px + env(safe-area-inset-top));
-  z-index: 210; width: min(360px, calc(100vw - 24px));
-  background: var(--bg-tertiary); border: 1px solid var(--border-light);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.5));
-  overflow: hidden;
-  animation: comfy-launch-in .22s var(--easing, ease);
-}
-.comfy-launch.hidden { display: none; }
-@keyframes comfy-launch-in { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-.comfy-launch-card { display: flex; align-items: center; gap: 11px; padding-block: 11px; padding-inline: 14px 12px; }
-.comfy-launch-glyph { font-size: 22px; line-height: 1; flex: none; }
-.comfy-launch.ready .comfy-launch-glyph,
-.comfy-launch.error .comfy-launch-glyph { animation: comfy-launch-pop .3s var(--easing, ease); }
-@keyframes comfy-launch-pop { 0% { transform: scale(.5); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
-.comfy-launch-text { flex: 1; min-width: 0; }
-.comfy-launch-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.comfy-launch-sub { font-size: 12px; color: var(--text-secondary); margin-top: 1px; }
-.comfy-launch-secs, #comfy-launch-secs { font-variant-numeric: tabular-nums; }
-.comfy-launch.ready .comfy-launch-title { color: var(--success-text); }
-.comfy-launch.error .comfy-launch-title { color: var(--error-text); }
-/* When the ready banner is a click-to-open affordance (popup was blocked). */
-.comfy-launch.clickable { cursor: pointer; }
-.comfy-launch.clickable:hover { border-color: var(--accent); }
-.comfy-launch-x {
-  flex: none; width: 26px; height: 26px; border-radius: 999px; border: none;
-  background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-}
-.comfy-launch-x:hover { background: var(--bg-hover, rgba(255,255,255,.08)); color: var(--text-primary); }
-.comfy-launch-bar { height: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); overflow: hidden; }
-.comfy-launch-bar-fill {
-  display: block; height: 100%; width: 40%; background: var(--accent);
-  border-radius: 3px; animation: comfy-launch-indet 1.15s ease-in-out infinite;
-}
-@keyframes comfy-launch-indet {
-  0%   { transform: translateX(-120%); }
-  60%  { transform: translateX(280%); }
-  100% { transform: translateX(280%); }
-}
-.comfy-launch.ready .comfy-launch-bar { background: color-mix(in srgb, var(--success) 25%, transparent); }
-.comfy-launch.ready .comfy-launch-bar-fill { width: 100%; background: var(--success); animation: none; transform: none; }
-.comfy-launch.error .comfy-launch-bar { background: color-mix(in srgb, var(--error) 25%, transparent); }
-.comfy-launch.error .comfy-launch-bar-fill { width: 100%; background: var(--error); animation: none; transform: none; }
-@media (prefers-reduced-motion: reduce) {
-  .comfy-launch { animation: none; }
-  .comfy-launch-glyph { animation: none !important; }
-  .comfy-launch-bar-fill { animation: none; width: 100%; opacity: .6; }
-}
-/* Mobile: the reconnect card and comfy banner share the top strip; keep the
-   banner clear of notch + reconnect. */
-@media (max-width: 768px) {
-  .comfy-launch { margin-top: calc(56px + env(safe-area-inset-top)); }
-}
-
 /* Lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; z-index: 300; cursor: zoom-out; }
 .lightbox img { max-width: 94vw; max-height: 94vh; border-radius: 8px; }
@@ -893,8 +834,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
      below) because a bare glyph mislabelled the theme toggle and the lock
      button, and on a family phone this rail IS the navigation; "icons only"
      would be tidier and less usable. */
-  .app[data-view="bots"] .gear-row > .gear-btn,
-  .app[data-view="bots"] .gear-row > #comfy-chip {
+  .app[data-view="bots"] .gear-row > .gear-btn {
     /* Share the row evenly, but never below a comfortable tap target. */
     flex: 1 1 0; min-width: 64px; max-width: 96px;
     height: auto; min-height: 56px; margin-top: 0;
@@ -903,7 +843,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
     border-radius: var(--radius-md); font-size: 20px; flex-shrink: 1;
   }
   /* Per-button labels — a blanket "Settings" mislabeled the theme toggle,
-     lock button and ComfyUI chip on the bots page.
+     lock button on the bots page.
      The label TEXT is not written here. It comes from data-label, which
      main.js fills from the locale files (applyRailLabels) on boot and on every
      language switch: a CSS `content:` string is English forever, and on a
@@ -911,8 +851,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
      button with no data-label, so an un-labelled button simply shows its glyph
      — which is also what ⚡ and 🩺 used to do PERMANENTLY, having been added
      without a `content:` rule of their own. */
-  .app[data-view="bots"] .gear-btn[data-label]::after,
-  .app[data-view="bots"] #comfy-chip[data-label]::after {
+  .app[data-view="bots"] .gear-btn[data-label]::after {
     content: attr(data-label);
     font-size: 10px; line-height: 1.15;
     padding-inline-start: 0;      /* the label sits UNDER the glyph now */
@@ -962,9 +901,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .bm-move-btn { width: 36px; height: 22px; font-size: 11px; }
   .lock-submit { min-height: 46px; }
   .fs-act-btn, .fs-del-btn { width: 42px; height: 42px; }
-  /* (.retry-chip button / .lock-forgot / .bm-safe-btn / .comfy-copy-btn are
-     bumped in the touch-target block at the END of the file — their base rules
-     come later in source and would override rules placed here.) */
+  /* (.retry-chip button / .lock-forgot / .bm-safe-btn are bumped in the
+     touch-target block at the END of the file — their base rules come
+     later in source and would override rules placed here.) */
 
   /* Bot Manager rows are too wide for a phone with every affordance shown:
      drop the (touch-dead) drag handle and the redundant "Change photo" button
@@ -1541,99 +1480,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .tx-badge-new { margin-inline-start: auto; font-size: 10px; color: var(--warning-text); font-weight: 700; }
 .tx-item.indb { opacity: .72; }
 
-/* ===================== ComfyUI service panel ===================== */
-.comfy-chip { position: relative; }
-.comfy-chip-glyph { pointer-events: none; }
-.comfy-dot {
-  position: absolute; bottom: 4px; inset-inline-end: 4px; width: 9px; height: 9px; border-radius: 50%;
-  border: 2px solid var(--bg-tertiary); background: var(--text-muted); transition: background .2s;
-}
-.comfy-dot.running { background: var(--success); }
-.comfy-dot.starting, .comfy-dot.stopping { background: var(--warning); animation: pulse 1.2s infinite; }
-.comfy-dot.stopped { background: var(--text-muted); }
-.comfy-dot.error { background: var(--error); box-shadow: 0 0 8px rgba(248,113,113,.7); }
-.comfy-chip.busy { opacity: .7; cursor: wait; }
-/* ComfyUI now lives in the Settings action row rather than the sidebar. Same
-   element and wiring as the old 44px chip, so it keeps .comfy-chip; this
-   modifier lays it out as a labelled row button and un-pins the status dot,
-   which would otherwise sit absolutely in the button's bottom-right corner. */
-.comfy-chip.inline { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-.comfy-chip.inline .comfy-dot { position: static; width: 8px; height: 8px; border-width: 1px; }
-
-.comfy-modal { width: min(560px, 94vw); max-height: 90vh; }
-.comfy-dirty-banner {
-  margin: 8px 18px 0; padding: 8px 12px; border-radius: var(--radius-md); font-size: 12.5px;
-  background: rgba(251,191,36,.14); color: var(--warning-text); border: 1px solid rgba(251,191,36,.35);
-}
-.comfy-status { padding: 12px 18px 4px; display: flex; flex-direction: column; gap: 6px; }
-.comfy-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 10px; }
-.comfy-row-label { color: var(--text-muted); }
-.comfy-row-val { font-weight: 600; }
-.comfy-row-val.comfy-state-running { color: var(--success-text); }
-.comfy-row-val.comfy-state-starting, .comfy-row-val.comfy-state-stopping { color: var(--warning-text); }
-.comfy-row-val.comfy-state-error { color: var(--error-text); }
-.comfy-url-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.comfy-url-link { font-size: 12px; color: var(--accent-text); word-break: break-all; flex: 1 1 auto; }
-.comfy-copy-btn {
-  width: 28px; height: 28px; border-radius: 8px; background: var(--bg-tertiary); border: 1px solid var(--border);
-  color: var(--text-secondary); flex-shrink: 0;
-}
-.comfy-copy-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-
-.comfy-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 18px 4px; }
-.comfy-actions .btn-secondary { flex: 1 1 auto; font-size: 13px; padding: 8px 10px; }
-
-/* One scroll region between the pinned header/footer — nested per-section
-   scrollers clipped content on short (phone) viewports. */
-.comfy-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
-.comfy-flags-title { font-size: 13px; font-weight: 700; color: var(--text-secondary); padding: 14px 18px 2px; flex-shrink: 0; }
-.comfy-flags-list { padding: 4px 18px 10px; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
-.comfy-flag-row { display: flex; flex-direction: column; gap: 4px; }
-.comfy-flag-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 600; }
-.comfy-flag-input {
-  background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: var(--radius-sm);
-  color: var(--text-primary); padding: 6px 9px; font-size: 13px;
-}
-.comfy-flag-input:focus { outline: none; border-color: var(--accent); }
-.comfy-flag-input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; align-self: flex-start; }
-.comfy-flag-note { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
-.comfy-unmanaged-head {
-  font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
-  letter-spacing: .03em; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border);
-}
-.comfy-unmanaged-row { flex-direction: row; align-items: center; justify-content: space-between; }
-.comfy-flag-readonly { font-size: 12.5px; color: var(--text-muted); font-family: ui-monospace, monospace; }
-
-/* ---- Workflows section ---- */
-.comfy-wf-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.comfy-wf-hint { font-size: 11.5px; font-weight: 400; color: var(--text-muted); }
-.comfy-wf-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 18px 0; }
-.comfy-wf-actions .btn-secondary { flex: 1 1 auto; font-size: 13px; padding: 8px 10px; }
-.comfy-wf-list {
-  padding: 8px 18px 2px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
-}
-.comfy-wf-row {
-  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
-  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;
-}
-.comfy-wf-info { flex: 1; min-width: 0; }
-.comfy-wf-name {
-  font-size: 13px; font-weight: 600; color: var(--text-primary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.comfy-wf-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
-.comfy-wf-empty { font-size: 12.5px; color: var(--text-muted); padding: 4px 2px; }
-
-.comfy-footer { justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.comfy-footer-save { display: flex; gap: 8px; }
-
-.comfy-logs-modal { width: min(680px, 96vw); max-height: 88vh; }
-.comfy-logs-content {
-  margin: 0; padding: 12px 16px; overflow: auto; max-height: 64vh; font-size: 12px; line-height: 1.5;
-  font-family: ui-monospace, "SF Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-word;
-  color: var(--text-secondary); background: var(--bg-tertiary);
-}
-
 /* ===================== Touch-target sizes (keep LAST) =====================
    These override base rules defined later in source than the main mobile
    media block, so they must stay at the end of the file to win the cascade. */
@@ -1641,7 +1487,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   .retry-chip button { padding: 9px 16px; }
   .lock-forgot { padding: 10px 6px; }
   .bm-safe-btn { padding: 8px 10px; }
-  .comfy-copy-btn { width: 42px; height: 42px; }
 }
 
 /* ===================== Coding terminal ===================== */
@@ -2502,8 +2347,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   .attach-preview .rm { width: 28px; height: 28px; font-size: 14px; top: -8px; inset-inline-end: -8px; }
   /* Transcript filter chips. */
   .tx-chip { padding: 9px 13px; font-size: 12.5px; }
-  /* Dismisses a banner that can hold the screen for up to 60s. */
-  .comfy-launch-x { width: 36px; height: 36px; font-size: 15px; }
 
   /* --- Settings form fields ---
      These were sized for a mouse: 26px (a reaction row's name/aliases), 33px
@@ -2558,7 +2401,6 @@ pre,
 .code-block-copy,
 code.markdown-block-art,
 .markdown-plain-text-fallback,
-.comfy-logs-content,
 .progress-panel,
 .progress-item,
 .tx-item .tx-body,
@@ -2584,12 +2426,9 @@ a.markdown-file-link > code,
 .model-pill,
 .sec-path,
 .rx-row-id,
-.comfy-url-link,
-.comfy-flag-readonly,
 .term-opts-val,
 .welcome-sub,
-.cmdk-item .sub,
-.comfy-wf-meta {
+.cmdk-item .sub {
   direction: ltr;
   unicode-bidi: isolate;
 }
@@ -2601,7 +2440,6 @@ a.markdown-file-link > code,
 .sec-field input,
 .terminal-find input,
 .term-model-custom input,
-.comfy-flag-input,
 /* Connect an AI: a base URL, an API key, an env-var name and a model id are
    all identifiers, not prose — they read left-to-right in every locale. */
 #llm-model,
@@ -2678,15 +2516,6 @@ a.markdown-file-link > code,
 
 /* --- Animation / gradient sweep direction --- */
 
-/* F55 · Indeterminate ComfyUI launch bar sweeps toward the reading end.
-   Mirrors @keyframes comfy-launch-indet (app.css L437-441). */
-@keyframes comfy-launch-indet-rtl {
-  0%   { transform: translateX(120%); }
-  60%  { transform: translateX(-280%); }
-  100% { transform: translateX(-280%); }
-}
-[dir="rtl"] .comfy-launch-bar-fill { animation-name: comfy-launch-indet-rtl; }
-
 /* F56 · Skeleton shimmer sweeps toward the reading end.
    Mirrors the 100deg gradient (L1172) and @keyframes shimmer (L1175). */
 @keyframes shimmer-rtl { to { background-position: 200% 0; } }
@@ -2703,7 +2532,6 @@ a.markdown-file-link > code,
 
 /* --- Reduced-motion parity: keep the RTL variants neutralised too --- */
 @media (prefers-reduced-motion: reduce) {
-  [dir="rtl"] .comfy-launch-bar-fill { animation: none; width: 100%; opacity: .6; }
   [dir="rtl"] .skeleton,
   [dir="rtl"] .sk-av,
   [dir="rtl"] .sk-line { animation: none; }

@@ -6,7 +6,7 @@ profiles are `web` (a browser UI on 127.0.0.1:3080) and `headless` (one task
 in, one answer out). So the DisPatch pane is built from three pieces:
 
   1. **Service control** of the `dsh web` systemd --user unit (start / stop /
-     restart / health), mirroring comfy_service.py. The pane embeds the Web UI
+     restart / health). The pane embeds the Web UI
      in an iframe when the browser can reach loopback.
   2. **Default-model switch**: reads/writes `agent-default-model` in
      `$DSH_HOME/settings.yaml`, which dsh hot-reloads. The catalog offered to the

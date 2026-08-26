@@ -19,9 +19,9 @@ async function j(url, opts = {}) {
       try { onLocked(); } catch {}
     }
     let detail = (body && (body.detail || body.error)) || r.statusText;
-    // FastAPI HTTPException detail can be an object (e.g. the comfy flags 422
-    // sends {errors:{key:msg}}, the 504 sends {detail, journal_tail}) — flatten
-    // it so toasts never show "[object Object]".
+    // FastAPI HTTPException detail can be an object (some endpoints send
+    // {errors:{key:msg}} or {detail, journal_tail}) — flatten it so toasts
+    // never show "[object Object]".
     if (detail && typeof detail === 'object') {
       if (detail.errors && typeof detail.errors === 'object') {
         detail = Object.entries(detail.errors).map(([k, v]) => `${k}: ${v}`).join('; ');
@@ -150,23 +150,6 @@ export const api = {
   uploadFile: (file, onProgress) => xhrUpload('/api/files', file, onProgress),
   deleteFile: (fid) => j(`/api/files/${fid}`, { method: 'DELETE' }),
   wipeFiles: (beforeIso) => j('/api/files/wipe', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ before: beforeIso }) }),
-
-  // ComfyUI service control
-  comfyServiceStatus: () => j('/api/comfy/service/status'),
-  comfyServiceAction: (action) => j(`/api/comfy/service/${action}`, { method: 'POST' }),
-  comfyLaunch: () => j('/api/comfy/service/launch', { method: 'POST' }),
-  comfyFlags: () => j('/api/comfy/service/flags'),
-  comfySaveFlags: (values, restart) => j('/api/comfy/service/flags', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ values, restart: !!restart }) }),
-  comfyGateway: (on) => j('/api/comfy/service/gateway', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ on }) }),
-  comfyLogs: (lines) => j(`/api/comfy/service/logs?lines=${lines || 100}`),
-
-  // ComfyUI workflow manager
-  comfyWorkflows: () => j('/api/comfy/workflows'),
-  comfyWorkflowUrl: (name) => `/api/comfy/workflows/${encodeURIComponent(name)}`,
-  // Body is the raw workflow JSON text (server re-validates + writes atomically).
-  comfyImportWorkflow: (name, text) => j(`/api/comfy/workflows/${encodeURIComponent(name)}`, { method: 'POST', headers: JSON_HEADERS, body: text }),
-  comfyDeleteWorkflow: (name) => j(`/api/comfy/workflows/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  comfyBackupWorkflows: () => j('/api/comfy/workflows/backup', { method: 'POST' }),
 
   // Reaction images (ephemeral overlay pack)
   reactions: () => j('/api/reactions'),

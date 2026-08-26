@@ -2,8 +2,9 @@
 
 The pools mint images on an image-generation host that may share its GPUs
 with an LLM server. When a large model is loaded across those GPUs it leaves
-the image backend (the image CLI / ComfyUI, which needs ~8-20 GB free and selects
-its GPU at ">= 10.0 GB free") nothing to work with, and every mint is
+the image backend (the image CLI and the REMOTE rig's ComfyUI behind it, which
+needs ~8-20 GB free and selects its GPU at ">= 10.0 GB free") nothing to work
+with, and every mint is
 refused. A tight refill loop then burns hundreds of rapid silent refusals in
 a night, which is the failure this module exists to prevent.
 
@@ -53,7 +54,8 @@ from . import config
 
 log = logging.getLogger("pool_guard")
 
-# ComfyUI's own GPU-selection threshold ("31.4 GB free >= 10.0 needed").
+# The remote rig ComfyUI's own GPU-selection threshold
+# ("31.4 GB free >= 10.0 needed"), as reported by the image CLI.
 MIN_MINT_FREE_GB = 10.0
 # Number of consecutive refill failures before we log an ERROR (the alert).
 ALERT_AFTER = 3
@@ -189,8 +191,8 @@ def _gpu_free_map(status: dict | None) -> dict[int, float]:
 def mint_gpu_free_gb() -> tuple[float, str] | None:
     """Free GB on the GPU the next mint will use, and which GPU that is.
 
-    Prefers the image CLI's own ``gpu_selected``: that is the GPU ComfyUI will
-    actually draw on, and on a multi-GPU host the one it picks can be the one
+    Prefers the image CLI's own ``gpu_selected``: that is the GPU the remote
+    rig's ComfyUI will actually draw on, and on a multi-GPU host the one it picks can be the one
     an LLM is occupying while the others sit idle — so "is there free VRAM
     somewhere" is the wrong question. Falls back to the best free GPU when
     that view can't be read. None = can't tell (fail open).

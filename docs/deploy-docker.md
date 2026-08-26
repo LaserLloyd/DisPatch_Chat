@@ -78,7 +78,7 @@ that one directory and you have backed up everything.
 
 ## What does not work in a container
 
-Be clear-eyed about this before you start. Three features of this app drive the *host
+Be clear-eyed about this before you start. Two features of this app drive the *host
 operating system*, and a container is specifically designed to stop that.
 
 ### The coding terminal — disabled
@@ -87,14 +87,6 @@ It spawns an interactive CLI on a server-side PTY and exposes it over a WebSocke
 Inside a container it would give you a shell *in the container*, which is what
 `docker exec -it dispatch bash` already does, with better isolation and no network
 exposure. `DISPATCH_TERMINAL=0` in the image; leave it there.
-
-### The ComfyUI service panel — disabled
-
-It shells out to `systemctl --user`. There is no systemd in the container, so every
-button in that panel returns an error. `DISPATCH_COMFY=0` in the image.
-
-If you run ComfyUI on the host, the panel's *service control* is what breaks; nothing
-stops you pointing a browser at ComfyUI directly.
 
 ### Agent replies — optional, and genuinely awkward
 

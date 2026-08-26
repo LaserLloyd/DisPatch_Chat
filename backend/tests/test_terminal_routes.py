@@ -1,6 +1,6 @@
 """Route-level tests for /api/terminal/* and /ws/terminal — FastAPI TestClient
 with the PTY session manager mocked (never spawns a real process). Mirrors
-test_comfy_routes.py's hermetic fixture. Run: cd backend && uv run pytest.
+the hermetic route fixture. Run: cd backend && uv run pytest.
 """
 from __future__ import annotations
 

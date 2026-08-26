@@ -18,12 +18,10 @@
          so an injected <script> still cannot run. THEY ARE WHITESPACE-EXACT:
          reindenting an inline script silently breaks the page. frontend/tests/
          csp.test.js recomputes them and fails when they drift.
-       · style-src is 'self' plus ONE hash — the <style> block of the ComfyUI
-         holding page written into a popup window (js/main.js), which inherits
-         this policy because it is opened as about:blank. No 'unsafe-inline':
-         every dynamic style in this app goes through element.style.* (CSSOM),
-         which CSP does not govern, and the handful of inline style="" attributes
-         that existed were moved into app.css.
+       · style-src is 'self' with NO hashes and no 'unsafe-inline': every
+         dynamic style in this app goes through element.style.* (CSSOM),
+         which CSP does not govern, and the handful of inline style=""
+         attributes that existed were moved into app.css.
        · img-src/media-src allow data: and blob: — inline data: pictures from
          agent markdown, and object URLs for composer previews. markdown.js
          confines data: to real image/video/audio types (see its DOMPurify hook).
@@ -35,7 +33,7 @@
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     script-src 'self' 'sha256-737X6nvcta4AdRTK/iBev34616mDyUYtk/vNSDWHzsI=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
-    style-src 'self' 'sha256-OHtUOj4BEpZAaAuMi/M8PJJTG1FgR0iicL0GQo9O8jo=';
+    style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
     connect-src 'self' ws: wss:;
@@ -112,7 +110,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=45" />
+  <link rel="stylesheet" href="/static/app.css?v=46" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=12"></script>
 </head>
@@ -527,12 +525,10 @@
           <span><strong data-i18n="settings.minimal_avatars">Minimal avatars</strong> <span data-i18n="settings.minimal_avatars_hint">— names instead of pictures in the
             sidebar, no avatars on messages (applies immediately)</span></span>
         </label>
-        <!-- ComfyUI and Recovery stay their own modals: both are full screens in
-             their own right (a service console and an export/restore flow), and
-             nesting either inside a settings pane would bury a footer of actions
-             under a second footer. -->
+        <!-- Recovery stays its own modal: it is a full screen in its own
+             right (an export/restore flow), and nesting it inside a settings
+             pane would bury a footer of actions under a second footer. -->
         <div class="bm-actions">
-          <button class="btn-secondary comfy-chip inline hidden" id="comfy-chip" title="ComfyUI — click to open, right-click or long-press for controls" aria-label="Open ComfyUI" data-i18n-attr="title=comfy.chip_title;aria-label=comfy.chip_aria"><span class="comfy-chip-glyph">🖼</span>ComfyUI<span class="comfy-dot stopped" id="comfy-dot"></span></button>
           <button class="btn-secondary" id="open-recovery" data-i18n="settings.recovery">🛟 Recovery &amp; Export</button>
         </div>
       </section>
@@ -642,62 +638,6 @@
     </div>
   </div>
   <input type="file" id="drop-input" multiple hidden />
-
-  <!-- ComfyUI service panel -->
-  <div class="modal-backdrop hidden" id="comfy-backdrop">
-    <div class="modal comfy-modal" role="dialog" aria-modal="true" aria-label="ComfyUI" data-i18n-attr="aria-label=comfy.name">
-      <header class="modal-header">
-        <h2 data-i18n="comfy.title">🖼 ComfyUI</h2>
-        <button class="icon-btn ghost" id="comfy-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
-      </header>
-      <!-- Everything between header and footer scrolls as ONE region, so short
-           viewports never clip content behind the pinned footer. -->
-      <div class="comfy-body">
-      <p class="comfy-dirty-banner hidden" id="comfy-dirty-banner" data-i18n="comfy.dirty_banner">⚠ Flags changed — restart to apply</p>
-      <div class="comfy-status" id="comfy-status"></div>
-      <div class="comfy-actions">
-        <button class="btn-secondary" id="comfy-start" data-i18n="comfy.start">▶ Start</button>
-        <button class="btn-secondary" id="comfy-restart" data-i18n="comfy.restart">⟳ Restart</button>
-        <button class="btn-secondary danger-text" id="comfy-stop" data-i18n="comfy.stop">■ Stop</button>
-        <button class="btn-secondary" id="comfy-gateway-toggle" disabled data-i18n="comfy.gateway_menu">Gateway…</button>
-        <button class="btn-secondary" id="comfy-logs-btn" data-i18n="comfy.logs_button">📜 Logs</button>
-      </div>
-      <h3 class="comfy-flags-title comfy-wf-title"><span data-i18n="comfy.workflows">Workflows</span>
-        <span class="comfy-wf-hint" id="comfy-wf-hint"></span>
-      </h3>
-      <div class="comfy-wf-actions">
-        <button class="btn-secondary" id="comfy-wf-import" data-i18n="comfy.wf_import">⬆ Import…</button>
-        <button class="btn-secondary" id="comfy-wf-backup" data-i18n="comfy.wf_backup">🗄 Back up now</button>
-      </div>
-      <div class="comfy-wf-list" id="comfy-wf-list"></div>
-      <input type="file" id="comfy-wf-file" accept=".json,application/json" hidden />
-
-      <h3 class="comfy-flags-title" data-i18n="comfy.flags">Launch flags</h3>
-      <div class="comfy-flags-list" id="comfy-flags-list"></div>
-      </div><!-- /.comfy-body -->
-      <footer class="modal-footer comfy-footer">
-        <button class="btn-secondary danger-text" id="comfy-flags-reset" data-i18n="comfy.flags_reset">Reset to known-good</button>
-        <div class="comfy-footer-save">
-          <button class="btn-secondary" id="comfy-flags-save" data-i18n="comfy.flags_save">Save</button>
-          <button class="btn-primary" id="comfy-flags-save-restart" data-i18n="comfy.flags_save_restart">Save &amp; Restart</button>
-        </div>
-      </footer>
-    </div>
-  </div>
-
-  <!-- ComfyUI logs viewer -->
-  <div class="modal-backdrop hidden" id="comfy-logs-backdrop">
-    <div class="modal comfy-logs-modal" role="dialog" aria-modal="true" aria-label="ComfyUI logs" data-i18n-attr="aria-label=comfy.logs_aria">
-      <header class="modal-header">
-        <h2 data-i18n="comfy.logs_title">📜 ComfyUI logs</h2>
-        <div class="fs-header-actions">
-          <button class="btn-secondary" id="comfy-logs-refresh" data-i18n="comfy.logs_refresh">⟳ Refresh</button>
-          <button class="icon-btn ghost" id="comfy-logs-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
-        </div>
-      </header>
-      <pre class="comfy-logs-content" id="comfy-logs-content"></pre>
-    </div>
-  </div>
 
   <!-- Coding terminal model picker -->
   <div class="modal-backdrop hidden" id="terminal-model-backdrop">
@@ -893,26 +833,6 @@
   <div id="sr-live" class="sr-only" role="log" aria-live="polite" aria-atomic="false"></div>
   <div id="sr-alert" class="sr-only" role="status" aria-live="assertive"></div>
 
-  <!-- ComfyUI launch banner: prominent, always-visible progress for the
-       "Open ComfyUI" flow (cold start can take ~60s). Complements the OS
-       desktop notification fired on ready/error. role=status + polite live
-       region announces the title transitions to screen readers; the seconds
-       counter is aria-hidden so it isn't re-read every tick. -->
-  <div class="comfy-launch hidden" id="comfy-launch" role="status" aria-live="polite">
-    <div class="comfy-launch-card">
-      <span class="comfy-launch-glyph" id="comfy-launch-glyph" aria-hidden="true">🖼</span>
-      <div class="comfy-launch-text">
-        <div class="comfy-launch-title" id="comfy-launch-title" data-i18n="comfy.launch_starting">Starting ComfyUI…</div>
-        <div class="comfy-launch-sub">
-          <span id="comfy-launch-secs" aria-hidden="true"></span>
-          <span id="comfy-launch-hint" data-i18n="comfy.launch_hint">cold start can take up to ~60s</span>
-        </div>
-      </div>
-      <button class="comfy-launch-x" id="comfy-launch-dismiss" aria-label="Dismiss" data-i18n-attr="aria-label=common.dismiss">✕</button>
-    </div>
-    <div class="comfy-launch-bar"><span class="comfy-launch-bar-fill" id="comfy-launch-bar-fill"></span></div>
-  </div>
-
   <!-- Toast + connection overlay -->
   <!-- role/aria-live so the toast is announced in place; toast() additionally
        mirrors into #sr-live / #sr-alert for assistive tech that ignores a node
@@ -972,6 +892,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=55"></script>
+  <script type="module" src="/static/js/main.js?v=56"></script>
 </body>
 </html>

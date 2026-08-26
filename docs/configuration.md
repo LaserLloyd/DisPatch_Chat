@@ -184,7 +184,6 @@ bot's daily thread.
 
 ```
 DISPATCH_TERMINAL=0     # host shell in the browser
-DISPATCH_COMFY=0        # ComfyUI service-control panel
 DISPATCH_MIRROR=0       # import an agent runner's own conversations
 ```
 
@@ -200,11 +199,11 @@ DISPATCH_TERMINAL_CONFIG=       # optional: TOML paths the model picker reads
 
 The CLI itself is external and not distributed with this project.
 
-**Read the defaults carefully: in the code all three are ON (`1`).** They are
+**Read the defaults carefully: in the code both are ON (`1`).** They are
 host-install features, so what actually turns them off for most people is the
 shipping configuration rather than the code — the container image and
-`.env.example` set all three to `0`, and the system unit sets terminal and
-ComfyUI to `0`. On a bare-metal install started by hand they are on.
+`.env.example` set both to `0`, and the system unit sets the terminal to `0`.
+On a bare-metal install started by hand they are on.
 
 **Both the terminal and the harness stay unavailable (403, and the terminal socket
 refuses) until a PIN is set** — they run code, and with no credential there is no
@@ -286,8 +285,6 @@ actually reads are the same set.
 | `DISPATCH_MIRROR_IDLE_MAX` | `60` | Ceiling the idle mirror poll ramps up to, seconds. |
 | `DISPATCH_MIRROR_HORIZON_H` | `72` | A transcript already older than this when first seen is tailed from EOF, not imported. |
 | `DISPATCH_MIRROR_KINDS` | `webchat,main` | Which session kinds to mirror. `other` adds scripted/watchdog sessions. |
-| `DISPATCH_COMFY_WORKFLOWS_DIR` | ComfyUI's own path | Where the ComfyUI workflow manager reads workflow JSON. |
-| `DISPATCH_COMFY_WORKFLOW_BACKUP_DIR` | `~/comfy/workflow-backups` | Where it writes rolling snapshots of them. |
 | `DISPATCH_GATEWAY_WS` | unset (off) | Native agent-gateway WebSocket transport: unset/`0` off, `shadow` connects and logs what it *would* deliver, `1` live. |
 | `OPENCLAW_GATEWAY_URL` | `ws://127.0.0.1:18789` | Where that transport connects. |
 | `OPENCLAW_GATEWAY_TOKEN` | unset | Its auth token. There is **no** loopback exemption on the gateway side. |

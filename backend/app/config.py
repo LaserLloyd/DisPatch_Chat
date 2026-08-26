@@ -211,16 +211,6 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-# ComfyUI workflow manager: where ComfyUI's own "Save" menu writes workflow
-# JSONs, and where DisPatch keeps rolling snapshots of them. Env-overridable;
-# tests point these at tmp dirs and must never touch the live ones.
-COMFY_WORKFLOWS_DIR = Path(env(
-    "COMFY_WORKFLOWS_DIR",
-    str(Path.home() / "comfy" / "ComfyUI" / "user" / "default" / "workflows")))
-COMFY_WORKFLOW_BACKUP_DIR = Path(env(
-    "COMFY_WORKFLOW_BACKUP_DIR",
-    str(Path.home() / "comfy" / "workflow-backups")))
-
 
 # --------------------------------------------------------------------------- #
 # Runtime settings (env-overridable)
@@ -267,9 +257,6 @@ class Settings:
     gateway_ws: str = env("GATEWAY_WS", "").strip().lower()
     # If true, a fresh thread shows a short canned greeting (no LLM call).
     greeting: bool = env("GREETING", "0") not in ("", "0", "false", "False")
-    # Gates the ComfyUI service-control panel (and, if built, the generation
-    # portal). Default on; set DISPATCH_COMFY=0 to disable + 404 the routes.
-    comfy_enabled: bool = env("COMFY", "1") not in ("0", "false", "False")
     # Gates the coding terminal (server-side PTY, full-session only).
     # Default on; set DISPATCH_TERMINAL=0 to disable + 404 the routes.
     terminal_enabled: bool = env("TERMINAL", "1") not in ("0", "false", "False")

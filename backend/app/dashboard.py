@@ -1,6 +1,6 @@
 """Operator host dashboard — the one page that answers "is this install healthy?".
 
-Shape mirrors comfy_service.py: this module is PURE. It gathers facts about the
+This module is PURE. It gathers facts about the
 host and turns them into *findings*; the routes in dashboard_routes.py own the
 HTTP mapping and the auth gate. No FastAPI in here, so every probe is testable
 with nothing but a :class:`~app.database.Database`.
@@ -509,7 +509,7 @@ async def _process() -> dict:
 # --------------------------------------------------------------------------- #
 
 # Rolling cache for the blob-store walk, so a page polling every 5s doesn't
-# re-walk the media dir every time. Same pattern as main's comfy status cache.
+# re-walk the media dir every time.
 _du_cache: dict = {"ts": 0.0, "value": None}
 
 # In-flight guard for that walk. asyncio.wait_for cancels the AWAIT, never the

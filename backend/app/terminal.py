@@ -1,7 +1,7 @@
 """Coding terminal: a single server-side PTY session running an interactive
 coding CLI, mirrored to any number of attached WebSocket clients.
 
-Mirrors comfy_service.py's shape: this module stays pure/testable (stdlib pty +
+This module stays pure/testable (stdlib pty +
 asyncio, no FastAPI here); routes in main.py compose these primitives, own the
 HTTP error mapping and the WS broadcasts.
 

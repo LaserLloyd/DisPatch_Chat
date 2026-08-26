@@ -45,7 +45,7 @@ def _patched_rig(monkeypatch, gpu_free_gb, loaded=None, selected=None):
         monkeypatch.setattr(pool_guard, "_image_cli_status", lambda: None)
     else:
         monkeypatch.setattr(pool_guard, "_image_cli_status",
-                            lambda: {"comfy": {"gpu_selected": selected}})
+                            lambda: {"comfy": {"gpu_selected": selected}})  # rig-side ComfyUI, via the image CLI
     monkeypatch.setattr(pool_guard, "_model_pinned", lambda mid: False)
     unloaded: list[str] = []
     monkeypatch.setattr(pool_guard, "_unload_model",

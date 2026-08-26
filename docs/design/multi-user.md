@@ -7,6 +7,15 @@ accounts, ahead of a public open-source release. Written against the code as of
 [← Back to the README](../../README.md) · Companion document:
 [Remote Access & Authentication Design](remote-access-and-auth.md)
 
+> **Historical note (2026-08-26).** The local ComfyUI feature was removed from
+> DisPatch entirely: this box (AMD/ROCm) cannot run ComfyUI, and ClawForge on
+> the remote rig is now the only image path. Every mention below of a ComfyUI
+> service panel, its systemd control, `_require_comfy`, `_broadcast_comfy_state`
+> or the `/api/comfy/*` routes describes code that no longer exists. The
+> analysis is left intact because the *tier* reasoning it illustrates still
+> applies to the surviving host-control surfaces (the coding terminal, the
+> harness pane).
+
 ---
 
 ## 0. Framing: what "multi-user" can and cannot mean here
