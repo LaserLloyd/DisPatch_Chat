@@ -42,8 +42,15 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import (
     auth,
@@ -58,6 +65,7 @@ from . import (
     openclaw,
     openclaw_text,
     pool_guard,
+    problem,
     reactions,
     terminal,
 )
@@ -378,8 +386,63 @@ async def lifespan(app: FastAPI):
 # /docs and /redoc would hand a sessionless caller the complete route + model
 # inventory (terminal, inject, recovery, reactions…) — exactly the unlocked
 # feature surface Safe Mode exists to hide, on a service bound to 0.0.0.0.
+#
+# The schema itself is still BUILT — it is served, gated, at /api/openapi.json
+# for a full session or an on-box machine (see openapi_schema below). An agent
+# that has to call this API cold needs the route inventory; a stranger on the
+# network still gets nothing.
 app = FastAPI(title="DisPatch Chat", version="1.0.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """RFC 9457 problem documents for machines; the old body for browsers.
+
+    See app/problem.py for why. In short: a model cannot branch on prose, so
+    every refusal a machine receives now carries a stable `code` beside the
+    unchanged `detail`. Nothing a browser sees changes shape.
+    """
+    if exc.status_code >= 400 and _wants_problem_json(request):
+        return JSONResponse(
+            problem.body(exc.status_code, exc.detail),
+            status_code=exc.status_code,
+            headers=getattr(exc, "headers", None),
+            media_type=problem.MEDIA_TYPE,
+        )
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Same treatment for FastAPI's own 422s.
+
+    `detail` keeps the full pydantic error list — that is what it always was,
+    and it is genuinely the most useful thing in the body — with the problem
+    envelope wrapped around it.
+    """
+    if _wants_problem_json(request):
+        return JSONResponse(
+            problem.body(422, jsonable_encoder(exc.errors()), code="validation_error"),
+            status_code=422,
+            media_type=problem.MEDIA_TYPE,
+        )
+    return await request_validation_exception_handler(request, exc)
+
+
+def _wants_problem_json(request: Request) -> bool:
+    """Only the machine-inbound surface, and only for a non-browser caller.
+
+    Scoped this tightly on purpose. The frontend reads `err.detail` off these
+    responses; a problem document keeps that key, but the content type change
+    is pointless for a browser and every pointless change to a shipped wire
+    format is a chance to break something for nothing.
+    """
+    try:
+        return (_is_inbound(request.method, request.url.path)
+                and not _browser_request(request))
+    except Exception:                     # a handler must never raise
+        return False
 
 
 @app.middleware("http")
@@ -540,20 +603,15 @@ async def auth_gate(request: Request, call_next):
             request.state.session = sess
             auth.touch_session(sess.token)
             return await call_next(request)
-        _ch = request.client.host if request.client else ""
-        _is_loopback = _ch in ("127.0.0.1", "::1", "::ffff:127.0.0.1") or _ch.startswith("127.")
-        # A reverse proxy in front of us (Tailscale Serve terminates TLS and
-        # forwards from loopback) makes remote tailnet callers appear local, which
-        # would silently skip the token check. Any forwarding / Serve-identity
-        # header proves the request did NOT originate from an on-box process, so
-        # force the token even when the socket peer is 127.0.0.1. Presence-based:
-        # forging one of these on a genuine local call only *tightens* the check,
-        # and a Serve-proxied caller cannot strip the headers Serve injects.
-        _proxied = bool(
-            request.headers.get("x-forwarded-for")
-            or request.headers.get("forwarded")
-            or request.headers.get("tailscale-headers-info")
-        )
+        # A reverse proxy in front of us (a tailnet Serve terminates TLS and
+        # forwards from loopback) makes remote callers appear local, which would
+        # silently skip the token check. Any forwarding / Serve-identity header
+        # proves the request did NOT originate from an on-box process, so force
+        # the token even when the socket peer is 127.0.0.1. Both tests live in
+        # _loopback_socket/_proxied_request so the health endpoint's machine
+        # branch cannot drift from this one.
+        _is_loopback = _loopback_socket(request)
+        _proxied = _proxied_request(request)
         if not _is_loopback or _proxied:
             key = request.headers.get("x-api-key") or _bearer(request) or ""
             if not cfg.api_token or not auth.verify_api_token(key):
@@ -1199,13 +1257,52 @@ def _browser_request(request: Request) -> bool:
     return bool(request.headers.get("sec-fetch-site") or request.headers.get("origin"))
 
 
+def _proxied_request(request: Request) -> bool:
+    """Did this request pass through a reverse proxy to get here?
+
+    Presence-based, and the same three headers the auth gate uses: a proxy in
+    front of us (TLS terminator, tailnet Serve) makes a REMOTE caller's socket
+    peer look like 127.0.0.1, so "the peer is loopback" only means "on this
+    box" once no forwarding header is present. Forging one of these on a
+    genuine local call can only tighten a check, never loosen one.
+    """
+    return bool(
+        request.headers.get("x-forwarded-for")
+        or request.headers.get("forwarded")
+        or request.headers.get("tailscale-headers-info")
+    )
+
+
+def _loopback_socket(request: Request) -> bool:
+    """Is the peer on this machine? See _proxied_request for the caveat."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1") or host.startswith("127.")
+
+
+def _on_box_machine(request: Request) -> bool:
+    """An on-box process (not a browser tab) calling us over loopback.
+
+    The same three-part test the machine branch of the auth gate applies:
+    loopback socket, no proxy in front, and no browser fingerprint. It grants
+    nothing on its own — callers use it to decide whether a response may carry
+    operator detail that a locked browser tab must not see.
+    """
+    return (_loopback_socket(request) and not _proxied_request(request)
+            and not _browser_request(request))
+
+
 def _bearer(request: Request) -> str | None:
     h = request.headers.get("authorization") or ""
     return h[7:].strip() if h.lower().startswith("bearer ") else None
 
 
 # Path classification for the auth gate.
-_OPEN_EXACT = {"/", "/favicon.ico", "/favicon.svg", "/manifest.webmanifest", "/api/health"}
+# Past the gate, but NOT ungated: /api/health and /api/openapi.json both decide
+# for themselves what a given caller may see (liveness for anyone, detail for a
+# full session or an on-box machine). Listing them here only means the gate
+# does not answer on their behalf.
+_OPEN_EXACT = {"/", "/favicon.ico", "/favicon.svg", "/manifest.webmanifest",
+               "/api/health", "/api/openapi.json"}
 _OPEN_PREFIXES = ("/static/",)
 _AUTH_PREFIX = "/api/auth"
 
@@ -3966,9 +4063,25 @@ async def health(request: Request):
     reconnaissance for anyone who can reach the port, so it is withheld unless
     the caller holds a full session — or no PIN is configured at all, the
     state in which the whole app is open by design.
+
+    An ON-BOX MACHINE caller gets the detail too. Monitoring is the whole
+    reason those fields exist — `avatar_snapshots_missing` says a chat is
+    showing the wrong face, `truncation_unrepaired` says replies are being
+    delivered cut short — and a cron job or a smoke script holds no session
+    and never will. Withholding them from the one caller whose job is to
+    notice made every signal here invisible to anything but a human with the
+    PIN, which is the failure mode this app keeps re-learning: a fault that
+    reports nothing looks exactly like health.
+
+    The test is the same one the auth gate's machine branch uses (loopback
+    socket, no proxy header, no browser fingerprint), so nothing reachable
+    from a browser tab widens by it — a locked tab on this very box still gets
+    the two-field body, because a browser stamps Sec-Fetch-*/Origin and a
+    remote caller is not on loopback.
     """
     cfg = auth.load()
-    detailed = bool(_session_of(request)) or not cfg.pin_set
+    detailed = (bool(_session_of(request)) or not cfg.pin_set
+                or _on_box_machine(request))
     body = {
         "status": "ok",
         # Degraded-state signals (all cached/cheap; see finding "health does
@@ -4006,6 +4119,26 @@ async def health(request: Request):
         "gateway_ws": _gateway_ws_stats(),
     })
     return body
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+async def openapi_schema(request: Request):
+    """The generated OpenAPI document — full session or on-box machine only.
+
+    /openapi.json, /docs and /redoc stay disabled: on a service bound to
+    0.0.0.0 they hand a stranger the whole route and model inventory
+    (terminal, inject, recovery, reactions), which is precisely what Safe Mode
+    exists to hide.
+
+    That reasoning never applied to a process on this box. An agent calling
+    this API cold has to be TOLD what the routes are, and the alternative to
+    serving the schema is a hand-written document that drifts from the code —
+    which is what happened, repeatedly. Same gate as the detailed health body.
+    """
+    if not (_session_of(request) or not auth.load().pin_set
+            or _on_box_machine(request)):
+        raise HTTPException(403, "Unlock for full access")
+    return JSONResponse(app.openapi())
 
 
 def _gateway_ws_stats() -> dict[str, Any] | None:
@@ -4327,7 +4460,7 @@ async def llm_connect(payload: dict = Body(...)):
     return {"bot": bot.to_admin_dict()}
 
 
-@app.get("/api/bots")
+@app.get("/api/bots", responses=problem.SAFE_MODE)
 async def get_bots(request: Request):
     """The roster as this client is allowed to see it.
 
@@ -4356,7 +4489,7 @@ async def put_bot_order(payload: UpdateBotOrderIn):
     return {"bots": data}
 
 
-@app.get("/api/bots/{bot_id}/avatar")
+@app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
 async def get_bot_avatar(request: Request, bot_id: str):
     # Safe Mode may see a SAFE bot's face by design, so mark a session-less
     # browser as decoy and then apply the per-bot rule — rather than the strict
@@ -4544,7 +4677,7 @@ def _process_avatar_upload(
     return face_name
 
 
-@app.post("/api/bots/{bot_id}/avatar")
+@app.post("/api/bots/{bot_id}/avatar", responses={**problem.MACHINE, **problem.TOO_LARGE})
 async def upload_bot_avatar(
     request: Request,
     bot_id: str,
@@ -4636,7 +4769,7 @@ async def _after_avatar_change(bot_id: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@app.get("/api/threads")
+@app.get("/api/threads", responses=problem.MACHINE)
 async def list_threads(request: Request, bot_id: str = Query(...), include_archived: bool = False):
     # Inbound-exempt for machines; a sessionless browser stays Safe Mode.
     _is_safe_mode_caller(request)
@@ -4651,7 +4784,7 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
     return {"bot_id": bot_id, "threads": out}
 
 
-@app.post("/api/threads")
+@app.post("/api/threads", responses=problem.MACHINE)
 async def create_thread(request: Request, payload: dict = Body(...)):
     # Inbound-exempt for machines; a sessionless browser stays Safe Mode
     # (decoy creation keeps its daily quota below).
@@ -4680,7 +4813,7 @@ async def create_thread(request: Request, payload: dict = Body(...)):
     return thread.model_dump()
 
 
-@app.get("/api/threads/{thread_id}")
+@app.get("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def get_thread(request: Request, thread_id: str):
     _is_safe_mode_caller(request)
     thread_id = await _canonical_thread_id(thread_id)
@@ -4829,7 +4962,7 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
 
 
 
-@app.get("/api/threads/{thread_id}/avatar")
+@app.get("/api/threads/{thread_id}/avatar", responses=problem.MACHINE)
 async def get_thread_avatar(request: Request, thread_id: str, full: bool = False):
     """The bot's face as it was when this thread started. `?full=1` for the
     full-resolution half, so a lightbox opens the SAME picture as the thumbnail
@@ -4882,7 +5015,7 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
-@app.post("/api/threads/{thread_id}/avatar")
+@app.post("/api/threads/{thread_id}/avatar", responses=problem.MACHINE)
 async def pin_thread_avatar(
     request: Request,
     thread_id: str,
@@ -4958,7 +5091,7 @@ async def pin_thread_avatar(
             "avatar_url": avatar_snapshots.url_for(thread_id, snap)}
 
 
-@app.get("/api/threads/{thread_id}/messages")
+@app.get("/api/threads/{thread_id}/messages", responses=problem.MACHINE)
 async def get_messages(request: Request, thread_id: str,
                        limit: int = Query(200, ge=1, le=500),
                        before_id: str | None = None):
@@ -4979,7 +5112,7 @@ async def get_messages(request: Request, thread_id: str,
     }
 
 
-@app.patch("/api/threads/{thread_id}")
+@app.patch("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def patch_thread(request: Request, thread_id: str, payload: dict = Body(...)):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
@@ -4998,7 +5131,7 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
     return {"ok": True}
 
 
-@app.post("/api/threads/{thread_id}/read")
+@app.post("/api/threads/{thread_id}/read", responses=problem.MACHINE)
 async def mark_read(request: Request, thread_id: str):
     """Mark a thread read (clears its unread indicator on every device)."""
     _is_safe_mode_caller(request)
@@ -5011,7 +5144,7 @@ async def mark_read(request: Request, thread_id: str):
     return {"ok": True}
 
 
-@app.get("/api/unread")
+@app.get("/api/unread", responses=problem.MACHINE)
 async def unread_summary(request: Request):
     """Threads with unread bot messages, across all bots (for sidebar dots)."""
     _is_safe_mode_caller(request)
@@ -5022,7 +5155,7 @@ async def unread_summary(request: Request):
     return {"unread": unread}
 
 
-@app.delete("/api/messages/{message_id}")
+@app.delete("/api/messages/{message_id}", responses=problem.MACHINE)
 async def delete_message_endpoint(request: Request, message_id: str):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
@@ -5158,7 +5291,7 @@ async def update_message_checklist(request: Request, message_id: str,
     return {"ok": True, "message_id": message_id, "checklist": stored}
 
 
-@app.delete("/api/threads/{thread_id}")
+@app.delete("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def delete_thread(request: Request, thread_id: str, hard: bool = False):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
@@ -5261,7 +5394,7 @@ async def _stream_upload(
     return size
 
 
-@app.post("/api/upload")
+@app.post("/api/upload", responses={**problem.MACHINE, **problem.TOO_LARGE})
 async def upload_media(request: Request, file: UploadFile = File(...)):
     """Upload a file for chat sharing.
 
@@ -5464,7 +5597,7 @@ async def file_upload(file: UploadFile = File(...)):
     return rec
 
 
-@app.get("/api/files")
+@app.get("/api/files", responses=problem.MACHINE)
 async def file_list():
     return {"files": await db.list_files()}
 
@@ -5586,7 +5719,7 @@ def _deny_agent_route_to_browser(request: Request) -> None:
         raise HTTPException(403, "Unlock for full access")
 
 
-@app.get("/api/reactions")
+@app.get("/api/reactions", responses=problem.SAFE_MODE)
 async def reactions_list(request: Request):
     """The pack as this client is allowed to see it.
 
@@ -5806,7 +5939,7 @@ async def avatar_pool_refill(request: Request, bot_id: str):
     return {"started": True, "pool": avatar_pool.status(bot_id)}
 
 
-@app.post("/api/reactions/fire")
+@app.post("/api/reactions/fire", responses={**problem.MACHINE, **problem.RATE_LIMITED})
 async def reactions_fire(request: Request, payload: FireReactionIn):
     """Pop a reaction on every connected device.
 
@@ -5990,7 +6123,7 @@ async def reaction_reseed(request: Request):
             "reactions": reactions.list_for(decoy=False)}
 
 
-@app.post("/api/inject")
+@app.post("/api/inject", responses=problem.MACHINE)
 async def inject_message(request: Request, payload: InjectIn):
     """Push a message into the chat from OpenClaw (proactive / scheduled).
 
@@ -6039,7 +6172,7 @@ async def inject_message(request: Request, payload: InjectIn):
     return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}
 
 
-@app.post("/api/daily")
+@app.post("/api/daily", responses=problem.MACHINE)
 async def ensure_daily_thread(request: Request, payload: DailyThreadIn):
     """Find-or-create today's (or a given date's) daily thread for a bot.
 
@@ -6141,7 +6274,7 @@ async def _prune_avatar_snapshots() -> None:
         log.warning("avatar snapshot prune failed", exc_info=True)
 
 
-@app.post("/api/threads/{thread_id}/messages")
+@app.post("/api/threads/{thread_id}/messages", responses=problem.MACHINE)
 async def post_message_rest(request: Request, thread_id: str, payload: dict = Body(...)):
     """REST alias for injecting a single message into a known thread.
 
