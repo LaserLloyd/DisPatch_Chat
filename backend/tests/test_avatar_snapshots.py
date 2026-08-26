@@ -499,3 +499,68 @@ def test_history_image_refuses_a_snapshot_from_another_bot(snap_env):
     r = client.get(f"/api/bots/{safe}/avatar/history/{sid}")
     assert r.status_code == 404, f"a foreign snapshot was served: {r.status_code}"
     assert client.get(f"/api/bots/{safe}/avatar/history/{sid}?full=1").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Losing a snapshot must be LOUD.
+#
+# The store is content-addressed and written once, so a file a thread points at
+# going missing is always a fault. It used to render as an ordinary broken
+# thumbnail and nothing else: no log line, no health signal, no way to tell it
+# apart from a thread that simply never had a snapshot. That silence is what
+# made a wiped store take two days to notice.
+# --------------------------------------------------------------------------- #
+
+def test_prune_refuses_an_empty_keep_set():
+    """"Keep nothing" means the caller failed to read the threads.
+
+    Obeying it deletes the whole store -- which is exactly what happened when a
+    test ran prune() against the live install with a keep-set built from one
+    fixture bot.
+    """
+    _write_avatar("a.png", b"PRECIOUS-" + uuid.uuid4().hex.encode())
+    sid = avatar_snapshots.snapshot_id(_Bot("a.png"))
+    assert avatar_snapshots.prune(set()) == 0, "an empty keep set pruned something"
+    assert avatar_snapshots.path_for(sid) is not None, \
+        "the store was emptied on an empty keep set"
+
+
+def test_missing_blobs_names_the_threads_whose_picture_is_gone():
+    class _T:
+        def __init__(self, tid, sid):
+            self.id, self.avatar_snapshot = tid, sid
+
+    _write_avatar("a.png", b"STILL-HERE-" + uuid.uuid4().hex.encode())
+    live = avatar_snapshots.snapshot_id(_Bot("a.png"))
+    threads = [_T("t-ok", live), _T("t-gone", "0123456789abcdef.png"), _T("t-none", None)]
+
+    gone = avatar_snapshots.missing_blobs(threads)
+    assert gone == [("t-gone", "0123456789abcdef.png")], gone
+
+
+def test_a_vanished_snapshot_is_reported_not_just_404ed(snap_env, caplog):
+    """Serving a thread whose blob was deleted logs it and shows up in health.
+
+    The 404 itself is correct (the frontend falls back to the live avatar); the
+    point is that the failure stops being invisible.
+    """
+    import logging
+
+    client = snap_env
+    bot = next(b.id for b in config.load_bots() if not b.safe)
+    _bot_with_avatar(bot, safe=False, data=b"DOOMED-" + uuid.uuid4().hex.encode())
+    created = client.post("/api/threads", json={"bot_id": bot}).json()
+    thread = created.get("thread", created)
+    tid, sid = thread["id"], thread["avatar_snapshot"]
+    assert avatar_snapshots.path_for(sid) is not None
+
+    before = client.get("/api/health?detailed=1").json()["avatar_snapshots_missing"]
+    avatar_snapshots.path_for(sid).unlink()          # the loss
+
+    with caplog.at_level(logging.WARNING):
+        assert client.get(f"/api/threads/{tid}/avatar").status_code == 404
+    assert any("avatar snapshot missing" in r.getMessage() for r in caplog.records), \
+        "a vanished snapshot was served as a silent 404"
+
+    after = client.get("/api/health?detailed=1").json()["avatar_snapshots_missing"]
+    assert after == before + 1, f"health did not surface the loss ({before} -> {after})"

@@ -247,9 +247,21 @@ def url_for(thread_id: str, sid: str | None) -> str:
 
 
 def prune(keep: set[str]) -> int:
-    """Delete snapshots no thread references any more. Returns the count."""
+    """Delete snapshots no thread references any more. Returns the count.
+
+    An EMPTY keep set is refused rather than obeyed. Every caller derives
+    `keep` by reading the thread table, so "keep nothing" means either a store
+    that legitimately has nothing to protect (deleting is then a no-op anyway)
+    or a caller that failed to read the threads -- and in the second case the
+    literal instruction is "delete the entire store". A prune that deletes
+    everything is never the right answer to a question nobody asked; the one
+    time this ran with a keep-set of one it took 117 snapshots with it.
+    """
     root = _dir()
     if not root.is_dir():
+        return 0
+    if not keep:
+        log.warning("refusing to prune avatar snapshots: empty keep set")
         return 0
     removed = 0
     for f in root.iterdir():
@@ -294,4 +306,22 @@ def history(bot_id: str, threads: list) -> list[dict]:
                 e["last_seen"] = created
     out = [e for e in seen.values() if path_for(e["id"]) is not None]
     out.sort(key=lambda e: e["last_seen"], reverse=True)
+    return out
+
+
+def missing_blobs(threads: list) -> list[tuple[str, str]]:
+    """(thread_id, snapshot_id) for every thread whose snapshot file is gone.
+
+    A thread pins a snapshot id in SQLite while the bytes live on disk, so the
+    two can drift: a restore that misses the store, a stray delete, a prune fed
+    a bad keep set. The visible result is a broken thumbnail, and nothing
+    anywhere said why -- the serving route just 404s and the frontend quietly
+    falls back to the live avatar. This turns that drift into something a log
+    line and /api/health can report.
+    """
+    out: list[tuple[str, str]] = []
+    for t in threads:
+        sid = getattr(t, "avatar_snapshot", None)
+        if sid and path_for(sid) is None:
+            out.append((getattr(t, "id", "?"), sid))
     return out

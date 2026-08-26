@@ -195,45 +195,58 @@ def _cheap_kdf(monkeypatch):
 # config.DATA_DIR is XDG-derived (~/.local/share/local-chat), so a test that
 # forgets to monkeypatch it writes into THE LIVE INSTALL. That is not
 # hypothetical: ten tests in test_avatar_snapshots.py had no fixture, and their
-# fixture bytes — a file containing literally b"KEEP-ME" — ended up in the
-# family app's data directory. config.AVATAR_DIR is derived from the repo
-# checkout instead, so the same tests wrote junk PNGs over the repo's avatars,
-# including a 40-byte "main-face.png".
+# fixture bytes -- a file containing literally b"KEEP-ME" -- ended up in the
+# family app's data directory, while _write_avatar dropped a 40-byte
+# "main-face.png" over the bot's real face.
 #
 # Nothing caught it, because a test writing to the wrong place still PASSES.
-# This fixture is the thing that catches it: it runs for every test and refuses
-# to let one start with either path pointing somewhere real.
+# Worse, test_prune_keeps_referenced_and_drops_orphans calls prune() with a
+# keep-set of ONE, so pointed at the live store it deletes every snapshot the
+# family's 163 threads reference -- and still reports green.
+#
+# This fixture is the thing that catches it. The rule it applies lives in
+# tests/_tmpguard.py, tested directly by tests/test_tmp_guard.py, because the
+# rule itself is what failed the first time: it inferred a "temp root" from the
+# basetemp string and mistook all of /var -- and therefore /var/home/<user> --
+# for scratch space. See that module for the full account.
 # --------------------------------------------------------------------------- #
 
 @pytest.fixture(autouse=True)
-def _no_writes_outside_tmp(tmp_path, monkeypatch):
-    import os
+def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     from pathlib import Path
+
+    from _tmpguard import is_disposable
 
     from app import config as _config
 
-    tmp_roots = (Path("/tmp"), Path(os.environ.get("PYTEST_TMPDIR", "/tmp")),
-                 Path(tmp_path).parents[-2] if len(Path(tmp_path).parents) > 1 else Path("/tmp"))
-
-    def _is_temp(p: Path) -> bool:
-        try:
-            rp = Path(p).resolve()
-        except OSError:
-            return False
-        return any(str(rp).startswith(str(Path(r).resolve())) for r in tmp_roots)
+    # Ask pytest where its scratch space actually is rather than deriving it
+    # from a path: an inferred root is what broke last time.
+    basetemp = tmp_path_factory.getbasetemp()
 
     # Default every test into an isolated directory. A test that wants its own
     # still monkeypatches DATA_DIR itself; this only decides where an
     # UNCONFIGURED test lands, and "somewhere disposable" beats "the family's
     # chat history".
-    if not _is_temp(_config.DATA_DIR):
+    if not is_disposable(_config.DATA_DIR, basetemp):
         monkeypatch.setattr(_config, "DATA_DIR", tmp_path / "data")
-    if not _is_temp(_config.AVATAR_DIR):
+    if not is_disposable(_config.AVATAR_DIR, basetemp):
         monkeypatch.setattr(_config, "AVATAR_DIR", tmp_path / "avatars")
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     (tmp_path / "avatars").mkdir(parents=True, exist_ok=True)
+
+    # Belt and braces, and the part that would have turned a silent disaster
+    # into a red test: having redirected, PROVE both paths are disposable. If
+    # the rule above is ever wrong again, every test errors here instead of
+    # quietly editing the live install.
+    for label, value in (("DATA_DIR", _config.DATA_DIR),
+                         ("AVATAR_DIR", _config.AVATAR_DIR)):
+        assert is_disposable(value, basetemp), (
+            f"config.{label} points at {value}, which is not inside pytest's "
+            f"scratch space ({basetemp}). Refusing to run: a test writing "
+            f"there would edit a real installation.")
+
     # The media-origins ledger caches in-process and is keyed off DATA_DIR,
-    # which this fixture (and most suites) just moved — drop the cache so one
+    # which this fixture (and most suites) just moved -- drop the cache so one
     # test's origins can never answer another test's dedup question.
     from app import main as _main
     _main._media_origins_reset()

@@ -315,6 +315,9 @@ async def lifespan(app: FastAPI):
     await _migrate_sanitize_stored_messages()
     # Reconcile blob storage: drop partial/orphan uploads, flag missing blobs.
     await _sweep_orphan_blobs()
+    # Same idea for the per-thread avatar store: a pinned snapshot whose file
+    # has vanished is data loss, and used to show up only as a broken image.
+    await _audit_avatar_snapshots()
     # Coding terminal: broadcast state flips (running/exited/…) to open tabs.
     # add_state_hook is idempotent, so repeated lifespans (tests) don't stack.
     terminal.session.add_state_hook(_terminal_state_changed)
@@ -3860,6 +3863,10 @@ async def health(request: Request):
         # alert counter, same count-only rule as fire failures above.
         "pool_refill_failures_24h":
             pool_guard.refill_failure_stats()["failures_24h"],
+        # Threads pinned to an avatar snapshot whose bytes are gone. Count
+        # only, same rule as above: nonzero means the store lost files and
+        # those chats are showing the wrong face.
+        "avatar_snapshots_missing": len(_missing_snapshots),
     })
     return body
 
@@ -4704,6 +4711,15 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
         # rendering the current one, and silently substituting a DIFFERENT
         # picture here would make the feature look broken in a way nobody could
         # explain ("why is Tuesday's chat showing today's face?").
+        #
+        # Those two cases are NOT the same, though, and conflating them cost
+        # two days: a thread with no snapshot is ordinary, while a thread that
+        # PINS one whose bytes have vanished is data loss. The second used to
+        # render as an unremarkable broken thumbnail. Say so, loudly and once
+        # per thread, so the store's state reaches the journal and /api/health
+        # instead of only the eye of whoever happens to open that chat.
+        if thread.avatar_snapshot:
+            _note_missing_snapshot(thread_id, thread.avatar_snapshot)
         raise HTTPException(404, "No avatar snapshot for this thread")
     if full and full_path is None:
         # Serving the FACE because the full half is missing. This answer is not
@@ -5882,6 +5898,47 @@ async def ensure_daily_thread(request: Request, payload: DailyThreadIn):
         _housekeeping_tasks.add(task)
         task.add_done_callback(_housekeeping_tasks.discard)
     return {"thread": thread.model_dump(), "created": created}
+
+
+# Threads whose pinned snapshot has no bytes on disk: {thread_id: snapshot_id}.
+# Populated by the boot audit and by any serve that finds the blob gone.
+_missing_snapshots: dict[str, str] = {}
+
+
+def _note_missing_snapshot(thread_id: str, sid: str) -> None:
+    """Record (and log once) a thread pinned to a snapshot that isn't there."""
+    if _missing_snapshots.get(thread_id) == sid:
+        return                                   # already known; don't spam
+    _missing_snapshots[thread_id] = sid
+    log.warning("avatar snapshot missing for thread %s: %s is not in the store",
+                thread_id, sid)
+
+
+async def _audit_avatar_snapshots() -> None:
+    """At boot, compare what the threads pin against what is on disk.
+
+    The store is content-addressed and written once, so a referenced file
+    disappearing is always a fault -- but nothing looked, so the first symptom
+    was a family member noticing a blank thumbnail. Checking at startup costs
+    one directory read and turns silent loss into a startup warning.
+    """
+    try:
+        threads = await db.all_threads(include_archived=True)
+        gone = await asyncio.to_thread(avatar_snapshots.missing_blobs, threads)
+        _missing_snapshots.clear()
+        for tid, sid in gone:
+            _missing_snapshots[tid] = sid
+        if gone:
+            log.warning(
+                "%d thread(s) reference an avatar snapshot that is not on disk "
+                "(%d distinct image(s)); thumbnails will fall back to the live "
+                "avatar. First few: %s",
+                len(gone), len({s for _, s in gone}), gone[:5])
+        else:
+            log.info("avatar snapshot store is complete (%d thread(s) checked)",
+                     sum(1 for t in threads if getattr(t, "avatar_snapshot", None)))
+    except Exception:
+        log.warning("avatar snapshot audit failed", exc_info=True)
 
 
 _last_snapshot_prune: str | None = None
