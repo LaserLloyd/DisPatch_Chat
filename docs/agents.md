@@ -108,6 +108,23 @@ or a `bot_id` to find-or-create that bot's daily thread. From loopback this
 needs no credential; from anywhere else it requires an API key. See
 [configuration.md](configuration.md).
 
+Three things worth knowing before you write a script against this, because each
+one is a place where a naive caller silently does the wrong thing:
+
+- **`GET /api/bots` gives an on-box caller the real roster.** A browser tab with
+  no unlocked session still gets the Safe-Mode subset — that is the two-tier
+  gate, not a bug — but a script on the host sees every visible bot, so it is a
+  fine way to discover ids.
+- **Ids are matched case-insensitively**, both `bot_id` and `thread_id`, on
+  every route: post, read back, rename, mark read, delete. The response carries
+  the canonical id; store that one. This matters when the id reaches you
+  lowercased from somewhere else (an agent session key, a log line) while the
+  row it names is mixed case.
+- **A message body over 65536 characters is refused with 422 and nothing is
+  posted.** Neither `/api/inject` nor `POST /api/threads/<id>/messages`
+  truncates, so a `200` means the whole body landed. Split long output across
+  messages rather than relying on a silent cut.
+
 ## Interactive checklist tables
 
 An agent can post a **daily routine or task list** that renders as an
