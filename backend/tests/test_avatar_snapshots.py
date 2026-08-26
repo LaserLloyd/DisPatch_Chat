@@ -112,16 +112,84 @@ def test_url_is_keyed_by_thread_not_by_hash():
     assert avatar_snapshots.url_for("t123", None) == ""
 
 
-def test_prune_keeps_referenced_and_drops_orphans():
-    _write_avatar("a.png", b"KEEP-ME")
-    _write_avatar("b.png", b"DROP-ME")
-    keep = avatar_snapshots.snapshot_id(_Bot("a.png"))
-    drop = avatar_snapshots.snapshot_id(_Bot("b.png"))
-    # Assert on OUR two files rather than a count: fixtures may have left
-    # snapshots of their own here, and prune legitimately removes those too.
-    avatar_snapshots.prune({keep})
-    assert avatar_snapshots.path_for(keep) is not None, "a referenced snapshot was pruned"
-    assert avatar_snapshots.path_for(drop) is None, "an orphan survived prune"
+def test_prune_keeps_referenced_and_drops_orphans(tmp_path, monkeypatch):
+    """Prune with the keep-set its ONLY caller actually builds.
+
+    The earlier version of this test called `prune({one_id})` and explained in
+    a comment that anything else in the directory was fair game — "prune
+    legitimately removes those too". That is true of the function and false of
+    the system: `_prune_avatar_snapshots` walks EVERY thread, adds each thread's
+    snapshot AND its `-full` sibling, then adds every current bot avatar. A
+    keep set of one never occurs unless the caller failed to read the threads.
+
+    Describing the wrong keep set is not a harmless simplification. It is the
+    shape that made a one-element keep set look like normal usage, and the day
+    a suite ran against the live install it deleted 117 referenced snapshots
+    while this test stayed green. So: an isolated store, a keep set built the
+    way production builds it, and an exact assertion on what survives.
+    """
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "AVATAR_DIR", tmp_path / "avatars")
+
+    # Two referenced avatars, each a face/full PAIR (upload and rotation both
+    # write `<stem>-face.png` beside `<stem>-full.png`), plus one orphan.
+    _write_avatar("main-face.png", b"FACE-ONE")
+    _write_avatar("main-full.png", b"FULL-ONE")
+    first = avatar_snapshots.snapshot_id(_Bot("main-face.png"))
+    _write_avatar("main-face.png", b"FACE-TWO")
+    _write_avatar("main-full.png", b"FULL-TWO")
+    second = avatar_snapshots.snapshot_id(_Bot("main-face.png"))
+    _write_avatar("gone.png", b"NOBODY-REFERENCES-ME")
+    orphan = avatar_snapshots.snapshot_id(_Bot("gone.png"))
+    assert first and second and orphan and first != second
+
+    # Exactly what _prune_avatar_snapshots assembles: every referenced id and
+    # its derived full-res name.
+    keep = set()
+    for sid in (first, second):
+        keep.add(sid)
+        keep.add(avatar_snapshots._full_name(sid))
+
+    store = tmp_path / "avatar-snapshots"
+    before = {p.name for p in store.iterdir()}
+    assert orphan in before and len(before) == 5, before   # 2 pairs + 1 orphan
+
+    removed = avatar_snapshots.prune(keep)
+
+    assert removed == 1, f"expected only the orphan to go, removed {removed}"
+    assert {p.name for p in store.iterdir()} == keep, "the store is not exactly the keep set"
+    assert avatar_snapshots.path_for(first) is not None
+    assert avatar_snapshots.path_for(second) is not None
+    # The full halves matter as much as the faces: losing one leaves the
+    # thumbnail working and the lightbox broken, which is how the last loss
+    # was mistaken for a one-bot problem.
+    assert avatar_snapshots.path_for_full(first) is not None
+    assert avatar_snapshots.path_for_full(second) is not None
+    assert avatar_snapshots.path_for(orphan) is None, "an orphan survived prune"
+
+
+def test_prune_refuses_an_empty_keep_set(tmp_path, monkeypatch):
+    """"Keep nothing" is never an instruction; it is a caller that failed.
+
+    Every keep set is derived by reading the thread table. An empty one means
+    either a store with nothing to protect (deleting is a no-op anyway) or a
+    read that returned nothing — and in that case the literal reading is
+    "delete the entire store". It happened: 117 snapshots, 163 threads showing
+    the wrong face. The refusal is the load-bearing part of prune(), so it gets
+    a test of its own rather than living only in a comment.
+    """
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "AVATAR_DIR", tmp_path / "avatars")
+    _write_avatar("a.png", b"IRREPLACEABLE")
+    sid = avatar_snapshots.snapshot_id(_Bot("a.png"))
+    store = tmp_path / "avatar-snapshots"
+    before = {p.name for p in store.iterdir()}
+    assert before
+
+    assert avatar_snapshots.prune(set()) == 0
+
+    assert {p.name for p in store.iterdir()} == before, "an empty keep set deleted files"
+    assert avatar_snapshots.path_for(sid) is not None
 
 
 # --------------------------------------------------------------------------- #

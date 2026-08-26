@@ -252,3 +252,22 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     _main._media_origins_reset()
     yield
     _main._media_origins_reset()
+
+
+@pytest.fixture(autouse=True)
+def _pin_the_autopilot_clock(monkeypatch):
+    """Stop the suite's result depending on what time it is.
+
+    Reaction autopilot fires a mood on a bot's reply unless it is night
+    (`_AUTOPILOT_NIGHT_HOURS`), so any test that asserts on how many rows a
+    turn persists passes between midnight and 07:00 and fails the rest of the
+    day — three tests in test_media_dedup.py did exactly that, and which run
+    you happened to do decided whether the suite was green.
+
+    A test suite whose answer changes with the clock is not reporting anything.
+    Default everything to a night hour (autopilot off, one row per reply);
+    test_reaction_autopilot.py pins its own hour per case, which still wins
+    because a test's own monkeypatch is applied after this fixture.
+    """
+    from app import main as _main
+    monkeypatch.setattr(_main, "_autopilot_now_hour", lambda: 3)
