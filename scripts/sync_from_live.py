@@ -73,6 +73,15 @@ HOST_TOOLS: list[tuple[str, str]] = [
 # "orphan" lines on every run — and it would become actively dangerous the day
 # the install is updated FROM this repo, because the sync would then be able to
 # copy a stale round-trip of the translations back over the originals.
+#
+# `scripts/` is repo-owned in the direction that matters here — nothing under
+# it is ever read back OUT of an install — but it is no longer true that every
+# file in it exists only in the repo. The operator's deploy tool has a
+# named-file carve-out that pushes `scripts/repair_swept_duplicates.py` INTO
+# the install, because that tool repairs the live chats.db and a backend test runs
+# it from ../../scripts/. Deliberately still absent from ALLOW above: the repo
+# is upstream for it, and a sync that could pull the install's copy back would
+# be exactly the stale round-trip the locales note warns about.
 REPO_ONLY = ("README.md", "LICENSE", "Dockerfile", "docker-compose.yml",
              "docs/", ".github/", "scripts/", "deploy/", ".env.example",
              "frontend/static/locales/", "frontend/static/dashboard.css")
