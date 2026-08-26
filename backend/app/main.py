@@ -934,6 +934,43 @@ def _strip_no_reply(text: str) -> str:
     return _NO_REPLY_RE.sub("", text).strip()
 
 
+# OpenClaw's native quote/reply directive: the runtime injects
+# "Native quote/reply: first token [[reply_to_current]]" into every agent's
+# system prompt, and some local models emit that token literally as the
+# first token of a reply. DisPatch has no parser for it, so it would render
+# as visible chat text. Strip a LEADING directive token — current-reply or
+# an explicit [[reply_to:<id>]] — plus optional surrounding whitespace: it
+# is a rendering instruction, never content.
+_REPLY_TO_CURRENT_RE = re.compile(r"^\s*\[\[reply_to_current\]\]\s*")
+_REPLY_TO_ID_RE = re.compile(r"^\s*\[\[reply_to:[^\]]+\]\]\s*")
+
+
+def _strip_reply_directive(text: str) -> str:
+    if not text or "[[" not in text:
+        return text
+    return _REPLY_TO_ID_RE.sub("", _REPLY_TO_CURRENT_RE.sub("", text)).strip()
+
+
+# The gateway WebSocket transport redacts quote/reply directives ANYWHERE in
+# the text (unanchored, case-insensitive) before its copy is delivered, while
+# the transcript files the legacy tail paths read keep the token verbatim. The
+# same reply therefore arrives as two genuinely different strings — the WS
+# copy without the token, the tail copy with it — and text-based dedup keys
+# treated them as distinct messages: both posted. Mirror the gateway's regex
+# exactly so canonicalisation erases the divergence and the two copies key
+# equal. (The anchored leading-only strip above stays: it fixes the separate
+# visible-token-at-start rendering bug, and is what the persist paths run.)
+_REPLY_DIRECTIVE_ANYWHERE_RE = re.compile(
+    r"\[\[\s*(?:reply_to_current|reply_to\s*:\s*[^\]\n]+)\s*\]\]",
+    re.IGNORECASE)
+
+
+def _strip_reply_directive_anywhere(text: str) -> str:
+    if not text or "[[" not in text:
+        return text
+    return _REPLY_DIRECTIVE_ANYWHERE_RE.sub("", text).strip()
+
+
 def _normalize_media(media: str | None) -> str | None:
     """Turn an agent-provided media reference into a URL the browser can load."""
     if not media or not isinstance(media, str):
@@ -1566,6 +1603,24 @@ def _replay_is_fresh(created_at: str | None) -> bool:
     return (datetime.now(UTC) - ts).total_seconds() <= REACTION_REPLAY_FRESH_S
 
 
+def _iso_age_seconds(created_at: str | None) -> float | None:
+    """Age of an ISO-8601 timestamp in seconds; None when absent/unparseable.
+
+    Same tolerance as :func:`_replay_is_fresh` — transcript stamps may be
+    `Z`-suffixed or naive-UTC. Callers skip a None row without treating it as
+    inside (or outside) any window.
+    """
+    if not created_at:
+        return None
+    try:
+        ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - ts).total_seconds()
+
+
 async def _persist_and_broadcast_message(
     thread_id: str, role: str, content: str,
     media_url: str | None = None, metadata: dict | None = None,
@@ -1576,7 +1631,8 @@ async def _persist_and_broadcast_message(
     if role == "assistant":
         bot_id = await _bot_of_thread(thread_id)
         content = _salvage_media_refs(
-            openclaw_text.sanitize_assistant_visible_text(_strip_no_reply(content)))
+            openclaw_text.sanitize_assistant_visible_text(
+                _strip_reply_directive(_strip_no_reply(content))))
         # `:react:<id>:` markers are the agent's way to pop a reaction image.
         # Stripped here, at the persist chokepoint, so the marker syntax can
         # never reach a chat bubble on any path.
@@ -1673,7 +1729,8 @@ async def _persist_and_stream_message(
     if role == "assistant":
         bot_id = await _bot_of_thread(thread_id)
         content = _salvage_media_refs(
-            openclaw_text.sanitize_assistant_visible_text(_strip_no_reply(content)))
+            openclaw_text.sanitize_assistant_visible_text(
+                _strip_reply_directive(_strip_no_reply(content))))
         content, fired = reactions.extract_markers(content, bot_id=bot_id)
         metadata = _demote_tool_warning(content, metadata)
     elif content and ":react:" in content.lower():
@@ -2165,7 +2222,7 @@ async def _watch_progress(
                     # and thinking stay ephemeral (live panel only).
                     if item.get("kind") == "text":
                         ft = item.get("full_text") or item.get("text") or ""
-                        if _strip_no_reply(ft).strip():
+                        if _strip_reply_directive(_strip_no_reply(ft)).strip():
                             handoff.setdefault("texts", []).append(ft)
                     slim = {k: v for k, v in item.items() if k != "full_text"}
                     await manager.broadcast(
@@ -2264,8 +2321,13 @@ def _canon_msg(s: str) -> str:
     """Canonical key for an assistant message — used for dedup across the three
     delivery paths (synchronous CLI payload, in-turn narration, post-turn
     follower). Mirrors the transforms applied at persist time (NO_REPLY strip +
-    media salvage + path-neutralised whitespace), so raw transcript text and
-    already-persisted content compare equal.
+    reply-directive strip + media salvage + path-neutralised whitespace), so
+    raw transcript text and already-persisted content compare equal. The
+    directive strip runs BOTH anchored (the persist chokepoint's rule) and
+    unanchored: the gateway WS transport redacts [[reply_to_current]] /
+    [[reply_to:<id>]] anywhere in the text before delivering, while the
+    transcript the legacy tail paths read keeps the token verbatim — the two
+    recordings of one reply must key equal or both post.
 
     Scaffolding is stripped here as well as at persist time, so a message stored
     RAW before the sanitizer existed still compares equal to the same message
@@ -2284,7 +2346,9 @@ def _canon_msg(s: str) -> str:
     third state-that-can-vanish drift, found auditing the first two.
     """
     return _media_norm(reactions.strip_markers(_salvage_media_refs(
-        openclaw_text.sanitize_assistant_visible_text(_strip_no_reply(s)),
+        openclaw_text.sanitize_assistant_visible_text(
+            _strip_reply_directive_anywhere(
+                _strip_reply_directive(_strip_no_reply(s)))),
         assume_files_exist=True)))
 
 
@@ -2345,8 +2409,18 @@ def _settle_payload(payload, narrations: list[str]) -> tuple[str, str | None]:
     return chosen, payload.media_url
 
 
+# Source-less deliveries get a second, wider dedup horizon — the trailing-run
+# scan only sees the CURRENT turn, and a legacy path can re-deliver an OLD
+# turn's text. 300s is the trade-off: generous for the double-delivery it must
+# catch (the two transports post the same reply seconds apart), tight enough
+# that a legitimately repeated line ("Done!", "No new items today.") is
+# normally turns/hours apart.
+DEDUP_RECENT_WINDOW_S = 300
+
+
 async def _is_duplicate_message(thread_id: str, text: str, *,
-                                whole_thread: bool = False) -> bool:
+                                whole_thread: bool = False,
+                                recent_window_s: float | None = None) -> bool:
     """True if this exact message was already posted *within the current turn*.
 
     Dedup must collapse the four redundant in-turn delivery sources (sync
@@ -2375,6 +2449,20 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
     (the transcript sweep, the mirror's truncation pass) applies: dedup against
     the entire thread.
 
+    ``recent_window_s`` widens the search for SOURCE-LESS deliveries: when
+    set, a matching assistant row ANYWHERE in the thread is a duplicate if it
+    was posted within the last ``recent_window_s`` seconds. The trailing run
+    above stops at the user row that opened the CURRENT turn, so it cannot see
+    an OLD turn's text — and the in-memory key set is cleared at every turn
+    start — which let a legacy re-delivery of an earlier turn (crashed-turn
+    recovery, a follower that resumed late) double-post. Five minutes is
+    generous for the double-delivery this exists to catch and tight enough
+    that a legitimately repeated line is normally turns/hours apart. Trade-off:
+    two genuinely separate identical lines inside the window collapse to one.
+    Accepted: the re-post is the failure that actually happens, and 300s
+    bounds the collateral. Deliveries WITH a source_id never take this path —
+    identity dedup is the whole answer for them.
+
     Both sides go through the same canonicalisation as persisting (NO_REPLY
     strip + media salvage) so a repaired MEDIA:/path reply compares equal to
     itself.
@@ -2395,6 +2483,15 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
             break                        # reached the row that opened the turn
         if _canon_msg(m.content or "") == norm:
             return True
+    if recent_window_s is not None:
+        msgs, _ = await db.list_messages(thread_id, limit=200)
+        for m in reversed(msgs):       # newest -> oldest (created_at, rowid)
+            age = _iso_age_seconds(m.created_at)
+            if age is not None and age > recent_window_s:
+                break                  # this row and all below: outside the window
+            if (age is not None and m.role == "assistant"
+                    and _canon_msg(m.content or "") == norm):
+                return True
     return False
 
 
@@ -2434,6 +2531,7 @@ async def _deliver_assistant_text(
     metadata: dict | None = None, media_url: str | None = None,
     stream: bool = False, source_id: str | None = None,
     created_at: str | None = None, dedup_whole_thread: bool = False,
+    dedup_recent_window: bool = True,
 ) -> MessageOut | None:
     """The single funnel every assistant message passes through.
 
@@ -2442,6 +2540,12 @@ async def _deliver_assistant_text(
     DB message), or when the thread has been deleted. Otherwise persists +
     broadcasts (streamed for the visible final reply, instant for everything
     else) and records the key so the other redundant paths won't repeat it.
+
+    ``dedup_recent_window`` gates the recent-window whole-thread check for
+    source-less deliveries (see _is_duplicate_message). Deliberate recovery
+    paths — the crashed-turn sweep — set it False: restoring a reply lost to
+    a crash may legitimately repeat an earlier turn's words, and the window
+    would eat the very message being recovered.
     """
     # IDENTITY BEATS CONTENT. When the source has a stable id, that is the
     # answer: it does not care how far back the message was (content matching
@@ -2456,7 +2560,7 @@ async def _deliver_assistant_text(
     # persisted: a transcript row that is nothing but a runtime-context block
     # sanitizes to "" and must post nothing rather than an empty bubble.
     if not openclaw_text.sanitize_assistant_visible_text(
-            _strip_no_reply(text or "")).strip() and not has_media:
+            _strip_reply_directive(_strip_no_reply(text or ""))).strip() and not has_media:
         return None
     key = _canon_msg(text) if (text or "").strip() else None
     if key:
@@ -2467,8 +2571,10 @@ async def _deliver_assistant_text(
         # failure so a transient error can't permanently drop the message.
         _mark_delivered(thread_id, key)
     try:
-        if key and await _is_duplicate_message(thread_id, text,
-                                               whole_thread=dedup_whole_thread):
+        if key and await _is_duplicate_message(
+                thread_id, text, whole_thread=dedup_whole_thread,
+                recent_window_s=(None if source_id or not dedup_recent_window
+                                 else DEDUP_RECENT_WINDOW_S)):
             return None                        # already in the DB — keep the claim
         if not await db.get_thread(thread_id):
             return None                        # thread deleted mid-flight
@@ -2945,9 +3051,13 @@ async def _import_transcript_messages(
         meta = {"followup": True} if mark_followup else None
         # _deliver_assistant_text still dedups against the trailing assistant
         # run, so a crashed-turn item that DID land before the crash is caught.
+        # The recent window is OFF here: crash recovery exists to restore a
+        # reply that may repeat an earlier turn's words ("Done." twice), and
+        # the window must not eat the message being recovered.
         msg = await _deliver_assistant_text(
             thread_id, text, metadata=meta,
-            created_at=_iso_from_transcript_ts(it.get("ts")))
+            created_at=_iso_from_transcript_ts(it.get("ts")),
+            dedup_recent_window=not in_crashed_turn)
         if msg:
             existing.add(key)
             count += 1
@@ -3681,7 +3791,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
                 text, media_url = settled[i]
                 # A payload that was ONLY the NO_REPLY token (and has no media)
                 # is the agent declining to post — persist nothing for it.
-                if not _strip_no_reply(text) and not media_url:
+                if not _strip_reply_directive(_strip_no_reply(text)) and not media_url:
                     continue
                 # Extra payloads of a multi-part reply (rare; the narration above
                 # is the usual multi-message case) collapse as "sub".
