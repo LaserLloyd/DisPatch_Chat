@@ -79,6 +79,13 @@ def _check_real_date(v: str | None) -> str | None:
     return v
 
 
+# One ceiling for one message, named once. The REST alias used to slice to this
+# number and return 200 while /api/inject 422'd on the same body — same
+# operation, two behaviours, and the silent one lost the tail of an agent's
+# report. The WS send path enforces it too.
+MESSAGE_MAX_CHARS = 65536
+
+
 class InjectIn(BaseModel):
     """Inbound message pushed BY OpenClaw (proactive / daily threads).
 
@@ -88,12 +95,12 @@ class InjectIn(BaseModel):
     bot_id: str | None = None
     thread_id: str | None = None
     role: Literal["assistant", "user", "system"] = "assistant"
-    content: str = Field(default="", max_length=65536)
+    content: str = Field(default="", max_length=MESSAGE_MAX_CHARS)
     # Alias for `content`, accepted-not-documented: `text` is the #1 caller
     # mistake (every other chat transport names the field that), and with
     # content defaulting to "" it used to persist an EMPTY bubble — the agent
     # believed it posted, the family saw a blank message. Explicit content wins.
-    text: str | None = Field(default=None, max_length=65536, exclude=True)
+    text: str | None = Field(default=None, max_length=MESSAGE_MAX_CHARS, exclude=True)
     media_url: str | None = None
     date: str | None = Field(default=None, pattern=_DATE_RE)  # YYYY-MM-DD; defaults to today
     title: str | None = Field(default=None, max_length=200)

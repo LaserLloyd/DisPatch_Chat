@@ -68,6 +68,7 @@ from .models import (
     FireReactionIn,
     GenerateReactionIn,
     InjectIn,
+    MESSAGE_MAX_CHARS,
     MessageOut,
     ReactionPatchIn,
     ReactionSettingsIn,
@@ -568,7 +569,8 @@ async def auth_gate(request: Request, call_next):
                 # this branch — and a keyless machine mutation stays
                 # fail-closed.
                 if method == "GET" and (
-                        path in ("/api/reactions", "/api/threads", "/api/unread")
+                        path in ("/api/reactions", "/api/bots", "/api/threads",
+                                 "/api/unread")
                         or _INBOUND_THREAD_ONE_RE.match(path)
                         or _INBOUND_THREAD_SUB_RE.match(path)):
                     request.state.decoy = True
@@ -1295,6 +1297,17 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if method in ("GET", "POST") and path == "/api/threads":
         return True
+    if method == "GET" and path == "/api/bots":
+        # Roster discovery. The dispatch skill has to WARN agents off this
+        # route today ("do NOT discover ids via GET /api/bots") because a
+        # sessionless machine got the Safe-Mode subset — so a model that
+        # looked up the roster the REST-natural way concluded the non-safe
+        # bots do not exist, then injected at the wrong one or gave up. A warning
+        # is not a fix for something a small model forgets under context load.
+        # Same machine-branch shape as GET /api/reactions, and the handler
+        # keeps _is_safe_mode_caller, so a browser tab with no session still
+        # sees exactly the Safe-Mode roster it always did.
+        return True
     if method in ("GET", "PATCH", "DELETE") and _INBOUND_THREAD_ONE_RE.match(path):
         return True
     if method in ("GET", "POST") and _INBOUND_THREAD_SUB_RE.match(path):
@@ -1395,6 +1408,28 @@ def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
 async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
     if _is_decoy(request):
         _deny_decoy_bot(request, await _bot_of_thread(thread_id))
+
+
+async def _canonical_thread_id(thread_id: str) -> str:
+    """The real row's id for ``thread_id``, matched case-insensitively.
+
+    The write paths (/api/inject, POST …/messages) have always resolved this
+    way because the OpenClaw gateway lowercases whole session keys, so an agent
+    reads its own thread id back as `daily-doxy-…` when the row is
+    `daily-Doxy-…`. The read/verify paths did NOT, which made the asymmetry
+    worse than either behaviour on its own: an agent could post successfully
+    and then 404 on the very next "verify, then stop" step, and a model that
+    cannot tell a phantom failure from a real one starts retrying a send that
+    already worked. Every thread-taking endpoint goes through here now.
+
+    Raises 404 for an id that matches no row, exactly as the old exact-match
+    ``get_thread`` check did — this widens what is found, never what is
+    permitted; the caller still runs its own tier checks on the canonical id.
+    """
+    canonical = await db.resolve_thread_id(thread_id)
+    if not canonical:
+        raise HTTPException(404, "Thread not found")
+    return canonical
 
 
 # Per-client decoy upload accounting: {client_ip: bytes_uploaded_today}.
@@ -2737,6 +2772,9 @@ async def _follow_session(
 
 _gateway_client: gateway_ws.GatewayClient | None = None
 _gateway_router: gateway_router.SessionRouter | None = None
+# When the router's counters started counting. They live in memory, so a zero
+# means nothing without the window it covers — see /api/health's gateway_ws.
+_gateway_ws_since: str | None = None
 _gateway_shadow_log: list[dict] = []
 GATEWAY_SHADOW_MAX = 2000        # bounded: this runs for days, memory does not
 
@@ -2881,6 +2919,7 @@ async def _gateway_ws_start() -> None:
     client._on_connect = _on_connect
     router._client = client
     _gateway_client, _gateway_router = client, router
+    globals()["_gateway_ws_since"] = now_iso()
     await client.start()
     try:
         await asyncio.wait_for(client.connected.wait(), timeout=20)
@@ -3957,8 +3996,24 @@ async def health(request: Request):
         # only, same rule as above: nonzero means the store lost files and
         # those chats are showing the wrong face.
         "avatar_snapshots_missing": len(_missing_snapshots),
+        # Gateway WebSocket transport counters. `truncation_unrepaired > 0` is
+        # a stop-the-line signal — it means replies are being DELIVERED cut
+        # short — and until now the only way to see it was a journal grep the
+        # reader had to know to run. Same for the gap/refetch counters. They
+        # are process-local and reset on restart, so `since` says what window
+        # they cover; without it a reassuring zero could just mean "restarted
+        # a minute ago".
+        "gateway_ws": _gateway_ws_stats(),
     })
     return body
+
+
+def _gateway_ws_stats() -> dict[str, Any] | None:
+    """The router's in-memory counters, or None when the transport is off."""
+    router = _gateway_router
+    if router is None:
+        return None
+    return {"mode": SETTINGS.gateway_ws, "since": _gateway_ws_since, **router.stats}
 
 
 # --------------------------------------------------------------------------- #
@@ -4274,8 +4329,15 @@ async def llm_connect(payload: dict = Body(...)):
 
 @app.get("/api/bots")
 async def get_bots(request: Request):
+    """The roster as this client is allowed to see it.
+
+    Session-exempt for machines so an on-box agent gets the TRUE roster (see
+    _is_inbound) — but _is_safe_mode_caller, not a bare _is_decoy, decides:
+    a browser tab with no full session is Safe Mode even on loopback, which is
+    what this box's own idle-locked tab is.
+    """
     bots = [b for b in config.load_bots() if b.visible]
-    if _is_decoy(request):
+    if _is_safe_mode_caller(request):
         bots = [b for b in bots if b.safe]   # Safe Mode sees only safe bots
     return {"bots": [b.to_dict() for b in bots]}
 
@@ -4621,6 +4683,7 @@ async def create_thread(request: Request, payload: dict = Body(...)):
 @app.get("/api/threads/{thread_id}")
 async def get_thread(request: Request, thread_id: str):
     _is_safe_mode_caller(request)
+    thread_id = await _canonical_thread_id(thread_id)
     thread = await db.get_thread(thread_id)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -4784,6 +4847,7 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
     Immutable by construction (the filename IS the hash of the bytes), so it is
     safe to cache hard.
     """
+    thread_id = await _canonical_thread_id(thread_id)
     thread = await db.get_thread(thread_id)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -4842,6 +4906,7 @@ async def pin_thread_avatar(
     thread's avatar URL changes with the pin (cache-busted by snapshot hash).
     """
     _deny_agent_route_to_browser(request)
+    thread_id = await _canonical_thread_id(thread_id)
     thread = await db.get_thread(thread_id)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -4898,6 +4963,7 @@ async def get_messages(request: Request, thread_id: str,
                        limit: int = Query(200, ge=1, le=500),
                        before_id: str | None = None):
     _is_safe_mode_caller(request)
+    thread_id = await _canonical_thread_id(thread_id)
     thread = await db.get_thread(thread_id)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -4917,6 +4983,7 @@ async def get_messages(request: Request, thread_id: str,
 async def patch_thread(request: Request, thread_id: str, payload: dict = Body(...)):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
+    thread_id = await _canonical_thread_id(thread_id)
     await _deny_decoy_thread(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
@@ -4935,6 +5002,7 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
 async def mark_read(request: Request, thread_id: str):
     """Mark a thread read (clears its unread indicator on every device)."""
     _is_safe_mode_caller(request)
+    thread_id = await _canonical_thread_id(thread_id)
     await _deny_decoy_thread(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
@@ -5094,6 +5162,7 @@ async def update_message_checklist(request: Request, message_id: str,
 async def delete_thread(request: Request, thread_id: str, hard: bool = False):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
+    thread_id = await _canonical_thread_id(thread_id)
     thread = await db.get_thread(thread_id)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -5756,8 +5825,16 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
     # check a typo'd thread returned ok:true while the trace silently
     # FK-failed — an agent's fire vanished with a success receipt (seen in
     # the journal 2026-08-01, documented operator confusion).
-    if payload.thread_id and await db.get_thread(payload.thread_id) is None:
-        raise HTTPException(404, "Unknown thread")
+    # Case-insensitive for the same reason the write paths are: the gateway
+    # hands agents lowercased ids, and a mistyped-case fire that 404s here
+    # reads to a small model as "bad reaction id" — it then cycles reaction
+    # names instead of fixing the thread. Resolve, then use the CANONICAL id
+    # everywhere downstream so the trace row's FK matches the real thread.
+    if payload.thread_id:
+        canonical_fire_tid = await db.resolve_thread_id(payload.thread_id)
+        if canonical_fire_tid is None:
+            raise HTTPException(404, "Unknown thread")
+        payload.thread_id = canonical_fire_tid
 
     # Every fire must claim agent kind. The claim is caller-supplied, so it
     # is not trusted on its own: fire_reaction authenticates it against the
@@ -6082,7 +6159,18 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
         role = "assistant"
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
     # silent "" default the caller's mistake persisted an empty bubble.
-    content = str(payload.get("content") or payload.get("text") or "")[:65536]
+    #
+    # Oversize REFUSES rather than truncating. This used to slice to 65536 and
+    # return 200, so an agent posting a long report got a success receipt for a
+    # message the reader saw cut off mid-sentence — a failure that reports
+    # success, and the same operation via /api/inject already 422s on
+    # InjectIn's max_length. One operation, one behaviour, and the loud one.
+    content = str(payload.get("content") or payload.get("text") or "")
+    if len(content) > MESSAGE_MAX_CHARS:
+        raise HTTPException(
+            422,
+            f"content is too long ({len(content)} chars; max {MESSAGE_MAX_CHARS}) — "
+            "split it across messages rather than letting it be cut")
     media_url = _normalize_media(payload.get("media_url"))
     if not content.strip() and not media_url:
         raise HTTPException(
@@ -7186,7 +7274,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     if not thread_id or not text:
         await _ack(ws, cmid, "rejected", "Empty message")
         return
-    if len(text) > 65536:
+    if len(text) > MESSAGE_MAX_CHARS:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "Message too long (max 64KB)."})
         await _ack(ws, cmid, "rejected", "Message too long")
