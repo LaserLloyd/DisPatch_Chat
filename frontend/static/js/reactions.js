@@ -804,20 +804,12 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
     collapseReactionRow(row);
   });
 
-  // A pending live frame (the reaction fired while this thread's messages were
-  // still loading) — expand now, and never again for this row.
-  const pend = R.pendingExpand.get(msg.id);
-  if (pend) {
-    R.pendingExpand.delete(msg.id);
-    if (Date.now() - pend.at < PENDING_EXPAND_MS) {
-      expandReactionRow(row, pend.ev, { auto: true });
-      return row;
-    }
-  }
-
-  // History / not-live: chip only. Clicking pops the picture back up in
-  // place, or tucks it away again — a toggle. (The expanded picture itself
-  // opens the lightbox, so the chip is the collapse affordance.)
+  // The chip toggles the picture back up in place, or tucks it away again.
+  // (The expanded picture itself opens the lightbox, so the chip is the
+  // collapse affordance.) This is wired BEFORE the pending-expand branch
+  // below: an auto-expand used to `return row` early and skip this, so a row
+  // that opened from a load-race had a dead chip after its 10s auto-collapse
+  // and could not be re-opened until some later renderMessages rebuilt it.
   if (rid && !decoy) {
     chip.classList.add('clickable');
     chip.title = t('reactions.show');
@@ -834,6 +826,14 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
         duration_ms: null,
       }, { auto: false });
     });
+  }
+
+  // A pending live frame (the reaction fired while this thread's messages were
+  // still loading) — expand now, and never again for this row.
+  const pend = R.pendingExpand.get(msg.id);
+  if (pend) {
+    R.pendingExpand.delete(msg.id);
+    if (Date.now() - pend.at < PENDING_EXPAND_MS) expandReactionRow(row, pend.ev, { auto: true });
   }
   return row;
 }

@@ -171,6 +171,96 @@ test('media directive inside a code span is not expanded', { skip: dom.skip }, a
   assert.match(renderMarkdown('here [[media:/media/b.png|y]] ok'), /\/media\/b\.png/);
 });
 
+// M12. The fence guard has to hold for the WHOLE fence, not just its first
+// content line. CODE_SPAN_RE's end-of-fence alternation once used a bare `$`
+// under /m, which matches the end of ANY line — so the lazy body stopped after
+// line 1 and every later line was treated as prose. The test above only ever
+// exercised a one-line fence, which is precisely the case the bug did not hit.
+//
+// Two consequences are asserted here. The obvious one: quoted directives on
+// line 2+ got expanded, so an agent explaining the syntax had its example
+// silently rewritten (and an unterminated ```python fence leaked a resolved
+// /api/media?path=… for whatever path it quoted). The structural one: expansion
+// parks raw HTML behind a placeholder, and restore() substitutes that HTML
+// wherever the token landed — inside a fence the token ends up in the copy
+// button's data-code attribute, where the `"` in class="doc-card" closes the
+// attribute early and a doc-card <a> or an autoplaying <video> becomes a DOM
+// child of <button class=code-block-copy>. Nothing escapes into chrome now.
+test('directives stay verbatim on every line of a fence, not just the first', { skip: dom.skip }, async () => {
+  await withDom();
+
+  const multi = [
+    '```',
+    'line1 [[media:/media/a.png|first]]',
+    'line2 [[media:/media/b.png|second]]',
+    'line3 [[doc:someid|quoted-doc.txt]]',
+    'line4 [[media:/tmp/fake.mp4|quoted-video]]',
+    '```',
+  ].join('\n');
+  const out = renderMarkdown(multi);
+  assert.ok(!/<img/.test(out), out);
+  assert.ok(!/<video/.test(out), out);
+  assert.ok(!/doc-card/.test(out), out);
+  for (const raw of ['[[media:/media/b.png|second]]', '[[doc:someid|quoted-doc.txt]]',
+                     '[[media:/tmp/fake.mp4|quoted-video]]']) {
+    assert.ok(out.includes(escapeForHtml(raw)), `${raw} was rewritten: ${out}`);
+  }
+  // The parked-HTML placeholder must never reach the copy button's payload.
+  const copy = out.match(/data-code="([^"]*)"/);
+  if (copy) {
+    assert.ok(!/<(a|video|div)\b/i.test(copy[1]), copy[1]);
+    assert.ok(!/doc-card|api\/media/.test(copy[1]), copy[1]);
+  }
+
+  // An UNTERMINATED fence runs to end of string, like the backend's \Z — it
+  // must not decay to "protects line 1 only".
+  const open = '```python\nprint(1)\nx = "[[media:/etc/hostname]]"\n';
+  const openOut = renderMarkdown(open);
+  assert.ok(!/api\/media/.test(openOut), openOut);
+  assert.ok(openOut.includes(escapeForHtml('[[media:/etc/hostname]]')), openOut);
+
+  // Tilde fences take the same path.
+  const tilde = '~~~\na [[media:/media/a.png]]\nb [[media:/media/b.png]]\n~~~';
+  assert.ok(!/<img/.test(renderMarkdown(tilde)), tilde);
+
+  // …and text AFTER a closed fence is still ordinary prose.
+  assert.match(renderMarkdown('```\nq [[media:/media/a.png]]\nr [[media:/media/b.png]]\n```\n\nafter [[media:/media/c.png|cap]] ok'),
+               /\/media\/c\.png/);
+});
+
+// M13. Collapsing an untagged fence behind a "JSON" <details> on brace-matching
+// alone hid ordinary code: a bash block that opens with `{`, a function body
+// pasted without its signature, array-shaped output. All of it rendered folded
+// and mislabelled. An untagged fence must PARSE as JSON to be treated as JSON;
+// a lang-tagged ```json fence still folds on the tag, malformed or not.
+test('only real JSON collapses behind the JSON details widget', { skip: dom.skip }, async () => {
+  await withDom();
+  const fence = (body, lang = '') => `\`\`\`${lang}\n${body}\n\`\`\``;
+
+  // Not JSON, must NOT collapse.
+  for (const body of ['{\n  echo hi\n  ls -la\n}', '{\n  return a + b;\n}',
+                      '[\n  ok\n  also ok\n]', '{ this is not json }']) {
+    const out = renderMarkdown(fence(body));
+    assert.ok(!/json-collapse/.test(out), `collapsed non-JSON: ${body}\n${out}`);
+  }
+
+  // Real JSON in an untagged fence still collapses.
+  assert.match(renderMarkdown(fence('{\n  "a": 1,\n  "b": [2, 3]\n}')), /json-collapse/);
+  assert.match(renderMarkdown(fence('[\n  {"a": 1},\n  {"b": 2}\n]')), /json-collapse/);
+
+  // A lang-tagged json fence collapses on the tag alone, even truncated.
+  assert.match(renderMarkdown(fence('{ "a": 1,', 'json')), /json-collapse/);
+
+  // A bare scalar is valid JSON but is not an object/array — no widget.
+  assert.ok(!/json-collapse/.test(renderMarkdown(fence('42'))));
+});
+
+// Fences render their body HTML-escaped; compare against the same encoding.
+function escapeForHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+}
+
 // M2. `[/.#?]` in ALLOWED_URI_REGEXP accepted a bare leading '/', which also
 // matched the PROTOCOL-RELATIVE form `//host/path` — a message could therefore
 // fetch from an arbitrary third-party host (a tracking beacon in a chat).

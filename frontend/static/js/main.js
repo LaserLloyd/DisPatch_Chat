@@ -4,7 +4,7 @@
 
 import { api, setOnLocked } from './api.js?v=19';
 import { ChatSocket } from './ws.js?v=7';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=20';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=21';
 import { installChecklists, applyChecklistState } from './checklist.js?v=1';
 import { el, escapeHtml, loadScript, loadStyle } from './util.js?v=10';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -20,7 +20,7 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=12';
+} from './reactions.js?v=13';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=5';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
@@ -2210,6 +2210,12 @@ function applyNimChange() {
   renderSidebar();
   renderThreads();
   renderChatHeader();
+  // #tl-avatar has exactly one painter, and it is not any of the above. Without
+  // this the thread-list header kept whatever it was last painted with: turning
+  // NIM OFF left the letter block sitting there until an unrelated repaint (a
+  // bot select, a bots WS frame) happened to come along. Same omission this
+  // function's own comment records for renderBots/renderThreadList.
+  updateThreadListHeader();
   if (state.activeThreadId) renderMessages(false);
   // The Bot Manager is built once when the modal opens and has no tab-change
   // rebuild, so a NIM flip from the Device tab left avatars and "Change photo"

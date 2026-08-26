@@ -277,6 +277,12 @@ const PLACEHOLDER_OPEN = '';
 const PLACEHOLDER_CLOSE = '';
 const PLACEHOLDER_RE = /(\d+)/g;
 
+// One pass over the parsed HTML, in order: every tag, and every placeholder
+// that sits in the text stream between tags. Group 1 = the tag's leading '/',
+// group 2 = its name, group 3 = a placeholder index. A token INSIDE a tag is
+// swallowed by the tag branch, which is how restore() spots an attribute.
+const TAG_OR_PLACEHOLDER_RE = /<(\/?)([a-zA-Z][^\s/>]*)[^>]*>|(\d+)/g;
+
 function makeHtmlParker() {
   const parked = [];
   return {
@@ -284,10 +290,42 @@ function makeHtmlParker() {
       parked.push(html);
       return `${PLACEHOLDER_OPEN}${parked.length - 1}${PLACEHOLDER_CLOSE}`;
     },
-    // Restore after parse. Placeholders can land inside an escaped entity run
-    // or a <p>; a plain string replace is correct because the token is unique.
+    // Restore after parse. A placeholder is parked at BLOCK level (wrapped in
+    // blank lines), so it normally lands between <p>s and injecting raw HTML
+    // there is exactly right.
+    //
+    // A blanket string replace is NOT safe on its own, though: if a token ever
+    // lands inside a tag (an attribute value) or inside a <code>/<pre> body,
+    // substituting unescaped HTML breaks out of that attribute and reparents
+    // real elements — a <video> ended up as a child of the copy button, whose
+    // autoplay then fetched the quoted path for real. DOMPurify runs after this
+    // and strips scripts, so it was never stored XSS, but the DOM was corrupt.
+    // The fence-regex fix removed the only known way to get there; this keeps
+    // it structurally impossible rather than merely unreached. In those two
+    // contexts the parked HTML is restored ESCAPED: visible, inert, and an
+    // obvious symptom instead of silent corruption.
     restore(rendered) {
-      return rendered.replace(PLACEHOLDER_RE, (m, i) => parked[Number(i)] ?? '');
+      if (!rendered) return rendered;
+      const take = (i) => parked[Number(i)] ?? '';
+      let out = '';
+      let pos = 0;
+      let codeDepth = 0;
+      TAG_OR_PLACEHOLDER_RE.lastIndex = 0;
+      for (let m; (m = TAG_OR_PLACEHOLDER_RE.exec(rendered)) !== null;) {
+        out += rendered.slice(pos, m.index);
+        pos = m.index + m[0].length;
+        if (m[3] !== undefined) {              // a placeholder in the text stream
+          out += codeDepth > 0 ? escapeHtml(take(m[3])) : take(m[3]);
+          continue;
+        }
+        const tag = (m[2] || '').toLowerCase();
+        if (tag === 'code' || tag === 'pre') codeDepth += m[1] ? -1 : 1;
+        if (codeDepth < 0) codeDepth = 0;
+        // A token inside the tag itself is inside an attribute value.
+        out += m[0].replace(PLACEHOLDER_RE, (_, i) => escapeHtml(take(i)));
+      }
+      return out + rendered.slice(pos).replace(
+        PLACEHOLDER_RE, (_, i) => (codeDepth > 0 ? escapeHtml(take(i)) : take(i)));
     },
   };
 }
@@ -299,7 +337,14 @@ function makeHtmlParker() {
 // (and, because the expansion inserts blank lines, it silently BREAKS an inline
 // backtick span so the image actually renders — how an agent's inject-result echoes
 // used to leak pictures into the gateway mirror thread). Skip code spans first.
-const CODE_SPAN_RE = /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|$))|(`+)(?:(?!\3)[\s\S])*?\3/gm;
+// The fence alternation ends at its closing line OR at end of STRING. That
+// second branch must be `(?![\s\S])` — a bare `$` under /m matches the end of
+// ANY line, so the lazy body stops at the end of the FIRST content line and
+// everything from line 2 down is treated as outside-code (quoted directives
+// get expanded, and a parked placeholder lands inside the copy button's
+// data-code attribute). The backend this mirrors uses `\Z` for exactly this
+// reason; see openclaw_text.CODE_SPAN_RE.
+const CODE_SPAN_RE = /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\2[ \t]*$|(?![\s\S])))|(`+)(?:(?!\3)[\s\S])*?\3/gm;
 
 // Apply fn to the non-code segments of text; code spans/fences pass through
 // verbatim. Mirrors backend/app/openclaw_text.py sub_outside_code().
@@ -468,6 +513,20 @@ export function decodeCopyPayload(value, encoding) {
   } catch { return value; }
 }
 
+// Cheap shape check first so a large non-JSON block never reaches JSON.parse.
+// Bounded because a message can carry a very big fence and this runs per block.
+const JSON_SNIFF_MAX = 512 * 1024;
+function isParseableJson(trimmed) {
+  if (!trimmed || trimmed.length > JSON_SNIFF_MAX) return false;
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (!((first === '{' && last === '}') || (first === '[' && last === ']'))) return false;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed !== null && typeof parsed === 'object';
+  } catch { return false; }
+}
+
 // `code` carries the fence's trailing newline (markdown-it keeps it, marked
 // strips it) so the line count and copy payload match upstream exactly.
 function renderCodeBlock(code, lang, { copyText } = {}) {
@@ -497,10 +556,17 @@ function renderCodeBlock(code, lang, { copyText } = {}) {
   // const temporal dead zone, so renderCodeBlock threw ReferenceError on EVERY
   // fenced block: code degraded to plain text and block-art broke the whole
   // message. (Regression from the initial release; caught in review.)
+  // An UNTAGGED fence has to actually parse as JSON before it is treated as
+  // JSON. Brace-matching alone is a shape test, and plenty of non-JSON has that
+  // shape: a bash block that opens with `{`, a C/Rust/JS function body pasted
+  // without its signature, array-ish command output. Those were being hidden
+  // behind a collapsed widget labelled "JSON", so the reader saw a folded
+  // container over code that is not JSON and never opens by habit. A
+  // lang-tagged ```json fence still collapses on the tag alone — that is the
+  // author saying what it is, and it should fold even when it is truncated or
+  // malformed.
   const trimmed = code.trim();
-  const looksJson = lang === 'json' ||
-    (!lang && ((trimmed.startsWith('{') && trimmed.endsWith('}'))
-               || (trimmed.startsWith('[') && trimmed.endsWith(']'))));
+  const looksJson = lang === 'json' || (!lang && isParseableJson(trimmed));
   if (looksJson) {
     const lines = code.split('\n').length;
     const label = lines > 1 ? `JSON &middot; ${lines} lines` : 'JSON';
