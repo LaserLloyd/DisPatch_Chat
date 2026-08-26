@@ -138,7 +138,15 @@
     "announce_reply": "{name} hat geantwortet: {text}",
     "view_raw": "Rohtext anzeigen",
     "image_alt": "Bild",
-    "fullsize_alt": "Bild in voller Größe"
+    "fullsize_alt": "Bild in voller Größe",
+    "code_wrap": "Lange Zeilen umbrechen",
+    "code_lang_detected": "Sprache automatisch erkannt",
+    "announce_responding": "{name} antwortet …",
+    "callout_note": "Hinweis",
+    "callout_tip": "Tipp",
+    "callout_important": "Wichtig",
+    "callout_warning": "Warnung",
+    "callout_caution": "Achtung"
   },
   "progress": {
     "hint_show": "Arbeit zeigen ▸",

@@ -136,7 +136,15 @@
     "announce_reply": "{name} 回复：{text}",
     "view_raw": "查看原文",
     "image_alt": "图片",
-    "fullsize_alt": "原图"
+    "fullsize_alt": "原图",
+    "code_wrap": "折行显示长行",
+    "code_lang_detected": "语言为自动识别",
+    "announce_responding": "{name} 正在回复…",
+    "callout_note": "注意",
+    "callout_tip": "提示",
+    "callout_important": "重要",
+    "callout_warning": "警告",
+    "callout_caution": "小心"
   },
   "progress": {
     "hint_show": "显示过程 ▸",

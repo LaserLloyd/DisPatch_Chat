@@ -140,7 +140,15 @@
     "announce_reply": "{name} respondeu: {text}",
     "view_raw": "Ver em bruto",
     "image_alt": "imagem",
-    "fullsize_alt": "Imagem em tamanho real"
+    "fullsize_alt": "Imagem em tamanho real",
+    "code_wrap": "Quebrar linhas longas",
+    "code_lang_detected": "Linguagem detectada automaticamente",
+    "announce_responding": "{name} está respondendo…",
+    "callout_note": "Nota",
+    "callout_tip": "Dica",
+    "callout_important": "Importante",
+    "callout_warning": "Aviso",
+    "callout_caution": "Cuidado"
   },
   "progress": {
     "hint_show": "ver o trabalho ▸",

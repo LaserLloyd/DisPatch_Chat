@@ -1913,6 +1913,71 @@ body.terminal-active #collapse-threads { display: none; }
 /* The wrapper owns the frame, so the inner <pre> drops its own. */
 .code-block-wrapper pre { margin: 0; border: 0; border-radius: 0; background: transparent; }
 
+/* An auto-DETECTED language is marked as a guess, not stated as a fact:
+   highlight.js decides from the text, and on a five-line block it is often
+   wrong. Dimmer, italic, and it carries a title explaining itself. */
+.code-block-lang--detected { opacity: .65; font-style: italic; }
+
+/* Header actions: wrap toggle + copy, grouped so the language badge keeps the
+   far edge to itself. */
+.code-block-actions { display: inline-flex; align-items: center; gap: 2px; }
+.code-block-wrap {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8b949e;   /* fixed-dark chrome, same as copy — the card is always dark */
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.code-block-wrap:hover { background: rgba(255,255,255,.08); color: #e6edf3; border-color: rgba(255,255,255,.15); }
+.code-block-wrap:focus-visible { outline: 2px solid #a78bfa; outline-offset: 1px; }
+.code-block-wrap[aria-pressed="true"] {
+  background: rgba(167,139,250,.18);
+  color: #d8ccff;
+  border-color: rgba(167,139,250,.35);
+}
+/* The toggle itself. `overflow-wrap: anywhere` as well as pre-wrap, because a
+   base64 blob or a 400-character URL has no whitespace to break at and would
+   otherwise still push the block sideways. */
+.code-block-wrapper.wrapped pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-block-wrapper.wrapped pre { overflow-x: hidden; }
+
+/* ---------------------------------------------------------------------------
+   GitHub-style callouts (> [!NOTE] and friends).
+   Agents write this syntax constantly — it is what every README taught them —
+   and until now `[!WARNING]` rendered as the literal text of a quote's first
+   line, so the one marker meant to stop a reader skimming past was the part
+   that looked like a mistake. Colour is a bar and a label, never a background
+   wash: these appear inside chat bubbles that already carry a background, and
+   two tinted surfaces stacked read as a rendering fault.
+   --------------------------------------------------------------------------- */
+.md-callout {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-inline-start: 3px solid var(--callout-color, var(--border));
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--callout-color, transparent) 7%, transparent);
+}
+.md-callout__label {
+  margin: 0 0 4px;
+  font-weight: 600;
+  font-size: .92em;
+  color: var(--callout-color, var(--text-secondary));
+}
+.md-callout > :last-child { margin-bottom: 0; }
+.md-callout--note      { --callout-color: #4493f8; }
+.md-callout--tip       { --callout-color: #3fb950; }
+.md-callout--important { --callout-color: #ab7df8; }
+.md-callout--warning   { --callout-color: #d29922; }
+.md-callout--caution   { --callout-color: #f85149; }
+
 /* JSON collapse — the payloads that used to unroll as walls of text. */
 details.json-collapse {
   margin: 10px 0;

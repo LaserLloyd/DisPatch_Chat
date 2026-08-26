@@ -138,7 +138,15 @@
     "announce_reply": "{name} replied: {text}",
     "view_raw": "View raw",
     "image_alt": "image",
-    "fullsize_alt": "Full-size image"
+    "fullsize_alt": "Full-size image",
+    "code_wrap": "Wrap long lines",
+    "code_lang_detected": "Language detected automatically",
+    "announce_responding": "{name} is responding…",
+    "callout_note": "Note",
+    "callout_tip": "Tip",
+    "callout_important": "Important",
+    "callout_warning": "Warning",
+    "callout_caution": "Caution"
   },
   "progress": {
     "hint_show": "show work ▸",

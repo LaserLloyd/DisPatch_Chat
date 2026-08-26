@@ -136,7 +136,15 @@
     "announce_reply": "{name} の返信: {text}",
     "view_raw": "元のテキストを表示",
     "image_alt": "画像",
-    "fullsize_alt": "原寸大の画像"
+    "fullsize_alt": "原寸大の画像",
+    "code_wrap": "長い行を折り返す",
+    "code_lang_detected": "言語は自動判定です",
+    "announce_responding": "{name} が応答しています…",
+    "callout_note": "メモ",
+    "callout_tip": "ヒント",
+    "callout_important": "重要",
+    "callout_warning": "警告",
+    "callout_caution": "注意"
   },
   "progress": {
     "hint_show": "途中経過を表示 ▸",

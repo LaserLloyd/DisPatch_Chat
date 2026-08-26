@@ -68,6 +68,9 @@ const DYNAMIC = [
   { re: /^unit\.(b|kb|mb|gb|tb|pb)$/, built: 'i18n.js  t(`unit.${u}`)' },
   // js/dashboard.js  paintBanner():  T(`dash.count_${lv}`)
   { re: /^dash\.count_(ok|warn|fail)$/, built: 'dashboard.js  T(`dash.count_${lv}`)' },
+  // js/markdown.js  blockquote():  t(`md.callout_${kind}`), kind from CALLOUT_RE
+  { re: /^msg\.callout_(note|tip|important|warning|caution)$/,
+    built: 'markdown.js  t(`msg.callout_${kind}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {

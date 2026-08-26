@@ -4,7 +4,7 @@
 
 import { api, setOnLocked } from './api.js?v=19';
 import { ChatSocket } from './ws.js?v=7';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=21';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=22';
 import { installChecklists, applyChecklistState } from './checklist.js?v=1';
 import { el, escapeHtml, loadScript, loadStyle } from './util.js?v=10';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -169,7 +169,7 @@ const dom = {};
  // Safe-Mode companions panel (the gear when locked)
  'companions-backdrop', 'comp-list', 'comp-close', 'comp-more',
  // Redesign 2026: status, search, recovery, transcript bridge, a11y
- 'conn-dot', 'sb-count', 'sr-live', 'sr-alert', 'search-btn',
+ 'conn-dot', 'sb-count', 'sr-live', 'sr-status', 'sr-alert', 'search-btn',
  'search-backdrop', 'search-close', 'search-input', 'search-results',
  'open-recovery', 'recover-backdrop', 'recover-close', 'recover-all',
  'browse-sessions', 'recover-result', 'recover-done',
@@ -484,8 +484,8 @@ function setConnected(ok) {
 }
 
 // Screen-reader announcements: new/streamed messages politely, errors assertively.
-function announce(text, assertive = false) {
-  const node = assertive ? dom['sr-alert'] : dom['sr-live'];
+function announce(text, assertive = false, region = 'sr-live') {
+  const node = assertive ? dom['sr-alert'] : dom[region];
   if (!node || !text) return;
   // Toggling content forces AT to re-read even on identical text.
   node.textContent = '';
@@ -1370,8 +1370,31 @@ function refreshTyping() {
   const existing = box.querySelector('.typing');
   // Never show the dots while a reply is actively streaming in.
   const want = !!state.thinking[state.activeThreadId] && !box.querySelector('.msg.streaming');
-  if (want && !existing) { box.append(typingEl()); if (isNearBottom()) scrollToBottom(); }
-  else if (!want && existing) existing.remove();
+  if (want && !existing) {
+    box.append(typingEl());
+    if (isNearBottom()) scrollToBottom();
+    // The animated dots are the sighted reader's "it heard you". Nothing said
+    // so for a screen reader: the next announcement was the finished reply,
+    // which for a slow local model is a minute of silence after pressing
+    // send. Its own short announcement, separate from the reply's — WCAG
+    // 4.1.3, and the reason the content region is NOT reused for it.
+    announceResponding();
+  } else if (!want && existing) {
+    existing.remove();
+    // Empty the status region when the wait ends, so a reader who tabs back to
+    // it later is not told something is still in progress that finished long
+    // ago. aria-atomic + empty text announces nothing.
+    if (dom['sr-status']) dom['sr-status'].textContent = '';
+  }
+}
+
+function announceResponding() {
+  const bot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
+  const who = (bot && bot.name) ? bot.name : t('common.assistant');
+  // 'sr-status', not the message log: this is a transient state, and
+  // filing it into the transcript region leaves a reader re-reading
+  // "X is responding" between every pair of real messages.
+  announce(t('msg.announce_responding', { name: who }), false, 'sr-status');
 }
 
 function appendErrorBubble(text, threadId) {

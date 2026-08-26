@@ -110,7 +110,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=46" />
+  <link rel="stylesheet" href="/static/app.css?v=47" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=12"></script>
 </head>
@@ -829,8 +829,14 @@
     </div>
   </div>
 
-  <!-- Screen-reader live regions: new/streamed messages (polite) + errors (assertive) -->
+  <!-- Screen-reader live regions. Three, not one, and the split is the point:
+       role="log" accumulates a transcript (each finished reply, announced once
+       — never per streamed token, which would read the same sentence forty
+       times); role="status" carries the transient "someone is replying" note,
+       which must NOT be filed into that transcript; assertive is reserved for
+       errors, because interrupting a reader mid-sentence has to be earned. -->
   <div id="sr-live" class="sr-only" role="log" aria-live="polite" aria-atomic="false"></div>
+  <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <div id="sr-alert" class="sr-only" role="status" aria-live="assertive"></div>
 
   <!-- Toast + connection overlay -->
@@ -892,6 +898,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=57"></script>
+  <script type="module" src="/static/js/main.js?v=58"></script>
 </body>
 </html>

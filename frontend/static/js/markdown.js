@@ -121,6 +121,12 @@ export function toPlainPreview(md) {
   // Block markers at the start of a line: heading, quote, list bullet,
   // ordered-list number, task-list checkbox, horizontal rule.
   s = s.replace(/^[ \t]*#{1,6}[ \t]+/gm, '');
+  // A callout marker is a LABEL, not words: `> [!WARNING]` on its own line
+  // left the preview reading "[!WARNING] Deploying this…", which is the
+  // syntax the bubble now renders as a panel. Drop the marker here too, or
+  // the thread list keeps showing the reader the markup.
+  s = s.replace(/^[ \t]*>[ \t]*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*$/gim, ' ');
+  s = s.replace(/^[ \t]*>[ \t]*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*/gim, '');
   s = s.replace(/^[ \t]*>[ \t]?/gm, '');
   s = s.replace(/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, '');
   s = s.replace(/^[ \t]*(?:[-*_][ \t]*){3,}$/gm, ' ');
@@ -460,7 +466,10 @@ function highlightCode(code, lang) {
     if (!norm && code.trim() && window.hljs) {
       const subset = HLJS_SUBSET.filter((l) => hljs.getLanguage(l));
       const auto = hljs.highlightAuto(code, subset);
-      if (auto.relevance >= 2) return { html: auto.value, lang: norm };
+      // Report what it decided the language WAS, so the header can say so.
+      // The `cls` the caller builds still keys off the author's tag only —
+      // upstream parity — so this widens the badge and nothing else.
+      if (auto.relevance >= 2) return { html: auto.value, lang: auto.language || norm };
     }
   } catch { /* fall through to escaped */ }
   return { html: escapeHtml(code), lang: norm };
@@ -532,21 +541,43 @@ function isParseableJson(trimmed) {
 function renderCodeBlock(code, lang, { copyText } = {}) {
   const art = isBlockArt(code);
   const copy = copyText ?? (code.endsWith('\n') ? code.slice(0, -1) : code);
+  let detected = '';
   const codeHtml = art
     ? `<pre><code class="markdown-block-art">${escapeHtml(code)}</code></pre>`
     : (() => {
-        const { html } = highlightCode(code, lang);
+        const { html, lang: resolved } = highlightCode(code, lang);
+        detected = resolved || '';
         const cls = [html.includes('hljs-') ? 'hljs' : '', lang ? `language-${lang}` : '']
           .filter(Boolean).join(' ');
         return `<pre><code${cls ? ` class="${escapeHtml(cls)}"` : ''}>${html}</code></pre>`;
       })();
-  const langLabel = lang ? `<span class="code-block-lang">${escapeHtml(lang)}</span>` : '';
+  // The badge now also names a language marked did NOT tag but the highlighter
+  // recognised (`detected` below), so an untagged fence that got highlighted
+  // stops claiming to be prose. It is marked as detected rather than declared,
+  // because auto-detection on a short block is a guess and labelling a guess
+  // as fact is how a reader ends up trusting the wrong grammar.
+  const shown = lang || (art ? '' : detected);
+  const langLabel = shown
+    ? `<span class="code-block-lang${lang ? '' : ' code-block-lang--detected'}"` +
+      `${lang ? '' : ` title="${escapeHtml(t('msg.code_lang_detected'))}"`}>` +
+      `${escapeHtml(shown)}</span>`
+    : '';
   const dataCode = art ? BLOCK_ART_CODE_PREFIX + JSON.stringify(copy) : copy;
   const encAttr = art ? ` data-code-encoding="${BLOCK_ART_ENCODING}"` : '';
+  // Wrap toggle. A long unbroken line — a stack trace, a URL, a base64 blob —
+  // is the normal shape of what an agent posts, and on a phone the horizontal
+  // scroll inside a bubble that is itself in a scrolling column is close to
+  // unusable. Purely visual, per block, no state to persist: the class is
+  // toggled on the wrapper by the same delegated handler that owns Copy.
+  const wrapBtn = art ? '' :
+    `<button type="button" class="code-block-wrap" aria-pressed="false" ` +
+    `title="${escapeHtml(t('msg.code_wrap'))}" aria-label="${escapeHtml(t('msg.code_wrap'))}">` +
+    `<span class="code-block-wrap__glyph" aria-hidden="true">↵</span></button>`;
   const header = `<div class="code-block-header">${langLabel}` +
+    `<span class="code-block-actions">${wrapBtn}` +
     `<button type="button" class="code-block-copy" data-code="${escapeHtml(dataCode)}"${encAttr} aria-label="Copy code">` +
     `<span class="code-block-copy__idle">${escapeHtml(t('msg.copy'))}</span>` +
-    `<span class="code-block-copy__done">${escapeHtml(t('msg.copied'))}</span></button></div>`;
+    `<span class="code-block-copy__done">${escapeHtml(t('msg.copied'))}</span></button></span></div>`;
   const body = `<div class="code-block-wrapper">${header}${codeHtml}</div>`;
   // JSON collapses behind a <details> — upstream's rule, and the thing the operator
   // noticed wasn't collapsing: a lang-tagged json fence OR an untagged fence
@@ -593,6 +624,18 @@ function renderChecklist(md) {
   return `<div class="checklist-widget">${inner}</div>`;
 }
 
+// GitHub's five callout kinds, and only those five: an open-ended list would
+// mean any bracketed first word silently changed how a quote renders.
+// Matched against the PARSED html, because that is what the blockquote
+// renderer receives — `[` is not entity-escaped, and marked turns the line
+// break after the marker into either a <br> or a newline depending on the
+// source, so both are optional here.
+const CALLOUT_RE =
+  /^\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>\s*)?/i;
+const CALLOUT_ICONS = {
+  note: 'ℹ️', tip: '💡', important: '❗', warning: '⚠️', caution: '🛑',
+};
+
 // --- marked renderer overrides (Control UI parity) -------------------------
 let _rendererReady = false;
 function ensureRenderer() {
@@ -638,6 +681,31 @@ function ensureRenderer() {
     },
     // Upstream renders <s>; marked defaults to <del>.
     del(token) { return `<s>${this.parser.parseInline(token.tokens)}</s>`; },
+    // GitHub-style callouts: a blockquote whose first line is `[!NOTE]` (or
+    // TIP / IMPORTANT / WARNING / CAUTION) becomes a labelled panel.
+    //
+    // Worth having because it is what agents already write. This syntax comes
+    // out of every README and every model that has read one, and before this
+    // it rendered as a quote whose first line was a literal `[!WARNING]` —
+    // i.e. the one marker meant to make a warning impossible to skim past was
+    // the part that looked like a typo. A ship/hold verdict or a "this will
+    // delete data" note now reads as one.
+    blockquote(token) {
+      const inner = this.parser.parse(token.tokens);
+      const m = inner.match(CALLOUT_RE);
+      if (!m) return `<blockquote>${inner}</blockquote>`;
+      const kind = m[1].toLowerCase();
+      // Drop the marker, keep the paragraph it opened, and drop that paragraph
+      // entirely if the marker was the whole of it.
+      const body = inner.replace(CALLOUT_RE, '<p>').replace(/^<p>\s*<\/p>/, '');
+      // role="note", not "alert": these are authored asides in a message that
+      // has already arrived. An alert role interrupts a screen reader
+      // mid-sentence, which is wrong for text nobody is being warned about in
+      // real time. The label carries the meaning.
+      return `<div class="md-callout md-callout--${kind}" role="note">` +
+        `<p class="md-callout__label"><span aria-hidden="true">${CALLOUT_ICONS[kind]}</span> ` +
+        `${escapeHtml(t(`msg.callout_${kind}`))}</p>${body}</div>`;
+    },
   };
   marked.use({ renderer });
 }
@@ -691,6 +759,11 @@ const ALLOWED_ATTR = ['checked', 'class', 'disabled', 'href', 'rel', 'target', '
   'start', 'src', 'alt', 'data-code', 'data-code-encoding', 'data-file-line',
   'data-file-path', 'type', 'aria-label', 'loading', 'controls', 'muted', 'loop',
   'playsinline', 'preload', 'poster', 'download', 'open',
+  // The wrap toggle's state, and the callout panel's role/hidden-icon markup.
+  // DOMPurify drops any attribute not named here, so a button whose pressed
+  // state never survived sanitization would report "off" to a screen reader
+  // forever while visibly being on.
+  'aria-pressed', 'aria-hidden', 'role',
   // marked emits `<td align="center">` for a `|:-:|` column; without it here
   // every table rendered left-aligned no matter what the author asked for.
   'align'];
@@ -703,7 +776,7 @@ const ALLOWED_ATTR = ['checked', 'class', 'disabled', 'href', 'rel', 'target', '
 // that check while href/src/poster stay fully URI-validated.
 const URI_SAFE_ATTR = ['type', 'start', 'controls', 'muted', 'loop', 'playsinline',
   'preload', 'loading', 'download', 'open', 'checked', 'disabled', 'rel', 'target',
-  'aria-label', 'data-code-encoding', 'align'];
+  'aria-label', 'data-code-encoding', 'align', 'aria-pressed', 'aria-hidden', 'role'];
 
 function sanitize(html, noMedia) {
   if (window.DOMPurify) {
@@ -972,6 +1045,15 @@ export function installMarkdownHandlers(onToast) {
         copyBtn.classList.add('copied');
         setTimeout(() => copyBtn.classList.remove('copied'), 1500);
       } catch { /* clipboard unavailable */ }
+      return;
+    }
+    const wrapBtn = e.target.closest?.('.code-block-wrap');
+    if (wrapBtn) {
+      const block = wrapBtn.closest('.code-block-wrapper');
+      if (block) {
+        const on = block.classList.toggle('wrapped');
+        wrapBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
       return;
     }
     // Upstream opens a side panel here; DisPatch has none, so the useful

@@ -146,7 +146,15 @@
     "announce_reply": "ردّ {name}: {text}",
     "view_raw": "عرض المصدر",
     "image_alt": "صورة",
-    "fullsize_alt": "صورة بالحجم الكامل"
+    "fullsize_alt": "صورة بالحجم الكامل",
+    "code_wrap": "التفاف الأسطر الطويلة",
+    "code_lang_detected": "تم اكتشاف اللغة تلقائيًا",
+    "announce_responding": "{name} يكتب ردًا…",
+    "callout_note": "ملاحظة",
+    "callout_tip": "نصيحة",
+    "callout_important": "مهم",
+    "callout_warning": "تحذير",
+    "callout_caution": "تنبيه"
   },
   "progress": {
     "hint_show": "إظهار العمل ◂",

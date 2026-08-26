@@ -364,3 +364,86 @@ test('enhanceContent makes markdown tables sortable (numeric-aware, blanks last)
   assert.ok(!table.classList.contains('is-resizing'));
   div.remove();
 });
+
+// ---------------------------------------------------------------------------
+// 3. GitHub callouts and code-block chrome
+// ---------------------------------------------------------------------------
+
+test('a [!WARNING] blockquote renders as a labelled callout', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('> [!WARNING]\n> This deletes the pool.');
+  assert.match(out, /class="md-callout md-callout--warning"/,
+    'the callout panel was not produced');
+  assert.match(out, /md-callout__label/);
+  assert.match(out, /This deletes the pool\./);
+  // The marker itself must not survive as text — showing `[!WARNING]` to the
+  // reader is the bug this replaces.
+  assert.ok(!/\[!WARNING\]/.test(out), `the marker leaked into the output: ${out}`);
+});
+
+test('every GitHub callout kind is recognised, case-insensitively', { skip: dom.skip }, async () => {
+  await withDom();
+  for (const kind of ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION']) {
+    const out = renderMarkdown(`> [!${kind}]\n> body`);
+    assert.match(out, new RegExp(`md-callout--${kind.toLowerCase()}`), kind);
+  }
+  assert.match(renderMarkdown('> [!note]\n> body'), /md-callout--note/);
+});
+
+test('an ordinary blockquote is still a blockquote', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('> just a quote\n> [!NOTE] not on the first line');
+  assert.match(out, /<blockquote>/);
+  assert.ok(!/md-callout/.test(out), out);
+});
+
+test('a bracketed word that is not a callout kind does not become one', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('> [!DANGER]\n> body');
+  assert.match(out, /<blockquote>/);
+  assert.ok(!/md-callout/.test(out), 'an open-ended marker list would let any '
+    + 'bracketed first word silently change how a quote renders');
+});
+
+test('a callout cannot be used to inject markup', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('> [!NOTE]\n> <img src=x onerror="alert(1)">');
+  // Raw model HTML is ESCAPED, never executed — so the text may still contain
+  // the word, but there must be no element carrying it.
+  assert.ok(!/<img/i.test(out), out);
+  assert.match(out, /&lt;img/);
+  const out2 = renderMarkdown('> [!NOTE"><script>x</script>]\n> body');
+  assert.ok(!/<script/i.test(out2), out2);
+});
+
+test('a code block offers a wrap toggle, and block art does not', { skip: dom.skip }, async () => {
+  await withDom();
+  const code = renderMarkdown('```python\nprint("a very long line")\n```');
+  assert.match(code, /class="code-block-wrap"/, 'no wrap toggle on a code block');
+  assert.match(code, /aria-pressed="false"/,
+    'the toggle shipped without its pressed state — DOMPurify drops any '
+    + 'attribute missing from ALLOWED_ATTR, and a button whose state never '
+    + 'survives sanitization lies to a screen reader forever');
+  assert.match(code, /class="code-block-lang[^"]*">python</);
+});
+
+test('the wrap toggle survives sanitization with its state intact', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('```\nplain\n```');
+  const win = await withDom();
+  const div = win.document.createElement('div');
+  div.innerHTML = out;
+  const btn = div.querySelector('.code-block-wrap');
+  assert.ok(btn, 'the wrap button did not survive the sanitizer');
+  assert.equal(btn.getAttribute('aria-pressed'), 'false');
+});
+
+test('the thread-list preview drops a callout marker too', () => {
+  // The bubble renders `> [!WARNING]` as a panel; if the preview still shows
+  // the marker, the thread list is the one place still displaying the syntax.
+  assert.equal(toPlainPreview('> [!WARNING]\n> Deploying this restarts it.'),
+    'Deploying this restarts it.');
+  assert.equal(toPlainPreview('> [!NOTE] label on the same line\n> body'),
+    'label on the same line body');
+  assert.equal(toPlainPreview('> a plain quote'), 'a plain quote');
+});
