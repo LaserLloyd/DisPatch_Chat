@@ -47,6 +47,23 @@ ALLOW: list[tuple[str, str, str]] = [
     ("frontend/static/vendor",      "frontend/static/vendor",      "*"),
 ]
 
+# Operator tools that do NOT live in the install tree.
+#
+# The daily timer's shell script and the avatar rotator run from the operator's
+# own PATH directory (~/.local/bin), not from the app directory — systemd calls
+# them, the app never imports them. That put them outside every allowlist here
+# and outside the deploy set as well, i.e. outside version control entirely,
+# which is exactly how the rotator came to hold a hardcoded path to a directory
+# that had moved and stayed broken for two days with nobody able to diff it.
+#
+# They are synced from `--tools-from` (default ~/.local/bin) and installed back
+# out by `scripts/install-tools.sh`. Same one-way-valve rules as everything
+# above: staged, scrubbed, then moved into the tree.
+HOST_TOOLS: list[tuple[str, str]] = [
+    ("dispatch-avatar-rotate", "scripts/dispatch-avatar-rotate"),
+    ("local-chat-daily.sh",    "scripts/local-chat-daily.sh"),
+]
+
 # Paths that live ONLY in the public repo. The allowlist above already excludes
 # them by construction; listed for the reader.
 #
@@ -141,12 +158,32 @@ DIVERGED = {
     # used at all.
     "frontend/static/js/api.js",
     "frontend/static/js/ws.js",
+
+    # --- host tools (see HOST_TOOLS) -------------------------------------
+    # The repo copy resolves its rotation roster (DISPATCH_ROTATE_BOTS, else
+    # the avatar-pool directories) instead of carrying one fork's hardcoded
+    # list of bot names, and finds the pre-migration avatar directory through
+    # DISPATCH_APP_DIR instead of a hardcoded install path. Syncing the host
+    # copy back over it would restore both.
+    "scripts/dispatch-avatar-rotate",
+    # Same shape: the repo copy must not carry a private bot roster or the
+    # host's cron-job names in its comments.
+    "scripts/local-chat-daily.sh",
 }
 
 
-def stage(src_root: Path, staging: Path) -> list[str]:
+def stage(src_root: Path, staging: Path, tools_root: Path | None = None) -> list[str]:
     """Copy the allowlist into `staging`. Returns the relative paths copied."""
     copied: list[str] = []
+    if tools_root is not None:
+        for name, dst_rel in HOST_TOOLS:
+            src = tools_root / name
+            if not src.is_file():
+                continue          # not installed here; nothing to compare
+            dst = staging / dst_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(dst_rel)
     for src_rel, dst_rel, pattern in ALLOW:
         src_dir = src_root / src_rel
         if not src_dir.is_dir():
@@ -208,6 +245,12 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--from", dest="src", type=Path, required=True,
                     help="path to the live install (the directory holding backend/ and frontend/)")
+    ap.add_argument("--tools-from", dest="tools", type=Path,
+                    default=Path("~/.local/bin"),
+                    help="directory holding the host tools listed in HOST_TOOLS "
+                         "(default ~/.local/bin); pass --no-tools to skip them")
+    ap.add_argument("--no-tools", action="store_true",
+                    help="do not stage the host tools at all")
     ap.add_argument("--go", action="store_true",
                     help="actually write the changes (default is a dry run)")
     args = ap.parse_args()
@@ -219,7 +262,8 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="dispatch-sync-") as tmp:
         staging = Path(tmp)
-        copied = stage(src_root, staging)
+        tools_root = None if args.no_tools else args.tools.expanduser().resolve()
+        copied = stage(src_root, staging, tools_root)
         if not copied:
             print("✗ nothing matched the allowlist — is --from pointing at the right tree?",
                   file=sys.stderr)

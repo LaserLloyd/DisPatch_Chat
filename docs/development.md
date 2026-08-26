@@ -90,6 +90,39 @@ Note that CI runs `scrub_check.py` **without** the personal-identifier rules —
 never published. Names and hostnames are therefore caught only by the local
 hooks. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+## Host tools (the nightly timer and the avatar rotator)
+
+Two of DisPatch's moving parts are **not** part of the app and are not copied
+by a deploy, because systemd runs them from the operator's own `PATH`
+directory rather than from the install tree:
+
+| Tool | What it does |
+|---|---|
+| `scripts/local-chat-daily.sh` | nightly: creates each bot's dated thread, rotates avatars, prunes yesterday's empty dated threads |
+| `scripts/dispatch-avatar-rotate` | picks today's face for every bot with an avatar bank and uploads it through the API |
+
+They live in `scripts/` and reach the host through one documented step:
+
+```bash
+sh scripts/install-tools.sh            # dry run — what would change
+sh scripts/install-tools.sh --go       # install into ~/.local/bin
+sh scripts/install-tools.sh --check    # exit 1 if the installed copy has drifted
+```
+
+`--go` backs up whatever it replaces and writes via a rename, so a timer can
+never start a half-written script. Put `--check` in whatever you use to verify
+a deployment: it is the only thing that will tell you the host is running an
+older copy than the repo.
+
+Neither tool hardcodes a roster. `dispatch-avatar-rotate` rotates every bot
+that has an avatar pool (`<data>/avatar-pool/<bot>/`) unless
+`DISPATCH_ROTATE_BOTS` names them explicitly, and finds a pre-migration avatar
+directory only when `DISPATCH_APP_DIR` is set. That is deliberate: the earlier
+version carried a hardcoded install path, the directory moved, and daily
+rotation was dead for two days while the failure was swallowed into a log on
+tmpfs. Nothing here may fail quietly — a failed rotation now reaches the
+journal, and the log lives beside the app's other logs.
+
 ## Shipping a change
 
 Edit the repository, run the checks above, and open a pull request. Maintainers

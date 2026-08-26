@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""dispatch-avatar-rotate — the ONE daily avatar rotator for every DisPatch bot.
+
+An avatar is a PAIR of files in the app's avatar dir:
+
+    <name>-face.png   square face crop, the thumbnail the UI shows
+    <name>-full.png   the full-resolution original, the lightbox image
+
+Two banks feed the rotation, in priority order:
+
+  1. DATED   <prefix>-YYYY-MM-DD-{face,full}.png  — a pre-planned picture for
+             one specific day. If today's pair exists it always wins.
+  2. POOL    the bot's avatar pool — ~/.local/share/local-chat/
+             avatar-pool/<bot>/ready/ (the same one-shot bank new DisPatch
+             threads draw from). A random pair is drawn and, after a VERIFIED
+             upload, BURNT into ../spent/ — the daily face can never come
+             back, either as a rotation or as a thread draw. The app's
+             nightly ClawForge top-up replaces what rotation burns.
+
+If a bot has neither, it is SKIPPED — one empty bank must never stop the other
+bots from rotating.
+
+Every change goes through the app's upload API, never a file copy into the
+avatar dir. Only the API updates config.yaml, snapshots avatar history,
+re-pins empty threads, and broadcasts the new face to connected devices; a
+copy would silently do none of that and leave the UI showing yesterday.
+
+    POST /api/bots/<id>/avatar   -F file=@<full>  -F face=@<face>
+
+`face` is sent explicitly so the server uses our real face crop verbatim
+instead of blindly center-cropping the full image.
+
+Usage:
+    dispatch-avatar-rotate                 rotate every bot (daily cron path)
+    dispatch-avatar-rotate --dry-run       print the decisions, change nothing
+    dispatch-avatar-rotate --bot <id>      one bot only
+    dispatch-avatar-rotate --force         ignore the already-ran-today guard
+
+Exit status: 0 when every attempted bot succeeded or was skipped for an empty
+bank, 1 when any bot failed (upload or verification).
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import random
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HOME = Path(os.path.expanduser("~"))
+
+# ── configuration ───────────────────────────────────────────────────────────
+# Which bots rotate. Resolved, never hardcoded — a checked-in roster is one
+# fork's private list of names, and it also goes stale the moment a bot is
+# added to the app but not to this file (which is how a bot silently stops
+# rotating while the job still reports success).
+#
+#   1. DISPATCH_ROTATE_BOTS   explicit, comma- or space-separated. Wins.
+#   2. otherwise              every bot that HAS an avatar pool, i.e. every
+#                             directory under <data>/avatar-pool/. That is the
+#                             same set the app itself draws thread faces from,
+#                             so the rotation follows the app's own config
+#                             instead of a second copy of it.
+#
+# `dated_prefix` is the filename prefix of the dated bank and equals the bot id
+# — the id is already the pool directory's name, so one identifier keys both.
+def _resolve_bots(pool_root: Path) -> dict[str, dict[str, str]]:
+    raw = os.environ.get("DISPATCH_ROTATE_BOTS", "")
+    ids = [b for b in raw.replace(",", " ").split() if b]
+    if not ids:
+        try:
+            # Dot-prefixed entries are the pool's own bookkeeping
+            # (`.generate/` is the top-up staging dir), never a bot.
+            ids = sorted(d.name for d in pool_root.iterdir()
+                         if d.is_dir() and not d.name.startswith("."))
+        except OSError:
+            ids = []
+    return {b: {"dated_prefix": b} for b in ids}
+
+# The avatar roster moved out of the code tree and into the DATA directory
+# (DisPatch commit "Serve avatars from the data directory, not the code tree").
+# Resolve it exactly the way backend/app/config.py does -- prefer the legacy
+# code-tree location ONLY while it still exists and the data one does not, so
+# a not-yet-migrated install keeps working. Hardcoding the old path is what
+# silently killed daily avatar rotation for two days.
+_XDG = os.environ.get("XDG_DATA_HOME")
+DATA_DIR = Path(
+    os.environ.get("DISPATCH_DATA_DIR")
+    or os.environ.get("LOCAL_CHAT_DATA_DIR")
+    or ((Path(_XDG) if _XDG else HOME / ".local" / "share") / "local-chat")
+)
+# The pre-migration location, inside whatever directory the app is installed
+# in. There is no default install path to guess at — an unset DISPATCH_APP_DIR
+# simply means "no legacy tree", which is correct for every migrated install.
+_APP_DIR = os.environ.get("DISPATCH_APP_DIR")
+_LEGACY_AVATAR_DIR = (Path(_APP_DIR) / "frontend/static/avatars" if _APP_DIR
+                      else DATA_DIR / ".no-legacy-avatar-dir")
+_DATA_AVATAR_DIR = DATA_DIR / "avatars"
+
+
+def _legacy_avatars_in_use(legacy):
+    """Mirror of config.resolve_avatar_dir's rule: only REAL files count. The
+    repo ships the legacy dir with a .gitkeep, so keying off mere existence
+    would send a migrated install back into the code tree."""
+    if not legacy.is_dir():
+        return False
+    ignore = {".gitkeep", ".gitignore", "README.md", ".DS_Store"}
+    try:
+        return any(f.is_file() and f.name not in ignore for f in legacy.iterdir())
+    except OSError:
+        return False
+
+
+AVATAR_DIR = (_LEGACY_AVATAR_DIR
+              if _legacy_avatars_in_use(_LEGACY_AVATAR_DIR)
+              and not _DATA_AVATAR_DIR.is_dir()
+              else _DATA_AVATAR_DIR)
+POOL_ROOT = DATA_DIR / "avatar-pool"
+BOTS: dict[str, dict[str, str]] = _resolve_bots(POOL_ROOT)
+STATE_FILE = DATA_DIR / "avatar-rotation.json"
+# NOT /tmp: /tmp is tmpfs on many systems, so the only record of a failed
+# rotation evaporated on reboot. Failures now persist beside the other logs.
+LOG_FILE = DATA_DIR / "logs" / "avatar-rotate.log"
+BASE_URL = os.environ.get("LOCAL_CHAT_URL", "http://127.0.0.1:8765")
+
+# How many recent picks a pool draw avoids, and how many we keep for forensics.
+# (avoid-recent window removed 2026-08-09: pool pairs burn on use, repeats impossible)
+HISTORY_KEEP = 10
+
+CURL_TIMEOUT = "60"  # seconds; a multi-MB upload plus PIL work on the server
+
+
+# ── logging ─────────────────────────────────────────────────────────────────
+class Log:
+    """Timestamped lines to stderr AND a size-capped logfile.
+
+    The logfile is best-effort: a rotation must not die because the log is
+    unwritable, so a failure there degrades to stderr only. That applies to
+    the roll below as well — a log that cannot be rolled still gets written.
+    """
+
+    # Roll at 1 MB, keeping ONE previous generation. At ~20 lines a day this
+    # file is years from mattering, but nothing else prunes anything under
+    # <data>/logs/ and an append-only file with no ceiling is a slow leak
+    # rather than a stable design. One generation, because the journal holds
+    # the real history — this log exists so a failure has somewhere to say
+    # what happened, not as an archive.
+    MAX_BYTES = 1_000_000
+
+    def __init__(self, path: Path) -> None:
+        self._fh = None
+        try:
+            if path.is_file() and path.stat().st_size >= self.MAX_BYTES:
+                # replace(): atomic, and it clobbers any existing .1 rather
+                # than growing a fan of numbered files nobody prunes either.
+                path.replace(path.with_suffix(path.suffix + ".1"))
+        except OSError as exc:  # pragma: no cover - environment dependent
+            print(f"WARN: cannot roll logfile {path}: {exc}", file=sys.stderr)
+        try:
+            self._fh = path.open("a", encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - environment dependent
+            print(f"WARN: cannot open logfile {path}: {exc}", file=sys.stderr)
+
+    def __call__(self, level: str, msg: str) -> None:
+        line = f"[{dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {level:<5} {msg}"
+        print(line, file=sys.stderr)
+        if self._fh:
+            self._fh.write(line + "\n")
+            self._fh.flush()
+
+    def info(self, msg: str) -> None:
+        self("INFO", msg)
+
+    def warn(self, msg: str) -> None:
+        self("WARN", msg)
+
+    def error(self, msg: str) -> None:
+        self("ERROR", msg)
+
+
+# ── state ───────────────────────────────────────────────────────────────────
+def load_state(path: Path, log: Log) -> dict:
+    """Read the rotation state. A missing or corrupt file is not fatal —
+    rotation just loses its memory for one run, which is better than not
+    rotating at all."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            return data
+        log.warn(f"state {path} is not an object; starting fresh")
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warn(f"unreadable state {path} ({exc}); starting fresh")
+    return {}
+
+
+def save_state(path: Path, state: dict) -> None:
+    """Atomic write: a crash mid-write must never leave a truncated state."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# ── bank selection ──────────────────────────────────────────────────────────
+def pair_for(stem: str) -> tuple[Path, Path]:
+    """The (face, full) file pair for a bank entry named `stem`."""
+    return AVATAR_DIR / f"{stem}-face.png", AVATAR_DIR / f"{stem}-full.png"
+
+
+def complete(stem: str) -> bool:
+    """A pair is usable only when BOTH halves are on disk and non-empty."""
+    face, full = pair_for(stem)
+    return (face.is_file() and face.stat().st_size > 0
+            and full.is_file() and full.stat().st_size > 0)
+
+
+def pool_dir(bot_id: str) -> Path:
+    return POOL_ROOT / bot_id / "ready"
+
+
+def pool_pair_for(bot_id: str, stem: str) -> tuple[Path, Path]:
+    d = pool_dir(bot_id)
+    return d / f"{stem}-face.png", d / f"{stem}-full.png"
+
+
+def pool_stems(bot_id: str) -> list[str]:
+    """Every complete pair in the bot's ready pool, sorted for a deterministic
+    candidate list (the randomness comes from the draw, not readdir order)."""
+    d = pool_dir(bot_id)
+    stems = []
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    for name in names:
+        if not name.endswith("-face.png"):
+            continue
+        stem = name[: -len("-face.png")]
+        face, full = pool_pair_for(bot_id, stem)
+        if (face.is_file() and face.stat().st_size > 0
+                and full.is_file() and full.stat().st_size > 0):
+            stems.append(stem)
+    return stems
+
+
+def burn_pool_pair(bot_id: str, stem: str, log: Log) -> None:
+    """Retire a used pool pair into ../spent/ — the same one-shot rule the
+    app's thread draws follow. Only after a VERIFIED upload; best-effort (a
+    failed move costs a possible repeat, never the rotation)."""
+    spent = POOL_ROOT / bot_id / "spent"
+    face, full = pool_pair_for(bot_id, stem)
+    try:
+        spent.mkdir(parents=True, exist_ok=True)
+        for f in (face, full):
+            if f.is_file():
+                os.replace(f, spent / f.name)
+        log.info(f"{bot_id}: burnt pool pair {stem} -> spent/")
+    except OSError as e:
+        log.warn(f"{bot_id}: could not burn {stem}: {e}")
+
+
+def choose(bot_id: str, cfg: dict, today: str, history: list[str],
+           log: Log) -> tuple[str, str] | tuple[None, None]:
+    """Pick this bot's pair for today. Returns (stem, source) or (None, None)
+    when both banks are empty."""
+    dated = f"{cfg['dated_prefix']}-{today}"
+    if complete(dated):
+        return dated, "dated"
+
+    stems = pool_stems(bot_id)
+    if not stems:
+        return None, None
+
+    # No avoid-window any more: a used pool pair is BURNT after upload, so a
+    # repeat is structurally impossible — random over what's left is enough.
+    return random.choice(stems), "pool"
+
+
+# ── the app API ─────────────────────────────────────────────────────────────
+def upload(bot_id: str, face: Path, full: Path, log: Log) -> bool:
+    """POST the pair to the app. True on a clean {"ok": true} response.
+
+    curl carries the multipart body (stdlib has no multipart encoder worth
+    hand-rolling); the response body lands in a temp file so stdout can carry
+    the HTTP status alone.
+    """
+    url = f"{BASE_URL}/api/bots/{bot_id}/avatar"
+    with tempfile.NamedTemporaryFile(prefix="avatar-resp-", suffix=".json") as body:
+        cmd = [
+            "curl", "-s", "-S", "--max-time", CURL_TIMEOUT,
+            "-X", "POST", url,
+            "-F", f"file=@{full}",
+            "-F", f"face=@{face}",
+            "-o", body.name, "-w", "%{http_code}",
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            log.error(f"{bot_id}: upload timed out")
+            return False
+
+        status = (proc.stdout or "").strip()
+        payload = Path(body.name).read_text(encoding="utf-8", errors="replace").strip()
+
+    if proc.returncode != 0:
+        log.error(f"{bot_id}: curl failed rc={proc.returncode} "
+                  f"{(proc.stderr or '').strip()}")
+        return False
+    if status != "200":
+        log.error(f"{bot_id}: upload HTTP {status} — {payload[:300]}")
+        return False
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        log.error(f"{bot_id}: upload returned non-JSON — {payload[:300]}")
+        return False
+    if data.get("ok") is not True:
+        log.error(f"{bot_id}: upload rejected — {payload[:300]}")
+        return False
+
+    log.info(f"{bot_id}: uploaded avatar_url={data.get('avatar_url')} "
+             f"full_url={data.get('full_url')}")
+    return True
+
+
+def verify(bot_id: str, log: Log) -> bool:
+    """The avatar the app now serves must actually come back 200."""
+    url = f"{BASE_URL}/api/bots/{bot_id}/avatar"
+    cmd = ["curl", "-s", "--max-time", "20", "-o", os.devnull,
+           "-w", "%{http_code}", url]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+    except subprocess.TimeoutExpired:
+        log.error(f"{bot_id}: verification timed out")
+        return False
+    status = (proc.stdout or "").strip()
+    if status != "200":
+        log.error(f"{bot_id}: verification GET returned HTTP {status}")
+        return False
+    log.info(f"{bot_id}: verified GET {url} -> 200")
+    return True
+
+
+# ── per-bot rotation ────────────────────────────────────────────────────────
+def rotate_bot(bot_id: str, cfg: dict, state: dict, today: str,
+               args: argparse.Namespace, log: Log) -> str:
+    """Rotate one bot. Returns 'ok' | 'skip' | 'fail' — a skip is a normal
+    outcome (nothing to wear, or already rotated today), a fail is not."""
+    entry = state.get(bot_id, {})
+    history = list(entry.get("last_used", []))
+
+    last_run = str(entry.get("last_run", ""))
+    if not args.force and last_run[:10] == today:
+        log.info(f"{bot_id}: already rotated today ({last_run}); skipping "
+                 "(--force overrides)")
+        return "skip"
+
+    stem, source = choose(bot_id, cfg, today, history, log)
+    if stem is None:
+        # cfg['pool_glob'] used to be interpolated here. It was removed from
+        # BOTS in the pool-era rewrite, so this line — the BENIGN skip taken
+        # when a bot has no dated pair and a drained pool — raised KeyError,
+        # which main()'s broad except turned into result 'fail' and exit 1.
+        # An intended skip reported as a failure is worse than useless: it
+        # both cries wolf and hides a real one. Name the pool directory, which
+        # is what the reader actually needs to go look at.
+        log.warn(f"{bot_id}: SKIP — no dated pair for {today} and no complete "
+                 f"pool pair in {pool_dir(bot_id)}")
+        return "skip"
+
+    face, full = (pair_for(stem) if source == "dated"
+                  else pool_pair_for(bot_id, stem))
+    log.info(f"{bot_id}: {source} pick {stem} "
+             f"(face={face.stat().st_size}B full={full.stat().st_size}B)")
+
+    if args.dry_run:
+        log.info(f"{bot_id}: DRY-RUN would POST {BASE_URL}/api/bots/{bot_id}/avatar "
+                 f"file=@{full.name} face=@{face.name}")
+        return "ok"
+
+    if not upload(bot_id, face, full, log):
+        return "fail"
+    if not verify(bot_id, log):
+        return "fail"
+    if source == "pool":
+        burn_pool_pair(bot_id, stem, log)
+
+    state[bot_id] = {
+        "last_used": [stem] + [s for s in history if s != stem][: HISTORY_KEEP - 1],
+        "last_run": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "last_source": source,
+    }
+    return "ok"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="dispatch-avatar-rotate",
+        description="Rotate DisPatch bot avatars through the app's upload API.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the decisions; upload nothing, write no state")
+    parser.add_argument("--bot", metavar="ID",
+                        help=f"rotate one bot only ({', '.join(BOTS)})")
+    parser.add_argument("--force", action="store_true",
+                        help="rotate even if state says this bot already ran today")
+    args = parser.parse_args()
+
+    log = Log(LOG_FILE)
+
+    if args.bot and args.bot not in BOTS:
+        log.error(f"unknown bot {args.bot!r}; known: {', '.join(BOTS)}")
+        return 2
+    if not AVATAR_DIR.is_dir():
+        log.error(f"avatar dir not found: {AVATAR_DIR}")
+        return 2
+
+    # LOCAL date on purpose: the banks are keyed to the operator's own day,
+    # not UTC — east of Greenwich a UTC date swaps the picture hours early.
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    targets = [args.bot] if args.bot else list(BOTS)
+    log.info(f"run start today={today} bots={','.join(targets)}"
+             f"{' [dry-run]' if args.dry_run else ''}"
+             f"{' [force]' if args.force else ''}")
+
+    state = load_state(STATE_FILE, log)
+    results: dict[str, str] = {}
+    for bot_id in targets:
+        try:
+            results[bot_id] = rotate_bot(bot_id, BOTS[bot_id], state, today, args, log)
+        except Exception as exc:  # one bot's surprise must not stop the rest
+            log.error(f"{bot_id}: unexpected {type(exc).__name__}: {exc}")
+            results[bot_id] = "fail"
+
+    if not args.dry_run:
+        try:
+            save_state(STATE_FILE, state)
+        except OSError as exc:
+            log.error(f"could not write state {STATE_FILE}: {exc}")
+            results["<state>"] = "fail"
+
+    summary = " ".join(f"{b}={r}" for b, r in results.items())
+    failed = [b for b, r in results.items() if r == "fail"]
+    log.info(f"run end {summary}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
