@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import os
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -353,12 +355,22 @@ def test_failed_upload_leaves_no_part(fs_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_orphan_sweep_deletes_untracked_blob(fs_env):
+async def test_orphan_sweep_adopts_untracked_blob(fs_env):
+    """An agent-dropped blob must SURVIVE the boot sweep and gain a DB row.
+
+    On-box agents write straight into FILES_DIR (a scheduled agent pipeline
+    drops dated images there daily) and reference the path; those files never
+    get a row. The sweep used to delete them, and the nightly ~02:30
+    backup-quiesce restart therefore wiped the day's files on every boot.
+    Stale .part temp files still die.
+    """
     _, tmp_path = fs_env
     files_dir = tmp_path / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
-    orphan = files_dir / "deadbeef.bin"
-    orphan.write_bytes(b"untracked")
+    orphan = files_dir / "influencer-2026-08-27.jpg"
+    orphan.write_bytes(b"untracked" * 10)
+    old_mtime = 1_700_000_000
+    os.utime(orphan, (old_mtime, old_mtime))
     stray_part = files_dir / "half.bin.part"
     stray_part.write_bytes(b"partial")
     # main.db is set by the fixture but not connected; the sweep lists files via
@@ -366,10 +378,43 @@ async def test_orphan_sweep_deletes_untracked_blob(fs_env):
     await main.db.connect()
     try:
         await main._sweep_orphan_blobs()
+        rows = await main.db.list_files()
+        total = await main.db.total_file_bytes()
     finally:
         await main.db.close()
-    assert not orphan.exists(), "untracked blob not swept"
+
+    assert orphan.exists(), "agent-dropped blob was deleted by the sweep"
     assert not stray_part.exists(), "stale .part not swept"
+    assert len(rows) == 1, "untracked blob was not adopted"
+    row = rows[0]
+    assert row["name"] == orphan.name
+    assert row["stored_name"] == orphan.name
+    assert row["size"] == orphan.stat().st_size
+    assert row["mime"] == "image/jpeg"
+    assert row["source"] == "fileserver"
+    # created_at comes from the blob's mtime, not "now", so retention is honest.
+    assert row["created_at"].startswith(
+        datetime.fromtimestamp(old_mtime, UTC).isoformat()[:10]
+    )
+    # Adopted bytes count toward the server-wide storage cap.
+    assert total == orphan.stat().st_size
+
+
+@pytest.mark.asyncio
+async def test_orphan_sweep_is_idempotent(fs_env):
+    """A second boot must not adopt the same blob twice."""
+    _, tmp_path = fs_env
+    files_dir = tmp_path / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    (files_dir / "drop.txt").write_bytes(b"hello")
+    await main.db.connect()
+    try:
+        await main._sweep_orphan_blobs()
+        await main._sweep_orphan_blobs()
+        rows = await main.db.list_files()
+    finally:
+        await main.db.close()
+    assert len(rows) == 1, f"adopted twice: {rows}"
 
 
 # --------------------------------------------------------------------------- #

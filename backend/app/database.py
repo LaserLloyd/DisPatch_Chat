@@ -961,6 +961,27 @@ class Database:
         return {"id": fid, "name": name, "stored_name": stored_name,
                 "size": size, "mime": mime, "created_at": ts, "source": source}
 
+    async def adopt_file(
+        self, name: str, stored_name: str, size: int, mime: str | None,
+        created_at: str, source: str = "fileserver",
+    ) -> dict:
+        """Insert a row for a blob that is ALREADY on disk.
+
+        Same as add_file() but the caller supplies created_at (the blob's mtime)
+        instead of "now", so an adopted file keeps its real age — retention
+        (delete_files_before) and the listing order stay honest.
+        """
+        fid = new_id()
+        await self.db.execute(
+            "INSERT INTO files (id, name, stored_name, size, mime, created_at, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (fid, name, stored_name, size, mime, created_at, source),
+        )
+        await self.db.commit()
+        return {"id": fid, "name": name, "stored_name": stored_name,
+                "size": size, "mime": mime, "created_at": created_at,
+                "source": source}
+
     async def list_files(self) -> list[dict]:
         cur = await self.db.execute(
             "SELECT * FROM files ORDER BY created_at DESC, rowid DESC"

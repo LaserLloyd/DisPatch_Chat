@@ -2484,6 +2484,100 @@ def _canon_msg(s: str) -> str:
         assume_files_exist=True)))
 
 
+# --------------------------------------------------------------------------- #
+# Drift-tolerant dedup (the abridged twin)
+#
+# The gateway WebSocket and the CLI/transcript-tail paths deliver the SAME
+# reply as two genuinely different strings: the abridged copy is the complete
+# copy with TRAILING content silently dropped (a whole paragraph, the MEDIA
+# lines, the `:react:` emoji — live 2026-08-26: 1,148 vs 1,034 chars, the
+# shorter a PREFIX of the longer). Exact `_canon_msg` equality keys them as
+# distinct messages and both post. The helpers below make the dedup predicate
+# tolerant to that drop; _is_twin is the ONE predicate used at every dedup
+# chokepoint (in-memory _delivered, the DB trailing-run scan, and the 300s
+# recent window), so a twin is recognised consistently everywhere.
+# --------------------------------------------------------------------------- #
+
+# A shared opening this long is a twin, not a coincidence. Kept deliberately
+# short of the 80-char signature head: a genuine abridged twin usually drops
+# a whole tail paragraph (hundreds of chars), while two DISTINCT replies
+# sharing 60+ leading chars are vanishingly rare — and the pair that matters
+# (the double-post) is the failure that actually happens, so the floor errs
+# toward catching it. Below this, a shared prefix is treated as coincidence:
+# "Done!" and "Done — more below." must never collide.
+_TWIN_MIN_SHARED_PREFIX = 60
+
+
+def _msg_signature(text: str) -> tuple[str, int]:
+    """Stable structural fingerprint of a message, tolerant to trailing drop.
+
+    ``(canonical_text[:80], media_directive_count)``: the two recordings of
+    one reply share their leading 80 canonical characters and their media
+    lines either survive or are dropped together, so a copy that differs
+    from its twin ONLY in the dropped tail still matches — while genuinely
+    different replies (different openings, or a different number of
+    pictures) do not. ``media_directive_count`` counts ``MEDIA:`` and
+    ``[[media:`` occurrences in the whole canonical text (the bare form only
+    survives salvage when it was not a real file reference; counting both
+    spellings keeps the two transports' recordings comparable either way).
+    Input may be raw or already canonical (canonicalisation is idempotent).
+    """
+    canon = _canon_msg(text)
+    return canon[:80], canon.count("MEDIA:") + canon.count("[[media:")
+
+
+def _is_twin(a: str, b: str) -> bool:
+    """True if two texts are the SAME reply recorded twice by the two
+    transports — even when their canonical dedup keys differ.
+
+    Two messages are duplicates (twins) when, within the dedup window:
+      a. their canonical texts are exactly equal (the pre-existing rule), or
+      b. the SHORTER canonical text is a PREFIX of the LONGER, with the
+         shared prefix at least ``_TWIN_MIN_SHARED_PREFIX`` (60) chars — the
+         abridged-copy shape, where the tail was cut cleanly, or
+      c. they share the same ``_msg_signature`` — same leading 80 canonical
+         chars AND the same media-directive count — AND the same media
+         directives themselves (same picture refs). The ref identity is
+         what keeps two DISTINCT captionless pictures posted in one turn
+         apart: they share the long serving path for 80+ chars and both
+         count one picture, so head+count alone would collapse them — the
+         exact anti-collision property the media fingerprint exists for
+         (test_two_captionless_images_in_one_turn_stay_distinct).
+
+    FALSE-POSITIVE GUARD: a shared opening is coincidence, not truncation,
+    below 60 chars, so two distinct one-liners that start alike never
+    collide. Rule (c) is stricter still (80 chars + identical media); its
+    accepted trade-off is that two genuinely DISTINCT replies sharing the
+    first 80 canonical characters verbatim AND carrying the same pictures
+    collapse to one — replies diverge within their opening sentence in
+    practice, and the alternative (an abridged twin double-posting into the
+    family chat) is the failure that actually happens. Inputs may be raw or
+    already canonical.
+    """
+    ca, cb = _canon_msg(a), _canon_msg(b)
+    if ca == cb:
+        return True
+    if len(ca) < _TWIN_MIN_SHARED_PREFIX or len(cb) < _TWIN_MIN_SHARED_PREFIX:
+        return False
+    shorter, longer = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+    if longer.startswith(shorter):
+        return True
+    return (_msg_signature(ca) == _msg_signature(cb)
+            and _media_refs(ca) == _media_refs(cb))
+
+
+def _media_refs(canon: str) -> list[tuple[str, str]]:
+    """The (path, caption) pairs of every media directive in canonical text.
+
+    Two recordings of one reply carry the SAME picture references — a cut
+    tail can drop them together or leave them together, it cannot swap them.
+    Two distinct replies can share a count ("here's a picture" twice) but
+    not the references, so ref identity is the discriminator that keeps
+    same-count pairs apart without weakening the twin test.
+    """
+    return _MEDIA_DIRECTIVE_RE.findall(canon)
+
+
 def _media_ref_count(text: str) -> int:
     """How many pictures this text would deliver, after salvage."""
     return _salvage_media_refs(text or "").count("[[media:")
@@ -2552,8 +2646,12 @@ DEDUP_RECENT_WINDOW_S = 300
 
 async def _is_duplicate_message(thread_id: str, text: str, *,
                                 whole_thread: bool = False,
-                                recent_window_s: float | None = None) -> bool:
-    """True if this exact message was already posted *within the current turn*.
+                                recent_window_s: float | None = None) -> MessageOut | None:
+    """Return the already-posted message if `text` was posted *within the
+    current turn* — as a duplicate OR as a drift-tolerant twin (see
+    _is_twin: the gateway and transcript-tail transports record one reply
+    with different text, the abridged copy being a prefix of the complete
+    one). None when the text is new.
 
     Dedup must collapse the four redundant in-turn delivery sources (sync
     payload, narration, reconcile, follower) WITHOUT suppressing a message that
@@ -2597,12 +2695,20 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
 
     Both sides go through the same canonicalisation as persisting (NO_REPLY
     strip + media salvage) so a repaired MEDIA:/path reply compares equal to
-    itself.
+    itself. Twin detection is structural (same head / prefix / signature), so
+    an abridged copy whose tail was dropped still matches its complete twin.
+
+    Returns the MATCHED ROW, not a bool: the caller applies the authority rule
+    (keep the longer/complete copy, suppress the shorter; equal length keeps
+    the first) and may need the row's id to replace an abridged copy that was
+    persisted before its complete twin arrived.
     """
     norm = _canon_msg(text)
     if whole_thread:
-        return any(m.role == "assistant" and _canon_msg(m.content or "") == norm
-                   for m in await db.dump_messages(thread_id))
+        for m in await db.dump_messages(thread_id):
+            if m.role == "assistant" and _is_twin(norm, _canon_msg(m.content or "")):
+                return m
+        return None
     # 40, not 10: a single multi-step turn can narrate many assistant blocks; the
     # trailing contiguous assistant run we compare against must be able to hold a
     # whole turn's worth so a within-turn repeat is still caught.
@@ -2613,8 +2719,8 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
                     and (m.metadata or {}).get("kind") == "reaction"):
                 continue                 # the turn's own trace, not a boundary
             break                        # reached the row that opened the turn
-        if _canon_msg(m.content or "") == norm:
-            return True
+        if _is_twin(norm, _canon_msg(m.content or "")):
+            return m
     if recent_window_s is not None:
         msgs, _ = await db.list_messages(thread_id, limit=200)
         for m in reversed(msgs):       # newest -> oldest (created_at, rowid)
@@ -2622,9 +2728,9 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
             if age is not None and age > recent_window_s:
                 break                  # this row and all below: outside the window
             if (age is not None and m.role == "assistant"
-                    and _canon_msg(m.content or "") == norm):
-                return True
-    return False
+                    and _is_twin(norm, _canon_msg(m.content or ""))):
+                return m
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -2669,9 +2775,14 @@ async def _deliver_assistant_text(
 
     Skips (returns None) when the text is empty after NO_REPLY-stripping and has
     no media, when it was already delivered (in-memory key OR a matching recent
-    DB message), or when the thread has been deleted. Otherwise persists +
-    broadcasts (streamed for the visible final reply, instant for everything
-    else) and records the key so the other redundant paths won't repeat it.
+    DB message — matching now includes drift-tolerant TWINS, see _is_twin, so
+    an abridged copy of an already-posted reply is suppressed), or when the
+    thread has been deleted. Otherwise persists + broadcasts (streamed for the
+    visible final reply, instant for everything else) and records the key so
+    the other redundant paths won't repeat it. When the complete copy arrives
+    AFTER its abridged twin was already persisted (the gateway-vs-transcript
+    ordering seen live), the abridged row is deleted and replaced by the
+    complete one — never the other way round.
 
     ``dedup_recent_window`` gates the recent-window whole-thread check for
     source-less deliveries (see _is_duplicate_message). Deliberate recovery
@@ -2696,18 +2807,51 @@ async def _deliver_assistant_text(
         return None
     key = _canon_msg(text) if (text or "").strip() else None
     if key:
-        if key in _delivered.get(thread_id, ()):
-            return None
+        # Twin-aware in-memory dedup (see _is_twin): the two transports record
+        # ONE reply with different text (the abridged copy is the complete copy
+        # with its tail dropped), so exact-key equality lets the twin through.
+        # Compare structurally and apply the AUTHORITY RULE: on a duplicate the
+        # LONGER (complete/gateway) copy wins, equal length keeps the first,
+        # and the complete copy is never suppressed.
+        claims = _delivered.get(thread_id)
+        if claims:
+            for stored in list(claims):
+                if _is_twin(key, stored):
+                    if len(key) <= len(stored):
+                        # Shorter (or equal) twin of an already-delivered
+                        # message: the abridged copy arriving after the
+                        # complete one. Suppress it.
+                        return None
+                    # The COMPLETE copy arriving after an abridged twin was
+                    # already delivered. Never suppress the complete copy:
+                    # drop the shorter claim so this message persists — the
+                    # DB check below then finds the abridged row and replaces
+                    # it with this one, leaving exactly one post.
+                    claims.pop(stored, None)
+                    break
         # Claim BEFORE any await: two sources delivering the same text can
         # otherwise both pass the checks below and double-post. Released on
         # failure so a transient error can't permanently drop the message.
         _mark_delivered(thread_id, key)
     try:
-        if key and await _is_duplicate_message(
+        if key:
+            existing = await _is_duplicate_message(
                 thread_id, text, whole_thread=dedup_whole_thread,
                 recent_window_s=(None if source_id or not dedup_recent_window
-                                 else DEDUP_RECENT_WINDOW_S)):
-            return None                        # already in the DB — keep the claim
+                                 else DEDUP_RECENT_WINDOW_S))
+            if existing is not None:
+                if len(key) <= len(_canon_msg(existing.content or "")):
+                    return None            # shorter/equal twin — keep the
+                                           # longer/earlier copy; keep the claim
+                # Upgrade: the ABRIDGED copy was persisted first; the complete
+                # copy arriving now replaces it so exactly one post remains.
+                await db.delete_message(existing.id)
+                await manager.broadcast({
+                    "type": "message_deleted",
+                    "thread_id": thread_id,
+                    "bot_id": await _bot_of_thread(thread_id),
+                    "message_id": existing.id,
+                })
         if not await db.get_thread(thread_id):
             return None                        # thread deleted mid-flight
         if stream:
@@ -3351,10 +3495,16 @@ async def _sweep_orphan_blobs() -> None:
     """Reconcile the files table against FILES_DIR/MEDIA_DIR on boot.
 
     - Leftover *.part temp files from an interrupted upload → delete.
-    - FILES_DIR blobs with no DB row (crash between write and insert, or old
-      residue) → delete so the store can't leak space.
+    - FILES_DIR blobs with no DB row → ADOPT (insert a row), never delete.
+      On-box agents legitimately write straight into FILES_DIR and reference
+      the path (a scheduled agent pipeline drops dated images there daily);
+      those files never get a row. This sweep used to delete them, and because
+      the service restarts nightly around 02:30 for the backup quiesce, every
+      boot wiped the day's agent-dropped files — the File Server "periodic
+      wipe". A blob still mid-write at boot is likewise adopted, which is
+      recoverable; deleting it was not.
     - DB rows whose blob is missing (e.g. a restore that dropped the blobs) →
-      log loudly; their download would 404.
+      purge, since their download would 404.
     """
     try:
         rows = await db.list_files()
@@ -3368,15 +3518,27 @@ async def _sweep_orphan_blobs() -> None:
                 with contextlib.suppress(OSError):
                     p.unlink()
                     log.info("orphan sweep: removed stale partial upload %s", p.name)
-    removed = 0
+    adopted = 0
+    untracked: list[Path] = []
     with contextlib.suppress(OSError):
-        for p in FILES_DIR.iterdir():
-            if p.is_file() and not p.name.endswith(".part") and p.name not in known:
-                with contextlib.suppress(OSError):
-                    p.unlink()
-                    removed += 1
-    if removed:
-        log.info("orphan sweep: deleted %d untracked File Server blob(s)", removed)
+        untracked = sorted(
+            p for p in FILES_DIR.iterdir()
+            if p.is_file() and not p.name.endswith(".part") and p.name not in known
+        )
+    for p in untracked:
+        try:
+            st = p.stat()
+            created = datetime.fromtimestamp(st.st_mtime, UTC).isoformat()
+            mime = (mimetypes.guess_type(p.name)[0] or "").lower()
+            # An agent drops the file under its real name, so name == stored_name;
+            # the size counts toward the server-wide storage cap from now on.
+            await db.adopt_file(p.name[:255], p.name, st.st_size, mime or None,
+                                created, source="fileserver")
+            adopted += 1
+        except Exception:
+            log.exception("orphan sweep: could not adopt untracked blob %s", p.name)
+    if adopted:
+        log.info("orphan sweep: adopted %d untracked File Server blob(s)", adopted)
     # A row whose blob is gone is worse than useless: it lists in /api/files,
     # its download 404s, an agent told to read it off disk fails on a path that
     # cannot exist, and its `size` still eats the server-wide storage cap. This
