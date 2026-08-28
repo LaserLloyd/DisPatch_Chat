@@ -273,3 +273,176 @@ async def test_distinct_texts_are_never_collapsed_by_the_window(wired, monkeypat
 
     asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
     assert asst == ["First answer.", "Second answer."], asst
+
+
+# --------------------------------------------------------------------------- #
+# Part 3: the abridged twin — trailing content dropped at the transport
+# --------------------------------------------------------------------------- #
+#
+# The gateway WebSocket delivers the COMPLETE reply; the CLI/transcript-tail
+# path delivers an ABRIDGED copy with trailing content silently dropped (a
+# whole paragraph, the MEDIA lines, the `:react:` emoji — live 2026-08-26:
+# 1,148 vs 1,034 chars, the shorter a PREFIX of the longer). The two copies
+# get different canonical keys, so exact-key dedup posts both. The fix:
+# structural twin detection (_is_twin — prefix with a 60-char floor, or the
+# same 80-char head + media count) at EVERY dedup chokepoint, with the
+# authority rule: keep the LONGER (complete) copy, suppress the SHORTER
+# (abridged) one; equal length keeps the first; never suppress the complete
+# copy.
+# --------------------------------------------------------------------------- #
+
+# A realistic complete reply whose tail — the final paragraph AND a media
+# line — is exactly what the abridged transport dropped. Cutting at a clean
+# paragraph boundary makes the abridged copy a strict prefix of the complete
+# one (canonicalisation preserves the prefix; see _is_twin).
+_TWIN_COMPLETE = (
+    "Here is the full picture of what happened.\n\n"
+    "The gateway persisted the complete reply, but the transcript-tail path "
+    "recorded an abridged copy with the final paragraph silently dropped — "
+    "so the two recordings of ONE reply became two different dedup keys, "
+    "and both posted. The abridged copy is a prefix of the complete one, "
+    "so structural comparison must see them as the same message and keep "
+    "only the longer, complete copy.\n\n"
+    "Final paragraph: this is the tail content the abridged recording "
+    "lost, including the picture line below.\n\n"
+    "[[media:/media/abc.png|the picture]]"
+)
+_TWIN_ABRIDGED = (
+    "Here is the full picture of what happened.\n\n"
+    "The gateway persisted the complete reply, but the transcript-tail path "
+    "recorded an abridged copy with the final paragraph silently dropped — "
+    "so the two recordings of ONE reply became two different dedup keys, "
+    "and both posted. The abridged copy is a prefix of the complete one, "
+    "so structural comparison must see them as the same message and keep "
+    "only the longer, complete copy."
+)
+
+
+def test_twin_fixture_is_a_long_prefix():
+    """The test texts themselves must satisfy the twin shape: the abridged
+    copy is a strict prefix of the complete one, comfortably past the 60-char
+    floor, and the complete copy carries a media line the abridged one lost."""
+    assert len(_TWIN_ABRIDGED) >= 60
+    assert _TWIN_COMPLETE.startswith(_TWIN_ABRIDGED)
+    assert _TWIN_COMPLETE != _TWIN_ABRIDGED
+    assert main._canon_msg(_TWIN_COMPLETE).startswith(main._canon_msg(_TWIN_ABRIDGED))
+    assert "[[media:" in main._canon_msg(_TWIN_COMPLETE)
+    assert "[[media:" not in main._canon_msg(_TWIN_ABRIDGED)
+
+
+def test_msg_signature_counts_media_directives_in_canonical_text():
+    """The signature head is the leading 80 canonical chars; the media count
+    is the second component, so a tail-dropped media line CHANGES the
+    signature (that is deliberate — media count is part of the fingerprint)
+    while the same-head/same-count pair still matches."""
+    bare = "A short reply with no pictures at all, just prose that runs on " \
+           "long enough that the first eighty canonical characters are the " \
+           "same with or without the trailing picture."
+    with_pic = bare + "\n\n[[media:/media/a.png|pic]]"
+    assert len(main._canon_msg(bare)) >= 80
+    sig_bare = main._msg_signature(bare)
+    sig_pic = main._msg_signature(with_pic)
+    assert sig_bare[0] == sig_pic[0]          # identical opening
+    assert sig_bare[1] == 0 and sig_pic[1] == 1
+    assert sig_bare != sig_pic                # media count is part of the key
+    assert sig_bare == main._msg_signature(main._canon_msg(bare))  # idempotent
+
+
+def test_is_twin_rules_and_false_positive_guard():
+    """The predicate itself: exact equality, prefix-with-60-char-floor, and
+    same-signature all count as twins; a SHORT shared prefix does not."""
+    # (a) exact canonical equality
+    assert main._is_twin(_TWIN_ABRIDGED, _TWIN_ABRIDGED)
+    # (b) abridged = strict prefix of complete, both orders
+    assert main._is_twin(_TWIN_COMPLETE, _TWIN_ABRIDGED)
+    assert main._is_twin(_TWIN_ABRIDGED, _TWIN_COMPLETE)
+    # (c) same leading 80 chars + same media count, divergent tails
+    head = "The opening of this reply is identical for both recordings. " * 2
+    assert main._is_twin(head + "AAA", head + "BBB")
+    # FALSE-POSITIVE GUARD: a shared prefix below 60 chars is coincidence
+    assert not main._is_twin("The answer is A.", "The answer is B.")
+    assert not main._is_twin("Done!", "Done — more below.")
+    # different openings / different media counts are never twins
+    assert not main._is_twin(_TWIN_COMPLETE, "Something else entirely, " + _TWIN_ABRIDGED)
+
+
+@pytest.mark.asyncio
+async def test_complete_then_abridged_twin_posts_once(wired, monkeypatch):
+    """The common ordering: the gateway's COMPLETE copy lands first, then the
+    tail path re-offers the same reply ABRIDGED (trailing paragraph and the
+    MEDIA line dropped). The abridged copy must be suppressed — exactly one
+    post, and it is the complete one."""
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    t = await p._db.create_thread(bot_id="main", title="twin-complete-first")
+
+    full = await main._deliver_assistant_text(t.id, _TWIN_COMPLETE)
+    assert full is not None
+    abridged = await main._deliver_assistant_text(t.id, _TWIN_ABRIDGED)
+    assert abridged is None, "the abridged twin re-posted the complete reply"
+
+    asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
+    assert asst == [_TWIN_COMPLETE], f"expected exactly one post, got {asst!r}"
+    assert p.visible() == [_TWIN_COMPLETE], p.frames
+
+
+@pytest.mark.asyncio
+async def test_abridged_then_complete_twin_upgrades_to_single_complete_post(wired, monkeypatch):
+    """The incident ordering: the ABRIDGED copy is persisted first, then the
+    complete gateway copy arrives. Authority rule: the complete copy is never
+    suppressed — the abridged row is replaced, leaving exactly one post, the
+    complete one (and a message_deleted broadcast so live clients drop the
+    abridged bubble)."""
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    t = await p._db.create_thread(bot_id="main", title="twin-abridged-first")
+
+    abridged = await main._deliver_assistant_text(t.id, _TWIN_ABRIDGED)
+    assert abridged is not None
+    full = await main._deliver_assistant_text(t.id, _TWIN_COMPLETE)
+    assert full is not None, "the complete copy was suppressed by its abridged twin"
+
+    asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
+    assert asst == [_TWIN_COMPLETE], f"expected exactly one post, got {asst!r}"
+    deleted = [f for f in p.frames if f.get("type") == "message_deleted"]
+    assert deleted and deleted[0]["message_id"] == abridged.id, p.frames
+
+
+@pytest.mark.asyncio
+async def test_distinct_messages_sharing_only_a_short_prefix_both_post(wired, monkeypatch):
+    """False-positive guard: two genuinely DIFFERENT replies that share a
+    short opening (well under the 60-char floor) are both delivered."""
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    t = await p._db.create_thread(bot_id="main", title="short-prefix-distinct")
+
+    a = "The answer is definitely A. Here is why: it has been the case for years."
+    b = "The answer is definitely B. Here is why: the evidence points elsewhere."
+    assert not main._is_twin(a, b)
+    assert await main._deliver_assistant_text(t.id, a) is not None
+    assert await main._deliver_assistant_text(t.id, b) is not None
+
+    asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
+    assert asst == [a, b], f"distinct replies were collapsed: {asst!r}"
+
+
+@pytest.mark.asyncio
+async def test_equal_length_twin_keeps_the_first(wired, monkeypatch):
+    """Two recordings of the same length (identical 80-char head, divergent
+    tails — the signature rule) — equal length keeps the FIRST; the second is
+    suppressed."""
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    t = await p._db.create_thread(bot_id="main", title="equal-length-twin")
+
+    head = "The opening of this reply is identical for both recordings. " * 2
+    first = head + "AAA"
+    second = head + "BBB"
+    assert len(first) == len(second)
+    assert main._msg_signature(first) == main._msg_signature(second)
+
+    assert await main._deliver_assistant_text(t.id, first) is not None
+    assert await main._deliver_assistant_text(t.id, second) is None
+
+    asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
+    assert asst == [first], f"expected the first copy only, got {asst!r}"
