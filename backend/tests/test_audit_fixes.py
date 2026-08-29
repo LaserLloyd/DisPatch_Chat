@@ -12,6 +12,7 @@ import asyncio
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,6 +144,57 @@ def test_ws_send_without_client_msg_id_gets_no_ack(app_client):
         ws.send_json({"type": "send", "thread_id": tid, "text": "legacy"})
         msg = _recv_until(ws, "message")     # would raise if an ack came instead
         assert "client_msg_id" not in msg
+
+
+def test_decoy_redactor_default_denies_unknown_frames(app_client):
+    """The redactor used to end in `return frame`, so any frame type nobody
+    had considered went to locked devices verbatim — which is how the
+    avatar_pool frame (non-safe bot ids, data-dir paths, rig errors) got
+    there. Unknown types must be dropped, not passed."""
+    assert main.redact_for_decoy({"type": "avatar_pool", "pools": {}}) is None
+    assert main.redact_for_decoy({"type": "something_new", "x": 1}) is None
+    assert main.redact_for_decoy({"x": 1}) is None            # no type at all
+    # …and the frames Safe Mode legitimately needs still get through.
+    assert main.redact_for_decoy({"type": "ack", "client_msg_id": "c",
+                                  "status": "ok"}) is not None
+    assert main.redact_for_decoy({"type": "pong"}) is not None
+    assert main.redact_for_decoy({"type": "error", "message": "nope"}) is not None
+    assert main.redact_for_decoy(
+        {"type": "hello", "bots": [], "decoy": True}) is not None
+    assert main.redact_for_decoy(
+        {"type": "messages", "thread_id": "t", "messages": []}) is not None
+    assert main.redact_for_decoy(
+        {"type": "threads_list", "bot_id": "alpha", "threads": []}) is not None
+    assert main.redact_for_decoy(
+        {"type": "thread_deleted", "bot_id": "alpha",
+         "thread_id": "t"}) is not None
+
+
+def test_ws_send_strips_reaction_markers(app_client):
+    """The composer bypassed the persist chokepoint, so a typed `:react:x:`
+    reached the bubble verbatim and _canon_msg disagreed with the stored row."""
+    tid = _mk_thread(app_client)
+    with app_client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "send", "thread_id": tid,
+                      "text": ":react:party: hi", "client_msg_id": "c-rx"})
+        assert _recv_until(ws, "ack")["status"] == "ok"
+        assert _recv_until(ws, "message")["message"]["content"] == "hi"
+        _recv_until(ws, "thread_update")
+    r = app_client.get(f"/api/threads/{tid}/messages")
+    assert [m["content"] for m in r.json()["messages"]] == ["hi"]
+
+
+def test_ws_send_marker_only_message_is_rejected(app_client):
+    """Nothing left after the strip — no empty bubble, and no agent turn."""
+    tid = _mk_thread(app_client)
+    with app_client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "send", "thread_id": tid, "text": ":react:party:",
+                      "client_msg_id": "c-rx2"})
+        assert _recv_until(ws, "ack")["status"] == "rejected"
+    r = app_client.get(f"/api/threads/{tid}/messages")
+    assert r.json()["messages"] == []
 
 
 # --------------------------------------------------------------------------- #
@@ -338,6 +390,63 @@ async def test_thread_preview_skips_tool_warning_sub_messages(tmp_path):
         # The sub row is still STORED — this is a display rule, not deletion.
         msgs = await db.dump_messages(t.id)
         assert any("Exec failed" in (m.content or "") for m in msgs)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_post_delivery_failure_does_not_mark_a_delivered_turn_as_error(
+        tmp_path, monkeypatch):
+    """The reply is on every screen in the house; the repair pass behind it
+    then throws. That used to set the thread to `error` and broadcast a
+    failure toast over a conversation that visibly went fine."""
+    from types import SimpleNamespace
+
+    from app.database import Database
+
+    db = Database(tmp_path / "t.db")
+    await db.connect()
+    monkeypatch.setattr(main, "db", db)
+    monkeypatch.setattr(main, "_shutting_down", True)   # no follower spawn
+    frames: list[dict] = []
+
+    async def _capture(frame):
+        frames.append(frame)
+
+    class FakeReply:
+        metadata: ClassVar[dict] = {"model": "fake", "provider": "fake",
+                                    "session_id": "s1"}
+        payloads: ClassVar[list] = [
+            SimpleNamespace(text="Here is the answer.", sub=False,
+                            media_url=None)]
+
+    async def fake_send(bot_id, session_key, message, thread_id):
+        return FakeReply()
+
+    async def fake_watch(thread_id, bot_id, session_key, handoff):
+        handoff["texts"] = []
+
+    async def boom(*a, **kw):
+        raise RuntimeError("second look exploded")
+
+    async def no_reconcile(*a, **kw):
+        return []
+
+    monkeypatch.setattr(main.manager, "broadcast", _capture)
+    monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
+    monkeypatch.setattr(main, "_watch_progress", fake_watch)
+    monkeypatch.setattr(main, "_media_second_look", boom)
+    monkeypatch.setattr(main, "_reconcile_transcript", no_reconcile)
+
+    t = await db.create_thread(bot_id="main", title="delivered")
+    try:
+        await main.run_agent_turn(t.id, "main", "do the thing")
+        stored = [m.content for m in await db.dump_messages(t.id)
+                  if m.role == "assistant"]
+        assert stored == ["Here is the answer."], stored
+        thread = await db.get_thread(t.id)
+        assert thread.status == "idle", "a delivered turn was labelled an error"
+        assert not [f for f in frames if f.get("type") == "error"], frames
     finally:
         await db.close()
 

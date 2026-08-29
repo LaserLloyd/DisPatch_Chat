@@ -425,7 +425,7 @@ async def test_ws_backfill_does_not_refire_reactions(_main_db, monkeypatch):
     t = await db.create_thread(bot_id="main", title="refire")
     fired: list[list[str]] = []
 
-    async def _record(ids, thread_id, bot_id):
+    async def _record(ids, thread_id, bot_id, *, autopilot=False):
         fired.append(list(ids))
 
     monkeypatch.setattr(main, "_fire_marker_reactions", _record)

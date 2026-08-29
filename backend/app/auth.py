@@ -344,6 +344,15 @@ def load() -> SecurityConfig:
             log.error("security.yaml exists but cannot be read/parsed (%s) — "
                       "FAILING CLOSED: app stays locked in Safe Mode. Fix or "
                       "delete %s to recover.", e, SECURITY_PATH)
+            # Fail closed means fail closed for sessions ALREADY MINTED too.
+            # Lockdown made it impossible to unlock from here on, but every
+            # full session handed out before the file went bad kept working —
+            # so the state entered because the security config can no longer be
+            # trusted still had unlocked devices walking around in it. The
+            # plaintext-PIN path above has always cleared both; this one now
+            # matches it.
+            _sessions.clear()
+            _wipe_trusted()
             cfg = _lockdown_config()
             _cache = (mtime, cfg)
             return cfg

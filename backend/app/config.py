@@ -460,6 +460,13 @@ def _bot_entry(b: Bot) -> dict:
     next load. `api` would have been the third such field, and the one whose
     loss costs the operator their API key.
 
+    It shipped a THIRD time anyway: `reaction_autopilot` was read by load_bots
+    but never emitted here, so every roster write (an avatar upload was enough)
+    turned autopilot off for the whole roster. The structural fix is the
+    round-trip test in tests/test_bot_config.py, which builds a Bot with every
+    persistable field non-default and fails if this dict drops one — so a
+    fourth field cannot be lost the same way.
+
     `api` is omitted entirely when unset so a roster with no direct-provider
     bots keeps the same file it has always had.
     """
@@ -474,6 +481,7 @@ def _bot_entry(b: Bot) -> dict:
         "safe": b.safe,
         "color": b.color,
         "reactions": b.reactions,
+        "reaction_autopilot": b.reaction_autopilot,
         "avatar_pool": b.avatar_pool,
     }
     if b.api:

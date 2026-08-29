@@ -28,6 +28,7 @@ import uuid
 from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from fastapi import (
     Body,
@@ -560,6 +561,7 @@ async def auth_gate(request: Request, call_next):
     """
     request.state.session = None
     request.state.decoy = False
+    request.state.machine = False
     cfg = auth.load()
     if not cfg.pin_set:
         return await call_next(request)
@@ -634,6 +636,10 @@ async def auth_gate(request: Request, call_next):
                     request.state.decoy = True
                     return await call_next(request)
                 return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+        # An authenticated MACHINE caller (on-box loopback, or a remote holding
+        # the api_token). Recorded so an in-handler guard can tell it apart
+        # from "sessionless, therefore Safe Mode" — see _require_full_access.
+        request.state.machine = True
         return await call_next(request)
 
     # Full session → everything (and slide the idle window). Otherwise Safe Mode.
@@ -1164,31 +1170,44 @@ def _frame_bot(frame: dict) -> str | None:
     return None
 
 
+# Every frame type a Safe-Mode connection may receive AT ALL. This list is an
+# ALLOWLIST on purpose: the redactor used to end in `return frame`, so a frame
+# type nobody had thought about was delivered verbatim. That is not theoretical
+# — `avatar_pool` shipped exactly that way and put non-safe bot ids, absolute
+# data-dir paths and rig error strings onto locked family devices. Default-deny
+# means the next new frame is silent for Safe Mode until someone decides
+# otherwise, which is the correct direction for a fail-closed tier.
+#
+# Deliberately NOT here, and why:
+#   stream_start / stream_chunk  a media directive can straddle two chunks, so
+#                                per-chunk stripping leaks; the final
+#                                stream_done is redacted and does reach them
+#   progress                     raw reply text, tool args, file paths
+#   terminal_state               the coding terminal is full-session only —
+#                                Safe Mode must not learn a session exists
+#   harness_state                same, for the DeepSeek Harness pane
+#   reaction_pool / avatar_pool  pool telemetry: batch sizes, prompts, rig
+#                                errors, absolute paths, every bot's id
+_DECOY_FRAME_ALLOW = frozenset({
+    "hello", "bots", "locked", "ack", "pong", "error",
+    "message", "stream_done", "message_deleted", "thinking",
+    "thread_update", "thread_created", "thread_deleted", "checklist_update",
+    "threads_list", "threads", "messages", "reaction",
+})
+
+
 def redact_for_decoy(frame: dict):
     """Make a frame safe for a Safe-Mode connection.
 
     Returns a redacted copy, the frame unchanged, or ``None`` to DROP it.
 
+    - A frame type not in :data:`_DECOY_FRAME_ALLOW` is dropped outright.
     - Frames about bots NOT flagged safe are dropped entirely — Safe Mode must
       not even learn those conversations exist.
-    - Streaming chunks and live "progress" items are dropped: a media directive
-      can straddle two stream chunks (per-chunk stripping leaks), and progress
-      items carry raw reply text / tool args / file paths. Safe-Mode clients
-      still get the final, fully-redacted ``stream_done`` / ``message`` frame.
     - Bot-list frames are filtered down to the safe set.
     """
     t = frame.get("type")
-    if t in ("stream_start", "stream_chunk", "progress"):
-        return None
-    # The coding terminal is full-session only — Safe Mode must not even
-    # learn that a session exists, let alone whether it is running.
-    if t == "terminal_state":
-        return None
-    # Same for the DeepSeek Harness pane (service state + headless jobs).
-    if t == "harness_state":
-        return None
-    # Pool telemetry (batch size, prompts, rig errors) is management detail.
-    if t == "reaction_pool":
+    if t not in _DECOY_FRAME_ALLOW:
         return None
 
     safe = _safe_bot_ids()
@@ -1273,10 +1292,15 @@ def _proxied_request(request: Request) -> bool:
     )
 
 
+def _ip_is_loopback(host: str) -> bool:
+    """Is this peer address this machine? (Address only — no header input.)"""
+    return bool(host) and (host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+                           or host.startswith("127."))
+
+
 def _loopback_socket(request: Request) -> bool:
     """Is the peer on this machine? See _proxied_request for the caveat."""
-    host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1") or host.startswith("127.")
+    return _ip_is_loopback(request.client.host if request.client else "")
 
 
 def _on_box_machine(request: Request) -> bool:
@@ -1537,22 +1561,22 @@ _decoy_upload_day: str = ""
 def _quota_ip(headers, peer: str) -> str:
     """The identity a Safe-Mode daily budget is charged to.
 
-    Behind the shipped reverse proxy every request arrives from the proxy's
-    own address, so keying on the socket peer gives the whole household ONE
-    shared budget — the first device to upload spends everyone's. When a
-    forwarding header is present (the same presence test the auth gate uses to
-    decide a request was proxied) the leftmost `X-Forwarded-For` entry is the
-    originating client, so charge that instead.
+    The socket peer, and ONLY the socket peer, unless the peer is loopback.
 
-    The value is only ever a bucket key: a client that forges it splits its
-    OWN budget into more buckets, which the quota already tolerates (a NAT
-    does the same thing honestly). It is validated as an IP so a junk header
-    cannot make an unbounded number of exotic keys, and anything unparseable
-    falls back to the peer.
+    This used to read the leftmost `X-Forwarded-For` whenever one was present,
+    with the reasoning that a forger "splits its OWN budget into more buckets".
+    That is exactly backwards: a bucket is a fresh ALLOWANCE, so N forged
+    values buy N times the daily quota — and a same-origin `fetch()` from the
+    locked page can set the header freely, so the limited tier could lift its
+    own limit from the browser.
+
+    There is no trusted reverse proxy in this deployment. Tailscale Serve is
+    the only thing that ever fronts the app, and it connects from loopback —
+    so a forwarding header is believed only when the peer IS loopback, where
+    the alternative (one shared household bucket for every tailnet device)
+    would be the worse failure. A remote peer's headers are ignored outright.
     """
-    proxied = bool(headers.get("x-forwarded-for") or headers.get("forwarded")
-                   or headers.get("tailscale-headers-info"))
-    if proxied:
+    if _ip_is_loopback(peer):
         first = (headers.get("x-forwarded-for") or "").split(",")[0].strip()
         # An IPv6 literal may arrive bracketed and/or with a port.
         if first.startswith("[") and "]" in first:
@@ -1634,14 +1658,76 @@ def _deny_decoy_mutation(request: Request) -> None:
         raise HTTPException(403, "Unlock for full access")
 
 
+def _require_full_access(request: Request) -> None:
+    """In-handler full-access gate for the operator-only routes.
+
+    A second lock on the same door, for the same reason dashboard_routes states
+    it: those routes are protected ONLY by the `_decoy_blocked` prefix tuple in
+    the middleware, so their security is a string-prefix list in another
+    function — an edit to that tuple, a route mounted at a new path, or a
+    handler called from anywhere but the middleware chain and the guard is
+    simply gone, silently. `/api/files/wipe` deletes the entire File Server.
+
+    Derives the answer itself: a Safe-Mode verdict is refused, a live session
+    or an AUTHENTICATED MACHINE caller (the gate's inbound branch — on-box
+    agents list files this way) is allowed, and a caller with neither is
+    allowed only when the app has no lock at all, which is the rule the rest
+    of the app uses.
+    """
+    if getattr(request.state, "decoy", False):
+        raise HTTPException(403, "Unlock for full access")
+    if getattr(request.state, "machine", False):
+        return
+    session = _session_of(request) or auth.get_session(
+        request.cookies.get(COOKIE_NAME))
+    if session is not None:
+        return
+    if auth.load().pin_set:
+        raise HTTPException(403, "Unlock for full access")
+
+
+# Liveness of the long-running background loops: {name: (last_beat_ts, period_s)}.
+# A loop that dies takes its duty with it and NOTHING said so — the app kept
+# answering "ok" while sessions stopped being purged and backups stopped being
+# taken. Each loop beats once per pass; /api/health reports the age.
+_loop_beats: dict[str, tuple[float, float]] = {}
+_LOOP_STALE_FACTOR = 2.5      # allow a full period of slack before "stale"
+
+
+def _loop_beat(name: str, period_s: float) -> None:
+    _loop_beats[name] = (time.time(), period_s)
+
+
+def _loop_health() -> dict[str, dict]:
+    """Per-loop {age_s, period_s, stale} for the health body."""
+    now = time.time()
+    out: dict[str, dict] = {}
+    for name, (ts, period) in _loop_beats.items():
+        age = now - ts
+        out[name] = {"age_s": round(age, 1), "period_s": period,
+                     "stale": age > period * _LOOP_STALE_FACTOR}
+    return out
+
+
 async def _session_purge_loop() -> None:
-    """Drop sessions abandoned past the inactivity window (lazy purge backstop)."""
+    """Drop sessions abandoned past the inactivity window (lazy purge backstop).
+
+    One bad pass must not end the loop. It used to be a bare `while True`
+    inside a single try: any exception (not just cancellation) unwound out of
+    the task and sessions were never purged again for the life of the process,
+    silently — the task's exception is never retrieved, so nothing even logged.
+    """
+    _loop_beat("session_purge", 300)
     try:
         while True:
             await asyncio.sleep(300)
-            auth.purge_expired()
+            try:
+                auth.purge_expired()
+            except Exception:
+                log.exception("session purge pass failed; loop continues")
+            _loop_beat("session_purge", 300)
     except asyncio.CancelledError:
-        pass
+        _loop_beats.pop("session_purge", None)   # shutdown, not a fault
 
 
 async def _broadcast_thread_update(thread_id: str) -> None:
@@ -1753,13 +1839,33 @@ def _iso_age_seconds(created_at: str | None) -> float | None:
     return (datetime.now(UTC) - ts).total_seconds()
 
 
-async def _persist_and_broadcast_message(
+class _Prepared(NamedTuple):
+    """What the shared pre-persist pass decided about one message."""
+    content: str
+    metadata: dict | None
+    bot_id: str | None
+    fired: list[str]
+    autopilot: bool     # `fired` is the SERVER's pick, not the bot's marker
+    skip: bool          # nothing left to say — persist no empty bubble
+
+
+async def _prepare_persist(
     thread_id: str, role: str, content: str,
-    media_url: str | None = None, metadata: dict | None = None,
-    source_id: str | None = None, created_at: str | None = None,
-) -> MessageOut:
+    media_url: str | None, metadata: dict | None, created_at: str | None,
+) -> _Prepared:
+    """Everything that happens to a message BEFORE it is written down.
+
+    The single implementation behind both persist chokepoints
+    (:func:`_persist_and_broadcast_message` and
+    :func:`_persist_and_stream_message`). It used to be copy-pasted into each,
+    and the copy drifted: the streaming path — the one final agent replies
+    actually take — never grew the reaction autopilot, the replay-freshness
+    window, or a `created_at`, so autopilot simply never saw a live reply.
+    One function, so the next rule lands on every path by construction.
+    """
     fired: list[str] = []
     bot_id: str | None = None
+    autopilot = False
     if role == "assistant":
         bot_id = await _bot_of_thread(thread_id)
         content = _salvage_media_refs(
@@ -1801,6 +1907,7 @@ async def _persist_and_broadcast_message(
                 mood = await _reaction_autopilot_mood(thread_id, content)
                 if mood:
                     fired = [mood]
+                    autopilot = True
                     log.info("reaction autopilot: %r for %s (%s)",
                              mood, bot_id, thread_id)
     elif content and ":react:" in content.lower():
@@ -1811,11 +1918,29 @@ async def _persist_and_broadcast_message(
         # Ingesting can copy up to 500MB off disk — never on the event loop
         # (this helper sits on the persist/WS hot path for every message).
         content = await asyncio.to_thread(_ingest_content_media, content)
-    # An all-marker reply has nothing left to say. Persist no empty bubble —
-    # the reactions it carried are still fired below.
-    if role == "assistant" and not (content or "").strip() and not media_url:
+    # Nothing left to say (an all-marker message) — persist no empty bubble.
+    # Deliberately role-agnostic: the guard used to apply to assistants only,
+    # so `POST /api/inject` with a user/system body of just `:react:random:`
+    # dropped a blank bubble into the thread.
+    skip = not (content or "").strip() and not media_url
+    return _Prepared(content, metadata, bot_id, fired, autopilot, skip)
+
+
+async def _persist_and_broadcast_message(
+    thread_id: str, role: str, content: str,
+    media_url: str | None = None, metadata: dict | None = None,
+    source_id: str | None = None, created_at: str | None = None,
+) -> MessageOut:
+    prep = await _prepare_persist(thread_id, role, content, media_url,
+                                  metadata, created_at)
+    content, metadata, bot_id, fired = (prep.content, prep.metadata,
+                                        prep.bot_id, prep.fired)
+    if prep.skip:
+        # The reactions it carried are still fired.
         if fired:
-            await _fire_marker_reactions(fired, thread_id, bot_id or await _bot_of_thread(thread_id))
+            await _fire_marker_reactions(
+                fired, thread_id, bot_id or await _bot_of_thread(thread_id),
+                autopilot=prep.autopilot)
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
@@ -1826,7 +1951,8 @@ async def _persist_and_broadcast_message(
          "message": msg.model_dump()}
     )
     if fired:
-        await _fire_marker_reactions(fired, thread_id, bot_id)
+        await _fire_marker_reactions(fired, thread_id, bot_id,
+                                     autopilot=prep.autopilot)
     return msg
 
 
@@ -1849,34 +1975,31 @@ _STREAM_MAX_CHUNKS = 83    # cap so very long text doesn't stream forever
 async def _persist_and_stream_message(
     thread_id: str, role: str, content: str,
     media_url: str | None = None, metadata: dict | None = None,
-    source_id: str | None = None,
+    source_id: str | None = None, created_at: str | None = None,
 ) -> MessageOut:
     """Persist the message, then stream its text to clients.
 
     Short or non-assistant messages fall back to a regular broadcast.
     Media-only messages (empty content + media_url) are also broadcast normally.
+
+    The pre-persist pass is :func:`_prepare_persist` — the SAME one the
+    broadcast chokepoint uses. It is shared rather than repeated because the
+    copy that used to live here silently drifted (no autopilot, no replay
+    freshness, no `created_at`).
     """
-    fired: list[str] = []
-    bot_id: str | None = None
-    if role == "assistant":
-        bot_id = await _bot_of_thread(thread_id)
-        content = _salvage_media_refs(
-            openclaw_text.sanitize_assistant_visible_text(
-                _strip_reply_directive(_strip_no_reply(content))))
-        content, fired = reactions.extract_markers(content, bot_id=bot_id)
-        metadata = _demote_tool_warning(content, metadata)
-    elif content and ":react:" in content.lower():
-        content, _ = reactions.extract_markers(content)
-    if content and "[[media:" in content:
-        # Blocking disk copy — off the event loop (see _persist_and_broadcast).
-        content = await asyncio.to_thread(_ingest_content_media, content)
-    # An all-marker reply has nothing left to say — persist no empty bubble.
-    if role == "assistant" and not (content or "").strip() and not media_url:
+    prep = await _prepare_persist(thread_id, role, content, media_url,
+                                  metadata, created_at)
+    content, metadata, bot_id, fired = (prep.content, prep.metadata,
+                                        prep.bot_id, prep.fired)
+    if prep.skip:
         if fired:
-            await _fire_marker_reactions(fired, thread_id, bot_id or await _bot_of_thread(thread_id))
+            await _fire_marker_reactions(
+                fired, thread_id, bot_id or await _bot_of_thread(thread_id),
+                autopilot=prep.autopilot)
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
-                               metadata=metadata, source_id=source_id)
+                               metadata=metadata, source_id=source_id,
+                               created_at=created_at)
     bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope frames
 
     is_sub = bool(metadata and metadata.get("sub"))
@@ -1886,7 +2009,8 @@ async def _persist_and_stream_message(
              "message": msg.model_dump()}
         )
         if fired:
-            await _fire_marker_reactions(fired, thread_id, bot_id)
+            await _fire_marker_reactions(fired, thread_id, bot_id,
+                                         autopilot=prep.autopilot)
         return msg
 
     # Adaptive chunk size so total stream time converges to ~2.5 s.
@@ -1907,7 +2031,8 @@ async def _persist_and_stream_message(
         "message_id": msg.id, "message": msg.model_dump(),
     })
     if fired:
-        await _fire_marker_reactions(fired, thread_id, bot_id)
+        await _fire_marker_reactions(fired, thread_id, bot_id,
+                                     autopilot=prep.autopilot)
     return msg
 
 
@@ -2044,7 +2169,8 @@ async def fire_reaction(
     return event
 
 
-async def _fire_marker_reactions(ids: list[str], thread_id: str, bot_id: str | None) -> None:
+async def _fire_marker_reactions(ids: list[str], thread_id: str, bot_id: str | None,
+                                 *, autopilot: bool = False) -> None:
     """Fire the `:react:<id>:` markers an agent embedded in its reply.
 
     The reaction lands in the chat right after the reply — the trace row is
@@ -2055,9 +2181,17 @@ async def _fire_marker_reactions(ids: list[str], thread_id: str, bot_id: str | N
     A success and a failure used to look identical from the chat, which is how
     two weeks of refused fires read as "reactions stopped working" with
     nothing to debug.
+
+    ``autopilot`` marks the SERVER's own pick (see _reaction_autopilot_mood),
+    which gets the opposite treatment: it falls back to a mood that exists and
+    otherwise says nothing at all. See :func:`_fire_autopilot_reaction`.
     """
     bot = config.get_bot(bot_id) if bot_id else None
     actor = bot.name if bot else "Assistant"
+    if autopilot:
+        for rid in ids:
+            await _fire_autopilot_reaction(rid, thread_id, bot_id, actor)
+        return
     for rid in ids:
         try:
             await fire_reaction(rid, actor=actor, actor_kind="agent",
@@ -2070,6 +2204,46 @@ async def _fire_marker_reactions(ids: list[str], thread_id: str, bot_id: str | N
             log.exception("failed to fire reaction %r", rid)
             reactions.note_fire_failure(rid, "internal error", actor=actor)
             await _note_reaction_refusal(thread_id, rid, "internal error")
+
+
+_AUTOPILOT_FALLBACK_MOODS = ("thinking", "random")
+
+
+async def _fire_autopilot_reaction(mood: str, thread_id: str,
+                                   bot_id: str | None, actor: str) -> None:
+    """Fire the server's OWN reaction pick — quietly, or not at all.
+
+    Autopilot chooses a mood heuristically (`morning` / `task_complete` /
+    `thinking`), but a pool only holds the moods someone actually generated —
+    a stock install seeds `thinking` alone. Firing the chosen name blindly
+    therefore 404'd on most replies and, worse, left a visible
+    "⚠️ Reaction 'task_complete' didn't fire" row under EVERY one of them:
+    the server's own misfire spamming the family's chat.
+
+    So autopilot degrades instead: try the mood, then `thinking`, then a
+    `random` draw, skipping any candidate that does not resolve, and if none
+    does, say nothing. A refusal is a log line and a health counter, never a
+    chat row — the visible-refusal behaviour is for a BOT's explicit marker,
+    where the agent asked for something specific and deserves to be told.
+    """
+    for cand in dict.fromkeys((mood, *_AUTOPILOT_FALLBACK_MOODS)):
+        try:
+            if reactions.get(cand, bot_id=bot_id) is None:
+                continue               # nothing on the shelf under that name
+        except Exception:
+            log.exception("autopilot could not probe reaction %r", cand)
+            continue
+        try:
+            await fire_reaction(cand, actor=actor, actor_kind="agent",
+                                thread_id=thread_id, bot_id=bot_id)
+            return
+        except reactions.ReactionError as e:
+            log.info("autopilot reaction %r not fired: %s", cand, e.message)
+            reactions.note_fire_failure(cand, e.message, actor=actor)
+        except Exception:
+            log.exception("autopilot failed to fire reaction %r", cand)
+            return
+    log.info("reaction autopilot: no usable mood for %s (%s)", bot_id, thread_id)
 
 
 async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:
@@ -2484,6 +2658,31 @@ def _canon_msg(s: str) -> str:
         assume_files_exist=True)))
 
 
+# Memo for the whole-thread dedup scan. _canon_msg is half a dozen regex
+# passes; the whole-thread branch runs it over EVERY assistant row for EVERY
+# delivered message, so a backfill batch onto a long thread was quadratic work
+# with not one await in it — the event loop stalled for the whole batch.
+#
+# Keyed by the raw content, which is exact: _canon_msg is a pure function of
+# its text (that is the point of `assume_files_exist`), so a hit can never be
+# stale, and a row whose content is later rewritten simply misses. Bounded, so
+# a long-running process does not accumulate every message it has ever seen.
+_canon_memo: OrderedDict[str, str] = OrderedDict()
+_CANON_MEMO_MAX = 4096
+
+
+def _canon_msg_cached(s: str) -> str:
+    hit = _canon_memo.get(s)
+    if hit is not None:
+        _canon_memo.move_to_end(s)
+        return hit
+    out = _canon_msg(s)
+    _canon_memo[s] = out
+    while len(_canon_memo) > _CANON_MEMO_MAX:
+        _canon_memo.popitem(last=False)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Drift-tolerant dedup (the abridged twin)
 #
@@ -2705,8 +2904,15 @@ async def _is_duplicate_message(thread_id: str, text: str, *,
     """
     norm = _canon_msg(text)
     if whole_thread:
-        for m in await db.dump_messages(thread_id):
-            if m.role == "assistant" and _is_twin(norm, _canon_msg(m.content or "")):
+        # Memoised canon + a yield every so often: this scan is O(rows) per
+        # delivered message and a backfill delivers many, so unbroken it held
+        # the event loop for the length of the batch (nothing else — a WS
+        # frame, a heartbeat, another thread's turn — ran meanwhile).
+        for i, m in enumerate(await db.dump_messages(thread_id)):
+            if i and not i % 200:
+                await asyncio.sleep(0)
+            if m.role == "assistant" and _is_twin(
+                    norm, _canon_msg_cached(m.content or "")):
                 return m
         return None
     # 40, not 10: a single multi-step turn can narrate many assistant blocks; the
@@ -2857,7 +3063,8 @@ async def _deliver_assistant_text(
         if stream:
             return await _persist_and_stream_message(
                 thread_id, "assistant", text, media_url=media_url,
-                metadata=metadata, source_id=source_id)
+                metadata=metadata, source_id=source_id,
+                created_at=created_at)
         msg = await _persist_and_broadcast_message(
             thread_id, "assistant", text, media_url=media_url,
             metadata=metadata, source_id=source_id, created_at=created_at)
@@ -3682,18 +3889,31 @@ async def _make_backup() -> Path | None:
 
 
 async def _backup_loop() -> None:
+    """Snapshot the DB on a cadence, for the life of the process.
+
+    Every pass is guarded: a snapshot that raises (disk full, a VACUUM losing
+    a race) logs and the loop keeps its cadence. The unguarded version ended
+    the task on the first such failure, and because `last_backup_ok` only ever
+    holds the LAST recorded outcome, health went on reporting that stale
+    success indefinitely — see the backup_age_s / background_loops fields in
+    /api/health, which exist to make that visible.
+    """
     interval = SETTINGS.backup_interval
     if interval <= 0:
         return
+    _loop_beat("backup", interval)
     try:
         # First snapshot shortly after boot, then on the configured cadence.
         await asyncio.sleep(60)
-        await _make_backup()
         while True:
+            try:
+                await _make_backup()
+            except Exception:
+                log.exception("backup pass failed; loop continues")
+            _loop_beat("backup", interval)
             await asyncio.sleep(interval)
-            await _make_backup()
     except asyncio.CancelledError:
-        pass
+        _loop_beats.pop("backup", None)          # shutdown, not a fault
 
 
 # How many [[doc:…]] references one message may inline, and how much of each.
@@ -4026,6 +4246,9 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
         await _broadcast_thread_update(thread_id)
         handoff: dict = {}
         session_id: str | None = None   # exact sessionId from the CLI reply
+        # Hoisted out of the try: the error handlers need to know whether the
+        # reply already reached the family before they call the turn a failure.
+        persisted: list[MessageOut] = []
         watcher = asyncio.create_task(
             _watch_progress(thread_id, bot_id, session_key, handoff)
         )
@@ -4041,7 +4264,6 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             # messages keep just model/provider for the per-message badge.
             slim = {k: reply.metadata[k] for k in ("model", "provider")
                     if reply.metadata.get(k)} or None
-            persisted: list[MessageOut] = []
 
             # All messages, not just the final one: a multi-step turn narrates
             # between tool calls, but send_to_agent returns ONLY the last block
@@ -4104,7 +4326,15 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
                 )
                 if msg:
                     persisted.append(msg)
-            await _media_second_look(thread_id, bot_id, session_key, persisted)
+            # POST-delivery, so its failure is not the turn's failure. The
+            # second look is a repair pass over messages the family has
+            # already read; letting it raise put the thread in `error` — a red
+            # banner over a conversation that went perfectly.
+            try:
+                await _media_second_look(thread_id, bot_id, session_key, persisted)
+            except Exception:
+                log.exception("media second look failed after a delivered turn "
+                              "(%s/%s)", bot_id, thread_id)
             await db.update_thread_status(thread_id, "idle")
         except openclaw.AgentError as e:
             log.warning("agent turn failed (%s/%s): %s — %s", bot_id, thread_id, e.message, e.detail)
@@ -4127,11 +4357,18 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
                 )
         except Exception as e:  # pragma: no cover - defensive
             log.exception("unexpected agent turn error")
-            await db.update_thread_status(thread_id, "error")
-            await manager.broadcast(
-                {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
-                 "message": "Something went wrong.", "detail": str(e)[:300]}
-            )
+            if persisted:
+                # The reply is already in the thread and on every screen. What
+                # failed is something after it, so the turn is not an error —
+                # marking it one puts a red banner and a toast over a
+                # conversation the family can see went fine.
+                await db.update_thread_status(thread_id, "idle")
+            else:
+                await db.update_thread_status(thread_id, "error")
+                await manager.broadcast(
+                    {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                     "message": "Something went wrong.", "detail": str(e)[:300]}
+                )
         finally:
             watcher.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -4244,8 +4481,22 @@ async def health(request: Request):
     cfg = auth.load()
     detailed = (bool(_session_of(request)) or not cfg.pin_set
                 or _on_box_machine(request))
+    loops = _loop_health()
+    backup_age = _iso_age_seconds(_last_backup_at)
+    # `last_backup_ok` latches: it holds the last outcome forever, so a loop
+    # that died a week ago still reports the success it had before it died.
+    # Age is what distinguishes "backups are fine" from "backups stopped".
+    backup_stale = bool(
+        SETTINGS.backup_interval > 0 and backup_age is not None
+        and backup_age > SETTINGS.backup_interval * 2)
+    degraded = (_db_integrity_ok is False
+                or any(v["stale"] for v in loops.values())
+                or backup_stale or _last_backup_ok is False)
     body = {
-        "status": "ok",
+        # "ok" unless something we can actually name is wrong. A liveness
+        # field nobody reads is the same as no field at all, so a stale loop
+        # or an old/failed backup shows up in the ALWAYS-visible status too.
+        "status": "degraded" if degraded else "ok",
         # Degraded-state signals (all cached/cheap; see finding "health does
         # not surface DB integrity, backup health, or gateway reachability").
         "db_integrity_ok": _db_integrity_ok,
@@ -4258,6 +4509,15 @@ async def health(request: Request):
         "data_dir": str(config.DATA_DIR),
         "last_backup_ok": _last_backup_ok,
         "last_backup_at": _last_backup_at,
+        # Additive companions to the two latching fields above: how long ago
+        # the last attempt was, and whether that is longer than the cadence
+        # allows. Existing consumers reading last_backup_ok are untouched.
+        "backup_age_s": None if backup_age is None else round(backup_age, 1),
+        "backup_stale": backup_stale,
+        # name -> {age_s, period_s, stale}. A loop missing from this map never
+        # started; a stale one stopped beating. Either way the duty it owns
+        # (session purge, DB snapshots) is not being done.
+        "background_loops": loops,
         "gateway_ok": await _gateway_ok(),
         # Count only — refusal details (bot names, reasons) stay in the
         # journal and the unlocked UI.
@@ -5295,7 +5555,21 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
 
 @app.post("/api/threads/{thread_id}/read", responses=problem.MACHINE)
 async def mark_read(request: Request, thread_id: str):
-    """Mark a thread read (clears its unread indicator on every device)."""
+    """Mark a thread read (clears its unread indicator on every device).
+
+    THE MISSING `_deny_decoy_mutation` HERE IS DELIBERATE — every sibling
+    route (patch, delete, archive) has one, so its absence looks like an
+    oversight and has been "fixed" by review more than once.
+
+    Safe Mode is view + send, and this endpoint is the *view* half writing
+    down that the view happened: the locked tab calls it when a family member
+    opens a thread on the tablet, and denying it would leave a dot that never
+    clears on exactly the devices the tier exists for. The blast radius is one
+    boolean on a thread the caller is already allowed to READ — Safe Mode's
+    bot gate still applies through `_deny_decoy_thread` below, so a locked
+    caller can no more clear a non-safe bot's dot than see it. Nothing is
+    created, renamed, deleted or sent.
+    """
     _is_safe_mode_caller(request)
     thread_id = await _canonical_thread_id(thread_id)
     await _deny_decoy_thread(request, thread_id)
@@ -5464,10 +5738,13 @@ async def delete_thread(request: Request, thread_id: str, hard: bool = False):
     _deny_decoy_bot(request, thread.bot_id)
     if hard:
         await db.delete_thread(thread_id)
-        # Safe to drop the lock only on hard delete: subsequent sends fail the
-        # get_thread check. (Archived threads remain sendable, so popping their
-        # lock could let two agent turns run concurrently on one session.)
-        _thread_locks.pop(thread_id, None)
+        # The lock is deliberately NOT dropped. Thread ids are not all random:
+        # a daily thread's id is derived from the bot and the date, so deleting
+        # today's and letting it be recreated hands the new thread a FRESH lock
+        # while a turn may still be running under the old one — two concurrent
+        # turns on one session, which is the exact thing this lock exists to
+        # prevent. Leaving the entry costs one lock object per thread ever
+        # seen, which is already the growth pattern of this defaultdict.
         _stop_follower(thread_id)
         _thread_bot.pop(thread_id, None)
         _forget_thread_delivery(thread_id)
@@ -5523,6 +5800,7 @@ async def _stream_upload(
 
     size = 0
     charged = 0
+    published = False
     try:
         with part.open("wb") as f:
             while chunk := await file.read(1 << 20):
@@ -5541,18 +5819,21 @@ async def _stream_upload(
             f.flush()
             os.fsync(f.fileno())
         os.replace(part, dest)          # atomic publish of the completed blob
-    except HTTPException:
-        if is_decoy and charged:
-            _decoy_quota_add(request, -charged)      # refund this failed upload
-        with contextlib.suppress(OSError):
-            part.unlink(missing_ok=True)
-        raise
+        published = True
     except OSError:
-        if is_decoy and charged:
-            _decoy_quota_add(request, -charged)
-        with contextlib.suppress(OSError):
-            part.unlink(missing_ok=True)
         raise HTTPException(507, "Disk write failed")
+    finally:
+        # `finally`, not two `except` clauses. The clauses named HTTPException
+        # and OSError only — and the two exceptions this function ACTUALLY sees
+        # most are neither: Starlette raises ClientDisconnect when a phone
+        # walks out of range mid-upload, and a cancelled request raises
+        # CancelledError. Both left the .part file on disk forever AND left the
+        # decoy's daily byte budget charged for an upload that never landed.
+        if not published:
+            if is_decoy and charged:
+                _decoy_quota_add(request, -charged)  # refund the failed upload
+            with contextlib.suppress(OSError):
+                part.unlink(missing_ok=True)
     return size
 
 
@@ -5760,7 +6041,8 @@ async def file_upload(file: UploadFile = File(...)):
 
 
 @app.get("/api/files", responses=problem.MACHINE)
-async def file_list():
+async def file_list(request: Request):
+    _require_full_access(request)      # see _require_full_access: second lock
     return {"files": await db.list_files()}
 
 
@@ -5809,7 +6091,8 @@ async def file_raw(file_id: str, request: Request):
 
 
 @app.delete("/api/files/{file_id}")
-async def file_delete(file_id: str):
+async def file_delete(file_id: str, request: Request):
+    _require_full_access(request)
     rec = await db.delete_file(file_id)
     if not rec:
         raise HTTPException(404, "File not found")
@@ -5820,11 +6103,14 @@ async def file_delete(file_id: str):
 
 
 @app.post("/api/files/wipe")
-async def file_wipe(payload: dict = Body(...)):
+async def file_wipe(request: Request, payload: dict = Body(...)):
     """Delete every file uploaded at or before `before` (ISO timestamp).
 
-    Powers the per-day "delete this and previous files" buttons.
+    Powers the per-day "delete this and previous files" buttons. The sharpest
+    route in the app to leave on a prefix tuple alone — one call empties the
+    File Server — so it re-derives the gate itself.
     """
+    _require_full_access(request)
     cutoff = payload.get("before")
     if not isinstance(cutoff, str) or not cutoff:
         raise HTTPException(400, "before (ISO timestamp) required")
@@ -6486,8 +6772,10 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 
 
 @app.get("/api/search")
-async def search_messages(q: str = Query(...), bot_id: str | None = None, limit: int = 60):
+async def search_messages(request: Request, q: str = Query(...),
+                          bot_id: str | None = None, limit: int = 60):
     """Full-text search across every thread's messages (FTS5, LIKE fallback)."""
+    _require_full_access(request)      # reads every thread, Safe-Mode-unredacted
     bot_ids = [bot_id] if bot_id else None
     results = await db.search_messages(q, bot_ids=bot_ids, limit=limit)
     return {"query": q, "results": results, "fts": db.fts_ok}
@@ -6553,6 +6841,7 @@ async def export_all(
     The user's 'retrieve ALL messages' guarantee: a single action that dumps the
     full conversation history into an open, human-readable + re-importable file.
     """
+    _require_full_access(request)      # dumps EVERY thread, unredacted
     threads = await db.all_threads(include_archived=True)
     if thread_id:
         threads = [t for t in threads if t.id == thread_id]
@@ -6587,12 +6876,13 @@ def _download_text(body: str, filename: str, media_type: str):
 
 
 @app.post("/api/recover/transcript")
-async def recover_transcript(payload: dict = Body(...)):
+async def recover_transcript(request: Request, payload: dict = Body(...)):
     """Pull any messages missing from a thread out of its OpenClaw transcript.
 
     Idempotent (routes through the shared dedup funnel): re-running only fills
     gaps. `thread_id` recovers one thread; `all: true` sweeps every thread.
     """
+    _require_full_access(request)
     if payload.get("all"):
         total, scanned = 0, 0
         for t in await db.all_threads(include_archived=True):
@@ -6614,10 +6904,11 @@ async def recover_transcript(payload: dict = Body(...)):
 
 
 @app.get("/api/openclaw/sessions")
-async def openclaw_sessions(bot_id: str = Query(...)):
+async def openclaw_sessions(request: Request, bot_id: str = Query(...)):
     """Every OpenClaw session for an agent — including cron/main/subagent/dashboard
     sessions DisPatch never created. The doorway to messages that would otherwise
     never reach DisPatch."""
+    _require_full_access(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(400, "Unknown bot_id")
@@ -6638,12 +6929,13 @@ async def openclaw_sessions(bot_id: str = Query(...)):
 
 @app.get("/api/openclaw/transcript")
 async def openclaw_transcript(
-    bot_id: str = Query(...), thread_id: str | None = None,
+    request: Request, bot_id: str = Query(...), thread_id: str | None = None,
     session_key: str | None = None,
 ):
     """Full raw transcript for a session — EVERYTHING, including the tool calls,
     thinking, subagent chatter and late items the normal delivery funnel drops.
     Each text/note item is flagged whether it's already in the DisPatch DB."""
+    _require_full_access(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(400, "Unknown bot_id")
@@ -6672,9 +6964,10 @@ async def openclaw_transcript(
 
 
 @app.post("/api/openclaw/import")
-async def openclaw_import_session(payload: dict = Body(...)):
+async def openclaw_import_session(request: Request, payload: dict = Body(...)):
     """Import an arbitrary agent session (cron/main/subagent/…) into a NEW
     DisPatch thread, so conversations the app never created become first-class."""
+    _require_full_access(request)
     bot = config.resolve_bot(payload.get("bot_id"))
     if not bot:
         raise HTTPException(400, "Unknown bot_id")
@@ -7605,6 +7898,17 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # media — a blocking disk copy, so off the event loop).
         if "[[media:" in text:
             text = await asyncio.to_thread(_ingest_content_media, text)
+    # Marker strip, as the persist chokepoint does it on every other path. The
+    # composer went straight to db.add_message, so a typed `:react:x:` reached
+    # the bubble verbatim AND left _canon_msg disagreeing with the stored text
+    # (dedup then failed to recognise the message it had just written). Only an
+    # assistant's markers ever FIRE; a user typing one just loses the syntax.
+    if ":react:" in text.lower():
+        text, _ = reactions.extract_markers(text)
+        text = text.strip()
+        if not text:
+            await _ack(ws, cmid, "rejected", "Empty message")
+            return
     try:
         user_msg = await db.add_message(thread_id, "user", text)
     except Exception:

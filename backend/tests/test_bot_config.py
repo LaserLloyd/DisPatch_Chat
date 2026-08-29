@@ -74,6 +74,49 @@ def test_save_bot_avatar_unknown_bot_is_a_noop(cfg_env):
 
 
 # --------------------------------------------------------------------------- #
+# Structural guard: _bot_entry must emit EVERY persistable field
+# --------------------------------------------------------------------------- #
+
+
+def _non_default(f):
+    """A value for dataclass field `f` that is NOT its compiled default."""
+    if f.name == "id":
+        return "roundtrip"
+    if f.type is bool or isinstance(f.default, bool):
+        return not f.default
+    if f.type is int or isinstance(f.default, int):
+        return 42
+    if f.name == "api":
+        return {"provider": "openai", "model": "m", "api_key": "k"}
+    return f"x-{f.name}"
+
+
+def test_bot_entry_round_trips_every_persistable_field(cfg_env):
+    """A Bot with every field non-default must survive _bot_entry -> load.
+
+    This is the structural fix for a bug that shipped THREE times: a writer
+    (now the single _bot_entry serializer) forgot a field, so every roster
+    write silently reverted it to its compiled default for every bot —
+    `reactions` in 2026-08-01, `reaction_autopilot` after it. Adding a field
+    to Bot without adding it to _bot_entry fails HERE, not in production.
+    """
+    from dataclasses import fields
+
+    values = {f.name: _non_default(f) for f in fields(config.Bot)}
+    bot = config.Bot(**values)
+    for name, want in values.items():
+        assert getattr(bot, name) == want
+
+    config._write_bots([config._bot_entry(bot)])
+    config._invalidate_bots_cache()
+    loaded = [b for b in config.load_bots() if b.id == bot.id]
+    assert loaded, "the round-tripped bot vanished from the roster"
+    assert loaded[0] == bot, (
+        "_bot_entry dropped a field — add it to the serializer, "
+        f"lost: {[n for n in values if getattr(loaded[0], n) != values[n]]}")
+
+
+# --------------------------------------------------------------------------- #
 # config.yaml may hold provider API keys — write it like a secret
 # --------------------------------------------------------------------------- #
 

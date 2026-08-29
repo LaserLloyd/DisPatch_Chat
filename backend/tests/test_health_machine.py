@@ -126,3 +126,74 @@ def test_with_no_pin_configured_the_app_is_open_by_design(off_box):
     assert auth.load().pin_set is False
     body = off_box.get("/api/health").json()
     assert DETAIL_KEYS <= set(body)
+
+
+# --------------------------------------------------------------------------- #
+# A background loop that dies must not report as health
+# --------------------------------------------------------------------------- #
+
+
+def test_background_loops_are_reported_and_a_live_one_is_not_stale(on_box):
+    body = on_box.get("/api/health").json()
+    loops = body["background_loops"]
+    assert "session_purge" in loops, loops
+    beat = loops["session_purge"]
+    assert beat["stale"] is False and beat["period_s"] > 0
+    assert body["status"] == "ok"
+
+
+def test_a_stale_loop_degrades_the_top_level_status(on_box, monkeypatch):
+    """The loops used to die on the first exception with nothing to show for
+    it: sessions stopped being purged, snapshots stopped being taken, and
+    /api/health kept answering "ok"."""
+    import time as _time
+
+    monkeypatch.setitem(main._loop_beats, "session_purge",
+                        (_time.time() - 100_000, 300))
+    body = on_box.get("/api/health").json()
+    assert body["background_loops"]["session_purge"]["stale"] is True
+    # Visible WITHOUT a session too — the short body is what a monitor reads.
+    assert body["status"] == "degraded"
+    auth.set_pin("1234")
+    short = on_box.get("/api/health", headers=BROWSER).json()
+    assert short == {"status": "degraded", "db_integrity_ok": short["db_integrity_ok"]}
+
+
+def test_a_loop_that_keeps_running_after_a_failed_pass(on_box, monkeypatch):
+    """One bad pass must not end the loop (it used to unwind the whole task)."""
+    calls: list[int] = []
+
+    def _boom():
+        calls.append(1)
+        raise RuntimeError("transient")
+
+    monkeypatch.setattr(main.auth, "purge_expired", _boom)
+    sleeps: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def _fast_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps) > 3:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    monkeypatch.setattr(main.asyncio, "sleep", _fast_sleep)
+    asyncio.run(main._session_purge_loop())
+    assert len(calls) == 3, "the loop stopped at the first failing pass"
+
+
+def test_backup_staleness_is_visible_even_though_last_backup_ok_latches(on_box,
+                                                                       monkeypatch):
+    from dataclasses import replace
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(main, "_last_backup_ok", True)      # latched success
+    monkeypatch.setattr(main, "SETTINGS",
+                        replace(main.SETTINGS, backup_interval=3600))
+    monkeypatch.setattr(main, "_last_backup_at",
+                        (datetime.now() - timedelta(days=7)).isoformat())
+    body = on_box.get("/api/health").json()
+    assert body["last_backup_ok"] is True     # additive: the old field is intact
+    assert body["backup_stale"] is True
+    assert body["backup_age_s"] > 3600 * 2
+    assert body["status"] == "degraded"

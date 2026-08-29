@@ -132,7 +132,7 @@ async def test_fresh_followup_still_fires(rx_env, monkeypatch):
     async def _noop(_frame):
         return None
 
-    async def _capture(ids, thread_id, bot_id):
+    async def _capture(ids, thread_id, bot_id, *, autopilot=False):
         fired.append(list(ids))
 
     monkeypatch.setattr(main.manager, "broadcast", _noop)
@@ -153,7 +153,7 @@ async def test_old_replay_stays_silent(rx_env, monkeypatch):
     async def _noop(_frame):
         return None
 
-    async def _capture(ids, thread_id, bot_id):
+    async def _capture(ids, thread_id, bot_id, *, autopilot=False):
         fired.append(list(ids))
 
     monkeypatch.setattr(main.manager, "broadcast", _noop)

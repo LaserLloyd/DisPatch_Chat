@@ -355,6 +355,68 @@ def test_failed_upload_leaves_no_part(fs_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_operator_routes_deny_a_decoy_in_the_handler_itself(fs_env):
+    """These routes used to be protected ONLY by the `_decoy_blocked` prefix
+    tuple in the middleware — their security was a string list in another
+    function. Each now re-derives it, so calling the handler directly (a route
+    remounted at a new path, a refactored middleware) still refuses. /api/files
+    /wipe empties the whole File Server, so it is the sharpest of them."""
+    from types import SimpleNamespace
+
+    auth.set_pin("1234")
+    decoy = SimpleNamespace(state=SimpleNamespace(decoy=True, session=None,
+                                                  machine=False),
+                            cookies={})
+    calls = [
+        main.file_list(decoy),
+        main.file_delete("x", decoy),
+        main.file_wipe(decoy, {"before": "2026-01-01T00:00:00"}),
+        main.search_messages(decoy, q="secret"),
+        main.export_all(decoy),
+        main.recover_transcript(decoy, {"all": True}),
+        main.openclaw_sessions(decoy, bot_id="main"),
+        main.openclaw_transcript(decoy, bot_id="main", thread_id="t"),
+        main.openclaw_import_session(decoy, {"bot_id": "main", "session_key": "k"}),
+    ]
+    for call in calls:
+        with pytest.raises(main.HTTPException) as e:
+            await call
+        assert e.value.status_code == 403, call
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_leaves_no_part_and_refunds_quota(fs_env, monkeypatch):
+    """The cleanup used to live in `except HTTPException` / `except OSError`,
+    and the two exceptions this path actually sees are neither: Starlette's
+    ClientDisconnect (a phone walking out of range) and CancelledError. Both
+    left the .part on disk forever AND left the decoy's day charged."""
+    _, tmp_path = fs_env
+    monkeypatch.setattr(main, "FILES_TOTAL_MAX", 0)
+    main._decoy_upload_used.clear()
+    main._decoy_upload_day = ""
+
+    from types import SimpleNamespace
+
+    class Disconnecting:
+        def __init__(self):
+            self.calls = 0
+
+        async def read(self, _n):
+            self.calls += 1
+            if self.calls == 1:
+                return b"z" * (256 * 1024)
+            raise RuntimeError("client disconnected")   # not HTTPException/OSError
+
+    req = SimpleNamespace(state=SimpleNamespace(decoy=True),
+                          client=SimpleNamespace(host="9.9.9.9"))
+    with pytest.raises(RuntimeError):
+        await main._stream_upload(Disconnecting(), tmp_path / "files", "gone.bin",
+                                  max_size=100 * 1024 * 1024, request=req, quota=True)
+    assert list((tmp_path / "files").glob("*.part")) == [], "leaked .part file"
+    assert main._decoy_upload_used.get("9.9.9.9", 0) == 0, "quota was not refunded"
+
+
+@pytest.mark.asyncio
 async def test_orphan_sweep_adopts_untracked_blob(fs_env):
     """An agent-dropped blob must SURVIVE the boot sweep and gain a DB row.
 

@@ -256,6 +256,27 @@ def test_corrupt_security_yaml_fails_closed(gate_env):
     assert client.get("/api/bots/all").status_code == 200
 
 
+def test_lockdown_revokes_sessions_already_minted(gate_env):
+    """Fail-closed has to include the devices that are ALREADY unlocked.
+
+    Lockdown made a NEW session impossible but left every existing one alive,
+    so the state entered because the security config can no longer be trusted
+    still had full-access devices walking around in it. The plaintext-PIN
+    reset path has always cleared both; this one now matches."""
+    client = gate_env()
+    auth.set_pin("1234")
+    assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
+    assert client.get("/api/bots/all").status_code == 200      # unlocked now
+    assert auth._sessions, "precondition: a live session exists"
+
+    auth.SECURITY_PATH.write_text("pin: [unclosed\n\t:::")
+    auth._bust_cache()
+    auth.load()                                   # trips the lockdown branch
+    assert auth._sessions == {}, "an already-unlocked device kept full access"
+    assert not auth.TRUSTED_PATH.exists()
+    assert client.get("/api/bots/all").status_code == 403
+
+
 def test_empty_security_yaml_fails_closed(gate_env):
     gate_env()
     auth.set_pin("1234")
@@ -579,10 +600,26 @@ def test_ws_retry_is_metered_for_a_locked_device(gate_env, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_quota_ip_prefers_the_forwarded_client(monkeypatch):
-    """Behind the shipped reverse proxy every request has the proxy's address,
-    so one household shared ONE budget and the first device spent everyone's."""
-    proxy = "192.0.2.77"
+def test_quota_ip_ignores_forwarding_headers_from_a_remote_peer(monkeypatch):
+    """A bucket is a fresh ALLOWANCE, so trusting a client-settable header
+    meant N forged values bought N daily quotas — and the locked page can set
+    X-Forwarded-For itself with a same-origin fetch(). Only the socket peer
+    counts unless the peer is loopback (where Tailscale Serve lands)."""
+    remote = "192.0.2.77"
+    assert main._quota_ip({}, remote) == remote
+    assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, remote) == remote
+    assert main._quota_ip({"forwarded": "for=203.0.113.9"}, remote) == remote
+    assert main._quota_ip({"x-real-ip": "203.0.113.9"}, remote) == remote
+    # Forged values must all land in the SAME bucket — one quota, not many.
+    keys = {main._quota_ip({"x-forwarded-for": f"203.0.113.{i}"}, remote)
+            for i in range(10)}
+    assert keys == {remote}, "forged XFF values minted extra quota buckets"
+
+
+def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
+    """Tailscale Serve is the only fronting layer and it connects from
+    loopback; there, one shared household bucket would be the worse failure."""
+    proxy = "127.0.0.1"
     assert main._quota_ip({}, proxy) == proxy                     # direct
     assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
     # Leftmost entry only.
@@ -592,7 +629,7 @@ def test_quota_ip_prefers_the_forwarded_client(monkeypatch):
     assert main._quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
     # Junk falls back to the peer rather than minting an arbitrary key.
     assert main._quota_ip({"x-forwarded-for": "not-an-ip"}, proxy) == proxy
-    # No forwarding evidence at all: the header is ignored outright.
+    # No forwarding evidence at all: nothing to read.
     assert main._quota_ip({"x-real-ip": "203.0.113.9"}, proxy) == proxy
 
 
