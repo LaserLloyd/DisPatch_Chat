@@ -398,8 +398,14 @@ function expandDocDirectives(text, parker) {
     const fid = id.trim();
     const fname = (name || fid).trim();
     const icon = _docIcon(fname);
-    const dlUrl = `/api/files/${attrEscape(fid)}/download`;
-    const rawUrl = `/api/files/${attrEscape(fid)}/raw`;
+    // encodeURIComponent, not just attrEscape: attrEscape makes the id safe to
+    // sit INSIDE an attribute, it does not stop the id from being read as PATH.
+    // A crafted `[[doc:../../api/export?format=json]]` rendered a document card
+    // whose download link walked out of /api/files/ and pulled a full chat
+    // export. Percent-encoding pins the id to exactly one path segment.
+    const eid = attrEscape(encodeURIComponent(fid));
+    const dlUrl = `/api/files/${eid}/download`;
+    const rawUrl = `/api/files/${eid}/raw`;
     return `\n\n${parker.park(`<div class="doc-card"><span class="doc-icon">${icon}</span><a href="${dlUrl}" download="${attrEscape(fname)}" target="_blank" class="doc-link">${attrEscape(fname)}</a><a href="${rawUrl}" target="_blank" class="doc-preview-link" title="${attrEscape(t('msg.view_raw'))}">👁</a></div>`)}\n\n`;
   }));
 }
@@ -408,9 +414,27 @@ function expandDocDirectives(text, parker) {
 // parsing matters: assigning innerHTML containing an <img> starts the network
 // fetch immediately, even on a detached node, so post-render removal would
 // still hit the server / disk cache.
-const MEDIA_SRC_RE = /!\[[^\]]*\]\([^)]*\)|\[\[media:[^\]]*\]\]/g;
+//
+// Three spellings, not one. The inline form `![alt](url)` is the common case,
+// but markdown also has REFERENCE-style images — `![cat][c]` (or the collapsed
+// `![cat][]` / shortcut `![cat]`) paired with a `[c]: /media/cat.png`
+// definition line somewhere else in the message. Missing those was not a fetch
+// bug (DOMPurify still drops the <img> that marked builds from them), but
+// isMediaOnly() reads the STRIPPED text to decide whether a row is nothing but
+// picture: an image-only message written in reference style kept its leftover
+// `![cat][c]` and its definition line, read as "has text", and rendered in NIM
+// as an empty bubble instead of dropping the row entirely.
+//
+// The definition half is filtered by URL rather than stripped wholesale: a
+// `[docs]: https://example.com` link definition is NOT media and removing it
+// would break a working link.
+const MEDIA_SRC_RE = /!\[[^\]]*\]\([^)]*\)|!\[[^\]]*\](?:\[[^\]]*\])?|\[\[media:[^\]]*\]\]/g;
+const MEDIA_EXT = 'png|jpe?g|gif|webp|avif|bmp|ico|svgz?|mp4|webm|mov|m4v|ogv|ogg';
+const MEDIA_REF_DEF_RE = new RegExp(
+  `^[ \\t]{0,3}\\[[^\\]\\n]+\\]:[ \\t]*<?(?:/media/[^\\s<>]*|[^\\s<>]*\\.(?:${MEDIA_EXT})(?:[?#][^\\s<>]*)?)>?[^\\n]*$`,
+  'gim');
 export function stripMediaSource(text) {
-  return (text || '').replace(MEDIA_SRC_RE, '');
+  return (text || '').replace(MEDIA_SRC_RE, '').replace(MEDIA_REF_DEF_RE, '');
 }
 
 // --- file links (ported) ---------------------------------------------------
@@ -495,7 +519,21 @@ export function ensureHighlighter() {
  *
  *  Highlighting normally happens during markdown parsing. With hljs arriving
  *  later, the first paint is plain — correct, just uncoloured — and this walks
- *  the DOM to colour it in place rather than re-parsing the message. */
+ *  the DOM to colour it in place rather than re-parsing the message.
+ *
+ *  WHY THE innerHTML BELOW IS SAFE, since it is the one write in this file that
+ *  does not go through DOMPurify. Its input is `codeEl.textContent` — text the
+ *  sanitizer has ALREADY passed, read back as a string, so no markup survives
+ *  into it. highlightCode() is the only thing that turns that string into HTML,
+ *  and it escapes before wrapping (hljs's own `ignoreIllegals` path likewise
+ *  emits escaped text plus its own <span class="hljs-*"> tags); its failure
+ *  fallback is escapeHtml(). The `html.includes('hljs-')` guard means a result
+ *  that carries no highlighter markup is not written back at all. So every
+ *  branch that reaches innerHTML is escaped-text-plus-hljs-spans.
+ *
+ *  If highlightCode is ever changed to pass anything through unescaped, this
+ *  write becomes an XSS sink — route it through the sanitizer at that point
+ *  rather than trusting this comment. */
 function rehighlight(container) {
   container.querySelectorAll('.code-block-wrapper pre > code').forEach((codeEl) => {
     if (codeEl.dataset.hl === '1' || codeEl.classList.contains('markdown-block-art')) return;

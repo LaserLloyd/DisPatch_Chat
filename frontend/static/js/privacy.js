@@ -28,10 +28,15 @@ const FLAG_KEY = 'dispatch-privacy';
 // while two real ones were missing, so they survived the purge — including
 // `lc-remember`, the remembered-unlock preference, which is the single worst
 // thing to leave behind on a shared tablet.
-const APP_KEYS = [
+// It drifted AGAIN after that, which is why frontend/tests/privacy-keys.test.js
+// now derives the writer list mechanically and fails on anything missing:
+// pins.js shipped 'dispatch-pinned-settings' and nobody added it here, so a
+// wiped device still advertised which settings the last user had pinned.
+export const APP_KEYS = [
   'dispatch-theme',           // theme.js
   'dispatch-avatar-style',    // main.js (Settings → minimal avatars)
   'dispatch-lang',            // i18n.js
+  'dispatch-pinned-settings', // pins.js (which settings are on the rail)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (unlock keypad "keep this device unlocked")
   // DELIBERATELY ABSENT: 'dispatch-nim'. No-Image Mode is a RATCHET — once on,

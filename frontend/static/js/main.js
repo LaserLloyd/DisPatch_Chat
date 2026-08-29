@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=19';
-import { ChatSocket } from './ws.js?v=7';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=22';
-import { installChecklists, applyChecklistState } from './checklist.js?v=1';
+import { api, setOnLocked } from './api.js?v=20';
+import { ChatSocket } from './ws.js?v=8';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=23';
+import { installChecklists, applyChecklistState } from './checklist.js?v=2';
 import { el, escapeHtml, loadScript, loadStyle } from './util.js?v=10';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -20,15 +20,15 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=13';
+} from './reactions.js?v=14';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=5';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=2';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=3';
-import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=3';
-import { renderPinnedRail, pinToggle } from './pins.js?v=1';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=4';
+import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
+import { renderPinnedRail, pinToggle } from './pins.js?v=2';
 import { aboutRow } from './about.js?v=1';
 
 // ===================== Popout mode =====================
@@ -1036,6 +1036,19 @@ function messageEl(msg) {
   // the point and the gap is meant to be visible.
   if (nimEnabled() && shouldDropMessage(msg, stripMediaSource)) return null;
   const role = msg.role === 'user' ? 'user' : (msg.role === 'system' ? 'system' : 'assistant');
+
+  // A reaction trace renders as a compact centred row that carries both the
+  // collapsed chip and the embedded picture — a reaction lives in the chat,
+  // pops up for its duration, then collapses back to the chip.
+  //
+  // Decided BEFORE the avatar is built, and that order is load-bearing:
+  // avatarNode() constructs an <img>, which starts a network request the
+  // moment it gets a src. Building it first and then returning the trace row
+  // threw the node away but not the fetch — every reaction trace in a thread
+  // pulled the bot's avatar for a row that never showed one.
+  const trace = reactionMessageEl(msg, { decoy: mediaHidden() });
+  if (trace) return trace;
+
   const wrap = el('div', { class: `msg ${role}`, dataset: { id: msg.id } });
 
   if (role !== 'user') {
@@ -1047,11 +1060,6 @@ function messageEl(msg) {
   }
 
   const col = el('div', { class: 'msg-col' });
-  // A reaction trace renders as a compact centred row that carries both the
-  // collapsed chip and the embedded picture — a reaction lives in the chat,
-  // pops up for its duration, then collapses back to the chip.
-  const trace = reactionMessageEl(msg, { decoy: mediaHidden() });
-  if (trace) return trace;
   const isSub = !!(msg.metadata && msg.metadata.sub);
   // Full-width assistant rows get a small name header; the model still shows in
   // the time line below. User / system / sub messages keep their compact look.
@@ -1102,10 +1110,15 @@ function messageEl(msg) {
     if (!state.decoy) {
       for (const doc of (docs || [])) {
         const name = doc.name || doc.id || t('common.file');
+        // Percent-encode: an id is ONE path segment, never a path. Interpolated
+        // raw, a crafted `[[doc:../../api/export?format=json]]` built a card
+        // whose "download" link walked out of /api/files/ and fetched a full
+        // chat export instead. Same fix as markdown.js's expandDocDirectives.
+        const did = encodeURIComponent(doc.id);
         const card = el('div', { class: 'doc-card' }, [
           el('span', { class: 'doc-icon', text: fileIcon(name) }),
-          el('a', { class: 'doc-link', href: `/api/files/${doc.id}/download`, text: name, download: name, target: '_blank' }),
-          el('a', { class: 'doc-preview-link', href: `/api/files/${doc.id}/raw`, text: '👁', target: '_blank', title: t('msg.view_raw') }),
+          el('a', { class: 'doc-link', href: `/api/files/${did}/download`, text: name, download: name, target: '_blank' }),
+          el('a', { class: 'doc-preview-link', href: `/api/files/${did}/raw`, text: '👁', target: '_blank', title: t('msg.view_raw') }),
         ]);
         col.append(card);
       }
@@ -1708,7 +1721,17 @@ function renderAttachments() {
   state.attachments.forEach((a, i) => {
     let thumb;
     const previewSrc = a.previewUrl || a.url;
-    if (a.kind === 'document') {
+    // The composer was the last surface still building an <img>/<video> in
+    // No-Image Mode. Every other one guards (mediaThumbEl, the Bot Manager,
+    // Companions, the File Server, reactions) — this one drew a real thumbnail
+    // of the picture you had just attached, on a device whose whole claim is
+    // that it shows none. A local object URL fetches nothing over the network,
+    // but "nothing is downloaded" is only half the promise: NIM says pictures
+    // are OMITTED, and one on screen is one on screen. So an image/video chip
+    // degrades to exactly what a document chip already is — a file-type glyph
+    // plus the filename, which still tells you what is queued to send.
+    const asFile = a.kind === 'document' || nimEnabled();
+    if (asFile) {
       thumb = el('span', { class: 'chip-doc-icon', text: fileIcon(a.name) });
     } else if (a.kind === 'video') {
       thumb = el('video', { src: previewSrc, muted: '', loop: '', playsinline: '' });
@@ -1716,13 +1739,13 @@ function renderAttachments() {
     } else {
       thumb = el('img', { src: previewSrc, alt: a.name });
     }
-    const label = a.kind === 'document'
+    const label = asFile
       ? el('span', { class: 'chip-label', text: a.name.slice(0, 30) })
       : null;
     const children = [thumb];
     if (label) children.push(label);
     children.push(el('button', { class: 'rm', text: '✕', onclick: () => { const [rm] = state.attachments.splice(i, 1); if (rm && rm.previewUrl) URL.revokeObjectURL(rm.previewUrl); renderAttachments(); updateSendEnabled(); } }));
-    const chip = el('div', { class: 'chip' + (a.kind === 'document' ? ' doc-chip' : '') }, children);
+    const chip = el('div', { class: 'chip' + (asFile ? ' doc-chip' : '') }, children);
     p.append(chip);
   });
 }
@@ -2239,6 +2262,10 @@ function applyNimChange() {
   // bot select, a bots WS frame) happened to come along. Same omission this
   // function's own comment records for renderBots/renderThreadList.
   updateThreadListHeader();
+  // Composer chips are painted once, when a file is attached — so a NIM flip
+  // with something already queued left its thumbnail on screen. Same class of
+  // omission as #tl-avatar above.
+  renderAttachments();
   if (state.activeThreadId) renderMessages(false);
   // The Bot Manager is built once when the modal opens and has no tab-change
   // rebuild, so a NIM flip from the Device tab left avatars and "Change photo"
@@ -3946,7 +3973,12 @@ function renderHarnessJobs() {
     if (body) {
       const out = (body.output || '').trim();
       const outEl = el('div', { class: 'harness-job-out markdown-body' + (out ? '' : ' empty') });
-      if (out) { outEl.innerHTML = renderMarkdown(out); enhanceContent(outEl); }
+      // noMedia like every other renderMarkdown call site (messageEl, the sub
+      // bubble, the streaming painter). This one was missed, so a dsh answer
+      // containing an image built a real <img> and fetched it on a No-Image /
+      // Safe-Mode device — the one surface where the source-strip chokepoint
+      // was bypassed.
+      if (out) { outEl.innerHTML = renderMarkdown(out, { noMedia: mediaHidden() }); enhanceContent(outEl); }
       else outEl.textContent = '(no output)';
       card.append(outEl);
       if ((body.error || '').trim()) {
@@ -4044,7 +4076,11 @@ const streamPending = new Set();
 let streamRaf = 0;
 const STREAM_PAINT_MS = 100;      // ~10 repaints/sec: reads as smooth, costs 6x less
 const STREAM_PAINT_CHARS = 160;  // …but a burst that big repaints immediately
-const streamPainted = new Map(); // id -> { at, len } of the last paint
+// id -> { at, len } of the last paint. Pruned wherever streamBuffers and
+// state.streamingIds are (stream_done, stream error, reboot) — it is paint
+// bookkeeping for a message id that no longer exists, and a long-lived tab
+// otherwise accumulates one small entry per reply, forever.
+const streamPainted = new Map();
 function scheduleStreamRender(id) {
   streamPending.add(id);
   if (streamRaf) return;
@@ -4097,7 +4133,14 @@ function handleWs(data) {
         applyAuthChrome();
       }
       if (Array.isArray(data.bots)) {
-        state.bots = data.bots.filter((b) => b.visible);
+        // The server's decoy redactor already drops non-safe bots from a
+        // locked session's frames; this re-checks on the client for the same
+        // reason reactions.js does before firing an overlay — a frame that
+        // slips through (a race with a lock, a mode flip mid-flight) must not
+        // be able to put a full-access bot on a Safe-Mode rail. `safe` is
+        // always present on the wire (Bot.to_dict), so this cannot empty the
+        // list for a legitimate frame.
+        state.bots = data.bots.filter((b) => b.visible && (!state.decoy || b.safe));
         const vb = visibleBots();
         // Only repair the selection if one existed and its bot vanished —
         // never auto-select on a fresh landing (the bots list IS the landing).
@@ -4221,6 +4264,7 @@ function handleWs(data) {
           const c = m.querySelector('.stream-cursor'); if (c) c.remove();
           // No stream_done will follow this turn — release the buffer now.
           delete streamBuffers[m.dataset.id];
+          streamPainted.delete(m.dataset.id);
           state.streamingIds.delete(m.dataset.id);
         });
       }
@@ -4285,6 +4329,7 @@ function handleWs(data) {
       if (!fullMsg) break;
       state.streamingIds.delete(data.message_id);
       delete streamBuffers[data.message_id];
+      streamPainted.delete(data.message_id);
       announceMessage(fullMsg);
       // Streamed reply delivered — clear the working state right away.
       if (state.thinking[data.thread_id]) {
@@ -4927,6 +4972,30 @@ function closeAllOverlays() {
   toggleThreadMenu(false);
   bmBots = [];
   bmDirty = false;
+
+  // Hiding a backdrop is not emptying it. Every panel above keeps its content
+  // in the DOM and its data in a module-level cache, so a lock left full-access
+  // material one `classList.remove('hidden')` — or one devtools inspection —
+  // away: transcript lines, search snippets with message text, the file list,
+  // harness job output, avatar-pool status. bmBots was already cleared for
+  // exactly this reason; the rest were missed. Same posture as the lightbox
+  // teardown above: assume a frame slips through and leave nothing behind it.
+  for (const k of ['tx-list', 'search-results', 'fs-list', 'harness-jobs', 'avatar-pool-panel']) {
+    if (dom[k]) dom[k].innerHTML = '';
+  }
+  txState = { items: [], filter: null, threadId: null, sessionKey: null, botId: null, missing: 0 };
+  searchHits = [];
+  harnessJobBodies.clear();
+  apPools = null;
+  const searchBox = dom['search-input'];
+  if (searchBox) searchBox.value = '';
+
+  // An API key typed into the AI-models pane is a secret sitting in an input
+  // value, exactly like the PIN and the recovery code — both of which are
+  // wiped after use for this reason. This one survived a lock, still populated
+  // behind the lock screen (and in the next screenshot or bug report).
+  const llmKey = document.getElementById('llm-key');
+  if (llmKey) llmKey.value = '';
 }
 
 // Rebuild the app for the current mode: drop the socket + sensitive caches and
@@ -4945,6 +5014,7 @@ async function reboot() {
   // Partial reply text must not survive a drop to Safe Mode.
   Object.keys(streamBuffers).forEach((k) => delete streamBuffers[k]);
   streamPending.clear();
+  streamPainted.clear();
   progressOpen = false;
   closeAllOverlays();
   clearChatView();

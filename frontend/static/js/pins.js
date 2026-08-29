@@ -17,8 +17,8 @@
 // convenience, not an account preference, and the family tablet wanting a
 // different rail from the phone is the normal case, not an edge one.
 
-import { nimEnabled, setNim, canDisableNim } from './nim.js?v=3';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=3';
+import { nimEnabled, setNim, canDisableNim } from './nim.js?v=4';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=4';
 
 const KEY = 'dispatch-pinned-settings';
 
@@ -129,7 +129,14 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
       btn.title = label;
       btn.addEventListener('click', async () => {
         const next = !entry.enabled();
-        await entry.toggle(next);
+        // toggle() shares setPrivacy()'s contract: a truthy return means the
+        // change only takes effect after a reload (privacy mode has to
+        // re-register the service worker, which needs a fresh page load). The
+        // Settings row honours it; the rail discarded the return value, so
+        // unpinning-privacy-from-the-rail left the page claiming a mode it was
+        // not actually in until the next reload.
+        const needsReload = await entry.toggle(next);
+        if (needsReload) { location.reload(); return; }
         renderPinnedRail(container, { decoy, t, onChange });
         if (onChange) onChange(entry.id, next);
       });

@@ -3,6 +3,7 @@
   "type": "module",
   "//": "Not a build step — DisPatch ships vanilla ES modules with no bundler, and that is deliberate. This file exists so `node --test frontend/tests/` can import those same modules directly instead of a copy: without it node resolves .js as CommonJS and the import fails. No dependencies, nothing to install.",
   "scripts": {
-    "test": "node --test tests/"
+    "//test": "A glob, not the bare directory: `node --test tests/` resolves the path as a module entry on node >=24 and dies with MODULE_NOT_FOUND before running a single test — which node then reports as one failing test named `tests`, so the suite looked red for a reason that had nothing to do with the code. Node expands this pattern itself; keep it quoted so the shell does not.",
+    "test": "node --test \"tests/**/*.test.js\""
   }
 }

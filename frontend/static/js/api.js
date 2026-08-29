@@ -40,6 +40,14 @@ async function j(url, opts = {}) {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+// EVERY value interpolated into a path below goes through encodeURIComponent,
+// with no exceptions for "ids we generate ourselves". Half of these already
+// did (uploadAvatar, the reaction and avatar-pool routes) and half did not,
+// which is the shape of an invariant nobody can check by eye: an id is one
+// path SEGMENT, and a value carrying `/`, `?` or `..` re-points the request at
+// a different endpoint. Query values use encodeURIComponent or URLSearchParams
+// for the same reason.
+
 // Client-side ceiling on a single upload — mirrors the server's pre-buffer hard
 // max so we never push a multi-GB body the server will just reject.
 const UPLOAD_HARD_MAX = 4 * 1024 * 1024 * 1024;   // 4GB
@@ -103,17 +111,17 @@ export const api = {
 
   threads: (botId) => j(`/api/threads?bot_id=${encodeURIComponent(botId)}`),
   createThread: (botId) => j('/api/threads', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ bot_id: botId }) }),
-  messages: (tid, beforeId) => j(`/api/threads/${tid}/messages?limit=200${beforeId ? `&before_id=${beforeId}` : ''}`),
-  rename: (tid, title) => j(`/api/threads/${tid}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ title }) }),
-  pin: (tid, pinned) => j(`/api/threads/${tid}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ pinned }) }),
-  archive: (tid) => j(`/api/threads/${tid}`, { method: 'DELETE' }),
-  remove: (tid) => j(`/api/threads/${tid}?hard=true`, { method: 'DELETE' }),
+  messages: (tid, beforeId) => j(`/api/threads/${encodeURIComponent(tid)}/messages?limit=200${beforeId ? `&before_id=${encodeURIComponent(beforeId)}` : ''}`),
+  rename: (tid, title) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ title }) }),
+  pin: (tid, pinned) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ pinned }) }),
+  archive: (tid) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'DELETE' }),
+  remove: (tid) => j(`/api/threads/${encodeURIComponent(tid)}?hard=true`, { method: 'DELETE' }),
 
-  deleteMessage: (mid) => j(`/api/messages/${mid}`, { method: 'DELETE' }),
+  deleteMessage: (mid) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'DELETE' }),
   // Takes either a row op ({index, checked, list}) or a whole array. The row
   // op is what the widget sends: the server merges it, so a request cannot
   // carry a stale view of rows it does not mention.
-  updateChecklist: (mid, body) => j(`/api/messages/${mid}/checklist`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(Array.isArray(body) ? { checked: body } : body) }),
+  updateChecklist: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}/checklist`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(Array.isArray(body) ? { checked: body } : body) }),
 
   upload: (file, onProgress) => xhrUpload('/api/upload', file, onProgress),
 
@@ -129,7 +137,7 @@ export const api = {
     return j(`/api/bots/${encodeURIComponent(botId)}/avatar?${q}`, { method: 'POST', body: fd });
   },
 
-  markRead: (tid) => j(`/api/threads/${tid}/read`, { method: 'POST' }),
+  markRead: (tid) => j(`/api/threads/${encodeURIComponent(tid)}/read`, { method: 'POST' }),
   unread: () => j('/api/unread'),
 
   // Search · recovery · transcript bridge
@@ -148,7 +156,7 @@ export const api = {
 
   files: () => j('/api/files'),
   uploadFile: (file, onProgress) => xhrUpload('/api/files', file, onProgress),
-  deleteFile: (fid) => j(`/api/files/${fid}`, { method: 'DELETE' }),
+  deleteFile: (fid) => j(`/api/files/${encodeURIComponent(fid)}`, { method: 'DELETE' }),
   wipeFiles: (beforeIso) => j('/api/files/wipe', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ before: beforeIso }) }),
 
   // Reaction images (ephemeral overlay pack)
@@ -178,12 +186,12 @@ export const api = {
 
   // Coding terminal (full-session only)
   terminalStatus: () => j('/api/terminal/status'),
-  terminalAction: (action) => j(`/api/terminal/${action}`, { method: 'POST' }),
+  terminalAction: (action) => j(`/api/terminal/${encodeURIComponent(action)}`, { method: 'POST' }),
   terminalOptions: (opts) => j('/api/terminal/options', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(opts) }),
   terminalModels: () => j('/api/terminal/models'),
   // DeepSeek Harness (full-session only)
   harnessStatus: () => j('/api/harness/status'),
-  harnessAction: (action) => j(`/api/harness/${action}`, { method: 'POST' }),
+  harnessAction: (action) => j(`/api/harness/${encodeURIComponent(action)}`, { method: 'POST' }),
   harnessSetModel: (provider, model) => j('/api/harness/model', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ provider, model }) }),
   harnessJobs: () => j('/api/harness/jobs'),
   harnessSubmitJob: (task, cwd) => j('/api/harness/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ task, cwd }) }),
