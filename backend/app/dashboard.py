@@ -538,6 +538,12 @@ def _du_release() -> None:
         _du_walking = False
 
 
+def _avatar_snapshots_dir() -> Path:
+    """Where avatar_snapshots.py keeps its store, derived the same way it
+    does — importing that module here would be a cycle for one path."""
+    return config.DATA_DIR / "avatar-snapshots"
+
+
 def _du_measuring() -> dict:
     """Placeholder for "a walk is running and we have nothing cached yet".
 
@@ -547,7 +553,8 @@ def _du_measuring() -> dict:
     """
     empty = {"bytes": None, "files": None, "complete": False}
     return {"media": dict(empty), "files": dict(empty), "backups": dict(empty),
-            "reactions": dict(empty), "blob_bytes": None,
+            "reactions": dict(empty), "avatar_pool": dict(empty),
+            "avatar_snapshots": dict(empty), "blob_bytes": None,
             "complete": False, "blob_complete": False,
             "cached": False, "measuring": True}
 
@@ -650,8 +657,16 @@ def _storage_sync(db_path: Path, *, fresh: bool, max_entries: int = DU_MAX_ENTRI
             files = _dir_usage(config.FILES_DIR, budget)
             backups = _dir_usage(config.BACKUP_DIR, budget)
             reactions = _dir_usage(config.REACTIONS_DIR, budget)
+            # The other two keep-forever stores. Avatar pools burn a pair per
+            # thread and keep the spent halves; a thread's avatar snapshot is
+            # kept as long as the thread is. Both grow the same way reactions
+            # do, and being unmeasured is the same problem: "where did the disk
+            # go" was unanswerable from this card.
+            avatar_pool = _dir_usage(config.AVATAR_POOL_DIR, budget)
+            avatar_snapshots = _dir_usage(_avatar_snapshots_dir(), budget)
             blobs = {
                 "media": media, "files": files, "backups": backups,
+                "avatar_pool": avatar_pool, "avatar_snapshots": avatar_snapshots,
                 # Reaction images are reported SEPARATELY and deliberately left
                 # out of blob_bytes: spent one-shots are kept forever by design,
                 # so this is the fastest-growing directory on the box and being
@@ -662,7 +677,9 @@ def _storage_sync(db_path: Path, *, fresh: bool, max_entries: int = DU_MAX_ENTRI
                 "reactions": reactions,
                 "blob_bytes": media["bytes"] + files["bytes"],
                 "complete": (media["complete"] and files["complete"]
-                             and backups["complete"] and reactions["complete"]),
+                             and backups["complete"] and reactions["complete"]
+                             and avatar_pool["complete"]
+                             and avatar_snapshots["complete"]),
                 # What the cap findings depend on, specifically: media+files.
                 "blob_complete": media["complete"] and files["complete"],
                 "cached": False, "measuring": False,

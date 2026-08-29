@@ -41,6 +41,7 @@ import os
 import random
 import re
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -312,6 +313,12 @@ class PoolState:
 
 _state_cache: dict[str, tuple[PoolState, float | None]] = {}
 
+# One writer at a time for every load-modify-save of avatar-pool-<bot>.yaml.
+# Same hazard as the reaction pool: update_config runs on the event loop while
+# refill/generate_pair run on worker threads, and a save of a pre-edit snapshot
+# reverts the operator's change. Re-entrant because save_state re-loads.
+_yaml_lock = threading.RLock()
+
 
 def _int_or(v, default: int) -> int:
     try:
@@ -343,7 +350,7 @@ def load_state(bot_id: str) -> PoolState:
         mtime = None
     cached = _state_cache.get(bot_id)
     if cached and cached[1] == mtime:
-        return cached[0]
+        return _copy_state(cached[0])
     raw: dict = {}
     if mtime is not None:
         try:
@@ -361,7 +368,32 @@ def load_state(bot_id: str) -> PoolState:
                    batch_date=str(raw.get("batch_date") or ""),
                    last_error=str(raw.get("last_error") or "")[:300])
     _state_cache[bot_id] = (st, mtime)
-    return st
+    return _copy_state(st)
+
+
+def _copy_state(st: PoolState) -> PoolState:
+    """A private copy — callers edit a field and save, and handing out the
+    CACHED object made one caller's edit visible to every other reader before
+    (or instead of) it was ever persisted."""
+    return PoolState(config=AvatarPoolConfig(**st.config.to_dict()),
+                     batch_date=st.batch_date, last_error=st.last_error)
+
+
+def update_state(bot_id: str, **fields) -> PoolState:
+    """Persist ONLY the telemetry fields named, re-reading first.
+
+    A refill round holds its state across minutes of rig calls; writing that
+    whole snapshot back would revert a config change made meanwhile."""
+    with _yaml_lock:
+        st = load_state(bot_id)
+        changed = False
+        for k, v in fields.items():
+            if getattr(st, k) != v:
+                setattr(st, k, v)
+                changed = True
+        if not changed:
+            return st
+        return save_state(st, bot_id)
 
 
 def save_state(st: PoolState, bot_id: str) -> PoolState:
@@ -372,13 +404,14 @@ def save_state(st: PoolState, bot_id: str) -> PoolState:
     if st.last_error:
         body["last_error"] = st.last_error
     path = _cfg_path(bot_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
-                   encoding="utf-8")
-    os.replace(tmp, path)
-    _state_cache.pop(bot_id, None)
-    return load_state(bot_id)
+    with _yaml_lock:                       # serialise with every other writer
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".yaml.tmp")
+        tmp.write_text(yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
+                       encoding="utf-8")
+        os.replace(tmp, path)
+        _state_cache.pop(bot_id, None)
+        return load_state(bot_id)
 
 
 def update_config(values: dict, bot_id: str) -> AvatarPoolConfig:
@@ -387,6 +420,11 @@ def update_config(values: dict, bot_id: str) -> AvatarPoolConfig:
     bot_id = _require_bot_id(bot_id)
     if not isinstance(values, dict):
         raise PoolError("Malformed pool settings")
+    with _yaml_lock:
+        return _update_config_locked(values, bot_id)
+
+
+def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
     st = load_state(bot_id)
     cur = st.config.to_dict()
     editable = set(cur) - {"bot_id"}
@@ -549,9 +587,7 @@ def daily_due(bot_id: str) -> bool:
 
 
 def mark_daily(bot_id: str) -> None:
-    st = load_state(bot_id)
-    st.batch_date = time.strftime("%Y-%m-%d")
-    save_state(st, bot_id)
+    update_state(bot_id, batch_date=time.strftime("%Y-%m-%d"))
 
 
 def status(bot_id: str) -> dict:
@@ -653,9 +689,7 @@ def generate_pair(bot_id: str) -> str | None:
     st = load_state(bot_id)
     prompt = compose_prompt(bot_id)
     if prompt is None:
-        if st.last_error != "no-prompt-bank":
-            st.last_error = "no-prompt-bank"
-            save_state(st, bot_id)
+        update_state(bot_id, last_error="no-prompt-bank")
         return None
     bank = bank_load(bot_id)
     out_dir = _generate_dir()
@@ -708,10 +742,8 @@ def generate_pair(bot_id: str) -> str | None:
             pool_guard.note_refill_success()
             st = load_state(bot_id)
             if st.last_error or not st.batch_date:
-                st.last_error = ""
-                if not st.batch_date:
-                    st.batch_date = time.strftime("%Y-%m-%d")
-                save_state(st, bot_id)
+                update_state(bot_id, last_error="",
+                             batch_date=st.batch_date or time.strftime("%Y-%m-%d"))
 
 
 def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> int:
@@ -726,10 +758,7 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     if not image_cli_available():
         # Same contract as the reaction pool: a pool that cannot generate says
         # so loudly and records which way it is broken.
-        err = note_image_cli_unavailable(st.last_error)
-        if st.last_error != err:
-            st.last_error = err
-            save_state(st, bot_id)
+        update_state(bot_id, last_error=note_image_cli_unavailable(st.last_error))
         return 0
     need = deficit(bot_id, only_low=only_low)
     # The CLI answered, so any CLI fault on record is disproved; and if the pool
@@ -739,8 +768,7 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     # after the CLI came back.
     if pool_common.stale_error(st.last_error, cli_ok=True, at_target=need <= 0,
                                cli_fault=_is_image_cli_error(st.last_error)):
-        st.last_error = ""
-        save_state(st, bot_id)
+        update_state(bot_id, last_error="")
     want = need
     if limit is not None:
         want = min(want, limit)
@@ -752,9 +780,8 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     # idle LLM models on the image host.
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
-        st = load_state(bot_id)
-        st.last_error = f"rig-vram-short ({guard['reason']})"[:300]
-        save_state(st, bot_id)
+        update_state(bot_id,
+                     last_error=f"rig-vram-short ({guard['reason']})"[:300])
         pool_guard.note_refill_failure("vram-short", guard["reason"], actor=bot_id)
         log.error("avatar pool refill for %s BLOCKED by VRAM guard: %s",
                   bot_id, guard["reason"])
@@ -769,6 +796,5 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
         # Never let the generic "it produced nothing" overwrite the specific
         # reason already on record (missing bank, or any image-CLI fault).
         if st.last_error != "no-prompt-bank" and not _is_image_cli_error(st.last_error):
-            st.last_error = "generation-failed"
-            save_state(st, bot_id)
+            update_state(bot_id, last_error="generation-failed")
     return made

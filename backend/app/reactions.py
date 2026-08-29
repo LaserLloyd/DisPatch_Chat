@@ -58,6 +58,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import unicodedata
 import uuid
@@ -99,6 +100,25 @@ UPLOAD_MAX = 8 * 1024 * 1024          # 8MB — these are overlay images, not ar
 # Registry-size ceiling: keeps a runaway generator from turning the pack into an
 # unbounded blob store, and keeps GET /api/reactions cheap.
 MAX_REACTIONS = 300
+
+# How many aliases one entry may carry. This is not decoration: heal_pack moves
+# a stranded card's id onto its surviving kin as an alias, and an alias is what
+# keeps an OLD CHAT TRACE resolving to a picture. The cap used to be 12, which
+# a busy regen history overran silently — heal appended, the next load() cut the
+# list back, and the dropped ids stopped resolving with nothing said. The cap
+# stays (a registry entry must not grow without bound) but is now roomy enough
+# for a real heal history, and heal_pack drops from the OLDEST end, loudly.
+MAX_ALIASES = 64
+
+# One writer at a time for every load-modify-save of the yaml files this module
+# owns (reactions.yaml and each reaction-pool-<bot>.yaml). The mutations arrive
+# from two places at once — the API routes on the event loop, and heal/refill on
+# worker threads — and a read-modify-write pair that straddles another writer
+# silently reverts it: a refill saving its pre-edit config snapshot undid an
+# operator's setting change, and heal_pack's load→save window could erase a card
+# added between them (orphaning its blob). The lock is re-entrant because the
+# save paths call load() again to refresh the cache.
+_yaml_lock = threading.RLock()
 
 # The image-generation CLI used to top up the reaction and avatar pools: a bare
 # name resolved on PATH, or an absolute path. Deliberately no default — pointing
@@ -179,13 +199,40 @@ def require_bot_id(bot_id: str | None) -> str:
     bot) could replace the working bank of the bot that does exist. An
     explicit id that is not a valid bot id is a 404; an omitted one still
     means "the default pool".
+
+    Syntax is not enough: ``?bot_id=Ghost`` is perfectly well-formed, and a
+    write under it used to MINT files — a prompt bank, a pool config and a
+    ``moods-Ghost/`` directory that then joined :func:`_all_moods_roots`
+    permanently. So the id must also name a bot that exists: one in the roster,
+    or one that already owns pool files on disk (a bot removed from config.yaml
+    still owns the images its chat traces point at, and its pool must stay
+    editable).
     """
     bid = str(bot_id or "").strip()
     if not bid:
         return default_bot_id()
-    if not BOT_ID_RE.match(bid):
+    if not BOT_ID_RE.match(bid) or not _bot_exists(bid):
         raise ReactionError(f"Unknown bot_id: {bid[:40]}", 404)
     return bid
+
+
+def _bot_exists(bot_id: str) -> bool:
+    """Is this a bot we may create/overwrite per-bot files for?
+
+    Roster membership OR an existing pool on disk. Never the reactions flag
+    alone: turning reactions off must not make a bot's own pool unwritable.
+    """
+    try:
+        if any(b.id == bot_id for b in config.load_bots()):
+            return True
+    except Exception:                      # unreadable roster — never fatal
+        pass
+    reactions_dir = config.DATA_DIR / "reactions"
+    return any(p.exists() for p in (
+        config.DATA_DIR / _POOL_FMT.format(bot_id=bot_id),
+        config.DATA_DIR / _BANK_FMT.format(bot_id=bot_id),
+        reactions_dir / _MOODS_FMT.format(bot_id=bot_id),
+    ))
 
 
 def default_bot_id() -> str:
@@ -367,7 +414,7 @@ def _norm_aliases(raw: Iterable | None) -> list[str]:
             continue
         if a2 not in out:
             out.append(a2)
-    return out[:12]
+    return out[:MAX_ALIASES]
 
 
 def _check_file(value: str) -> str:
@@ -618,6 +665,11 @@ def heal_pack() -> dict:
     restore) — healing then would delete a working registry to match a
     temporary void. In that case it logs an error and leaves the yaml alone.
     """
+    with _yaml_lock:                       # load→save must not straddle an add()
+        return _heal_pack_locked()
+
+
+def _heal_pack_locked() -> dict:
     pack = load()
     if not pack.reactions:
         return {"dangling": 0, "aliased": 0, "dropped": 0}
@@ -659,6 +711,16 @@ def heal_pack() -> dict:
             moved = [a for a in [r.id, *r.aliases]
                      if a != target.id and a not in target.aliases]
             target.aliases.extend(moved)
+            if len(target.aliases) > MAX_ALIASES:
+                # The load path enforces the same cap, so an over-long list
+                # would be silently truncated on the next load() and the ids it
+                # dropped would stop resolving with nothing said. Trim here,
+                # from the OLDEST end (the newest healed ids are the ones live
+                # traces are still naming), and say which mappings were lost.
+                lost = target.aliases[:-MAX_ALIASES]
+                target.aliases = target.aliases[-MAX_ALIASES:]
+                log.warning("pack heal: %r is at the %d-alias cap — dropped %s",
+                            target.id, MAX_ALIASES, ", ".join(lost))
             aliased += 1
             log.warning("pack heal: %r lost its image — now an alias of %r",
                         r.id, target.id)
@@ -767,12 +829,11 @@ def safe_ids() -> set[str]:
     ids = {r.id for r in load().reactions if r.safe}
 
     def _add(mood: str, p: Path) -> None:
-        ids.add(pool_file_id(mood, p.name))
+        ids.add(pool_file_id_for(mood, p))
         # Legacy chat traces name the blob's stem ("pool-<hex>") — keep those
         # fetchable too. See _resolve_pool_file.
         ids.add(f"{POOL_ID_PREFIX}{p.stem}")
 
-    safe_pool = False
     for moods_base in _all_moods_roots():
         try:
             st = pool_load(_bot_id_from_moods_dir(moods_base))
@@ -780,23 +841,47 @@ def safe_ids() -> set[str]:
             continue
         if not st.config.safe:
             continue
-        safe_pool = True
         for mood, d in _mood_dirs(moods_base):
             for p in _mood_files(d):
                 _add(mood, p)
 
-    # spent/ is SHARED (blob names are uuids, so they never collide), and the
-    # bot a spent blob came from is no longer recorded — it moved out of the
-    # only directory that said so. One safe pool therefore makes the spent
-    # store visible, which is the conservative reading of "was this safe":
-    # only reachable at all if some pool is marked safe, and every blob in
-    # there was already broadcast to those same clients when it fired.
-    if safe_pool:
-        for mood, d in _mood_dirs(config.REACTIONS_SPENT_DIR):
-            for p in _mood_files(d):
-                _add(mood, p)
+    # spent/ is SHARED and a spent blob no longer records which bot fired it —
+    # it moved out of the only directory that said so. "Some pool is safe" was
+    # therefore enough to publish EVERY spent blob, so an unsafe bot's fired
+    # picture became fetchable by a locked device the moment any other bot's
+    # pool was marked safe. The conservative reading is per mood: a spent blob
+    # is Safe-Mode visible only when every pool that could have owned it — the
+    # pools carrying a folder of that mood — is itself safe.
+    for mood, d in _mood_dirs(config.REACTIONS_SPENT_DIR):
+        if not _spent_mood_safe(mood):
+            continue
+        for p in _mood_files(d):
+            _add(mood, p)
     _safe_ids_cache = (key, set(ids))
     return ids
+
+
+def _spent_mood_safe(mood: str) -> bool:
+    """May a locked device see a FIRED blob of this mood?
+
+    Only if every pool that could have produced it says so. The owners are the
+    pools with a folder of that mood; when none has one any more (the folder
+    was removed after its last picture was fired) the whole set of pools on
+    disk is the owner set — still "all of them agree", never "one of them
+    does". An install with no pool at all publishes nothing.
+    """
+    owners: list[bool] = []
+    others: list[bool] = []
+    for moods_base in _all_moods_roots():
+        try:
+            st = pool_load(_bot_id_from_moods_dir(moods_base))
+        except Exception:                  # a junk pool file is not a leak
+            return False
+        others.append(bool(st.config.safe))
+        if any(m == mood for m, _d in _mood_dirs(moods_base)):
+            owners.append(bool(st.config.safe))
+    flags = owners or others
+    return bool(flags) and all(flags)
 
 
 def reaction_bots() -> list[str]:
@@ -889,7 +974,9 @@ class RateLimiter:
 
     def __init__(self) -> None:
         self._recent: dict[str, list[float]] = {}
-        self._global: list[float] = []
+        # (timestamp, actor): the actor is what makes a refund able to take
+        # back the caller's OWN slot rather than the newest one, whoever's.
+        self._global: list[tuple[float, str]] = []
 
     def _prune(self, now: float, window_s: float) -> None:
         cutoff = now - window_s
@@ -899,7 +986,7 @@ class RateLimiter:
                 self._recent[actor] = kept
             else:
                 del self._recent[actor]
-        self._global = [t for t in self._global if t >= now - 60.0]
+        self._global = [e for e in self._global if e[0] >= now - 60.0]
 
     def check(self, actor: str, st: Settings) -> str | None:
         """Return an error string to refuse, or None (and record the fire)."""
@@ -917,7 +1004,7 @@ class RateLimiter:
             return "Reaction burst limit reached — wait a moment."
 
         self._recent.setdefault(actor, []).append(now)
-        self._global.append(now)
+        self._global.append((now, actor))
         return None
 
     def refund(self, actor: str) -> None:
@@ -931,8 +1018,14 @@ class RateLimiter:
             self._recent[actor].pop()
             if not self._recent[actor]:
                 del self._recent[actor]
-        if self._global:
-            self._global.pop()
+        # The refunding actor's own most recent global slot — popping the last
+        # entry unconditionally handed back somebody ELSE's fire whenever two
+        # actors interleaved, which both over-credits the loser and taxes a
+        # bystander. Absent = no-op, like the per-actor half above.
+        for i in range(len(self._global) - 1, -1, -1):
+            if self._global[i][1] == actor:
+                del self._global[i]
+                break
 
     def reset(self) -> None:
         self._recent.clear()
@@ -1085,6 +1178,17 @@ def add(*, name: str, image_bytes: bytes | None = None, src_path: Path | None = 
     if suffix not in IMAGE_EXTS:
         raise ReactionError(f"Unsupported image type: {suffix}")
 
+    with _yaml_lock:                       # the whole mint: read → blob → save
+        return _add_locked(name=name, image_bytes=image_bytes, src_path=src_path,
+                           suffix=suffix, aliases=aliases, category=category,
+                           safe=safe, duration_ms=duration_ms, source=source,
+                           prompt=prompt)
+
+
+def _add_locked(*, name: str, image_bytes: bytes | None, src_path: Path | None,
+                suffix: str, aliases: Iterable[str] | None, category: str,
+                safe: bool, duration_ms: int | None, source: str,
+                prompt: str) -> Reaction:
     pack = load()
     if len(pack.reactions) >= MAX_REACTIONS:
         raise ReactionError(f"Reaction pack is full (max {MAX_REACTIONS})", 507)
@@ -1129,6 +1233,11 @@ def add(*, name: str, image_bytes: bytes | None = None, src_path: Path | None = 
 
 
 def update(rid: str, **fields) -> Reaction:
+    with _yaml_lock:
+        return _update_locked(rid, **fields)
+
+
+def _update_locked(rid: str, **fields) -> Reaction:
     pack = load()
     r = pack.by_id(rid)
     if r is None:
@@ -1150,6 +1259,11 @@ def update(rid: str, **fields) -> Reaction:
 
 def remove(rid: str) -> None:
     """Deregister a reaction and delete its blob (pack images only)."""
+    with _yaml_lock:
+        _remove_locked(rid)
+
+
+def _remove_locked(rid: str) -> None:
     pack = load()
     r = pack.by_id(rid)
     if r is None:
@@ -1195,6 +1309,11 @@ def _merge_validated(cur: dict, values: dict, label: str) -> dict:
 
 
 def update_settings(values: dict) -> Settings:
+    with _yaml_lock:
+        return _update_settings_locked(values)
+
+
+def _update_settings_locked(values: dict) -> Settings:
     pack = load()
     cur = _merge_validated(pack.settings.to_dict(), values, "settings")
     # Only now — every value validated and clamped — does anything reach disk.
@@ -1901,13 +2020,36 @@ def _mood_dirs(base: Path) -> list[tuple[str, Path]]:
     return out
 
 
+#: Files already reported as unfirable, so the log line is one per file, not one
+#: per draw. Names only — this is a diagnostic, never a gate.
+_quarantined: set[str] = set()
+
+
 def _mood_files(d: Path) -> list[Path]:
     """The stock inside one mood folder: plain image files only.
 
     Dotfiles and non-image suffixes (which covers ``*.part`` staging) are
     invisible, so a crash mid-generate or a stray .DS_Store can never be drawn.
+
+    A name :func:`_check_file` would refuse is skipped as well. A backslash in
+    a filename is the live case: the blob was drawable but ``image_path``
+    refused it, so ``:react:random:`` intermittently drew it and then failed
+    with a ⚠️ row while the file stayed in the rotation to fail again. A pool
+    must never offer a picture it cannot fire — quarantine it (one log line)
+    and draw something else.
     """
-    return pool_common.image_files(d, IMAGE_EXTS)
+    out: list[Path] = []
+    for p in pool_common.image_files(d, IMAGE_EXTS):
+        if "\\" in p.name or p.name in (".", ".."):
+            key = str(p)
+            if key not in _quarantined:
+                _quarantined.add(key)
+                log.warning("pool: %s cannot be served (illegal character in the"
+                            " filename) — skipped; rename it to make it drawable",
+                            key)
+            continue
+        out.append(p)
+    return out
 
 
 def _iter_ready(bot_id: str | None = None) -> list[tuple[str, Path]]:
@@ -1945,25 +2087,93 @@ def pool_file_id(mood: str, filename: str) -> str:
     return f"{POOL_ID_PREFIX}{mood}-{slug}"
 
 
+#: Length of the tie-break suffix appended to an ambiguous base id.
+_DISAMBIG_LEN = 6
+
+
+def _disambiguated(mood: str, path: Path) -> str:
+    """``pool-<mood>-<slug>-<hash>`` — the id form for a name that CLASHES.
+
+    Derived from the raw ``<folder>/<filename>`` — the folder, because a mood
+    KEY is case-folded, so ``Bravo/pic.png`` and ``bravo/pic.png`` are two
+    files in one id namespace. Stable across restarts and independent of
+    directory iteration order.
+    """
+    base = pool_file_id(mood, path.name)
+    room = 48 - _DISAMBIG_LEN - 1
+    if len(base) > room:
+        base = base[:room].rstrip("-_") or base[:room]
+    raw = f"{path.parent.name}/{path.name}"
+    h = hashlib.md5(raw.encode("utf-8", "surrogatepass")).hexdigest()
+    return f"{base}-{h[:_DISAMBIG_LEN]}"
+
+
+def _mood_peers(base: Path, mood: str) -> list[Path]:
+    """Every stocked file sharing one mood KEY under a root.
+
+    Folder names are matched case-insensitively (``_mood_dirs`` lowercases the
+    key), so a hand-made ``Bravo/`` beside ``bravo/`` is one id namespace — as
+    it must be, since both mint ``pool-bravo-…`` ids.
+    """
+    return [p for m, d in _mood_dirs(base) if m == mood for p in _mood_files(d)]
+
+
+def pool_file_id_for(mood: str, path: Path) -> str:
+    """The id of a blob that is ON DISK — the mint every caller should use.
+
+    :func:`pool_file_id` is not injective: ``_stem_slug`` collapses runs of
+    non-id characters and truncates to the id budget, so ``a b.png`` and
+    ``a-b.png`` (or two long names sharing a prefix) minted the SAME id. One id
+    for two files means a fire retires one picture while the chat trace re-opens
+    the other, and that one id can burn both images in turn. When the base id is
+    ambiguous inside its mood, every file involved gets the hashed form instead,
+    so distinct files always have distinct ids. Names that do not clash keep
+    their plain id, which is what keeps existing chat traces resolving.
+    """
+    base = pool_file_id(mood, path.name)
+    peers = _mood_peers(path.parent.parent, mood)
+    if any(q != path and pool_file_id(mood, q.name) == base for q in peers):
+        return _disambiguated(mood, path)
+    return base
+
+
 def _resolve_pool_file(rid: str, base: Path) -> tuple[str, Path] | None:
     """Find the blob a pool id names under one root (moods/ or spent/).
 
-    Two passes: the exact folder-model mapping first, then the legacy fallback
-    — pre-folder blobs were named ``pool-<hex>.<ext>`` and their ids live on in
-    old chat traces, so a stem equal to the id's bare tail (or the whole id,
-    for a blob still wearing its old name) also matches.
+    Three passes, narrowest first:
+
+    1. the disambiguated mint — exactly the file :func:`pool_file_id_for`
+       would have named;
+    2. the plain base id, but only when it names exactly ONE file in that mood.
+       This is what keeps a pre-existing trace resolving (and what finds a blob
+       in ``spent/`` whose clashing twin stayed behind in the mood folder); an
+       ambiguous base id resolves to NOTHING rather than burning an arbitrary
+       one of the two files it could mean;
+    3. the legacy fallback — pre-folder blobs were named ``pool-<hex>.<ext>``
+       and their ids live on in old chat traces, so a stem equal to the id's
+       bare tail (or the whole id) also matches. SCOPED to the mood the id
+       names when it names one, so a legacy-shaped id can never retire a blob
+       sitting in a folder its own id contradicts.
     """
     if not rid or not rid.startswith(POOL_ID_PREFIX):
         return None
     dirs = _mood_dirs(base)
-    for mood, d in dirs:
-        if not rid.startswith(f"{POOL_ID_PREFIX}{mood}-"):
-            continue
+    named = [(mood, d) for mood, d in dirs
+             if rid.startswith(f"{POOL_ID_PREFIX}{mood}-")]
+    for mood, d in named:
         for p in _mood_files(d):
-            if pool_file_id(mood, p.name) == rid:
+            if _disambiguated(mood, p) == rid:
                 return mood, p
+    for mood in dict.fromkeys(m for m, _d in named):
+        hits = [p for p in _mood_peers(base, mood)
+                if pool_file_id(mood, p.name) == rid]
+        if len(hits) == 1:
+            return mood, hits[0]
+        if hits:
+            log.warning("pool id %r names %d files in %r — refusing to guess"
+                        " which; rename one of them", rid, len(hits), mood)
     bare = rid[len(POOL_ID_PREFIX):]
-    for mood, d in dirs:
+    for mood, d in (named or dirs):
         for p in _mood_files(d):
             if p.stem in (bare, rid):
                 return mood, p
@@ -1998,7 +2208,7 @@ def _file_reaction(mood: str, path: Path, cfg: PoolConfig, *,
     else:
         rel = f"{_MOODS_FMT.format(bot_id=bot_id)}/{path.parent.name}/{path.name}"
     return Reaction(
-        id=pool_file_id(mood, path.name), name=_mood_label(mood, bot_id),
+        id=pool_file_id_for(mood, path), name=_mood_label(mood, bot_id),
         file=rel, aliases=[],
         category=mood, safe=cfg.safe, duration_ms=None,
         source="pool", prompt="", created_at=created,
@@ -2078,7 +2288,7 @@ def pool_load(bot_id: str | None = None) -> PoolState:
     except OSError:
         mtime = None
     if bot_id in _pool_cache and _pool_cache[bot_id][1] == mtime:
-        return _pool_cache[bot_id][0]
+        return _pool_copy(_pool_cache[bot_id][0])
     raw: dict = {}
     if mtime is not None:
         try:
@@ -2090,7 +2300,42 @@ def pool_load(bot_id: str | None = None) -> PoolState:
         raw = {}
     st = _pool_parse(raw, bot_id)
     _pool_cache[bot_id] = (st, mtime)
-    return st
+    return _pool_copy(st)
+
+
+def _pool_copy(st: PoolState) -> PoolState:
+    """A private copy of a pool state.
+
+    ``pool_load`` used to hand out the CACHED object, so every caller that
+    edited a field (the normal load-edit-save shape) mutated what every other
+    caller was reading — and a save then wrote a snapshot taken before someone
+    else's edit. Callers get their own copy; the cache is only ever written by
+    the parse above.
+    """
+    return PoolState(config=PoolConfig(**st.config.to_dict()),
+                     batch_date=st.batch_date, last_error=st.last_error)
+
+
+def _pool_update(bot_id: str | None = None, **fields) -> PoolState:
+    """Persist ONLY the telemetry fields named, re-reading first.
+
+    The refill paths hold a PoolState for the length of a generation round —
+    minutes, over a dozen rig calls — and saving it wrote back the CONFIG as it
+    looked when the round began, silently reverting a setting the operator
+    changed meanwhile. This re-reads under the lock and writes only what the
+    caller owns (``batch_date`` / ``last_error``), so a concurrent config edit
+    survives.
+    """
+    with _yaml_lock:
+        st = pool_load(bot_id)
+        changed = False
+        for k, v in fields.items():
+            if getattr(st, k) != v:
+                setattr(st, k, v)
+                changed = True
+        if not changed:
+            return st
+        return pool_save(st, bot_id)
 
 
 def pool_save(state: PoolState, bot_id: str | None = None) -> PoolState:
@@ -2105,12 +2350,14 @@ def pool_save(state: PoolState, bot_id: str | None = None) -> PoolState:
     if state.last_error:
         body["last_error"] = state.last_error
     path = _pool_path(bot_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(body, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    os.replace(tmp, path)
-    _pool_cache.pop(bot_id, None)
-    return pool_load(bot_id)
+    with _yaml_lock:                       # serialise with every other writer
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".yaml.tmp")
+        tmp.write_text(yaml.safe_dump(body, sort_keys=False, allow_unicode=True),
+                       encoding="utf-8")
+        os.replace(tmp, path)
+        _pool_cache.pop(bot_id, None)
+        return pool_load(bot_id)
 
 
 def pool_get(rid: str, *, bot_id: str | None = None, include_spent: bool = False) -> Reaction | None:
@@ -2133,7 +2380,13 @@ def pool_get(rid: str, *, bot_id: str | None = None, include_spent: bool = False
     if include_spent:
         hit = _resolve_pool_file(rid, config.REACTIONS_SPENT_DIR)
         if hit is not None:
-            return _file_reaction(hit[0], hit[1], st.config, spent=True, bot_id=bot_id)
+            # A spent blob has no owner on record, so its `safe` flag may NOT
+            # come from whichever pool happened to be queried — that let an
+            # unsafe bot's fired picture render safe simply because the caller
+            # named a safe pool. Same conservative rule as safe_ids().
+            cfg = PoolConfig(**st.config.to_dict())
+            cfg.safe = _spent_mood_safe(hit[0])
+            return _file_reaction(hit[0], hit[1], cfg, spent=True, bot_id=bot_id)
     return None
 
 
@@ -2182,7 +2435,7 @@ def pool_draw(category: str | None = None,
         return None
     ready = [(mood, p) for mood, p in _iter_ready(bot_id)
              if (not category or mood == category)
-             and (not exclude or pool_file_id(mood, p.name) not in exclude)]
+             and (not exclude or pool_file_id_for(mood, p) not in exclude)]
     if not ready:
         return None
     import random
@@ -2327,13 +2580,16 @@ def _pool_daily_due(st: PoolState) -> bool:
 
 def pool_mark_daily(bot_id: str | None = None) -> None:
     """Stamp tonight's refill as complete for one bot."""
-    st = pool_load(bot_id)
-    st.batch_date = time.strftime("%Y-%m-%d")
-    pool_save(st, bot_id)
+    _pool_update(bot_id, batch_date=time.strftime("%Y-%m-%d"))
 
 
 def pool_update_config(values: dict, bot_id: str | None = None) -> PoolConfig:
     bot_id = require_bot_id(bot_id)
+    with _yaml_lock:
+        return _pool_update_config_locked(values, bot_id)
+
+
+def _pool_update_config_locked(values: dict, bot_id: str) -> PoolConfig:
     st = pool_load(bot_id)
     cur = _merge_validated(st.config.to_dict(), values, "pool")
     # Validated and clamped BEFORE the write — a junk value must 400 here, not
@@ -2418,7 +2674,7 @@ def _pool_generate_one(cfg: PoolConfig, category: str, *, bot_id: str | None = N
 
     pool_guard.note_refill_success()
     log.debug("pool image generated for %r (bot %s): %s", label, bot_id, dest.name)
-    return pool_file_id(category, dest.name)
+    return pool_file_id_for(category, dest)
 
 
 def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
@@ -2438,15 +2694,11 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
         # A pool that cannot generate is broken, not idle: say so in the log
         # and record WHICH way it is broken, so "unset on this install" never
         # again reads as "the image host is down".
-        err = note_image_cli_unavailable(st.last_error)
-        if st.last_error != err:
-            st.last_error = err
-            pool_save(st, bot_id)
+        _pool_update(bot_id, last_error=note_image_cli_unavailable(st.last_error))
         return 0
 
     if not bank_categories(bot_id):
-        st.last_error = "no-prompt-categories"
-        pool_save(st, bot_id)
+        _pool_update(bot_id, last_error="no-prompt-categories")
         return 0
 
     deficits = pool_deficits(bot_id=bot_id, only_low=only_low)
@@ -2457,8 +2709,7 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
     # a weeks-old error that watchdogs kept reporting.
     if pool_common.stale_error(st.last_error, cli_ok=True, at_target=need <= 0,
                                cli_fault=_is_image_cli_error(st.last_error)):
-        st.last_error = ""
-        pool_save(st, bot_id)
+        _pool_update(bot_id, last_error="")
     want = need
     if limit is not None:
         want = min(want, limit)
@@ -2486,9 +2737,8 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
     # is what stops the overnight silent refusal hammer at the source.
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
-        st = pool_load(bot_id)
-        st.last_error = f"rig-vram-short ({guard['reason']})"[:300]
-        pool_save(st, bot_id)
+        _pool_update(bot_id,
+                     last_error=f"rig-vram-short ({guard['reason']})"[:300])
         pool_guard.note_refill_failure("vram-short", guard["reason"],
                                        actor=resolve_bot_id(bot_id))
         log.error("pool refill for %s BLOCKED by VRAM guard: %s",
@@ -2507,16 +2757,15 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
         made += 1
         # The image itself is already live — its folder IS the manifest — so
         # the yaml only needs touching when the telemetry it holds changes.
+        # Re-read + write only our own fields: the operator may have edited the
+        # config while this round was running, and the pre-round snapshot must
+        # not be written back over it.
         st = pool_load(bot_id)
         if st.last_error or not st.batch_date:
-            st.last_error = ""
-            if not st.batch_date:
-                st.batch_date = time.strftime("%Y-%m-%d")
-            pool_save(st, bot_id)
+            _pool_update(bot_id, last_error="",
+                         batch_date=st.batch_date or time.strftime("%Y-%m-%d"))
     if made == 0:
-        st = pool_load(bot_id)
-        st.last_error = "generation-failed"
-        pool_save(st, bot_id)
+        _pool_update(bot_id, last_error="generation-failed")
     return made
 
 
@@ -2535,10 +2784,15 @@ def pool_replace_batch(bot_id: str | None = None) -> int:
         return 0
     for _mood, p in _iter_ready(bot_id):
         _retire(p)
-    st = pool_load(bot_id)
-    st.batch_date = time.strftime("%Y-%m-%d")
-    pool_save(st, bot_id)
-    return pool_refill(bot_id=bot_id)
+    made = pool_refill(bot_id=bot_id)
+    # Stamp only a batch that actually landed. Stamping BEFORE the refill made
+    # an interrupted replace (rig down, VRAM guard, a crash) look like tonight's
+    # top-up had already run, so the nightly path skipped the now-EMPTY shelf
+    # until the next day. `batch_date` means "a fill reached its targets" —
+    # everywhere else in this module, and now here.
+    if not pool_deficits(bot_id=bot_id):
+        _pool_update(bot_id, batch_date=time.strftime("%Y-%m-%d"))
+    return made
 
 
 # --------------------------------------------------------------------------- #
