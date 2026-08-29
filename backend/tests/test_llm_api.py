@@ -971,3 +971,87 @@ def test_same_origin_redirect_keeps_the_credential(monkeypatch):
     seen = _redirect_probe(monkeypatch, "https://api.example.com/v2/chat")
     assert seen[1].headers.get("authorization") == "Bearer sk-secret"
     assert seen[1].headers.get("x-api-key") == "sk-secret"
+
+
+# --------------------------------------------------------------------------- #
+# Re-saving a bot must not erase what the panel never sees
+# --------------------------------------------------------------------------- #
+
+def test_resaving_a_bot_without_a_key_keeps_the_stored_one(db_env):
+    """A saved key never comes back out of the API, so the panel re-submits an
+    empty one. `upsert_bot` replaces the entry wholesale, so rebuilding the
+    `api` block from the submission alone DELETED the key — editing a bot's
+    name broke its ability to answer, and the only symptom was a 401 on the
+    next turn."""
+    first = llm_api.connect(llm_api.ConnectSpec(
+        provider="openai", model="gpt-4o-mini", api_key="sk-stored",
+        bot_id="llm-openai", name="First",
+        system_prompt="be brief", max_history_chars=4000))
+    assert first.api["api_key"] == "sk-stored"
+
+    again = llm_api.connect(llm_api.ConnectSpec(
+        provider="openai", model="gpt-4o-mini", api_key="",
+        bot_id="llm-openai", name="Renamed"))
+
+    assert again.name == "Renamed"
+    assert again.api["api_key"] == "sk-stored"
+    assert again.api["system_prompt"] == "be brief"
+    assert again.api["max_history_chars"] == 4000
+    assert config.get_bot("llm-openai").api["api_key"] == "sk-stored"
+
+
+def test_a_new_key_still_replaces_the_stored_one(db_env):
+    llm_api.connect(llm_api.ConnectSpec(
+        provider="openai", model="gpt-4o-mini", api_key="sk-old",
+        bot_id="llm-openai"))
+    bot = llm_api.connect(llm_api.ConnectSpec(
+        provider="openai", model="gpt-4o-mini", api_key="sk-new",
+        bot_id="llm-openai"))
+    assert bot.api["api_key"] == "sk-new"
+
+
+def test_switching_provider_does_not_carry_the_old_key_across(db_env):
+    llm_api.connect(llm_api.ConnectSpec(
+        provider="openai", model="gpt-4o-mini", api_key="sk-openai",
+        bot_id="llm-shared"))
+    with pytest.raises(llm_api.ApiError):
+        llm_api.connect(llm_api.ConnectSpec(
+            provider="deepseek", model="deepseek-chat", api_key="",
+            bot_id="llm-shared"))
+
+
+# --------------------------------------------------------------------------- #
+# Block-list content
+# --------------------------------------------------------------------------- #
+
+def test_block_list_content_is_read_not_crashed_on():
+    """`.strip()` on a list raises AttributeError, which escapes the ApiError
+    ladder and reaches the family as "Something went wrong." — with the reply
+    sitting there intact."""
+    msg = {"content": [{"type": "text", "text": "hello "},
+                       {"type": "image_url", "image_url": {"url": "x"}},
+                       {"type": "text", "text": "world"}]}
+    assert llm_api._openai_message_text(msg) == "hello world"
+
+
+def test_string_content_is_unchanged():
+    assert llm_api._openai_message_text({"content": " hi "}) == "hi"
+    assert llm_api._openai_message_text({"content": None}) == ""
+
+
+# --------------------------------------------------------------------------- #
+# The timeout an error quotes must be the one that expired
+# --------------------------------------------------------------------------- #
+
+def test_a_probe_timeout_quotes_the_probe_timeout():
+    err = llm_api._transport_error(
+        httpx.ReadTimeout("slow"), "http://x/v1/models", local=True,
+        read_timeout=llm_api.PROBE_READ_TIMEOUT_S)
+    assert f"{int(llm_api.PROBE_READ_TIMEOUT_S)}s" in err.detail
+    assert f"{int(llm_api.READ_TIMEOUT_S)}s" not in err.detail
+
+
+def test_a_turn_timeout_still_quotes_the_turn_timeout():
+    err = llm_api._transport_error(
+        httpx.ReadTimeout("slow"), "http://x/v1/chat/completions", local=True)
+    assert f"{int(llm_api.READ_TIMEOUT_S)}s" in err.detail

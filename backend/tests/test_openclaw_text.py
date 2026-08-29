@@ -394,3 +394,68 @@ def test_thinking_content_inside_code_blocks_is_untouched():
     out = ot.sanitize_assistant_visible_text(text)
     assert "<|channel>thought" in out
     assert "<|start_thinking|>" in out
+
+
+# --------------------------------------------------------------------------- #
+# The reasoning-tail heuristic must never eat a markdown reply
+# --------------------------------------------------------------------------- #
+
+_LONG = (" The rest of this reply is ordinary prose, long enough to clear the "
+         "200-character floor the reasoning-tail heuristic uses, so the only "
+         "thing under test is which character it opens with. It must survive "
+         "sanitizing completely intact and reach the database.")
+
+
+@pytest.mark.parametrize("opener", [
+    "> ", "![alt](/media/a.png)", "+ ", "~~~\ncode\n~~~", "? ", "'",
+    "/media/a.png is the path;", "!", "!!! note", "'quoted'",
+])
+def test_markdown_openers_are_never_a_reasoning_tail(opener):
+    """The heuristic used to be an ALLOWLIST of reply openers, and everything
+    it forgot sanitized to "" — which main.py treats as nothing to persist, so
+    the reply was never written at all. Verified for blockquotes, images, "+"
+    lists, "~~~" fences and questions."""
+    text = opener + _LONG
+    assert ot.sanitize_assistant_visible_text(text) == text.strip()
+
+
+def test_a_dangling_slash_is_still_a_reasoning_tail():
+    """The observed 2026-08-19 tail opened "/ ` blocks that leak…". A slash
+    followed by a space is a cut expression; "/media/…" is a path."""
+    text = "/ ` blocks that leak, and I need to check the config." + _LONG
+    assert ot.sanitize_assistant_visible_text(text) == ""
+
+
+def test_a_real_mid_expression_fragment_is_still_a_reasoning_tail():
+    """The inversion must not disarm the heuristic: a block opening on a
+    closing bracket is still a mis-split thinking stream."""
+    text = "), so the plan is to check the config first." + _LONG
+    assert ot.sanitize_assistant_visible_text(text) == ""
+
+
+# --------------------------------------------------------------------------- #
+# Scaffolding examples inside code fences
+# --------------------------------------------------------------------------- #
+
+def test_scaffolding_tags_inside_a_fence_survive():
+    """An agent explaining what these tags look like is QUOTING them. The three
+    scaffolding passes ran over the raw string, so the example was deleted out
+    of the middle of the explanation."""
+    text = ("The runtime wraps injected context like this:\n\n"
+            "```\n<system-reminder>do the thing</system-reminder>\n"
+            "<prompt-data>\npayload\n</prompt-data>\n```\n\n"
+            "and that is all it means.")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert "<system-reminder>do the thing</system-reminder>" in out
+    assert "<prompt-data>" in out
+    assert "</prompt-data>" in out
+
+
+def test_scaffolding_tags_outside_a_fence_are_still_stripped():
+    text = ("before\n<system-reminder>hidden</system-reminder>\n"
+            "<prompt-data>\npayload\n</prompt-data>\nafter")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert "system-reminder" not in out
+    assert "prompt-data" not in out
+    assert out.startswith("before")
+    assert out.endswith("after")

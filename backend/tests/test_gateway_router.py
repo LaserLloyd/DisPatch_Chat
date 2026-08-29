@@ -414,3 +414,105 @@ async def test_cursor_map_is_lru_bounded(monkeypatch):
             "message": _msg("ours")})
     assert len(router._seq) == 8
     assert list(router._seq) == [f"agent:main:t{i}" for i in range(12, 20)]
+
+
+# --- backfill must cover the whole gap, or say it did not -------------------
+
+class _PagedClient(_FakeClient):
+    """A real tail read: `offset` counts backwards from the newest message.
+
+    The single call the router used to make could only ever see one page, so
+    any gap wider than it was permanently unrecovered.
+    """
+
+    def __init__(self, messages: list[dict]):
+        super().__init__()
+        # newest last, like a transcript
+        self._all = messages
+
+    async def history(self, session_key, *, limit=50, offset=0):
+        self.history_calls.append({"limit": limit, "offset": offset})
+        end = len(self._all) - offset
+        if end <= 0:
+            return []
+        return self._all[max(0, end - limit):end]
+
+
+def _session(n: int) -> list[dict]:
+    return [_msg(f"reply {i}", mid=f"m{i}", seq=i) for i in range(1, n + 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_gap_wider_than_one_page_is_fully_backfilled():
+    client = _PagedClient(_session(300))
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("reply 1", mid="m1", seq=1)})
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 300,
+        "message": _msg("reply 300", mid="m300", seq=300)})
+
+    assert len(client.history_calls) > 1, "one page cannot cover a 299-wide gap"
+    assert router.stats["backfill_incomplete"] == 0
+    texts = [c["text"] for c in r.calls]
+    for i in range(2, 300):
+        assert f"reply {i}" in texts, f"reply {i} was never recovered"
+
+
+@pytest.mark.asyncio
+async def test_an_uncoverable_gap_is_counted_not_hidden(monkeypatch):
+    """The ceiling exists so a corrupt cursor cannot ask for the whole
+    history — but stopping at it must be VISIBLE, because stats["backfilled"]
+    counts what was delivered, never what was missed."""
+    monkeypatch.setattr(gr, "BACKFILL_PAGE", 10)
+    monkeypatch.setattr(gr, "BACKFILL_MAX_MESSAGES", 20)
+    client = _PagedClient(_session(200))
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("reply 1", mid="m1", seq=1)})
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 200,
+        "message": _msg("reply 200", mid="m200", seq=200)})
+
+    assert router.stats["backfill_incomplete"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resync_is_not_capped_at_a_guessed_window(monkeypatch):
+    """Reconnect used to guess `last + 50` and DISCARD everything past it."""
+    monkeypatch.setattr(gr, "BACKFILL_PAGE", 10)
+    client = _PagedClient(_session(80))
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+    router._seq["agent:main:t1"] = 1
+
+    await router.resync_known()
+
+    texts = [c["text"] for c in r.calls]
+    assert "reply 80" in texts, "the tail past the old +50 window was dropped"
+    assert router.stats["backfill_incomplete"] == 0
+
+
+# --- stats keys are not minted from the wire --------------------------------
+
+@pytest.mark.asyncio
+async def test_unknown_roles_share_one_stats_bucket():
+    """`dropped_role_<role>` took its key from a wire-supplied string and then
+    served it in /api/health — unbounded growth from remote input."""
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver)
+    for role in ("weird", "x" * 500, "role-2", "user"):
+        await router.handle("session.message", {
+            "sessionKey": "agent:main:t1", "messageSeq": 1,
+            "message": _msg("hi", role=role)})
+
+    assert router.stats["dropped_role_other"] == 3
+    assert router.stats["dropped_role_user"] == 1
+    assert not [k for k in router.stats if k.startswith("dropped_role_")
+                and k not in ("dropped_role_other", "dropped_role_user")]

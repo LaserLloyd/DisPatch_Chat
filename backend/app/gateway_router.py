@@ -55,6 +55,19 @@ SEQ_CURSOR_MAX = 4096
 # turn that really died still shows its failure, just this much later.
 ERROR_PLACEHOLDER_GRACE_S = 180.0
 
+# Backfill window. `chat.history` is a paged tail read, so ONE call can only
+# ever cover its own page — a gap wider than that used to be permanently
+# unrecoverable by this transport while stats["backfilled"] read healthy.
+# Pages are walked backwards until the cursor is reached, bounded by
+# BACKFILL_MAX_MESSAGES so a corrupt cursor cannot ask for the whole history.
+BACKFILL_PAGE = 100
+BACKFILL_MAX_MESSAGES = 2000
+
+# Roles the gateway emits. Anything else is bucketed, because
+# stats["dropped_role_<role>"] minted a NEW key from a wire-supplied string and
+# then served it in /api/health — unbounded growth from remote input.
+KNOWN_ROLES = ("user", "assistant", "system", "tool", "toolResult")
+
 
 def text_of(message: dict) -> str:
     """The visible text of a gateway message.
@@ -148,7 +161,7 @@ class SessionRouter:
         self.stats = {"delivered": 0, "delivered_live": 0,
                       "delivered_backfill": 0, "skipped_not_ours": 0,
                       "gaps": 0, "refetched": 0, "backfilled": 0,
-                      "truncation_unrepaired": 0,
+                      "truncation_unrepaired": 0, "backfill_incomplete": 0,
                       "error_held": 0, "error_suppressed": 0,
                       "error_released": 0}
 
@@ -215,7 +228,9 @@ class SessionRouter:
             # the family their own question a second time, below the answer.
             # (Mirror-kind threads are the exception, and this counter is how
             # many rows a cutover would lose there.)
-            role = message.get("role") or "?"
+            role = message.get("role")
+            if role not in KNOWN_ROLES:
+                role = "other"
             k = f"dropped_role_{role}"
             self.stats[k] = self.stats.get(k, 0) + 1
             return
@@ -308,7 +323,7 @@ class SessionRouter:
         self.stats["delivered"] += 1
 
     async def _backfill(self, session_key: str, thread_id: str, bot_id: str,
-                        last: int, now: int) -> None:
+                        last: int, now: int | None) -> None:
         """Fetch what the gap swallowed.
 
         Safe to overrun: every message carries a stable id, so re-delivering
@@ -317,14 +332,51 @@ class SessionRouter:
         """
         if self._client is None:
             return
-        want = min(now - last + 5, 100)
-        try:
-            msgs = await self._client.history(session_key, limit=want, offset=0)
-        except Exception:
-            log.warning("backfill failed for %s", session_key, exc_info=True)
-            return
-        for m in msgs:
-            if not isinstance(m, dict) or m.get("role") != "assistant":
+
+        # WALK BACK TO THE CURSOR, don't guess a window. `chat.history` is a
+        # paged tail read; one call with limit=min(gap+5, 100) covered a gap of
+        # at most ~95 messages, and anything wider was silently unrecoverable
+        # by this transport — with stats["backfilled"] reading healthy, because
+        # what it counts is what was delivered, not what was missed.
+        pages: list[list[dict]] = []
+        fetched = 0
+        oldest_seq: int | None = None
+        while fetched < BACKFILL_MAX_MESSAGES:
+            limit = min(BACKFILL_PAGE, BACKFILL_MAX_MESSAGES - fetched)
+            try:
+                page = await self._client.history(
+                    session_key, limit=limit, offset=fetched)
+            except Exception:
+                log.warning("backfill failed for %s", session_key, exc_info=True)
+                break
+            page = [m for m in page if isinstance(m, dict)]
+            if not page:
+                break
+            pages.append(page)
+            fetched += len(page)
+            seqs = [s for s in ((m.get("__openclaw") or {}).get("seq")
+                                for m in page) if isinstance(s, int)]
+            if seqs:
+                low = min(seqs)
+                oldest_seq = low if oldest_seq is None else min(oldest_seq, low)
+            # Reached back past the cursor: the gap is fully covered.
+            if oldest_seq is not None and oldest_seq <= last + 1:
+                break
+            if len(page) < limit:
+                break                            # the session has no more
+
+        if oldest_seq is None or oldest_seq > last + 1:
+            # VISIBLE, not silent. The gap is real, it was not covered, and the
+            # delivered counters cannot show that on their own.
+            self.stats["backfill_incomplete"] += 1
+            log.error("INCOMPLETE BACKFILL session=%s gap=%d..%s reached=%s "
+                      "after %d messages", session_key, last,
+                      "live" if now is None else now, oldest_seq, fetched)
+
+        # Pages come newest-first; deliver oldest-first so a thread reads in
+        # order.
+        for m in [m for page in reversed(pages) for m in page]:
+            if m.get("role") != "assistant":
                 continue
             # ONLY WHAT THE GAP SWALLOWED. history() returns a window, not the
             # gap, so delivering all of it re-posts messages already shown.
@@ -333,7 +385,8 @@ class SessionRouter:
             # the trailing assistant run. That combination is exactly how 49
             # messages once landed in the family chat in one second.
             mseq = (m.get("__openclaw") or {}).get("seq")
-            if isinstance(mseq, int) and not (last < mseq <= now):
+            if isinstance(mseq, int) and (
+                    mseq <= last or (now is not None and mseq > now)):
                 continue
             await self._deliver_message(session_key, thread_id, bot_id, m)
             self.stats["backfilled"] += 1
@@ -363,4 +416,8 @@ class SessionRouter:
             if target is None:
                 continue
             thread_id, bot_id = target
-            await self._backfill(key, thread_id, bot_id, last, last + 50)
+            # No upper bound: a reconnect has no idea how far the session moved
+            # while the socket was down, and `last + 50` was a guess that
+            # DISCARDED anything past it. The walk back to the cursor is what
+            # bounds the read now.
+            await self._backfill(key, thread_id, bot_id, last, None)

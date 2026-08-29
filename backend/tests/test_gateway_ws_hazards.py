@@ -20,7 +20,9 @@ the original code and pass on the fixed code.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+from unittest import mock
 
 import pytest
 
@@ -215,3 +217,139 @@ def test_frame_size_is_bounded():
     connection. Generous, but finite."""
     assert isinstance(gateway_ws.MAX_FRAME_BYTES, int)
     assert 1024 * 1024 <= gateway_ws.MAX_FRAME_BYTES <= 256 * 1024 * 1024
+
+
+# --------------------------------------------------------------------------- #
+# A disconnect must resolve every request in flight
+# --------------------------------------------------------------------------- #
+
+
+class SilentWS(FakeWS):
+    """Accepts requests and never answers any of them."""
+
+    async def send(self, raw: str) -> None:
+        self.sent.append(json.loads(raw))
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_fails_pending_calls_instead_of_stalling_them():
+    """Nothing used to walk `_pending` when the reader exited, and `_ws` was
+    never cleared — so a refetch outstanding at disconnect blocked the single
+    event consumer for the whole 30s request timeout while the queue filled."""
+    client = gateway_ws.GatewayClient(lambda e, p: asyncio.sleep(0))
+    ws = SilentWS([])
+    client._ws = ws
+    call = asyncio.create_task(client.call("chat.message.get", {}))
+    await _until(lambda: ws.sent)
+
+    client._ws = None
+    client._fail_pending(gateway_ws.GatewayDisconnected("lost"))
+
+    with pytest.raises(gateway_ws.GatewayDisconnected):
+        await asyncio.wait_for(call, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_call_fails_fast_while_disconnected():
+    client = gateway_ws.GatewayClient(lambda e, p: asyncio.sleep(0))
+    with pytest.raises(gateway_ws.GatewayDisconnected):
+        await asyncio.wait_for(client.call("chat.history", {}), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_run_forever_clears_the_socket_and_fails_pending_on_drop():
+    """The whole path, not just the helper: _run_forever's finally is the only
+    place that runs after every kind of connection death."""
+    client = gateway_ws.GatewayClient(lambda e, p: asyncio.sleep(0))
+    ws = SilentWS([])
+    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+    client._pending["req-1"] = fut
+
+    async def connect_once():
+        client._ws = ws
+        raise RuntimeError("socket closed by peer")
+
+    client._connect_once = connect_once           # type: ignore[assignment]
+    task = asyncio.create_task(client._run_forever())
+    await asyncio.wait_for(_until(lambda: fut.done()), timeout=2)
+    client._stop.set()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert client._ws is None
+    with pytest.raises(gateway_ws.GatewayDisconnected):
+        fut.result()
+
+
+# --------------------------------------------------------------------------- #
+# Reconnect backoff
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_backoff_keeps_growing_when_connections_die_immediately():
+    """A gateway that accepts the socket, completes the handshake and then
+    closes used to reset the backoff to 1s — a permanent 1 Hz
+    connect/handshake/subscribe/resync loop against a degraded gateway."""
+    client = gateway_ws.GatewayClient(lambda e, p: asyncio.sleep(0))
+    delays: list[float] = []
+
+    async def connect_once():
+        return                                    # up and down instantly
+
+    async def fake_sleep(d):
+        delays.append(d)
+        if len(delays) >= 4:
+            client._stop.set()
+
+    client._connect_once = connect_once           # type: ignore[assignment]
+    with mock.patch.object(gateway_ws.asyncio, "sleep", fake_sleep):
+        await asyncio.wait_for(client._run_forever(), timeout=5)
+
+    assert delays == [1.0, 2.0, 4.0, 8.0], delays
+
+
+@pytest.mark.asyncio
+async def test_backoff_resets_after_a_connection_that_stayed_up():
+    client = gateway_ws.GatewayClient(lambda e, p: asyncio.sleep(0))
+    delays: list[float] = []
+    clock = [1000.0]
+
+    async def connect_once():
+        clock[0] += gateway_ws.HEALTHY_CONNECTION_S + 1
+
+    async def fake_sleep(d):
+        delays.append(d)
+        if len(delays) >= 3:
+            client._stop.set()
+
+    class _Loop:
+        @staticmethod
+        def time():
+            return clock[0]
+
+    client._connect_once = connect_once           # type: ignore[assignment]
+    with mock.patch.object(gateway_ws.asyncio, "sleep", fake_sleep), \
+            mock.patch.object(gateway_ws.asyncio, "get_event_loop",
+                              lambda: _Loop):
+        await asyncio.wait_for(client._run_forever(), timeout=5)
+
+    assert delays == [1.0, 1.0, 1.0], delays
+
+
+# --------------------------------------------------------------------------- #
+# Truncation detection must match what text_of actually reads
+# --------------------------------------------------------------------------- #
+
+
+def test_a_marker_in_a_non_text_block_is_not_a_truncation():
+    """Only `text` blocks reach the chat. A marker in a tool_use argument
+    ordered a refetch that could not change the delivered text, and every one
+    of them incremented stats["refetched"] — a repair counter reporting work
+    it did not do."""
+    msg = {"content": [
+        {"type": "tool_use", "text": "ls -la" + gateway_ws.TRUNCATION_MARKER},
+        {"type": "text", "text": "a clean reply"},
+    ]}
+    assert gateway_ws.GatewayClient.blocks_truncated(msg) is False

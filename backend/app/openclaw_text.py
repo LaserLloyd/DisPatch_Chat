@@ -273,9 +273,19 @@ def _unwrap_prompt_data_wrapper_lines(text: str) -> str:
     (`<prompt-data>` showed up in the DOM); the Control UI never shows them.
     """
     lines = text.split("\n")
+    regions = _find_code_regions(text)
     out: list[str] = []
     changed = False
+    pos = 0
     for i, line in enumerate(lines):
+        # Offset of this line in the original string, so a wrapper tag QUOTED
+        # inside a fence (an agent explaining what these tags look like) is
+        # left alone like every other marker strip in this module.
+        start = pos
+        pos += len(line) + 1
+        if _is_inside_code(start, regions):
+            out.append(line)
+            continue
         trimmed = line.strip().lower()
         nxt = lines[i + 1].strip().lower() if i + 1 < len(lines) else ""
         is_open = any(trimmed == f"<{t}>" for t in _PROMPT_DATA_TAG_NAMES)
@@ -297,9 +307,13 @@ def strip_internal_runtime_scaffolding(text: str) -> str:
     if not text:
         return text
     stripped = _unwrap_prompt_data_wrapper_lines(text)
-    stripped = _SCAFFOLDING_BLOCK_RE.sub("", stripped)
-    stripped = _SCAFFOLDING_SELF_CLOSING_RE.sub("", stripped)
-    stripped = _SCAFFOLDING_TAG_RE.sub("", stripped)
+    # Outside code only, like every other marker strip here. These three ran
+    # over the raw string, so an agent documenting `<system-reminder>` inside a
+    # fence had its example deleted out of the explanation — the same
+    # use-vs-mention blindness the runtime-context passes had.
+    stripped = _strip_outside_code(stripped, _SCAFFOLDING_BLOCK_RE)
+    stripped = _strip_outside_code(stripped, _SCAFFOLDING_SELF_CLOSING_RE)
+    stripped = _strip_outside_code(stripped, _SCAFFOLDING_TAG_RE)
     stripped = _strip_delimited_runtime_block(
         stripped, INTERNAL_RUNTIME_CONTEXT_BEGIN, INTERNAL_RUNTIME_CONTEXT_END)
     for marker in _UNTRUSTED_RESULT_MARKERS:
@@ -452,15 +466,25 @@ def _strip_internal_trace_lines(text: str) -> str:
     return "".join(out)
 
 
-# First characters a real assistant reply starts with, observed across the
-# app's whole message history: letters, digits, emoji/CJK (anything non-ASCII),
-# and markdown/RP openers. Anything else — "/", "!", ".", a stray fragment —
-# marks a text block that is the TAIL of a mis-split thinking stream, not
-# speech. On 2026-08-19 a frontier model's reasoning was cut at a backtick and
-# the continuation arrived as a `text` block; it was delivered verbatim.
-_REPLY_START_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    "*#-[<=(@.\"_:$|`")
+# Characters a text block can only START with when it is the TAIL of a
+# mis-split thinking stream: closing brackets and mid-expression separators.
+#
+# POSITIVE EVIDENCE ONLY, DELIBERATELY. This used to be the inverse — an
+# allowlist of characters a real reply may open with — and every markdown
+# opener it forgot was classified as reasoning and returned as the empty
+# string. main.py treats "" as nothing to persist, so a reply opening with a
+# blockquote (">"), an image ("!["), a "+" list, a "~~~" fence or a question
+# ("?") was silently never written to the database at all. An allowlist that
+# has to enumerate every legal opener fails closed on the MESSAGE; this
+# direction fails open, which is the right way round for a heuristic whose
+# false positive is total data loss.
+_REASONING_TAIL_START_CHARS = frozenset(",;)]}%&^\\")
+
+# "/" is the one opener that is evidence BOTH ways: the observed 2026-08-19
+# case opened "/ ` blocks that leak…" (reasoning cut at a backtick), while a
+# reply opening "/media/…" or "/api/health" is a path and is speech. A dangling
+# slash is followed by a space; a path is not, so that is the discriminator.
+_DANGLING_SLASH_RE = re.compile(r"^/\s")
 
 # A reasoning tail is long; a terse odd-start line is more likely a real
 # (if unusual) reply. Only judge texts at least this long.
@@ -469,11 +493,11 @@ _REASONING_TAIL_MIN_CHARS = 200
 
 def _is_reasoning_tail(text: str) -> bool:
     """True when a stripped text block is the unlabelled continuation of a
-    thinking stream: it begins with a character no real reply begins with."""
+    thinking stream: it begins with a character a reply cannot begin with."""
     if not text:
         return False
-    first = text[0]
-    if first in _REPLY_START_CHARS or ord(first) > 127:
+    if (text[0] not in _REASONING_TAIL_START_CHARS
+            and not _DANGLING_SLASH_RE.match(text)):
         return False
     return len(text) >= _REASONING_TAIL_MIN_CHARS
 

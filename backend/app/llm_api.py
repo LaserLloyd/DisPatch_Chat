@@ -456,7 +456,8 @@ def _status_error(status: int, payload: Any, *, url: str, model: str = "",
     return ApiError(f"The provider returned HTTP {status}", f"{url}{tail}")
 
 
-def _transport_error(e: Exception, url: str, *, local: bool) -> ApiError:
+def _transport_error(e: Exception, url: str, *, local: bool,
+                     read_timeout: float = READ_TIMEOUT_S) -> ApiError:
     """Connection-level failures, phrased for the two very different causes."""
     if isinstance(e, httpx.ConnectTimeout | httpx.ConnectError):
         return ApiError(
@@ -470,7 +471,10 @@ def _transport_error(e: Exception, url: str, *, local: bool) -> ApiError:
     if isinstance(e, httpx.ReadTimeout | httpx.WriteTimeout | httpx.PoolTimeout):
         return ApiError(
             "The provider took too long to answer",
-            f"No reply from {url} within {int(READ_TIMEOUT_S)}s. A local model "
+            # The number MUST be the one that actually expired: the probe path
+            # runs on PROBE_READ_TIMEOUT_S, and quoting 120s for a 25s timeout
+            # sends the operator looking for a slow model that is not there.
+            f"No reply from {url} within {int(read_timeout)}s. A local model "
             "loading for the first time can exceed this — try again once it is "
             "warm.")
     return ApiError("The connection to the provider failed",
@@ -529,6 +533,25 @@ def _anthropic_error(e: Exception) -> ApiError:
     if isinstance(status, int) and status >= 500:
         return ApiError("Anthropic had an error", f"HTTP {status}: {str(e)[:200]}")
     return ApiError("The Anthropic request failed", f"{name}: {str(e)[:200]}")
+
+
+def _openai_message_text(message: dict) -> str:
+    """The visible text of one chat-completions message.
+
+    `content` is USUALLY a string, but a growing number of OpenAI-compatible
+    servers answer with the multimodal block list instead. `.strip()` on a list
+    raises AttributeError, which escapes the ApiError ladder entirely and
+    reaches the family as "Something went wrong." — no provider, no URL, no
+    hint that the reply actually arrived intact.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [b.get("text") or "" for b in content
+                 if isinstance(b, dict) and b.get("type") in (None, "text")]
+        return "".join(parts).strip()
+    return ""
 
 
 def _anthropic_text(resp: Any) -> str:
@@ -740,7 +763,7 @@ async def _complete_openai(cfg: Resolved, history: list[dict]) -> Reply:
             f"{url} answered {status} with no `choices`. "
             f"{_provider_message(payload) or 'Response: ' + str(payload)[:200]}")
     message = (choices[0] or {}).get("message") or {}
-    text = (message.get("content") or "").strip()
+    text = _openai_message_text(message)
     if not text:
         # A finish_reason of "length" with empty content is the classic
         # symptom of a reasoning model whose whole budget went to thinking.
@@ -847,7 +870,8 @@ async def _probe_openai(url: str, key: str, model: str, *, local: bool) -> list[
         except ApiError:
             raise
         except httpx.HTTPError as e:
-            raise _transport_error(e, models_url, local=local) from e
+            raise _transport_error(e, models_url, local=local,
+                                   read_timeout=PROBE_READ_TIMEOUT_S) from e
 
         if status < 400:
             payload = _decode_json(raw, models_url)
@@ -875,7 +899,8 @@ async def _probe_openai(url: str, key: str, model: str, *, local: bool) -> list[
                     json_body={"model": probe_model, "max_tokens": 1,
                                "messages": [{"role": "user", "content": "Hi"}]})
             except httpx.HTTPError as e:
-                raise _transport_error(e, chat_url, local=local) from e
+                raise _transport_error(e, chat_url, local=local,
+                                       read_timeout=PROBE_READ_TIMEOUT_S) from e
             if cstatus >= 400:
                 raise _status_error(cstatus, _decode_json_lenient(craw),
                                     url=chat_url, model=probe_model,
@@ -1073,8 +1098,33 @@ def connect(spec: ConnectSpec) -> config.Bot:
         raise ApiError("A model is required",
                        "Run Test connection to list the models this provider "
                        "offers, or type the model name in.")
-    key = (spec.api_key or "").strip()
-    key_env = (spec.api_key_env or "").strip()
+    bot_id = (spec.bot_id or "").strip() or default_bot_id(provider.id)
+    existing = config.get_bot(bot_id)
+    if existing is not None and not existing.api:
+        # Refusing rather than silently converting: `assistant` is an agent bot
+        # with real history behind it, and turning it into an API bot from a
+        # setup panel would change where its replies come from without saying so.
+        raise ApiError(
+            "That bot already exists and is not an API bot",
+            f"{bot_id!r} is configured for the agent backend. Choose a "
+            "different name, or remove it from config.yaml first.")
+    # WHAT THE PANEL DID NOT SEND, IT DID NOT MEAN TO ERASE. A saved key never
+    # comes back out of the API (deliberately — see the routes), so the panel
+    # re-submits an EMPTY key for a bot that has one. `upsert_bot` replaces the
+    # entry wholesale, so rebuilding `api` from the submission alone deleted
+    # the stored key, system prompt and history cap: editing a bot's name broke
+    # its ability to answer at all, and the only symptom was an auth error on
+    # the next turn.
+    # Only from the SAME provider: a re-save that switches provider must not
+    # carry the old provider's key across.
+    stored: dict[str, Any] = (
+        dict(existing.api)
+        if existing is not None and existing.api.get("provider") == provider.id
+        else {})
+
+    key = (spec.api_key or "").strip() or str(stored.get("api_key") or "")
+    key_env = (spec.api_key_env or "").strip() or str(
+        stored.get("api_key_env") or "")
     if provider.key_required and not key and not (
             key_env and os.environ.get(key_env, "").strip()):
         raise ApiError(f"{provider.label} needs an API key",
@@ -1087,21 +1137,13 @@ def connect(spec: ConnectSpec) -> config.Bot:
         api["api_key"] = key
     if key_env:
         api["api_key_env"] = key_env
-    if (spec.system_prompt or "").strip():
-        api["system_prompt"] = spec.system_prompt.strip()
-    if spec.max_history_chars:
-        api["max_history_chars"] = int(spec.max_history_chars)
-
-    bot_id = (spec.bot_id or "").strip() or default_bot_id(provider.id)
-    existing = config.get_bot(bot_id)
-    if existing is not None and not existing.api:
-        # Refusing rather than silently converting: `assistant` is an agent bot
-        # with real history behind it, and turning it into an API bot from a
-        # setup panel would change where its replies come from without saying so.
-        raise ApiError(
-            "That bot already exists and is not an API bot",
-            f"{bot_id!r} is configured for the agent backend. Choose a "
-            "different name, or remove it from config.yaml first.")
+    prompt = (spec.system_prompt or "").strip() or str(
+        stored.get("system_prompt") or "")
+    if prompt:
+        api["system_prompt"] = prompt
+    history_chars = spec.max_history_chars or stored.get("max_history_chars")
+    if history_chars:
+        api["max_history_chars"] = int(history_chars)
     # An existing API bot keeps everything the panel does not manage — its
     # avatar, its colour, its position, and any flags the operator has since
     # turned on in the Bot Manager.

@@ -77,6 +77,16 @@ MAX_FRAME_BYTES = 64 * 1024 * 1024
 REQUEST_TIMEOUT_S = 30.0
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 60.0
+# How long a connection must SURVIVE before its success counts. A gateway that
+# accepts the socket, completes the handshake and then closes is "successful"
+# by the old test, so the backoff reset to 1s and DisPatch hammered a degraded
+# gateway at 1 Hz — connect, handshake, subscribe, resync, drop, forever — with
+# the backoff that exists to prevent exactly that never getting off the floor.
+HEALTHY_CONNECTION_S = 30.0
+
+
+class GatewayDisconnected(ConnectionError):
+    """The connection went away with requests still outstanding."""
 
 
 def gateway_url() -> str:
@@ -191,9 +201,9 @@ class GatewayClient:
         """
         delay = RECONNECT_MIN_S
         while not self._stop.is_set():
+            started = asyncio.get_event_loop().time()
             try:
                 await self._connect_once()
-                delay = RECONNECT_MIN_S          # a good connection resets it
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -201,6 +211,18 @@ class GatewayClient:
                             e, delay)
             finally:
                 self.connected.clear()
+                # A DEAD SOCKET MUST NOT LOOK LIKE A LIVE ONE. `call()` reads
+                # self._ws, and nothing used to clear it or fail the futures
+                # waiting on the reader that just exited — so a refetch
+                # outstanding at disconnect stalled the single event consumer
+                # for the whole 30s request timeout while the queue filled.
+                self._ws = None
+                self._fail_pending(GatewayDisconnected(
+                    "gateway connection lost before the response arrived"))
+            # Only a connection that STAYED UP counts as good (see
+            # HEALTHY_CONNECTION_S).
+            if asyncio.get_event_loop().time() - started >= HEALTHY_CONNECTION_S:
+                delay = RECONNECT_MIN_S
             if self._stop.is_set():
                 return
             await asyncio.sleep(delay)
@@ -317,14 +339,22 @@ class GatewayClient:
 
     # -- request / response ------------------------------------------------ #
 
+    def _fail_pending(self, exc: BaseException) -> None:
+        """Resolve every outstanding request, now, with the reason."""
+        pending, self._pending = self._pending, {}
+        for fut in pending.values():
+            if not fut.done():
+                fut.set_exception(exc)
+
     async def call(self, method: str, params: dict | None = None) -> dict:
-        if self._ws is None:
-            raise RuntimeError("not connected")
+        ws = self._ws
+        if ws is None:
+            raise GatewayDisconnected("not connected")
         req_id = uuid.uuid4().hex
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[req_id] = fut
         try:
-            await self._ws.send(json.dumps(
+            await ws.send(json.dumps(
                 {"type": "req", "id": req_id, "method": method,
                  **({"params": params} if params is not None else {})}))
             return await asyncio.wait_for(fut, timeout=REQUEST_TIMEOUT_S)
@@ -393,13 +423,20 @@ class GatewayClient:
         The gateway truncates per block, and text_of joins blocks with a blank
         line — so a truncated block that is not the last one leaves the marker
         buried mid-string, where an endswith() check cannot see it.
+
+        Only `text` blocks count, because only those are what text_of reads.
+        Scanning every block type meant a marker in a tool_use argument or a
+        thinking block ordered a refetch that could not change the delivered
+        text, and each one incremented stats["refetched"] — a repair counter
+        reporting work it did not do.
         """
         content = message.get("content")
         if isinstance(content, str):
             return GatewayClient.looks_truncated(content)
         if isinstance(content, list):
             return any(TRUNCATION_MARKER in (b.get("text") or "")
-                       for b in content if isinstance(b, dict))
+                       for b in content
+                       if isinstance(b, dict) and b.get("type") == "text")
         return False
 
     async def full_text(self, session_key: str, message_id: str) -> str | None:
