@@ -88,7 +88,7 @@ def _seed_mixed(client) -> tuple[str, str]:
     """
     mixed_bot = config.Bot(id="MixedCase", name="Mixed", emoji="\N{TEST TUBE}",
                            order=99, visible=True, safe=False)
-    roster = list(config.load_bots()) + [mixed_bot]
+    roster = [*config.load_bots(), mixed_bot]
     config._write_bots([config._bot_entry(b) for b in roster])
     config._invalidate_bots_cache()
 

@@ -462,13 +462,13 @@ def check_string(
     if unknown:
         rep.error(
             f"{lang}:{label}",
-            f"unknown placeholder(s) {sorted('{%s}' % p for p in unknown)}; "
-            f"English defines {sorted('{%s}' % p for p in en_ph) or 'none'}",
+            f"unknown placeholder(s) {sorted("{" + p + "}" for p in unknown)}; "
+            f"English defines {sorted("{" + p + "}" for p in en_ph) or 'none'}",
         )
 
     missing = en_ph - tr_ph
     if missing:
-        pretty = sorted("{%s}" % p for p in missing)
+        pretty = sorted("{" + p + "}" for p in missing)
         if variant in COUNTLESS_CATEGORIES and missing - {"count"}:
             # Dropping something other than the count in an exact-quantity form
             # is usually still fine ("No messages were recovered." legitimately

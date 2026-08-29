@@ -28,7 +28,7 @@ import uuid
 from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from fastapi import (
     Body,
@@ -73,11 +73,11 @@ from . import (
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .database import Database, local_date, new_id, now_iso
 from .models import (
+    MESSAGE_MAX_CHARS,
     DailyThreadIn,
     FireReactionIn,
     GenerateReactionIn,
     InjectIn,
-    MESSAGE_MAX_CHARS,
     MessageOut,
     ReactionPatchIn,
     ReactionSettingsIn,

@@ -398,17 +398,17 @@ def _archive_members(blob: bytes, rel: str):
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             infos = [i for i in zf.infolist() if not i.is_dir()]
             if len(infos) > ARCHIVE_MAX_MEMBERS:
-                yield (None, None, f"{len(infos)} members exceeds the "
-                                   f"{ARCHIVE_MAX_MEMBERS} cap")
+                yield (None, None, (f"{len(infos)} members exceeds the "
+                                    f"{ARCHIVE_MAX_MEMBERS} cap"))
                 return
             total = 0
             for info in infos:
                 if (info.compress_size
                         and info.file_size / max(info.compress_size, 1) > ARCHIVE_MAX_RATIO):
                     yield (info.filename, None,
-                           f"compression ratio "
-                           f"{info.file_size // max(info.compress_size, 1)}:1 "
-                           f"looks like a decompression bomb")
+                           (f"compression ratio "
+                            f"{info.file_size // max(info.compress_size, 1)}:1 "
+                            f"looks like a decompression bomb"))
                     continue
                 yield_name = info.filename
                 if Path(yield_name).suffix.lower() in ARCHIVE_SKIP_MEMBER_SUFFIXES:
@@ -531,8 +531,8 @@ def scan_commit_range(repo_root: Path, spec: str) -> list[str]:
         return []
     r = _git(repo_root, "log", "--no-merges", "--format=%H%x1f%B%x1e", *args)
     if r.returncode != 0:
-        return [f"commit-range {spec!r}: git log failed \u2014 "
-                f"{r.stderr.strip() or 'unknown error'}"]
+        return [(f"commit-range {spec!r}: git log failed \u2014 "
+                 f"{r.stderr.strip() or 'unknown error'}")]
     problems: list[str] = []
     for record in r.stdout.split("\x1e"):
         record = record.strip("\n")
@@ -811,7 +811,7 @@ def selftest() -> int:
         if scan_text(git_comment_block, "msg"):
             failures.append("the git comment block was scanned (it is stripped "
                             "before the message is stored)")
-        if not scan_commit_range(root, "HEAD~0..HEAD") == []:
+        if scan_commit_range(root, "HEAD~0..HEAD") != []:
             failures.append("an empty commit range should be clean, not an error")
 
     print("scrub_check --selftest: index-vs-working-tree, commit-vs-working-tree, "

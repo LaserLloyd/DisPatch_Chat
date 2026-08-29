@@ -206,7 +206,7 @@ def main() -> int:
         print("\ndry run — re-run with --go to apply")
         return 0
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     backup = args.db.parent / "backups" / f"chats-before-dedupe-repair-{stamp}.db"
     backup.parent.mkdir(parents=True, exist_ok=True)
     con.execute("VACUUM INTO ?", (str(backup),))
