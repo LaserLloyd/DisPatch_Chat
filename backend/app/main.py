@@ -2243,7 +2243,13 @@ async def _fire_autopilot_reaction(mood: str, thread_id: str,
         except Exception:
             log.exception("autopilot failed to fire reaction %r", cand)
             return
+    # Exhausted: none of the candidates resolved for this bot. A log line alone
+    # made an autopilot that never fires indistinguishable from one that is
+    # simply keeping quiet on purpose, so it also ticks the health counter that
+    # /api/health already reports as `reaction_fire_failures_24h`. Still no chat
+    # row — a server-chosen mood missing is not the family's problem.
     log.info("reaction autopilot: no usable mood for %s (%s)", bot_id, thread_id)
+    reactions.note_fire_failure(mood, "autopilot: no usable mood", actor=actor)
 
 
 async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:

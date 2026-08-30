@@ -6,6 +6,8 @@ count on their own line, an unterminated block fails closed, and ordinary prose
 """
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from app import openclaw_text as ot
@@ -459,3 +461,228 @@ def test_scaffolding_tags_outside_a_fence_are_still_stripped():
     assert "prompt-data" not in out
     assert out.startswith("before")
     assert out.endswith("after")
+
+
+# --------------------------------------------------------------------------- #
+# Stages that had drifted away from the gateway (2026-08-30)
+#
+# Each fixture is a realistic LEAKING payload — the shape a real producer emits,
+# not a minimal reproduction — and the assertion is that no fragment of the
+# internal half survives into the family-visible text. Every expected output
+# below was checked against the installed gateway's own
+# `sanitizeAssistantVisibleText` before being written down.
+# --------------------------------------------------------------------------- #
+
+
+def test_memory_block_content_is_stripped_not_just_its_tags():
+    """A1. The tags wrap RECALLED MEMORY; stripping only the tags publishes it.
+
+    The port matched the bare literal `<relevant_memories>`, so the attributed,
+    hyphenated form the gateway actually emits went through untouched — and
+    even the literal form only lost its two tags, leaving the recall in the
+    chat with nothing to mark it as internal.
+    """
+    text = ('<relevant-memories score="0.82" source="memory-core">\n'
+            "Alex's landlord is called Mr. Tanaka; rent is due on the 27th.\n"
+            "</relevant-memories>\n"
+            "Sure — I'll remind you the day before.")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert out == "Sure — I'll remind you the day before."
+    assert "Tanaka" not in out
+    assert "relevant" not in out
+
+
+def test_an_unterminated_memory_block_fails_closed():
+    """A1. A truncated recall must not leak the way a truncated block can't."""
+    text = "On it.\n<relevant_memories>\nAlex's PIN hint is his sister's"
+    assert ot.sanitize_assistant_visible_text(text) == "On it."
+
+
+def test_memory_tags_quoted_in_a_fence_survive():
+    text = ("The gateway wraps recall like this:\n\n"
+            "```\n<relevant_memories>\n…\n</relevant_memories>\n```\n\n"
+            "and never shows it.")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert "<relevant_memories>" in out
+    assert out.endswith("and never shows it.")
+
+
+def test_tool_result_block_and_its_body_are_stripped():
+    """A2. The producer emits NO COLON after `ID`, and the leak is the body.
+
+    `[Tool Result for ID:` never matched anything, so both the marker and the
+    command output under it reached the chat.
+    """
+    text = ("Checking the box now.\n\n"
+            "[Tool Result for ID call_9fa21c]\n"
+            "uid=1000(someuser) gid=1000(someuser) groups=1000(someuser),10(wheel)\n"
+            "/opt/agent-home/.openclaw/gateway.systemd.env\n\n"
+            "You're running as someuser, and you're in wheel.")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert "gateway.systemd.env" not in out
+    assert "Tool Result" not in out
+    # Everything after the marker goes with it, up to the next `[Tool ` or the
+    # end — so the closing prose is lost too. Checked against the installed
+    # gateway, which does exactly this: the block has no terminator, so the only
+    # safe read of "where does the result end" is "at the next marker".
+    assert out == "Checking the box now."
+
+
+def test_tool_call_marker_and_its_arguments_are_stripped():
+    """A2. `[Tool Call: …]` takes the `Arguments:` JSON on the next line too."""
+    text = ('[Tool Call: exec]\n'
+            'Arguments: {"cmd": "cat ~/.config/secrets/acme.env"}\n'
+            'That file holds the deploy keys — I have not printed it.')
+    out = ot.sanitize_assistant_visible_text(text)
+    assert out == "That file holds the deploy keys — I have not printed it."
+    assert "acme.env" not in out
+
+
+def test_plain_text_tool_call_blocks_are_stripped():
+    """A3. The stage DisPatch never had — what the local models actually emit."""
+    bracket = ('One moment.\n'
+               '[tool:exec]{"cmd": "systemctl --user status local-chat.service"}\n'
+               'It is running.')
+    assert ot.sanitize_assistant_visible_text(bracket) == "One moment.\nIt is running."
+
+    harmony = ('Let me look.\n'
+               '<|channel|>commentary to=read code<|message|>'
+               '{"path": "/opt/agent-home/.openclaw/openclaw.json"}<|call|>\n'
+               'Bits is on deepseek-v4-pro.')
+    assert ot.sanitize_assistant_visible_text(harmony) == (
+        "Let me look.\nBits is on deepseek-v4-pro.")
+
+    xmlish = ('Checking.\n'
+              '[tool:exec]\n<parameter=cmd>df -h /</parameter>\n'
+              'You have 210G free.')
+    assert ot.sanitize_assistant_visible_text(xmlish) == "Checking.\nYou have 210G free."
+
+
+def test_the_bare_xmlish_function_form_is_only_partly_stripped_upstream():
+    """A3, recorded rather than asserted-away: this shape LEAKS in the gateway.
+
+    `<function=name>` followed by `<parameter=…>` is handled by two stages that
+    disagree — the XML-tag stage takes the `</function>` terminator, and the
+    plain-text stage then no longer recognises what is left as a block, so the
+    opening tag and the parameter (which carries the COMMAND) stay visible.
+    Verified against the installed gateway: it produces the same residue. The
+    test pins our parity with it, and marks the leak as known upstream rather
+    than as something this port got wrong.
+    """
+    text = ('Checking.\n'
+            '<function=exec>\n<parameter=cmd>df -h /</parameter>\n</function>\n'
+            'You have 210G free.')
+    assert ot.sanitize_assistant_visible_text(text) == (
+        "Checking.\n<function=exec>\n<parameter=cmd>df -h /</parameter>\n"
+        "\nYou have 210G free.")
+
+
+def test_a_bracketed_line_that_is_not_a_tool_call_survives():
+    """A3. The JSON parse is what keeps markdown footnotes out of the blast."""
+    text = "See [1]\n{this is prose in braces}\nand that is the whole answer."
+    assert ot.sanitize_assistant_visible_text(text) == text
+
+
+def test_tool_call_xml_blocks_are_stripped():
+    """A4. `<tool_call>{…}</tool_call>` emitted as ordinary text."""
+    text = ('Working on it.\n'
+            '<tool_call>{"name": "exec", "arguments": {"cmd": "id"}}</tool_call>\n'
+            'Done.')
+    assert ot.sanitize_assistant_visible_text(text) == "Working on it.\n\nDone."
+
+
+def test_the_word_function_in_prose_is_not_a_tool_call():
+    """A4. The stage must not eat a reply for using the word."""
+    text = "A <function> tag is not the same as a function in the maths sense."
+    assert ot.sanitize_assistant_visible_text(text) == text
+
+
+def test_legacy_bracket_tool_blocks_are_stripped_only_with_a_real_payload():
+    """A4. Payload-gated, so the marker in prose stays where the agent put it."""
+    real = ('Here goes.\n[TOOL_CALL]\ntool => "exec", args => {"cmd": "id"}\n'
+            '[/TOOL_CALL]\nAll done.')
+    assert ot.sanitize_assistant_visible_text(real) == "Here goes.\n\nAll done."
+
+    prose = "The [TOOL_CALL] marker is legacy syntax we stopped emitting in July."
+    assert ot.sanitize_assistant_visible_text(prose) == prose
+
+
+def test_minimax_tool_call_xml_is_stripped():
+    """A4."""
+    text = ('Sure.\n<minimax:tool_call><invoke name="search">{"q": "x"}</invoke>'
+            '</minimax:tool_call>\nFound three.')
+    assert ot.sanitize_assistant_visible_text(text) == "Sure.\n\nFound three."
+
+
+def test_emoji_trace_lines_are_stripped():
+    """A4. The runtime narrating its own tool use, line by line."""
+    text = ("\U0001f6e0️ Exec: run systemctl --user restart local-chat\n"
+            "\U0001f4d6 Read: /opt/agent-home/.local/share/local-chat/security.yaml\n"
+            "Restarted, and I did not read your PIN out loud.")
+    out = ot.sanitize_assistant_visible_text(text)
+    assert out == "Restarted, and I did not read your PIN out loud."
+    assert "security.yaml" not in out
+
+
+def test_reasoning_tag_coverage_matches_the_gateway():
+    """A5. `thought`, `antthinking`, namespace prefixes, and attributes."""
+    for opener, closer in (("<think>", "</think>"),
+                           ("<thinking>", "</thinking>"),
+                           ("<thought>", "</thought>"),
+                           ("<antthinking>", "</antthinking>"),
+                           ("<mm:thinking>", "</mm:thinking>"),
+                           ('<thinking mode="auto" budget="8000">', "</thinking>")):
+        text = f"{opener}the family only needs the number{closer}\nSeven."
+        assert ot.sanitize_assistant_visible_text(text) == "Seven.", opener
+
+
+def test_a_realistic_multi_stage_leak_sanitizes_to_the_reply_alone():
+    """Every stage at once, in the shape a local model actually produces."""
+    text = ('<thinking>He wants the uid. Run id, then answer plainly.</thinking>\n'
+            '<relevant-memories score="0.7">Alex dislikes long answers.</relevant-memories>\n'
+            'One sec.\n'
+            '[tool:exec]{"cmd": "id -u"}\n'
+            '\U0001f6e0️ Exec: id -u\n'
+            '[Tool Result for ID call_04b1]\n1000\n\n'
+            'You are uid 1000.')
+    out = ot.sanitize_assistant_visible_text(text)
+    # "One sec." alone, for the reason in the tool-result test above: an
+    # unterminated result block runs to the end of the message. Byte-identical
+    # to the installed gateway on this input.
+    assert out == "One sec."
+    for leaked in ("thinking", "Alex dislikes", "tool:exec", "Exec:", "Tool Result"):
+        assert leaked not in out
+
+
+# --------------------------------------------------------------------------- #
+# Drift tripwire
+# --------------------------------------------------------------------------- #
+
+DIST = pathlib.Path.home() / ".hermes/node/lib/node_modules/openclaw/dist"
+
+
+@pytest.mark.parametrize("name,anchor", sorted(ot.GATEWAY_DIST_ANCHORS.items()))
+def test_every_ported_pattern_still_exists_in_the_installed_gateway(name, anchor):
+    """The tripwire that would have caught A1 and A2 before the family did.
+
+    Every pattern in openclaw_text.py / openclaw_tool_calls.py is a hand copy of
+    a regex or marker in OpenClaw's own source, and every stage there fails OPEN:
+    when the gateway's shape moves, our copy quietly matches nothing and internal
+    text starts arriving in the chat with no error anywhere. So assert the
+    fragments are still THERE, against the installed dist, at test time.
+
+    A failure here is not "the test is wrong" — it means an `openclaw update`
+    moved something and that stage must be re-derived from the new dist.
+    """
+    if not DIST.is_dir():
+        pytest.skip(
+            f"no OpenClaw dist at {DIST} — this box's gateway is the ground "
+            "truth for these ports and it is not installed here, so drift "
+            "cannot be checked (expected on CI; NOT expected on the DisPatch host)")
+    sources = sorted(DIST.glob("*.js"))
+    assert sources, f"{DIST} exists but holds no *.js — is the install broken?"
+    hits = [p.name for p in sources if anchor in p.read_text(errors="replace")]
+    assert hits, (
+        f"{name}: the fragment {anchor!r} is no longer anywhere in {DIST}/*.js. "
+        "Our port of that stage now matches text the gateway has stopped "
+        "emitting, which fails OPEN — re-derive the stage from the new dist.")

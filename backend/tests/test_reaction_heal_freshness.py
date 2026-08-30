@@ -191,3 +191,30 @@ async def test_refused_fire_leaves_a_sub_row(rx_env, monkeypatch):
     assert any("didn't fire" in m.content for m in subs), \
         [m.content for m in msgs]
     assert reactions.fire_failure_stats()["failures_24h"] == baseline + 1
+
+
+async def test_an_unresolvable_marker_ticks_the_failure_counter(rx_env):
+    """An id that resolves to nothing looked EXACTLY like a successful fire.
+
+    The marker is stripped either way (that part is deliberate — an unknown
+    marker must not stay in the text), so a bot spending every reply on a mood
+    that does not exist for it produced no picture, no row, no log line and
+    nothing on /api/health. Silence was the success signal and the failure
+    signal at once. Now the failure half is counted.
+    """
+    baseline = reactions.fire_failure_stats()["failures_24h"]
+    text, ids = reactions.extract_markers("Nice one :react:no_such_mood_at_all:")
+    assert ids == []
+    assert "no_such_mood_at_all" not in text
+    stats = reactions.fire_failure_stats()
+    assert stats["failures_24h"] == baseline + 1
+    assert stats["recent"][-1]["key"] == "no_such_mood_at_all"
+
+
+async def test_a_resolvable_marker_does_not_tick_the_counter(rx_env):
+    """The other half of the guarantee: a working fire stays uncounted."""
+    known = reactions.list_for(decoy=False)[0]["id"]
+    baseline = reactions.fire_failure_stats()["failures_24h"]
+    _, ids = reactions.extract_markers(f"Yes :react:{known}:")
+    assert ids == [known]
+    assert reactions.fire_failure_stats()["failures_24h"] == baseline

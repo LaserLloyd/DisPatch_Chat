@@ -323,18 +323,34 @@ class GatewayClient:
         `openclaw update` that removes something breaks at startup with a clear
         message, instead of degrading into the silent no-delivery that the file
         follower used to produce.
+
+        AN EMPTY LIST IS A FAILURE, NOT A PASS. The check used to read
+        `n not in methods` guarded by `methods and` — so if `features.methods`
+        were renamed, moved or dropped, `methods` came back empty, every term
+        was skipped and the guard reported all-present. The one update most
+        likely to break us (the one that reshapes the hello frame) was the one
+        it was guaranteed to wave through: a tripwire that disarms itself
+        exactly when it is needed. Absent or empty now fails, naming what was
+        expected so the message says more than "something moved".
         """
         feats = hello.get("features") or {}
         methods = set(feats.get("methods") or [])
         events = set(feats.get("events") or [])
         need_m = {"sessions.subscribe", "chat.history", "chat.message.get"}
         need_e = {"session.message"}
-        missing = [n for n in need_m if methods and n not in methods]
-        missing += [n for n in need_e if events and n not in events]
+        blank = [name for name, got in (("features.methods", methods),
+                                        ("features.events", events)) if not got]
+        if blank:
+            raise RuntimeError(
+                "gateway hello frame advertises no " + " or ".join(blank)
+                + " — cannot verify the capabilities DisPatch depends on ("
+                + ", ".join(sorted(need_m | need_e))
+                + "); the protocol changed and delivery would silently stop")
+        missing = sorted((need_m - methods) | (need_e - events))
         if missing:
             raise RuntimeError(
                 "gateway is missing capabilities DisPatch depends on: "
-                + ", ".join(sorted(missing))
+                + ", ".join(missing)
                 + " — the protocol changed; delivery would silently stop")
 
     # -- request / response ------------------------------------------------ #

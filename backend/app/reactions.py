@@ -1111,7 +1111,14 @@ def extract_markers(content: str, *, bot_id: str | None = None,
         if not resolve:
             return ""
         r = get(m.group(1), bot_id=bot_id)
-        if r is not None and r.id not in found and len(found) < MAX_MARKERS_PER_MESSAGE:
+        if r is None:
+            # An id that resolves to nothing is still REMOVED from the text, so
+            # the agent's fire looks exactly like a successful one: no picture,
+            # no row, no log, nothing on /api/health. Tick the counter so a
+            # bot spending its replies on a mood that does not exist for it is
+            # visible instead of merely quiet.
+            note_fire_failure(m.group(1), "unknown reaction id", actor=bot_id or "")
+        elif r.id not in found and len(found) < MAX_MARKERS_PER_MESSAGE:
             found.append(r.id)
         return ""
 

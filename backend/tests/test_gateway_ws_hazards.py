@@ -353,3 +353,54 @@ def test_a_marker_in_a_non_text_block_is_not_a_truncation():
         {"type": "text", "text": "a clean reply"},
     ]}
     assert gateway_ws.GatewayClient.blocks_truncated(msg) is False
+
+
+# --------------------------------------------------------------------------- #
+# The capability guard must not disarm itself
+# --------------------------------------------------------------------------- #
+
+_FULL_HELLO = {"features": {
+    "methods": ["sessions.subscribe", "chat.history", "chat.message.get"],
+    "events": ["session.message"]}}
+
+
+def test_a_complete_hello_frame_passes():
+    gateway_ws.GatewayClient._assert_capabilities(_FULL_HELLO)
+
+
+def test_a_genuinely_missing_capability_is_named():
+    hello = {"features": {"methods": ["chat.history"],
+                          "events": ["session.message"]}}
+    with pytest.raises(RuntimeError) as e:
+        gateway_ws.GatewayClient._assert_capabilities(hello)
+    assert "sessions.subscribe" in str(e.value)
+    assert "chat.message.get" in str(e.value)
+
+
+@pytest.mark.parametrize("hello,label", [
+    ({}, "no features block at all"),
+    ({"features": {}}, "features present but empty"),
+    ({"features": {"methods": [], "events": ["session.message"]}}, "methods empty"),
+    ({"features": {"capabilities": ["sessions.subscribe"],
+                   "events": ["session.message"]}}, "methods renamed"),
+    ({"features": {"methods": ["sessions.subscribe", "chat.history",
+                               "chat.message.get"], "events": []}}, "events empty"),
+])
+def test_an_absent_or_empty_capability_list_is_a_hard_failure(hello, label):
+    """A TRIPWIRE THAT DISARMS ITSELF IS WORSE THAN NO TRIPWIRE.
+
+    The guard read `n not in methods` gated on `methods and …`, so an empty or
+    renamed `features.methods` skipped every term and reported all-present. The
+    single update most likely to break DisPatch — one that reshapes the hello
+    frame — was therefore the one guaranteed to sail through, and the failure
+    would have surfaced as replies silently never arriving, which is exactly
+    the mode this guard exists to prevent.
+    """
+    with pytest.raises(RuntimeError) as e:
+        gateway_ws.GatewayClient._assert_capabilities(hello)
+    message = str(e.value)
+    assert "cannot verify" in message, label
+    # The message has to say what was expected, or the next person gets
+    # "something moved" and no idea what to look for in the new protocol.
+    assert "sessions.subscribe" in message, label
+    assert "session.message" in message, label

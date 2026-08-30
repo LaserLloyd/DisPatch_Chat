@@ -261,3 +261,27 @@ async def test_marker_only_user_message_persists_nothing(rx_env, monkeypatch):
         await main._persist_and_broadcast_message("t-ap11", role, ":react:random:")
     rows, _ = await main.db.list_messages("t-ap11")
     assert rows == []
+
+
+async def test_autopilot_exhausting_every_mood_ticks_the_health_counter(rx_env,
+                                                                        monkeypatch):
+    """C1/C2. Autopilot degrades quietly — but not INVISIBLY.
+
+    The candidate list is hardcoded (`morning`/`task_complete`/`thinking`, then
+    `random`) and is intersected with what the bot actually has on the shelf, so
+    a pool holding none of them means autopilot never fires. That is the right
+    behaviour for the chat (a server-chosen mood missing is not the family's
+    problem) and the wrong behaviour for the operator: the loop ended at a
+    `log.info` no dashboard reads, so an autopilot that had been mute for weeks
+    was indistinguishable from one deliberately keeping quiet. It now ticks the
+    same `reaction_fire_failures_24h` counter /api/health already reports.
+    """
+    from app import reactions
+
+    monkeypatch.setattr(reactions, "get", lambda *a, **k: None)
+    baseline = reactions.fire_failure_stats()["failures_24h"]
+    await main._fire_autopilot_reaction(
+        "task_complete", "t-autopilot-dry", "main", "main")
+    stats = reactions.fire_failure_stats()
+    assert stats["failures_24h"] == baseline + 1
+    assert stats["recent"][-1]["reason"] == "autopilot: no usable mood"
