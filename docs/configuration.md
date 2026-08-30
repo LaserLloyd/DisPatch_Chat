@@ -163,7 +163,9 @@ with no credential, can spend agent turns on that bot.
 Other per-bot fields: `color` (pins the letter-block avatar colour),
 `reactions` (may this bot fire reaction images — off for every shipped bot),
 `reaction_autopilot`, `avatar_pool`, `image_jobs` (may this bot ask for a
-generated picture — also off for every shipped bot), and an `api:` block for a
+generated picture — also off for every shipped bot), `image_workflow` (the
+image-server workflow its pictures use when a request names none; empty means
+the server's own default), and an `api:` block for a
 direct LLM provider. See [agents.md](agents.md) and [llm-providers.md](llm-providers.md).
 
 ## Posting in from outside

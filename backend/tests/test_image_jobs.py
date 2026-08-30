@@ -18,7 +18,7 @@ import json
 import struct
 import zlib
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -574,3 +574,251 @@ def test_health_reports_the_failure_count(env):
     assert body["image_job_failures_24h"] == 1
     # Count only — the prompt and the rig's error text stay off this route.
     assert "boom" not in json.dumps(body)
+
+
+# --------------------------------------------------------------------------- #
+# The inline marker
+#
+# `POST /api/image-jobs` is the explicit path; `[[pic:…]]` is the one a model
+# takes on its own. What is tested here is the pair of properties the feature
+# rests on: the marker never reaches a bubble, and it only creates a render
+# when every guard says so.
+# --------------------------------------------------------------------------- #
+
+
+def _say(c, thread_id, content, role="assistant"):
+    r = c.post("/api/inject", json={"thread_id": thread_id, "role": role,
+                                    "content": content})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _placeholders(c, thread_id) -> list[dict]:
+    return [m for m in _messages(c, thread_id)
+            if (m.get("metadata") or {}).get("kind") == "image_job"]
+
+
+def _job_of(c, row) -> dict:
+    r = c.get(f"/api/image-jobs/{row['metadata']['job_id']}")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_marker_in_a_reply_starts_a_job(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "Here you go. [[pic:a blue ceramic teapot]] Hope it fits.")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 2, "the reply, then the placeholder it earned"
+    reply, placeholder = rows[0], rows[1]
+    assert "[[pic:" not in reply["content"]
+    assert reply["content"] == "Here you go. Hope it fits."
+    assert placeholder["metadata"]["kind"] == "image_job"
+    assert placeholder["metadata"]["status"] == "queued"
+    assert _job_of(c, placeholder)["prompt"] == "a blue ceramic teapot"
+    assert _job_of(c, placeholder)["thread_id"] == tid
+
+
+def test_a_marker_carries_an_optional_caption(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:a blue ceramic teapot|Tea, at last]] There.")
+
+    placeholder = _placeholders(c, tid)[0]
+    assert placeholder["metadata"]["caption"] == "Tea, at last"
+    assert "Tea, at last" in placeholder["content"]
+    assert _job_of(c, placeholder)["prompt"] == "a blue ceramic teapot"
+
+
+def test_a_reply_that_is_only_a_marker_still_starts_the_job(env):
+    """An all-marker message persists no empty bubble — but the request in it
+    is a request, not something to discard."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:a blue ceramic teapot]]")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 1 and rows[0]["metadata"]["kind"] == "image_job"
+
+
+def test_a_quoted_marker_is_text_and_fires_nothing(env):
+    """A marker inside a code span or a fence is an agent DESCRIBING the
+    syntax. Firing it both corrupts the sentence and spends rig time on
+    documentation — the same bug the reaction markers were taught first."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "Write `[[pic:a teapot]]` in a reply.\n\n"
+                 "```\n[[pic:another teapot]]\n```")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 1, "no placeholder — nothing was actually asked for"
+    assert "`[[pic:a teapot]]`" in rows[0]["content"]
+    assert "[[pic:another teapot]]" in rows[0]["content"]
+
+
+def test_a_user_message_has_its_marker_stripped_and_fires_nothing(env):
+    """Marker syntax is stripped on EVERY path; only an assistant's fires."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "draw me [[pic:a teapot]] please", role="user")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 1
+    assert "[[pic:" not in rows[0]["content"]
+    assert rows[0]["content"] == "draw me please"
+
+
+def test_a_stale_replay_strips_its_marker_without_rendering(env):
+    """Replaying HISTORY has no side effects. A live reply that took the
+    scenic route (the follower, seconds later) still counts."""
+    c = env()
+    tid = _thread(c)
+
+    def at(age_s):
+        return (datetime.now(UTC) - timedelta(seconds=age_s)).isoformat()
+
+    async def replay(age_s):
+        await main._persist_and_broadcast_message(
+            tid, "assistant", f"done [[pic:a teapot {age_s}]]",
+            metadata={"followup": True}, created_at=at(age_s))
+
+    asyncio.run(replay(main.REACTION_REPLAY_FRESH_S + 60))
+    assert _placeholders(c, tid) == []
+    assert "[[pic:" not in _messages(c, tid)[0]["content"]
+
+    asyncio.run(replay(5))
+    assert len(_placeholders(c, tid)) == 1
+
+
+def test_a_bot_without_the_flag_gets_the_marker_stripped_only(env):
+    c = env()
+    assert config.get_bot("alpha").image_jobs is False
+    tid = _thread(c, "alpha")
+    _say(c, tid, "sure [[pic:a teapot]]")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 1 and "[[pic:" not in rows[0]["content"]
+
+
+def test_markers_are_stripped_when_no_image_server_is_configured(env,
+                                                                 monkeypatch):
+    c = env()
+    tid = _thread(c)
+    monkeypatch.setattr(main, "SETTINGS", replace(main.SETTINGS,
+                                                  clawforge_url=""))
+    _say(c, tid, "sure [[pic:a teapot]]")
+
+    rows = _messages(c, tid)
+    assert len(rows) == 1 and "[[pic:" not in rows[0]["content"]
+
+
+def test_at_most_two_markers_per_message_render(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:one]] [[pic:two]] [[pic:three]] [[pic:four]] done")
+
+    placeholders = _placeholders(c, tid)
+    assert len(placeholders) == 2
+    assert [_job_of(c, p)["prompt"] for p in placeholders] == ["one", "two"]
+    assert "[[pic:" not in _messages(c, tid)[0]["content"]
+
+
+def test_the_rate_limiter_refuses_a_marker_without_eating_the_reply(env):
+    c = env()
+    tid = _thread(c)
+    for _ in range(image_jobs.RATE_LIMIT):
+        assert _fire(c, tid).status_code == 202
+    _say(c, tid, "one more [[pic:a teapot]]")
+
+    assert len(_placeholders(c, tid)) == image_jobs.RATE_LIMIT
+    assert "one more" in _messages(c, tid)[-1]["content"]
+
+
+def test_an_unusable_marker_is_dropped_not_fatal(env):
+    """ImageSpec is the validator; a marker it refuses costs the reply
+    nothing."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:]] and [[pic:" + "x" * 3000 + "]] anyway")
+
+    assert _placeholders(c, tid) == []
+    assert _messages(c, tid)[0]["content"] == "and anyway"
+
+
+def test_a_placeholder_never_spawns_a_job_of_its_own(env, monkeypatch):
+    """The placeholder text is server-written, but the guard is structural:
+    a receipt for a render must not be able to start renders."""
+    c = env()
+    tid = _thread(c)
+    monkeypatch.setattr(main, "_image_job_pending_text",
+                        lambda spec: "🖼️ Generating… [[pic:recursion]]")
+    _fire(c, tid)
+
+    assert len(_placeholders(c, tid)) == 1
+    assert "[[pic:" not in _placeholders(c, tid)[0]["content"]
+
+
+# --------------------------------------------------------------------------- #
+# Per-bot default workflow
+# --------------------------------------------------------------------------- #
+
+
+def _set_workflow(name: str, bot_id: str = "main") -> None:
+    bots = config.load_bots()
+    for b in bots:
+        if b.id == bot_id:
+            b.image_workflow = name
+    config._write_bots([config._bot_entry(b) for b in bots])
+    config._invalidate_bots_cache()
+    assert config.get_bot(bot_id).image_workflow == name
+
+
+def test_the_bots_default_workflow_lands_in_a_marker_job(env):
+    c = env()
+    _set_workflow("krea2")
+    tid = _thread(c)
+    _say(c, tid, "[[pic:a teapot]]")
+
+    assert _job_of(c, _placeholders(c, tid)[0])["workflow"] == "krea2"
+
+
+def test_the_bots_default_workflow_fills_an_endpoint_request(env):
+    c = env()
+    _set_workflow("krea2")
+    tid = _thread(c)
+
+    body = _fire(c, tid).json()
+    assert c.get(f"/api/image-jobs/{body['job_id']}").json()["workflow"] == "krea2"
+
+    # An explicit workflow still wins — the default only fills a gap.
+    body = _fire(c, tid, workflow="z-image-turbo").json()
+    assert c.get(
+        f"/api/image-jobs/{body['job_id']}").json()["workflow"] == "z-image-turbo"
+
+
+def test_the_workflow_survives_a_roster_write(env):
+    """_bot_entry has dropped a field three times; image_workflow is only
+    useful if it is still there after the next avatar upload."""
+    c = env()
+    _set_workflow("krea2")
+    config.save_bot_avatar("main", "new-face.png")
+    config._invalidate_bots_cache()
+    assert config.get_bot("main").image_workflow == "krea2"
+
+
+# --------------------------------------------------------------------------- #
+# Dedup
+# --------------------------------------------------------------------------- #
+
+
+def test_the_dedup_key_ignores_the_marker(env):
+    """EVERY transform persisting applies has to appear in _canon_msg. When
+    the `:react:` strip did not, one reply re-posted five times in a morning."""
+    assert (main._canon_msg("Here you go. [[pic:a teapot]] Hope it fits.")
+            == main._canon_msg("Here you go. Hope it fits."))
+    assert (main._canon_msg("done [[pic:a teapot|cap]]")
+            == main._canon_msg("done"))
+    # A quoted marker is text, and text is part of the key.
+    assert (main._canon_msg("say `[[pic:x]]`")
+            != main._canon_msg("say ``"))

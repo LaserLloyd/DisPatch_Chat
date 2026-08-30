@@ -145,8 +145,8 @@ curl -X POST http://127.0.0.1:8765/api/image-jobs \
 # 202 {"job_id": "…", "message_id": "…", "thread_id": "…", "state": "queued"}
 ```
 
-Optional fields: `workflow` (image-server-specific; omit it and the server
-picks its own default), `ratio` (`"3:2"`), `width` + `height` (both or
+Optional fields: `workflow` (image-server-specific; omit it and the bot's
+`image_workflow` fills in, or the server picks its own default), `ratio` (`"3:2"`), `width` + `height` (both or
 neither), `negative`, `caption`.
 
 `GET /api/image-jobs/<job_id>` reports one job's state — but an agent rarely
@@ -155,6 +155,22 @@ needs it. **The thread is the status display.** The message goes from
 "⚠️ image failed: \<reason\>" with the image server's own words for what went
 wrong. It never stays pending: every job has a ten-minute deadline, and a
 DisPatch restart mid-render either resumes the job or fails it visibly.
+
+The shorter way is to write the marker inline in a reply, which costs no call
+at all:
+
+```
+Here's how that would look. [[pic:a blue ceramic teapot on a white table]]
+```
+
+`[[pic:<prompt>]]`, or `[[pic:<prompt>|<caption>]]` to caption the picture.
+The marker is removed from the reply before it reaches the thread, the
+placeholder appears underneath it, and nothing comes back to the agent — the
+picture arrives on its own. At most two per message; the prompt may not
+contain `|`; a marker inside backticks or a fenced block is quoted text and
+does nothing. Everything else (the flags, the rate limit, the endings) is
+identical to the endpoint, and `workflow` comes from the bot's own
+`image_workflow` setting, since the marker has no room to name one.
 
 Rules worth knowing:
 

@@ -65,6 +65,8 @@ from typing import Any
 
 import httpx
 
+from . import openclaw_text
+
 log = logging.getLogger("local-chat.image_jobs")
 
 # --------------------------------------------------------------------------- #
@@ -556,3 +558,95 @@ def failure_stats(window_s: float = 24 * 3600.0) -> dict:
 
 def reset_failures() -> None:
     _FAILURES.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Inline markers — how an agent asks for a picture from inside a reply
+#
+# `POST /api/image-jobs` is the explicit path; this is the one a model actually
+# takes, because writing a marker costs it no tool call and no extra turn. The
+# marker is stripped at the persist chokepoint, so the syntax never reaches a
+# chat bubble, and the model gets nothing back — the placeholder it produces is
+# a separate message that the worker rewrites into the picture.
+# --------------------------------------------------------------------------- #
+
+#: `[[pic:a blue teapot]]` or `[[pic:a blue teapot|Tea, at last]]`.
+#: Single line and non-greedy: a marker may not span a paragraph, and the first
+#: `]]` closes it, so two markers on one line are two markers rather than one
+#: swallowing everything between them.
+PIC_MARKER_RE = re.compile(r"\[\[pic:([^\n]*?)\]\]", re.IGNORECASE)
+
+#: Same ceiling as reaction markers, for the same reason: a model in a loop
+#: must not be able to occupy the rig for the length of one reply.
+MAX_PIC_MARKERS_PER_MESSAGE = 2
+
+
+def parse_pic_marker(body: str) -> tuple[str, str]:
+    """``(prompt, caption)`` out of one marker body.
+
+    Split on the FIRST `|`: a prompt may not contain one, a caption may. The
+    other way round, a caption with a pipe in it would silently move half of
+    itself into the prompt and render something nobody asked for.
+    """
+    prompt, sep, caption = body.partition("|")
+    return prompt.strip(), (caption.strip() if sep else "")
+
+
+def extract_pic_markers(content: str) -> tuple[str, list[tuple[str, str]]]:
+    """Strip ``[[pic:…]]`` markers out of text.
+
+    Returns ``(clean_text, [(prompt, caption), …])``, at most
+    :data:`MAX_PIC_MARKERS_PER_MESSAGE` of them; a marker with an empty prompt
+    is removed and reported to nobody, exactly like an unknown reaction id —
+    leaving the syntax in the bubble would be worse than dropping the request.
+
+    CODE IS SKIPPED, for the reason the reaction markers learned it: a quoted
+    `[[pic:…]]` is an agent DESCRIBING the syntax, and firing it both corrupts
+    the sentence and spends rig time on documentation.
+    """
+    if not content or "[[pic:" not in content.lower():
+        return content, []
+    found: list[tuple[str, str]] = []
+    dropped = 0
+
+    def _sub(m: re.Match) -> str:
+        nonlocal dropped
+        prompt, caption = parse_pic_marker(m.group(1))
+        if not prompt:
+            dropped += 1
+        elif len(found) < MAX_PIC_MARKERS_PER_MESSAGE:
+            found.append((prompt, caption))
+        else:
+            dropped += 1
+        return ""
+
+    def _clean(segment: str) -> str:
+        # Tidy PER SEGMENT so the whitespace collapse never reaches the code
+        # regions the walk copied through verbatim.
+        segment = PIC_MARKER_RE.sub(_sub, segment)
+        segment = re.sub(r"[ \t]{2,}", " ", segment)
+        return re.sub(r"\n{3,}", "\n\n", segment)
+
+    cleaned = openclaw_text.sub_outside_code(content, _clean).strip()
+    if dropped:
+        log.info("dropped %d [[pic:…]] marker(s) — empty prompt or over the "
+                 "%d-per-message cap", dropped, MAX_PIC_MARKERS_PER_MESSAGE)
+    return cleaned, found
+
+
+def strip_pic_markers(content: str) -> str:
+    """The marker-free text, with no side effects and no logging.
+
+    Byte-identical to ``extract_pic_markers(content)[0]``. Dedup keys need
+    exactly this: a canonical key must mirror every transform persisting
+    applies, and computing one must not log.
+    """
+    if not content or "[[pic:" not in content.lower():
+        return content
+
+    def _clean(segment: str) -> str:
+        segment = PIC_MARKER_RE.sub("", segment)
+        segment = re.sub(r"[ \t]{2,}", " ", segment)
+        return re.sub(r"\n{3,}", "\n\n", segment)
+
+    return openclaw_text.sub_outside_code(content, _clean).strip()

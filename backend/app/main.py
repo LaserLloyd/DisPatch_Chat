@@ -1882,6 +1882,10 @@ class _Prepared(NamedTuple):
     fired: list[str]
     autopilot: bool     # `fired` is the SERVER's pick, not the bot's marker
     skip: bool          # nothing left to say — persist no empty bubble
+    # Image jobs this message's `[[pic:…]]` markers earned. Started by the
+    # CALLERS, after the message exists: this pass cannot persist a second
+    # message of its own. Never mutated in place.
+    pic_specs: list = []
 
 
 async def _prepare_persist(
@@ -1899,6 +1903,7 @@ async def _prepare_persist(
     One function, so the next rule lands on every path by construction.
     """
     fired: list[str] = []
+    pic_specs: list = []
     bot_id: str | None = None
     autopilot = False
     if role == "assistant":
@@ -1932,6 +1937,13 @@ async def _prepare_persist(
             log.info("suppressed %d reaction(s) on a recovered message (%s)",
                      len(fired), thread_id)
             fired = []
+        # `[[pic:<prompt>|<caption>]]` is the same idea for a generated
+        # picture, and obeys the same replay rule: an old reply keeps its
+        # marker stripped but must not occupy a GPU for news that has already
+        # been read.
+        content, pic_specs = _pic_specs_from_markers(
+            content, bot_id, metadata=metadata,
+            replaying=replaying and not _replay_is_fresh(created_at))
         metadata = _demote_tool_warning(content, metadata)
         # Autopilot fills the silence AFTER the demote so a collapsed tool
         # warning never earns a picture, and only for LIVE replies — a replay
@@ -1951,10 +1963,15 @@ async def _prepare_persist(
                     autopilot = True
                     log.info("reaction autopilot: %r for %s (%s)",
                              mood, bot_id, thread_id)
-    elif content and ":react:" in content.lower():
+    elif content:
         # Markers are stripped on EVERY path — /api/inject with role user or
-        # system included — but only an assistant's markers fire a reaction.
-        content, _ = reactions.extract_markers(content)
+        # system included — but only an assistant's markers fire a reaction or
+        # ask for a picture. A human typing either syntax gets it removed and
+        # nothing else happens.
+        if ":react:" in content.lower():
+            content, _ = reactions.extract_markers(content)
+        if "[[pic:" in content.lower():
+            content = image_jobs.strip_pic_markers(content)
     if content and "[[media:" in content:
         # Ingesting can copy up to 500MB off disk — never on the event loop
         # (this helper sits on the persist/WS hot path for every message).
@@ -1964,7 +1981,8 @@ async def _prepare_persist(
     # so `POST /api/inject` with a user/system body of just `:react:random:`
     # dropped a blank bubble into the thread.
     skip = not (content or "").strip() and not media_url
-    return _Prepared(content, metadata, bot_id, fired, autopilot, skip)
+    return _Prepared(content, metadata, bot_id, fired, autopilot, skip,
+                     pic_specs)
 
 
 async def _persist_and_broadcast_message(
@@ -1977,11 +1995,15 @@ async def _persist_and_broadcast_message(
     content, metadata, bot_id, fired = (prep.content, prep.metadata,
                                         prep.bot_id, prep.fired)
     if prep.skip:
-        # The reactions it carried are still fired.
+        # The reactions and pictures it asked for still happen — an all-marker
+        # message is a request with no prose, not a message to discard.
         if fired:
             await _fire_marker_reactions(
                 fired, thread_id, bot_id or await _bot_of_thread(thread_id),
                 autopilot=prep.autopilot)
+        if prep.pic_specs:
+            await _start_pic_jobs(prep.pic_specs, thread_id,
+                                  bot_id or await _bot_of_thread(thread_id))
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
@@ -1994,6 +2016,8 @@ async def _persist_and_broadcast_message(
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
+    if prep.pic_specs:
+        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
     return msg
 
 
@@ -2037,6 +2061,9 @@ async def _persist_and_stream_message(
             await _fire_marker_reactions(
                 fired, thread_id, bot_id or await _bot_of_thread(thread_id),
                 autopilot=prep.autopilot)
+        if prep.pic_specs:
+            await _start_pic_jobs(prep.pic_specs, thread_id,
+                                  bot_id or await _bot_of_thread(thread_id))
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
@@ -2052,6 +2079,8 @@ async def _persist_and_stream_message(
         if fired:
             await _fire_marker_reactions(fired, thread_id, bot_id,
                                          autopilot=prep.autopilot)
+        if prep.pic_specs:
+            await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
         return msg
 
     # Adaptive chunk size so total stream time converges to ~2.5 s.
@@ -2074,6 +2103,8 @@ async def _persist_and_stream_message(
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
+    if prep.pic_specs:
+        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
     return msg
 
 
@@ -2367,6 +2398,100 @@ def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
     if error:
         meta["error"] = error
     return meta
+
+
+async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
+                           ) -> tuple[str, str] | None:
+    """Placeholder message + job row for one accepted request.
+
+    Returns ``(job_id, message_id)``, or None when the placeholder could not be
+    written. Shared by `POST /api/image-jobs` and the inline `[[pic:…]]`
+    marker so the two cannot drift: everything above this call is a gate,
+    everything below it is the worker, and the order in between is load-bearing.
+
+    The placeholder is persisted BEFORE the row that will rewrite it, so a
+    crash in between leaves a message with no job (visible, wrong, and fixable)
+    rather than a job pointing at a message that does not exist (invisible, and
+    the worker's rewrite would silently no-op forever). The caller's rate-limit
+    slot is refunded on failure — nothing was spent.
+    """
+    job_id = image_jobs.new_job_id()
+    try:
+        msg = await _persist_and_broadcast_message(
+            thread_id, "assistant", _image_job_pending_text(spec),
+            metadata=_image_job_meta(job_id, image_jobs.QUEUED, spec))
+    except Exception:
+        image_jobs.limiter.refund(bot.id.lower())
+        log.exception("could not write the image-job placeholder")
+        return None
+    await db.add_image_job(job_id, msg.id, thread_id, bot.id, spec.to_json())
+    return job_id, msg.id
+
+
+def _pic_specs_from_markers(content: str, bot_id: str | None, *,
+                            metadata: dict | None = None,
+                            replaying: bool = False,
+                            ) -> tuple[str, list[image_jobs.ImageSpec]]:
+    """Strip `[[pic:…]]` from an assistant reply and decide what it earned.
+
+    The STRIP is unconditional — marker syntax must never reach a chat bubble,
+    whatever the guards decide — and every guard below ends the same way: the
+    text persists clean, one line goes to the journal, and nothing is created.
+    A refusal that ate the reply's text, or one that answered the model, would
+    both be worse than a picture that does not arrive.
+    """
+    content, markers = image_jobs.extract_pic_markers(content)
+    if not markers:
+        return content, []
+    meta = metadata or {}
+    if replaying:
+        # Same rule as reaction markers: replaying HISTORY has no side effects.
+        log.info("suppressed %d image marker(s) on a recovered message",
+                 len(markers))
+        return content, []
+    if meta.get("sub") or meta.get("kind") == "image_job":
+        # A placeholder is a receipt for a render, not a reply — letting one
+        # spawn renders of its own is a loop with a GPU on the end of it.
+        return content, []
+    if not _image_jobs_configured():
+        log.info("ignored %d image marker(s): no image server configured",
+                 len(markers))
+        return content, []
+    bot = config.resolve_bot(bot_id)
+    if bot is None or not bot.image_jobs:
+        log.info("ignored %d image marker(s): not enabled for %s",
+                 len(markers), bot_id)
+        return content, []
+
+    specs: list[image_jobs.ImageSpec] = []
+    for prompt, caption in markers:
+        if image_jobs.limiter.check(bot.id.lower()):
+            log.info("image marker refused by the rate limiter (%s)", bot.id)
+            break
+        try:
+            specs.append(image_jobs.ImageSpec(
+                prompt=prompt, caption=caption, workflow=bot.image_workflow))
+        except ValueError as e:
+            # A marker the bot mis-typed is dropped, not fatal: the reply it
+            # arrived in is already sanitized and about to be persisted.
+            image_jobs.limiter.refund(bot.id.lower())
+            log.info("ignored an image marker from %s: %s", bot.id, e)
+    return content, specs
+
+
+async def _start_pic_jobs(specs: list, thread_id: str,
+                          bot_id: str | None) -> None:
+    """Start the jobs a persisted message's markers earned.
+
+    Called by the persist chokepoints AFTER the reply itself exists, so the
+    placeholder always lands under the sentence that asked for it.
+    """
+    bot = config.resolve_bot(bot_id)
+    if bot is None:
+        return
+    for spec in specs:
+        if await _start_image_job(thread_id, bot, spec) is None:
+            break
 
 
 async def _broadcast_message_update(msg: MessageOut, thread_id: str) -> None:
@@ -2976,18 +3101,20 @@ def _canon_msg(s: str) -> str:
     did not, and so a reply that fired a reaction never matched its own stored
     copy: the gap sweep re-posted one short text reply five times
     in one morning. Adding a transform at the persist chokepoint without adding
-    it here is the bug, not an oversight in the sweep.
+    it here is the bug, not an oversight in the sweep — which is why the
+    `[[pic:…]]` strip is here too.
 
     ``assume_files_exist`` because a key must be a pure function of the text:
     the salvage walk normally wraps a bare path only while the file exists,
     which made this key change when the agent deleted its scratch files — the
     third state-that-can-vanish drift, found auditing the first two.
     """
-    return _media_norm(reactions.strip_markers(_salvage_media_refs(
-        openclaw_text.sanitize_assistant_visible_text(
-            _strip_reply_directive_anywhere(
-                _strip_reply_directive(_strip_no_reply(s)))),
-        assume_files_exist=True)))
+    return _media_norm(image_jobs.strip_pic_markers(
+        reactions.strip_markers(_salvage_media_refs(
+            openclaw_text.sanitize_assistant_visible_text(
+                _strip_reply_directive_anywhere(
+                    _strip_reply_directive(_strip_no_reply(s)))),
+            assume_files_exist=True))))
 
 
 # Memo for the whole-thread dedup scan. _canon_msg is half a dozen regex
@@ -6812,7 +6939,11 @@ async def image_job_create(request: Request, payload: ImageJobIn):
 
     try:
         spec = image_jobs.ImageSpec(
-            prompt=payload.prompt, workflow=payload.workflow or "",
+            # A request that names no workflow gets the bot's own default, if
+            # it has one — the same rule the inline marker path uses, since a
+            # marker has no room to name one at all.
+            prompt=payload.prompt,
+            workflow=payload.workflow or bot.image_workflow,
             ratio=payload.ratio or "", width=payload.width,
             height=payload.height, negative=payload.negative or "",
             caption=payload.caption or "")
@@ -6823,23 +6954,12 @@ async def image_job_create(request: Request, payload: ImageJobIn):
     if err:
         raise HTTPException(429, err)
 
-    job_id = image_jobs.new_job_id()
-    # The placeholder is persisted BEFORE the row that will rewrite it, so a
-    # crash in between leaves a message with no job (visible, wrong, and
-    # fixable) rather than a job pointing at a message that does not exist
-    # (invisible, and the worker's rewrite would silently no-op forever).
-    try:
-        msg = await _persist_and_broadcast_message(
-            canonical, "assistant", _image_job_pending_text(spec),
-            metadata=_image_job_meta(job_id, image_jobs.QUEUED, spec))
-    except Exception:
-        image_jobs.limiter.refund(bot.id.lower())
-        log.exception("could not write the image-job placeholder")
+    started = await _start_image_job(canonical, bot, spec)
+    if started is None:
         raise HTTPException(500, "Could not start the image request")
-
-    await db.add_image_job(job_id, msg.id, canonical, bot.id, spec.to_json())
-    return {"job_id": job_id, "message_id": msg.id, "thread_id": canonical,
-            "state": image_jobs.QUEUED}
+    job_id, message_id = started
+    return {"job_id": job_id, "message_id": message_id,
+            "thread_id": canonical, "state": image_jobs.QUEUED}
 
 
 @app.get("/api/image-jobs/{job_id}", responses=problem.MACHINE)

@@ -21,6 +21,7 @@ class BotOut(BaseModel):
     color: str = ""
     reactions: bool = False       # may this bot fire reaction images?
     image_jobs: bool = False      # may this bot request a generated picture?
+    image_workflow: str = ""      # its default image-server workflow ("" = theirs)
     # Which direct LLM provider backs this bot ("" = the agent backend). The id
     # only — never the base URL and never the key; see config.Bot.to_dict.
     api_provider: str = ""

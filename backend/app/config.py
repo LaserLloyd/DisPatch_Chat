@@ -374,6 +374,11 @@ class Bot:
     # bot silently gains. Requires the feature itself to be configured
     # (DISPATCH_CLAWFORGE_URL); see app/image_jobs.py.
     image_jobs: bool = False
+    # Which ClawForge workflow this bot's pictures use when a request names
+    # none. A companion whose look is curated needs one specific workflow, and
+    # the inline `[[pic:…]]` marker has no room to say so — it carries a prompt
+    # and a caption, nothing else. Empty means the image server's own default.
+    image_workflow: str = ""
     # Direct-provider backend ("Connect an AI"). When present this bot does NOT
     # go through the agent CLI at all — its turns are HTTP calls to an LLM API.
     # Shape (every field optional except provider + model):
@@ -427,6 +432,7 @@ class Bot:
             "reactions": self.reactions,
             "avatar_pool": self.avatar_pool,
             "image_jobs": self.image_jobs,
+            "image_workflow": self.image_workflow,
             "api_provider": str((self.api or {}).get("provider") or ""),
         }
 
@@ -524,6 +530,7 @@ def _bot_entry(b: Bot) -> dict:
         "reaction_autopilot": b.reaction_autopilot,
         "avatar_pool": b.avatar_pool,
         "image_jobs": b.image_jobs,
+        "image_workflow": b.image_workflow,
     }
     if b.api:
         entry["api"] = dict(b.api)
@@ -647,6 +654,8 @@ def load_bots() -> list[Bot]:
                                        base.avatar_pool if base else False)),
                 image_jobs=bool(e.get("image_jobs",
                                       base.image_jobs if base else False)),
+                image_workflow=str(e.get("image_workflow",
+                                         base.image_workflow if base else "")),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,
