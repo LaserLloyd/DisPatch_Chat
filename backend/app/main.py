@@ -18,6 +18,7 @@ import logging
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -604,6 +605,17 @@ async def auth_gate(request: Request, call_next):
     # decoy for the per-route guards — the same agents-yes/locked-tab-no split
     # _deny_agent_route_to_browser enforces, decided once, here.
     if _is_inbound(method, path) and not _browser_request(request):
+        # The image server's completion callback carries its own credential —
+        # the per-job token DisPatch generated and handed to the rig at submit
+        # time — and it arrives from another machine, so the api_token check
+        # below would refuse every one of them (the rig has no api_token, and
+        # giving it one would hand a GPU box a key to the whole inbound
+        # surface). The handler verifies the token in constant time and
+        # DISCARDS the body: a valid callback is a poke to re-poll one job,
+        # never content. Worst case for a forged one is a wasted get_job.
+        if method == "POST" and _INBOUND_IMAGE_JOB_CALLBACK_RE.match(path):
+            request.state.machine = True
+            return await call_next(request)
         # A logged-in full session may always use these endpoints (e.g. a family
         # member driving the app over the tailnet) — check that first.
         sess = auth.get_session(request.cookies.get(COOKIE_NAME))
@@ -1399,6 +1411,14 @@ _INBOUND_REACTION = {
 # message in that thread is the answer either way.
 _INBOUND_IMAGE_JOB_RE = re.compile(r"^/api/image-jobs(?:/[A-Za-z0-9_-]{1,64})?$")
 
+# The rig's completion callback. A third route, and the only one on this
+# surface whose caller is neither on this box nor holding the api_token: the
+# image server is a LAN peer that knows one thing about us, the per-job token
+# we handed it at submit time. That token is the whole credential, which is
+# why the body is discarded — see image_job_callback.
+_INBOUND_IMAGE_JOB_CALLBACK_RE = re.compile(
+    r"^/api/image-jobs/[A-Za-z0-9_-]{1,64}/callback$")
+
 
 # Avatar management an on-box agent legitimately drives. Agents already
 # generate the images (the image CLI) and a cron rotates them daily — but the API
@@ -1473,6 +1493,8 @@ def _is_inbound(method: str, path: str) -> bool:
     if (method, path) in _INBOUND_REACTION:
         return True
     if method in ("GET", "POST") and _INBOUND_IMAGE_JOB_RE.match(path):
+        return True
+    if method == "POST" and _INBOUND_IMAGE_JOB_CALLBACK_RE.match(path):
         return True
     if method in ("GET", "POST") and _INBOUND_AVATAR_RE.match(path):
         return True
@@ -2389,15 +2411,44 @@ def _image_job_failed_text(reason: str) -> str:
     return f"⚠️ image failed: {reason}"
 
 
+def _image_job_cancelled_text(reason: str = "") -> str:
+    """A withdrawn render is not a failure, and must not read as one.
+
+    It happens when the deadline is up, when the thread was deleted under the
+    job, or when somebody pressed Interrupt on the rig — three things a reader
+    would rather see named than see dressed up as the GPU letting them down.
+    """
+    tail = f" — {reason}" if reason else ""
+    return f"✋ The image was cancelled on the rig.{tail}"
+
+
 def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
-                    *, error: str = "") -> dict:
+                    *, error: str = "", progress: dict | None = None,
+                    seed: int | None = None) -> dict:
     meta = {"kind": "image_job", "job_id": job_id, "status": status,
             "prompt": spec.prompt[:200], "caption": spec.caption}
     if spec.workflow:
         meta["workflow"] = spec.workflow
     if error:
         meta["error"] = error
+    if progress:
+        meta["progress"] = progress
+    if seed is not None:
+        # Not in the visible text: it is machinery for "again, but…", and a
+        # ten-digit number in a chat bubble is noise to everyone else.
+        meta["seed"] = seed
     return meta
+
+
+def _image_job_callback_url(job_id: str) -> str:
+    """Where the rig should POST when this job finishes, or "" for no callback.
+
+    Empty unless an operator has said what DisPatch's address looks like from
+    the rig — it cannot be derived here, and a guessed one would either fail
+    silently or point the rig at something that is not us.
+    """
+    base = SETTINGS.callback_base
+    return f"{base}/api/image-jobs/{job_id}/callback" if base else ""
 
 
 async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
@@ -2416,6 +2467,11 @@ async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
     slot is refunded on failure — nothing was spent.
     """
     job_id = image_jobs.new_job_id()
+    # One token per job, minted here whether or not callbacks are configured:
+    # the arming decision belongs to the submit call (which only sends a URL
+    # when there is a base), and a row that always has a token cannot grow a
+    # "callbacks were switched on mid-flight, this job has none" case.
+    callback_token = secrets.token_urlsafe(24)
     try:
         msg = await _persist_and_broadcast_message(
             thread_id, "assistant", _image_job_pending_text(spec),
@@ -2424,7 +2480,8 @@ async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
         image_jobs.limiter.refund(bot.id.lower())
         log.exception("could not write the image-job placeholder")
         return None
-    await db.add_image_job(job_id, msg.id, thread_id, bot.id, spec.to_json())
+    await db.add_image_job(job_id, msg.id, thread_id, bot.id, spec.to_json(),
+                           callback_token=callback_token)
     return job_id, msg.id
 
 
@@ -2528,16 +2585,59 @@ async def _rewrite_image_job_message(job: dict, content: str,
             await _broadcast_message_update(msg, job["thread_id"])
 
 
-async def _fail_image_job(job: dict, reason: str) -> None:
-    """Terminal failure: the row, the message and the counter, in that order."""
+async def _fail_image_job(job: dict, reason: str, *,
+                          state: str = image_jobs.FAILED) -> None:
+    """Terminal ending: the row, the message and the counter, in that order.
+
+    `state` is the third terminal value, cancelled, taking the same path — the
+    bookkeeping is identical and only the wording differs, so splitting it into
+    a second function is how the two drift.
+    """
     reason = image_jobs._clip(reason, 200)
     spec = _image_job_spec(job)
-    await db.update_image_job(job["id"], state=image_jobs.FAILED, error=reason)
+    cancelled = state == image_jobs.CANCELLED
+    text = (_image_job_cancelled_text(reason) if cancelled
+            else _image_job_failed_text(reason))
+    await db.update_image_job(job["id"], state=state, error=reason)
     await _rewrite_image_job_message(
-        job, _image_job_failed_text(reason),
-        _image_job_meta(job["id"], image_jobs.FAILED, spec, error=reason))
-    image_jobs.note_failure(job["id"], reason, bot=job.get("bot_id", ""))
-    log.info("image job %s failed: %s", job["id"], reason)
+        job, text, _image_job_meta(job["id"], state, spec, error=reason,
+                                   seed=job.get("seed")))
+    # A cancellation is an outcome somebody chose, not the rig letting us
+    # down, so it deliberately does NOT move the failure counter /api/health
+    # exposes — that number exists to make a rig going wrong visible.
+    if not cancelled:
+        image_jobs.note_failure(job["id"], reason, bot=job.get("bot_id", ""))
+    log.info("image job %s %s: %s", job["id"], state, reason)
+
+
+async def _cancel_on_rig(job: dict, why: str) -> None:
+    """Ask the rig to stop rendering. Best effort, and never load-bearing.
+
+    Cancelling is about not burning a GPU on a picture nobody will see; the
+    local job is failed by the caller regardless, so every outcome here — a
+    refusal, an unreachable rig, an already-finished job — is a log line.
+    """
+    rig_id = job.get("rig_job_id")
+    if not rig_id:
+        return
+    try:
+        await _clawforge().cancel(str(rig_id))
+        log.info("image job %s: asked the rig to cancel %s (%s)",
+                 job["id"], rig_id, why)
+    except Exception as e:
+        log.info("image job %s: could not cancel %s on the rig (%s)",
+                 job["id"], rig_id, e)
+
+
+async def _cancel_open_image_jobs(jobs: list[dict], why: str) -> None:
+    """Withdraw a set of open jobs whose placeholder is about to disappear.
+
+    The rows are cascaded away with their messages, so failing them locally
+    would be writing to something that no longer exists; the point of this is
+    purely the rig-side withdrawal.
+    """
+    for job in jobs:
+        await _cancel_on_rig(job, why)
 
 
 def _image_job_spec(job: dict) -> image_jobs.ImageSpec:
@@ -2589,7 +2689,8 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
         await _fail_image_job(job, "the image could not be stored")
         return
 
-    meta = _image_job_meta(job["id"], image_jobs.DONE, spec)
+    meta = _image_job_meta(job["id"], image_jobs.DONE, spec,
+                           seed=job.get("seed"))
     media_url = content.split("[[media:", 1)[1].split("|", 1)[0].rstrip("]")
     meta["media_url"] = media_url
     await db.update_image_job(job["id"], state=image_jobs.DONE,
@@ -2610,13 +2711,50 @@ def _image_job_expired(job: dict) -> bool:
     return (now - started).total_seconds() > image_jobs.DEADLINE_S
 
 
+async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
+    """Store the rig's step counter and show it, but only when it CHANGED.
+
+    Every write here is a message metadata update plus a broadcast to every
+    open device, and the poll runs every few seconds for up to ten minutes —
+    so re-publishing an unchanged number would be a steady stream of frames
+    that redraw the same card. The metadata is rebuilt rather than patched:
+    `update_message_metadata` replaces wholesale, so a partial dict would drop
+    the prompt, the caption and the workflow off the placeholder.
+    """
+    if not progress or progress == _image_job_progress(job):
+        return
+    await db.update_image_job(job["id"], progress=json.dumps(progress))
+    await _rewrite_image_job_message(
+        job, _image_job_pending_text(_image_job_spec(job)),
+        _image_job_meta(job["id"], job["state"], _image_job_spec(job),
+                        progress=progress, seed=job.get("seed")))
+    job["progress"] = json.dumps(progress)
+
+
+def _image_job_progress(job: dict) -> dict | None:
+    """The stored progress block, or None if there is none / it is junk."""
+    try:
+        stored = json.loads(job.get("progress") or "null")
+    except (TypeError, ValueError):
+        return None
+    return stored if isinstance(stored, dict) else None
+
+
 async def _advance_image_job(job: dict) -> None:
     """Move one job one step. Never raises — the loop must survive a bad row."""
     forge = _clawforge()
     spec = _image_job_spec(job)
     try:
         if job["state"] == image_jobs.QUEUED:
-            res = await forge.enqueue(spec)
+            res = await forge.enqueue(
+                spec, callback_url=_image_job_callback_url(job["id"]),
+                callback_token=job.get("callback_token") or "")
+            if res.seed is not None:
+                # Known at enqueue on this rig, and the only moment it is
+                # offered on the fast path — an idle rig delivers the file in
+                # the same breath and there is no poll to read it off.
+                await db.update_image_job(job["id"], seed=res.seed)
+                job["seed"] = res.seed
             if res.files_rel:
                 # An idle rig answered with the finished file straight away.
                 data = await forge.fetch(res.files_rel)
@@ -2633,15 +2771,27 @@ async def _advance_image_job(job: dict) -> None:
             await _fail_image_job(job, "the render was lost")
             return
         poll = await forge.poll(rig_id)
+        if poll.seed is not None and job.get("seed") is None:
+            await db.update_image_job(job["id"], seed=poll.seed)
+            job["seed"] = poll.seed
         if poll.files_rel:
             data = await forge.fetch(poll.files_rel)
             await _deliver_image_job(job, data, poll.files_rel)
+            return
+        if poll.state == image_jobs.CANCELLED:
+            # Reachable WITHOUT DisPatch asking: an operator interrupt on the
+            # rig lands here. Checked before poll.error because a cancellation
+            # carries an error string of its own, and it is not a failure.
+            await _fail_image_job(job, poll.error,
+                                  state=image_jobs.CANCELLED)
             return
         if poll.error:
             await _fail_image_job(job, poll.error)
             return
         if poll.done:
             await _fail_image_job(job, "the render finished with no image")
+            return
+        await _record_image_job_progress(job, poll.progress)
     except image_jobs.ImageJobError as e:
         if e.retryable and not _image_job_expired(job):
             # The rig is briefly unreachable (a restart, a dropped link). Say
@@ -2661,6 +2811,10 @@ async def _image_job_sweep() -> None:
         if _shutting_down:
             return
         if _image_job_expired(job):
+            # Withdraw it first: past the deadline nobody is going to be shown
+            # this picture, and a render left running holds a GPU the next
+            # request wants. The local ending does not wait on the answer.
+            await _cancel_on_rig(job, "deadline")
             await _fail_image_job(
                 job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
             continue
@@ -6064,7 +6218,12 @@ async def delete_message_endpoint(request: Request, message_id: str):
     if thread and thread.status == "thinking":
         raise HTTPException(409, "Cannot delete messages while a reply is in progress")
     bot_id = await _bot_of_thread(msg.thread_id)   # resolve BEFORE deleting
+    # An image-job row cascades away with its placeholder, so after this the
+    # render has nothing left to rewrite — read the open ones BEFORE deleting
+    # and tell the rig to stop.
+    orphaned = await db.open_image_jobs_for_message(message_id)
     await db.delete_message(message_id)
+    await _cancel_open_image_jobs(orphaned, "placeholder deleted")
     await manager.broadcast({
         "type": "message_deleted",
         "thread_id": msg.thread_id,
@@ -6198,7 +6357,12 @@ async def delete_thread(request: Request, thread_id: str, hard: bool = False):
         raise HTTPException(404, "Thread not found")
     _deny_decoy_bot(request, thread.bot_id)
     if hard:
+        # Same reasoning as deleting one placeholder, one level up: the rows
+        # go with the messages, so read them first and withdraw the renders
+        # rather than leaving the rig working on pictures with nowhere to land.
+        orphaned = await db.open_image_jobs_for_thread(thread_id)
         await db.delete_thread(thread_id)
+        await _cancel_open_image_jobs(orphaned, "thread deleted")
         # The lock is deliberately NOT dropped. Thread ids are not all random:
         # a daily thread's id is derived from the bot and the date, so deleting
         # today's and letting it be recreated hands the new thread a FRESH lock
@@ -6946,7 +7110,7 @@ async def image_job_create(request: Request, payload: ImageJobIn):
             workflow=payload.workflow or bot.image_workflow,
             ratio=payload.ratio or "", width=payload.width,
             height=payload.height, negative=payload.negative or "",
-            caption=payload.caption or "")
+            caption=payload.caption or "", priority=payload.priority)
     except ValueError as e:
         raise HTTPException(422, str(e))
 
@@ -6971,12 +7135,58 @@ async def image_job_status(request: Request, job_id: str):
     if job is None:
         raise HTTPException(404, "Unknown image job")
     spec = _image_job_spec(job)
+    # The callback token is deliberately absent: this route is readable by any
+    # on-box agent, and handing one of them the credential that advances a job
+    # would make the callback's own gate pointless.
     return {"job_id": job["id"], "state": job["state"],
             "message_id": job["message_id"], "thread_id": job["thread_id"],
             "bot_id": job["bot_id"], "prompt": spec.prompt,
-            "workflow": spec.workflow, "media_url": job["media_url"],
+            "workflow": spec.workflow, "priority": spec.priority,
+            "media_url": job["media_url"], "seed": job.get("seed"),
+            "progress": _image_job_progress(job),
             "error": job["error"], "created_at": job["created_at"],
             "updated_at": job["updated_at"]}
+
+
+@app.post("/api/image-jobs/{job_id}/callback", responses=problem.MACHINE)
+async def image_job_callback(request: Request, job_id: str):
+    """The rig saying "this one is done". A poke, never content.
+
+    The BODY IS IGNORED. The rig posts what `get_job` would have returned, and
+    trusting it would make a forged POST able to write a picture URL, an error
+    string or a state into a family thread. Instead this advances the job
+    through exactly the path the sweep uses, which re-polls the rig itself — so
+    the worst a forged callback can do is cost one extra `get_job`.
+
+    Its credential is the per-job token minted at submit time and given only to
+    the image server. That is why this route is exempt from the api_token check
+    the rest of the machine surface uses (see the auth middleware): the caller
+    is a LAN peer, holding a capability scoped to one job, that expires with
+    the job. A browser never reaches here — a locked tab gets Safe Mode's 403.
+
+    The sweep is unchanged and still runs on its own cadence. A callback only
+    makes a terminal transition arrive sooner; a callback that never comes is
+    the case the sweep has always covered.
+    """
+    _deny_agent_route_to_browser(request)
+    job = await db.get_image_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Unknown image job")
+    presented = request.headers.get("x-clawforge-token") or ""
+    expected = job.get("callback_token") or ""
+    # `compare_digest` on both halves, and an empty expected token can never
+    # match: a job created before callbacks existed is not advanceable by
+    # anyone who guesses "no token".
+    if not expected or not secrets.compare_digest(presented, expected):
+        raise HTTPException(403, "Invalid callback token")
+    if job["state"] not in image_jobs.OPEN_STATES:
+        # A late or duplicate delivery for a job that already ended. Not an
+        # error — the rig retries, and this is what a retry after success
+        # looks like.
+        return {"ok": True, "state": job["state"]}
+    await _advance_image_job(job)
+    fresh = await db.get_image_job(job_id)
+    return {"ok": True, "state": (fresh or job)["state"]}
 
 
 @app.get("/api/reactions/{rid}/image")

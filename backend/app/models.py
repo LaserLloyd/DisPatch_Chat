@@ -176,6 +176,10 @@ class ImageJobIn(BaseModel):
     # Shown with the finished picture, and in the pending line so the thread
     # says what is coming rather than just that something is.
     caption: str | None = Field(default=None, max_length=200)
+    # The rig's queue band: 1 interactive, 2 normal, 3 background. Defaults to
+    # 1 because a request through this route always has a placeholder sitting
+    # in a thread; a caller that knows its picture is not urgent can say so.
+    priority: int = Field(default=1, ge=1, le=3)
 
 
 class ReactionPatchIn(BaseModel):

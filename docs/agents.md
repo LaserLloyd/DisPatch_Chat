@@ -147,14 +147,22 @@ curl -X POST http://127.0.0.1:8765/api/image-jobs \
 
 Optional fields: `workflow` (image-server-specific; omit it and the bot's
 `image_workflow` fills in, or the server picks its own default), `ratio` (`"3:2"`), `width` + `height` (both or
-neither), `negative`, `caption`.
+neither), `negative`, `caption`, `priority` (`1` interactive — the default for
+this route — `2` normal, `3` background; anything else is a `422`).
 
 `GET /api/image-jobs/<job_id>` reports one job's state — but an agent rarely
 needs it. **The thread is the status display.** The message goes from
-"🖼️ Generating an image…" to the picture, or to
-"⚠️ image failed: \<reason\>" with the image server's own words for what went
-wrong. It never stays pending: every job has a ten-minute deadline, and a
-DisPatch restart mid-render either resumes the job or fails it visibly.
+"🖼️ Generating an image…" (with the render's percentage once the image server
+starts reporting one) to the picture, or to one of two endings:
+
+- "⚠️ image failed: \<reason\>" — the image server's own words for what went
+  wrong.
+- "✋ The image was cancelled on the rig." — the render was withdrawn, because
+  it passed its deadline, its thread was deleted, or somebody stopped it on
+  the image server itself.
+
+It never stays pending: every job has a ten-minute deadline, and a DisPatch
+restart mid-render either resumes the job or fails it visibly.
 
 The shorter way is to write the marker inline in a reply, which costs no call
 at all:
@@ -187,8 +195,9 @@ Rules worth knowing:
   job pipeline adds no exceptions to any of that.
 
 Host configuration for this is `DISPATCH_CLAWFORGE_URL` (the image server's
-MCP endpoint) and `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff
-that URL is set). See [configuration.md](configuration.md).
+MCP endpoint), `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff that
+URL is set) and the optional `DISPATCH_CALLBACK_BASE`, which only makes a
+finished render appear sooner. See [configuration.md](configuration.md).
 
 ## Interactive checklist tables
 

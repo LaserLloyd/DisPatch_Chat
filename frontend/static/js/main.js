@@ -30,7 +30,7 @@ import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
 import { renderPinnedRail, pinToggle } from './pins.js?v=2';
 import { aboutRow } from './about.js?v=2';
-import { imageJobMessageEl } from './imagejobs.js?v=1';
+import { imageJobMessageEl } from './imagejobs.js?v=2';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with

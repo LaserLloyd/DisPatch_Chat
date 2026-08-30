@@ -110,10 +110,20 @@ CREATE TABLE IF NOT EXISTS image_jobs (
     thread_id   TEXT NOT NULL,
     bot_id      TEXT NOT NULL,
     spec        TEXT NOT NULL,          -- ImageSpec.to_json()
-    state       TEXT NOT NULL,          -- queued | running | done | failed
+    state       TEXT NOT NULL,          -- queued | running | done | failed | cancelled
     rig_job_id  TEXT,                   -- the image server's own id, once it has one
     error       TEXT,
     media_url   TEXT,
+    -- Per-job bearer token for POST /api/image-jobs/<id>/callback. NULL when
+    -- no callback origin is configured, and a NULL token can never match: the
+    -- route refuses before comparing, so "callbacks off" is not a hole.
+    callback_token TEXT,
+    -- The rig's last reported {step, steps, percent}, as JSON. Advisory only —
+    -- the poll remains the sole authority on state.
+    progress    TEXT,
+    -- The seed the rig chose, known at enqueue. Kept so "again, but…" can
+    -- reproduce (or deliberately not reproduce) a picture later.
+    seed        INTEGER,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -202,6 +212,13 @@ class Database:
             # import) — and SQLite treats every NULL as distinct, so the unique
             # index constrains only rows that actually have one.
             "ALTER TABLE messages ADD COLUMN source_id TEXT",
+            # Image-job fields added with the rig's callback/progress/seed
+            # round. All three are NULL on pre-existing rows, which is the
+            # correct reading: no callback was armed, no progress was reported,
+            # no seed was recorded.
+            "ALTER TABLE image_jobs ADD COLUMN callback_token TEXT",
+            "ALTER TABLE image_jobs ADD COLUMN progress TEXT",
+            "ALTER TABLE image_jobs ADD COLUMN seed INTEGER",
         ):
             try:
                 await self._db.execute(ddl)
@@ -930,17 +947,21 @@ class Database:
 
     async def add_image_job(self, job_id: str, message_id: str, thread_id: str,
                             bot_id: str, spec: str, *,
-                            state: str = "queued") -> dict:
+                            state: str = "queued",
+                            callback_token: str | None = None) -> dict:
         ts = now_iso()
         await self.db.execute(
             "INSERT INTO image_jobs (id, message_id, thread_id, bot_id, spec, "
-            "state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (job_id, message_id, thread_id, bot_id, spec, state, ts, ts))
+            "state, callback_token, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, message_id, thread_id, bot_id, spec, state,
+             callback_token, ts, ts))
         await self.db.commit()
         return {"id": job_id, "message_id": message_id, "thread_id": thread_id,
                 "bot_id": bot_id, "spec": spec, "state": state,
                 "rig_job_id": None, "error": None, "media_url": None,
-                "created_at": ts, "updated_at": ts}
+                "callback_token": callback_token, "progress": None,
+                "seed": None, "created_at": ts, "updated_at": ts}
 
     async def update_image_job(self, job_id: str, **fields: Any) -> None:
         """Patch a job row. Only the columns named are touched.
@@ -950,7 +971,8 @@ class Database:
         KeyError here rather than a silently-ignored update that leaves a job
         stuck in `running` forever.
         """
-        allowed = ("state", "rig_job_id", "error", "media_url")
+        allowed = ("state", "rig_job_id", "error", "media_url", "progress",
+                   "seed")
         sets, values = [], []
         for k, v in fields.items():
             if k not in allowed:
@@ -976,6 +998,26 @@ class Database:
         cur = await self.db.execute(
             "SELECT * FROM image_jobs WHERE state IN ('queued', 'running') "
             "ORDER BY created_at")
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def open_image_jobs_for_thread(self, thread_id: str) -> list[dict]:
+        """Open jobs belonging to one thread — what a delete has to withdraw.
+
+        Deleting the thread cascades the placeholder away, so nothing is left
+        to rewrite; the render on the rig, however, keeps burning a GPU unless
+        somebody says otherwise.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM image_jobs WHERE thread_id = ? "
+            "AND state IN ('queued', 'running') ORDER BY created_at",
+            (thread_id,))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def open_image_jobs_for_message(self, message_id: str) -> list[dict]:
+        """Open jobs whose placeholder is this message. Same reasoning."""
+        cur = await self.db.execute(
+            "SELECT * FROM image_jobs WHERE message_id = ? "
+            "AND state IN ('queued', 'running')", (message_id,))
         return [dict(r) for r in await cur.fetchall()]
 
     async def get_last_user_message(self, thread_id: str) -> MessageOut | None:

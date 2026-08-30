@@ -2639,7 +2639,9 @@ def _pool_generate_one(cfg: PoolConfig, category: str, *, bot_id: str | None = N
     bank = bank_load(bot_id)
     out_dir = config.REACTIONS_DIR / ".generate"
     out_dir.mkdir(parents=True, exist_ok=True)
-    argv = [str(_IMAGE_CLI), "--count", "1",
+    # Background band: nobody is waiting on a shelf refill, and a chat request
+    # arriving mid-refill should not queue behind one.
+    argv = [str(_IMAGE_CLI), "--count", "1", "--priority", "3",
             "--ratio", (bank.get("ratio") or "1:1"), "--output", str(out_dir)]
     style = cfg.style or bank.get("style") or ""
     workflow = cfg.workflow or bank.get("workflow") or ""

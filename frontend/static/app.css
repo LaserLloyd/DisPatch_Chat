@@ -2267,6 +2267,12 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 }
 .image-job-card.is-pending .image-job-text { opacity: .8; }
 .image-job-card.is-failed .image-job-text { color: var(--warning-text); }
+/* Tabular figures so a number that changes every few seconds does not shift
+   the text beside it. */
+.image-job-percent {
+  flex: none; font-size: .82em; opacity: .65;
+  font-variant-numeric: tabular-nums;
+}
 /* The spinner is the only motion in a bubble that may sit there for minutes;
    a reader who has asked for less of that gets a static ring. */
 @media (prefers-reduced-motion: reduce) {

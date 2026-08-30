@@ -93,6 +93,36 @@ def test_avatar_pair_puts_the_prompt_after_a_double_dash(rx_env, rig, monkeypatc
 
 
 # --------------------------------------------------------------------------- #
+# queue band
+#
+# A shelf refill has nobody waiting on it, and the rig runs one job at a time
+# per GPU — so a refill that submits in the same band as a chat request puts a
+# family member behind a picture that will not be looked at for hours.
+# --------------------------------------------------------------------------- #
+
+
+def test_the_reaction_pool_refills_in_the_background_band(rx_env, rig):
+    cfg = reactions.pool_load().config
+    cat = next(iter(reactions.bank_load()["categories"]))
+    assert reactions._pool_generate_one(cfg, cat) is not None
+    argv = rig[0]
+    assert argv[argv.index("--priority") + 1] == "3"
+
+
+def test_the_avatar_pool_refills_in_the_background_band(rx_env, rig):
+    avatar_pool.bank_save({"base": "a portrait", "ratio": "1:1"}, "main")
+    st = avatar_pool.load_state("main")
+    st.config.enabled = True
+    avatar_pool.save_state(st, "main")
+    assert avatar_pool.generate_pair("main") is not None
+    argv = rig[0]
+    assert argv[argv.index("--priority") + 1] == "3"
+    # The band is an option like any other: it stays in front of the `--`, so
+    # a prompt can never be read as its value.
+    assert argv.index("--priority") < argv.index("--")
+
+
+# --------------------------------------------------------------------------- #
 # validation boundary
 # --------------------------------------------------------------------------- #
 

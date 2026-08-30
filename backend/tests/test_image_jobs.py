@@ -142,12 +142,19 @@ class FakeForge:
     real worker — only the socket is replaced.
     """
 
-    def __init__(self, *, enqueue=None, poll=None, fetch=None):
+    def __init__(self, *, enqueue=None, poll=None, fetch=None, cancel=None):
         self._enqueue, self._poll, self._fetch = enqueue, poll, fetch
+        self._cancel = cancel
         self.calls: list[str] = []
+        # What the worker actually submitted — the callback wiring, the
+        # priority band and the spec are only real if they reach the rig.
+        self.enqueue_args: list[dict] = []
+        self.cancelled: list[str] = []
 
-    async def enqueue(self, spec):
+    async def enqueue(self, spec, *, callback_url="", callback_token=""):
         self.calls.append("enqueue")
+        self.enqueue_args.append({"spec": spec, "callback_url": callback_url,
+                                  "callback_token": callback_token})
         if callable(self._enqueue):
             return self._enqueue(spec)
         if isinstance(self._enqueue, Exception):
@@ -158,7 +165,16 @@ class FakeForge:
         self.calls.append("poll")
         if isinstance(self._poll, Exception):
             raise self._poll
+        if callable(self._poll):
+            return self._poll(rig_id)
         return self._poll or image_jobs.PollResult(state="running", done=False)
+
+    async def cancel(self, rig_id):
+        self.calls.append("cancel")
+        self.cancelled.append(rig_id)
+        if isinstance(self._cancel, Exception):
+            raise self._cancel
+        return {"cancelled": True, "state": "cancelled"}
 
     async def fetch(self, rel):
         self.calls.append("fetch")
@@ -822,3 +838,572 @@ def test_the_dedup_key_ignores_the_marker(env):
     # A quoted marker is text, and text is part of the key.
     assert (main._canon_msg("say `[[pic:x]]`")
             != main._canon_msg("say ``"))
+
+
+# --------------------------------------------------------------------------- #
+# The rig's completion callback
+#
+# A callback is an OPTIMISATION over the sweep: it makes a terminal transition
+# arrive in a second instead of within five. What is tested here is that it
+# cannot be anything more than that — the body is discarded, the token is the
+# only credential, and a browser never takes this path.
+# --------------------------------------------------------------------------- #
+
+
+CALLBACK_BASE = "http://192.0.2.37:8765"
+
+
+def _armed(monkeypatch):
+    monkeypatch.setattr(main, "SETTINGS",
+                        replace(main.SETTINGS, callback_base=CALLBACK_BASE))
+
+
+async def _token_of(job_id: str) -> str:
+    row = await main.db.get_image_job(job_id)
+    return row["callback_token"]
+
+
+def _callback(c, job_id, token, body=None):
+    headers = {} if token is None else {"X-ClawForge-Token": token}
+    return c.post(f"/api/image-jobs/{job_id}/callback",
+                  json=body if body is not None else {"state": "done"},
+                  headers=headers)
+
+
+def test_the_submit_call_carries_the_callback_url_and_token(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    forge = _use(monkeypatch, FakeForge())
+
+    asyncio.run(main._image_job_sweep())
+
+    sent = forge.enqueue_args[0]
+    assert sent["callback_url"] == f"{CALLBACK_BASE}/api/image-jobs/{jid}/callback"
+    assert sent["callback_token"] == asyncio.run(_token_of(jid))
+
+
+def test_no_callback_base_means_pure_polling(env, monkeypatch):
+    """The default is the behaviour that existed before callbacks: the rig is
+    told nothing, and the sweep is the only thing that finishes a job."""
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge())
+
+    asyncio.run(main._image_job_sweep())
+
+    assert forge.enqueue_args[0]["callback_url"] == ""
+
+
+def test_a_valid_callback_advances_exactly_that_job(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    first = _fire(c, tid).json()
+    second = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+
+    # Both are handed to the rig; only the first one's callback arrives.
+    asyncio.run(main._image_job_sweep())
+    forge.calls.clear()
+    r = _callback(c, first["job_id"], asyncio.run(_token_of(first["job_id"])))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "done"
+    assert forge.calls == ["poll", "fetch"], "one job's worth of work, no sweep"
+    rows = {m["id"]: m for m in _messages(c, tid)}
+    assert rows[first["message_id"]]["metadata"]["status"] == "done"
+    assert rows[second["message_id"]]["metadata"]["status"] == "queued"
+
+
+def test_the_callback_body_is_ignored(env, monkeypatch):
+    """The rig posts what get_job would return, and trusting it would let a
+    forged POST write a picture URL into a family thread. We re-poll instead."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="running", done=False)))
+    asyncio.run(main._image_job_sweep())
+
+    r = _callback(c, body["job_id"], asyncio.run(_token_of(body["job_id"])),
+                  body={"state": "done", "files_rel": ["out/evil.png"],
+                        "error": "attacker text", "media_url": "/media/evil.png"})
+
+    assert r.status_code == 200
+    # The rig still says "running", so that is what the job is.
+    assert r.json()["state"] == "running"
+    row = [m for m in _messages(c, tid) if m["id"] == body["message_id"]][0]
+    assert "Generating an image" in row["content"]
+    assert "attacker text" not in json.dumps(row)
+    assert "evil" not in json.dumps(row)
+
+
+def test_a_callback_with_a_wrong_or_missing_token_is_refused(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    forge = _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())
+    forge.calls.clear()
+
+    assert _callback(c, jid, "not-the-token").status_code == 403
+    assert _callback(c, jid, "").status_code == 403
+    assert _callback(c, jid, None).status_code == 403
+    assert forge.calls == [], "a refused callback must not reach the rig"
+
+
+def test_an_unknown_job_is_404(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    assert _callback(c, "no-such-job", "anything").status_code == 404
+
+
+def test_a_browser_shaped_callback_is_refused(env, monkeypatch):
+    """The credential is a per-job token held by the rig, so a locked TAB must
+    get Safe Mode's answer rather than a path into the worker."""
+    unlocked = _unlocked(env)
+    _armed(monkeypatch)
+    tid = _thread(unlocked)
+    jid = _fire(unlocked, tid).json()["job_id"]
+    token = asyncio.run(_token_of(jid))
+
+    locked = env()
+    r = locked.post(f"/api/image-jobs/{jid}/callback", json={},
+                    headers={**BROWSER, "X-ClawForge-Token": token})
+    assert r.status_code == 403
+
+
+def test_a_callback_for_a_finished_job_is_benign(env, monkeypatch):
+    """The rig retries up to three times; a retry after success must not be an
+    error, and must not re-run the worker on a terminal row."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+    asyncio.run(main._image_job_sweep())
+    asyncio.run(main._image_job_sweep())
+    forge.calls.clear()
+
+    r = _callback(c, jid, asyncio.run(_token_of(jid)))
+    assert r.status_code == 200
+    assert r.json()["state"] == "done"
+    assert forge.calls == []
+
+
+def test_the_callback_route_is_on_the_machine_surface_only(env):
+    assert main._is_inbound("POST", "/api/image-jobs/abc/callback")
+    assert main._decoy_blocked("POST", "/api/image-jobs/abc/callback")
+
+
+def test_the_status_route_never_hands_out_the_callback_token(env, monkeypatch):
+    """It is readable by every on-box agent; the token is the one thing on the
+    row that must stay between DisPatch and the rig."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    token = asyncio.run(_token_of(jid))
+    assert token
+    assert token not in c.get(f"/api/image-jobs/{jid}").text
+
+
+# --------------------------------------------------------------------------- #
+# Cancelled — the third terminal ending
+# --------------------------------------------------------------------------- #
+
+
+def test_a_cancelled_render_is_its_own_ending_not_a_failure(env, monkeypatch):
+    """An operator pressing Interrupt on the rig produces this WITHOUT DisPatch
+    asking, and a worker that only knows "failed" would wait out the deadline."""
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="cancelled", done=True,
+                                   error="Cancelled by an operator")))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    row = [m for m in _messages(c, tid) if m["id"] == body["message_id"]][0]
+    assert row["metadata"]["status"] == "cancelled"
+    assert row["content"].startswith("✋")
+    assert "cancelled on the rig" in row["content"]
+    assert "Cancelled by an operator" in row["content"]
+    assert c.get(f"/api/image-jobs/{body['job_id']}").json()["state"] == "cancelled"
+    # Not a rig fault, so it does not move the number an operator watches.
+    assert image_jobs.failure_stats()["failures_24h"] == 0
+
+
+def test_a_cancelled_job_is_closed_and_never_swept_again(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="cancelled", done=True, error="stopped")))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+        forge.calls.clear()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+    assert forge.calls == []
+
+
+def test_the_deadline_withdraws_the_render_from_the_rig(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge())
+    old = (datetime.now() - timedelta(seconds=image_jobs.DEADLINE_S + 60)).isoformat()
+
+    async def drive():
+        await main._image_job_sweep()          # queued -> running
+        await main.db.db.execute(
+            "UPDATE image_jobs SET created_at = ? WHERE id = ?",
+            (old, body["job_id"]))
+        await main.db.db.commit()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    assert forge.cancelled == ["rig-1"]
+    row = [m for m in _messages(c, tid) if m["id"] == body["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "timed out" in row["content"]
+
+
+def test_a_cancel_the_rig_refuses_does_not_stop_the_job_failing(env, monkeypatch):
+    """Cancelling is best-effort by contract: the local ending is what makes a
+    stuck job impossible, and it must not depend on the rig answering."""
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        cancel=image_jobs.ImageJobError("image server unreachable: ConnectError",
+                                        retryable=True)))
+    old = (datetime.now() - timedelta(seconds=image_jobs.DEADLINE_S + 60)).isoformat()
+
+    async def drive():
+        await main._image_job_sweep()
+        await main.db.db.execute(
+            "UPDATE image_jobs SET created_at = ? WHERE id = ?",
+            (old, body["job_id"]))
+        await main.db.db.commit()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+    row = [m for m in _messages(c, tid) if m["id"] == body["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+
+
+def test_deleting_the_placeholder_withdraws_the_render(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())          # queued -> running
+
+    assert c.delete(f"/api/messages/{body['message_id']}").status_code == 200
+    assert forge.cancelled == ["rig-1"]
+    assert asyncio.run(main.db.get_image_job(body["job_id"])) is None
+
+
+def test_deleting_the_thread_withdraws_every_open_render(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge(
+        enqueue=lambda spec: image_jobs.EnqueueResult(job_id=f"rig-{spec.prompt}")))
+    asyncio.run(main._image_job_sweep())
+
+    assert c.delete(f"/api/threads/{tid}?hard=true").status_code == 200
+    assert len(forge.cancelled) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Progress
+# --------------------------------------------------------------------------- #
+
+
+def test_progress_reaches_the_card_and_merges_into_the_metadata(env, monkeypatch):
+    """update_message_metadata replaces wholesale, so a progress write that
+    patched only its own key would drop the prompt off the placeholder."""
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid, caption="a teapot").json()
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(
+            state="running", done=False,
+            progress={"step": 15, "steps": 32, "percent": 46.9})))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    meta = [m for m in _messages(c, tid)
+            if m["id"] == body["message_id"]][0]["metadata"]
+    assert meta["progress"] == {"step": 15, "steps": 32, "percent": 46.9}
+    assert meta["kind"] == "image_job" and meta["status"] == "running"
+    assert meta["caption"] == "a teapot"
+    assert meta["prompt"] == "a blue ceramic teapot"
+    assert c.get(f"/api/image-jobs/{body['job_id']}").json()["progress"]["step"] == 15
+
+
+def test_progress_is_broadcast_when_it_changes_and_not_when_it_does_not(env,
+                                                                       monkeypatch):
+    """Every write here is a frame to every open device, and the poll runs
+    every few seconds for up to ten minutes."""
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    steps = iter([{"step": 1, "steps": 32, "percent": 3.1},
+                  {"step": 1, "steps": 32, "percent": 3.1},
+                  {"step": 8, "steps": 32, "percent": 25.0}])
+    _use(monkeypatch, FakeForge(
+        poll=lambda rig_id: image_jobs.PollResult(
+            state="running", done=False, progress=next(steps))))
+
+    frames: list[dict] = []
+
+    async def fake_broadcast(frame):
+        frames.append(frame)
+
+    monkeypatch.setattr(main.manager, "broadcast", fake_broadcast)
+
+    async def drive():
+        for _ in range(4):
+            await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    updates = [f for f in frames if f["type"] == "message_update"]
+    assert len(updates) == 2, "one frame per CHANGE, not one per poll"
+    assert updates[-1]["message"]["metadata"]["progress"]["percent"] == 25.0
+
+
+def test_a_finished_job_does_not_keep_a_stale_percentage(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    polls = iter([
+        image_jobs.PollResult(state="running", done=False,
+                              progress={"step": 15, "steps": 32, "percent": 46.9}),
+        image_jobs.PollResult(state="done", done=True, files_rel="out/a.png"),
+    ])
+    _use(monkeypatch, FakeForge(poll=lambda rig_id: next(polls)))
+
+    async def drive():
+        for _ in range(3):
+            await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    meta = [m for m in _messages(c, tid)
+            if m["id"] == body["message_id"]][0]["metadata"]
+    assert meta["status"] == "done"
+    assert "progress" not in meta
+
+
+def test_a_junk_progress_block_is_dropped_rather_than_shown():
+    assert image_jobs._progress({"progress": "soon"}) is None
+    assert image_jobs._progress({}) is None
+    assert image_jobs._progress({"progress": {"percent": "46.9"}}) is None
+    assert image_jobs._progress(
+        {"progress": {"step": 15, "steps": 32, "percent": 146.9}}) == {
+            "step": 15, "steps": 32, "percent": 100.0}
+
+
+# --------------------------------------------------------------------------- #
+# Priority
+# --------------------------------------------------------------------------- #
+
+
+def test_the_chat_path_submits_at_the_interactive_band(env, monkeypatch):
+    """Everything through a thread has a placeholder somebody is looking at."""
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    _say(c, tid, "[[pic:a teapot]]")
+    forge = _use(monkeypatch, FakeForge())
+
+    asyncio.run(main._image_job_sweep())
+
+    assert [a["spec"].priority for a in forge.enqueue_args] == [1, 1]
+
+
+def test_the_endpoint_accepts_a_band_and_refuses_the_rest(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    assert _fire(c, tid, priority=3).status_code == 202
+    assert _fire(c, tid, priority=0).status_code == 422
+    assert _fire(c, tid, priority=4).status_code == 422
+    forge = _use(monkeypatch, FakeForge())
+
+    asyncio.run(main._image_job_sweep())
+    assert forge.enqueue_args[0]["spec"].priority == 3
+
+
+def test_the_band_survives_the_stored_spec():
+    spec = image_jobs.ImageSpec(prompt="a teapot", priority=3)
+    assert image_jobs.ImageSpec.from_json(spec.to_json()).priority == 3
+    # A row written before priority existed reads back as the chat band.
+    assert image_jobs.ImageSpec.from_json('{"prompt": "x"}').priority == 1
+    for bad in (0, 4, "high", None):
+        with pytest.raises(ValueError):
+            image_jobs.ImageSpec(prompt="x", priority=bad)
+
+
+def test_the_band_reaches_the_rig_arguments():
+    """The spec is only worth validating if it lands in the tool call."""
+    forge = image_jobs.ClawForge(ENDPOINT)
+    seen: dict = {}
+
+    async def fake_tool_json(tool, args, **kw):
+        seen.update(args)
+        return {"job_id": "rig-1", "seeds": [2975651872]}
+
+    async def drive():
+        forge._tool_json = fake_tool_json
+        res = await forge.enqueue(
+            image_jobs.ImageSpec(prompt="a teapot", priority=3),
+            callback_url="http://host/cb", callback_token="tok")
+        assert res.seed == 2975651872
+
+    asyncio.run(drive())
+    assert seen["priority"] == 3
+    assert seen["callback_url"] == "http://host/cb"
+    assert seen["callback_token"] == "tok"
+    assert seen["wait"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Structured error codes
+# --------------------------------------------------------------------------- #
+
+
+def _refusal(code: str) -> dict:
+    return {"isError": True,
+            "content": [{"type": "text",
+                         "text": f"Error executing tool generate_image: "
+                                 f"[{code}] the rig's own sentence"}],
+            "structuredContent": {"error": {"code": code,
+                                            "message": f"[{code}] …",
+                                            "tool": "generate_image"}}}
+
+
+@pytest.mark.parametrize("code,retryable", [
+    ("insufficient_vram", True),
+    ("backend_unavailable", True),
+    ("captioner_unavailable", True),
+    ("insufficient_compute_cap", False),
+    ("comfy_rejected", False),
+    ("workflow_not_found", False),
+    ("invalid_priority", False),
+    ("", False),
+])
+def test_the_structured_code_decides_retry_not_the_prose(code, retryable):
+    """The text carries the SDK's own "Error executing tool …: " prefix in
+    front of the [code], which is why matching it never worked."""
+    forge = image_jobs.ClawForge(ENDPOINT)
+    res = _refusal(code) if code else {"isError": True,
+                                       "content": [{"type": "text", "text": "boom"}]}
+
+    async def drive():
+        async def fake_call(*a, **k):
+            return res
+        forge.call = fake_call
+        with pytest.raises(image_jobs.ImageJobError) as e:
+            await forge._tool_json("generate_image", {})
+        assert e.value.retryable is retryable
+        assert e.value.code == code
+        if code:
+            assert "the rig's own sentence" in e.value.message
+
+    asyncio.run(drive())
+
+
+def test_a_retryable_refusal_waits_and_a_terminal_one_does_not(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    vram = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "[insufficient_vram] Not enough free VRAM — short by 15.9 GB",
+        code="insufficient_vram", retryable=True)))
+    asyncio.run(main._image_job_sweep())
+    assert [m for m in _messages(c, tid)
+            if m["id"] == vram["message_id"]][0]["metadata"]["status"] == "queued"
+
+    missing = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "[workflow_not_found] no such workflow", code="workflow_not_found")))
+    asyncio.run(main._image_job_sweep())
+    row = [m for m in _messages(c, tid) if m["id"] == missing["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "no such workflow" in row["content"]
+
+
+# --------------------------------------------------------------------------- #
+# Seeds
+# --------------------------------------------------------------------------- #
+
+
+def test_the_seed_is_stored_at_enqueue_and_exposed(env, monkeypatch):
+    """`seeds` is on the wait:false reply, populated before the graph is even
+    submitted — it is what makes "again, but…" possible later."""
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        enqueue=lambda spec: image_jobs.EnqueueResult(job_id="rig-1",
+                                                      seed=2975651872)))
+
+    asyncio.run(main._image_job_sweep())
+
+    assert c.get(f"/api/image-jobs/{body['job_id']}").json()["seed"] == 2975651872
+
+
+def test_the_finished_picture_carries_its_seed_in_metadata_only(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    body = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        enqueue=lambda spec: image_jobs.EnqueueResult(job_id="rig-1",
+                                                      seed=2975651872),
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+
+    asyncio.run(drive())
+
+    row = [m for m in _messages(c, tid) if m["id"] == body["message_id"]][0]
+    assert row["metadata"]["seed"] == 2975651872
+    assert "2975651872" not in row["content"], "machinery, not something to read"
+
+
+def test_the_seed_is_read_off_the_poll_when_the_enqueue_had_none():
+    assert image_jobs._first_seed({"seeds": [7]}) == 7
+    assert image_jobs._first_seed({"seed": 7}) == 7
+    assert image_jobs._first_seed({"seeds": []}) is None
+    assert image_jobs._first_seed({"seeds": ["7"]}) is None

@@ -226,6 +226,8 @@ write `0` when you mean off.
 DISPATCH_CLAWFORGE_URL=         # the image server's MCP endpoint, e.g.
                                 #   http://192.0.2.5:8700/mcp
 DISPATCH_CLAWFORGE_FILES_URL=   # optional; defaults to /files/ on the same host
+DISPATCH_CALLBACK_BASE=         # optional; DisPatch's own origin AS THE RIG
+                                #   SEES IT, e.g. http://192.0.2.37:8765
 DISPATCH_IMAGE_JOBS=auto        # auto (default) | 1 | 0
 ```
 
@@ -241,8 +243,32 @@ Two switches have to agree before anything happens: this one, and
 shipped bot, for the same reason reactions are — it spends shared GPU time and
 puts a picture into a family conversation.
 
+**`DISPATCH_CALLBACK_BASE` is an optimisation, not a requirement.** Set it and
+each submitted job carries a `callback_url` plus a per-job token, so the image
+server can say "this one is finished" instead of DisPatch noticing on its next
+poll — terminal transitions land in about a second rather than within five. It
+cannot be derived, because it is what *the image server* has to dial to reach
+this box; leave it empty (the default) and the worker polls exactly as before.
+The callback route (`POST /api/image-jobs/<job_id>/callback`) authenticates on
+that per-job token alone, **discards the request body**, and re-polls the rig
+itself, so a forged call can at worst cost one wasted poll. The safety net is
+unchanged either way: every job still has a ten-minute deadline, and the sweep
+still runs on its own cadence.
+
+Jobs submitted through a thread go to the image server's **interactive** queue
+band (`priority: 1`); `POST /api/image-jobs` accepts an explicit `priority` of
+`1`, `2` or `3` if a caller knows its picture is not urgent. Reaction- and
+avatar-pool refills submit at `3` (background), so a shelf top-up never puts a
+waiting family member behind it.
+
+A render can also end as **cancelled** — DisPatch withdraws one that has passed
+its deadline or whose thread was deleted, and an operator interrupting the job
+on the rig produces the same thing. That is its own visible ending ("✋ The
+image was cancelled on the rig."), not counted as a failure in `/api/health`.
+
 The expected server speaks MCP over streamable HTTP and offers
-`generate_image` (with `wait: false`), `get_job` and a `/files/<path>` route;
+`generate_image` (with `wait: false`), `get_job`, `cancel_job` and a
+`/files/<path>` route;
 [ClawForge](https://github.com/) is the reference implementation. Nothing else
 is assumed: DisPatch validates the returned bytes are a real image over 10 KB
 before any of it reaches a chat window.

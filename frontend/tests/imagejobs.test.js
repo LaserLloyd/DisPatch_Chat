@@ -59,3 +59,34 @@ test('metadata fields are coerced, so a mangled row cannot inject a non-string',
   assert.equal(job.jobId, '7');
   assert.equal(job.error, '');
 });
+
+test('cancelled is a terminal state of its own, not an unknown one', () => {
+  const job = imageJobState(msg({ kind: KIND, status: 'cancelled', error: 'stopped' },
+                                '✋ The image was cancelled on the rig.'));
+  assert.ok(job, 'a withdrawn render must still render its card');
+  assert.equal(job.status, 'cancelled');
+  assert.equal(job.pending, false);
+  assert.equal(job.error, 'stopped');
+});
+
+test('progress is exposed as a rounded percentage, or null', () => {
+  const with_p = imageJobState(msg({
+    kind: KIND, status: 'running', progress: { step: 15, steps: 32, percent: 46.9 },
+  }));
+  assert.equal(with_p.percent, 47);
+  assert.equal(imageJobState(msg({ kind: KIND, status: 'running' })).percent, null);
+});
+
+test('a junk progress block is dropped rather than rendered', () => {
+  for (const progress of ['soon', null, 42, { percent: 'half' }, { percent: NaN }]) {
+    assert.equal(imageJobState(msg({ kind: KIND, status: 'running', progress })).percent,
+                 null, JSON.stringify(progress));
+  }
+});
+
+test('a percentage out of range is clamped, not shown as-is', () => {
+  const over = imageJobState(msg({ kind: KIND, status: 'running', progress: { percent: 146 } }));
+  const under = imageJobState(msg({ kind: KIND, status: 'running', progress: { percent: -5 } }));
+  assert.equal(over.percent, 100);
+  assert.equal(under.percent, 0);
+});

@@ -299,6 +299,14 @@ class Settings:
     # Where the finished files are served from. Defaults to /files/ on the same
     # origin as the MCP endpoint, which is how the reference server lays it out.
     clawforge_files_url: str = env("CLAWFORGE_FILES_URL", "").strip()
+    # Origin the image server can POST a completion callback back to, e.g.
+    # "http://192.0.2.37:8765" — DisPatch's own address AS THE RIG SEES IT,
+    # which is why it cannot be derived: the rig is on another machine, so
+    # neither the bind address nor a request's Host header is it. Empty (the
+    # default) means the feature is off and the worker is pure polling; a
+    # callback is only ever an optimisation over the sweep, never a
+    # replacement for it.
+    callback_base: str = env("CALLBACK_BASE", "").strip().rstrip("/")
     image_jobs_enabled: bool = _image_jobs_default(
         env("IMAGE_JOBS", "auto"), env("CLAWFORGE_URL", ""))
     harness_unit: str = env("HARNESS_UNIT", "dsh-web.service")

@@ -695,7 +695,9 @@ def generate_pair(bot_id: str) -> str | None:
     out_dir = _generate_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    argv = [str(_IMAGE_CLI), "--count", "1",
+    # Background band: a pool pair is drawn for a thread that does not exist
+    # yet, so it yields to anything with a person waiting on it.
+    argv = [str(_IMAGE_CLI), "--count", "1", "--priority", "3",
             "--ratio", bank["ratio"] or "1:1", "--output", str(out_dir)]
     style = st.config.style or bank["style"]
     workflow = st.config.workflow or bank["workflow"]

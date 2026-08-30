@@ -51,6 +51,10 @@ address of somebody's GPU box is site configuration, not something to ship in
 a public repository, and "auto" mode keys off exactly this — the feature is on
 when an operator has pointed it at a server and off otherwise.
 ``DISPATCH_CLAWFORGE_FILES_URL`` defaults to ``/files/`` on the same origin.
+``DISPATCH_CALLBACK_BASE`` is DisPatch's own origin as the rig sees it; set, it
+arms a completion callback per job, which only makes terminal transitions
+arrive sooner. Unset (the default) the worker is pure polling and behaves
+exactly as it did before callbacks existed.
 """
 
 from __future__ import annotations
@@ -108,13 +112,30 @@ class ImageJobError(Exception):
     not a traceback, and not a 4 KB wall of rig log.
     """
 
-    def __init__(self, message: str, *, retryable: bool = False):
+    def __init__(self, message: str, *, retryable: bool = False,
+                 code: str = ""):
         super().__init__(message)
         self.message = _clip(message)
-        # Retryable failures are transport-shaped (the rig briefly unreachable);
-        # the worker keeps polling until the deadline instead of giving up on
-        # the first blip. A refusal from the rig itself is never retryable.
+        # Retryable failures are transport-shaped (the rig briefly unreachable)
+        # or a refusal the rig itself says is temporary; the worker keeps
+        # polling until the deadline instead of giving up on the first blip.
+        # Everything else is terminal on the spot.
         self.retryable = retryable
+        # The rig's machine-readable reason, when it gave one. Kept alongside
+        # the prose rather than instead of it: the sentence is what a human
+        # reads in the thread, the code is what the worker decides on.
+        self.code = code
+
+
+#: Refusal codes the rig says are worth another attempt before the deadline.
+#: Anything else — a workflow that does not exist, a graph ComfyUI rejected, a
+#: GPU that is the wrong generation — will refuse identically in a minute, and
+#: retrying it only delays the visible failure.
+RETRYABLE_CODES = frozenset({
+    "insufficient_vram",        # a co-tenant is holding the card; it frees up
+    "backend_unavailable",      # ComfyUI was starting or briefly down
+    "captioner_unavailable",    # the captioner's LLM backend was busy
+})
 
 
 def _clip(text: str, limit: int = 300) -> str:
@@ -240,12 +261,19 @@ class ClawForge:
         telling you *why*, in a sentence ("Not enough free VRAM … short by
         15.9 GB"). Raise it verbatim rather than flattening every failure to
         "no image returned".
+
+        The retry decision comes from ``structuredContent.error.code``, not
+        from the prose: the text carries the SDK's own "Error executing tool
+        <name>: " prefix in front of the ``[code]``, so matching it is exactly
+        the kind of parse that reads fine and silently stops working.
         """
         res = await self.call(tool, args, timeout=timeout)
         blocks = [b for b in (res.get("content") or []) if isinstance(b, dict)]
         text = " ".join((b.get("text") or "") for b in blocks).strip()
         if res.get("isError"):
-            raise ImageJobError(text or f"{tool} failed (no reason given)")
+            code = _error_code(res)
+            raise ImageJobError(text or f"{tool} failed (no reason given)",
+                                code=code, retryable=code in RETRYABLE_CODES)
         for b in blocks:
             t = (b.get("text") or "").strip()
             if t.startswith("{"):
@@ -255,16 +283,27 @@ class ClawForge:
                     continue
         return {}
 
-    async def enqueue(self, spec: ImageSpec) -> EnqueueResult:
+    async def enqueue(self, spec: ImageSpec, *, callback_url: str = "",
+                      callback_token: str = "") -> EnqueueResult:
         """Start a render WITHOUT waiting for it.
 
         ``wait=false`` is what makes the whole feature possible: it returns a
         job id in about a second even when the queue is deep. Two answers are
         legitimate and both are handled — a job id (the normal case) and, on a
         completely idle rig, the finished file straight away.
+
+        A ``callback_url`` asks the rig to POST once when the job reaches a
+        terminal state. It is an optimisation on top of the poll, never a
+        replacement: the rig makes three attempts and then gives up with a log
+        line, so the sweep stays the thing that makes a lost job impossible.
         """
         args: dict[str, Any] = {"prompt": spec.prompt, "wait": False,
-                                "client": self.client_name}
+                                "client": self.client_name,
+                                "priority": spec.priority}
+        if callback_url:
+            args["callback_url"] = callback_url
+            if callback_token:
+                args["callback_token"] = callback_token
         if spec.workflow:
             args["workflow"] = spec.workflow
         if spec.negative:
@@ -295,7 +334,20 @@ class ClawForge:
         if state in ("failed", "cancelled") and not err:
             err = str(res.get("note") or f"render {state}")
         return PollResult(state=state, done=done, files_rel=rel,
-                          error=_clip(err), seed=_first_seed(res))
+                          error=_clip(err), seed=_first_seed(res),
+                          progress=_progress(res))
+
+    async def cancel(self, job_id: str) -> dict:
+        """Withdraw a render from the rig. Best effort by contract.
+
+        Cancelling a job that already finished is a NORMAL reply on this rig
+        (``cancelled: false`` and a note), not an error — which is what makes
+        it safe to call from the timeout path without racing the completion.
+        Callers still treat every outcome, including a raise, as advisory: the
+        job is failed locally either way.
+        """
+        return await self._tool_json(
+            "cancel_job", {"job_id": job_id, "client": self.client_name})
 
     async def fetch(self, files_rel: str) -> bytes:
         """Pull the finished image and prove it is one.
@@ -345,6 +397,42 @@ def _first_rel(res: dict) -> str:
         if isinstance(first, str) and first.strip():
             return first.strip()
     return ""
+
+
+def _error_code(res: dict) -> str:
+    """``structuredContent.error.code`` off an ``isError`` result, or "".
+
+    Defensive at every level: a server that has not shipped structured errors
+    yet, or one that answers with a differently-shaped block, must degrade to
+    "no code" (and therefore to the pre-existing terminal-on-refusal
+    behaviour) rather than raising inside the error path.
+    """
+    sc = res.get("structuredContent")
+    err = sc.get("error") if isinstance(sc, dict) else None
+    code = err.get("code") if isinstance(err, dict) else None
+    return str(code).strip()[:64] if isinstance(code, str) else ""
+
+
+def _progress(res: dict) -> dict | None:
+    """``{step, steps, percent}`` off a poll, or None.
+
+    Stage progress, not job progress: a workflow with two samplers runs 0→100
+    twice and a finished job reports nothing at all. Stored and shown as a
+    number for exactly that reason — anything derived from it (an ETA, a
+    monotonic bar) would be wrong the moment a second sampler starts.
+    """
+    p = res.get("progress")
+    if not isinstance(p, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key in ("step", "steps"):
+        v = p.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100_000:
+            out[key] = v
+    pct = p.get("percent")
+    if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+        out["percent"] = round(max(0.0, min(100.0, float(pct))), 1)
+    return out or None
 
 
 def _first_seed(res: dict) -> int | None:
@@ -416,6 +504,11 @@ class ImageSpec:
     height: int | None = None
     negative: str = ""
     caption: str = ""
+    #: Queue band on the rig: 1 interactive, 2 normal, 3 background. Defaults
+    #: to 1 because every job this class describes has a placeholder message
+    #: sitting in a thread with somebody looking at it; the pool refills, which
+    #: nobody is waiting on, go through the image CLI and pass 3 there.
+    priority: int = 1
 
     def __post_init__(self) -> None:
         self.prompt = (self.prompt or "").strip()
@@ -435,12 +528,19 @@ class ImageSpec:
                 raise ValueError(f"{name} must be between 64 and 4096")
         if (self.width is None) != (self.height is None):
             raise ValueError("give both width and height, or neither")
+        try:
+            self.priority = int(self.priority)
+        except (TypeError, ValueError):
+            raise ValueError("priority must be 1, 2 or 3")
+        if self.priority not in (1, 2, 3):
+            raise ValueError("priority must be 1, 2 or 3")
 
     def to_json(self) -> str:
         return json.dumps({"prompt": self.prompt, "workflow": self.workflow,
                            "ratio": self.ratio, "width": self.width,
                            "height": self.height, "negative": self.negative,
-                           "caption": self.caption}, sort_keys=True)
+                           "caption": self.caption,
+                           "priority": self.priority}, sort_keys=True)
 
     @classmethod
     def from_json(cls, blob: str) -> ImageSpec:
@@ -448,7 +548,11 @@ class ImageSpec:
         return cls(prompt=d.get("prompt", ""), workflow=d.get("workflow", ""),
                    ratio=d.get("ratio", ""), width=d.get("width"),
                    height=d.get("height"), negative=d.get("negative", ""),
-                   caption=d.get("caption", ""))
+                   caption=d.get("caption", ""),
+                   # A row written before priority existed reads back as 1,
+                   # which is what it was submitted as in every practical
+                   # sense: it was a chat request with somebody waiting.
+                   priority=d.get("priority", 1))
 
 
 @dataclass
@@ -465,6 +569,7 @@ class PollResult:
     files_rel: str = ""
     error: str = ""
     seed: int | None = None
+    progress: dict | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -517,18 +622,26 @@ def new_job_id() -> str:
 # --------------------------------------------------------------------------- #
 # Job states
 #
-# Three of the four are self-explanatory; the split between QUEUED and RUNNING
-# exists so the resume-after-restart path can tell "we wrote the placeholder
-# but never got a job id out of the rig" (unrecoverable — nothing to poll)
-# apart from "the rig has it, keep polling" (recoverable).
+# The split between QUEUED and RUNNING exists so the resume-after-restart path
+# can tell "we wrote the placeholder but never got a job id out of the rig"
+# (unrecoverable — nothing to poll) apart from "the rig has it, keep polling"
+# (recoverable).
+#
+# CANCELLED is a THIRD terminal outcome, not a flavour of failure: the rig
+# reports it when the render was withdrawn — by our own timeout path, by a
+# thread being deleted under it, or by an operator pressing Interrupt in a
+# ComfyUI tab on the rig. It can therefore arrive without DisPatch asking for
+# it, and a worker that only branches on "failed" would read it as still
+# pending and wait out the whole deadline.
 # --------------------------------------------------------------------------- #
 
 QUEUED = "queued"       # placeholder written, not yet accepted by the rig
 RUNNING = "running"     # the rig has a job id for it
 DONE = "done"
 FAILED = "failed"
+CANCELLED = "cancelled"
 OPEN_STATES = (QUEUED, RUNNING)
-TERMINAL_STATES = (DONE, FAILED)
+TERMINAL_STATES = (DONE, FAILED, CANCELLED)
 
 
 # --------------------------------------------------------------------------- #

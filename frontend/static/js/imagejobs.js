@@ -32,12 +32,22 @@ export const KIND = 'image_job';
  * frontend suite has no browser, and the interesting logic here is "which of
  * these four states am I in", not "what class name did I set".
  */
+// The states a card may render. `cancelled` is a THIRD terminal outcome, not a
+// flavour of failure: the render was withdrawn (a deadline, a deleted thread,
+// somebody pressing Interrupt on the rig itself), and the server writes a
+// different sentence for it. An unknown status renders nothing rather than a
+// card labelled with a string this file has never heard of.
+const STATUSES = ['queued', 'running', 'done', 'failed', 'cancelled'];
+
 export function imageJobState(msg) {
   const meta = msg && msg.metadata;
   if (!meta || meta.kind !== KIND) return null;
   const status = String(meta.status || '');
-  if (status !== 'queued' && status !== 'running'
-      && status !== 'done' && status !== 'failed') return null;
+  if (!STATUSES.includes(status)) return null;
+  const p = (meta.progress && typeof meta.progress === 'object') ? meta.progress : null;
+  const pct = p && typeof p.percent === 'number' && isFinite(p.percent)
+    ? Math.max(0, Math.min(100, Math.round(p.percent)))
+    : null;
   return {
     status,
     // queued and running are the same thing to a reader: it has not arrived.
@@ -45,6 +55,9 @@ export function imageJobState(msg) {
     jobId: String(meta.job_id || ''),
     error: String(meta.error || ''),
     caption: String(meta.caption || ''),
+    // Per-STAGE progress: a workflow with two samplers runs 0→100 twice, so
+    // this is a number to show, never something to derive an ETA from.
+    percent: pct,
   };
 }
 
@@ -79,5 +92,10 @@ export function imageJobMessageEl(msg) {
     class: 'image-job-text',
     text: msg.content || (job.pending ? '🖼️ Generating an image…' : '⚠️ image failed'),
   }));
+  if (job.pending && job.percent !== null) {
+    // Text, not a bar: the number can go backwards when a second stage
+    // starts, and a bar that resets reads as a bug rather than as progress.
+    card.append(el('span', { class: 'image-job-percent', text: `${job.percent}%` }));
+  }
   return card;
 }
