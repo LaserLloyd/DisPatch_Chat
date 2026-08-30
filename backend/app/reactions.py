@@ -1117,7 +1117,14 @@ def extract_markers(content: str, *, bot_id: str | None = None,
             # no row, no log, nothing on /api/health. Tick the counter so a
             # bot spending its replies on a mood that does not exist for it is
             # visible instead of merely quiet.
-            note_fire_failure(m.group(1), "unknown reaction id", actor=bot_id or "")
+            #
+            # ONLY when a bot is speaking. The same strip runs on user/system
+            # text (/api/inject, the WS send path) purely to keep marker syntax
+            # out of chat bubbles — a human typing `:react:typo:` never could
+            # fire, so counting it as a fire FAILURE would fill the health
+            # counter with noise the counter exists to keep meaningful.
+            if bot_id:
+                note_fire_failure(m.group(1), "unknown reaction id", actor=bot_id)
         elif r.id not in found and len(found) < MAX_MARKERS_PER_MESSAGE:
             found.append(r.id)
         return ""

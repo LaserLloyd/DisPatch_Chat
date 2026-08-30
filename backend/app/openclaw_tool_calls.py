@@ -8,7 +8,7 @@ ORDINARY TEXT instead of as structured tool calls — three shapes:
   * Harmony     ``<|channel|>commentary to=exec code<|message|>{...}<|call|>``
   * XML-ish     ``<function=exec><parameter=cmd>ls</parameter></function>``
 
-These are exactly what the LOCAL the local model server models (Doxy, Charley, beta) emit
+These are exactly what the LOCAL models (Doxy, Charley, beta) emit
 when a chat template's tool grammar is not honoured by the runtime, and
 DisPatch had no equivalent stage — so the raw block reached the family chat
 verbatim, JSON payload and all.

@@ -1397,6 +1397,10 @@ GATEWAY_DIST_ANCHORS: dict[str, str] = {
     "_SCAFFOLDING_TAGS": "system-reminder",
     "_PROMPT_DATA_TAG_NAMES": "untrusted-text",
     "_MODEL_SPECIAL_TOKEN_RE": r"<[|｜][^|｜]*[|｜]>",
+    # The private-use citation delimiter (U+E200). Copied from the Control UI's
+    # markdown module; the same codepoint also appears in the dist root's
+    # payload module, which is what this (root-glob) tripwire scans.
+    "_CITATION_RE": "\ue200",
     "_MEMORY_TAG_RE": r"relevant[-_]memories\b",
     "_REASONING_TAG_NAME": r"(?:(?:antml:|mm:)?(?:think(?:ing)?|thought)|antthinking)",
     "_MINIMAX_TOOL_XML_RE": r"<\/?minimax:tool_call>",

@@ -203,12 +203,30 @@ async def test_an_unresolvable_marker_ticks_the_failure_counter(rx_env):
     signal at once. Now the failure half is counted.
     """
     baseline = reactions.fire_failure_stats()["failures_24h"]
-    text, ids = reactions.extract_markers("Nice one :react:no_such_mood_at_all:")
+    text, ids = reactions.extract_markers(
+        "Nice one :react:no_such_mood_at_all:", bot_id="main")
     assert ids == []
     assert "no_such_mood_at_all" not in text
     stats = reactions.fire_failure_stats()
     assert stats["failures_24h"] == baseline + 1
     assert stats["recent"][-1]["key"] == "no_such_mood_at_all"
+    assert stats["recent"][-1]["actor"] == "main"
+
+
+async def test_a_users_typo_marker_is_not_a_fire_failure(rx_env):
+    """The counter counts AGENT fires going nowhere, and only those.
+
+    The same strip runs on user/system text (/api/inject with a user role, the
+    WS send path) purely to keep marker syntax out of chat bubbles. A human
+    typing `:react:typo:` never could fire — counting it would fill
+    `reaction_fire_failures_24h` with noise and bury the signal the counter
+    was added to surface. No ``bot_id`` means nobody's fire failed.
+    """
+    baseline = reactions.fire_failure_stats()["failures_24h"]
+    text, ids = reactions.extract_markers("oops :react:no_such_mood_at_all:")
+    assert ids == []
+    assert "no_such_mood_at_all" not in text
+    assert reactions.fire_failure_stats()["failures_24h"] == baseline
 
 
 async def test_a_resolvable_marker_does_not_tick_the_counter(rx_env):
