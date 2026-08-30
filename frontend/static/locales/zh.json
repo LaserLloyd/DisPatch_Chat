@@ -650,7 +650,7 @@
   "about": {
     "title": "关于",
     "version": "DisPatch Chat {version}",
-    "license": "自由软件，采用 GNU Affero General Public License v3 授权。",
+    "license": "自由软件，采用 MIT 许可证授权。",
     "source": "源代码"
   },
   "dash": {

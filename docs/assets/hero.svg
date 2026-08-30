@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img"
-     aria-label="DisPatch Chat — a self-hosted chat app for your household and your AI agents. AGPL-3.0, one process, one SQLite file, no cloud.">
+     aria-label="DisPatch Chat — a self-hosted chat app for your household and your AI agents. MIT-licensed, one process, one SQLite file, no cloud.">
   <defs>
     <pattern id="grid" width="46" height="46" patternUnits="userSpaceOnUse">
       <path d="M 46 0 H 0 V 46" fill="none" stroke="#18202a" stroke-width="1"/>
@@ -40,7 +40,7 @@
   <line x1="64" y1="266" x2="214" y2="266" stroke="#ffb64a" stroke-width="5" stroke-linecap="round"/>
   <text x="62" y="312" font-family="system-ui, &apos;Segoe UI&apos;, Roboto, &apos;Helvetica Neue&apos;, Arial, sans-serif" font-size="27" fill="#9aabbc">Your household, your hardware, your AI.</text>
 
-  <text x="64" y="372" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="4" fill="#5f7386">AGPL-3.0 &#183; ONE PROCESS &#183; ONE SQLITE FILE &#183; NO CLOUD</text>
+  <text x="64" y="372" font-family="ui-monospace, &apos;Cascadia Code&apos;, &apos;SF Mono&apos;, Menlo, Consolas, monospace" font-size="16" letter-spacing="4" fill="#5f7386">MIT &#183; ONE PROCESS &#183; ONE SQLITE FILE &#183; NO CLOUD</text>
 
   <!-- conversation motif: a human bubble, an agent bubble, a locked tier -->
   <g transform="translate(726 70)" opacity="0.95">

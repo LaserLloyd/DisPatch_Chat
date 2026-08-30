@@ -40,9 +40,9 @@ not a code change.
       `.github/ISSUE_TEMPLATE/config.yml` — it points at
       `https://github.com/LaserLloyd/dispatch-chat/discussions`, which does not exist
       until the feature is switched on.
-- [ ] **Add an About/Source link in Settings.** AGPL §13 obliges an operator to
-      offer the source to network users; the README states the obligation but
-      the app does not yet discharge it. A "Source" entry in Settings → About,
+- [ ] **Add an About/Source link in Settings.** Network users never see the
+      README, so the app is the only place that can tell them what they are
+      running and where its source is. A "Source" entry in Settings → About,
       pointing at the repository, closes it. (Frontend change — no environment
       variable: the URL should be a JS constant, not a setting.)
 - [ ] **Tag `v1.0.0`.** `CHANGELOG.md` carries a `1.0.0 — unreleased` section.
@@ -120,9 +120,9 @@ Kept so these are not re-proposed. Each was verified in the tree, not just remem
   HEALTHCHECK reads `db_integrity_ok`. The host dashboard covers the rest of what this
   item asked for. (The avatar directory is the one field still missing — folded into §1.)
 - **`backend/app/main.py.bak-packregen`** is gone from the tree.
-- **`LICENSE` added** (GNU AGPL v3), and the Dockerfile's
-  `org.opencontainers.image.licenses` label corrected from `MIT` to `AGPL-3.0-only` to
-  match it. If the intent was "or later", change the label to `AGPL-3.0-or-later` —
-  it is a licensing statement, so it should say what the owner means.
+- **`LICENSE` added**, and the Dockerfile's `org.opencontainers.image.licenses`
+  label kept in step with it. (The project shipped under the GNU AGPL v3 at first and
+  was relicensed to MIT by the owner in August 2026; `LICENSE`, the label, the
+  `pyproject.toml` metadata and the in-app About row all say MIT now.)
 - **Startup warning when the app is wide open**, plus the loopback-by-default bind in
   `config.py`.

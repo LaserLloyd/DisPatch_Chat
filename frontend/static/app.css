@@ -2687,7 +2687,7 @@ body.popout .app { grid-template-columns: 1fr; padding-bottom: 0; }
    so the locked state earns its own cue rather than relying on opacity. */
 .lock-nim.is-locked { cursor: default; }
 
-/* --- About (Settings -> Device): version + the AGPL §13 source offer. ------ */
+/* --- About (Settings -> Device): version + the source link. --------------- */
 .about-row {
   margin-top: 14px;
   padding-top: 12px;

@@ -680,7 +680,7 @@
   "about": {
     "title": "Acerca de",
     "version": "DisPatch Chat {version}",
-    "license": "Software livre sob a GNU Affero General Public License v3.",
+    "license": "Software livre sob a licença MIT.",
     "source": "Código-fonte"
   },
   "dash": {

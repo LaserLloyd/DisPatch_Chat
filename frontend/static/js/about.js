@@ -1,21 +1,21 @@
 // The "About" row: what this install is, and where its source lives.
 //
-// This is not decoration. DisPatch is AGPL-3.0, and §13 of that licence says
-// that if users interact with the program remotely over a network — which is
-// exactly what every family device on :8765 does — they must be offered the
-// Corresponding Source. A link in the README does not reach them; a row in the
-// app does. It therefore lives in the DEVICE pane, the one settings tab a
-// Safe-Mode session can open, so the offer reaches every user and not just the
+// This is not decoration. Every family device on :8765 uses this program over
+// the network and never sees the repository, so the app itself is the only
+// place that can tell them what they are running and where its source is. MIT
+// does not oblige the offer — it is made because a user of a program should be
+// able to find out what it is. It lives in the DEVICE pane, the one settings
+// tab a Safe-Mode session can open, so it reaches every user and not just the
 // operator.
 //
 // One constant, one place to change it.
 
-/** Where the Corresponding Source for THIS build lives.
+/** Where the source for THIS build lives.
  *
- *  <!-- FORK NOTE: if you modify DisPatch and let anyone else use it over a
- *  network, AGPL §13 obliges you to offer YOUR modified source — not ours. Point
- *  this at your own repository. `OWNER` is a placeholder that the release
- *  tooling rewrites repo-wide; a fork must set it by hand. -->
+ *  <!-- FORK NOTE: if you modify DisPatch, point this at YOUR repository — a
+ *  link to ours would send your users to code you are not running. `OWNER` is a
+ *  placeholder that the release tooling rewrites repo-wide; a fork must set it
+ *  by hand. -->
  */
 export const SOURCE_URL = 'https://github.com/LaserLloyd/dispatch-chat';
 
@@ -55,7 +55,7 @@ export function aboutRow(t) {
   licence.className = 'about-line muted';
   licence.setAttribute('data-i18n', 'about.license');
   licence.textContent = t ? t('about.license')
-                         : 'Free software under the GNU AGPL v3.';
+                         : 'Free software under the MIT licence.';
 
   const link = document.createElement('a');
   link.className = 'about-source';

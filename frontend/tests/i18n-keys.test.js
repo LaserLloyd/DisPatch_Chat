@@ -145,7 +145,7 @@ test('the no-FOUC language lists match js/i18n.js', () => {
     'index.html RTL and i18n.js RTL_LANGS disagree');
 });
 
-// The About row (AGPL §13) shows a version number to every user, including
+// The About row shows a version number to every user, including
 // Safe-Mode sessions that cannot reach /api/dashboard. It is therefore a
 // constant in the frontend, and a constant drifts.
 test('about.js APP_VERSION matches the backend', () => {

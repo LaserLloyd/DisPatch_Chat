@@ -3,7 +3,7 @@
 Everything in `frontend/static/vendor/` is third-party code, copied here verbatim so the
 app never fetches a script or stylesheet from a CDN at runtime. These files are
 **redistributed under their own upstream licenses**, listed below. The DisPatch Chat
-project license (AGPL-3.0-only) does **not** apply to them.
+project license (MIT) does **not** apply to them.
 
 Do not edit these files by hand. To upgrade one, replace it with a fresh upstream build
 and update the version in the table below.

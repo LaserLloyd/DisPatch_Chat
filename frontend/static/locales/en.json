@@ -665,7 +665,7 @@
   "about": {
     "title": "About",
     "version": "DisPatch Chat {version}",
-    "license": "Free software under the GNU Affero General Public License v3.",
+    "license": "Free software under the MIT licence.",
     "source": "Source code"
   },
   "dash": {

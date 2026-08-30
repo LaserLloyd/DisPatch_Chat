@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="DisPatch Chat — a self-hosted chat app for your household and your AI agents. AGPL-3.0, one process, one SQLite file, no cloud." width="100%" />
+<img src="docs/assets/hero.svg" alt="DisPatch Chat — a self-hosted chat app for your household and your AI agents. MIT-licensed, one process, one SQLite file, no cloud." width="100%" />
 
 **A self-hosted chat app for you, your household, and your AI agents.**
 
@@ -188,7 +188,7 @@ docker compose up -d
 ```
 
 If you forked, or are running your own copy, one line repoints every reference
-in the tree at your own fork — image labels, the AGPL source offer, issue links:
+in the tree at your own fork — image labels, the in-app source link, issue links:
 
 ```bash
 grep -rl 'LaserLloyd/dispatch-chat' --exclude-dir=.git . \
@@ -359,11 +359,10 @@ Translation contributions are very welcome and are the easiest way to help.
 
 ## License
 
-Copyright (C) 2026 the DisPatch Chat authors.
+Copyright (c) 2026 Jake Lloyd. <!-- scrub-ok: the copyright holder is named on purpose — MIT is meaningless without an attributable notice, and this line mirrors LICENSE. -->
 
-[GNU AGPL v3](LICENSE). You can run, modify and share this freely. If you offer
-a modified version to other people over a network, you must offer them the
-source too.
+[MIT](LICENSE). You can run, modify, share and sell this freely — keep the
+copyright notice and the licence text with it, and it comes with no warranty.
 
 The vendored third-party libraries in `frontend/static/vendor/` keep their own
 licences (MIT, BSD-3-Clause, Apache-2.0/MPL-2.0) — inventory and full licence

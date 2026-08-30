@@ -650,7 +650,7 @@
   "about": {
     "title": "このアプリについて",
     "version": "DisPatch Chat {version}",
-    "license": "GNU Affero General Public License v3 のもとで公開されているフリーソフトウェアです。",
+    "license": "MIT ライセンスのもとで公開されているフリーソフトウェアです。",
     "source": "ソースコード"
   },
   "dash": {

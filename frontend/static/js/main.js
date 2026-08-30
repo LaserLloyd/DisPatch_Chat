@@ -29,7 +29,7 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=4';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
 import { renderPinnedRail, pinToggle } from './pins.js?v=2';
-import { aboutRow } from './about.js?v=1';
+import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=1';
 
 // ===================== Popout mode =====================
@@ -2216,9 +2216,9 @@ function mountLanguagePicker() {
     const pin = pinToggle(pinId, { t, onChange: renderPins });
     if (pin) row.append(pin);
   }
-  // About: version + the AGPL §13 source offer. In the Device pane on purpose —
-  // it is the one settings tab a Safe-Mode session can open, and §13 owes the
-  // offer to every user of the running program, not just the operator.
+  // About: version + the source link. In the Device pane on purpose — it is the
+  // one settings tab a Safe-Mode session can open, so every user of the running
+  // program can see what it is, not just the operator.
   const oldAbout = document.getElementById('about-row');
   if (oldAbout) oldAbout.remove();
   const ab = aboutRow(t);

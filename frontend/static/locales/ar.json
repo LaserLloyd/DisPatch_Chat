@@ -725,7 +725,7 @@
   "about": {
     "title": "حول",
     "version": "DisPatch Chat {version}",
-    "license": "برنامج حر بموجب رخصة GNU Affero General Public License v3.",
+    "license": "برنامج حر بموجب رخصة MIT.",
     "source": "الشيفرة المصدرية"
   },
   "dash": {
