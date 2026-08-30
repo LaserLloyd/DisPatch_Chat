@@ -79,6 +79,26 @@ def _harness_default(flag: str) -> bool:
     return bool(explicit) and os.access(explicit, os.X_OK)
 
 
+def _image_jobs_default(flag: str, endpoint: str) -> bool:
+    """DISPATCH_IMAGE_JOBS: "auto" (default) = on iff an image server is
+    configured; truthy = on; anything else = off.
+
+    "Configured" is the whole test, and deliberately not "reachable": probing a
+    remote GPU box at import time would put a network round trip in front of
+    every boot and make the feature's availability depend on whether the rig
+    happened to be awake when DisPatch restarted. An operator who has set
+    DISPATCH_CLAWFORGE_URL has said what they want; a rig that is down then
+    fails the individual job, loudly, in the thread — which is the behaviour
+    this feature is built around anyway.
+    """
+    f = (flag or "").strip().lower()
+    if f in ("0", "false", "no", "off", ""):
+        return False
+    if f != "auto":
+        return True
+    return bool((endpoint or "").strip())
+
+
 def _default_data_dir() -> Path:
     xdg = os.environ.get("XDG_DATA_HOME")
     base = Path(xdg) if xdg else Path.home() / ".local" / "share"
@@ -269,6 +289,18 @@ class Settings:
     harness_enabled: bool = _harness_default(env("HARNESS", "auto"))
     # The systemd --user unit that runs `dsh web`, and the loopback port it
     # listens on (both must agree with the unit file).
+    # Agent-fired image jobs (app/image_jobs.py): a bot asks for a picture, a
+    # placeholder lands in the thread immediately, and DisPatch drives the
+    # image server in the background and rewrites that message when the render
+    # arrives. Off unless an image server is configured — there is no default
+    # endpoint, because the address of somebody's GPU box is site
+    # configuration, not something to ship.
+    clawforge_url: str = env("CLAWFORGE_URL", "").strip()
+    # Where the finished files are served from. Defaults to /files/ on the same
+    # origin as the MCP endpoint, which is how the reference server lays it out.
+    clawforge_files_url: str = env("CLAWFORGE_FILES_URL", "").strip()
+    image_jobs_enabled: bool = _image_jobs_default(
+        env("IMAGE_JOBS", "auto"), env("CLAWFORGE_URL", ""))
     harness_unit: str = env("HARNESS_UNIT", "dsh-web.service")
     harness_port: int = int(env("HARNESS_PORT", "3080") or 3080)
     # Gateway chat mirror: continuously tail OpenClaw's own conversations (the
@@ -335,6 +367,13 @@ class Bot:
     # first eligible thread each day wears the daily face instead of drawing.
     # See app/avatar_pool.py.
     avatar_pool: bool = False
+    # May this bot fire an IMAGE JOB — "draw this, put it in the thread when
+    # it's ready"? Off by default, and for the same reason reactions are: it
+    # spends time on a shared GPU and drops a picture into a family
+    # conversation, so it is a per-character opt-in rather than something every
+    # bot silently gains. Requires the feature itself to be configured
+    # (DISPATCH_CLAWFORGE_URL); see app/image_jobs.py.
+    image_jobs: bool = False
     # Direct-provider backend ("Connect an AI"). When present this bot does NOT
     # go through the agent CLI at all — its turns are HTTP calls to an LLM API.
     # Shape (every field optional except provider + model):
@@ -387,6 +426,7 @@ class Bot:
             "color": self.color,
             "reactions": self.reactions,
             "avatar_pool": self.avatar_pool,
+            "image_jobs": self.image_jobs,
             "api_provider": str((self.api or {}).get("provider") or ""),
         }
 
@@ -483,6 +523,7 @@ def _bot_entry(b: Bot) -> dict:
         "reactions": b.reactions,
         "reaction_autopilot": b.reaction_autopilot,
         "avatar_pool": b.avatar_pool,
+        "image_jobs": b.image_jobs,
     }
     if b.api:
         entry["api"] = dict(b.api)
@@ -604,6 +645,8 @@ def load_bots() -> list[Bot]:
                                               base.reaction_autopilot if base else False)),
                 avatar_pool=bool(e.get("avatar_pool",
                                        base.avatar_pool if base else False)),
+                image_jobs=bool(e.get("image_jobs",
+                                      base.image_jobs if base else False)),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,

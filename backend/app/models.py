@@ -20,6 +20,7 @@ class BotOut(BaseModel):
     safe: bool = False
     color: str = ""
     reactions: bool = False       # may this bot fire reaction images?
+    image_jobs: bool = False      # may this bot request a generated picture?
     # Which direct LLM provider backs this bot ("" = the agent backend). The id
     # only — never the base URL and never the key; see config.Bot.to_dict.
     api_provider: str = ""
@@ -149,6 +150,31 @@ class FireReactionIn(BaseModel):
     caption: str | None = Field(default=None, max_length=120)
     duration_ms: int | None = Field(default=None, ge=0, le=120_000)
     trace: bool = True          # leave the collapsed one-liner in the thread
+
+
+class ImageJobIn(BaseModel):
+    """Ask for a picture in a thread and get an id back, not a picture.
+
+    One call, and the agent's turn is free again: DisPatch writes the
+    placeholder, drives the image server, and rewrites that same message when
+    the render lands (or fails). `workflow` and the size fields are optional —
+    omitted, the image server picks its own default, which is what an agent
+    that does not know this rig's workflow names should do.
+    """
+
+    bot_id: str = Field(..., max_length=64)
+    thread_id: str = Field(..., max_length=128)
+    prompt: str = Field(..., max_length=2000)
+    workflow: str | None = Field(default=None, max_length=80)
+    # "3:2" style. Mutually exclusive with width/height in practice; the image
+    # server prefers explicit pixels when both arrive, and so do we.
+    ratio: str | None = Field(default=None, max_length=8)
+    width: int | None = Field(default=None, ge=64, le=4096)
+    height: int | None = Field(default=None, ge=64, le=4096)
+    negative: str | None = Field(default=None, max_length=2000)
+    # Shown with the finished picture, and in the pending line so the thread
+    # says what is coming rather than just that something is.
+    caption: str | None = Field(default=None, max_length=200)
 
 
 class ReactionPatchIn(BaseModel):

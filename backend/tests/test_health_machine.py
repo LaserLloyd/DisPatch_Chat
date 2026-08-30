@@ -30,7 +30,8 @@ BROWSER = {"Sec-Fetch-Site": "same-origin", "Origin": "http://testserver"}
 
 # Fields that are operator detail, not liveness.
 DETAIL_KEYS = {"data_dir", "clients", "last_backup_ok", "gateway_ok",
-               "avatar_snapshots_missing", "reaction_fire_failures_24h"}
+               "avatar_snapshots_missing", "reaction_fire_failures_24h",
+               "image_job_failures_24h"}
 
 
 def _client(tmp_path, monkeypatch, host: str):

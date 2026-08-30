@@ -62,6 +62,7 @@ from . import (
     gateway_router,
     gateway_ws,
     harness,
+    image_jobs,
     llm_api,
     openclaw,
     openclaw_text,
@@ -77,6 +78,7 @@ from .models import (
     DailyThreadIn,
     FireReactionIn,
     GenerateReactionIn,
+    ImageJobIn,
     InjectIn,
     MessageOut,
     ReactionPatchIn,
@@ -347,6 +349,10 @@ async def lifespan(app: FastAPI):
         log.warning("reaction pack heal at startup: %s", healed)
     # Rotating reaction pool: nightly per-mood top-up + low-water refill.
     _track(asyncio.create_task(_reaction_pool_loop()))
+    # Adopt or fail out image jobs left mid-render by the last shutdown BEFORE
+    # the worker starts, so the sweep never sees a half-state it has to guess at.
+    await _resume_image_jobs()
+    _track(asyncio.create_task(_image_job_loop()))
     # Backstop for answers every live path missed (see _gap_sweep_loop).
     _track(asyncio.create_task(_gap_sweep_loop()))
     # Native gateway transport. OFF unless DISPATCH_GATEWAY_WS says otherwise,
@@ -1188,9 +1194,19 @@ def _frame_bot(frame: dict) -> str | None:
 #   harness_state                same, for the DeepSeek Harness pane
 #   reaction_pool / avatar_pool  pool telemetry: batch sizes, prompts, rig
 #                                errors, absolute paths, every bot's id
+#   message_update               a message that was already delivered, rewritten
+#                                in place (an image job's placeholder becoming
+#                                the picture, or the ⚠️ line). Allowed because
+#                                it carries exactly a `message` frame's payload
+#                                and is redacted by exactly the same rules —
+#                                the bot must be safe, and the media is stripped
+#                                from the copy a locked device receives. A
+#                                locked device that legitimately saw the
+#                                placeholder must see it stop saying "pending",
+#                                or Safe Mode is where failures go to hide.
 _DECOY_FRAME_ALLOW = frozenset({
     "hello", "bots", "locked", "ack", "pong", "error",
-    "message", "stream_done", "message_deleted", "thinking",
+    "message", "message_update", "stream_done", "message_deleted", "thinking",
     "thread_update", "thread_created", "thread_deleted", "checklist_update",
     "threads_list", "threads", "messages", "reaction",
 })
@@ -1233,8 +1249,9 @@ def redact_for_decoy(frame: dict):
     # unknown attribution drops the frame (safe default). Plain "error" frames
     # are only dropped when they're attributed to an unsafe bot — validation
     # errors with no bot context must still reach the requester.
-    if t in ("message", "stream_done", "thread_update", "thread_created",
-             "thread_deleted", "thinking", "message_deleted", "checklist_update"):
+    if t in ("message", "message_update", "stream_done", "thread_update",
+             "thread_created", "thread_deleted", "thinking", "message_deleted",
+             "checklist_update"):
         bot = _frame_bot(frame)
         if bot not in safe:
             return None
@@ -1243,7 +1260,8 @@ def redact_for_decoy(frame: dict):
         if bot is not None and bot not in safe:
             return None
 
-    if t in ("message", "stream_done") and isinstance(frame.get("message"), dict):
+    if (t in ("message", "message_update", "stream_done")
+            and isinstance(frame.get("message"), dict)):
         return {**frame, "message": _redact_message_dict(frame["message"])}
     if t in ("thread_update", "thread_created") and isinstance(frame.get("thread"), dict):
         return {**frame, "thread": _redact_thread_dict(frame["thread"])}
@@ -1373,6 +1391,15 @@ _INBOUND_REACTION = {
 }
 
 
+# Agent-fired image jobs. Exactly two routes, and both belong on the machine
+# surface for the same reason the reaction fire does: this is a bot asking for
+# something, not an operator configuring something. Firing is POST, reading a
+# job's state is GET, and there is deliberately no list route — an agent that
+# has lost its job id has also lost the thread it was for, and the placeholder
+# message in that thread is the answer either way.
+_INBOUND_IMAGE_JOB_RE = re.compile(r"^/api/image-jobs(?:/[A-Za-z0-9_-]{1,64})?$")
+
+
 # Avatar management an on-box agent legitimately drives. Agents already
 # generate the images (the image CLI) and a cron rotates them daily — but the API
 # was full-session only, so that rotation had to be a shell script writing
@@ -1445,6 +1472,8 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if (method, path) in _INBOUND_REACTION:
         return True
+    if method in ("GET", "POST") and _INBOUND_IMAGE_JOB_RE.match(path):
+        return True
     if method in ("GET", "POST") and _INBOUND_AVATAR_RE.match(path):
         return True
     if method == "POST" and _INBOUND_THREAD_AVATAR_RE.match(path):
@@ -1487,6 +1516,12 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # refill) — full-session or on-box machine only; a
                         # locked device has no business with the shelf.
                         "/api/avatar-pool",
+                        # Image jobs: firing one spends GPU time and puts a
+                        # picture in a conversation, and reading one back names
+                        # the prompt and the rig's error text. Agents and the
+                        # operator only — a locked device sees the resulting
+                        # message (redacted) and nothing else.
+                        "/api/image-jobs",
                         # The terminal is arbitrary code execution — belt-and-
                         # braces here on top of _require_terminal's own gate.
                         # Same for the harness: a headless job runs a shell
@@ -1901,7 +1936,13 @@ async def _prepare_persist(
         # Autopilot fills the silence AFTER the demote so a collapsed tool
         # warning never earns a picture, and only for LIVE replies — a replay
         # that was too old to fire its own markers must not gain server ones.
-        if not fired and not replaying and bot_id and not (metadata or {}).get("sub"):
+        # An image-job placeholder is not a reply — it is a receipt for one
+        # that is still rendering. Letting autopilot decorate it would spend a
+        # one-shot pool image on "generating an image…", and then the row it
+        # decorated gets rewritten into something else entirely.
+        if (not fired and not replaying and bot_id
+                and not (metadata or {}).get("sub")
+                and (metadata or {}).get("kind") != "image_job"):
             bot = config.get_bot(bot_id)
             if bot is not None and bot.reactions and bot.reaction_autopilot:
                 mood = await _reaction_autopilot_mood(thread_id, content)
@@ -2265,6 +2306,291 @@ async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:
             thread_id, "assistant",
             f"⚠️ Reaction '{rid}' didn't fire: {reason}",
             metadata={"sub": True})
+
+
+# --------------------------------------------------------------------------- #
+# Image jobs — a placeholder now, the picture when it lands
+#
+# The agent's whole involvement is one POST. Everything below is deterministic:
+# write a real message saying a picture is coming, enqueue the render, poll it,
+# fetch it, prove it is an image, ingest it through the same path every other
+# picture takes, and rewrite that message. On any failure — a refusal from the
+# rig, a corrupt file, ten minutes gone — the same message becomes a visible
+# ⚠️ line instead. There is no branch that leaves it saying "pending".
+#
+# See app/image_jobs.py for the rig client and the rules; this half owns the
+# message, the broadcast and the Safe-Mode scoping.
+# --------------------------------------------------------------------------- #
+
+#: How often the worker sweeps open jobs.
+_IMAGE_JOB_TICK_S = 5.0
+
+
+def _image_jobs_configured() -> bool:
+    """Is the feature switched on AND pointed at a server?
+
+    Both halves matter: `DISPATCH_IMAGE_JOBS=1` on a box with no endpoint would
+    otherwise advertise a route that can only ever fail, and "auto" already
+    keys off the endpoint being set.
+    """
+    return bool(SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url)
+
+
+def _clawforge() -> image_jobs.ClawForge:
+    return image_jobs.ClawForge(SETTINGS.clawforge_url,
+                                files_url=SETTINGS.clawforge_files_url,
+                                client_name="dispatch")
+
+
+def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
+    """What the thread says while the render is in flight.
+
+    Deliberately readable on its own: this exact string is what a No-Image-Mode
+    device and a Safe-Mode device render (they get no card), and it is what
+    lands in the thread list preview. "Generating an image…" with nothing else
+    is a worse trace than one that says what of."""
+    what = spec.caption or spec.prompt
+    tail = f" — {what[:80]}" if what else ""
+    return f"🖼️ Generating an image…{tail}"
+
+
+def _image_job_failed_text(reason: str) -> str:
+    return f"⚠️ image failed: {reason}"
+
+
+def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
+                    *, error: str = "") -> dict:
+    meta = {"kind": "image_job", "job_id": job_id, "status": status,
+            "prompt": spec.prompt[:200], "caption": spec.caption}
+    if spec.workflow:
+        meta["workflow"] = spec.workflow
+    if error:
+        meta["error"] = error
+    return meta
+
+
+async def _broadcast_message_update(msg: MessageOut, thread_id: str) -> None:
+    """Tell open clients that an EXISTING message changed.
+
+    A second `message` frame would append a duplicate bubble, so this is its
+    own type — and being its own type means it had to be added to
+    _DECOY_FRAME_ALLOW deliberately, which is the point of that list being
+    default-deny. It carries the same payload as `message` and is redacted by
+    the same rules.
+    """
+    bot_id = await _bot_of_thread(thread_id)
+    await manager.broadcast({"type": "message_update", "thread_id": thread_id,
+                             "bot_id": bot_id, "message_id": msg.id,
+                             "message": msg.model_dump()})
+
+
+async def _rewrite_image_job_message(job: dict, content: str,
+                                     metadata: dict) -> None:
+    """Persist a new body for the placeholder and push it to open clients.
+
+    Both halves or neither, as far as the operator is concerned: a write that
+    lands but is not broadcast leaves every open tab showing a stale spinner
+    until it reloads, which is the same failure this feature exists to avoid.
+    The broadcast is best-effort *after* the durable write, so a dead WS
+    connection cannot roll back the row.
+    """
+    mid = job["message_id"]
+    await db.update_message_content(mid, content)
+    await db.update_message_metadata(mid, metadata)
+    msg = await db.get_message(mid)
+    if msg is not None:
+        with contextlib.suppress(Exception):
+            await _broadcast_message_update(msg, job["thread_id"])
+
+
+async def _fail_image_job(job: dict, reason: str) -> None:
+    """Terminal failure: the row, the message and the counter, in that order."""
+    reason = image_jobs._clip(reason, 200)
+    spec = _image_job_spec(job)
+    await db.update_image_job(job["id"], state=image_jobs.FAILED, error=reason)
+    await _rewrite_image_job_message(
+        job, _image_job_failed_text(reason),
+        _image_job_meta(job["id"], image_jobs.FAILED, spec, error=reason))
+    image_jobs.note_failure(job["id"], reason, bot=job.get("bot_id", ""))
+    log.info("image job %s failed: %s", job["id"], reason)
+
+
+def _image_job_spec(job: dict) -> image_jobs.ImageSpec:
+    """The stored spec, or a placeholder one if the row was hand-mangled.
+
+    A job whose spec no longer parses still has a message to rewrite, and
+    dying here would strand exactly the row this module promises never to
+    strand.
+    """
+    try:
+        return image_jobs.ImageSpec.from_json(job["spec"])
+    except Exception:
+        return image_jobs.ImageSpec(prompt="(unreadable request)")
+
+
+async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
+    """Store the bytes, rewrite the placeholder into the picture.
+
+    The file is written into MEDIA_DIR and then run through
+    ``_ingest_content_media`` — the same directive rewrite every agent-sent
+    picture goes through. That is not ceremony: it is what records the media
+    origin, what produces the `/media/<uuid>` URL the lightbox and the dedup
+    ledger expect, and what makes No-Image Mode and Safe Mode strip this
+    picture by the rules they already have, with no new code on either side.
+
+    Success is defined as the REWRITE happening. If the directive comes back
+    unchanged the ingest declined the file, and shipping the raw path would put
+    an absolute filesystem path into a chat bubble that renders as a broken
+    relative URL — the silent version of this failing.
+    """
+    spec = _image_job_spec(job)
+    suffix = image_jobs.image_suffix(data, files_rel)
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    dest = MEDIA_DIR / f"{uuid.uuid4().hex}{suffix}"
+
+    def _write() -> None:
+        tmp = dest.with_name(dest.name + ".part")
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)          # atomic: a torn file would 404 forever
+
+    await asyncio.to_thread(_write)
+
+    cap = f"|{spec.caption}" if spec.caption else ""
+    directive = f"[[media:{dest}{cap}]]"
+    content = await asyncio.to_thread(_ingest_content_media, directive)
+    if "[[media:/media/" not in content:
+        with contextlib.suppress(OSError):
+            dest.unlink()
+        await _fail_image_job(job, "the image could not be stored")
+        return
+
+    meta = _image_job_meta(job["id"], image_jobs.DONE, spec)
+    media_url = content.split("[[media:", 1)[1].split("|", 1)[0].rstrip("]")
+    meta["media_url"] = media_url
+    await db.update_image_job(job["id"], state=image_jobs.DONE,
+                              media_url=media_url, error=None)
+    await _rewrite_image_job_message(job, content, meta)
+    log.info("image job %s delivered (%d bytes)", job["id"], len(data))
+
+
+def _image_job_expired(job: dict) -> bool:
+    try:
+        started = datetime.fromisoformat(job["created_at"])
+    except (TypeError, ValueError):
+        return True          # an unreadable timestamp is not a reason to wait
+    # `now_iso()` is UTC-aware, but a row written by hand (a repair, a test)
+    # may be naive. Comparing the two raises, and an exception here would
+    # abandon the sweep — so normalise instead of assuming.
+    now = datetime.now(UTC) if started.tzinfo else datetime.now()
+    return (now - started).total_seconds() > image_jobs.DEADLINE_S
+
+
+async def _advance_image_job(job: dict) -> None:
+    """Move one job one step. Never raises — the loop must survive a bad row."""
+    forge = _clawforge()
+    spec = _image_job_spec(job)
+    try:
+        if job["state"] == image_jobs.QUEUED:
+            res = await forge.enqueue(spec)
+            if res.files_rel:
+                # An idle rig answered with the finished file straight away.
+                data = await forge.fetch(res.files_rel)
+                await _deliver_image_job(job, data, res.files_rel)
+                return
+            await db.update_image_job(job["id"], state=image_jobs.RUNNING,
+                                      rig_job_id=res.job_id)
+            return
+
+        rig_id = job.get("rig_job_id")
+        if not rig_id:
+            # RUNNING with no rig id is not a state the writer can produce; a
+            # row in it has been edited by hand or half-written by a crash.
+            await _fail_image_job(job, "the render was lost")
+            return
+        poll = await forge.poll(rig_id)
+        if poll.files_rel:
+            data = await forge.fetch(poll.files_rel)
+            await _deliver_image_job(job, data, poll.files_rel)
+            return
+        if poll.error:
+            await _fail_image_job(job, poll.error)
+            return
+        if poll.done:
+            await _fail_image_job(job, "the render finished with no image")
+    except image_jobs.ImageJobError as e:
+        if e.retryable and not _image_job_expired(job):
+            # The rig is briefly unreachable (a restart, a dropped link). Say
+            # so once and let the deadline decide — failing on the first blip
+            # would turn every rig restart into a thread full of ⚠️ lines.
+            log.info("image job %s: %s (will retry)", job["id"], e.message)
+            return
+        await _fail_image_job(job, e.message)
+    except Exception:
+        log.exception("image job %s crashed", job["id"])
+        await _fail_image_job(job, "internal error")
+
+
+async def _image_job_sweep() -> None:
+    """One pass over every open job: expire the old, advance the rest."""
+    for job in await db.open_image_jobs():
+        if _shutting_down:
+            return
+        if _image_job_expired(job):
+            await _fail_image_job(
+                job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
+            continue
+        await _advance_image_job(job)
+
+
+async def _resume_image_jobs() -> None:
+    """Startup: adopt what survives a restart, fail out what cannot.
+
+    A crash mid-render leaves rows in `queued`/`running`. The ones the rig
+    still holds a job id for are simply picked up by the next sweep — the
+    render kept going on the rig, it does not care that we restarted. The rest
+    (placeholder written, request never accepted) have nothing to poll and are
+    failed here, immediately and visibly, rather than being left to expire ten
+    minutes into the new process's life.
+
+    Also fails out everything if the feature has since been switched off: a
+    thread must never keep a placeholder alive for a worker that will not run.
+    """
+    open_jobs = await db.open_image_jobs()
+    if not open_jobs:
+        return
+    for job in open_jobs:
+        if not _image_jobs_configured():
+            await _fail_image_job(job, "image generation is switched off")
+        elif job["state"] == image_jobs.QUEUED or not job.get("rig_job_id"):
+            await _fail_image_job(job, "interrupted by a restart")
+        elif _image_job_expired(job):
+            await _fail_image_job(job, "timed out while DisPatch was down")
+    log.info("image jobs: %d open at startup", len(open_jobs))
+
+
+async def _image_job_loop() -> None:
+    """The worker. One task, one sweep every few seconds, forever.
+
+    Sequential rather than a task per job on purpose: the whole point of the
+    rate limit is that a handful of renders can be in flight at once, and a
+    sweep of a handful of cheap polls costs less than the bookkeeping to run
+    them concurrently — while a single loop can be cancelled cleanly at
+    shutdown and can never leak a task per abandoned job.
+    """
+    try:
+        await asyncio.sleep(3)
+        while True:
+            _loop_beat("image_jobs", _IMAGE_JOB_TICK_S * 4)
+            try:
+                if _image_jobs_configured():
+                    await _image_job_sweep()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("image job sweep failed")
+            await asyncio.sleep(_IMAGE_JOB_TICK_S)
+    except asyncio.CancelledError:
+        pass
 
 
 # --- Rotating pool: keep a fresh batch on hand ------------------------------ #
@@ -4529,6 +4855,8 @@ async def health(request: Request):
         # journal and the unlocked UI.
         "reaction_fire_failures_24h":
             reactions.fire_failure_stats()["failures_24h"],
+        "image_job_failures_24h":
+            image_jobs.failure_stats()["failures_24h"],
         # Pool-refill refusals (VRAM contention / rig down) — the guard's
         # alert counter, same count-only rule as fire failures above.
         "pool_refill_failures_24h":
@@ -6448,6 +6776,87 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
     except reactions.ReactionError as e:
         _raise_for_reaction_error(e)
     return {"ok": True, "event": event}
+
+
+@app.post("/api/image-jobs", status_code=202,
+          responses={**problem.MACHINE, **problem.RATE_LIMITED})
+async def image_job_create(request: Request, payload: ImageJobIn):
+    """Ask for a picture. Returns in milliseconds; the picture arrives later.
+
+    The gate is the reaction fire's gate, for the same reasons: a locked device
+    gets no path at all, an unknown thread refuses loudly rather than
+    succeeding into nowhere, and the bot must have the capability switched on.
+    The one addition is that the bot has to be the thread's OWN bot — the
+    placeholder is persisted as an assistant message and will be attributed to
+    whoever owns the thread regardless, so accepting a mismatch would let one
+    bot put a picture in another's conversation under that bot's name.
+    """
+    if not _image_jobs_configured():
+        raise HTTPException(503, "Image generation isn't configured")
+    # A locked device has no fire path at all — same rule as reactions.
+    if _is_safe_mode_caller(request):
+        raise HTTPException(403, "Unlock for full access")
+
+    canonical = await db.resolve_thread_id(payload.thread_id)
+    if canonical is None:
+        raise HTTPException(404, "Unknown thread")
+
+    bot = config.resolve_bot(payload.bot_id)
+    if bot is None:
+        raise HTTPException(404, f"Unknown bot: {payload.bot_id}")
+    thread_bot = await _bot_of_thread(canonical)
+    if not thread_bot or thread_bot.lower() != bot.id.lower():
+        raise HTTPException(403, "That thread belongs to another bot")
+    if not bot.image_jobs:
+        raise HTTPException(403, f"Image requests aren't enabled for {bot.name}")
+
+    try:
+        spec = image_jobs.ImageSpec(
+            prompt=payload.prompt, workflow=payload.workflow or "",
+            ratio=payload.ratio or "", width=payload.width,
+            height=payload.height, negative=payload.negative or "",
+            caption=payload.caption or "")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    err = image_jobs.limiter.check(bot.id.lower())
+    if err:
+        raise HTTPException(429, err)
+
+    job_id = image_jobs.new_job_id()
+    # The placeholder is persisted BEFORE the row that will rewrite it, so a
+    # crash in between leaves a message with no job (visible, wrong, and
+    # fixable) rather than a job pointing at a message that does not exist
+    # (invisible, and the worker's rewrite would silently no-op forever).
+    try:
+        msg = await _persist_and_broadcast_message(
+            canonical, "assistant", _image_job_pending_text(spec),
+            metadata=_image_job_meta(job_id, image_jobs.QUEUED, spec))
+    except Exception:
+        image_jobs.limiter.refund(bot.id.lower())
+        log.exception("could not write the image-job placeholder")
+        raise HTTPException(500, "Could not start the image request")
+
+    await db.add_image_job(job_id, msg.id, canonical, bot.id, spec.to_json())
+    return {"job_id": job_id, "message_id": msg.id, "thread_id": canonical,
+            "state": image_jobs.QUEUED}
+
+
+@app.get("/api/image-jobs/{job_id}", responses=problem.MACHINE)
+async def image_job_status(request: Request, job_id: str):
+    """One job's state. Machine-facing, same gate as creating one."""
+    if _is_safe_mode_caller(request):
+        raise HTTPException(403, "Unlock for full access")
+    job = await db.get_image_job(job_id)
+    if job is None:
+        raise HTTPException(404, "Unknown image job")
+    spec = _image_job_spec(job)
+    return {"job_id": job["id"], "state": job["state"],
+            "message_id": job["message_id"], "thread_id": job["thread_id"],
+            "bot_id": job["bot_id"], "prompt": spec.prompt,
+            "workflow": spec.workflow, "media_url": job["media_url"],
+            "error": job["error"], "created_at": job["created_at"],
+            "updated_at": job["updated_at"]}
 
 
 @app.get("/api/reactions/{rid}/image")

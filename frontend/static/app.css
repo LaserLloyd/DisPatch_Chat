@@ -2253,6 +2253,26 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 
 /* ---- In-transcript trace chip ---- */
 
+/* Image jobs — the bubble that is waiting for a picture (js/imagejobs.js).
+   Never contains an image, in any state: the pending card is a spinner and a
+   line of text, and a FINISHED job is rendered by the ordinary markdown path,
+   so Safe Mode and No-Image Mode need no rule of their own here. */
+.image-job-bubble { padding-block: 9px; }
+.image-job-card { display: flex; align-items: center; gap: 9px; }
+.image-job-spinner {
+  flex: none; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid color-mix(in oklab, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: spin .8s linear infinite;
+}
+.image-job-card.is-pending .image-job-text { opacity: .8; }
+.image-job-card.is-failed .image-job-text { color: var(--warning-text); }
+/* The spinner is the only motion in a bubble that may sit there for minutes;
+   a reader who has asked for less of that gets a static ring. */
+@media (prefers-reduced-motion: reduce) {
+  .image-job-spinner { animation: none; }
+}
+
 .reaction-trace {
   display: inline-flex;
   align-items: center;

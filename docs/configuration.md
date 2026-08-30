@@ -162,8 +162,9 @@ with no credential, can spend agent turns on that bot.
 
 Other per-bot fields: `color` (pins the letter-block avatar colour),
 `reactions` (may this bot fire reaction images — off for every shipped bot),
-`reaction_autopilot`, `avatar_pool`, and an `api:` block for a direct LLM
-provider. See [agents.md](agents.md) and [llm-providers.md](llm-providers.md).
+`reaction_autopilot`, `avatar_pool`, `image_jobs` (may this bot ask for a
+generated picture — also off for every shipped bot), and an `api:` block for a
+direct LLM provider. See [agents.md](agents.md) and [llm-providers.md](llm-providers.md).
 
 ## Posting in from outside
 
@@ -216,6 +217,37 @@ before you turn either of them on.
 
 Only `0`, `false`, `False` and empty read as off. `no` and `off` read as **on**;
 write `0` when you mean off.
+
+### Agent image jobs
+
+```
+DISPATCH_CLAWFORGE_URL=         # the image server's MCP endpoint, e.g.
+                                #   http://192.0.2.5:8700/mcp
+DISPATCH_CLAWFORGE_FILES_URL=   # optional; defaults to /files/ on the same host
+DISPATCH_IMAGE_JOBS=auto        # auto (default) | 1 | 0
+```
+
+Lets a bot ask for a generated picture without its turn hanging behind the
+render: `POST /api/image-jobs` returns immediately, a placeholder message
+appears in the thread, and DisPatch rewrites that message into the picture (or
+into a visible failure line) when the render lands. There is deliberately **no
+default endpoint** — the address of a GPU box is site configuration — and
+`auto` therefore means "on iff `DISPATCH_CLAWFORGE_URL` is set".
+
+Two switches have to agree before anything happens: this one, and
+`image_jobs: true` on the individual bot in `config.yaml`. It is off for every
+shipped bot, for the same reason reactions are — it spends shared GPU time and
+puts a picture into a family conversation.
+
+The expected server speaks MCP over streamable HTTP and offers
+`generate_image` (with `wait: false`), `get_job` and a `/files/<path>` route;
+[ClawForge](https://github.com/) is the reference implementation. Nothing else
+is assumed: DisPatch validates the returned bytes are a real image over 10 KB
+before any of it reaches a chat window.
+
+Both routes are on the machine surface (loopback free, remote needs the API
+key) and are refused to a locked browser tab. See
+[agents.md](agents.md#asking-for-a-generated-image) for the agent-facing side.
 
 ### DeepSeek Harness (`dsh`)
 

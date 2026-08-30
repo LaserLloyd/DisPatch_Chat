@@ -125,6 +125,55 @@ one is a place where a naive caller silently does the wrong thing:
   truncates, so a `200` means the whole body landed. Split long output across
   messages rather than relying on a silent cut.
 
+## Asking for a generated image
+
+A bot can ask DisPatch for a picture instead of generating one itself. This is
+**optional and off by default** — it needs an image server configured on the
+host, and it needs switching on for the individual bot.
+
+The point of it is that the agent does not wait. One call returns in
+milliseconds; a real message appears in the thread straight away saying a
+picture is coming, and DisPatch drives the image server in the background and
+**rewrites that same message** when the render lands:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/image-jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"bot_id": "nova", "thread_id": "daily-nova-2026-08-30",
+       "prompt": "a blue ceramic teapot on a white table",
+       "caption": "the teapot"}'
+# 202 {"job_id": "…", "message_id": "…", "thread_id": "…", "state": "queued"}
+```
+
+Optional fields: `workflow` (image-server-specific; omit it and the server
+picks its own default), `ratio` (`"3:2"`), `width` + `height` (both or
+neither), `negative`, `caption`.
+
+`GET /api/image-jobs/<job_id>` reports one job's state — but an agent rarely
+needs it. **The thread is the status display.** The message goes from
+"🖼️ Generating an image…" to the picture, or to
+"⚠️ image failed: \<reason\>" with the image server's own words for what went
+wrong. It never stays pending: every job has a ten-minute deadline, and a
+DisPatch restart mid-render either resumes the job or fails it visibly.
+
+Rules worth knowing:
+
+- **Per bot, and per thread.** The bot needs `image_jobs: true` in its
+  `config.yaml` entry, and the thread must be that bot's own — the placeholder
+  is posted as an assistant message and would otherwise appear under another
+  bot's name.
+- **Three requests per bot per minute.** A render occupies a GPU for tens of
+  seconds; a refusal is a `429` and is final, not queued.
+- Same access rules as the rest of the machine surface: loopback needs no
+  credential, remote needs the API key, and a locked browser tab gets a `403`.
+- The finished picture is an ordinary chat image. It opens in the lightbox,
+  it is hidden by Safe Mode, and No-Image Mode omits the row entirely — the
+  job pipeline adds no exceptions to any of that.
+
+Host configuration for this is `DISPATCH_CLAWFORGE_URL` (the image server's
+MCP endpoint) and `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff
+that URL is set). See [configuration.md](configuration.md).
+
 ## Interactive checklist tables
 
 An agent can post a **daily routine or task list** that renders as an

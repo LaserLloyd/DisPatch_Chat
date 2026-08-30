@@ -30,6 +30,7 @@ import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
 import { renderPinnedRail, pinToggle } from './pins.js?v=2';
 import { aboutRow } from './about.js?v=1';
+import { imageJobMessageEl } from './imagejobs.js?v=1';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with
@@ -1095,8 +1096,19 @@ function messageEl(msg) {
     details.append(inner);
     bubble.append(details);
   } else if (role === 'assistant') {
-    bubble.innerHTML = renderMarkdown(msg.content || '', mdOpts);
-    enhanceContent(bubble);
+    // A picture the bot asked for but has not received yet (or never will):
+    // a distinct card in place of the body. A FINISHED image job returns null
+    // here on purpose and falls through to the markdown path below — its body
+    // is an ordinary media directive, and rendering it any other way would
+    // fork the lightbox / Safe-Mode / No-Image-Mode rules.
+    const jobCard = imageJobMessageEl(msg);
+    if (jobCard) {
+      bubble.classList.add('image-job-bubble');
+      bubble.append(jobCard);
+    } else {
+      bubble.innerHTML = renderMarkdown(msg.content || '', mdOpts);
+      enhanceContent(bubble);
+    }
   } else {
     // User / system: plain text with preserved line breaks; attachments
     // extracted and rendered as thumbnails below the bubble.
@@ -4389,6 +4401,34 @@ function handleWs(data) {
           }
         }
       }
+      break;
+    }
+    case 'message_update': {
+      // A message that is already on screen has been rewritten server-side —
+      // today, an image job's placeholder becoming the picture or the ⚠️ line.
+      // Replace the node rather than appending: the id is unchanged, and a
+      // second bubble would read as the bot saying it twice.
+      const mid = data.message_id || (data.message && data.message.id);
+      if (!mid || !data.message) break;
+      const idx = state.messages.findIndex((x) => x.id === mid);
+      if (idx >= 0) state.messages[idx] = data.message;
+      if (data.thread_id !== state.activeThreadId) break;
+      const oldEl = dom['messages'].querySelector(`[data-id="${CSS.escape(mid)}"]`);
+      if (!oldEl) break;
+      const stick = isNearBottom();
+      const nextEl = messageEl(data.message);
+      if (!nextEl) {
+        // No-Image Mode: the finished picture is a media-only row, which NIM
+        // omits entirely. The placeholder that stood in for it has to go with
+        // it — leaving "Generating an image…" behind would be a permanent
+        // trace of exactly the thing NIM removed.
+        oldEl.remove();
+        break;
+      }
+      if (oldEl.classList.contains('grouped')) nextEl.classList.add('grouped');
+      oldEl.replaceWith(nextEl);
+      pinOnImageLoad(nextEl);
+      if (stick) scrollToBottom();
       break;
     }
     case 'checklist_update': {

@@ -92,6 +92,33 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at DESC);
+
+-- Agent-fired image jobs (app/image_jobs.py). One row per request, created in
+-- the same breath as the placeholder message it will eventually rewrite.
+--
+-- The row is the truth, not the worker's memory: a restart mid-render reads
+-- this table back, resumes anything the rig still holds a job id for, and
+-- fails out the rest. Without it a crash would leave "image pending…" in a
+-- thread with nothing left alive to ever change it — the one outcome this
+-- feature is not allowed to produce.
+--
+-- ON DELETE CASCADE from messages, not threads: deleting the placeholder
+-- deletes the job, because the job exists only to edit that message.
+CREATE TABLE IF NOT EXISTS image_jobs (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    thread_id   TEXT NOT NULL,
+    bot_id      TEXT NOT NULL,
+    spec        TEXT NOT NULL,          -- ImageSpec.to_json()
+    state       TEXT NOT NULL,          -- queued | running | done | failed
+    rig_job_id  TEXT,                   -- the image server's own id, once it has one
+    error       TEXT,
+    media_url   TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at);
 """
 
 
@@ -891,6 +918,65 @@ class Database:
             "UPDATE messages SET metadata = ? WHERE id = ?",
             (_json.dumps(metadata) if metadata else None, msg_id))
         await self.db.commit()
+
+    # ----------------------------------------------------------------- #
+    # Image jobs
+    #
+    # Deliberately thin: no ORM, no state machine in SQL. The worker owns the
+    # transitions; these four calls just make them durable. Every write stamps
+    # `updated_at`, which is what the resume path uses to tell a job that is
+    # merely slow from one whose worker died.
+    # ----------------------------------------------------------------- #
+
+    async def add_image_job(self, job_id: str, message_id: str, thread_id: str,
+                            bot_id: str, spec: str, *,
+                            state: str = "queued") -> dict:
+        ts = now_iso()
+        await self.db.execute(
+            "INSERT INTO image_jobs (id, message_id, thread_id, bot_id, spec, "
+            "state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, message_id, thread_id, bot_id, spec, state, ts, ts))
+        await self.db.commit()
+        return {"id": job_id, "message_id": message_id, "thread_id": thread_id,
+                "bot_id": bot_id, "spec": spec, "state": state,
+                "rig_job_id": None, "error": None, "media_url": None,
+                "created_at": ts, "updated_at": ts}
+
+    async def update_image_job(self, job_id: str, **fields: Any) -> None:
+        """Patch a job row. Only the columns named are touched.
+
+        A whitelist rather than an f-string over ``fields``: this is the one
+        place a caller's dict reaches SQL, and a typo'd key should be a loud
+        KeyError here rather than a silently-ignored update that leaves a job
+        stuck in `running` forever.
+        """
+        allowed = ("state", "rig_job_id", "error", "media_url")
+        sets, values = [], []
+        for k, v in fields.items():
+            if k not in allowed:
+                raise KeyError(f"image_jobs has no updatable column {k!r}")
+            sets.append(f"{k} = ?")
+            values.append(v)
+        if not sets:
+            return
+        sets.append("updated_at = ?")
+        values.extend([now_iso(), job_id])
+        await self.db.execute(
+            f"UPDATE image_jobs SET {', '.join(sets)} WHERE id = ?", values)
+        await self.db.commit()
+
+    async def get_image_job(self, job_id: str) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM image_jobs WHERE id = ?", (job_id,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def open_image_jobs(self) -> list[dict]:
+        """Every job that has not reached a terminal state, oldest first."""
+        cur = await self.db.execute(
+            "SELECT * FROM image_jobs WHERE state IN ('queued', 'running') "
+            "ORDER BY created_at")
+        return [dict(r) for r in await cur.fetchall()]
 
     async def get_last_user_message(self, thread_id: str) -> MessageOut | None:
         cur = await self.db.execute(
