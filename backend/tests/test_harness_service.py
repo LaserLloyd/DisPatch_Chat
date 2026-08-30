@@ -5,6 +5,7 @@ task/cwd validation, and the headless JobRunner against a fake `dsh` binary
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import stat
 import textwrap
@@ -52,6 +53,116 @@ def test_discover_models_reads_deepseek_and_pi_ai_routes(tmp_path):
     assert by_id["buildpc"]["name"] == "Acme Inference"
     assert [(m["id"], m["name"]) for m in by_id["buildpc"]["models"]] == \
         [("local/foo", "local/foo"), ("local/bar", "Bar")]
+
+
+def test_discover_models_lists_any_configured_route_verbatim(tmp_path, monkeypatch):
+    """The picker is driven by settings.yaml, not by a built-in model list: a
+    route nobody wrote code for (here MiniMax, whose ids are mixed-case) shows
+    up, with its ids preserved character for character."""
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(tmp_path / "no-catalog"))
+    p = tmp_path / "settings.yaml"
+    p.write_text(textwrap.dedent("""
+        llm-pi-ai:
+          providers:
+            minimax:
+              displayName: MiniMax (cloud)
+              apiKeyEnv: MINIMAX_API_KEY
+              api: openai-completions
+              baseURL: https://api.minimax.io/v1
+              models:
+                - id: MiniMax-M3
+                  name: MiniMax M3
+                - id: MiniMax-M2.7-highspeed
+    """))
+    by_id = {pr["id"]: pr for pr in harness.discover_models(p)["providers"]}
+    mm = by_id["minimax"]
+    assert mm["name"] == "MiniMax (cloud)"
+    assert [(m["id"], m["name"]) for m in mm["models"]] == [
+        ("MiniMax-M3", "MiniMax M3"),
+        ("MiniMax-M2.7-highspeed", "MiniMax-M2.7-highspeed"),
+    ]
+    # And that exact id survives a write + re-read (no lowercasing anywhere).
+    assert harness.set_default_model("minimax", "MiniMax-M3", p) == \
+        {"provider": "minimax", "model": "MiniMax-M3"}
+    assert harness.discover_models(p)["current"] == \
+        {"provider": "minimax", "model": "MiniMax-M3"}
+    assert "MiniMax-M3" in p.read_text()
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def _fake_pi_ai_catalog(root: Path) -> Path:
+    """A stand-in for @earendil-works/pi-ai's bundled provider data."""
+    prov = root / "providers"
+    (prov / "data").mkdir(parents=True)
+    (prov / "data" / "minimax.json").write_text(json.dumps({
+        "anthropic-messages": {
+            "MiniMax-M2.7": {"id": "MiniMax-M2.7", "name": "MiniMax-M2.7"},
+            "MiniMax-M3": {"id": "MiniMax-M3", "name": "MiniMax-M3"},
+        }
+    }))
+    (prov / "minimax.js").write_text(
+        'export function minimaxProvider() { return createProvider({\n'
+        '  id: "minimax",\n  name: "MiniMax",\n  baseUrl: "https://api.minimax.io/anthropic",\n});}\n')
+    return prov
+
+
+def test_discover_models_falls_back_to_pi_ai_catalog_when_models_omitted(tmp_path, monkeypatch):
+    """A route may legally omit `models:` — the adapter then serves pi-ai's
+    installed catalog for it. Without this the picker showed an EMPTY minimax
+    provider (the frontend skips model-less providers), so M3 was unreachable
+    from a perfectly valid two-line route."""
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(_fake_pi_ai_catalog(tmp_path / "pi")))
+    p = tmp_path / "settings.yaml"
+    p.write_text("llm-pi-ai:\n  providers:\n    minimax:\n      apiKeyEnv: MINIMAX_API_KEY\n")
+    mm = {pr["id"]: pr for pr in harness.discover_models(p)["providers"]}["minimax"]
+    assert mm["from_catalog"] is True
+    assert mm["name"] == "MiniMax"                 # pi-ai's own display name
+    assert [m["id"] for m in mm["models"]] == ["MiniMax-M2.7", "MiniMax-M3"]
+
+
+def test_pi_ai_catalog_route_key_cannot_escape_the_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(_fake_pi_ai_catalog(tmp_path / "pi")))
+    assert harness.catalog_models("minimax")       # sanity: the fixture is live
+    for bad in ("../../etc/passwd", "/etc/passwd", "..", "min imax", "", None):
+        assert harness.catalog_models(bad) == []
+        assert harness.catalog_display_name(bad) is None
+    assert harness.catalog_models("no-such-provider") == []
+
+
+def test_pi_ai_catalog_absent_or_broken_degrades_quietly(tmp_path, monkeypatch):
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(tmp_path / "gone"))
+    assert harness.pi_ai_catalog_dir() is None
+    assert harness.catalog_models("minimax") == []
+    prov = _fake_pi_ai_catalog(tmp_path / "pi")
+    (prov / "data" / "minimax.json").write_text("{not json")
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(prov))
+    assert harness.catalog_models("minimax") == []
+    p = tmp_path / "settings.yaml"
+    p.write_text("llm-pi-ai:\n  providers:\n    minimax: {}\n")
+    mm = {pr["id"]: pr for pr in harness.discover_models(p)["providers"]}["minimax"]
+    assert mm["models"] == [] and mm["from_catalog"] is False
+
+
+def test_explicit_models_list_replaces_the_catalog(tmp_path, monkeypatch):
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(_fake_pi_ai_catalog(tmp_path / "pi")))
+    p = tmp_path / "settings.yaml"
+    p.write_text("llm-pi-ai:\n  providers:\n    minimax:\n      models: [{id: MiniMax-M3}]\n")
+    mm = {pr["id"]: pr for pr in harness.discover_models(p)["providers"]}["minimax"]
+    assert [m["id"] for m in mm["models"]] == ["MiniMax-M3"] and mm["from_catalog"] is False
+
+
+def test_model_overrides_rename_catalog_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv(harness.PI_AI_CATALOG_DIR_ENV, str(_fake_pi_ai_catalog(tmp_path / "pi")))
+    p = tmp_path / "settings.yaml"
+    p.write_text(textwrap.dedent("""
+        llm-pi-ai:
+          providers:
+            minimax:
+              modelOverrides:
+                MiniMax-M3: {name: M3 (1M ctx)}
+    """))
+    mm = {pr["id"]: pr for pr in harness.discover_models(p)["providers"]}["minimax"]
+    assert {m["id"]: m["name"] for m in mm["models"]}["MiniMax-M3"] == "M3 (1M ctx)"
 
 
 def test_discover_models_malformed_file_never_raises(tmp_path):

@@ -174,6 +174,33 @@ def test_model_get_set_round_trip(route_client, fake_svc, tmp_path):
     assert r.status_code == 422
 
 
+def test_models_route_offers_whatever_settings_configures(route_client, fake_svc, tmp_path):
+    """No hardcoded catalog: a route added to settings.yaml by hand (MiniMax,
+    mixed-case ids) is offered by /api/harness/models and can be selected."""
+    home = tmp_path / "dsh-home"; home.mkdir(parents=True, exist_ok=True)
+    (home / "settings.yaml").write_text(
+        "llm-pi-ai:\n"
+        "  providers:\n"
+        "    minimax:\n"
+        "      displayName: MiniMax (cloud)\n"
+        "      models:\n"
+        "        - {id: MiniMax-M3, name: MiniMax M3}\n"
+    )
+    _unlock(route_client)
+    body = route_client.get("/api/harness/models").json()
+    mm = {pr["id"]: pr for pr in body["providers"]}["minimax"]
+    assert [m["id"] for m in mm["models"]] == ["MiniMax-M3"]
+    r = route_client.post("/api/harness/model", json={"provider": "minimax", "model": "MiniMax-M3"})
+    assert r.status_code == 200, r.text
+    assert r.json()["current"] == {"provider": "minimax", "model": "MiniMax-M3"}
+    # Written verbatim, and the other section survived the rewrite.
+    text = (home / "settings.yaml").read_text()
+    assert "MiniMax-M3" in text and "MiniMax (cloud)" in text
+    # Locked again → the whole surface is 403, models included.
+    route_client.post("/api/auth/lock")
+    assert route_client.get("/api/harness/models").status_code == 403
+
+
 def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
     _unlock(route_client)
     home = tmp_path / "home"; (home / "p").mkdir(parents=True)

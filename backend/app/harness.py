@@ -12,6 +12,12 @@ in, one answer out). So the DisPatch pane is built from three pieces:
      `$DSH_HOME/settings.yaml`, which dsh hot-reloads. The catalog offered to the
      picker is the union of the DeepSeek route (`llm-deepseek.models`, falling
      back to dsh's shipped defaults) and every `llm-pi-ai.providers.*` route.
+     A pi-ai route with no `models:` list is NOT model-less: per the adapter's
+     own contract ("Omission serves the installed catalog for the route
+     unchanged") it serves whatever pi-ai's bundled catalog ships for that
+     route, so the picker reads that catalog off disk rather than showing an
+     empty provider. That is what makes a two-line `providers: {minimax: {…}}`
+     route selectable without naming a single model id here.
   3. **Headless jobs**: one task at a time, spawned as the fixed argv
      `[dsh, --profile, headless, <task>]` — no shell, the task is a single argv
      element, and the working directory is validated to be an existing directory
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -270,6 +277,108 @@ def settings_path() -> Path:
     return dsh_home() / "settings.yaml"
 
 
+# ---- pi-ai's bundled provider catalog ---------------------------------------
+# dsh's `llm-pi-ai` adapter ships @earendil-works/pi-ai, whose provider data
+# lives as one JSON file per route under
+# `<pkg>/dist/providers/data/<route>.json`, shaped
+# `{<api>: {<model-id>: {id, name, …}}}`. A settings route that omits `models:`
+# serves that file's models unchanged, so the picker has to read it to know what
+# the route can actually run. Read-only, best-effort: every failure degrades to
+# "no catalog models for this route", never to an exception.
+PI_AI_CATALOG_DIR_ENV = "DISPATCH_PI_AI_CATALOG"
+_PI_AI_REL = ("node_modules", "@earendil-works", "pi-ai", "dist", "providers")
+# Route keys are file names — refuse anything that could escape the data dir.
+_ROUTE_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_CATALOG_MAX_BYTES = 4 * 1024 * 1024
+
+
+def pi_ai_catalog_dir() -> Path | None:
+    """`…/pi-ai/dist/providers`, or None when dsh/pi-ai is not installed.
+
+    Resolved from the dsh binary (realpath → the package's own lib/), walking up
+    so a hoisted node_modules layout is found too. Not cached: an install or an
+    upgrade must be visible without restarting DisPatch.
+    """
+    override = os.environ.get(PI_AI_CATALOG_DIR_ENV, "").strip()
+    if override:
+        p = Path(override)
+        return p if p.is_dir() else None
+    binary = resolve_binary()
+    if not binary:
+        return None
+    try:
+        start = Path(binary).resolve()
+    except (OSError, RuntimeError):
+        return None
+    for anc in [start, *start.parents]:
+        cand = anc.joinpath(*_PI_AI_REL)
+        if cand.is_dir():
+            return cand
+    return None
+
+
+def _catalog_file(route: str) -> Path | None:
+    if not (isinstance(route, str) and _ROUTE_RE.match(route)):
+        return None
+    base = pi_ai_catalog_dir()
+    if base is None:
+        return None
+    f = base / "data" / f"{route}.json"
+    return f if f.is_file() else None
+
+
+def catalog_models(route: str) -> list[dict]:
+    """[{id, name}] pi-ai ships for `route`, in catalog order ([] when unknown)."""
+    f = _catalog_file(route)
+    if f is None:
+        return []
+    try:
+        if f.stat().st_size > _CATALOG_MAX_BYTES:
+            log.warning("pi-ai catalog %s is implausibly large — ignored", f.name)
+            return []
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        log.warning("cannot read pi-ai catalog %s: %s", f.name, e)
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(data, dict):
+        return out
+    for by_id in data.values():                 # one group per wire protocol
+        if not isinstance(by_id, dict):
+            continue
+        for mid, spec in by_id.items():
+            entry = _model_entry(spec if isinstance(spec, dict) else mid)
+            if entry is None and isinstance(mid, str):
+                entry = {"id": mid, "name": mid}
+            if entry is None or entry["id"] in seen:
+                continue
+            seen.add(entry["id"])
+            out.append(entry)
+    return out
+
+
+def catalog_display_name(route: str) -> str | None:
+    """pi-ai's own display name for `route` (e.g. minimax → "MiniMax").
+
+    The name lives in the provider module, not the data JSON, so this is a
+    deliberately narrow read of `<route>.js` and returns None on any surprise —
+    the caller falls back to the route key.
+    """
+    base = pi_ai_catalog_dir()
+    if base is None or not (isinstance(route, str) and _ROUTE_RE.match(route)):
+        return None
+    f = base / f"{route}.js"
+    try:
+        if not f.is_file() or f.stat().st_size > _CATALOG_MAX_BYTES:
+            return None
+        head = f.read_text(encoding="utf-8", errors="replace")[:8192]
+    except OSError:
+        return None
+    m = re.search(r'id:\s*"' + re.escape(route) + r'"\s*,\s*name:\s*"([^"\\\n]{1,64})"', head)
+    return m.group(1) if m else None
+
+
 def _load_settings(path: Path | None = None) -> dict:
     p = path or settings_path()
     try:
@@ -314,10 +423,28 @@ def discover_models(path: Path | None = None) -> dict:
     for pid, spec in provs.items():
         if not isinstance(pid, str) or not isinstance(spec, dict):
             continue
-        models = [e for e in (_model_entry(m) for m in (spec.get("models") or [])) if e] \
-            if isinstance(spec.get("models"), list) else []
-        name = spec.get("displayName") if isinstance(spec.get("displayName"), str) else pid
-        providers.append({"id": pid, "name": name, "models": models})
+        if isinstance(spec.get("models"), list):
+            # An explicit list REPLACES the installed catalog for this route.
+            models = [e for e in (_model_entry(m) for m in spec["models"]) if e]
+            catalogued = False
+        else:
+            # Omitted (or malformed) `models`: the route serves pi-ai's bundled
+            # catalog, so that is what the picker must offer. `modelOverrides`
+            # is only meaningful here and may rename catalog entries.
+            models = catalog_models(pid)
+            catalogued = bool(models)
+            overrides = spec.get("modelOverrides")
+            if isinstance(overrides, dict):
+                for m in models:
+                    ov = overrides.get(m["id"])
+                    if isinstance(ov, dict) and isinstance(ov.get("name"), str):
+                        m["name"] = ov["name"]
+        if isinstance(spec.get("displayName"), str):
+            name = spec["displayName"]
+        else:
+            name = catalog_display_name(pid) or pid
+        providers.append({"id": pid, "name": name, "models": models,
+                          "from_catalog": catalogued})
 
     current = None
     adm = data.get("agent-default-model")
