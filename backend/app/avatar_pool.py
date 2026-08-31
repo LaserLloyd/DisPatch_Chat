@@ -455,16 +455,18 @@ def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
 #     look: detector hint for the crop (anime|realistic)
 #     variations: ["...", ...]     # one is picked per generation
 
-DEFAULT_BANK: dict = {
-    "version": 1,
-    "base": "",
-    "suffix": "",
-    "ratio": "1:1",
-    "style": "",
+# A v5 bank with nothing to generate — bank_load's fallback when a malformed
+# bank fails _clean_bank. compose_prompt returns None on it, which surfaces as
+# a loud "no-prompt-bank" last_error instead of silent degenerate output.
+_EMPTY_BANK: dict = {
+    "version": 5,
+    "categories": [],
+    "crop_size": 0,
+    "face_percent": 0.0,
+    "face_y_percent": 0.0,
     "workflow": "",
-    "shot": "",
-    "look": "",
-    "variations": [],
+    "ratio": "1:1",
+    "background": "",
 }
 
 _SHOTS = {"", "extreme_close", "close", "wide", "bust", "waist"}
@@ -484,22 +486,78 @@ def _reject_dash_lead(value: str, label: str) -> None:
             " option by the image CLI", 400)
 
 
-def _clean_bank(raw: dict) -> dict:
-    """Normalise a hand- or agent-edited bank. Never raises on junk — a bad
-    field falls back rather than stopping the pool refilling."""
-    shot = str(raw.get("shot") or "")[:16]
-    look = str(raw.get("look") or "")[:16]
+def _float_or(v, default: float) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _face_pct(v) -> int | None:
+    """Map a bank face knob to the rig's integer field. The v5 bank stores
+    fractions (0.55 = 55% of frame); the rig's crop_to_face schema declares
+    integers, so a fraction is scaled to percent. An already-integer percent
+    passes through. None when unparseable or empty (omit the flag)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f <= 1.0:
+        return int(round(f * 100))
+    return int(f)
+
+
+def _clean_bank(raw: dict) -> dict | None:
+    """Normalise a v5 avatar bank (categories[].expressions/prompts + crop
+    knobs). Returns None — logging LOUDLY — when the bank has no usable
+    categories, so a malformed bank fails visibly instead of silently
+    regenerating base-only degenerate output."""
+    raw_cats = raw.get("categories") or {}
+    categories: list[dict] = []
+    if isinstance(raw_cats, dict):
+        for name, cat in raw_cats.items():
+            if not isinstance(cat, dict):
+                continue
+            label = str(cat.get("label") or name or "")[:60]
+            expressions = [str(x)[:600] for x in (cat.get("expressions") or [])
+                           if str(x).strip()]
+            prompts = [str(x)[:600] for x in (cat.get("prompts") or [])
+                       if str(x).strip()]
+            if not (expressions or prompts):
+                continue
+            categories.append({"name": str(name or "")[:60], "label": label,
+                               "expressions": expressions, "prompts": prompts})
+    elif isinstance(raw_cats, list):
+        # bank_save serialises the cleaned list to YAML and reads it back as a
+        # list; accept the same shape so the round trip survives a save+load.
+        for cat in raw_cats:
+            if not isinstance(cat, dict):
+                continue
+            label = str(cat.get("label") or cat.get("name") or "")[:60]
+            expressions = [str(x)[:600] for x in (cat.get("expressions") or [])
+                           if str(x).strip()]
+            prompts = [str(x)[:600] for x in (cat.get("prompts") or [])
+                       if str(x).strip()]
+            if not (expressions or prompts):
+                continue
+            categories.append({"name": str(cat.get("name") or "")[:60],
+                               "label": label,
+                               "expressions": expressions, "prompts": prompts})
+    if not categories:
+        log.error("avatar prompt bank has NO usable categories — refusing the "
+                  "bank (v1 'variations' schema is gone in v5); the pool "
+                  "refill will fail visibly instead of regenerating "
+                  "base-only degenerate avatars")
+        return None
     return {
-        "version": 1,
-        "base": str(raw.get("base") or "")[:600],
-        "suffix": str(raw.get("suffix") or "")[:300],
-        "ratio": str(raw.get("ratio") or "1:1")[:12],
-        "style": str(raw.get("style") or "")[:60],
+        "version": 5,
+        "categories": categories,
+        "crop_size": _int_or(raw.get("crop_size"), 1024),
+        "face_percent": _float_or(raw.get("face_percent"), 0.55),
+        "face_y_percent": _float_or(raw.get("face_y_percent"), 0.45),
         "workflow": str(raw.get("workflow") or "")[:60],
-        "shot": shot if shot in _SHOTS else "",
-        "look": look if look in _LOOKS else "",
-        "variations": [str(x)[:600] for x in (raw.get("variations") or [])
-                       if str(x).strip()][:60],
+        "ratio": str(raw.get("ratio") or "1:1")[:12],
+        "background": str(raw.get("background") or "clean black background")[:200],
     }
 
 
@@ -521,6 +579,8 @@ def bank_load(bot_id: str) -> dict:
             log.error("%s unreadable (%s) — treating as empty", path.name, e)
             raw = {}
     bank = _clean_bank(raw if isinstance(raw, dict) else {})
+    if bank is None:                    # malformed — _clean_bank logged loudly
+        bank = dict(_EMPTY_BANK)
     _bank_cache[bot_id] = (bank, mtime)
     return bank
 
@@ -530,10 +590,15 @@ def bank_save(raw: dict, bot_id: str) -> dict:
     if not isinstance(raw, dict):
         raise PoolError("Malformed prompt bank")
     bank = _clean_bank(raw)
-    for key in ("base", "suffix", "ratio", "style", "workflow"):
+    if bank is None:
+        raise PoolError(
+            "Malformed prompt bank: no usable categories (a v5 bank needs a "
+            "non-empty 'categories' mapping with expressions/prompts)", 400)
+    for key in ("workflow", "ratio", "background"):
         _reject_dash_lead(bank[key], f"Prompt bank {key}")
-    for text in bank["variations"]:
-        _reject_dash_lead(text, "Prompt bank variation")
+    for cat in bank["categories"]:
+        for text in cat["expressions"] + cat["prompts"]:
+            _reject_dash_lead(text, "Prompt bank body")
     path = bank_path(bot_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".yaml.tmp")
@@ -544,18 +609,55 @@ def bank_save(raw: dict, bot_id: str) -> dict:
     return bank_load(bot_id)
 
 
-def compose_prompt(bot_id: str) -> str | None:
-    """base + one random variation + suffix. None when the bank has no base —
-    an avatar without a character description would be a stranger's face."""
-    bank = bank_load(bot_id)
-    if not bank["base"].strip():
+_BITS_PROMPT = os.path.expanduser("~/bin/bits-prompt")
+
+
+def _bits_prompt(*flags: str) -> str | None:
+    """Shell out to the canonical prompt helper — the source of truth for the
+    Tier 1 / Tier 2 / negative strings (bits-visual-identity.md). Tier
+    constants are NEVER hardcoded here. None (logged) when the helper fails."""
+    try:
+        proc = subprocess.run([_BITS_PROMPT, *flags], capture_output=True,
+                              text=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log.error("bits-prompt unavailable (%s) — cannot compose avatar prompt", e)
         return None
-    parts = [bank["base"]]
-    if bank["variations"]:
-        parts.append(random.choice(bank["variations"]))
-    if bank["suffix"].strip():
-        parts.append(bank["suffix"])
-    return ", ".join(p.strip().strip(",") for p in parts if p.strip())
+    if proc.returncode != 0:
+        log.error("bits-prompt %s failed (rc=%d): %s", " ".join(flags),
+                  proc.returncode, (proc.stderr or "").strip()[:200])
+        return None
+    return proc.stdout.strip()
+
+
+def compose_prompt(bank_or_id: str | dict) -> str | None:
+    """Tier 1 + Tier 2 (face/neck/hands) + one random expression body + the
+    bank's background directive. Accepts a bot_id (loads the live bank) or a
+    bank dict (raw v5 yaml or already cleaned). None when the bank has no
+    usable categories — an avatar without an expression bank would come out
+    base-only and degenerate."""
+    if isinstance(bank_or_id, str):
+        bank = bank_load(bank_or_id)
+    else:
+        raw = bank_or_id or {}
+        if isinstance(raw.get("categories"), dict):   # raw v5 yaml — normalise
+            bank = _clean_bank(raw) or dict(_EMPTY_BANK)
+        else:
+            bank = raw
+    categories = bank.get("categories") or []
+    if not categories:
+        return None
+    t1 = _bits_prompt("--tier1")
+    t2 = _bits_prompt("--tier2", "--face", "--neck", "--hands")
+    if t1 is None or t2 is None:
+        return None
+    cat = random.choice(categories)
+    bodies = cat.get("expressions") or cat.get("prompts") or []
+    if not bodies:
+        return None
+    parts = [t1.strip().strip(","), t2.strip().strip(","),
+             random.choice(bodies).strip().strip(","),
+             str(bank.get("background") or "").strip().strip(",")]
+    return ", ".join(p for p in parts if p)
 
 
 # --------------------------------------------------------------------------- #
@@ -608,7 +710,7 @@ def status(bot_id: str) -> dict:
         "available": image_cli_available(),
         # WHY, not just THAT — see the reaction pool's status for the reason.
         "image_cli": image_cli_state(),
-        "has_prompts": bool(bank["base"].strip()),
+        "has_prompts": bool(bank.get("categories")),
         "last_error": st.last_error,
         "dir": str(ready_dir(bot_id)),    # where to hand-drop pairs
         "bot_id": bot_id,
@@ -687,24 +789,27 @@ def generate_pair(bot_id: str) -> str | None:
     """
     bot_id = _require_bot_id(bot_id)
     st = load_state(bot_id)
-    prompt = compose_prompt(bot_id)
+    bank = bank_load(bot_id)
+    prompt = compose_prompt(bank)
     if prompt is None:
         update_state(bot_id, last_error="no-prompt-bank")
         return None
-    bank = bank_load(bot_id)
     out_dir = _generate_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Background band: a pool pair is drawn for a thread that does not exist
     # yet, so it yields to anything with a person waiting on it.
     argv = [str(_IMAGE_CLI), "--count", "1", "--priority", "3",
-            "--ratio", bank["ratio"] or "1:1", "--output", str(out_dir)]
-    style = st.config.style or bank["style"]
-    workflow = st.config.workflow or bank["workflow"]
+            "--ratio", bank.get("ratio") or "1:1", "--output", str(out_dir)]
+    style = st.config.style or bank.get("style") or ""
+    workflow = st.config.workflow or bank.get("workflow") or ""
     if style and not style.strip().startswith("-"):
         argv += ["--style", style[:60]]
     if workflow and not workflow.strip().startswith("-"):
         argv += ["--workflow", workflow[:60]]
+    negative = _bits_prompt("--negative")
+    if negative:
+        argv += ["--negative", negative]
     # `--` ends option parsing: the composed prompt is a positional, never a flag.
     argv += ["--", prompt]
     fulls = _run_image_cli(argv, out_dir)
@@ -714,10 +819,20 @@ def generate_pair(bot_id: str) -> str | None:
 
     argv = [str(_IMAGE_CLI), "--crop-face", str(full_src),
             "--output", str(out_dir)]
-    if bank["shot"]:
+    if bank.get("shot"):
         argv += ["--shot", bank["shot"]]
-    if bank["look"]:
+    if bank.get("look"):
         argv += ["--look", bank["look"]]
+    # v5 bank crop knobs — passed through to the rig's detector, never
+    # hardcoded here.
+    if _int_or(bank.get("crop_size"), 0):
+        argv += ["--crop-size", str(bank["crop_size"])]
+    fp = _face_pct(bank.get("face_percent"))
+    if fp is not None:
+        argv += ["--face-percent", str(fp)]
+    fyp = _face_pct(bank.get("face_y_percent"))
+    if fyp is not None:
+        argv += ["--face-y-percent", str(fyp)]
     faces = _run_image_cli(argv, out_dir)
 
     stem = uuid.uuid4().hex[:10]

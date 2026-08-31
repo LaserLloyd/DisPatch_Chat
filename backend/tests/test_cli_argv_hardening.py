@@ -60,6 +60,19 @@ def rig(monkeypatch, tmp_path):
     return calls
 
 
+def _save_v5_bank(monkeypatch):
+    """A minimal valid v5 avatar bank, with the bits-prompt helper stubbed —
+    compose_prompt shells out to it for the tier strings, and under the rig
+    fixtures every subprocess.run is the fake image CLI. The v1
+    base+variations shape is refused by bank_save since v5."""
+    monkeypatch.setattr(
+        avatar_pool, "_bits_prompt",
+        lambda *flags: "tier1 identity" if "--tier1" in flags else "tier2 detail")
+    avatar_pool.bank_save(
+        {"categories": {"calm": {"label": "Calm", "prompts": ["a portrait"]}},
+         "ratio": "1:1"}, "main")
+
+
 # --------------------------------------------------------------------------- #
 # argv shape
 # --------------------------------------------------------------------------- #
@@ -83,13 +96,15 @@ def test_pool_generate_puts_the_prompt_after_a_double_dash(rx_env, rig):
 
 
 def test_avatar_pair_puts_the_prompt_after_a_double_dash(rx_env, rig, monkeypatch):
-    avatar_pool.bank_save({"base": "a portrait", "ratio": "1:1"}, "main")
+    _save_v5_bank(monkeypatch)
     st = avatar_pool.load_state("main")
     st.config.enabled = True
     avatar_pool.save_state(st, "main")
     assert avatar_pool.generate_pair("main") is not None
     argv = rig[0]
-    assert argv[-2:] == ["--", "a portrait"]
+    assert argv[-2] == "--"
+    assert not argv[-1].startswith("-")
+    assert "a portrait" in argv[-1]
 
 
 # --------------------------------------------------------------------------- #
@@ -109,8 +124,8 @@ def test_the_reaction_pool_refills_in_the_background_band(rx_env, rig):
     assert argv[argv.index("--priority") + 1] == "3"
 
 
-def test_the_avatar_pool_refills_in_the_background_band(rx_env, rig):
-    avatar_pool.bank_save({"base": "a portrait", "ratio": "1:1"}, "main")
+def test_the_avatar_pool_refills_in_the_background_band(rx_env, rig, monkeypatch):
+    _save_v5_bank(monkeypatch)
     st = avatar_pool.load_state("main")
     st.config.enabled = True
     avatar_pool.save_state(st, "main")
@@ -228,7 +243,7 @@ def test_pool_generate_ignores_a_file_outside_the_output_dir(rx_env, stray_rig):
     assert stray_rig.is_file()
 
 
-def test_avatar_pair_ignores_a_file_outside_the_output_dir(rx_env, stray_rig):
-    avatar_pool.bank_save({"base": "a portrait", "ratio": "1:1"}, "main")
+def test_avatar_pair_ignores_a_file_outside_the_output_dir(rx_env, stray_rig, monkeypatch):
+    _save_v5_bank(monkeypatch)
     assert avatar_pool.generate_pair("main") is None
     assert stray_rig.is_file()

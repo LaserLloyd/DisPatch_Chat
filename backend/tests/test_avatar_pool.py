@@ -282,11 +282,18 @@ def test_bad_bot_id_cannot_name_a_path(pool_env):
 
 def test_bank_round_trip_and_compose(pool_env):
     assert avatar_pool.compose_prompt("main") is None, "an empty bank must not compose"
-    avatar_pool.bank_save({"base": "a red-haired engineer", "suffix": "studio light",
-                           "variations": ["smiling", ""]}, "main")
+    avatar_pool.bank_save({"categories": {
+                               "neutral": {"label": "Neutral",
+                                           "expressions": ["neutral expression, cool violet gaze"],
+                                           "prompts": ["full pre-composed prompt"]}},
+                           "crop_size": 1024, "face_percent": 0.55,
+                           "face_y_percent": 0.45,
+                           "workflow": "anima-Rev8-26", "ratio": "1:1",
+                           "background": "clean black background"}, "main")
     p = avatar_pool.compose_prompt("main")
-    assert p is not None and p.startswith("a red-haired engineer") and p.endswith("studio light")
-    assert "smiling" in p
+    assert p is not None and p.startswith("masterpiece, best quality")  # Tier 1
+    assert "neutral expression, cool violet gaze" in p                  # body
+    assert p.endswith("clean black background")                         # bank background
 
 
 def test_deficit_and_low_water(pool_env):
@@ -365,12 +372,26 @@ def test_unlocked_browser_manages_the_pool(client):
 
 
 def test_prompts_round_trip_over_the_api(client):
-    r = client.put("/api/avatar-pool/main/prompts",
-                   json={"prompts": {"base": "the companion", "variations": ["at a desk"]}})
+    # v5 bank: categories of expressions/prompts. The v1 base+variations shape
+    # is refused (a bank with no usable categories 400s, tested below).
+    bank = {"categories": {"calm": {"label": "Calm",
+                                    "expressions": ["a relaxed smile"],
+                                    "prompts": ["the companion at a desk"]}}}
+    r = client.put("/api/avatar-pool/main/prompts", json={"prompts": bank})
     assert r.status_code == 200, r.text
     r = client.get("/api/avatar-pool/main/prompts")
     assert r.status_code == 200
-    assert r.json()["prompts"]["base"] == "the companion"
+    cats = r.json()["prompts"]["categories"]
+    assert [c["name"] for c in cats] == ["calm"]
+    assert cats[0]["prompts"] == ["the companion at a desk"]
+
+
+def test_prompts_put_refuses_a_v1_bank(client):
+    """The v1 'base'+'variations' schema is gone in v5 — a bank with no usable
+    categories must be refused loudly, not saved as something degenerate."""
+    r = client.put("/api/avatar-pool/main/prompts",
+                   json={"prompts": {"base": "the companion", "variations": ["at a desk"]}})
+    assert r.status_code == 400
 
 
 def test_prompts_put_refuses_a_pool_less_bot(client):

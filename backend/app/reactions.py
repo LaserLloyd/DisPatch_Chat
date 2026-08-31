@@ -1767,16 +1767,57 @@ PART_STALE_S = pool_common.PART_STALE_S
 class PoolConfig:
     bot_id: str = ""                 # which bot this pool owns (set on load)
     enabled: bool = True
-    per_mood: int = 20               # unused images to keep on hand PER MOOD
+    per_mood: int = 20               # unused images to keep on hand PER MOOD (default)
     min_per_mood: int = 5            # a mood dipping below this refills right away
     refresh_hour: int = 4            # local hour of the nightly top-up
     max_per_cycle: int = 6           # generation is slow — cap one refill run
     safe: bool = False               # Safe-Mode visibility for generated images
     style: str = ""                  # image CLI style preset
     workflow: str = ""               # image CLI workflow override
+    per_mood_overrides: dict = field(default_factory=dict)
+                                    # per-mood target overrides: {mood_id: target}
+                                    # falls back to per_mood. Capped 0..100 per mood.
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def per_mood_for(cfg: PoolConfig, mood: str) -> int:
+    """Effective target stock for one mood: override wins, else global per_mood.
+
+    Hot moods (thinking, task_complete) can be bumped past the global cap by
+    listing them in ``per_mood_overrides``. Unknown moods and out-of-range
+    values silently fall back to ``cfg.per_mood`` so a stale config never
+    stops the pool.
+    """
+    try:
+        raw = cfg.per_mood_overrides.get(mood)
+    except (AttributeError, TypeError):
+        raw = None
+    if isinstance(raw, int) and 0 <= raw <= 100:
+        return raw
+    return cfg.per_mood
+
+
+def min_per_mood_for(cfg: PoolConfig, mood: str) -> int:
+    """Effective low-water mark for one mood.
+
+    The cap (``per_mood`` and any override) always wins — a low-water mark
+    above the target is meaningless. Otherwise the override maps to the
+    global default scaled by the same ratio, so raising a hot mood's target
+    doesn't silently leave its low-water too low to matter.
+    """
+    target = per_mood_for(cfg, mood)
+    if target <= 0:
+        return 0
+    try:
+        raw = cfg.per_mood_overrides.get(mood)
+    except (AttributeError, TypeError):
+        raw = None
+    if isinstance(raw, int) and raw >= cfg.per_mood:
+        # Scaled in proportion so a 50→100 target raises low-water 5→10.
+        return min(target, max(1, cfg.min_per_mood * raw // max(1, cfg.per_mood)))
+    return min(target, cfg.min_per_mood)
 
 
 # --------------------------------------------------------------------------- #
@@ -2258,6 +2299,25 @@ def _clamp_pool_config(cfg: PoolConfig) -> PoolConfig:
     cfg.style = str(cfg.style or "")[:60]
     cfg.workflow = str(cfg.workflow or "")[:60]
     cfg.bot_id = resolve_bot_id(cfg.bot_id)
+    # per_mood_overrides: mood_id → int 0..100. Junk entries (non-int,
+    # out-of-range, unknown mood) are dropped so a stale override never wedges
+    # the pool.
+    raw_overrides = cfg.per_mood_overrides
+    if not isinstance(raw_overrides, dict):
+        cfg.per_mood_overrides = {}
+    else:
+        cleaned: dict[str, int] = {}
+        for k, v in raw_overrides.items():
+            key = str(k or "").strip().lower()
+            if not key:
+                continue
+            try:
+                ival = int(v)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= ival <= 100:
+                cleaned[key] = ival
+        cfg.per_mood_overrides = cleaned
     return cfg
 
 
@@ -2526,9 +2586,10 @@ def pool_deficits(*, bot_id: str | None = None, only_low: bool = False) -> dict[
     out: dict[str, int] = {}
     for c in bank_categories(bot_id):
         n = have.get(c, 0)
-        if only_low and n >= st.config.min_per_mood:
+        low = min_per_mood_for(st.config, c)
+        if only_low and n >= low:
             continue
-        want = st.config.per_mood - n
+        want = per_mood_for(st.config, c) - n
         if want > 0:
             out[c] = want
     return out
@@ -2549,8 +2610,8 @@ def pool_status(bot_id: str | None = None) -> dict:
         **st.config.to_dict(),
         "remaining": sum(have.values()),
         "moods": moods,
-        "low_moods": [c for c in cats if moods[c] < st.config.min_per_mood],
-        "deficit": sum(max(0, st.config.per_mood - moods[c]) for c in cats),
+        "low_moods": [c for c in cats if moods[c] < min_per_mood_for(st.config, c)],
+        "deficit": sum(max(0, per_mood_for(st.config, c) - moods[c]) for c in cats),
         # Historic key (spent blobs once awaited a purge); now simply how many
         # fired images are being kept in spent/<mood>/ for trace re-opens.
         "spent_pending": sum(len(_mood_files(d))
@@ -2578,7 +2639,7 @@ def _pool_needs_refill(st: PoolState, bot_id: str | None = None) -> bool:
     if not st.config.enabled:
         return False
     have = pool_categories(bot_id)
-    return any(have.get(c, 0) < st.config.min_per_mood for c in bank_categories(bot_id))
+    return any(have.get(c, 0) < min_per_mood_for(st.config, c) for c in bank_categories(bot_id))
 
 
 def _pool_daily_due(st: PoolState) -> bool:
