@@ -26,9 +26,10 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=2';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=4';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=5';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
-import { renderPinnedRail, pinToggle } from './pins.js?v=2';
+import { renderPinnedRail, pinToggle } from './pins.js?v=3';
+import { renderLinkRail, linksSection } from './links.js?v=1';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=2';
 
@@ -2215,6 +2216,17 @@ function mountLanguagePicker() {
   for (const [row, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
     const pin = pinToggle(pinId, { t, onChange: renderPins });
     if (pin) row.append(pin);
+  }
+  // Custom link buttons: fourth device preference, same instant-apply rules —
+  // add a link here and it is on the rail before the modal closes (renderPins
+  // is the onChange). Unlocked sessions only: the editor is simply not built
+  // in Safe Mode, matching the rail, so a locked device neither sees the
+  // buttons nor the URLs behind them.
+  const oldLinks = document.getElementById('links-row');
+  if (oldLinks) oldLinks.remove();
+  if (!state.decoy) {
+    const lr = linksSection(t, { onChange: renderPins });
+    nr.after(lr);
   }
   // About: version + the source link. In the Device pane on purpose — it is the
   // one settings tab a Safe-Mode session can open, so every user of the running
@@ -4849,6 +4861,10 @@ function renderPins() {
       if (document.getElementById('nim-row')) mountLanguagePicker();
     },
   });
+  // Custom link buttons share the rail and the rebuild-on-tier-change rule,
+  // but not the registry: they are unlocked-only (the URLs are exactly what
+  // Safe Mode must not advertise) and links.js enforces that on every render.
+  renderLinkRail(document.getElementById('gear-row'), { decoy: state.decoy });
 }
 
 // ---- Idle auto-lock (full mode only → drops back to Safe Mode) ----

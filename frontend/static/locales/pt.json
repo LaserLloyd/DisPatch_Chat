@@ -829,5 +829,16 @@
   "checklist": {
     "done": "Concluído",
     "complete": "Concluir"
+  },
+  "links": {
+    "title": "Botões de link personalizados",
+    "hint": "botões de atalho na barra de menu que abrem um site numa nova aba. Apenas neste dispositivo, e apenas desbloqueado.",
+    "glyph": "Emoji do botão",
+    "label": "Nome",
+    "url": "Endereço web",
+    "add": "Adicionar",
+    "remove": "Remover",
+    "need_label": "Dê um nome ao botão.",
+    "need_url": "Insira um endereço web completo começando com http:// ou https://."
   }
 }

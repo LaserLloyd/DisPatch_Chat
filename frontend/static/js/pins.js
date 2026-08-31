@@ -18,7 +18,7 @@
 // different rail from the phone is the normal case, not an edge one.
 
 import { nimEnabled, setNim, canDisableNim } from './nim.js?v=4';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=4';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=5';
 
 const KEY = 'dispatch-pinned-settings';
 

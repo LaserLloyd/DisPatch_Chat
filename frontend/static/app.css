@@ -2729,6 +2729,43 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 }
 .gear-btn.pin-btn[disabled] { opacity: .45; cursor: not-allowed; }
 
+/* A custom link button is an <a> wearing .gear-btn, and anchors bring two
+   defaults buttons don't: an underline and the link colour. Neutralise both so
+   it is indistinguishable from its button neighbours; layout comes from
+   .gear-btn itself. */
+.gear-btn.link-btn { text-decoration: none; }
+
+/* ---- Custom link buttons (Settings → Device editor) ---------------------- */
+.bm-links { display: block; padding: 10px 2px 2px; font-size: 13px; color: var(--text-secondary); }
+.bm-links strong { color: var(--text-primary); font-weight: 600; }
+.bm-links-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.bm-links-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 8px; background: var(--bg-hover);
+}
+.bm-links-glyph { flex: 0 0 auto; }
+.bm-links-label { color: var(--text-primary); font-weight: 500; flex: 0 1 auto; }
+.bm-links-url {
+  color: var(--text-muted); font-size: 12px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; flex: 1 1 0; min-width: 0;
+  direction: ltr; text-align: start;    /* a URL is LTR even in an RTL locale */
+}
+.bm-links-remove {
+  margin-inline-start: auto; flex: 0 0 auto;
+  background: none; border: 0; color: var(--text-muted);
+  padding: 2px 6px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.bm-links-remove:hover { color: var(--error, #e5484d); background: var(--bg-tertiary, var(--bg-hover)); }
+.bm-links-addrow { margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bm-links-addrow input {
+  background: var(--bg-input, var(--bg-hover)); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px;
+}
+.bm-links-in-glyph { width: 3.2em; text-align: center; flex: 0 0 auto; }
+.bm-links-in-label { flex: 1 1 8em; min-width: 7em; }
+.bm-links-in-url { flex: 2 1 14em; min-width: 10em; direction: ltr; }
+.bm-links-error { color: var(--error, #e5484d); font-size: 12px; margin: 6px 0 0; }
+
 /* The 📌 on a settings row. Pushed to the right edge so the row still reads
    as "checkbox, label" left-to-right and the pin is an aside, not a second
    control competing with the one it pins. */

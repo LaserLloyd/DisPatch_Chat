@@ -829,5 +829,16 @@
   "checklist": {
     "done": "Terminé",
     "complete": "Terminer"
+  },
+  "links": {
+    "title": "Boutons de lien personnalisés",
+    "hint": "des boutons de raccourci dans la barre de menu qui ouvrent un site web dans un nouvel onglet. Sur cet appareil uniquement, et uniquement déverrouillé.",
+    "glyph": "Émoji du bouton",
+    "label": "Nom",
+    "url": "Adresse web",
+    "add": "Ajouter",
+    "remove": "Supprimer",
+    "need_label": "Donnez un nom au bouton.",
+    "need_url": "Saisissez une adresse web complète commençant par http:// ou https://."
   }
 }

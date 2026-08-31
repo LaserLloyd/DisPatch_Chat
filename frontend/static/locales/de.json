@@ -806,5 +806,16 @@
   "checklist": {
     "done": "Erledigt",
     "complete": "Erledigen"
+  },
+  "links": {
+    "title": "Eigene Link-Buttons",
+    "hint": "Schnellzugriffs-Buttons in der Menüleiste, die eine Website in einem neuen Tab öffnen. Nur auf diesem Gerät, und nur im entsperrten Zustand.",
+    "glyph": "Button-Emoji",
+    "label": "Name",
+    "url": "Webadresse",
+    "add": "Hinzufügen",
+    "remove": "Entfernen",
+    "need_label": "Gib dem Button einen Namen.",
+    "need_url": "Gib eine vollständige Webadresse ein, beginnend mit http:// oder https://."
   }
 }

@@ -806,5 +806,16 @@
   "checklist": {
     "done": "Completed",
     "complete": "Complete"
+  },
+  "links": {
+    "title": "Custom link buttons",
+    "hint": "shortcut buttons on the menu bar that open a website in a new tab. This device only, and only while unlocked.",
+    "glyph": "Button emoji",
+    "label": "Name",
+    "url": "Web address",
+    "add": "Add",
+    "remove": "Remove",
+    "need_label": "Give the button a name.",
+    "need_url": "Enter a full web address starting with http:// or https://."
   }
 }

@@ -829,5 +829,16 @@
   "checklist": {
     "done": "Completado",
     "complete": "Completar"
+  },
+  "links": {
+    "title": "Botones de enlace personalizados",
+    "hint": "botones de acceso rápido en la barra de menú que abren un sitio web en una pestaña nueva. Solo en este dispositivo, y solo desbloqueado.",
+    "glyph": "Emoji del botón",
+    "label": "Nombre",
+    "url": "Dirección web",
+    "add": "Añadir",
+    "remove": "Quitar",
+    "need_label": "Ponle un nombre al botón.",
+    "need_url": "Introduce una dirección web completa que empiece por http:// o https://."
   }
 }
