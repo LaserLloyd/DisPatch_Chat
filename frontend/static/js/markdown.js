@@ -1,7 +1,7 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=10';
+import { loadScript, loadStyle, escapeHtml } from './util.js?v=11';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.

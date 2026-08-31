@@ -362,7 +362,10 @@
     "toast_stopped": "dsh web stopped",
     "toast_restarted": "dsh web restarted",
     "toast_job_started": "Job started",
-    "toast_job_cancelled": "Cancel requested"
+    "toast_job_cancelled": "Cancel requested",
+    "model_loaded": "loaded on the server now",
+    "model_loading": "loading on the server…",
+    "sf_link_title": "About StudioForge — laserlloyd.com"
   },
   "llm": {
     "hint": "Point DisPatch at a model provider. It becomes a bot in your sidebar — no agent stack needed.",

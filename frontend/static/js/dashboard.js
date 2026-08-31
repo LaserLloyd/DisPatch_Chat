@@ -37,7 +37,7 @@
 //     would read worse than leaving the pair consistent;
 //   * NOT the numeric formatting (bytes, durations, clock). Unit symbols are
 //     near-universal and the values are diagnostic — see docs/dashboard.md.
-import { el } from './util.js?v=10';
+import { el } from './util.js?v=11';
 
 // ===================== State =====================
 

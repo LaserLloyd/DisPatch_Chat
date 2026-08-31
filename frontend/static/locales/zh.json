@@ -356,7 +356,10 @@
     "toast_stopped": "dsh web 已停止",
     "toast_restarted": "dsh web 已重启",
     "toast_job_started": "任务已开始",
-    "toast_job_cancelled": "已请求取消"
+    "toast_job_cancelled": "已请求取消",
+    "model_loaded": "当前已在服务器上加载",
+    "model_loading": "正在服务器上加载…",
+    "sf_link_title": "关于 StudioForge — laserlloyd.com"
   },
   "llm": {
     "hint": "把 DisPatch 指向一个模型提供方，它就会变成侧边栏里的一个机器人 — 不需要任何智能体框架。",

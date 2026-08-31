@@ -110,9 +110,9 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=50" />
+  <link rel="stylesheet" href="/static/app.css?v=51" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
-  <script type="module" src="/static/js/theme.js?v=12"></script>
+  <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -396,6 +396,14 @@
               <span class="harness-model-lbl" data-i18n="harness.model">Model</span>
               <select id="harness-model" class="harness-model-select" aria-label="Default model" data-i18n-attr="aria-label=harness.model"></select>
             </label>
+            <!-- Docs for the ★'d provider. Outside the label (an <a> inside one
+                 fights the select for the click) and unhidden by
+                 renderHarnessModelSelect only when a StudioForge route is
+                 actually configured. -->
+            <a id="harness-sf-link" class="harness-sf-link" hidden
+               href="https://www.laserlloyd.com/projects/studioforge-gpu-only-llm-server/"
+               target="_blank" rel="noopener noreferrer"
+               title="About StudioForge — laserlloyd.com" data-i18n-attr="title=harness.sf_link_title">★</a>  <!-- scrub-ok: public project, article live on laserlloyd.com -->
             <button class="btn-secondary" id="harness-start" data-i18n="harness.start">▶ Start</button>
             <button class="btn-secondary" id="harness-restart" data-i18n="harness.restart">⟳ Restart</button>
             <button class="btn-secondary danger-text" id="harness-stop" data-i18n="harness.stop">■ Stop</button>
@@ -898,6 +906,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=64"></script>
+  <script type="module" src="/static/js/main.js?v=65"></script>
 </body>
 </html>

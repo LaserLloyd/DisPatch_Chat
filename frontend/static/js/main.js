@@ -6,7 +6,7 @@ import { api, setOnLocked } from './api.js?v=20';
 import { ChatSocket } from './ws.js?v=8';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=23';
 import { installChecklists, applyChecklistState } from './checklist.js?v=2';
-import { el, escapeHtml, loadScript, loadStyle } from './util.js?v=10';
+import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=11';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -28,8 +28,8 @@ import {
 } from './llm.js?v=2';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=5';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle } from './pins.js?v=5';
-import { renderLinkRail, linksSection } from './links.js?v=2';
+import { renderPinnedRail, pinToggle } from './pins.js?v=6';
+import { renderLinkRail, linksSection } from './links.js?v=3';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=2';
 
@@ -191,7 +191,7 @@ const dom = {};
  'harness-open', 'harness-pane-ui', 'harness-pane-jobs', 'harness-frame', 'harness-note',
  'harness-note-text', 'harness-note-hint', 'harness-job-form', 'harness-task', 'harness-cwd',
  'harness-run', 'harness-cancel', 'harness-jobs', 'harness-dot', 'harness-status-label',
- 'harness-model', 'harness-start', 'harness-restart', 'harness-stop',
+ 'harness-model', 'harness-sf-link', 'harness-start', 'harness-restart', 'harness-stop',
  // Locked-mode dedicated unlock button
  'unlock-btn',
 ].forEach((id) => { dom[id] = $(id); });
@@ -3917,18 +3917,30 @@ function renderHarnessModelSelect() {
   sel.innerHTML = '';
   if (!models || !Array.isArray(models.providers)) { sel.disabled = true; return; }
   let matched = false;
+  let hasStudioForge = false;   // scrub-ok: public project, article live on laserlloyd.com
   for (const pr of models.providers) {
     if (!pr || !Array.isArray(pr.models) || !pr.models.length) continue;
-    const grp = el('optgroup', { label: pr.name || pr.id });
+    // The house LLM server gets a ★ — and it unhides the docs link below.
+    const sf = /studioforge/i.test(`${pr.name || ''} ${pr.id || ''}`);   // scrub-ok: public project name
+    if (sf) hasStudioForge = true;
+    const grp = el('optgroup', { label: `${sf ? '★ ' : ''}${pr.name || pr.id}` });
     for (const m of pr.models) {
       const key = `${pr.id} ${m.id}`;
-      const opt = el('option', { value: key, text: m.name && m.name !== m.id ? `${m.name}` : m.id });
-      opt.title = `${pr.id} / ${m.id}`;
+      // Live state from the server's /models decoration (StudioForge / LM
+      // Studio dialect): ● resident now, ◌ mid-load. No badge = cold, and
+      // picking it is legitimate — the first request just pays the load.
+      const badge = m.state === 'loaded' ? ' ●' : m.state === 'loading' ? ' ◌' : '';
+      const label = m.name && m.name !== m.id ? m.name : m.id;
+      const opt = el('option', { value: key, text: `${label}${badge}` });
+      opt.title = `${pr.id} / ${m.id}`
+        + (m.state === 'loaded' ? ` — ${t('harness.model_loaded')}${m.ctx ? ` (ctx ${m.ctx.toLocaleString()})` : ''}`
+          : m.state === 'loading' ? ` — ${t('harness.model_loading')}` : '');
       if (key === curKey) { opt.selected = true; matched = true; }
       grp.append(opt);
     }
     sel.append(grp);
   }
+  if (dom['harness-sf-link']) dom['harness-sf-link'].hidden = !hasStudioForge;
   // A current default that is not in any catalog (hand-edited settings) still
   // shows up, so the picker never lies about what dsh will use.
   if (cur && !matched) {
@@ -5373,9 +5385,28 @@ function wireAuthEvents() {
 
 // ===================== Boot =====================
 
+// The rail's static buttons ship emoji/text glyphs in the markup (a readable
+// no-JS fallback); swap them for the shared line-icon set so the whole rail —
+// built-ins, pins and links alike — speaks one visual language. The theme
+// button is theme.js's (it repaints on every toggle), and the buttons carry
+// only data-i18n-attr, so no translation pass ever writes text over the SVG.
+function iconifyRail() {
+  for (const [id, icon] of [
+    ['lock-now', RAIL_ICONS.lock],
+    ['unlock-btn', RAIL_ICONS.unlock],
+    ['drop-btn', RAIL_ICONS.upload],
+    ['fs-chip', RAIL_ICONS.folder],
+    ['manage-bots', RAIL_ICONS.gear],
+  ]) {
+    const b = document.getElementById(id);
+    if (b) b.replaceChildren(railIcon(icon));
+  }
+}
+
 async function startApp() {
   if (state.started) return;
   state.started = true;
+  iconifyRail();
   // Delegated code-block / file-path copy handlers (idempotent, survives
   // re-render + streaming since it binds on document, not per message).
   installMarkdownHandlers(toast);

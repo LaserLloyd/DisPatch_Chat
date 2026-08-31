@@ -356,7 +356,10 @@
     "toast_stopped": "dsh web を停止しました",
     "toast_restarted": "dsh web を再起動しました",
     "toast_job_started": "ジョブを開始しました",
-    "toast_job_cancelled": "キャンセルを要求しました"
+    "toast_job_cancelled": "キャンセルを要求しました",
+    "model_loaded": "サーバーに読み込み済み",
+    "model_loading": "サーバーで読み込み中…",
+    "sf_link_title": "StudioForge について — laserlloyd.com"
   },
   "llm": {
     "hint": "DisPatch をモデルプロバイダーに向けるだけです。サイドバーのボットになり、エージェント基盤は要りません。",

@@ -9,6 +9,7 @@
 // minimal (absent = full). This isolated module (no app state, no imports)
 // owns the button; 'system' was retired in favour of the explicit toggle.
 import { applyDom, hasDictionary } from './i18n.js?v=3';
+import { railIcon, RAIL_ICONS } from './util.js?v=11';
 
 const THEME_KEY = 'dispatch-theme';
 // The button's label depends on which theme is active, so it is TWO keys, not
@@ -17,8 +18,10 @@ const THEME_KEY = 'dispatch-theme';
 // runs from <head>, before the dictionaries have loaded, and a hard-coded
 // English label reads better at that moment than t()'s humanized key would.
 const STATES = {
-  dark:  { glyph: '☾', key: 'theme.dark',  label: 'Dark theme — click for light' },
-  light: { glyph: '☀', key: 'theme.light', label: 'Light theme — click for dark' },
+  // The icon shows the ACTIVE theme (moon while dark), same as the old glyphs;
+  // line art from the shared rail set so this button matches its neighbours.
+  dark:  { icon: RAIL_ICONS.moon, key: 'theme.dark',  label: 'Dark theme — click for light' },
+  light: { icon: RAIL_ICONS.sun,  key: 'theme.light', label: 'Light theme — click for dark' },
 };
 const meta = document.querySelector('meta[name="theme-color"]');
 
@@ -45,7 +48,7 @@ function updateBtn(theme) {
   const b = document.getElementById('theme-toggle');
   if (!b) return;
   const s = STATES[theme];
-  b.textContent = s.glyph;
+  b.replaceChildren(railIcon(s.icon));
   b.title = s.label;
   b.setAttribute('aria-label', s.label);
   // Re-point the DOM pass at whichever key is now current and let it own the

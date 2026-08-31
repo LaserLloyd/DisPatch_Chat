@@ -19,16 +19,7 @@
 // not an account preference. The key is in privacy.js APP_KEYS — privacy
 // mode's wipe must forget a device's links like everything else it forgets.
 
-import { el } from './util.js?v=10';
-import { railIcon } from './pins.js?v=5';
-
-// The default face of a link button when no emoji is chosen: an external-link
-// arrow in the same thin-stroke line language as the pinned-setting icons.
-const ICON_LINK = [
-  'M15 3h6v6',
-  'M10 14 21 3',
-  'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
-];
+import { el, railIcon, RAIL_ICONS } from './util.js?v=11';
 
 const KEY = 'dispatch-custom-links';
 
@@ -117,7 +108,7 @@ export function renderLinkRail(container, { decoy = false } = {}) {
       'aria-label': entry.label,
     });
     if (entry.glyph) a.textContent = entry.glyph;
-    else a.append(railIcon(ICON_LINK));
+    else a.append(railIcon(RAIL_ICONS.link));
     if (anchor) container.insertBefore(a, anchor);
     else container.append(a);
   }
@@ -143,7 +134,7 @@ export function linksSection(t, { onChange = null } = {}) {
     for (const entry of customLinks()) {
       list.append(el('div', { class: 'bm-links-item' }, [
         el('span', { class: 'bm-links-glyph', 'aria-hidden': 'true' },
-          entry.glyph ? [entry.glyph] : [railIcon(ICON_LINK)]),
+          entry.glyph ? [entry.glyph] : [railIcon(RAIL_ICONS.link)]),
         el('span', { class: 'bm-links-label', text: entry.label }),
         el('span', { class: 'bm-links-url', text: entry.url }),
         el('button', {

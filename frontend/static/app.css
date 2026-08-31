@@ -2772,6 +2772,14 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .bm-links-in-url { flex: 2 1 14em; min-width: 10em; direction: ltr; }
 .bm-links-error { color: var(--error, #e5484d); font-size: 12px; margin: 6px 0 0; }
 
+/* The ★ next to the harness model picker: docs link for the starred provider.
+   Accent-coloured so it reads as a link, not a decoration. */
+.harness-sf-link {
+  text-decoration: none; color: var(--accent); font-size: 15px;
+  align-self: center; padding: 0 4px; border-radius: 6px;
+}
+.harness-sf-link:hover { background: var(--bg-hover); }
+
 /* The 📌 on a settings row. Pushed to the right edge so the row still reads
    as "checkbox, label" left-to-right and the pin is an aside, not a second
    control competing with the one it pins. */

@@ -393,6 +393,43 @@ def _load_settings(path: Path | None = None) -> dict:
     return data
 
 
+# ---- Live model state ------------------------------------------------------
+# A local llama.cpp-family server (StudioForge, LM Studio) decorates its
+# OpenAI /models listing with `state` ("loaded" | "loading" | "not-loaded")
+# and, when resident, `loaded_context_length`. Surfacing that in the picker is
+# the difference between "instant reply" and "30s cold load" being a surprise.
+#
+# Probed ONLY for plain-http base URLs — those are LAN/tailnet servers the
+# operator configured; https means a cloud API where an unauthenticated
+# /models GET is at best noise. Best-effort with a short timeout and a small
+# TTL cache so the picker stays snappy; a dead rig degrades to no badges, not
+# an error.
+_STATE_TTL_S = 10.0
+_state_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _probe_model_states(base_url: str) -> dict:
+    """{model_id: {"state": str, "ctx": int|None}} for servers that report it."""
+    now = time.monotonic()
+    hit = _state_cache.get(base_url)
+    if hit and now - hit[0] < _STATE_TTL_S:
+        return hit[1]
+    states: dict[str, dict] = {}
+    try:
+        resp = httpx.get(base_url.rstrip("/") + "/models", timeout=2.0,
+                         headers={"Accept": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+        for m in (data.get("data") or []):
+            if isinstance(m, dict) and isinstance(m.get("id"), str) and isinstance(m.get("state"), str):
+                states[m["id"]] = {"state": m["state"],
+                                   "ctx": m.get("loaded_context_length")}
+    except Exception as e:                       # any failure = no badges
+        log.debug("model-state probe %s failed: %s", base_url, e)
+    _state_cache[base_url] = (now, states)
+    return states
+
+
 def _model_entry(m) -> dict | None:
     if isinstance(m, str):
         return {"id": m, "name": m}
@@ -443,6 +480,15 @@ def discover_models(path: Path | None = None) -> dict:
             name = spec["displayName"]
         else:
             name = catalog_display_name(pid) or pid
+        base = spec.get("baseURL") if isinstance(spec.get("baseURL"), str) else ""
+        if base.startswith("http://"):
+            states = _probe_model_states(base)
+            for m in models:
+                st = states.get(m["id"])
+                if st:
+                    m["state"] = st["state"]
+                    if st.get("ctx"):
+                        m["ctx"] = st["ctx"]
         providers.append({"id": pid, "name": name, "models": models,
                           "from_catalog": catalogued})
 

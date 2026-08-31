@@ -386,7 +386,10 @@
     "toast_stopped": "تم إيقاف dsh web",
     "toast_restarted": "تمت إعادة تشغيل dsh web",
     "toast_job_started": "بدأت المهمة",
-    "toast_job_cancelled": "طُلب الإلغاء"
+    "toast_job_cancelled": "طُلب الإلغاء",
+    "model_loaded": "محمَّل على الخادم الآن",
+    "model_loading": "جارٍ التحميل على الخادم…",
+    "sf_link_title": "حول StudioForge — laserlloyd.com"
   },
   "llm": {
     "hint": "وجّه DisPatch إلى مزوّد نماذج، فيصبح بوتًا في شريطك الجانبي — دون الحاجة إلى منظومة وكلاء.",

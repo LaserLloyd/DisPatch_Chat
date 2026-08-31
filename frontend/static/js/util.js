@@ -67,3 +67,92 @@ export function escapeHtml(s) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
+
+// --- Rail icons -------------------------------------------------------------
+// Thin-stroke line icons in currentColor for the sidebar rail and anywhere
+// else an emoji would clash with monochrome chrome: emoji draw in the
+// platform's colour set, so a rail mixing them with line art reads as two
+// different apps. One language, one place. 24px grid, 1.8px rounded strokes;
+// colour comes from the element, so themes and accent states apply for free.
+//
+// Built with createElementNS from constant path data. No innerHTML: el()
+// above bans it, and a hand-rolled exception for "trusted" markup is how that
+// ban erodes.
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** One icon: an array of path `d` strings on a 24×24 grid → an <svg>. */
+export function railIcon(paths) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('rail-icon');
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+/** The shared set, named by meaning. */
+export const RAIL_ICONS = {
+  // Picture frame, broken by the slash: "no images".
+  nim: [
+    'M2 2 22 22',
+    'M10.41 10.41a2 2 0 1 1-2.83-2.83',
+    'M13.5 13.5 6 21',
+    'M18 12l3 3',
+    'M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59',
+    'M21 15V5a2 2 0 0 0-2-2H9',
+  ],
+  // Eye, struck through: "this device sees nothing".
+  privacy: [
+    'M2 2 22 22',
+    'M9.88 9.88a3 3 0 1 0 4.24 4.24',
+    'M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68',
+    'M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61',
+  ],
+  // The silhouette Minimal avatars switches to.
+  avatars: [
+    'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2',
+    'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+  ],
+  // External-link arrow: a custom link button with no chosen emoji.
+  link: [
+    'M15 3h6v6',
+    'M10 14 21 3',
+    'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
+  ],
+  moon: ['M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z'],
+  sun: [
+    'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8',
+    'M12 2v2', 'M12 20v2', 'M4.93 4.93l1.41 1.41', 'M17.66 17.66l1.41 1.41',
+    'M2 12h2', 'M20 12h2', 'M6.34 17.66l-1.41 1.41', 'M19.07 4.93l-1.41 1.41',
+  ],
+  lock: [
+    'M5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z',
+    'M7 11V7a5 5 0 0 1 10 0v4',
+  ],
+  unlock: [
+    'M5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z',
+    'M7 11V7a5 5 0 0 1 9.9-1',
+  ],
+  folder: [
+    'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z',
+  ],
+  upload: [
+    'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',
+    'M17 8l-5-5-5 5',
+    'M12 3v12',
+  ],
+  gear: [
+    'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
+    'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+  ],
+};

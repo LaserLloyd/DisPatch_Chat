@@ -368,7 +368,10 @@
     "toast_stopped": "dsh web detenido",
     "toast_restarted": "dsh web reiniciado",
     "toast_job_started": "Trabajo iniciado",
-    "toast_job_cancelled": "Cancelación solicitada"
+    "toast_job_cancelled": "Cancelación solicitada",
+    "model_loaded": "cargado en el servidor ahora",
+    "model_loading": "cargándose en el servidor…",
+    "sf_link_title": "Acerca de StudioForge — laserlloyd.com"
   },
   "llm": {
     "hint": "Apunta DisPatch a un proveedor de modelos. Se convierte en un bot de tu barra lateral — sin necesidad de un stack de agentes.",

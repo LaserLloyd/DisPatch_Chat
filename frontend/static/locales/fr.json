@@ -368,7 +368,10 @@
     "toast_stopped": "dsh web arrêté",
     "toast_restarted": "dsh web redémarré",
     "toast_job_started": "Tâche lancée",
-    "toast_job_cancelled": "Annulation demandée"
+    "toast_job_cancelled": "Annulation demandée",
+    "model_loaded": "chargé sur le serveur actuellement",
+    "model_loading": "chargement sur le serveur…",
+    "sf_link_title": "À propos de StudioForge — laserlloyd.com"
   },
   "llm": {
     "hint": "Pointe DisPatch vers un fournisseur de modèles. Il devient un bot dans ta barre latérale — sans aucune pile d’agents.",
