@@ -54,11 +54,11 @@ test('only http(s) URLs are accepted on write', () => {
   assert.ok(addLink({ label: 'x', url: 'https://example.com/panel' }));
 });
 
-test('a label is required; a glyph is not (falls back to 🔗)', () => {
+test('a label is required; a glyph is not (empty means the line icon)', () => {
   reset();
   assert.equal(addLink({ label: '   ', url: 'https://example.com' }), null);
   const e = addLink({ label: 'Panel', url: 'https://example.com' });
-  assert.equal(e.glyph, '🔗');
+  assert.equal(e.glyph, '');
 });
 
 test('a hand-edited storage row cannot smuggle a bad scheme onto the rail', () => {

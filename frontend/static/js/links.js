@@ -20,6 +20,15 @@
 // mode's wipe must forget a device's links like everything else it forgets.
 
 import { el } from './util.js?v=10';
+import { railIcon } from './pins.js?v=5';
+
+// The default face of a link button when no emoji is chosen: an external-link
+// arrow in the same thin-stroke line language as the pinned-setting icons.
+const ICON_LINK = [
+  'M15 3h6v6',
+  'M10 14 21 3',
+  'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
+];
 
 const KEY = 'dispatch-custom-links';
 
@@ -53,7 +62,7 @@ export function customLinks() {
     if (!Array.isArray(raw)) return [];
     return raw.filter(validEntry).map((e) => ({
       id: e.id,
-      glyph: (typeof e.glyph === 'string' && e.glyph.trim()) ? e.glyph.trim() : '🔗',
+      glyph: typeof e.glyph === 'string' ? e.glyph.trim() : '',
       label: e.label.trim(),
       url: e.url,
     }));
@@ -71,7 +80,7 @@ function save(list) {
 export function addLink({ glyph, label, url }) {
   const entry = {
     id: `link-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    glyph: (typeof glyph === 'string' && glyph.trim()) ? glyph.trim() : '🔗',
+    glyph: typeof glyph === 'string' ? glyph.trim() : '',
     label: typeof label === 'string' ? label.trim() : '',
     url: typeof url === 'string' ? url.trim() : '',
   };
@@ -106,8 +115,9 @@ export function renderLinkRail(container, { decoy = false } = {}) {
       rel: 'noopener noreferrer',
       title: `${entry.label} — ${entry.url}`,
       'aria-label': entry.label,
-      text: entry.glyph,
     });
+    if (entry.glyph) a.textContent = entry.glyph;
+    else a.append(railIcon(ICON_LINK));
     if (anchor) container.insertBefore(a, anchor);
     else container.append(a);
   }
@@ -132,7 +142,8 @@ export function linksSection(t, { onChange = null } = {}) {
     list.innerHTML = '';
     for (const entry of customLinks()) {
       list.append(el('div', { class: 'bm-links-item' }, [
-        el('span', { class: 'bm-links-glyph', 'aria-hidden': 'true', text: entry.glyph }),
+        el('span', { class: 'bm-links-glyph', 'aria-hidden': 'true' },
+          entry.glyph ? [entry.glyph] : [railIcon(ICON_LINK)]),
         el('span', { class: 'bm-links-label', text: entry.label }),
         el('span', { class: 'bm-links-url', text: entry.url }),
         el('button', {

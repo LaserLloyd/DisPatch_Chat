@@ -28,8 +28,8 @@ import {
 } from './llm.js?v=2';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=5';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle } from './pins.js?v=4';
-import { renderLinkRail, linksSection } from './links.js?v=1';
+import { renderPinnedRail, pinToggle } from './pins.js?v=5';
+import { renderLinkRail, linksSection } from './links.js?v=2';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=2';
 

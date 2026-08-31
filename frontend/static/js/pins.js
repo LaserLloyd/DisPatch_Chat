@@ -22,6 +22,60 @@ import { privacyEnabled, setPrivacy } from './privacy.js?v=5';
 
 const KEY = 'dispatch-pinned-settings';
 
+// ---- Rail icons -----------------------------------------------------------
+// Thin-stroke line icons in currentColor, not emoji: emoji render in the
+// platform's colour set and clash with the rail's monochrome chrome (the 🙈
+// experiment proved it). These follow the house line-work — 1.8px rounded
+// strokes on a 24px grid — and inherit the button's colour, so they track the
+// theme and pick up the accent fill of `.pin-on` for free.
+//
+// Built with createElementNS from constant path data. No innerHTML: el() bans
+// it app-wide and a hand-rolled exception for "trusted" markup is how that
+// ban erodes.
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** One icon: an array of path `d` strings on a 24×24 grid → an <svg>. */
+export function railIcon(paths) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('rail-icon');
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+// Picture frame, broken by the slash: "no images".
+const ICON_NIM = [
+  'M2 2 22 22',                                       // the slash
+  'M10.41 10.41a2 2 0 1 1-2.83-2.83',                 // the sun, cut open
+  'M13.5 13.5 6 21',                                  // the mountainside
+  'M18 12l3 3',
+  'M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59',
+  'M21 15V5a2 2 0 0 0-2-2H9',                         // frame, open at the slash
+];
+// Eye, struck through: "this device sees nothing".
+const ICON_PRIVACY = [
+  'M2 2 22 22',
+  'M9.88 9.88a3 3 0 1 0 4.24 4.24',
+  'M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68',
+  'M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61',
+];
+// The silhouette the setting switches to.
+const ICON_AVATARS = [
+  'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2',
+  'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+];
+
 /** The pinnable registry.
  *
  *  `enabled()`  – is the setting currently on?
@@ -34,9 +88,7 @@ const KEY = 'dispatch-pinned-settings';
 export const PINNABLE = [
   {
     id: 'nim',
-    // 🙈 (see no evil), not 🚫: the prohibition sign read as "error", where
-    // this button means "don't show me the pictures".
-    glyph: '🙈',
+    icon: ICON_NIM,
     titleKey: 'nim.title',
     titleEn: 'No-Image Mode',
     safe: true,                       // works in Safe Mode; that is its point
@@ -49,7 +101,7 @@ export const PINNABLE = [
   },
   {
     id: 'privacy',
-    glyph: '🕶',
+    icon: ICON_PRIVACY,
     titleKey: 'privacy.title',
     titleEn: 'Privacy mode',
     safe: true,
@@ -59,7 +111,7 @@ export const PINNABLE = [
   },
   {
     id: 'avatars',
-    glyph: '👤',                      // the letter-block silhouette it switches to
+    icon: ICON_AVATARS,
     titleKey: 'settings.minimal_avatars',
     titleEn: 'Minimal avatars',
     safe: true,                       // pure CSS display preference, no gate behind it
@@ -128,7 +180,7 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
     const btn = document.createElement('button');
     btn.className = 'gear-btn pin-btn';
     btn.dataset.pin = entry.id;
-    btn.textContent = entry.glyph;
+    btn.append(railIcon(entry.icon));
     const label = t ? t(entry.titleKey) : entry.titleEn;
     const on = !!entry.enabled();
     const blockedKey = entry.blocked ? entry.blocked(decoy) : null;

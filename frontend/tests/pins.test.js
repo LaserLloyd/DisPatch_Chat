@@ -81,7 +81,9 @@ test('Safe Mode sees only pins marked safe', () => {
 test('every registry entry declares the fields the rail relies on', () => {
   for (const entry of PINNABLE) {
     assert.equal(typeof entry.id, 'string');
-    assert.equal(typeof entry.glyph, 'string');
+    // The rail draws a line icon, not an emoji: an array of SVG path strings.
+    assert.ok(Array.isArray(entry.icon) && entry.icon.length > 0);
+    for (const d of entry.icon) assert.equal(typeof d, 'string');
     assert.equal(typeof entry.enabled, 'function');
     assert.equal(typeof entry.toggle, 'function');
     assert.equal(typeof entry.safe, 'boolean');

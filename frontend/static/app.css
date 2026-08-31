@@ -2735,6 +2735,12 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
    .gear-btn itself. */
 .gear-btn.link-btn { text-decoration: none; }
 
+/* Thin-stroke line icons on the rail (pins + default link face). Sized to sit
+   like the emoji glyphs around them; colour comes from the button, so theme
+   and .pin-on accent both just work. */
+.gear-btn .rail-icon { width: 18px; height: 18px; display: block; margin: auto; }
+.bm-links-glyph .rail-icon { width: 15px; height: 15px; display: block; }
+
 /* ---- Custom link buttons (Settings → Device editor) ---------------------- */
 .bm-links { display: block; padding: 10px 2px 2px; font-size: 13px; color: var(--text-secondary); }
 .bm-links strong { color: var(--text-primary); font-weight: 600; }
