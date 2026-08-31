@@ -816,7 +816,7 @@ def test_the_bots_default_workflow_fills_an_endpoint_request(env):
 def test_the_workflow_survives_a_roster_write(env):
     """_bot_entry has dropped a field three times; image_workflow is only
     useful if it is still there after the next avatar upload."""
-    c = env()
+    env()
     _set_workflow("krea2")
     config.save_bot_avatar("main", "new-face.png")
     config._invalidate_bots_cache()

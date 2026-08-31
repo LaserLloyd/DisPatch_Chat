@@ -27,6 +27,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -1906,8 +1907,9 @@ class _Prepared(NamedTuple):
     skip: bool          # nothing left to say — persist no empty bubble
     # Image jobs this message's `[[pic:…]]` markers earned. Started by the
     # CALLERS, after the message exists: this pass cannot persist a second
-    # message of its own. Never mutated in place.
-    pic_specs: list = []
+    # message of its own. Never mutated in place — and the default is a tuple
+    # precisely so the shared class-level default CANNOT be mutated (RUF012).
+    pic_specs: Sequence = ()
 
 
 async def _prepare_persist(

@@ -503,7 +503,7 @@ def _face_pct(v) -> int | None:
     except (TypeError, ValueError):
         return None
     if f <= 1.0:
-        return int(round(f * 100))
+        return round(f * 100)
     return int(f)
 
 
