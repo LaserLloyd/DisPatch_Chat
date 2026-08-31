@@ -20,15 +20,15 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=14';
+} from './reactions.js?v=15';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=5';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=2';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=5';
-import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow } from './nim.js?v=4';
-import { renderPinnedRail, pinToggle } from './pins.js?v=3';
+import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
+import { renderPinnedRail, pinToggle } from './pins.js?v=4';
 import { renderLinkRail, linksSection } from './links.js?v=1';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=2';
@@ -2217,6 +2217,15 @@ function mountLanguagePicker() {
     const pin = pinToggle(pinId, { t, onChange: renderPins });
     if (pin) row.append(pin);
   }
+  // Minimal avatars is pinnable too. Its row is static markup (unlike the two
+  // built above), so the 📌 from the previous mount must go before a new one
+  // lands — this function runs on every Device-tab open.
+  const avRow = dom['bm-avatar-style-row'];
+  if (avRow) {
+    avRow.querySelector('.pin-toggle')?.remove();
+    const avPin = pinToggle('avatars', { t, onChange: renderPins });
+    if (avPin) avRow.append(avPin);
+  }
   // Custom link buttons: fourth device preference, same instant-apply rules —
   // add a link here and it is on the rail before the modal closes (renderPins
   // is the onChange). Unlocked sessions only: the editor is simply not built
@@ -2298,6 +2307,9 @@ function applyNimChange() {
   if (reactionManagerOpen()) repaintReactionManager();
   syncMinimalAvatarRow();
   syncLockNimRow();
+  // The rail too: a pinned 🙈 changes state, and a pinned 👤 flips between
+  // operable and "No-Image Mode controls this" when NIM claims the attribute.
+  renderPins();
 }
 
 // The lock-screen row. Always shown (a Safe-Mode device must be able to turn
@@ -4628,14 +4640,10 @@ function wireEvents() {
   dom['bm-avatar-minimal'].addEventListener('change', () => {
     // Belt to syncMinimalAvatarRow's braces: `disabled` is a DOM property
     // anyone can clear, and this handler writes a stored preference.
+    // setMinimalAvatars refuses under NIM for the same reason.
     if (nimEnabled()) { syncMinimalAvatarRow(); return; }
-    const on = dom['bm-avatar-minimal'].checked;
-    if (on) document.documentElement.setAttribute('data-avatar-style', 'minimal');
-    else document.documentElement.removeAttribute('data-avatar-style');
-    try {
-      if (on) localStorage.setItem('dispatch-avatar-style', 'minimal');
-      else localStorage.removeItem('dispatch-avatar-style');
-    } catch { /* private mode */ }
+    setMinimalAvatars(dom['bm-avatar-minimal'].checked);
+    renderPins();   // a pinned 👤 shows the same state this checkbox writes
   });
   dom['botmanager-backdrop'].addEventListener('click', (e) => {
     if (e.target === dom['botmanager-backdrop']) closeBotManager();
@@ -4858,6 +4866,9 @@ function renderPins() {
       // A pinned toggle changes the same device setting the Settings pane
       // shows, so anything open must be repainted or the two disagree.
       if (id === 'nim') applyNimChange(nimEnabled());
+      // A rail toggle of minimal avatars must repaint its Settings checkbox
+      // (the CSS attribute swap itself needs no re-render).
+      if (id === 'avatars') syncMinimalAvatarRow();
       if (document.getElementById('nim-row')) mountLanguagePicker();
     },
   });

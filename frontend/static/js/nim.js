@@ -67,6 +67,32 @@ function applyNim(on) {
   else html.removeAttribute('data-avatar-style');
 }
 
+// ---- Minimal avatars ------------------------------------------------------
+// The device preference that data-avatar-style stores. It lives HERE, not in
+// main.js, because NIM borrows the same attribute (applyNim above) and the two
+// must agree on who owns it: while NIM is on, minimal avatars are FORCED and
+// the preference is read-only — the Settings checkbox shows this ticked and
+// disabled, and a pinned rail button reports blocked instead of toggling.
+
+/** Are avatars minimal right now — by preference, or forced by NIM? */
+export function minimalAvatarsEnabled() {
+  if (nimEnabled()) return true;
+  try { return localStorage.getItem('dispatch-avatar-style') === 'minimal'; } catch { return false; }
+}
+
+/** Write the preference and apply it. Refuses while NIM owns the attribute —
+ *  same rule the Settings checkbox enforces (see syncMinimalAvatarRow). */
+export function setMinimalAvatars(on) {
+  if (nimEnabled()) return;
+  const html = document.documentElement;
+  if (on) html.setAttribute('data-avatar-style', 'minimal');
+  else html.removeAttribute('data-avatar-style');
+  try {
+    if (on) localStorage.setItem('dispatch-avatar-style', 'minimal');
+    else localStorage.removeItem('dispatch-avatar-style');
+  } catch { /* private mode */ }
+}
+
 /** Apply the stored flag to the DOM. The <head> script already did this before
  *  first paint; this exists so a storage-disabled browser still converges, and
  *  so boot order can't leave the attribute and the key disagreeing. */

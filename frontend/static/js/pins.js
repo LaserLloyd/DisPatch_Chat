@@ -17,7 +17,7 @@
 // convenience, not an account preference, and the family tablet wanting a
 // different rail from the phone is the normal case, not an edge one.
 
-import { nimEnabled, setNim, canDisableNim } from './nim.js?v=4';
+import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
 import { privacyEnabled, setPrivacy } from './privacy.js?v=5';
 
 const KEY = 'dispatch-pinned-settings';
@@ -34,7 +34,9 @@ const KEY = 'dispatch-pinned-settings';
 export const PINNABLE = [
   {
     id: 'nim',
-    glyph: '🚫',
+    // 🙈 (see no evil), not 🚫: the prohibition sign read as "error", where
+    // this button means "don't show me the pictures".
+    glyph: '🙈',
     titleKey: 'nim.title',
     titleEn: 'No-Image Mode',
     safe: true,                       // works in Safe Mode; that is its point
@@ -54,6 +56,18 @@ export const PINNABLE = [
     enabled: () => privacyEnabled(),
     toggle: (on) => setPrivacy(on),
     blocked: () => null,
+  },
+  {
+    id: 'avatars',
+    glyph: '👤',                      // the letter-block silhouette it switches to
+    titleKey: 'settings.minimal_avatars',
+    titleEn: 'Minimal avatars',
+    safe: true,                       // pure CSS display preference, no gate behind it
+    enabled: () => minimalAvatarsEnabled(),
+    toggle: (on) => setMinimalAvatars(on),
+    // While NIM is on the attribute is borrowed and the preference read-only —
+    // same rule syncMinimalAvatarRow enforces on the Settings checkbox.
+    blocked: () => (nimEnabled() ? 'nim.controls_avatars' : null),
   },
 ];
 

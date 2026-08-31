@@ -23,7 +23,7 @@
 import { api } from './api.js?v=20';
 import { el } from './util.js?v=10';
 import { t } from './i18n.js?v=3';
-import { nimEnabled } from './nim.js?v=4';
+import { nimEnabled } from './nim.js?v=5';
 
 // ===================== State =====================
 

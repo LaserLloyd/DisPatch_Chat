@@ -90,3 +90,28 @@ test('every registry entry declares the fields the rail relies on', () => {
     assert.ok(entry.titleEn && entry.titleKey);
   }
 });
+
+// --- the avatars pin under NIM -------------------------------------------
+// NIM borrows data-avatar-style, so while it is on the Minimal-avatars pin
+// must read as ON and be blocked, not operable — the same contract the
+// Settings checkbox keeps (ticked + disabled + "No-Image Mode controls this").
+
+test('minimal-avatars pin reports on-and-blocked while NIM holds the attribute', () => {
+  reset();
+  const av = pinnableById('avatars');
+  assert.ok(av, 'avatars entry missing from the registry');
+  assert.equal(av.enabled(), false);
+  assert.equal(av.blocked(false), null);
+  store.set('dispatch-nim', '1');
+  assert.equal(av.enabled(), true, 'NIM forces minimal avatars');
+  assert.equal(av.blocked(false), 'nim.controls_avatars');
+});
+
+test('minimal-avatars pin reflects the stored preference when NIM is off', () => {
+  reset();
+  const av = pinnableById('avatars');
+  store.set('dispatch-avatar-style', 'minimal');
+  assert.equal(av.enabled(), true);
+  store.delete('dispatch-avatar-style');
+  assert.equal(av.enabled(), false);
+});
