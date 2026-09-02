@@ -371,3 +371,144 @@ def test_unload_enabled_reads_the_knob(monkeypatch, value, expected):
     else:
         monkeypatch.setenv("LOCAL_CHAT_POOL_FREE_VRAM", value)
     assert pool_guard.unload_enabled() is expected
+
+
+# --------------------------------------------------------------------------- #
+# Backend-down vs VRAM-short (2026-09-02)
+#
+# On 2026-09-02 the rig's ComfyUI was down from ~00:50 to ~15:00 JST. DisPatch
+# spent fourteen hourly cycles finding that out one wasted `generate_image`
+# call at a time, recorded every one of them as a generic "refused", and
+# alerted with a text that GUESSED between "VRAM contention or rig down". Six
+# more refusals the same afternoon were the opposite error: the guard demanded
+# the 10 GB ComfyUI wants when SELECTING a card, from a ComfyUI that had
+# already selected one and was holding 16 GB of warm weights on it.
+# --------------------------------------------------------------------------- #
+
+
+def _cli_status(running=True, selected=3, last_error=""):
+    return {"comfy": {"running": running, "gpu_selected": selected,
+                      "last_error": last_error}}
+
+
+def test_backend_state_reads_the_image_cli(monkeypatch):
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=False, last_error="boom"))
+    st = pool_guard.image_backend_state()
+    assert st["known"] is True
+    assert st["running"] is False
+    assert st["error"] == "boom"
+
+
+def test_backend_state_unknown_without_a_cli(monkeypatch):
+    monkeypatch.setattr(pool_guard, "_image_cli_status", lambda: None)
+    st = pool_guard.image_backend_state()
+    assert st == {"known": False, "running": None, "gpu_selected": None,
+                  "error": ""}
+
+
+def test_backend_state_tolerates_a_status_without_the_running_field():
+    # The pre-2026-09 status shape. Absent must never read as "down".
+    st = pool_guard.image_backend_state({"comfy": {"gpu_selected": 1}})
+    assert st["known"] is True and st["running"] is None
+    assert st["gpu_selected"] == 1
+
+
+def test_guard_blocks_and_names_a_dead_render_backend(monkeypatch):
+    _patched_rig(monkeypatch, {0: 25.0, 1: 25.0}, selected=1)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=False))
+    verdict = pool_guard.free_vram_before_mint()
+    # Plenty of VRAM — and still a refusal, because every mint would fail.
+    assert verdict["ok"] is False
+    assert verdict["backend"] == "down"
+    assert "image backend down" in verdict["reason"]
+
+
+def test_guard_blocks_when_the_backend_reports_its_own_error(monkeypatch):
+    _patched_rig(monkeypatch, {0: 25.0}, selected=0)
+    monkeypatch.setattr(
+        pool_guard, "_image_cli_status",
+        lambda: _cli_status(last_error="CUDA error: out of memory"))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is False and verdict["backend"] == "down"
+    assert "out of memory" in verdict["reason"]
+
+
+def test_running_backend_is_not_held_to_the_selection_threshold(monkeypatch):
+    """The regression that cost six refills: warm weights are not "short"."""
+    _patched_rig(monkeypatch, {0: 7.5, 3: 4.2}, selected=3)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=True, selected=3))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is True
+    assert verdict["backend"] == "up"
+    assert "headroom-ok" in verdict["reason"]
+
+
+def test_a_running_backend_with_no_room_at_all_still_blocks(monkeypatch):
+    _patched_rig(monkeypatch, {3: 0.4}, selected=3)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=True, selected=3))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is False
+    assert verdict["backend"] == "up"          # up, just full
+
+
+def test_selection_threshold_still_applies_when_nothing_is_running(monkeypatch):
+    # No ComfyUI yet: it has to CHOOSE a card, and 10 GB is what it wants.
+    _patched_rig(monkeypatch, {0: 4.2}, selected=None)
+    monkeypatch.setattr(pool_guard, "_image_cli_status", lambda: None)
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is False
+    assert "4.2 GB" in verdict["reason"] and "10.0" in verdict["reason"]
+
+
+def test_explicit_min_free_gb_is_never_overridden(monkeypatch):
+    _patched_rig(monkeypatch, {3: 4.2}, selected=3)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=True, selected=3))
+    assert pool_guard.free_vram_before_mint(min_free_gb=20.0)["ok"] is False
+
+
+# --- classifier ------------------------------------------------------------ #
+
+
+def test_classify_uses_the_structured_code_first():
+    assert pool_guard.classify_cli_failure(
+        "anything at all", "backend_unavailable") == pool_guard.KIND_BACKEND_DOWN
+    assert pool_guard.classify_cli_failure(
+        "ConnectError: all connection attempts failed",
+        "insufficient_vram") == "refused"
+
+
+def test_classify_recognises_the_rigs_connect_error_prose():
+    # The exact string 54 of the 60 failures on 2026-09-02 carried.
+    msg = ("Error executing tool generate_image: Generation failed: "
+           "ConnectError: All connection attempts failed")
+    assert pool_guard.classify_cli_failure(msg) == pool_guard.KIND_BACKEND_DOWN
+
+
+def test_classify_defaults_to_refused():
+    assert pool_guard.classify_cli_failure(
+        "Not enough free VRAM, short by 15.9 GB") == "refused"
+    assert pool_guard.classify_cli_failure("") == "refused"
+
+
+def test_stats_break_the_count_down_by_kind():
+    pool_guard.note_refill_failure(pool_guard.KIND_BACKEND_DOWN, "down", actor="main")
+    pool_guard.note_refill_failure(pool_guard.KIND_BACKEND_DOWN, "down", actor="beta")
+    pool_guard.note_refill_failure("vram-short", "4.2 < 10.0", actor="alpha")
+    stats = pool_guard.refill_failure_stats()
+    assert stats["failures_24h"] == 3
+    assert stats["by_kind"] == {pool_guard.KIND_BACKEND_DOWN: 2, "vram-short": 1}
+
+
+def test_a_trailing_newline_does_not_pass_an_id_as_a_path_component():
+    # `^…$` + .match() accepts "main\n"; the id becomes a directory name.
+    from app import reactions, avatar_pool
+    for rx in (reactions.ID_RE, reactions.MOOD_DIR_RE, reactions.BOT_ID_RE,
+               avatar_pool._BOT_ID_RE):
+        assert rx.match("main")
+        assert not rx.match("main\n")
+        assert not rx.match("ma/in")

@@ -66,7 +66,7 @@ log = logging.getLogger("local-chat.avatar_pool")
 # A bot id doubles as a path component (avatar-pool/<bot_id>/); same contract
 # as reactions.BOT_ID_RE — no dot, no separator, so a query-string id can
 # never name a file outside the data dir.
-_BOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
+_BOT_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,47}\Z")
 
 # Bounded redraws when a consume loses its race to a concurrent creator.
 _DRAW_RETRIES = 4
@@ -754,8 +754,10 @@ def _run_image_cli(argv: list[str], out_dir: Path) -> list[Path]:
         log.warning("image CLI call failed (%s): %s", argv[1] if len(argv) > 1 else "?", e)
         return []
     if result.get("status") != "ok":
-        pool_guard.note_refill_failure("refused", str(result.get("message"))[:200])
-        log.warning("image CLI refused: %s", result.get("message"))
+        kind = pool_guard.classify_cli_failure(
+            str(result.get("message")), str(result.get("error_code") or ""))
+        pool_guard.note_refill_failure(kind, str(result.get("message"))[:200])
+        log.warning("image CLI refused (%s): %s", kind, result.get("message"))
         return []
     out = out_dir.resolve()
     keep: list[Path] = []
@@ -898,10 +900,14 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
         update_state(bot_id,
-                     last_error=f"rig-vram-short ({guard['reason']})"[:300])
-        pool_guard.note_refill_failure("vram-short", guard["reason"], actor=bot_id)
-        log.error("avatar pool refill for %s BLOCKED by VRAM guard: %s",
-                  bot_id, guard["reason"])
+                     last_error=(f"rig-backend-down ({guard['reason']})"
+                                 if guard.get("backend") == "down"
+                                 else f"rig-vram-short ({guard['reason']})")[:300])
+        kind = (pool_guard.KIND_BACKEND_DOWN
+                if guard.get("backend") == "down" else "vram-short")
+        pool_guard.note_refill_failure(kind, guard["reason"], actor=bot_id)
+        log.error("avatar pool refill for %s BLOCKED (%s): %s",
+                  bot_id, kind, guard["reason"])
         return 0
     made = 0
     for _ in range(want):

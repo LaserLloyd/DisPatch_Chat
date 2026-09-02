@@ -77,19 +77,19 @@ log = logging.getLogger("local-chat.reactions")
 # Constants / validation
 # --------------------------------------------------------------------------- #
 
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+ID_RE = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,47}\Z")
 ROOTS = ("builtin", "pack", "moods", "spent")
 # A mood folder name. Case is tolerated (operators hand-make these folders); dots
 # are not — the name becomes a path component, so this doubles as the
 # traversal guard for the middle segment of a pool file reference.
-MOOD_DIR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
+MOOD_DIR_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,47}\Z")
 # A BOT id, which since the per-bot pools (2026-08) is also a path component:
 # reactions/moods-<bot_id>/, reaction-pool-<bot_id>.yaml. Roster ids are
 # free-form and mixed case (`Helper_2`, `Scout`), so this is deliberately
 # looser than ID_RE — but, like MOOD_DIR_RE, it admits no dot and no
 # separator, which is what stops a bot_id query parameter from naming a file
 # outside the data dir.
-BOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
+BOT_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,47}\Z")
 
 # Raster only, and deliberately no SVG: a reaction image is served from our own
 # origin, and an inline SVG can carry <script> (stored XSS). Same rule as the
@@ -2724,8 +2724,13 @@ def _pool_generate_one(cfg: PoolConfig, category: str, *, bot_id: str | None = N
         return None
     if result.get("status") != "ok":
         _LAST_GEN_RIG_REFUSED = True
-        pool_guard.note_refill_failure("refused", str(result.get("message"))[:200],
-                                       actor=resolve_bot_id(bot_id))
+        # The rig's own structured code first, its prose second: "the image
+        # backend is down" and "the GPU is full" are the same word here
+        # otherwise, and only one of them is fixed by waiting.
+        pool_guard.note_refill_failure(
+            pool_guard.classify_cli_failure(str(result.get("message")),
+                                            str(result.get("error_code") or "")),
+            str(result.get("message"))[:200], actor=resolve_bot_id(bot_id))
         log.warning("pool generation refused for %r (bot %s): %s",
                     label, resolve_bot_id(bot_id), result.get("message"))
         return None
@@ -2815,11 +2820,15 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
         _pool_update(bot_id,
-                     last_error=f"rig-vram-short ({guard['reason']})"[:300])
-        pool_guard.note_refill_failure("vram-short", guard["reason"],
+                     last_error=(f"rig-backend-down ({guard['reason']})"
+                                 if guard.get("backend") == "down"
+                                 else f"rig-vram-short ({guard['reason']})")[:300])
+        kind = (pool_guard.KIND_BACKEND_DOWN
+                if guard.get("backend") == "down" else "vram-short")
+        pool_guard.note_refill_failure(kind, guard["reason"],
                                        actor=resolve_bot_id(bot_id))
-        log.error("pool refill for %s BLOCKED by VRAM guard: %s",
-                  resolve_bot_id(bot_id), guard["reason"])
+        log.error("pool refill for %s BLOCKED (%s): %s",
+                  resolve_bot_id(bot_id), kind, guard["reason"])
         return 0
 
     made = 0

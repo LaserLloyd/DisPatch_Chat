@@ -88,16 +88,17 @@
     "menu": "对话操作",
     "popout": "在独立窗口中打开",
     "popout_gone": "该对话已不存在 — 显示最新对话。",
-    "pin": "置顶",
-    "unpin": "取消置顶",
-    "rename": "重命名",
+    "pin": "📌 置顶",
+    "unpin": "📌 取消置顶",
+    "rename": "✏️ 重命名",
     "rename_title": "重命名对话",
     "sync": "⤓ 找回丢失的消息",
     "transcript": "📜 查看会话记录",
-    "archive": "归档",
+    "archive": "🗄️ 归档",
     "archive_confirm": "归档这个对话？它会从对话列表里隐藏起来。",
     "archived": "对话已归档",
-    "delete_confirm": "永久删除这个对话？"
+    "delete_confirm": "永久删除这个对话？",
+    "delete_thread": "🗑️ 删除"
   },
   "welcome": {
     "with_bot": "和 {name} 聊天",
@@ -186,7 +187,7 @@
     "pool_vars_ph": "变化 — 每行一个（服装、姿势、场景…）",
     "pool_save": "保存提示词",
     "pool_saved": "提示词已保存 — 下次补充就会用上",
-    "pool_no_prompts": "没有提示词 — 补充时什么都生成不出来",
+    "pool_no_prompts": "还没有提示词库 — 添加提示词以启用补充",
     "move_up": "上移",
     "move_down": "下移",
     "move_up_aria": "把 {name} 上移",
@@ -469,7 +470,11 @@
     "action_theme": "切换主题",
     "action_search": "搜索消息",
     "action_recovery": "恢复与导出",
-    "action_lock": "立即锁定"
+    "action_lock": "立即锁定",
+    "action_settings": "设置",
+    "action_health": "健康面板",
+    "action_files": "文件服务器",
+    "action_send_file": "发送文件"
   },
   "recovery": {
     "aria": "恢复与导出",
@@ -777,7 +782,22 @@
     "answering": "有响应",
     "not_answering": "无响应",
     "note_agent_providers": "可选 — 这些机器人也不需要它：它们直接调用 LLM 服务商。",
-    "note_agent_none": "可选 — 聊天记录、上传和这个页面没有它也能用。要给机器人配服务商，请用「连接 AI」（🔌）。"
+    "note_agent_none": "可选 — 聊天记录、上传和这个页面没有它也能用。要给机器人配服务商，请用「连接 AI」（🔌）。",
+    "card_transport": "实时传输",
+    "reply_socket": "回复套接字",
+    "socket_connected": "已连接",
+    "socket_shadow": "已连接（影子模式 — 不投递）",
+    "socket_disconnected": "已断开 — 回复改由转录文件送达",
+    "replies_delivered": "已投递的回复",
+    "live_plus_backfill": "{live} 实时 + {backfill} 补录",
+    "truncated_unrepaired": "被截断的回复",
+    "seq_gaps": "序列缺口",
+    "turns_sent": "已发送的轮次",
+    "socket_vs_cli": "{socket} 经套接字 · {cli} 经 CLI",
+    "image_rig": "图像主机",
+    "rig_unreachable_for": "已无法访问 {time}",
+    "image_failures_24h": "图像失败（24 小时）",
+    "note_since": "计数自 {time} 起 — 应用重启后重置。"
   },
   "pins": {
     "pin": "固定到侧栏",

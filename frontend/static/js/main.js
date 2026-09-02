@@ -4,7 +4,7 @@
 
 import { api, setOnLocked } from './api.js?v=20';
 import { ChatSocket } from './ws.js?v=8';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=23';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=24';
 import { installChecklists, applyChecklistState } from './checklist.js?v=2';
 import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=11';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,7 +21,7 @@ import {
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
 } from './reactions.js?v=15';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=5';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=6';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -5870,6 +5870,16 @@ function cmdkActions() {
   if (!state.decoy) {
     a.push({ icon: '🔍', label: t('cmdk.action_search'), run: () => openSearch() });
     a.push({ icon: '🛟', label: t('cmdk.action_recovery'), run: () => openRecovery() });
+  }
+  if (!state.decoy) {
+    // The Settings tabs and the File Server are unlocked-only surfaces, so
+    // the palette offers them only where the rail would — a locked device
+    // must get no hint that they exist.
+    a.push({ icon: '⚙️', label: t('cmdk.action_settings'), run: () => openSettingsTab('device') });
+    a.push({ icon: '🩺', label: t('cmdk.action_health'), run: () => openSettingsTab('health') });
+    a.push({ icon: '📁', label: t('cmdk.action_files'), run: () => openFileServer() });
+  } else {
+    a.push({ icon: '📤', label: t('cmdk.action_send_file'), run: () => openDrop() });
   }
   if (state.auth && state.auth.pinSet && !state.decoy) a.push({ icon: '🔒', label: t('cmdk.action_lock'), run: () => lockNow() });
   return a;

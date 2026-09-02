@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+import time
 import zlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -338,6 +339,32 @@ def test_success_rewrites_the_same_message_into_the_picture(env, monkeypatch):
     assert "[[media:/media/" in row["content"]
     assert "Generating" not in row["content"]
     assert forge.calls == ["enqueue", "poll", "fetch"]
+
+
+def test_the_thread_list_preview_follows_the_rewrite(env, monkeypatch):
+    """The list shows `last_message`; a rewrite that only pushed the bubble
+    left every tab's list reading "Generating an image…" until a reload."""
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True, files_rel="out/a.png")))
+    frames: list[dict] = []
+
+    async def fake_broadcast(frame, *a, **k):
+        frames.append(frame)
+    monkeypatch.setattr(main.manager, "broadcast", fake_broadcast)
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+    asyncio.run(drive())
+
+    ups = [f for f in frames if f["type"] == "thread_update" and f["thread"]["id"] == tid]
+    assert ups, "no thread_update after the rewrite"
+    assert "[[media:/media/" in (ups[-1]["thread"]["last_message"] or "")
+    order = [f["type"] for f in frames]
+    assert order.index("message_update") < len(order) - 1 - order[::-1].index("thread_update")
 
 
 def test_a_rig_refusal_becomes_a_visible_failure(env, monkeypatch):
@@ -1407,3 +1434,80 @@ def test_the_seed_is_read_off_the_poll_when_the_enqueue_had_none():
     assert image_jobs._first_seed({"seed": 7}) == 7
     assert image_jobs._first_seed({"seeds": []}) is None
     assert image_jobs._first_seed({"seeds": ["7"]}) is None
+
+
+def test_an_unreachable_rig_is_named_on_the_placeholder_then_cleared(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    mid = _fire(c, tid).json()["message_id"]
+    forge = _use(monkeypatch, FakeForge(
+        enqueue=image_jobs.ImageJobError(
+            "image server unreachable: ConnectError (backing off)", retryable=True)))
+
+    asyncio.run(main._image_job_sweep())
+    asyncio.run(main._image_job_sweep())
+    row = [m for m in _messages(c, tid) if m["id"] == mid][0]
+    assert row["metadata"]["status"] == "queued"
+    assert "Waiting for the image rig" in row["content"]
+    assert "ConnectError" in row["content"]
+    assert row["metadata"]["progress"]["waiting"] == "ConnectError"
+
+    # Rig back: accepted, then the first poll drops the waiting wording.
+    forge._enqueue = None
+    asyncio.run(main._image_job_sweep())
+    asyncio.run(main._image_job_sweep())
+    row = [m for m in _messages(c, tid) if m["id"] == mid][0]
+    assert row["metadata"]["status"] == "running"
+    assert row["content"].startswith("🖼️ Generating an image…"), row["content"]
+    assert "waiting" not in (row["metadata"].get("progress") or {})
+
+
+def test_health_reports_whether_the_rig_is_reachable(env, monkeypatch):
+    c = _unlocked(env)
+    body = c.get("/api/health?detailed=1").json()
+    assert "image_rig" in body
+    assert body["image_rig"].get("reachable") in (True, False, None)
+
+
+def test_a_submit_wakes_the_worker_instead_of_waiting_for_the_tick(env, monkeypatch):
+    main._image_job_wake = None
+    c = env()
+    tid = _thread(c)
+    assert _fire(c, tid).status_code == 202
+    assert main._image_job_wake is not None and main._image_job_wake.is_set()
+
+
+def test_the_sweep_advances_jobs_concurrently_not_in_series(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    for i in range(3):
+        assert _fire(c, tid, prompt=f"teapot {i}").status_code == 202
+    active = {"now": 0, "peak": 0}
+
+    class SlowForge(FakeForge):
+        async def enqueue(self, spec, **kw):
+            active["now"] += 1
+            active["peak"] = max(active["peak"], active["now"])
+            await asyncio.sleep(0.05)
+            active["now"] -= 1
+            return await super().enqueue(spec, **kw)
+    _use(monkeypatch, SlowForge())
+
+    t0 = time.monotonic()
+    asyncio.run(main._image_job_sweep())
+    assert active["peak"] == 3, "three open jobs must be in flight together"
+    assert time.monotonic() - t0 < 0.15, "a serial sweep would take 3× as long"
+
+
+def test_a_callback_and_the_sweep_cannot_advance_one_job_twice(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge())
+
+    async def race():
+        job = (await main.db.open_image_jobs())[0]
+        await asyncio.gather(main._advance_image_job(dict(job)),
+                             main._advance_image_job(dict(job)))
+    asyncio.run(race())
+    assert forge.calls.count("enqueue") == 1, "the second advancer must yield"

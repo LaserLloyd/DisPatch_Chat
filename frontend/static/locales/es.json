@@ -90,16 +90,17 @@
     "menu": "Acciones del chat",
     "popout": "Abrir en su propia ventana",
     "popout_gone": "Ese chat ya no está disponible — se muestra el más reciente.",
-    "pin": "Fijar",
-    "unpin": "Dejar de fijar",
-    "rename": "Renombrar",
+    "pin": "📌 Fijar",
+    "unpin": "📌 Dejar de fijar",
+    "rename": "✏️ Renombrar",
     "rename_title": "Renombrar el chat",
     "sync": "⤓ Recuperar mensajes perdidos",
     "transcript": "📜 Ver la transcripción",
-    "archive": "Archivar",
+    "archive": "🗄️ Archivar",
     "archive_confirm": "¿Archivar este chat? Se ocultará de tu lista de chats.",
     "archived": "Chat archivado",
-    "delete_confirm": "¿Eliminar este chat de forma permanente?"
+    "delete_confirm": "¿Eliminar este chat de forma permanente?",
+    "delete_thread": "🗑️ Eliminar"
   },
   "welcome": {
     "with_bot": "Chatea con {name}",
@@ -190,7 +191,7 @@
     "pool_vars_ph": "Variaciones — una por línea (ropa, pose, escena…)",
     "pool_save": "Guardar los prompts",
     "pool_saved": "Prompts guardados — la siguiente recarga los usará",
-    "pool_no_prompts": "sin prompts guardados — las recargas no generan nada",
+    "pool_no_prompts": "aún sin banco de prompts — añade prompts para habilitar recargas",
     "move_up": "Subir",
     "move_down": "Bajar",
     "move_up_aria": "Subir a {name}",
@@ -483,7 +484,11 @@
     "action_theme": "Cambiar el tema",
     "action_search": "Buscar mensajes",
     "action_recovery": "Recuperación y exportación",
-    "action_lock": "Bloquear ahora"
+    "action_lock": "Bloquear ahora",
+    "action_settings": "Ajustes",
+    "action_health": "Panel de salud",
+    "action_files": "Servidor de archivos",
+    "action_send_file": "Enviar un archivo"
   },
   "recovery": {
     "aria": "Recuperación y exportación",
@@ -823,7 +828,22 @@
     "answering": "responde",
     "not_answering": "no responde",
     "note_agent_providers": "Opcional, y estos bots no lo necesitan: llaman directamente a un proveedor de LLM.",
-    "note_agent_none": "Opcional: el historial de chats, las subidas y esta página funcionan sin él. Usa Conectar una IA (🔌) para darle un proveedor a un bot."
+    "note_agent_none": "Opcional: el historial de chats, las subidas y esta página funcionan sin él. Usa Conectar una IA (🔌) para darle un proveedor a un bot.",
+    "card_transport": "Transporte en vivo",
+    "reply_socket": "Socket de respuestas",
+    "socket_connected": "conectado",
+    "socket_shadow": "conectado (sombra — no entrega nada)",
+    "socket_disconnected": "desconectado — las respuestas llegan por la transcripción",
+    "replies_delivered": "Respuestas entregadas",
+    "live_plus_backfill": "{live} en vivo + {backfill} recuperadas",
+    "truncated_unrepaired": "Respuestas cortadas",
+    "seq_gaps": "Huecos de secuencia",
+    "turns_sent": "Turnos enviados",
+    "socket_vs_cli": "{socket} por el socket · {cli} por CLI",
+    "image_rig": "Equipo de imágenes",
+    "rig_unreachable_for": "inaccesible desde hace {time}",
+    "image_failures_24h": "Fallos de imagen (24 h)",
+    "note_since": "Contadores desde {time} — se reinician al reiniciar la app."
   },
   "pins": {
     "pin": "Fijar a la barra",

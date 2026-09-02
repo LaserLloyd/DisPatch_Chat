@@ -89,6 +89,28 @@ class GatewayDisconnected(ConnectionError):
     """The connection went away with requests still outstanding."""
 
 
+class GatewayRunRefused(RuntimeError):
+    """The gateway never ACCEPTED the run, so it never started.
+
+    The distinction is the whole point: an `agent` request is answered twice —
+    an acceptance receipt, then the finished turn. A failure before the
+    acceptance means no model was called and nothing was written, so the caller
+    may retry. A failure after it means a turn is (or was) underway and a retry
+    would double-run it.
+    """
+
+
+class GatewayRunTimeout(TimeoutError):
+    """We stopped waiting for a run that the gateway had already accepted."""
+
+
+# How long to wait for the acceptance receipt on an `agent` request. The
+# gateway answers this in milliseconds on loopback (measured: 24 ms); a long
+# wait here means the gateway is not taking work, which is exactly the
+# condition the caller retries.
+AGENT_ACCEPT_TIMEOUT_S = 30.0
+
+
 def gateway_url() -> str:
     return os.environ.get("OPENCLAW_GATEWAY_URL") or "ws://127.0.0.1:18789"
 
@@ -115,6 +137,20 @@ def gateway_token(config_path: Path | None = None) -> str | None:
     auth = gw.get("auth") or {}
     tok = auth.get("token")
     return tok if isinstance(tok, str) and tok else None
+
+
+class _AgentCall:
+    """One in-flight turn dispatch: its acceptance, and its finished result."""
+
+    __slots__ = ("final", "accepted", "accepted_payload")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.final: asyncio.Future = loop.create_future()
+        # An Event, not a flag: the caller must be able to WAIT for the receipt
+        # without polling, and must stop waiting for it the moment it lands
+        # rather than sitting out the whole acceptance window.
+        self.accepted = asyncio.Event()
+        self.accepted_payload: dict | None = None
 
 
 class GatewayClient:
@@ -147,6 +183,10 @@ class GatewayClient:
         self._task: asyncio.Task | None = None
         self._pump: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        # `agent` requests answer TWICE on one id (accepted, then final), so
+        # they cannot share the single-response map above without the
+        # acceptance resolving the call and the real answer arriving to nobody.
+        self._agent_calls: dict[str, _AgentCall] = {}
         self._stop = asyncio.Event()
         self.hello: dict | None = None
         self.connected = asyncio.Event()
@@ -361,6 +401,13 @@ class GatewayClient:
         for fut in pending.values():
             if not fut.done():
                 fut.set_exception(exc)
+        # Turn dispatches too, or a reply that can never arrive holds the
+        # thread lock until the agent timeout — the socket is gone, the future
+        # it was waiting on is only ours to resolve.
+        agent_calls, self._agent_calls = self._agent_calls, {}
+        for call in agent_calls.values():
+            if not call.final.done():
+                call.final.set_exception(exc)
 
     async def call(self, method: str, params: dict | None = None) -> dict:
         ws = self._ws
@@ -377,6 +424,83 @@ class GatewayClient:
         finally:
             self._pending.pop(req_id, None)
 
+    def _handle_agent_res(self, frame: dict) -> None:
+        """One `agent` request, two responses.
+
+        The first carries ``status: "accepted"`` and means only that the
+        gateway took the work; the turn's result comes later on the SAME id.
+        Resolving on the first frame — which is what the generic single-shot
+        `call()` does — returns an empty receipt as if it were the reply, and
+        the real answer then arrives for a request nobody is waiting on.
+        """
+        call = self._agent_calls.get(frame.get("id"))
+        if call is None or call.final.done():
+            return
+        payload = frame.get("payload") or {}
+        if frame.get("ok") and payload.get("status") == "accepted":
+            call.accepted_payload = payload
+            call.accepted.set()
+            return
+        if frame.get("ok"):
+            call.final.set_result(payload)
+        else:
+            call.final.set_exception(RuntimeError(str(frame.get("error"))))
+
+    async def call_agent(self, params: dict, *, timeout: float) -> dict:
+        """Dispatch an agent turn and wait for its result.
+
+        This is the same request the `openclaw agent` CLI makes — the CLI is a
+        Node process that boots, reads the config, opens its own socket to this
+        very gateway and sends exactly this frame. Measured on this box, that
+        wrapper costs 2.3 s before the run even starts, on every single turn,
+        while a socket to the gateway is already open and idle two feet away.
+
+        Two waits, not one, because the two failures mean opposite things to a
+        retrying caller:
+
+        - ``GatewayRunRefused`` — no acceptance receipt, so nothing ran. Safe
+          to retry, and the only class the caller's backoff should retry.
+        - ``GatewayRunTimeout`` / ``GatewayDisconnected`` — accepted, so a turn
+          is (or was) underway on the gateway. Retrying double-runs a billed
+          model call; the reply, if it lands, arrives over the session
+          subscription like any other.
+        """
+        ws = self._ws
+        if ws is None:
+            raise GatewayRunRefused("not connected to the gateway")
+        req_id = uuid.uuid4().hex
+        call = _AgentCall(asyncio.get_event_loop())
+        self._agent_calls[req_id] = call
+        try:
+            await ws.send(json.dumps(
+                {"type": "req", "id": req_id, "method": "agent", "params": params}))
+            accepted = asyncio.ensure_future(call.accepted.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {accepted, call.final},
+                    timeout=min(AGENT_ACCEPT_TIMEOUT_S, timeout),
+                    return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                accepted.cancel()
+            if not call.accepted.is_set():
+                if call.final.done():
+                    # Answered without ever accepting: a refusal at the door.
+                    exc = call.final.exception()
+                    raise GatewayRunRefused(
+                        str(exc) if exc else "the gateway refused the run")
+                raise GatewayRunRefused(
+                    "the gateway did not accept the run within "
+                    f"{min(AGENT_ACCEPT_TIMEOUT_S, timeout):.0f}s")
+            if call.final.done():
+                return call.final.result()
+            try:
+                return await asyncio.wait_for(call.final, timeout=timeout)
+            except TimeoutError:
+                raise GatewayRunTimeout(
+                    f"the run did not finish within {timeout:.0f}s") from None
+        finally:
+            self._agent_calls.pop(req_id, None)
+
     async def _reader(self, ws: Any) -> None:
         async for raw in ws:
             try:
@@ -392,6 +516,9 @@ class GatewayClient:
                             type(frame).__name__)
                 continue
             kind = frame.get("type")
+            if kind == "res" and frame.get("id") in self._agent_calls:
+                self._handle_agent_res(frame)
+                continue
             if kind == "res":
                 fut = self._pending.get(frame.get("id"))
                 if fut is not None and not fut.done():

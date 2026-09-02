@@ -88,16 +88,17 @@
     "menu": "チャットの操作",
     "popout": "別ウィンドウで開く",
     "popout_gone": "そのチャットは利用できません — 最新のチャットを表示します。",
-    "pin": "ピン留め",
-    "unpin": "ピン留めを解除",
-    "rename": "名前を変更",
+    "pin": "📌 ピン留め",
+    "unpin": "📌 ピン留めを解除",
+    "rename": "✏️ 名前を変更",
     "rename_title": "チャットの名前を変更",
     "sync": "⤓ 抜けているメッセージを復元",
     "transcript": "📜 トランスクリプトを表示",
-    "archive": "アーカイブ",
+    "archive": "🗄️ アーカイブ",
     "archive_confirm": "このチャットをアーカイブしますか？チャット一覧には表示されなくなります。",
     "archived": "チャットをアーカイブしました",
-    "delete_confirm": "このチャットを完全に削除しますか？"
+    "delete_confirm": "このチャットを完全に削除しますか？",
+    "delete_thread": "🗑️ 削除"
   },
   "welcome": {
     "with_bot": "{name} とチャット",
@@ -186,7 +187,7 @@
     "pool_vars_ph": "バリエーション — 1行に1つ（服装・ポーズ・シーンなど）",
     "pool_save": "プロンプトを保存",
     "pool_saved": "保存しました — 次回の補充から使われます",
-    "pool_no_prompts": "プロンプト未設定 — 自動生成されません",
+    "pool_no_prompts": "プロンプト集がまだありません — プロンプトを追加すると補充が有効になります",
     "move_up": "上へ",
     "move_down": "下へ",
     "move_up_aria": "{name} を上へ移動",
@@ -469,7 +470,11 @@
     "action_theme": "テーマを切り替え",
     "action_search": "メッセージを検索",
     "action_recovery": "復元とエクスポート",
-    "action_lock": "今すぐロック"
+    "action_lock": "今すぐロック",
+    "action_settings": "設定",
+    "action_health": "ヘルスダッシュボード",
+    "action_files": "ファイルサーバー",
+    "action_send_file": "ファイルを送る"
   },
   "recovery": {
     "aria": "復元とエクスポート",
@@ -777,7 +782,22 @@
     "answering": "応答あり",
     "not_answering": "応答なし",
     "note_agent_providers": "任意です — これらのボットには不要で、LLM プロバイダーを直接呼び出します。",
-    "note_agent_none": "任意です — チャット履歴もアップロードもこのページも、なくても動きます。ボットにプロバイダーを渡すには「AI を接続」（🔌）を使ってください。"
+    "note_agent_none": "任意です — チャット履歴もアップロードもこのページも、なくても動きます。ボットにプロバイダーを渡すには「AI を接続」（🔌）を使ってください。",
+    "card_transport": "ライブ転送",
+    "reply_socket": "返信ソケット",
+    "socket_connected": "接続中",
+    "socket_shadow": "接続中（シャドウ — 配信なし）",
+    "socket_disconnected": "切断 — 返信はトランスクリプト経由になります",
+    "replies_delivered": "配信した返信",
+    "live_plus_backfill": "ライブ {live} + 補完 {backfill}",
+    "truncated_unrepaired": "途中で切れた返信",
+    "seq_gaps": "シーケンスの欠落",
+    "turns_sent": "送信したターン",
+    "socket_vs_cli": "ソケット経由 {socket} · CLI経由 {cli}",
+    "image_rig": "画像リグ",
+    "rig_unreachable_for": "{time} 前から到達不能",
+    "image_failures_24h": "画像の失敗（24時間）",
+    "note_since": "カウンターは {time} から — アプリ再起動でリセットされます。"
   },
   "pins": {
     "pin": "バーに固定",

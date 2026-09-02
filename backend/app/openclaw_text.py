@@ -1420,10 +1420,13 @@ GATEWAY_DIST_ANCHORS: dict[str, str] = {
         r"[A-Za-z_:][-A-Za-z0-9_:.]*\s*=\s*"),
     "_TOOL_CALL_XML_PAYLOAD_START_RE": (
         r"(?:function_call|tool_call|function|invoke|parameters?|arguments?)\b"),
-    "_XMLISH_FUNCTION_OPEN_RE": "<function=[A-Za-z0-9_.:-]{1,120}>",
-    "_XMLISH_PARAM_OPEN_RE": "<parameter=([A-Za-z0-9_.:-]{1,120})>",
+    # 2026.8.1 replaced the xml-ish regexes with a char scanner; the markers
+    # and the name charset are what the port copies, so anchor on those.
+    "_XMLISH_FUNCTION_OPEN_RE": 'const FUNCTION_OPEN = "<function=";',
+    "_XMLISH_PARAM_OPEN_RE": 'const PARAMETER_OPEN = "<parameter=";',
+    "_XMLISH_NAME_CHARS": "/[A-Za-z0-9_.:-]/.test(char)",
     "_QUICK_BRACKET_RE": r"\[(?:tool:)?[A-Za-z0-9_-]+\]",
-    "_QUICK_HARMONY_RE": r"(?:commentary|analysis|final)\s+to=",
+    "_QUICK_HARMONY_RE": r"(?:commentary|analysis|final)[ \t]+to=",
     "_END_TOOL_REQUEST": "[END_TOOL_REQUEST]",
     "_HARMONY_MESSAGE_MARKER": "<|message|>",
     "_HARMONY_CALL_MARKER": "<|call|>",

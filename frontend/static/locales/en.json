@@ -89,16 +89,17 @@
     "menu": "Thread actions",
     "popout": "Open in its own window",
     "popout_gone": "That chat isn't available anymore — showing the latest instead.",
-    "pin": "Pin",
-    "unpin": "Unpin",
-    "rename": "Rename",
+    "pin": "📌 Pin",
+    "unpin": "📌 Unpin",
+    "rename": "✏️ Rename",
     "rename_title": "Rename chat",
     "sync": "⤓ Recover missing messages",
     "transcript": "📜 View transcript",
-    "archive": "Archive",
+    "archive": "🗄️ Archive",
     "archive_confirm": "Archive this chat? It’ll be hidden from your chat list.",
     "archived": "Chat archived",
-    "delete_confirm": "Delete this chat permanently?"
+    "delete_confirm": "Delete this chat permanently?",
+    "delete_thread": "🗑️ Delete"
   },
   "welcome": {
     "with_bot": "Chat with {name}",
@@ -188,7 +189,7 @@
     "pool_vars_ph": "Variations — one per line (outfit, pose, scene…)",
     "pool_save": "Save prompts",
     "pool_saved": "Prompts saved — the next refill uses them",
-    "pool_no_prompts": "no prompt bank — refills generate nothing",
+    "pool_no_prompts": "no prompt bank yet — add prompts to enable refills",
     "move_up": "Move up",
     "move_down": "Move down",
     "move_up_aria": "Move {name} up",
@@ -476,7 +477,11 @@
     "action_theme": "Toggle theme",
     "action_search": "Search messages",
     "action_recovery": "Recovery & Export",
-    "action_lock": "Lock now"
+    "action_lock": "Lock now",
+    "action_settings": "Settings",
+    "action_health": "Health dashboard",
+    "action_files": "File Server",
+    "action_send_file": "Send a file"
   },
   "recovery": {
     "aria": "Recovery and export",
@@ -800,7 +805,22 @@
     "answering": "answering",
     "not_answering": "not answering",
     "note_agent_providers": "Optional — and these bots do not need one: they call an LLM provider directly.",
-    "note_agent_none": "Optional — chat history, uploads and this page all work without one. Use Connect an AI (🔌) to give a bot a provider instead."
+    "note_agent_none": "Optional — chat history, uploads and this page all work without one. Use Connect an AI (🔌) to give a bot a provider instead.",
+    "card_transport": "Live transport",
+    "reply_socket": "Reply socket",
+    "socket_connected": "connected",
+    "socket_shadow": "connected (shadow — delivering nothing)",
+    "socket_disconnected": "disconnected — replies fall back to transcript tailing",
+    "replies_delivered": "Replies delivered",
+    "live_plus_backfill": "{live} live + {backfill} backfilled",
+    "truncated_unrepaired": "Cut-short replies",
+    "seq_gaps": "Sequence gaps",
+    "turns_sent": "Turns sent",
+    "socket_vs_cli": "{socket} over the socket · {cli} via CLI",
+    "image_rig": "Image rig",
+    "rig_unreachable_for": "unreachable for {time}",
+    "image_failures_24h": "Image failures (24 h)",
+    "note_since": "Counters since {time} — they reset when the app restarts."
   },
   "pins": {
     "pin": "Pin to the bar",

@@ -254,3 +254,51 @@ def test_gateway_ws_counters_are_surfaced_in_detailed_health(env):
     if stats is not None:
         assert "truncation_unrepaired" in stats
         assert "since" in stats and "mode" in stats
+        # Live socket state, distinct from the counters: all-zero counters on
+        # a quiet box cannot say whether the transport is up right now.
+        assert isinstance(stats["connected"], bool)
+
+
+def test_gateway_ws_stats_report_live_socket_state(env, monkeypatch):
+    from app import main as main_mod
+    env()
+
+    class _Router:
+        stats = {"delivered": 0}
+
+    class _Client:
+        def __init__(self):
+            import asyncio
+            self.connected = asyncio.Event()
+
+    router, client = _Router(), _Client()
+    monkeypatch.setattr(main_mod, "_gateway_router", router)
+    monkeypatch.setattr(main_mod, "_gateway_client", client)
+    assert main_mod._gateway_ws_stats()["connected"] is False
+    client.connected.set()
+    assert main_mod._gateway_ws_stats()["connected"] is True
+    # Router present, client gone (shutdown race): still a clean False.
+    monkeypatch.setattr(main_mod, "_gateway_client", None)
+    assert main_mod._gateway_ws_stats()["connected"] is False
+
+
+def test_first_run_card_keys_off_socket_as_well_as_cli(env, monkeypatch):
+    """A dead CLI with a live gateway socket is a working install."""
+    import asyncio
+    from app import main, openclaw
+
+    class _Client:
+        def __init__(self):
+            self.connected = asyncio.Event()
+
+    monkeypatch.setattr(openclaw, "cli_available", lambda: False)
+    monkeypatch.setattr(main, "_gateway_client", None)
+    assert main._agent_backend_available() is False
+    client = _Client()
+    monkeypatch.setattr(main, "_gateway_client", client)
+    assert main._agent_backend_available() is False
+    client.connected.set()
+    assert main._agent_backend_available() is True
+    monkeypatch.setattr(openclaw, "cli_available", lambda: True)
+    monkeypatch.setattr(main, "_gateway_client", None)
+    assert main._agent_backend_available() is True

@@ -266,6 +266,17 @@ its deadline or whose thread was deleted, and an operator interrupting the job
 on the rig produces the same thing. That is its own visible ending ("✋ The
 image was cancelled on the rig."), not counted as a failure in `/api/health`.
 
+**When the image server cannot be reached**, the placeholder says so —
+"🖼️ Waiting for the image rig (ConnectError)…" — and goes back to the plain
+placeholder the moment the server answers again; the job itself keeps its
+ten-minute deadline. DisPatch keeps one MCP session open to the server and
+reuses it (a server that forgets the session gets one fresh handshake and the
+call repeated), and a server that refuses connections is left alone for
+fifteen seconds before the next attempt, so a rack of queued jobs fails fast
+instead of each waiting out its own connect timeout. `GET /api/health` reports
+this as `image_rig`: `{"reachable": true|false|null, "unreachable_for_s": …,
+"last_error": "…"}` (`null` = image jobs are not configured).
+
 The expected server speaks MCP over streamable HTTP and offers
 `generate_image` (with `wait: false`), `get_job`, `cancel_job` and a
 `/files/<path>` route;
@@ -346,6 +357,7 @@ actually reads are the same set.
 | `DISPATCH_MIRROR_HORIZON_H` | `72` | A transcript already older than this when first seen is tailed from EOF, not imported. |
 | `DISPATCH_MIRROR_KINDS` | `webchat,main` | Which session kinds to mirror. `other` adds scripted/watchdog sessions. |
 | `DISPATCH_GATEWAY_WS` | unset (off) | Native agent-gateway WebSocket transport: unset/`0` off, `shadow` connects and logs what it *would* deliver, `1` live. |
+| `DISPATCH_TURN_TRANSPORT` | `auto` | How a turn is *sent* (the WS transport above is how the reply comes back): `auto` = over the gateway socket when one is connected, else spawn `openclaw agent`; `1` = socket only (a turn with no socket fails instead of quietly costing ~1.1 s more); `0` = the per-turn CLI spawn. |
 | `OPENCLAW_GATEWAY_URL` | `ws://127.0.0.1:18789` | Where that transport connects. |
 | `OPENCLAW_GATEWAY_TOKEN` | unset | Its auth token. There is **no** loopback exemption on the gateway side. |
 | `DISPATCH_HARNESS` | `auto` | Coding-agent harness pane: `auto` = on iff a `dsh` binary is found at boot, `1` forces on, `0` off + 404. |

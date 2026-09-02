@@ -32,6 +32,7 @@ THE THREE THINGS IT MUST GET RIGHT
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -62,6 +63,23 @@ ERROR_PLACEHOLDER_GRACE_S = 180.0
 # BACKFILL_MAX_MESSAGES so a corrupt cursor cannot ask for the whole history.
 BACKFILL_PAGE = 100
 BACKFILL_MAX_MESSAGES = 2000
+
+# How long a detected gap waits before it is chased, and why it waits at all.
+#
+# MOST GAPS ARE NOT LOSS. `messageSeq` counts every transcript row, but the
+# gateway only emits `session.message` for rows its display projection keeps —
+# and a toolResult row is folded into the assistant message that called the
+# tool, so it is counted and never emitted. Measured on this box: every one of
+# the 32 "gaps" in a day was a jump of exactly 2 across a tool call, on a
+# session that had lost nothing. Chasing each one inline cost a `chat.history`
+# round trip ON THE PATH THE REPLY TRAVELS, and a tool-heavy turn produces one
+# per tool call.
+#
+# So the gap is recorded, the reply goes out immediately, and the repair runs
+# behind it — coalesced, because a turn that called eight tools produced eight
+# "gaps" that one read covers. Every backfilled message carries a stable
+# source_id, so overlapping the live delivery is a no-op by construction.
+GAP_BACKFILL_DELAY_S = 6.0
 
 # Roles the gateway emits. Anything else is bucketed, because
 # stats["dropped_role_<role>"] minted a NEW key from a wire-supplied string and
@@ -158,10 +176,16 @@ class SessionRouter:
         self._seq: OrderedDict[str, int] = OrderedDict()
         # sessionKey -> the held error placeholder (see ERROR_PLACEHOLDER_GRACE_S).
         self._held_errors: dict[str, asyncio.Task] = {}
+        # sessionKey -> (thread_id, bot_id, lowest missed seq): gaps noticed but
+        # not yet chased. One task per session drains this (see _schedule_gap).
+        self._gap_pending: dict[str, tuple[str, str, int]] = {}
+        self._gap_tasks: dict[str, asyncio.Task] = {}
         self.stats = {"delivered": 0, "delivered_live": 0,
                       "delivered_backfill": 0, "skipped_not_ours": 0,
                       "gaps": 0, "refetched": 0, "backfilled": 0,
                       "truncation_unrepaired": 0, "backfill_incomplete": 0,
+                      "gaps_empty": 0, "gap_backfills_run": 0,
+                      "backfill_attempts": 0, "deduped": 0,
                       "error_held": 0, "error_suppressed": 0,
                       "error_released": 0}
 
@@ -218,9 +242,16 @@ class SessionRouter:
         # message in hand is one we are about to drop.
         if last is not None and isinstance(seq, int) and seq > last + 1:
             self.stats["gaps"] += 1
-            log.warning("session %s jumped %d -> %d; backfilling",
-                        session_key, last, seq)
-            await self._backfill(session_key, thread_id, bot_id, last, seq)
+            log.info("session %s jumped %d -> %d; queued a backfill",
+                     session_key, last, seq)
+            # NOT awaited. A gap repair used to run inline, ahead of the very
+            # message that revealed it, so every tool call put a chat.history
+            # round trip in front of the reply — and because the repair's range
+            # INCLUDED that message, the reply was then delivered as a replay
+            # (live=False -> `followup`, whole-thread dedup, reaction markers
+            # held to the replay rule) and its real live delivery deduped away.
+            # The reply is the urgent thing; the repair is not.
+            self._schedule_gap(session_key, thread_id, bot_id, last)
 
         if message.get("role") != "assistant":
             # The user's own message is already in the thread — DisPatch put it
@@ -249,6 +280,80 @@ class SessionRouter:
                      "session=%s (run continued)", session_key)
         await self._deliver_message(session_key, thread_id, bot_id, message,
                                     live=True)
+
+    def _schedule_gap(self, session_key: str, thread_id: str, bot_id: str,
+                      last: int) -> None:
+        """Remember a gap and make sure something will chase it.
+
+        Coalescing is the point: a turn that calls eight tools reports eight
+        gaps, all inside the same few seconds, all covered by one read. The
+        LOWEST missed seq wins, so the one read still spans everything.
+        """
+        prev = self._gap_pending.get(session_key)
+        low = last if prev is None else min(prev[2], last)
+        self._gap_pending[session_key] = (thread_id, bot_id, low)
+        task = self._gap_tasks.get(session_key)
+        if task is not None and not task.done():
+            return
+        self._gap_tasks[session_key] = asyncio.create_task(
+            self._drain_gap(session_key))
+
+    async def _run_gap(self, session_key: str) -> None:
+        """Chase whatever is queued for one session, if anything still is."""
+        pending = self._gap_pending.pop(session_key, None)
+        if pending is None:
+            return
+        thread_id, bot_id, last = pending
+        self.stats["gap_backfills_run"] += 1
+        before = self.stats["backfilled"]
+        await self._backfill(session_key, thread_id, bot_id, last, None)
+        if self.stats["backfilled"] == before:
+            # The overwhelmingly common case: the missing seqs were rows the
+            # gateway never emits (a toolResult is folded into the assistant
+            # message that called the tool, counted by messageSeq and never
+            # sent). Counted separately so `gaps` climbing stops reading as
+            # replies going missing — a counter that cries loss on every tool
+            # call trains an operator to ignore the one time it means it.
+            self.stats["gaps_empty"] += 1
+
+    async def _drain_gap(self, session_key: str) -> None:
+        """Wait out the settling delay, then chase the session's queued gap."""
+        try:
+            await asyncio.sleep(GAP_BACKFILL_DELAY_S)
+        except asyncio.CancelledError:
+            # flush_gaps() cancels the sleep and runs the repair itself; the
+            # queue entry stays put so nothing is dropped.
+            self._gap_tasks.pop(session_key, None)
+            raise
+        try:
+            await self._run_gap(session_key)
+        except Exception:
+            log.exception("gap backfill failed for %s", session_key)
+        finally:
+            self._gap_tasks.pop(session_key, None)
+            # A gap recorded while the repair was running must not sit unchased.
+            still = self._gap_pending.get(session_key)
+            if still is not None:
+                self._schedule_gap(session_key, *still)
+
+    async def flush_gaps(self) -> None:
+        """Run every queued gap repair immediately.
+
+        The repair is deliberately deferred (see GAP_BACKFILL_DELAY_S), which
+        makes "did the gap get repaired?" untestable and un-drainable without
+        this. Used by the tests and by shutdown, where a pending repair would
+        otherwise be cancelled with the loop and simply never happen.
+        """
+        for key, task in list(self._gap_tasks.items()):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            self._gap_tasks.pop(key, None)
+        for key in list(self._gap_pending):
+            try:
+                await self._run_gap(key)
+            except Exception:
+                log.exception("gap backfill failed for %s", key)
 
     def _hold_error(self, session_key: str, thread_id: str, bot_id: str,
                     message: dict) -> None:
@@ -285,10 +390,10 @@ class SessionRouter:
 
     async def _deliver_message(self, session_key: str, thread_id: str,
                                bot_id: str, message: dict,
-                               *, live: bool = False) -> None:
+                               *, live: bool = False) -> Any:
         text = text_of(message)
         if not text.strip():
-            return
+            return None
 
         # Truncation: repair BEFORE anything downstream sees it. Detected per
         # BLOCK — a truncated block that is not last leaves the marker buried
@@ -313,14 +418,24 @@ class SessionRouter:
         # replayed, and the deliverer needs to know — it may sit behind later
         # turns (trailing-run dedup cannot see it) and its `:react:` markers
         # were already spent when the block first happened.
-        await self._deliver(
+        landed = await self._deliver(
             thread_id, text,
             source_id=source_id_of(message, session_key),
             created_at=created_at_of(message),
             bot_id=bot_id, live=live,
         )
-        self.stats["delivered_live" if live else "delivered_backfill"] += 1
-        self.stats["delivered"] += 1
+        # The funnel returns the persisted row, or None when it recognised the
+        # message as one the thread already has. COUNT THE LANDINGS, not the
+        # attempts: "delivered_backfill: 27" meant 27 offers, most of which the
+        # funnel threw away as duplicates, and it read as 27 replies that only
+        # a repair had rescued. A counter that reports work it did not do is
+        # the same failure as a repair that reports success by silence.
+        if landed is None:
+            self.stats["deduped"] += 1
+        else:
+            self.stats["delivered_live" if live else "delivered_backfill"] += 1
+            self.stats["delivered"] += 1
+        return landed
 
     async def _backfill(self, session_key: str, thread_id: str, bot_id: str,
                         last: int, now: int | None) -> None:
@@ -385,11 +500,15 @@ class SessionRouter:
             # the trailing assistant run. That combination is exactly how 49
             # messages once landed in the family chat in one second.
             mseq = (m.get("__openclaw") or {}).get("seq")
+            # `now` is EXCLUSIVE. When a live message reveals a gap, that
+            # message is delivered live moments later; including it here made
+            # the backfill win the race and the reply landed as a replay.
             if isinstance(mseq, int) and (
-                    mseq <= last or (now is not None and mseq > now)):
+                    mseq <= last or (now is not None and mseq >= now)):
                 continue
-            await self._deliver_message(session_key, thread_id, bot_id, m)
-            self.stats["backfilled"] += 1
+            self.stats["backfill_attempts"] += 1
+            if await self._deliver_message(session_key, thread_id, bot_id, m):
+                self.stats["backfilled"] += 1
 
     async def resync_known(self) -> None:
         """Resync every session we hold a cursor for. The reconnect entry point.

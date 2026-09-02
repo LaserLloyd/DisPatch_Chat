@@ -238,6 +238,16 @@ async def test_backup_corrupt_snapshot_renamed_and_good_one_pinned(tmp_path, mon
         assert main._last_backup_ok is True
         assert main._last_good_backup == good
 
+        # The stamp is read back by _iso_age_seconds, which treats a NAIVE
+        # timestamp as UTC. Written in naive LOCAL time it produced
+        # backup_age_s = -24714 on this UTC+9 box — a backup nine hours in the
+        # future — and `backup_stale` (age > threshold) could then never fire.
+        # A staleness alarm that cannot go off is worse than no alarm: it
+        # reports health.
+        age = main._iso_age_seconds(main._last_backup_at)
+        assert age is not None and 0 <= age < 120, (
+            f"backup age is {age}s — the stamp is not UTC")
+
         # Live DB "corrupt": every subsequent snapshot fails verification.
         async def _bad_backup(dest: Path):
             dest.write_bytes(b"this is not a sqlite database")

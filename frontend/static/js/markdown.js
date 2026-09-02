@@ -109,9 +109,13 @@ export function toPlainPreview(md) {
   let s = String(md == null ? '' : md);
   // Fenced code: keep the code, drop the fence lines (and the language tag).
   s = s.replace(/^[ \t]*(?:```|~~~)[^\n]*$/gm, ' ');
-  // Our own directives: a document shows its name, a picture shows nothing.
-  s = s.replace(/\[\[doc:[^\]|]*\|([^\]]*)\]\]/g, '$1');
-  s = s.replace(/\[\[(?:doc|media|image):[^\]]*\]\]/g, ' ');
+  // Our own directives: a document shows its name, a picture its caption —
+  // or a frame glyph when it has none. A picture that showed NOTHING left a
+  // thread whose newest row is an image (every agent-fired image job) reading
+  // "No messages yet" in the list, under a picture that plainly exists.
+  s = s.replace(/\[\[(?:doc|media|image):[^\]|]*\|([^\]]*)\]\]/g, '$1');
+  s = s.replace(/\[\[(?:media|image):[^\]]*\]\]/g, ' \u{1F5BC}\uFE0F ');
+  s = s.replace(/\[\[doc:[^\]]*\]\]/g, ' ');
   // Images before links — ![alt](url) would otherwise leave a stray "!".
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');

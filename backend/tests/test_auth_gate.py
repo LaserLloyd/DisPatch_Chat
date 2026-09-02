@@ -622,9 +622,11 @@ def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
     proxy = "127.0.0.1"
     assert main._quota_ip({}, proxy) == proxy                     # direct
     assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
-    # Leftmost entry only.
+    # Rightmost entry only: that is the hop the trusted proxy itself appended;
+    # everything to its left is client-supplied and would let a caller pick
+    # its own quota bucket.
     assert main._quota_ip(
-        {"x-forwarded-for": "203.0.113.9, 192.0.2.77"}, proxy) == "203.0.113.9"
+        {"x-forwarded-for": "203.0.113.9, 192.0.2.77"}, proxy) == "192.0.2.77"
     # IPv6, bracketed and with a port.
     assert main._quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
     # Junk falls back to the peer rather than minting an arbitrary key.

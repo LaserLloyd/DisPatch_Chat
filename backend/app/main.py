@@ -793,6 +793,21 @@ def _media_origins_record(url: str, src: str) -> None:
             log.warning("could not record media origin for %s", url, exc_info=True)
 
 
+def _ingest_deny_roots() -> tuple[Path, ...]:
+    home = Path.home()
+    roots = [home / ".ssh", home / ".gnupg", home / ".config" / "secrets",
+             home / ".openclaw" / "secrets", home / ".openclaw" / "agents",
+             Path("/etc"), Path("/proc"), Path("/sys"), Path("/dev")]
+    out = []
+    for r in roots:
+        with contextlib.suppress(OSError, RuntimeError):
+            out.append(r.resolve())
+    return tuple(out)
+
+
+_INGEST_DENY_ROOTS = _ingest_deny_roots()
+
+
 def _ingest_local_file(path_str: str) -> str | None:
     """Copy a local media file into MEDIA_DIR; return its served /media/ URL.
 
@@ -805,6 +820,11 @@ def _ingest_local_file(path_str: str) -> str | None:
     except (OSError, RuntimeError):
         return None
     if not p.is_file() or p.suffix.lower() not in MEDIA_EXTS:
+        return None
+    if any(root == p or root in p.parents for root in _INGEST_DENY_ROOTS):
+        # A directive is text anyone with send rights can write; the media
+        # extension check already keeps keys out, but nothing under these
+        # trees is ever a picture to post, so refuse the whole subtree.
         return None
     try:
         if p.stat().st_size > _INGEST_MAX:
@@ -1316,11 +1336,18 @@ def _proxied_request(request: Request) -> bool:
     box" once no forwarding header is present. Forging one of these on a
     genuine local call can only tighten a check, never loosen one.
     """
-    return bool(
-        request.headers.get("x-forwarded-for")
-        or request.headers.get("forwarded")
-        or request.headers.get("tailscale-headers-info")
-    )
+    return any(request.headers.get(h) for h in _PROXY_MARKER_HEADERS)
+
+
+# Every header a reverse proxy in front of us is known to stamp. The auth gate
+# used to look at three of these; a proxy that sets only `X-Real-IP` or the
+# `Tailscale-User-*` identity headers (Serve does, for tailnet callers) left a
+# REMOTE request looking like a loopback one. Presence is all that is read.
+_PROXY_MARKER_HEADERS = (
+    "x-forwarded-for", "forwarded", "x-real-ip", "x-forwarded-host",
+    "x-forwarded-proto", "via", "tailscale-headers-info",
+    "tailscale-user-login", "tailscale-user-name", "tailscale-user-profile-pic",
+)
 
 
 def _ip_is_loopback(host: str) -> bool:
@@ -1633,9 +1660,15 @@ def _quota_ip(headers, peer: str) -> str:
     so a forwarding header is believed only when the peer IS loopback, where
     the alternative (one shared household bucket for every tailnet device)
     would be the worse failure. A remote peer's headers are ignored outright.
+    Of a forwarded list only the RIGHTMOST value — the one the proxy itself
+    appended — is read; anything to its left was written by the caller.
     """
     if _ip_is_loopback(peer):
-        first = (headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        # RIGHTMOST entry: a proxy appends the address it saw, so the last
+        # value is the one the proxy wrote and the leftmost is whatever the
+        # caller put there itself — a tailnet device could otherwise mint a
+        # fresh bucket per forged value, the very thing this docstring warns of.
+        first = (headers.get("x-forwarded-for") or "").split(",")[-1].strip()
         # An IPv6 literal may arrive bracketed and/or with a port.
         if first.startswith("[") and "]" in first:
             first = first[1:first.index("]")]
@@ -2379,6 +2412,25 @@ async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:
 
 #: How often the worker sweeps open jobs.
 _IMAGE_JOB_TICK_S = 5.0
+#: How many rig calls one sweep may have in flight. Matches the rig rule of
+#: thumb ("keep parallel calls ≤ 2–3") and, more to the point, stops N jobs
+#: against a down rig from costing N connect timeouts in series.
+_IMAGE_JOB_CONCURRENCY = 3
+#: Set by anything that just changed what the worker should look at (a new
+#: job, a rig callback) so the sweep runs NOW instead of at the next tick —
+#: the tick was the only DisPatch-side latency on the whole path.
+_image_job_wake: asyncio.Event | None = None
+#: Jobs currently being advanced. A rig callback and the sweep can both hold
+#: the same row at once; whichever is second must wait for the first, or the
+#: job is enqueued twice / delivered twice.
+_image_jobs_in_flight: set[str] = set()
+
+
+def _wake_image_jobs() -> None:
+    global _image_job_wake
+    if _image_job_wake is None:
+        _image_job_wake = asyncio.Event()
+    _image_job_wake.set()
 
 
 def _image_jobs_configured() -> bool:
@@ -2391,10 +2443,29 @@ def _image_jobs_configured() -> bool:
     return bool(SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url)
 
 
+_clawforge_client: image_jobs.ClawForge | None = None
+
+
 def _clawforge() -> image_jobs.ClawForge:
-    return image_jobs.ClawForge(SETTINGS.clawforge_url,
-                                files_url=SETTINGS.clawforge_files_url,
-                                client_name="dispatch")
+    """The ONE rig client. Its MCP session and its unreachable-breaker are
+    only worth anything if every job in the sweep shares them."""
+    global _clawforge_client
+    c = _clawforge_client
+    if (c is None or c.url != SETTINGS.clawforge_url
+            or c.files_url != (SETTINGS.clawforge_files_url or c.files_url)):
+        c = image_jobs.ClawForge(SETTINGS.clawforge_url,
+                                 files_url=SETTINGS.clawforge_files_url,
+                                 client_name="dispatch")
+        _clawforge_client = c
+    return c
+
+
+def _image_job_waiting_text(spec: image_jobs.ImageSpec, why: str) -> str:
+    """The pending line while the rig cannot be reached: still pending, but
+    honest about it. Same shape as the pending text so the card is unchanged."""
+    what = spec.caption or spec.prompt
+    tail = f" — {what[:80]}" if what else ""
+    return f"🖼️ Waiting for the image rig ({why})…{tail}"
 
 
 def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
@@ -2484,6 +2555,7 @@ async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
         return None
     await db.add_image_job(job_id, msg.id, thread_id, bot.id, spec.to_json(),
                            callback_token=callback_token)
+    _wake_image_jobs()
     return job_id, msg.id
 
 
@@ -2585,6 +2657,12 @@ async def _rewrite_image_job_message(job: dict, content: str,
     if msg is not None:
         with contextlib.suppress(Exception):
             await _broadcast_message_update(msg, job["thread_id"])
+        # The thread list previews `last_message`, and the placeholder is
+        # usually the newest row — without this the list keeps reading
+        # "Generating an image…" after the picture landed (seen on staging
+        # 2026-09-02; the bubble itself was fine).
+        with contextlib.suppress(Exception):
+            await _broadcast_thread_update(job["thread_id"])
 
 
 async def _fail_image_job(job: dict, reason: str, *,
@@ -2723,14 +2801,38 @@ async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
     `update_message_metadata` replaces wholesale, so a partial dict would drop
     the prompt, the caption and the workflow off the placeholder.
     """
-    if not progress or progress == _image_job_progress(job):
-        return
+    stored = _image_job_progress(job) or {}
+    if not progress:
+        if not stored.get("waiting"):
+            return
+        # Reachable again but no step counter yet: drop the waiting wording.
+        progress = {k: v for k, v in stored.items() if k != "waiting"}
+    elif progress == {k: v for k, v in stored.items() if k != "waiting"}:
+        if not stored.get("waiting"):
+            return
     await db.update_image_job(job["id"], progress=json.dumps(progress))
     await _rewrite_image_job_message(
         job, _image_job_pending_text(_image_job_spec(job)),
         _image_job_meta(job["id"], job["state"], _image_job_spec(job),
                         progress=progress, seed=job.get("seed")))
     job["progress"] = json.dumps(progress)
+
+
+async def _mark_image_job_waiting(job: dict, why: str) -> None:
+    """Rewrite the placeholder to say the rig is unreachable — once per
+    outage, not once per tick (the marker is `waiting` in the progress block)."""
+    prog = _image_job_progress(job) or {}
+    if prog.get("waiting"):
+        return
+    short = why.split(":", 1)[-1].split("(")[0].strip() or "unreachable"
+    spec = _image_job_spec(job)
+    prog = {**prog, "waiting": short}
+    await db.update_image_job(job["id"], progress=json.dumps(prog))
+    job["progress"] = json.dumps(prog)
+    await _rewrite_image_job_message(
+        job, _image_job_waiting_text(spec, short),
+        _image_job_meta(job["id"], job["state"], spec, progress=prog,
+                        seed=job.get("seed")))
 
 
 def _image_job_progress(job: dict) -> dict | None:
@@ -2743,7 +2845,23 @@ def _image_job_progress(job: dict) -> dict | None:
 
 
 async def _advance_image_job(job: dict) -> None:
-    """Move one job one step. Never raises — the loop must survive a bad row."""
+    """Move one job one step. Never raises — the loop must survive a bad row.
+
+    One advancer per job at a time: a second caller (the callback route while
+    the sweep holds the row, or vice versa) returns at once. The row is
+    re-read by the next sweep anyway, and the callback's poke has already
+    been honoured by whoever is in there.
+    """
+    if job["id"] in _image_jobs_in_flight:
+        return
+    _image_jobs_in_flight.add(job["id"])
+    try:
+        await _advance_image_job_locked(job)
+    finally:
+        _image_jobs_in_flight.discard(job["id"])
+
+
+async def _advance_image_job_locked(job: dict) -> None:
     forge = _clawforge()
     spec = _image_job_spec(job)
     try:
@@ -2799,7 +2917,10 @@ async def _advance_image_job(job: dict) -> None:
             # The rig is briefly unreachable (a restart, a dropped link). Say
             # so once and let the deadline decide — failing on the first blip
             # would turn every rig restart into a thread full of ⚠️ lines.
+            # The placeholder does change wording, once, so a reader knows the
+            # wait is the rig and not DisPatch — and changes back on progress.
             log.info("image job %s: %s (will retry)", job["id"], e.message)
+            await _mark_image_job_waiting(job, e.message)
             return
         await _fail_image_job(job, e.message)
     except Exception:
@@ -2808,19 +2929,33 @@ async def _advance_image_job(job: dict) -> None:
 
 
 async def _image_job_sweep() -> None:
-    """One pass over every open job: expire the old, advance the rest."""
-    for job in await db.open_image_jobs():
-        if _shutting_down:
-            return
-        if _image_job_expired(job):
-            # Withdraw it first: past the deadline nobody is going to be shown
-            # this picture, and a render left running holds a GPU the next
-            # request wants. The local ending does not wait on the answer.
-            await _cancel_on_rig(job, "deadline")
-            await _fail_image_job(
-                job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
-            continue
-        await _advance_image_job(job)
+    """One pass over every open job: expire the old, advance the rest.
+
+    Up to ``_IMAGE_JOB_CONCURRENCY`` jobs are advanced at once. The sweep
+    used to be strictly serial, which was fine while every call answered in
+    70 ms and ruinous when the rig was down: each open job then cost a full
+    connect timeout before the next one was even looked at.
+    """
+    sem = asyncio.Semaphore(_IMAGE_JOB_CONCURRENCY)
+
+    async def one(job: dict) -> None:
+        async with sem:
+            if _shutting_down:
+                return
+            if _image_job_expired(job):
+                # Withdraw it first: past the deadline nobody is going to be
+                # shown this picture, and a render left running holds a GPU
+                # the next request wants. The local ending does not wait on
+                # the answer.
+                await _cancel_on_rig(job, "deadline")
+                await _fail_image_job(
+                    job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
+                return
+            await _advance_image_job(job)
+
+    jobs = await db.open_image_jobs()
+    if jobs:
+        await asyncio.gather(*(one(j) for j in jobs))
 
 
 async def _resume_image_jobs() -> None:
@@ -2858,10 +2993,17 @@ async def _image_job_loop() -> None:
     them concurrently — while a single loop can be cancelled cleanly at
     shutdown and can never leak a task per abandoned job.
     """
+    global _image_job_wake
+    if _image_job_wake is None:
+        _image_job_wake = asyncio.Event()
     try:
         await asyncio.sleep(3)
         while True:
-            _loop_beat("image_jobs", _IMAGE_JOB_TICK_S * 4)
+            # The health beat says "this loop runs every tick" and the stale
+            # factor supplies the slack — reporting tick×4 as the period made
+            # /api/health read as a 20 s poll that does not exist.
+            _loop_beat("image_jobs", _IMAGE_JOB_TICK_S)
+            _image_job_wake.clear()
             try:
                 if _image_jobs_configured():
                     await _image_job_sweep()
@@ -2869,7 +3011,11 @@ async def _image_job_loop() -> None:
                 raise
             except Exception:
                 log.exception("image job sweep failed")
-            await asyncio.sleep(_IMAGE_JOB_TICK_S)
+            # Sleep a tick, or less if something new arrives.
+            try:
+                await asyncio.wait_for(_image_job_wake.wait(), _IMAGE_JOB_TICK_S)
+            except asyncio.TimeoutError:
+                pass
     except asyncio.CancelledError:
         pass
 
@@ -3060,10 +3206,15 @@ async def _reaction_pool_loop() -> None:
             consec = pool_guard.consecutive_failures()
             timeout = pool_guard.backoff_s(consec)
             if consec and consec >= pool_guard.ALERT_AFTER:
+                # Name the cause instead of guessing between two. The old text
+                # said "(VRAM contention or rig down)" on every streak, which
+                # is how fourteen hours of a dead rig-side renderer read
+                # identically to a busy GPU.
+                stats = pool_guard.refill_failure_stats()
                 log.error("POOL-REFILL-ALERT: %d consecutive refill failures "
-                          "(VRAM contention or rig down); next cycle in %ds — "
-                          "details: %s", consec, int(timeout),
-                          pool_guard.refill_failure_stats()["recent"][-1:])
+                          "%s; next cycle in %ds — details: %s",
+                          consec, stats["by_kind"] or "(no kinds recorded)",
+                          int(timeout), stats["recent"][-1:])
             elif consec:
                 log.warning("pool refill: %d consecutive failures; next cycle in %ds",
                             consec, int(timeout))
@@ -3896,7 +4047,7 @@ async def _gateway_resolve_thread(session_key: str) -> tuple[str, str] | None:
 
 async def _gateway_shadow_deliver(thread_id: str, text: str, *,
                                   source_id: str | None, created_at: str | None,
-                                  bot_id: str | None, live: bool = True) -> None:
+                                  bot_id: str | None, live: bool = True) -> Any:
     """Record what WOULD have been delivered. Persist nothing, broadcast nothing.
 
     A separate function, not a branch inside the live one, so a shadow router
@@ -3915,11 +4066,16 @@ async def _gateway_shadow_deliver(thread_id: str, text: str, *,
         })
     log.info("gateway-ws SHADOW would deliver %d chars to %s (%s)",
              len(text), thread_id, source_id)
+    # Truthy on purpose: the router reads the return value to decide whether a
+    # backfill actually landed anything, and a shadow run that always answered
+    # None would report every repair as a no-op — the comparison run's numbers
+    # have to mean the same thing as the live one's.
+    return {"shadow": True, "thread_id": thread_id, "source_id": source_id}
 
 
 async def _gateway_deliver(thread_id: str, text: str, *, source_id: str | None,
                            created_at: str | None, bot_id: str | None,
-                           live: bool = True) -> None:
+                           live: bool = True) -> Any:
     """Hand a gateway-sourced reply to the one funnel every path shares.
 
     A NON-live delivery (the router's gap/reconnect backfill) is history being
@@ -3937,7 +4093,11 @@ async def _gateway_deliver(thread_id: str, text: str, *, source_id: str | None,
       undated replay stays silent — the sweep learned that rule the day a
       replay popped two spent pool images on every device in the house.
     """
-    await _deliver_assistant_text(
+    # RETURNS the persisted row, or None when the funnel recognised the message
+    # as one the thread already has. The router counts on that distinction to
+    # tell a repair that recovered a lost reply from one that found nothing
+    # missing (the normal outcome of a tool-call seq gap).
+    return await _deliver_assistant_text(
         thread_id, text, source_id=source_id, created_at=created_at,
         metadata=None if live else {"followup": True},
         dedup_whole_thread=not live)
@@ -3994,6 +4154,14 @@ async def _gateway_ws_start() -> None:
 
 
 async def _gateway_ws_stop() -> None:
+    # Repairs first, socket second. A queued gap repair is a deferred task; if
+    # the loop goes away underneath it the repair simply never happens and the
+    # only trace is a counter that was already incremented — a fix that reports
+    # itself done. Draining it here is bounded (one history read per session
+    # that saw a gap) and the socket is still up to serve it.
+    if _gateway_router is not None:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(_gateway_router.flush_gaps(), timeout=10)
     if _gateway_client is not None:
         with contextlib.suppress(Exception):
             await _gateway_client.stop()
@@ -4458,7 +4626,12 @@ async def _make_backup() -> Path | None:
     pruning, so it never evicts a known-good snapshot from the rotation. The
     outcome is recorded for /api/health (last_backup_ok/last_backup_at)."""
     global _db_integrity_ok, _last_backup_ok, _last_backup_at, _last_good_backup
-    _last_backup_at = datetime.now().isoformat(timespec="seconds")
+    # UTC, and AWARE. This is read back by _iso_age_seconds, which treats a
+    # naive stamp as UTC — so a local-time stamp on a UTC+9 box reported
+    # backup_age_s = -24714, i.e. a backup nine hours in the future, and
+    # `backup_stale` (age > threshold) could never fire. A staleness alarm
+    # that cannot go off is worse than none: it reports health.
+    _last_backup_at = datetime.now(UTC).isoformat(timespec="seconds")
     try:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         dest = config.BACKUP_DIR / f"chats-{stamp}.db"
@@ -4677,7 +4850,13 @@ async def _resolve_doc_refs(text: str) -> str:
             is_text = mime.startswith("text/") or mime in _TEXT_MIMES or ext in DOC_EXTS
 
             if is_pdf or is_text:
-                stored_path = FILES_DIR / stored_name
+                stored_path = _safe_file_path(stored_name)
+                if stored_path is None:
+                    # A row whose stored name resolves outside FILES_DIR is
+                    # not a document we hold; never read through it.
+                    parts.append(f"[📎 {name or file_id}]")
+                    last_end = m.end()
+                    continue
                 try:
                     max_chars = _DOC_REF_MAX_CHARS
                     # Read the cap (+1 to detect truncation) rather than the
@@ -4795,10 +4974,43 @@ async def _media_second_look(
 _GATEWAY_RETRY_DELAYS = (3, 6, 12, 24, 45)
 
 
+# Which way turns actually went since boot. `auto` mode picks per attempt, so
+# without this a box could be quietly paying the CLI spawn on every turn while
+# the socket flag said "1" — surfaced in /api/health as `turn_transport`.
+_turn_transport_counts: dict[str, int] = {"socket": 0, "cli": 0}
+
+
+async def _dispatch_turn(bot_id: str, session_key: str, message: str
+                         ) -> openclaw.AgentReply:
+    """One attempt at a turn, over whichever transport is available.
+
+    The socket path and the subprocess path answer with the same
+    `AgentReply` — `_parse_reply` is shared — so everything downstream of here
+    is transport-blind. The choice is made per attempt, not once at boot,
+    because the socket can drop and come back while the app runs.
+    """
+    mode = SETTINGS.turn_transport
+    if mode != "0":
+        client = _gateway_client
+        if client is not None and client.connected.is_set():
+            _turn_transport_counts["socket"] += 1
+            return await openclaw.send_via_gateway(
+                client, bot_id=bot_id, session_key=session_key, message=message)
+        if mode == "1":
+            raise openclaw.GatewayUnavailable(
+                f"The agent gateway is down or restarting, so {bot_id} can't "
+                "answer right now. Your message is saved — try again in a "
+                "minute.",
+                detail="DISPATCH_TURN_TRANSPORT=1 and no gateway socket")
+    _turn_transport_counts["cli"] += 1
+    return await openclaw.send_to_agent(
+        bot_id=bot_id, session_key=session_key, message=message)
+
+
 async def _send_with_gateway_retry(
     bot_id: str, session_key: str, message: str, thread_id: str,
 ) -> openclaw.AgentReply:
-    """send_to_agent, retrying only gateway-refused turns.
+    """Dispatch a turn, retrying only turns the gateway refused at the door.
 
     The semaphore is taken per attempt and released during the sleeps, so a
     gateway restart doesn't serialize every other thread's turn behind it.
@@ -4806,8 +5018,7 @@ async def _send_with_gateway_retry(
     for delay in _GATEWAY_RETRY_DELAYS:
         try:
             async with _agent_sem:
-                return await openclaw.send_to_agent(
-                    bot_id=bot_id, session_key=session_key, message=message)
+                return await _dispatch_turn(bot_id, session_key, message)
         except openclaw.GatewayUnavailable as e:
             if _shutting_down:
                 raise
@@ -4815,8 +5026,7 @@ async def _send_with_gateway_retry(
                         bot_id, thread_id, delay, (e.detail or "")[:160])
             await asyncio.sleep(delay)
     async with _agent_sem:
-        return await openclaw.send_to_agent(
-            bot_id=bot_id, session_key=session_key, message=message)
+        return await _dispatch_turn(bot_id, session_key, message)
 
 
 async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
@@ -5118,6 +5328,9 @@ async def health(request: Request):
     }
     if not detailed:
         return body
+    # One read of the refill tally for both fields below: a second call would
+    # be cheap but could disagree with the first across a cycle boundary.
+    _pool_refill_stats = pool_guard.refill_failure_stats()
     body.update({
         "openclaw_available": openclaw.cli_available(),
         "clients": manager.count,
@@ -5140,10 +5353,19 @@ async def health(request: Request):
             reactions.fire_failure_stats()["failures_24h"],
         "image_job_failures_24h":
             image_jobs.failure_stats()["failures_24h"],
+        # Is the rig answering RIGHT NOW (the worker's breaker), and if not,
+        # for how long. Reachability, not prose: no rig URL, no job ids.
+        "image_rig": (_clawforge().status() if _image_jobs_configured()
+                      else {"reachable": None}),
         # Pool-refill refusals (VRAM contention / rig down) — the guard's
         # alert counter, same count-only rule as fire failures above.
         "pool_refill_failures_24h":
-            pool_guard.refill_failure_stats()["failures_24h"],
+            _pool_refill_stats["failures_24h"],
+        # ...and WHICH failure. A bare count cannot tell "the rig's renderer
+        # is down" (wait, or restart it) from "a co-tenant has the GPU"
+        # (wait) from "the image CLI is unset" (fix the unit file), and those
+        # want different humans. Kinds only — no prompts, bots or rig prose.
+        "pool_refill_failures_24h_by_kind": _pool_refill_stats["by_kind"],
         # Threads pinned to an avatar snapshot whose bytes are gone. Count
         # only, same rule as above: nonzero means the store lost files and
         # those chats are showing the wrong face.
@@ -5156,6 +5378,7 @@ async def health(request: Request):
         # they cover; without it a reassuring zero could just mean "restarted
         # a minute ago".
         "gateway_ws": _gateway_ws_stats(),
+        "turn_transport": {"mode": SETTINGS.turn_transport, **_turn_transport_counts},
     })
     return body
 
@@ -5180,12 +5403,33 @@ async def openapi_schema(request: Request):
     return JSONResponse(app.openapi())
 
 
+def _agent_backend_available() -> bool:
+    """Can *anything* on this host answer a bot turn right now?
+
+    Two backends exist: the `openclaw` CLI on disk and the gateway socket. The
+    socket transport needs no binary at all, so an install whose CLI is absent
+    (or, in staging, deliberately dead) but whose socket is up is a working
+    install — and the first-run "Connect an AI" card must not be shown to it.
+    Keying the card on the CLI alone did exactly that on staging.
+    """
+    if openclaw.cli_available():
+        return True
+    client = _gateway_client
+    return bool(client is not None and client.connected.is_set())
+
+
 def _gateway_ws_stats() -> dict[str, Any] | None:
     """The router's in-memory counters, or None when the transport is off."""
     router = _gateway_router
     if router is None:
         return None
-    return {"mode": SETTINGS.gateway_ws, "since": _gateway_ws_since, **router.stats}
+    # `connected` is the socket's live state, not a counter: the counters can
+    # all read zero on a healthy box that simply had no turns since boot, so
+    # they cannot say whether the transport is up right now. This can.
+    client = _gateway_client
+    connected = bool(client is not None and client.connected.is_set())
+    return {"mode": SETTINGS.gateway_ws, "since": _gateway_ws_since,
+            "connected": connected, **router.stats}
 
 
 # --------------------------------------------------------------------------- #
@@ -5278,7 +5522,7 @@ async def auth_status(request: Request):
         "features": ({"terminal": terminal_available(),
                       "harness": harness_available(),
                       "api_bots": config.api_bot_count(),
-                      "agent": openclaw.cli_available()}
+                      "agent": _agent_backend_available()}
                      if (authed or not cfg.pin_set) else {}),
     }
 
@@ -5515,13 +5759,15 @@ async def get_bots(request: Request):
 
 
 @app.get("/api/bots/all")
-async def get_all_bots():
+async def get_all_bots(request: Request):
     """All bots including hidden — used by the Bot Manager."""
+    _require_full_access(request)      # second lock, see _require_full_access
     return {"bots": [b.to_dict() for b in config.load_bots()]}
 
 
 @app.put("/api/bots/order")
-async def put_bot_order(payload: UpdateBotOrderIn):
+async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
+    _require_full_access(request)      # second lock, see _require_full_access
     bots = config.save_bot_order([i.model_dump() for i in payload.bots])
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
@@ -6622,8 +6868,9 @@ async def drop_file(
 
 
 @app.get("/api/media")
-async def serve_media(path: str = Query(...)):
+async def serve_media(request: Request, path: str = Query(...)):
     """Serve a local image/video file, but only from allow-listed base directories."""
+    _require_full_access(request)      # second lock, see _require_full_access
     try:
         candidate = Path(path).resolve(strict=True)
     except (OSError, RuntimeError):
@@ -6656,8 +6903,9 @@ def _safe_file_path(stored_name: str) -> Path | None:
 
 
 @app.post("/api/files")
-async def file_upload(file: UploadFile = File(...)):
+async def file_upload(request: Request, file: UploadFile = File(...)):
     """Upload any file type to the File Server."""
+    _require_full_access(request)      # second lock, see _require_full_access
     orig = (Path(file.filename or "file").name or "file")[:255]
     suffix = Path(orig).suffix.lower()[:16]
     stored = f"{uuid.uuid4().hex}{suffix}"
@@ -7188,6 +7436,10 @@ async def image_job_callback(request: Request, job_id: str):
         return {"ok": True, "state": job["state"]}
     await _advance_image_job(job)
     fresh = await db.get_image_job(job_id)
+    if fresh and fresh["state"] in image_jobs.OPEN_STATES:
+        # The sweep held the row: let it look again straight away rather than
+        # at the next tick, so the poke still buys the reader its seconds.
+        _wake_image_jobs()
     return {"ok": True, "state": (fresh or job)["state"]}
 
 

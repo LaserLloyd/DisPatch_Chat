@@ -82,6 +82,11 @@ log = logging.getLogger("local-chat.image_jobs")
 #: that is not going to answer, and the job's own deadline governs the retry.
 MCP_TIMEOUT_S = 60.0
 CONNECT_TIMEOUT_S = 10.0
+#: After a transport failure, how long every call fails fast (retryable)
+#: before the next real probe. Shorter than the worker tick × 4 so the health
+#: loop-beat never sees a stall, longer than one tick so a down rig costs one
+#: connect timeout per window rather than one per job per tick.
+RIG_BACKOFF_S = 15.0
 
 #: Fetching the finished image. Generous — this is a multi-megabyte PNG over a
 #: home network, and by this point the render has already succeeded.
@@ -179,16 +184,40 @@ def _sse_json(body: str) -> dict:
 class ClawForge:
     """A minimal MCP client for one image server.
 
-    Deliberately stateless between calls: it re-initialises a session for every
-    tool call. That is one extra round trip on loopback/LAN and it means a rig
-    restart, a session timeout or a server upgrade can never leave this process
-    holding a dead handle — which, for something that polls every few seconds
-    for ten minutes, is the failure mode that actually matters.
+    One MCP session, reused across calls. The server we talk to still speaks
+    the session-ful transport (a ``tools/call`` with no ``Mcp-Session-Id`` is a
+    400 "Missing session ID"), so a session must exist — but there is no
+    reason to build a fresh one per call, and on a LAN the handshake is two
+    round trips that dwarf the call itself. The thing that made the old
+    per-call handshake attractive — never being left holding a dead handle
+    across a rig restart — is kept a different way: a session-level refusal
+    (400/404) throws the handle away and the call is repeated ONCE on a new
+    one. A poll that runs every few seconds for ten minutes therefore
+    survives a rig restart with one extra round trip, not a stale session.
+
+    The second thing this owns is a rig-unreachable breaker. Without it a
+    sweep over N open jobs against a rig that is down pays N connect timeouts
+    IN SERIES (10 s each) every tick — which is how one dead renderer turned
+    into a worker that could not keep up with its own placeholders. After a
+    transport failure every call for the next ``RIG_BACKOFF_S`` fails fast
+    (retryable, so nothing is marked failed); the first call after the window
+    is the probe. ``status()`` reports the breaker so /api/health can say
+    "the rig is unreachable since …" instead of a bare failure count.
     """
 
     url: str
     files_url: str = ""
     client_name: str = "dispatch"
+    #: Test seam: an ``httpx`` transport to talk to instead of the network.
+    transport: Any = None
+
+    _sid: str | None = field(default=None, init=False, repr=False)
+    _client: Any = field(default=None, init=False, repr=False)
+    _unreachable_until: float = field(default=0.0, init=False, repr=False)
+    _unreachable_since: float = field(default=0.0, init=False, repr=False)
+    _last_error: str = field(default="", init=False, repr=False)
+    #: Sessions started, for tests and for the log line that proves reuse.
+    handshakes: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.url = (self.url or "").strip()
@@ -200,51 +229,129 @@ class ClawForge:
 
     # -- plumbing ---------------------------------------------------------- #
 
-    def _http(self, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout, connect=CONNECT_TIMEOUT_S),
-            follow_redirects=False,
-        )
+    def _http(self) -> httpx.AsyncClient:
+        """The one long-lived client (keep-alive + the session id live here)."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                follow_redirects=False,
+                transport=self.transport,
+                timeout=httpx.Timeout(MCP_TIMEOUT_S, connect=CONNECT_TIMEOUT_S))
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+        self._sid = None
+
+    @staticmethod
+    def _timeout(seconds: float) -> httpx.Timeout:
+        return httpx.Timeout(seconds, connect=CONNECT_TIMEOUT_S)
+
+    # Breaker ----------------------------------------------------------------
+
+    def _note_unreachable(self, why: str) -> None:
+        now = time.monotonic()
+        if not self._unreachable_since:
+            self._unreachable_since = now
+            log.warning("image server unreachable (%s); backing off %ss between "
+                        "probes", why, int(RIG_BACKOFF_S))
+        self._unreachable_until = now + RIG_BACKOFF_S
+        self._last_error = why
+
+    def _note_reachable(self) -> None:
+        if self._unreachable_since:
+            log.info("image server reachable again after %ds",
+                     int(time.monotonic() - self._unreachable_since))
+        self._unreachable_since = 0.0
+        self._unreachable_until = 0.0
+        self._last_error = ""
+
+    def status(self) -> dict:
+        """For /api/health: is the rig answering, and if not, since when."""
+        down = bool(self._unreachable_since)
+        return {
+            "reachable": not down,
+            "unreachable_for_s": (int(time.monotonic() - self._unreachable_since)
+                                  if down else 0),
+            "last_error": self._last_error,
+            "session": bool(self._sid),
+        }
+
+    def _check_breaker(self) -> None:
+        if self._unreachable_until and time.monotonic() < self._unreachable_until:
+            raise ImageJobError(
+                f"image server unreachable: {self._last_error} (backing off)",
+                retryable=True)
+
+    # Session ----------------------------------------------------------------
+
+    _HEADERS = {"content-type": "application/json",
+                "accept": "application/json, text/event-stream"}
+
+    async def _initialize(self, timeout: float) -> str:
+        http = self._http()
+        init = {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": self.client_name, "version": "2"}},
+        }
+        r = await http.post(self.url, json=init, headers=self._HEADERS,
+                            timeout=self._timeout(timeout))
+        r.raise_for_status()
+        sid = r.headers.get("mcp-session-id")
+        body = _sse_json(r.text)
+        if body.get("error") or not sid:
+            raise ImageJobError(
+                f"image server handshake failed: "
+                f"{body.get('error') or 'no session id'}", retryable=True)
+        await http.post(self.url, headers={**self._HEADERS, "mcp-session-id": sid},
+                        json={"jsonrpc": "2.0",
+                              "method": "notifications/initialized"},
+                        timeout=self._timeout(timeout))
+        self._sid = sid
+        self.handshakes += 1
+        return sid
 
     async def call(self, tool: str, args: dict, *,
                    timeout: float = MCP_TIMEOUT_S) -> dict:
         """One ``tools/call``. Returns the raw MCP result object."""
         if not self.url:
             raise ImageJobError("no image server configured")
-        headers = {"content-type": "application/json",
-                   "accept": "application/json, text/event-stream"}
-        init = {
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                       "clientInfo": {"name": self.client_name, "version": "1"}},
-        }
+        self._check_breaker()
+        req = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": {"name": tool, "arguments": args}}
         try:
-            async with self._http(timeout) as http:
-                r = await http.post(self.url, json=init, headers=headers)
-                r.raise_for_status()
-                sid = r.headers.get("mcp-session-id")
-                body = _sse_json(r.text)
-                if body.get("error") or not sid:
-                    raise ImageJobError(
-                        f"image server handshake failed: "
-                        f"{body.get('error') or 'no session id'}", retryable=True)
-                headers["mcp-session-id"] = sid
-                await http.post(self.url, headers=headers,
-                                json={"jsonrpc": "2.0",
-                                      "method": "notifications/initialized"})
-                r = await http.post(
-                    self.url, headers=headers,
-                    json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                          "params": {"name": tool, "arguments": args}})
+            body: dict = {}
+            for attempt in (0, 1):
+                sid = self._sid or await self._initialize(timeout)
+                r = await self._http().post(
+                    self.url, json=req,
+                    headers={**self._HEADERS, "mcp-session-id": sid},
+                    timeout=self._timeout(timeout))
+                if r.status_code in (400, 404) and attempt == 0:
+                    # The server no longer knows our session (it restarted, or
+                    # expired us). Not a transport failure: the rig is up. Once.
+                    log.info("image server dropped session; re-initialising")
+                    self._sid = None
+                    continue
                 r.raise_for_status()
                 body = _sse_json(r.text)
+                break
         except ImageJobError:
             raise
+        except httpx.TransportError as e:
+            # Unreachable / timed out: the rig may be restarting. Worth another
+            # poll before the deadline, so mark it retryable — and trip the
+            # breaker so the other open jobs do not each pay the same timeout.
+            why = type(e).__name__
+            self._note_unreachable(why)
+            self._sid = None
+            raise ImageJobError(f"image server unreachable: {why}", retryable=True)
         except httpx.HTTPError as e:
-            # Unreachable / timed out / 5xx: the rig may be restarting. Worth
-            # another poll before the deadline, so mark it retryable.
             raise ImageJobError(f"image server unreachable: {type(e).__name__}",
                                 retryable=True)
+        self._note_reachable()
         if body.get("error"):
             raise ImageJobError(f"image server refused {tool}: "
                                 f"{_error_text(body['error'])}")
@@ -359,19 +466,25 @@ class ClawForge:
         """
         if not self.files_url:
             raise ImageJobError("no file endpoint for the image server")
+        parts = files_rel.replace("\\", "/").split("/")
+        if ".." in parts or "" in parts[1:] or "://" in files_rel:
+            # The path came from the rig's own answer, but a rig that has been
+            # replaced by something hostile must not be able to walk us off
+            # its /files/ tree or onto another host.
+            raise ImageJobError("the rig named a file outside its files area")
         url = self.files_url.rstrip("/") + "/" + files_rel.lstrip("/")
         try:
-            async with self._http(FETCH_TIMEOUT_S) as http:
-                async with http.stream("GET", url) as resp:
-                    resp.raise_for_status()
-                    chunks: list[bytes] = []
-                    total = 0
-                    async for chunk in resp.aiter_bytes():
-                        total += len(chunk)
-                        if total > FETCH_MAX_BYTES:
-                            raise ImageJobError("image is implausibly large — "
-                                                "refusing to buffer it")
-                        chunks.append(chunk)
+            async with self._http().stream(
+                    "GET", url, timeout=self._timeout(FETCH_TIMEOUT_S)) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > FETCH_MAX_BYTES:
+                        raise ImageJobError("image is implausibly large — "
+                                            "refusing to buffer it")
+                    chunks.append(chunk)
         except ImageJobError:
             raise
         except httpx.HTTPError as e:

@@ -56,7 +56,9 @@ test('toPlainPreview strips the markdown a preview would otherwise show', () => 
     ['| a | b |\n| --- | --- |\n| 1 | 2 |', 'a b 1 2'],
     ['<https://example.com>', 'https://example.com'],
     ['[[doc:12|notes.txt]]', 'notes.txt'],
-    ['[[media:/tmp/a.png]]', ''],
+    ['[[media:/tmp/a.png]]', '\u{1F5BC}\uFE0F'],
+    ['[[media:/media/a.png|a red boat]]', 'a red boat'],
+    ['[[image:/tmp/a.png]]', '\u{1F5BC}\uFE0F'],
     ['line one\n\nline two', 'line one line two'],
   ];
   for (const [input, want] of cases) {

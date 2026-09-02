@@ -89,16 +89,17 @@
     "menu": "Chat-Aktionen",
     "popout": "In eigenem Fenster öffnen",
     "popout_gone": "Dieser Chat ist nicht mehr verfügbar — stattdessen wird der neueste angezeigt.",
-    "pin": "Anheften",
-    "unpin": "Lösen",
-    "rename": "Umbenennen",
+    "pin": "📌 Anheften",
+    "unpin": "📌 Lösen",
+    "rename": "✏️ Umbenennen",
     "rename_title": "Chat umbenennen",
     "sync": "⤓ Fehlende Nachrichten holen",
     "transcript": "📜 Transkript ansehen",
-    "archive": "Archivieren",
+    "archive": "🗄️ Archivieren",
     "archive_confirm": "Diesen Chat archivieren? Er verschwindet aus deiner Chatliste.",
     "archived": "Chat archiviert",
-    "delete_confirm": "Diesen Chat endgültig löschen?"
+    "delete_confirm": "Diesen Chat endgültig löschen?",
+    "delete_thread": "🗑️ Löschen"
   },
   "welcome": {
     "with_bot": "Chat mit {name}",
@@ -188,7 +189,7 @@
     "pool_vars_ph": "Variationen — eine pro Zeile (Outfit, Pose, Szene…)",
     "pool_save": "Prompts speichern",
     "pool_saved": "Prompts gespeichert — die nächste Auffüllung nutzt sie",
-    "pool_no_prompts": "keine Prompt-Sammlung — beim Auffüllen entsteht nichts",
+    "pool_no_prompts": "noch keine Prompt-Bank — Prompts hinzufügen, um Nachfüllungen zu ermöglichen",
     "move_up": "Nach oben",
     "move_down": "Nach unten",
     "move_up_aria": "{name} nach oben verschieben",
@@ -476,7 +477,11 @@
     "action_theme": "Design wechseln",
     "action_search": "Nachrichten suchen",
     "action_recovery": "Wiederherstellung & Export",
-    "action_lock": "Jetzt sperren"
+    "action_lock": "Jetzt sperren",
+    "action_settings": "Einstellungen",
+    "action_health": "Gesundheits-Dashboard",
+    "action_files": "Dateiserver",
+    "action_send_file": "Datei senden"
   },
   "recovery": {
     "aria": "Wiederherstellung und Export",
@@ -800,7 +805,22 @@
     "answering": "antwortet",
     "not_answering": "antwortet nicht",
     "note_agent_providers": "Optional — und diese Bots brauchen keins: Sie rufen einen LLM-Anbieter direkt auf.",
-    "note_agent_none": "Optional — Chatverlauf, Uploads und diese Seite funktionieren auch ohne. Nutze stattdessen KI verbinden (🔌), um einem Bot einen Anbieter zu geben."
+    "note_agent_none": "Optional — Chatverlauf, Uploads und diese Seite funktionieren auch ohne. Nutze stattdessen KI verbinden (🔌), um einem Bot einen Anbieter zu geben.",
+    "card_transport": "Live-Transport",
+    "reply_socket": "Antwort-Socket",
+    "socket_connected": "verbunden",
+    "socket_shadow": "verbunden (Schatten — liefert nichts)",
+    "socket_disconnected": "getrennt — Antworten kommen über das Transkript",
+    "replies_delivered": "Zugestellte Antworten",
+    "live_plus_backfill": "{live} live + {backfill} nachgeholt",
+    "truncated_unrepaired": "Abgeschnittene Antworten",
+    "seq_gaps": "Sequenzlücken",
+    "turns_sent": "Gesendete Turns",
+    "socket_vs_cli": "{socket} über den Socket · {cli} per CLI",
+    "image_rig": "Bild-Rig",
+    "rig_unreachable_for": "seit {time} nicht erreichbar",
+    "image_failures_24h": "Bildfehler (24 h)",
+    "note_since": "Zähler seit {time} — sie werden beim Neustart der App zurückgesetzt."
   },
   "pins": {
     "pin": "An die Leiste anheften",

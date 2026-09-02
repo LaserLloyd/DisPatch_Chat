@@ -9,11 +9,80 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Health → "Live transport" card.** The host dashboard shows the gateway
+  socket state, replies delivered live vs backfilled, unrepaired truncation,
+  `messageSeq` gaps, turns sent over the socket vs the CLI, image-rig
+  reachability and 24 h image-job failures — the `/api/health` counters the
+  socket turn transport exposes, so "which path did that reply take" is
+  answerable from the app.
+- **Command palette reaches every rail surface.** Ctrl/⌘-K offers Settings,
+  the Health dashboard and the File Server when unlocked, and "Send a file"
+  in Safe Mode.
+
 - **Interactive checklist tables**: a ```` ```checklist ```` fenced block posts a
   markdown table that renders as a checkable widget — sortable columns, a
   checkbox per row (completed rows group at the bottom in check order), and
   state persisted on the message so it survives a reload and syncs across
   devices.
+- **Image jobs: the placeholder says when the image server is unreachable.**
+  A job whose rig cannot be reached shows "🖼️ Waiting for the image rig
+  (ConnectError)…" and reverts to the normal placeholder when the rig answers
+  again; `/api/health` gains `image_rig` (`reachable`, `unreachable_for_s`,
+  `last_error`).
+
+### Changed
+
+- **Turn dispatch over the already-open gateway socket.** When the native
+  gateway transport (`DISPATCH_GATEWAY_WS=1`) is connected, a user turn is
+  sent as a gateway `agent` request on that socket instead of spawning
+  `openclaw agent` per message — about 1.1 s of fixed pre-model overhead
+  gone from every reply (measured 2259 → 1115 ms). `DISPATCH_TURN_TRANSPORT`
+  = `auto` (default: socket when connected, CLI otherwise) / `1` (socket only,
+  a turn with no socket fails instead of silently paying the CLI cost) / `0`
+  (the old per-turn CLI spawn). Only a run the gateway never accepted is
+  retried; an accepted run is never re-sent.
+
+- **Image jobs: faster and cheaper on the wire.** One MCP session is reused
+  across calls (a forgotten session is rebuilt once and the call repeated); a
+  submit or a rig callback wakes the worker instead of waiting for the next
+  5-second tick; the sweep advances up to three jobs at once; an unreachable
+  rig trips a 15-second breaker so queued jobs fail fast rather than each
+  waiting out a connect timeout in series.
+
+### Fixed
+
+- **First-run "Connect an AI" hero on a socket-only host.** `features.agent`
+  keyed off the `openclaw` CLI alone, so a host whose turns run over the
+  gateway socket greeted an unlocked admin with the onboarding banner. It now
+  reports true when either the CLI or a connected gateway socket can answer a
+  turn (`test_agent_operability.py`).
+- **Thread `⋯` menu glyphs.** Pin/Rename/Archive/Delete carry an icon like
+  Sync and Transcript already did; the Bots pane's "no prompt bank — refills
+  generate nothing" now reads "no prompt bank yet — add prompts to enable
+  refills".
+
+- **Phantom `messageSeq` gaps no longer trigger a backfill per reply.** The
+  gateway folds tool-result rows into the assistant message, so every
+  "gap of 2" the router repaired was phantom (32 of 32 in the logs). Gap
+  repair is now deferred and coalesced (`GAP_BACKFILL_DELAY_S`), the range
+  excludes the just-delivered message, and the health counters count
+  deliveries that actually landed rather than offers. Side effect fixed with
+  it: the backfill used to deliver the revealing reply first as a `followup`,
+  which is what was suppressing Bits' reaction markers.
+- **`backup_age_s` in `/api/health` could go negative** — the backup stamp was
+  naive local time compared against UTC; it is now `datetime.now(UTC)`.
+- **Thread list: a picture-only newest message previews as its caption** (or
+  a 🖼️ glyph) instead of "No messages yet", and the row repaints when an
+  image job's placeholder is rewritten — it used to sit on "Generating an
+  image…" after the picture had landed.
+- **Image jobs: a callback and the sweep can no longer advance one job
+  twice** (a duplicate enqueue was possible when both arrived together).
+- **Image jobs: a file name returned by the image server is checked** for
+  `..`, empty segments and embedded schemes before it is fetched.
+- **Reaction and avatar ids are anchored with `\A…\Z`**: a trailing newline
+  in a `bot_id` or mood name passed `^…$` and became a path component.
+- The `image_jobs` loop reported a 20-second period to `/api/health`'s
+  loop beats while ticking every 5.
 
 ## [1.0.0] — unreleased
 

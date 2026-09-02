@@ -100,12 +100,25 @@ class _Recorder:
     def __init__(self, known=None):
         self.known = known or {"agent:main:t1": ("t1", "main")}
         self.calls = []
+        self.seen_ids = set()
 
     async def resolve(self, key):
         return self.known.get(key)
 
     async def deliver(self, thread_id, text, **kw):
-        self.calls.append({"thread": thread_id, "text": text, **kw})
+        """Mirrors the real funnel's contract: the stored row, or None.
+
+        The router reads that return value to tell a repair that recovered a
+        reply from one that found nothing missing, so a recorder that always
+        returned None would make every backfill look like a no-op.
+        """
+        call = {"thread": thread_id, "text": text, **kw}
+        self.calls.append(call)
+        if kw.get("source_id") in self.seen_ids:
+            return None
+        if kw.get("source_id"):
+            self.seen_ids.add(kw["source_id"])
+        return call
 
 
 @pytest.mark.asyncio
@@ -196,6 +209,11 @@ async def test_a_sequence_gap_triggers_a_backfill():
     await router.handle("session.message", {
         "sessionKey": "agent:main:t1", "messageSeq": 4, "message": _msg("four", mid="m4")})
 
+
+    # The repair is deferred off the reply path (see GAP_BACKFILL_DELAY_S);
+    # flush_gaps() is what makes it observable without a sleep in a test.
+    await router.flush_gaps()
+
     assert router.stats["gaps"] == 1, "the skip from 1 to 4 went unnoticed"
     assert client.history_calls, "no backfill was attempted"
     assert client.history_calls[0]["offset"] == 0, (
@@ -274,7 +292,11 @@ async def test_backfilled_deliveries_are_marked_not_live():
     await router.handle("session.message", {
         "sessionKey": "agent:main:t1", "messageSeq": 4, "message": _msg("four", mid="m4")})
 
+    # The repair is deferred off the reply path (see GAP_BACKFILL_DELAY_S);
+    # flush_gaps() is what makes it observable without a sleep in a test.
+    await router.flush_gaps()
     by_text = {c["text"]: c for c in r.calls}
+
     assert by_text["one"]["live"] is True
     assert by_text["four"]["live"] is True
     assert by_text["the message that was dropped"]["live"] is False
@@ -455,6 +477,11 @@ async def test_a_gap_wider_than_one_page_is_fully_backfilled():
         "sessionKey": "agent:main:t1", "messageSeq": 300,
         "message": _msg("reply 300", mid="m300", seq=300)})
 
+
+    # The repair is deferred off the reply path (see GAP_BACKFILL_DELAY_S);
+    # flush_gaps() is what makes it observable without a sleep in a test.
+    await router.flush_gaps()
+
     assert len(client.history_calls) > 1, "one page cannot cover a 299-wide gap"
     assert router.stats["backfill_incomplete"] == 0
     texts = [c["text"] for c in r.calls]
@@ -479,6 +506,11 @@ async def test_an_uncoverable_gap_is_counted_not_hidden(monkeypatch):
     await router.handle("session.message", {
         "sessionKey": "agent:main:t1", "messageSeq": 200,
         "message": _msg("reply 200", mid="m200", seq=200)})
+
+
+    # The repair is deferred off the reply path (see GAP_BACKFILL_DELAY_S);
+    # flush_gaps() is what makes it observable without a sleep in a test.
+    await router.flush_gaps()
 
     assert router.stats["backfill_incomplete"] == 1
 
@@ -516,3 +548,126 @@ async def test_unknown_roles_share_one_stats_bucket():
     assert router.stats["dropped_role_user"] == 1
     assert not [k for k in router.stats if k.startswith("dropped_role_")
                 and k not in ("dropped_role_other", "dropped_role_user")]
+
+
+# --- gaps are usually not loss ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_gap_does_not_delay_the_reply_that_revealed_it():
+    """The repair must not sit in front of the message.
+
+    `messageSeq` counts every transcript row, but the gateway only emits
+    `session.message` for rows its display projection keeps — and a toolResult
+    is folded into the assistant message that called the tool, so it is counted
+    and never sent. Measured on this box: every gap in a day was a jump of
+    exactly 2 across a tool call, on a session that had lost nothing. Repairing
+    inline put a `chat.history` round trip in front of the reply, once per tool
+    call, for nothing.
+    """
+    client = _FakeClient(history=[])
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("one", mid="m1", seq=1)})
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 3,
+        "message": _msg("after the tool call", mid="m3", seq=3)})
+
+    assert router.stats["gaps"] == 1
+    assert [c["text"] for c in r.calls] == ["one", "after the tool call"]
+    assert client.history_calls == [], (
+        "the gap was chased on the reply's own path — that is the latency the "
+        "deferral exists to remove")
+    await router.flush_gaps()
+    assert client.history_calls, "the deferred repair never ran"
+
+
+@pytest.mark.asyncio
+async def test_the_message_that_revealed_a_gap_is_not_replayed_as_backfill():
+    """`now` is exclusive.
+
+    Including it let the repair deliver the live reply first, as a replay:
+    live=False, so it was marked `followup`, deduped against the whole thread,
+    and its `:react:` markers were held to the replay-freshness rule. The real
+    live delivery then deduped away. The family saw a normal reply; the bot's
+    reaction never fired and the counters said `delivered_backfill`.
+    """
+    live = _msg("the live reply", mid="m3", seq=3)
+    client = _FakeClient(history=[live])
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("one", mid="m1", seq=1)})
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 3, "message": live})
+
+    delivered = [c for c in r.calls if c["text"] == "the live reply"]
+    assert len(delivered) == 1
+    assert delivered[0]["live"] is True, (
+        "the reply was delivered as a replay by its own gap repair")
+
+
+@pytest.mark.asyncio
+async def test_a_phantom_gap_is_counted_apart_from_a_real_one():
+    """`gaps` climbing on every tool call trains an operator to ignore it."""
+    client = _FakeClient(history=[])
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("one", mid="m1", seq=1)})
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 3,
+        "message": _msg("two", mid="m3", seq=3)})
+    await router.flush_gaps()
+    assert router.stats["gaps_empty"] == 1
+    assert router.stats["backfilled"] == 0, (
+        "backfilled must count replies actually recovered, not attempts")
+
+
+@pytest.mark.asyncio
+async def test_many_gaps_in_one_turn_cost_one_history_read():
+    """A turn that calls eight tools reports eight gaps and needs one read."""
+    client = _FakeClient(history=[])
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver, client=client)
+    await router.handle("session.message", {
+        "sessionKey": "agent:main:t1", "messageSeq": 1,
+        "message": _msg("one", mid="m1", seq=1)})
+    for seq in (3, 5, 7, 9):
+        await router.handle("session.message", {
+            "sessionKey": "agent:main:t1", "messageSeq": seq,
+            "message": _msg(f"m{seq}", mid=f"m{seq}", seq=seq)})
+    assert router.stats["gaps"] == 4
+    await router.flush_gaps()
+    assert router.stats["gap_backfills_run"] == 1
+    assert len(client.history_calls) <= 1
+
+
+@pytest.mark.asyncio
+async def test_flush_gaps_is_safe_with_nothing_queued():
+    router = gr.SessionRouter(_Recorder().resolve, _Recorder().deliver)
+    await router.flush_gaps()
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_the_funnel_deduped_is_not_counted_as_delivered():
+    """Counters must report landings, not offers.
+
+    `delivered_backfill: 27` on the live install meant 27 OFFERS, nearly all of
+    which the funnel discarded as messages the thread already had — and it read
+    as 27 replies a repair had rescued. A counter that reports work it did not
+    do is the same defect as a repair that reports success by silence.
+    """
+    r = _Recorder()
+    router = gr.SessionRouter(r.resolve, r.deliver)
+    for _ in range(2):
+        await router.handle("session.message", {
+            "sessionKey": "agent:main:t1", "messageSeq": 1,
+            "message": _msg("same reply", mid="m1", seq=1)})
+    assert router.stats["delivered"] == 1
+    assert router.stats["deduped"] == 1

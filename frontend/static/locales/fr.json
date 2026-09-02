@@ -90,16 +90,17 @@
     "menu": "Actions du fil",
     "popout": "Ouvrir dans sa propre fenêtre",
     "popout_gone": "Cette discussion n'est plus disponible — affichage de la plus récente.",
-    "pin": "Épingler",
-    "unpin": "Désépingler",
-    "rename": "Renommer",
+    "pin": "📌 Épingler",
+    "unpin": "📌 Désépingler",
+    "rename": "✏️ Renommer",
     "rename_title": "Renommer la conversation",
     "sync": "⤓ Récupérer les messages manquants",
     "transcript": "📜 Voir la transcription",
-    "archive": "Archiver",
+    "archive": "🗄️ Archiver",
     "archive_confirm": "Archiver cette conversation ? Elle sera masquée de ta liste.",
     "archived": "Conversation archivée",
-    "delete_confirm": "Supprimer définitivement cette conversation ?"
+    "delete_confirm": "Supprimer définitivement cette conversation ?",
+    "delete_thread": "🗑️ Supprimer"
   },
   "welcome": {
     "with_bot": "Discuter avec {name}",
@@ -190,7 +191,7 @@
     "pool_vars_ph": "Variations — une par ligne (tenue, pose, décor…)",
     "pool_save": "Enregistrer les prompts",
     "pool_saved": "Prompts enregistrés — le prochain remplissage les utilisera",
-    "pool_no_prompts": "aucun prompt enregistré — les remplissages ne produisent rien",
+    "pool_no_prompts": "pas encore de banque de prompts — ajoutez des prompts pour activer les recharges",
     "move_up": "Monter",
     "move_down": "Descendre",
     "move_up_aria": "Monter {name}",
@@ -483,7 +484,11 @@
     "action_theme": "Changer de thème",
     "action_search": "Rechercher dans les messages",
     "action_recovery": "Récupération et export",
-    "action_lock": "Verrouiller"
+    "action_lock": "Verrouiller",
+    "action_settings": "Réglages",
+    "action_health": "Tableau de bord santé",
+    "action_files": "Serveur de fichiers",
+    "action_send_file": "Envoyer un fichier"
   },
   "recovery": {
     "aria": "Récupération et export",
@@ -823,7 +828,22 @@
     "answering": "répond",
     "not_answering": "ne répond pas",
     "note_agent_providers": "Facultatif — et ces bots n’en ont pas besoin : ils appellent directement un fournisseur de LLM.",
-    "note_agent_none": "Facultatif — l’historique des chats, les envois et cette page fonctionnent sans. Utilise plutôt Connecter une IA (🔌) pour donner un fournisseur à un bot."
+    "note_agent_none": "Facultatif — l’historique des chats, les envois et cette page fonctionnent sans. Utilise plutôt Connecter une IA (🔌) pour donner un fournisseur à un bot.",
+    "card_transport": "Transport en direct",
+    "reply_socket": "Socket de réponses",
+    "socket_connected": "connecté",
+    "socket_shadow": "connecté (ombre — ne livre rien)",
+    "socket_disconnected": "déconnecté — les réponses passent par la transcription",
+    "replies_delivered": "Réponses livrées",
+    "live_plus_backfill": "{live} en direct + {backfill} rattrapées",
+    "truncated_unrepaired": "Réponses tronquées",
+    "seq_gaps": "Trous de séquence",
+    "turns_sent": "Tours envoyés",
+    "socket_vs_cli": "{socket} par le socket · {cli} par CLI",
+    "image_rig": "Machine à images",
+    "rig_unreachable_for": "injoignable depuis {time}",
+    "image_failures_24h": "Échecs d’image (24 h)",
+    "note_since": "Compteurs depuis {time} — remis à zéro au redémarrage de l’app."
   },
   "pins": {
     "pin": "Épingler à la barre",

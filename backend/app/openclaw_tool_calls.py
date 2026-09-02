@@ -48,9 +48,12 @@ _XMLISH_PARAM_CLOSE_RE = re.compile(r"</parameter>", re.I)
 
 # Cheap pre-filter, mirroring upstream: any of the three shapes' opening token.
 _QUICK_BRACKET_RE = re.compile(r"\[(?:tool:)?[A-Za-z0-9_-]+\]")
+# Re-derived 2026-09-02 against 2026.8.1: upstream now skips only horizontal
+# whitespace at the line start and requires spaces/tabs (not any whitespace)
+# between the channel word and `to=`, so "final\nto=" is no longer a call.
 _QUICK_HARMONY_RE = re.compile(
-    r"(?:^|\n)\s*(?:<\|channel\|>)?(?:commentary|analysis|final)\s+to=")
-_QUICK_XMLISH_RE = re.compile(r"(?:^|\n)\s*<function=[A-Za-z0-9_.:-]{1,120}>", re.I)
+    r"(?:^|[\r\n])[^\S\r\n]*(?:<\|channel\|>)?(?:commentary|analysis|final)[ \t]+to=")
+_QUICK_XMLISH_RE = re.compile(r"(?:^|[\r\n])[^\S\r\n]*<function=", re.I)
 
 
 class _Opening(NamedTuple):

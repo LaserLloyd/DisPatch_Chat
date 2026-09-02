@@ -275,6 +275,16 @@ class Settings:
     #                    logs it. Delivers nothing. This is the comparison run.
     #   "1"      LIVE  — the WS path delivers, and the tailing paths stand down.
     gateway_ws: str = env("GATEWAY_WS", "").strip().lower()
+    # How a turn is DISPATCHED (the direction the question travels; gateway_ws
+    # above is how the answer comes back).
+    #   "auto"  — over the gateway socket when one is connected, else the CLI.
+    #             The default: it can only be faster, and it falls back on its
+    #             own the moment the socket is not there.
+    #   "1"     — gateway socket only. A turn with no socket fails rather than
+    #             quietly costing 2.3s more, which is what you want on a box
+    #             where the socket is supposed to be up.
+    #   "0"     — spawn `openclaw agent` per turn, as DisPatch always did.
+    turn_transport: str = env("TURN_TRANSPORT", "auto").strip().lower()
     # If true, a fresh thread shows a short canned greeting (no LLM call).
     greeting: bool = env("GREETING", "0") not in ("", "0", "false", "False")
     # Gates the coding terminal (server-side PTY, full-session only).

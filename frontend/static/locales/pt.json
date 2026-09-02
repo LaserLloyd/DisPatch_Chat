@@ -90,16 +90,17 @@
     "menu": "Ações da conversa",
     "popout": "Abrir em janela própria",
     "popout_gone": "Essa conversa não está mais disponível — mostrando a mais recente.",
-    "pin": "Fixar",
-    "unpin": "Desafixar",
-    "rename": "Mudar o nome",
+    "pin": "📌 Fixar",
+    "unpin": "📌 Desafixar",
+    "rename": "✏️ Mudar o nome",
     "rename_title": "Mudar o nome da conversa",
     "sync": "⤓ Recuperar mensagens em falta",
     "transcript": "📜 Ver transcrição",
-    "archive": "Arquivar",
+    "archive": "🗄️ Arquivar",
     "archive_confirm": "Arquivar esta conversa? Fica escondida da tua lista.",
     "archived": "Conversa arquivada",
-    "delete_confirm": "Eliminar esta conversa definitivamente?"
+    "delete_confirm": "Eliminar esta conversa definitivamente?",
+    "delete_thread": "🗑️ Eliminar"
   },
   "welcome": {
     "with_bot": "Conversar com {name}",
@@ -190,7 +191,7 @@
     "pool_vars_ph": "Variações — uma por linha (roupa, pose, cenário…)",
     "pool_save": "Guardar os prompts",
     "pool_saved": "Prompts guardados — o próximo enchimento usa-os",
-    "pool_no_prompts": "sem prompts guardados — os enchimentos não geram nada",
+    "pool_no_prompts": "ainda sem banco de prompts — adicione prompts para ativar recargas",
     "move_up": "Mover para cima",
     "move_down": "Mover para baixo",
     "move_up_aria": "Mover {name} para cima",
@@ -483,7 +484,11 @@
     "action_theme": "Alternar o tema",
     "action_search": "Procurar mensagens",
     "action_recovery": "Recuperar e exportar",
-    "action_lock": "Bloquear agora"
+    "action_lock": "Bloquear agora",
+    "action_settings": "Definições",
+    "action_health": "Painel de saúde",
+    "action_files": "Servidor de ficheiros",
+    "action_send_file": "Enviar um ficheiro"
   },
   "recovery": {
     "aria": "Recuperar e exportar",
@@ -823,7 +828,22 @@
     "answering": "responde",
     "not_answering": "não responde",
     "note_agent_providers": "Opcional — e estes bots não precisam de nenhum: chamam diretamente um fornecedor de LLM.",
-    "note_agent_none": "Opcional — o histórico, os carregamentos e esta página funcionam sem ele. Usa Ligar uma IA (🔌) para dar um fornecedor a um bot."
+    "note_agent_none": "Opcional — o histórico, os carregamentos e esta página funcionam sem ele. Usa Ligar uma IA (🔌) para dar um fornecedor a um bot.",
+    "card_transport": "Transporte ao vivo",
+    "reply_socket": "Socket de respostas",
+    "socket_connected": "ligado",
+    "socket_shadow": "ligado (sombra — não entrega nada)",
+    "socket_disconnected": "desligado — as respostas chegam pela transcrição",
+    "replies_delivered": "Respostas entregues",
+    "live_plus_backfill": "{live} ao vivo + {backfill} recuperadas",
+    "truncated_unrepaired": "Respostas cortadas",
+    "seq_gaps": "Lacunas de sequência",
+    "turns_sent": "Turnos enviados",
+    "socket_vs_cli": "{socket} pelo socket · {cli} via CLI",
+    "image_rig": "Máquina de imagens",
+    "rig_unreachable_for": "inacessível há {time}",
+    "image_failures_24h": "Falhas de imagem (24 h)",
+    "note_since": "Contadores desde {time} — reiniciam quando a app reinicia."
   },
   "pins": {
     "pin": "Fixar na barra",

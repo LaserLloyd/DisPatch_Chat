@@ -8,8 +8,10 @@ HTTP error mapping and the WS broadcasts.
 Command whitelist (non-negotiable): the only binary ever spawned is the one
 named by DISPATCH_TERMINAL_BIN, resolved once at import. There is no default —
 an unset variable leaves the feature off rather than guessing at a binary. argv
-is exactly [binary] — no route parameter ever reaches argv; client input only
-travels through the PTY master fd as terminal keystrokes.
+is [binary] plus fixed flags chosen from closed tables (_RESUME_FLAGS, --yolo)
+and an optional --model whose value must match _MODEL_RE — no raw route
+parameter ever reaches argv; client input only travels through the PTY master
+fd as terminal keystrokes.
 
 The session is in-memory only: it dies with the DisPatch process (every restart
 is a fresh session) and is never auto-respawned — Start/Restart are the only

@@ -49,6 +49,7 @@ const LOG_LINE_CHOICES = [100, 200, 500, 2000];
 const D = {
   open: false,
   data: null,          // last good payload
+  health: null,        // /api/health alongside it (transport card)
   error: null,         // last refresh error (data stays, banner goes stale)
   fetchedAt: 0,
   loading: false,
@@ -336,8 +337,16 @@ async function refresh() {
   D.loading = true;
   paintUpdated();
   try {
-    const data = await getJSON('/api/dashboard');
+    // /api/health rides along: the transport card reads the process-local
+    // counters (gateway socket, turn path, image rig) that live there and
+    // nowhere else. It is cached server-side and cheap; a failure of that
+    // call alone must not blank the whole page, so it degrades to "no card".
+    const [data, health] = await Promise.all([
+      getJSON('/api/dashboard'),
+      getJSON('/api/health').catch(() => null),
+    ]);
     D.data = data;
+    D.health = health;
     D.error = null;
     D.fetchedAt = Date.now();
   } catch (e) {
@@ -588,12 +597,64 @@ function paintCards() {
         : null,
     ], a.configured ? null
       : T(a.api_bots ? 'dash.note_agent_providers' : 'dash.note_agent_none')),
-  ];
+    transportCard(),
+  ].filter(Boolean);
 
   // Append any card that isn't in the DOM yet, in declaration order.
   for (const node of built) {
     if (!node.isConnected) nodes.cards.append(node);
   }
+}
+
+// The live transport card: how replies and turns actually travel, and
+// whether the image rig is there. Sourced from /api/health because those
+// counters are process-local (they reset on restart — hence the `since`
+// note) and the dashboard summary deliberately does not duplicate them.
+// Only shown once the gateway socket has ever been configured or the image
+// path exists; a stock install with neither gets no card rather than a
+// column of dashes.
+function transportCard() {
+  const h = D.health;
+  if (!h) return null;
+  const gw = h.gateway_ws;
+  const tt = h.turn_transport;
+  const rig = h.image_rig;
+  const hasRig = rig && rig.reachable !== null && rig.reachable !== undefined;
+  if (!gw && !hasRig) return null;
+  const rows = [];
+  if (gw) {
+    const shadow = gw.mode === 'shadow';
+    rows.push({ l: T('dash.reply_socket'),
+      v: gw.connected ? (shadow ? T('dash.socket_shadow') : T('dash.socket_connected'))
+                      : T('dash.socket_disconnected'),
+      t: gw.connected ? (shadow ? 'warn' : null) : 'warn' });
+    rows.push({ l: T('dash.replies_delivered'),
+      v: T('dash.live_plus_backfill', { live: gw.delivered_live ?? 0,
+                                        backfill: gw.delivered_backfill ?? 0 }) });
+    // Cut-short replies are the stop-the-line signal; a nonzero here is the
+    // only red row on the card.
+    rows.push({ l: T('dash.truncated_unrepaired'), v: String(gw.truncation_unrepaired ?? 0),
+      t: gw.truncation_unrepaired ? 'fail' : null });
+    if (gw.gaps) rows.push({ l: T('dash.seq_gaps'), v: String(gw.gaps), t: 'warn' });
+  }
+  if (tt) {
+    // `auto` picks per turn, so the split is the fact that matters: the CLI
+    // count climbing while the socket is up means the socket path is failing.
+    const cliWhileUp = gw && gw.connected && tt.cli > 0 && tt.mode !== '0';
+    rows.push({ l: T('dash.turns_sent'),
+      v: T('dash.socket_vs_cli', { socket: tt.socket ?? 0, cli: tt.cli ?? 0 }),
+      t: cliWhileUp ? 'warn' : null });
+  }
+  if (hasRig) {
+    rows.push({ l: T('dash.image_rig'),
+      v: rig.reachable ? T('dash.answering')
+        : T('dash.rig_unreachable_for', { time: fmtDuration(rig.unreachable_for_s || 0) }),
+      t: rig.reachable ? null : 'warn' });
+    const fails = h.image_job_failures_24h ?? 0;
+    rows.push({ l: T('dash.image_failures_24h'), v: String(fails), t: fails ? 'warn' : null });
+  }
+  const since = gw && gw.since ? T('dash.note_since', { time: fmtClock(gw.since) }) : null;
+  return card('transport', `🔗 ${T('dash.card_transport')}`, rows, since);
 }
 
 function diskTone(disk) {

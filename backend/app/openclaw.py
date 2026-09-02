@@ -41,6 +41,7 @@ import re
 import shutil
 import signal
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -535,6 +536,74 @@ def parse_progress_line(line: str) -> list[dict]:
                 items.append(_with_source(_base, len(items),
                                           {"kind": "text", "text": t[:300], "full_text": t}))
     return items
+
+
+# Agent ids the gateway will accept: it normalizes to lowercase and replaces
+# anything outside [a-z0-9_-]. The CLI does this to `--agent` before sending,
+# so doing it here keeps the two transports addressing the same agent — a
+# mixed-case id like `DS_Flash` otherwise risks resolving differently from the
+# session key, and "unknown agent" is not a failure worth discovering in the
+# family chat.
+_AGENT_ID_INVALID_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def normalize_agent_id(bot_id: str) -> str:
+    v = _AGENT_ID_INVALID_RE.sub("-", (bot_id or "").strip().lower())
+    return v.strip("-") or "main"
+
+
+async def send_via_gateway(
+    client,
+    bot_id: str,
+    session_key: str,
+    message: str,
+    timeout: int | None = None,
+) -> AgentReply:
+    """Dispatch a turn over the gateway socket DisPatch already holds open.
+
+    Identical request to the one `openclaw agent --json` makes, and the reply
+    payload has the identical shape — `_parse_reply` is shared, deliberately,
+    so the two transports cannot drift into disagreeing about what an agent
+    said. What it skips is the Node process in between: on this box that
+    wrapper measured 2.3 s of boot-and-connect before the run started, on every
+    turn, which is the single largest fixed cost on the reply path.
+
+    `deliver` stays False for the same reason the CLI is never given
+    `--deliver`: replies come back to us and are not re-sent to any channel.
+    """
+    from . import gateway_ws
+    timeout = timeout or SETTINGS.agent_timeout
+    params = {
+        "message": message,
+        "agentId": normalize_agent_id(bot_id),
+        "sessionKey": session_key,
+        "deliver": False,
+        "timeout": timeout,
+        # A stable per-attempt key: the gateway dedups on it, so a resend can
+        # never start a second run of the same turn.
+        "idempotencyKey": uuid.uuid4().hex,
+        "cleanupBundleMcpOnRunEnd": True,
+    }
+    try:
+        payload = await client.call_agent(params, timeout=timeout + 15)
+    except gateway_ws.GatewayRunRefused as e:
+        # Nothing ran. Retryable, and the caller's backoff already knows how.
+        raise _friendly_gateway_down(bot_id, str(e))
+    except gateway_ws.GatewayRunTimeout:
+        raise AgentTimeout(
+            f"{bot_id} took too long to respond (>{timeout}s).",
+            detail="agent timeout (gateway transport)")
+    except (gateway_ws.GatewayDisconnected, ConnectionError) as e:
+        # The run was accepted, so it may still be underway on the gateway and
+        # its reply will arrive over the session subscription. Retrying would
+        # double-run it, so this is a plain AgentError, never a retryable one.
+        raise AgentError(
+            f"Lost the connection to the gateway while {bot_id} was answering.",
+            detail=str(e)[:200])
+    if not isinstance(payload, dict):
+        raise AgentError(f"{bot_id} returned an unreadable response.",
+                         detail=repr(payload)[:200])
+    return _parse_reply(payload, bot_id, "")
 
 
 def cli_available() -> bool:

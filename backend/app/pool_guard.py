@@ -57,6 +57,18 @@ log = logging.getLogger("pool_guard")
 # The remote rig ComfyUI's own GPU-selection threshold
 # ("31.4 GB free >= 10.0 needed"), as reported by the image CLI.
 MIN_MINT_FREE_GB = 10.0
+# Headroom required on the mint GPU once the rig's ComfyUI is ALREADY RUNNING
+# and has already chosen that GPU. MIN_MINT_FREE_GB above is a *selection*
+# threshold — the free memory ComfyUI insists on before it will adopt a card at
+# startup — and applying it to a live backend is a category error: a running
+# ComfyUI holds its checkpoint resident on the card it picked, so the very
+# weights that make the next render fast are counted as "not free" and the
+# refill is blocked by its own warm cache. (Measured 2026-09-02: 16 GB of
+# z-image-turbo weights resident on GPU 3 left 4.2 GB free, the guard demanded
+# 10 GB, and six avatar rounds were refused while the rig was rendering
+# perfectly well.) What a live backend actually needs is working room for
+# latents and the VAE decode, which is a fraction of that.
+MIN_MINT_WORKING_FREE_GB = 2.0
 # Number of consecutive refill failures before we log an ERROR (the alert).
 ALERT_AFTER = 3
 # Backoff: 300s base (the pool loop's normal poll), doubling, capped at 1h.
@@ -112,6 +124,44 @@ def gpu_status() -> dict | None:
         log.debug("pool_guard: no GPU CLI configured (DISPATCH_GPU_CLI) — VRAM guard off")
         return None
     return _run_json([bin_, "status", "--json"])
+
+
+def image_backend_state(status: dict | None = None) -> dict:
+    """What the image host says about its own rendering backend.
+
+    ``{"known", "running", "gpu_selected", "error"}``. ``known`` is False when
+    the image CLI is not configured or did not answer — every caller must then
+    behave exactly as it did before this function existed (fail open).
+
+    This exists because "the rig is short of VRAM" and "the rig's ComfyUI is
+    not running" produce the SAME refusal at the generate call, and only the
+    second one is worth skipping the whole round for. On 2026-09-02 the rig's
+    ComfyUI was down from roughly 00:50 to 15:00 JST; DisPatch spent fourteen
+    hourly cycles discovering that one wasted ``generate_image`` call at a
+    time, and logged an alert that *guessed* between the two causes rather
+    than reading the answer that was sitting in the CLI's own status.
+
+    ``running`` is only False when the host explicitly says so: a status shape
+    that predates the field must not be read as an outage.
+    """
+    if status is None:
+        status = _image_cli_status()
+    if not isinstance(status, dict):
+        return {"known": False, "running": None, "gpu_selected": None,
+                "error": ""}
+    comfy = status.get("comfy")
+    if not isinstance(comfy, dict):
+        return {"known": False, "running": None, "gpu_selected": None,
+                "error": ""}
+    running = comfy.get("running")
+    try:
+        sel = int(comfy.get("gpu_selected"))
+    except (TypeError, ValueError):
+        sel = None
+    return {"known": True,
+            "running": running if isinstance(running, bool) else None,
+            "gpu_selected": sel,
+            "error": str(comfy.get("last_error") or "")[:200]}
 
 
 def _image_cli_status() -> dict | None:
@@ -188,7 +238,7 @@ def _gpu_free_map(status: dict | None) -> dict[int, float]:
     return out
 
 
-def mint_gpu_free_gb() -> tuple[float, str] | None:
+def mint_gpu_free_gb(cli_status: dict | None = None) -> tuple[float, str] | None:
     """Free GB on the GPU the next mint will use, and which GPU that is.
 
     Prefers the image CLI's own ``gpu_selected``: that is the GPU the remote
@@ -200,13 +250,13 @@ def mint_gpu_free_gb() -> tuple[float, str] | None:
     free = _gpu_free_map(gpu_status())
     if not free:
         return None
-    sel: int | None = None
-    cf = _image_cli_status()
-    if cf:
-        try:
-            sel = int(cf.get("comfy", {}).get("gpu_selected"))
-        except (TypeError, ValueError):
-            sel = None
+    # `cli_status` lets a caller that has already asked the image CLI pass the
+    # answer down rather than shelling out a second time: this is a subprocess
+    # on every refill round, and the two probes racing each other could also
+    # disagree about which GPU is selected mid-restart.
+    sel = image_backend_state(
+        cli_status if cli_status is not None else _image_cli_status()
+    )["gpu_selected"]
     if sel is not None and sel in free:
         return free[sel], f"selected:gpu{sel}"
     best = max(free, key=free.get)
@@ -276,9 +326,6 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     runs — it still says "don't mint, the rig is short", which is the part
     that stops the refusal storm — but nothing is ever unloaded.
     """
-    if min_free_gb is None:
-        min_free_gb = float(config.env("MINT_MIN_FREE_GB",
-                                           MIN_MINT_FREE_GB))
     # BEFORE anything else, including the headroom probe: a leased rig is
     # off-limits no matter how much VRAM happens to be free, because the
     # holder booked the cards, not the spare bytes.
@@ -286,23 +333,55 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     if holder:
         return {"ok": False, "headroom_before": None, "headroom_after": None,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
+                "backend": "leased",
                 "reason": f"rig leased by {holder}"}
-    probe = mint_gpu_free_gb()
+
+    # One image-CLI probe for the whole round, read twice: once to decide
+    # whether the rendering backend is up at all, once (inside
+    # mint_gpu_free_gb) to find the GPU it selected.
+    cli_status = _image_cli_status()
+    backend = image_backend_state(cli_status)
+    if backend["known"] and (backend["running"] is False or backend["error"]):
+        # The backend is down or reporting a fault of its own. Every mint this
+        # round would fail identically at the generate call — one wasted rig
+        # call per mood, per bot, per cycle — and the reason would be recorded
+        # as a generic refusal. Name it and skip.
+        why = backend["error"] or "the image backend is not running"
+        return {"ok": False, "headroom_before": None, "headroom_after": None,
+                "unloaded": [], "skipped_pinned": [], "skipped_active": [],
+                "backend": "down",
+                "reason": f"image backend down ({why})"}
+
+    if min_free_gb is None:
+        # A live backend has already made the choice the 10 GB threshold
+        # exists to gate, and is holding its weights on the card it chose;
+        # asking for another 10 GB on top of them blocks the warm, fast case.
+        # Only demand the selection threshold when nothing is running yet.
+        live = backend["known"] and backend["running"] is True \
+            and backend["gpu_selected"] is not None
+        min_free_gb = float(config.env(
+            "MINT_WORKING_MIN_FREE_GB", MIN_MINT_WORKING_FREE_GB) if live
+            else config.env("MINT_MIN_FREE_GB", MIN_MINT_FREE_GB))
+    probe = mint_gpu_free_gb(cli_status)
     if probe is None:
         return {"ok": True, "headroom_before": None, "headroom_after": None,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
-                "reason": "gpu-cli-unavailable"}
+                "backend": "unknown", "reason": "gpu-cli-unavailable"}
     before, which = probe
     if before >= min_free_gb:
         return {"ok": True, "headroom_before": before, "headroom_after": before,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
-                "reason": f"headroom-ok ({before:.1f} GB on {which})"}
+                "backend": "up",
+                "reason": (f"headroom-ok ({before:.1f} GB on {which}, "
+                           f"need {min_free_gb:.1f})")}
 
     if not (dry_run or unload_enabled()):
         return {"ok": False, "headroom_before": before, "headroom_after": before,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
-                "reason": (f"short ({before:.1f} GB on {which}); unloading is "
-                           "off (DISPATCH_POOL_FREE_VRAM=1 to enable)")}
+                "backend": "up",
+                "reason": (f"short ({before:.1f} GB on {which}, need "
+                           f"{min_free_gb:.1f}); unloading is off "
+                           "(DISPATCH_POOL_FREE_VRAM=1 to enable)")}
 
     status = gpu_status()
     unloaded: list[str] = []
@@ -338,12 +417,40 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
         reason = f"DRY-RUN would unload {len(unloaded)}; " + reason
     return {"ok": ok, "headroom_before": before, "headroom_after": after,
             "unloaded": unloaded, "skipped_pinned": skipped_pinned,
-            "skipped_active": skipped_active, "reason": reason}
+            "skipped_active": skipped_active, "backend": "up",
+            "reason": reason}
 
 
 # --------------------------------------------------------------------------- #
 # Refusal tally + backoff (mirrors note_fire_failure/fire_failure_stats)
 # --------------------------------------------------------------------------- #
+
+
+#: Kinds, so a reader of /api/health or the journal alert is told WHICH thing
+#: went wrong rather than being handed a count and a guess. `backend-down` is
+#: the one added on 2026-09-02: it used to arrive as `refused`, one wasted
+#: generate call at a time, indistinguishable from a VRAM refusal.
+KIND_BACKEND_DOWN = "backend-down"
+
+
+def classify_cli_failure(message: str, code: str = "") -> str:
+    """The failure kind behind an image-CLI refusal.
+
+    The rig's structured ``error_code`` decides when it gave one. The prose
+    fallback matches the ONE shape that means "the image host is up but its
+    renderer is not" — its own connect error to its backend — because that is
+    the refusal that repeats every cycle for as long as the outage lasts and
+    is worth naming separately from a busy GPU.
+    """
+    code = str(code or "").strip().lower()
+    if code == "backend_unavailable":
+        return KIND_BACKEND_DOWN
+    if code:
+        return "refused"
+    text = str(message or "").lower()
+    if "connecterror" in text or "all connection attempts failed" in text:
+        return KIND_BACKEND_DOWN
+    return "refused"
 
 
 def note_refill_failure(kind: str, reason: str, *, actor: str = "") -> None:
@@ -363,10 +470,21 @@ def consecutive_failures() -> int:
 
 
 def refill_failure_stats(window_s: float = 24 * 3600.0) -> dict:
+    """Refusal telemetry. ``by_kind`` is the part an operator can act on.
+
+    A bare 24 h count says "something is wrong with images" and nothing else —
+    which is how sixty identical rig-outage refusals sat behind one number for
+    a day. The breakdown separates "the renderer is down" from "the GPU is
+    busy" from "the host did not answer" without putting a prompt, a bot name
+    or a rig log line on a route a locked device can reach.
+    """
     cutoff = time.time() - window_s
     recent = [f for f in _REFILL_FAILURES if f["at"] >= cutoff]
+    by_kind: dict[str, int] = {}
+    for f in recent:
+        by_kind[f["kind"]] = by_kind.get(f["kind"], 0) + 1
     return {"failures_24h": len(recent), "consecutive": _consecutive,
-            "recent": recent[-10:]}
+            "by_kind": by_kind, "recent": recent[-10:]}
 
 
 def backoff_s(consecutive: int) -> float:
