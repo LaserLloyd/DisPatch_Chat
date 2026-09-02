@@ -75,6 +75,8 @@ class ConnectionManager:
         ``_ACK_SEEN``, so the client's reconnect-and-resend was answered with a
         bare re-ack and the reply was lost for good. Bounding it here means a
         stalled client is dropped instead of taking the turn down with it.
+        (The `_ACK_SEEN` entry now also records whether the turn was actually
+        scheduled, so a resend finishes the job rather than confirming it.)
         """
         meta = self._conns.get(ws)
         if meta is None:

@@ -229,9 +229,18 @@ class _Sock:
         if up:
             self.connected.set()
         self.calls = 0
+        self.subscribed: list[str] = []
+        self.run_ids: list[str] = []
+
+    async def subscribe_session(self, key):
+        self.subscribed.append(key)
+
+    def track_session(self, key):
+        self.subscribed.append(key)
 
     async def call_agent(self, params, *, timeout):
         self.calls += 1
+        self.run_ids.append(params.get("idempotencyKey"))
         return _final_ok("over the socket")
 
 
@@ -247,11 +256,21 @@ async def test_the_transport_is_chosen_per_attempt_not_once_at_boot(monkeypatch)
                                                  turn_transport="auto"))
     sock = _Sock(up=True)
     monkeypatch.setattr(main, "_gateway_client", sock, raising=False)
+    main._inflight_runs.clear()
     before = dict(main._turn_transport_counts)
     reply = await main._dispatch_turn("beta", "agent:beta:t1", "hi")
     assert [p.text for p in reply.payloads] == ["over the socket"]
     assert main._turn_transport_counts["socket"] == before["socket"] + 1, (
         "/api/health must be able to say which way turns actually went")
+    assert sock.subscribed == ["agent:beta:t1"], (
+        "the session must be subscribed or its live deltas never arrive")
+    assert sock.run_ids and sock.run_ids[0], (
+        "the run must be NAMED by us: the gateway adopts the idempotency key "
+        "as the runId, and a run we cannot name we cannot stream, abort, or "
+        "ask agent.wait about after a disconnect")
+    assert not main._inflight_runs, (
+        "a turn that answered is finished; leaving it in the registry would "
+        "have every reconnect chase a run that ended long ago")
 
     spawned = []
 

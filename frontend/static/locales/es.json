@@ -116,6 +116,8 @@
     "placeholder_no_thread": "Elige un chat para escribir",
     "aria": "Mensaje",
     "send": "Enviar",
+    "stop": "Detener respuesta",
+    "stopping": "Deteniendo…",
     "waiting": "Esperando respuesta…",
     "offline": "Sin conexión — reconectando…",
     "chars": {
@@ -156,6 +158,16 @@
     "hint_hide": "ocultar proceso ▾",
     "title": "Pulsa para ver qué está haciendo el modelo",
     "idle": "Esperando actividad…"
+  },
+  "turn": {
+    "phase_preparing_context": "Preparando el contexto…",
+    "phase_preparing_workspace": "Preparando el espacio de trabajo…",
+    "phase_starting_model": "Cargando el modelo…",
+    "phase_waiting_model": "Esperando al modelo…",
+    "phase_streaming": "Escribiendo…",
+    "phase_finishing": "Terminando…",
+    "phase_tool": "Usando {name}…",
+    "phase_generic": "Trabajando…"
   },
   "settings": {
     "title": "Ajustes",
@@ -484,6 +496,7 @@
     "action_theme": "Cambiar el tema",
     "action_search": "Buscar mensajes",
     "action_recovery": "Recuperación y exportación",
+    "action_stop": "Detener respuesta",
     "action_lock": "Bloquear ahora",
     "action_settings": "Ajustes",
     "action_health": "Panel de salud",

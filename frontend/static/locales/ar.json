@@ -119,6 +119,8 @@
     "placeholder_no_thread": "اختر محادثة لتبدأ الكتابة",
     "aria": "رسالة",
     "send": "إرسال",
+    "stop": "إيقاف الرد",
+    "stopping": "جارٍ الإيقاف…",
     "waiting": "في انتظار الرد…",
     "offline": "غير متصل — جارٍ إعادة الاتصال…",
     "chars": {
@@ -162,6 +164,16 @@
     "hint_hide": "إخفاء العمل ▾",
     "title": "انقر لمعرفة ما يفعله النموذج",
     "idle": "في انتظار النشاط…"
+  },
+  "turn": {
+    "phase_preparing_context": "جارٍ تحضير السياق…",
+    "phase_preparing_workspace": "جارٍ تحضير مساحة العمل…",
+    "phase_starting_model": "جارٍ تحميل النموذج…",
+    "phase_waiting_model": "في انتظار النموذج…",
+    "phase_streaming": "جارٍ الكتابة…",
+    "phase_finishing": "جارٍ الإنهاء…",
+    "phase_tool": "يستخدم {name}…",
+    "phase_generic": "جارٍ العمل…"
   },
   "settings": {
     "title": "الإعدادات",
@@ -505,6 +517,7 @@
     "action_theme": "تبديل المظهر",
     "action_search": "البحث في الرسائل",
     "action_recovery": "الاسترداد والتصدير",
+    "action_stop": "إيقاف الرد",
     "action_lock": "قفل الآن",
     "action_settings": "الإعدادات",
     "action_health": "لوحة الصحة",

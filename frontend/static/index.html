@@ -110,7 +110,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=51" />
+  <link rel="stylesheet" href="/static/app.css?v=52" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
@@ -267,6 +267,12 @@
                vice-versa on an English UI). Re-evaluated per keystroke by the
                browser, from the first strong character. -->
           <textarea id="input" rows="1" dir="auto" placeholder="Type a message…" aria-label="Message" data-i18n-attr="placeholder=composer.placeholder;aria-label=composer.aria" autocomplete="off"></textarea>
+          <!-- Stop sits BESIDE Send, not in place of it: sends are queued
+               server-side while a reply runs, so the composer stays live and
+               swapping the button would take that away. Hidden by default and
+               shown only for an unlocked session with a turn in flight —
+               Safe Mode never sees it (the server 403s the abort anyway). -->
+          <button class="stop-btn hidden" id="stop" aria-label="Stop reply" title="Stop reply" data-i18n-attr="aria-label=composer.stop;title=composer.stop">⏹</button>
           <button class="send-btn" id="send" aria-label="Send" data-i18n-attr="aria-label=composer.send" disabled>↑</button>
         </div>
         <div class="composer-foot">
@@ -906,6 +912,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=66"></script>
+  <script type="module" src="/static/js/main.js?v=67"></script>
 </body>
 </html>

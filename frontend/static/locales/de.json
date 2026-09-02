@@ -115,6 +115,8 @@
     "placeholder_no_thread": "Wähle einen Chat, um zu schreiben",
     "aria": "Nachricht",
     "send": "Senden",
+    "stop": "Antwort stoppen",
+    "stopping": "Wird gestoppt…",
     "waiting": "Warte auf Antwort…",
     "offline": "Offline — verbinde neu…",
     "chars": {
@@ -154,6 +156,16 @@
     "hint_hide": "Arbeit verbergen ▾",
     "title": "Klicken, um zu sehen, was das Modell gerade tut",
     "idle": "Warte auf Aktivität…"
+  },
+  "turn": {
+    "phase_preparing_context": "Kontext wird vorbereitet…",
+    "phase_preparing_workspace": "Arbeitsbereich wird vorbereitet…",
+    "phase_starting_model": "Modell wird geladen…",
+    "phase_waiting_model": "Warten auf das Modell…",
+    "phase_streaming": "Schreibt…",
+    "phase_finishing": "Wird abgeschlossen…",
+    "phase_tool": "{name} wird verwendet…",
+    "phase_generic": "Arbeitet…"
   },
   "settings": {
     "title": "Einstellungen",
@@ -477,6 +489,7 @@
     "action_theme": "Design wechseln",
     "action_search": "Nachrichten suchen",
     "action_recovery": "Wiederherstellung & Export",
+    "action_stop": "Antwort stoppen",
     "action_lock": "Jetzt sperren",
     "action_settings": "Einstellungen",
     "action_health": "Gesundheits-Dashboard",

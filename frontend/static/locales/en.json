@@ -115,6 +115,8 @@
     "placeholder_no_thread": "Pick a chat to start typing",
     "aria": "Message",
     "send": "Send",
+    "stop": "Stop reply",
+    "stopping": "Stopping…",
     "waiting": "Waiting for response…",
     "offline": "Offline — reconnecting…",
     "chars": {
@@ -154,6 +156,16 @@
     "hint_hide": "hide work ▾",
     "title": "Click to see what the model is doing",
     "idle": "Waiting for activity…"
+  },
+  "turn": {
+    "phase_preparing_context": "Preparing context…",
+    "phase_preparing_workspace": "Preparing workspace…",
+    "phase_starting_model": "Loading model…",
+    "phase_waiting_model": "Waiting for the model…",
+    "phase_streaming": "Writing…",
+    "phase_finishing": "Finishing up…",
+    "phase_tool": "Using {name}…",
+    "phase_generic": "Working…"
   },
   "settings": {
     "title": "Settings",
@@ -477,6 +489,7 @@
     "action_theme": "Toggle theme",
     "action_search": "Search messages",
     "action_recovery": "Recovery & Export",
+    "action_stop": "Stop reply",
     "action_lock": "Lock now",
     "action_settings": "Settings",
     "action_health": "Health dashboard",

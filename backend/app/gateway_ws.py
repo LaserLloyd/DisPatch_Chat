@@ -83,6 +83,18 @@ RECONNECT_MAX_S = 60.0
 # gateway at 1 Hz — connect, handshake, subscribe, resync, drop, forever — with
 # the backoff that exists to prevent exactly that never getting off the floor.
 HEALTHY_CONNECTION_S = 30.0
+# Websocket-level keepalive. Without these `websockets` never pings, so a
+# connection killed by a NAT/firewall idle timeout stays "open" in this process
+# for ever: connected.is_set() is True, nothing arrives, and every turn is
+# dispatched into a socket that no longer exists.
+PING_INTERVAL_S = 20.0
+PING_TIMEOUT_S = 20.0
+# The gateway advertises `policy.tickIntervalMs` and its own reference client
+# closes with code 4000 when inbound silence exceeds twice that. We do the same:
+# a half-open socket that passes the TCP keepalive but has stopped delivering
+# events is indistinguishable from a quiet box otherwise.
+DEFAULT_TICK_INTERVAL_MS = 30_000
+TICK_CLOSE_CODE = 4000
 
 
 class GatewayDisconnected(ConnectionError):
@@ -205,6 +217,17 @@ class GatewayClient:
         # than silently dropped.
         self._events: asyncio.Queue = asyncio.Queue(maxsize=512)
         self.dropped_local = 0
+        # Session keys we want live `chat`/`session.tool` events for. The
+        # global `sessions.subscribe` covers transcript messages; per-session
+        # subscriptions are what the gateway checks for the session-scoped
+        # event families, and they die with the connection like every other
+        # subscription — so they are re-established on every connect from the
+        # set, never from a caller that only ran once at startup.
+        self._session_keys: set[str] = set()
+        # policy.tickIntervalMs from hello-ok, and when we last heard anything.
+        self._tick_ms = DEFAULT_TICK_INTERVAL_MS
+        self._last_inbound = 0.0
+        self.tick_closes = 0
 
     # -- lifecycle --------------------------------------------------------- #
 
@@ -282,11 +305,17 @@ class GatewayClient:
         async with websockets.connect(
             self._url, open_timeout=CONNECT_TIMEOUT_S, max_size=MAX_FRAME_BYTES,
             origin=None,
+            ping_interval=PING_INTERVAL_S, ping_timeout=PING_TIMEOUT_S,
         ) as ws:
             self._ws = ws
+            self._mark_inbound()
             hello = await self._handshake(ws, token)
             self.hello = hello
             self._assert_capabilities(hello)
+            # Honour the server's advertised tick, not our pre-handshake guess.
+            tick = ((hello.get("policy") or {}).get("tickIntervalMs")
+                    if isinstance(hello.get("policy"), dict) else None)
+            self._tick_ms = tick if isinstance(tick, int) and tick > 0 else DEFAULT_TICK_INTERVAL_MS
             self.connected.set()
             log.info("gateway connected: protocol=%s scopes=%s",
                      hello.get("protocol"), (hello.get("auth") or {}).get("scopes"))
@@ -299,6 +328,7 @@ class GatewayClient:
             # 16:36:26, failure 16:36:56, reconnect 16:36:57.) This is the same
             # trap as awaiting a handler inside the reader, one level up.
             reader = asyncio.create_task(self._reader(ws))
+            tick = asyncio.create_task(self._tick_watchdog(ws))
             try:
                 # RE-SUBSCRIBE ON EVERY CONNECT, from inside the client: a
                 # caller that subscribes once after start() cannot survive a
@@ -309,9 +339,10 @@ class GatewayClient:
                     await self._on_connect()
                 await reader
             finally:
-                reader.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await reader
+                for t in (reader, tick):
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await t
 
     async def _handshake(self, ws: Any, token: str) -> dict:
         """connect must be the FIRST request frame, or the socket is closed.
@@ -331,6 +362,11 @@ class GatewayClient:
                 # to nothing, receiving nothing.
                 "scopes": ["operator.read", "operator.write"],
                 "auth": {"token": token},
+                # Advertised capabilities, not authorization: `tool-events`
+                # opts this connection in to structured tool lifecycle events,
+                # which is what turns a silent minute of tool work into a
+                # "phase" the family can see.
+                "caps": ["tool-events"],
                 # This exact identity + mode over clean loopback is what skips
                 # device pairing. Any other pairing lands in an approval queue
                 # and the connection is useless until a human intervenes.
@@ -343,6 +379,7 @@ class GatewayClient:
         deadline = asyncio.get_event_loop().time() + CONNECT_TIMEOUT_S
         while asyncio.get_event_loop().time() < deadline:
             raw = await asyncio.wait_for(ws.recv(), timeout=CONNECT_TIMEOUT_S)
+            self._mark_inbound()
             frame = json.loads(raw)
             if not isinstance(frame, dict):
                 continue
@@ -501,8 +538,32 @@ class GatewayClient:
         finally:
             self._agent_calls.pop(req_id, None)
 
+    def _mark_inbound(self) -> None:
+        self._last_inbound = asyncio.get_event_loop().time()
+
+    async def _tick_watchdog(self, ws: Any) -> None:
+        """Close a socket that has gone quiet past twice the server's tick.
+
+        A TCP connection can survive its peer perfectly while delivering
+        nothing — the exact shape that makes a dead transport look healthy.
+        The gateway's own reference client uses this rule and close code, so
+        matching it keeps our reconnect behaviour the one the server expects.
+        """
+        while True:
+            limit = (self._tick_ms * 2) / 1000.0
+            quiet = asyncio.get_event_loop().time() - self._last_inbound
+            if quiet >= limit:
+                self.tick_closes += 1
+                log.warning("gateway silent for %.0fs (tick %dms); closing %d",
+                            quiet, self._tick_ms, TICK_CLOSE_CODE)
+                with contextlib.suppress(Exception):
+                    await ws.close(code=TICK_CLOSE_CODE)
+                return
+            await asyncio.sleep(max(1.0, limit - quiet))
+
     async def _reader(self, ws: Any) -> None:
         async for raw in ws:
+            self._mark_inbound()
             try:
                 frame = json.loads(raw)
             except json.JSONDecodeError:
@@ -629,6 +690,30 @@ class GatewayClient:
         msgs = res.get("messages")
         return msgs if isinstance(msgs, list) else []
 
+    async def history_from_cursor(self, session_key: str, cursor: str) -> dict:
+        """Forward catch-up from a delta cursor.
+
+        Cheaper and more exact than the backward page walk: the gateway
+        replays only what happened after the cursor. It answers
+        ``{"kind": "delta", ...}`` with the messages, or ``{"kind": "reset"}``
+        when the cursor is too old to serve — which is not an error, it is the
+        instruction to fall back to a tail read.
+        """
+        res = await self.call("chat.history",
+                              {"sessionKey": session_key, "cursor": cursor})
+        return res if isinstance(res, dict) else {}
+
+    async def history_tail(self, session_key: str, *, limit: int = 50) -> dict:
+        """A tail read that KEEPS the envelope (cursor, in-flight run).
+
+        `history()` throws everything but `messages` away, and the two fields
+        this transport needs to catch up after a reconnect — `deltaCursor` and
+        `inFlightRun` — live in that envelope.
+        """
+        res = await self.call("chat.history", {
+            "sessionKey": session_key, "limit": limit, "offset": 0})
+        return res if isinstance(res, dict) else {}
+
     async def subscribe_sessions(self) -> None:
         """One subscription; every session's messages.
 
@@ -637,3 +722,69 @@ class GatewayClient:
         """
         await self.call("sessions.subscribe", None)
         log.info("subscribed to session events")
+
+    def track_session(self, session_key: str) -> None:
+        """Remember a session so every future connect re-subscribes to it."""
+        self._session_keys.add(session_key)
+
+    @property
+    def tracked_sessions(self) -> set[str]:
+        return set(self._session_keys)
+
+    async def subscribe_session(self, session_key: str) -> None:
+        """Subscribe to ONE session's live event families.
+
+        The global `sessions.subscribe` is what carries `session.message`.
+        The session-scoped families — `chat` deltas and `session.tool` — are
+        checked against the per-session subscriber set for clients the gateway
+        considers session-scoped, so a client that only ever subscribed
+        globally can be connected, healthy, and receive no deltas at all.
+        Subscribing per session costs one call and removes that whole class of
+        silence.
+        """
+        self._session_keys.add(session_key)
+        await self.call("sessions.messages.subscribe", {"key": session_key})
+
+    async def resubscribe_sessions(self) -> None:
+        """Re-establish every per-session subscription. Called on each connect.
+
+        Failures are per session on purpose: one session the gateway has since
+        forgotten must not cost the subscriptions of every other.
+        """
+        for key in sorted(self._session_keys):
+            try:
+                await self.call("sessions.messages.subscribe", {"key": key})
+            except Exception:
+                log.warning("could not re-subscribe to %s", key, exc_info=True)
+
+    async def agent_wait(self, run_id: str, *, timeout_ms: int) -> dict:
+        """Ask the gateway how a run we lost the socket on ended.
+
+        A run accepted before a disconnect keeps going; its reply was emitted
+        to a subscription that no longer existed. This is the only way to ask
+        about it by id — and whatever it answers, the caller still backfills,
+        because "finished" does not mean "delivered".
+        """
+        res = await self.call("agent.wait",
+                              {"runId": run_id, "timeoutMs": timeout_ms})
+        return res if isinstance(res, dict) else {}
+
+    async def abort_run(self, session_key: str, run_id: str | None = None) -> dict:
+        """Stop a run in flight.
+
+        `chat.abort` is the session-scoped verb; `sessions.abort` is the
+        fallback for a run the chat plane will not resolve. Passing `runId`
+        keeps the cancellation scoped to that run rather than to everything the
+        session has queued.
+        """
+        params: dict[str, Any] = {"sessionKey": session_key}
+        if run_id:
+            params["runId"] = run_id
+        try:
+            res = await self.call("chat.abort", params)
+        except Exception:
+            alt: dict[str, Any] = {"key": session_key}
+            if run_id:
+                alt["runId"] = run_id
+            res = await self.call("sessions.abort", alt)
+        return res if isinstance(res, dict) else {}

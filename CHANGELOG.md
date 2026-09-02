@@ -9,6 +9,23 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live reply streaming.** A reply paints as the gateway produces it: the
+  OpenClaw `chat` delta events (per-session `sessions.messages.subscribe`)
+  drive `stream_start` / `stream_chunk` / `stream_done` frames, coalesced to
+  ~100 ms, and the streaming row swaps to the persisted message on
+  `stream_done`. Text appears as soon as the model emits it instead of after
+  the run ends. Providers that hand OpenClaw a single block (DeepSeek's
+  reasoning models do) still land in one paint — the gateway, not DisPatch,
+  decides the granularity.
+- **Turn phases.** A status line under the composer names what the run is
+  doing (preparing context, loading model, writing, using *tool*, finishing)
+  from `turn_status` frames (`turn.phase_*` locale keys, all eight languages).
+- **Stop.** A ⏹ button beside Send aborts the in-flight run
+  (`{type:"abort"}` over the socket, `POST /api/threads/{id}/abort`);
+  unlocked sessions only — Safe Mode gets 403.
+- **Optimistic send.** The sent bubble paints immediately and is reconciled
+  with the server row when it lands (`provisional_id`).
+
 - **Health → "Live transport" card.** The host dashboard shows the gateway
   socket state, replies delivered live vs backfilled, unrepaired truncation,
   `messageSeq` gaps, turns sent over the socket vs the CLI, image-rig
@@ -31,6 +48,13 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `last_error`).
 
 ### Changed
+
+- **No dropped replies.** Every run the gateway accepts is registered in an
+  in-flight table and settled with `agent.wait`, so a reply whose live delta
+  stream was cut (socket blip, restart mid-run) still lands as a message —
+  recovered on startup for runs that were in flight when the server went
+  down. `/api/health` carries `inflight_runs`, `dropped_local`, `tick_closes`
+  and `transcript_backstop`.
 
 - **Turn dispatch over the already-open gateway socket.** When the native
   gateway transport (`DISPATCH_GATEWAY_WS=1`) is connected, a user turn is

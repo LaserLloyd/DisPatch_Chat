@@ -558,6 +558,7 @@ async def send_via_gateway(
     session_key: str,
     message: str,
     timeout: int | None = None,
+    run_id: str | None = None,
 ) -> AgentReply:
     """Dispatch a turn over the gateway socket DisPatch already holds open.
 
@@ -580,8 +581,11 @@ async def send_via_gateway(
         "deliver": False,
         "timeout": timeout,
         # A stable per-attempt key: the gateway dedups on it, so a resend can
-        # never start a second run of the same turn.
-        "idempotencyKey": uuid.uuid4().hex,
+        # never start a second run of the same turn. It is ALSO the run id the
+        # gateway then uses on every `chat` delta and on `agent.wait`, which is
+        # why the caller may supply it — a run you cannot name is a run you
+        # cannot follow, stream, or ask about after a disconnect.
+        "idempotencyKey": run_id or uuid.uuid4().hex,
         "cleanupBundleMcpOnRunEnd": True,
     }
     try:

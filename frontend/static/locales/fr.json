@@ -116,6 +116,8 @@
     "placeholder_no_thread": "Choisis une conversation pour écrire",
     "aria": "Message",
     "send": "Envoyer",
+    "stop": "Arrêter la réponse",
+    "stopping": "Arrêt en cours…",
     "waiting": "En attente de réponse…",
     "offline": "Hors ligne — reconnexion…",
     "chars": {
@@ -156,6 +158,16 @@
     "hint_hide": "masquer le travail ▾",
     "title": "Clique pour voir ce que fait le modèle",
     "idle": "En attente d’activité…"
+  },
+  "turn": {
+    "phase_preparing_context": "Préparation du contexte…",
+    "phase_preparing_workspace": "Préparation de l’espace de travail…",
+    "phase_starting_model": "Chargement du modèle…",
+    "phase_waiting_model": "En attente du modèle…",
+    "phase_streaming": "Rédaction…",
+    "phase_finishing": "Finalisation…",
+    "phase_tool": "Utilise {name}…",
+    "phase_generic": "Travail en cours…"
   },
   "settings": {
     "title": "Réglages",
@@ -484,6 +496,7 @@
     "action_theme": "Changer de thème",
     "action_search": "Rechercher dans les messages",
     "action_recovery": "Récupération et export",
+    "action_stop": "Arrêter la réponse",
     "action_lock": "Verrouiller",
     "action_settings": "Réglages",
     "action_health": "Tableau de bord santé",

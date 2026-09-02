@@ -1217,10 +1217,16 @@ def _frame_bot(frame: dict) -> str | None:
 # means the next new frame is silent for Safe Mode until someone decides
 # otherwise, which is the correct direction for a fail-closed tier.
 #
+# stream_start / stream_chunk / turn_status ARE here now, and the reason they
+# were not is the reason they are safe to be: a media directive straddling two
+# chunks made per-chunk stripping leak. The live transport never strips a
+# chunk — it sanitizes the gateway's CUMULATIVE text and sends the difference,
+# so a directive is whole before it is ever looked at, and a half-written one
+# is held back until it completes (see _sanitize_delta). They are bot-scoped
+# exactly like `message`: a locked device sees a safe bot's reply arrive as it
+# is typed, and learns nothing at all about any other bot.
+#
 # Deliberately NOT here, and why:
-#   stream_start / stream_chunk  a media directive can straddle two chunks, so
-#                                per-chunk stripping leaks; the final
-#                                stream_done is redacted and does reach them
 #   progress                     raw reply text, tool args, file paths
 #   terminal_state               the coding terminal is full-session only —
 #                                Safe Mode must not learn a session exists
@@ -1240,6 +1246,7 @@ def _frame_bot(frame: dict) -> str | None:
 _DECOY_FRAME_ALLOW = frozenset({
     "hello", "bots", "locked", "ack", "pong", "error",
     "message", "message_update", "stream_done", "message_deleted", "thinking",
+    "stream_start", "stream_chunk", "turn_status",
     "thread_update", "thread_created", "thread_deleted", "checklist_update",
     "threads_list", "threads", "messages", "reaction",
 })
@@ -1284,7 +1291,7 @@ def redact_for_decoy(frame: dict):
     # errors with no bot context must still reach the requester.
     if t in ("message", "message_update", "stream_done", "thread_update",
              "thread_created", "thread_deleted", "thinking", "message_deleted",
-             "checklist_update"):
+             "checklist_update", "stream_start", "stream_chunk", "turn_status"):
         bot = _frame_bot(frame)
         if bot not in safe:
             return None
@@ -2042,6 +2049,84 @@ async def _prepare_persist(
                      pic_specs)
 
 
+# --------------------------------------------------------------------------- #
+# Provisional bubbles (live gateway deltas)
+#
+# While a turn is running the client shows the model's words under a
+# PROVISIONAL id — `run:<runId>` — because no database row exists yet. When the
+# row lands, the frame that announces it must tell the client which
+# provisional bubble it replaces, or the client is left with two: the one it
+# streamed and the one that arrived.
+#
+# The registry is keyed by thread rather than by run because the persist
+# chokepoints know a thread, not a run. One open bubble per thread is also the
+# truth of the product: a thread's turns are serialised by its own lock.
+# --------------------------------------------------------------------------- #
+
+_provisional_runs: dict[str, str] = {}
+
+
+def _open_provisional(thread_id: str, provisional_id: str) -> None:
+    _provisional_runs[thread_id] = provisional_id
+
+
+def _close_provisional(thread_id: str, provisional_id: str) -> bool:
+    """Claim a thread's open bubble. False when it was already claimed.
+
+    Both the persist chokepoint and the router's settle timer race to retire
+    the same bubble; whichever gets here first owns it, and the loser must send
+    nothing — a second `stream_done` for a bubble that already has its message
+    would blank it out.
+    """
+    if _provisional_runs.get(thread_id) != provisional_id:
+        return False
+    _provisional_runs.pop(thread_id, None)
+    return True
+
+
+def _take_provisional(thread_id: str) -> str | None:
+    return _provisional_runs.pop(thread_id, None)
+
+
+def _provisional_open(thread_id: str, provisional_id: str) -> bool:
+    """True while this bubble is still the thread's live one (unclaimed)."""
+    return _provisional_runs.get(thread_id) == provisional_id
+
+
+# The tail of a cumulative delta that may still be growing into a directive or
+# a marker. `[[med` is not `[[media:…]]` yet, so no strip pattern matches it —
+# and sending it would put the beginning of an absolute path on screen a
+# fraction of a second before the strip catches up.
+_DELTA_PARTIAL_RE = re.compile(
+    r"(\[\[[^\]]*|:(?:r|re|rea|reac|react|react:[a-z0-9_-]*))$", re.I)
+
+
+def _sanitize_delta(text: str) -> str:
+    """What a live delta may show, by exactly the persist chokepoint's rules.
+
+    Delta text is raw model output. It still carries `[[media:/abs/path]]`,
+    `[[doc:…]]`, `[[pic:…]]`, `:react:…:` and the gateway's internal-context
+    scaffolding — every one of which the persisted copy has stripped since
+    long before streaming existed. A locked family device must never see an
+    absolute path or an internal marker in a provisional bubble that the
+    finished message would not have shown it.
+
+    Applied to the CUMULATIVE text, never to a chunk: a directive split across
+    two deltas is whole here, and a directive that is only half-written yet is
+    held back until it completes.
+    """
+    if not text:
+        return ""
+    clean = openclaw_text.sanitize_assistant_visible_text(
+        _strip_reply_directive_anywhere(
+            _strip_reply_directive(_strip_no_reply(text))))
+    clean = reactions.strip_markers(clean)
+    clean = image_jobs.strip_pic_markers(clean)
+    clean = _MEDIA_DIRECTIVE_RE.sub("", clean)
+    clean = _DOC_REF_RE.sub("", clean)
+    return _DELTA_PARTIAL_RE.sub("", clean)
+
+
 async def _persist_and_broadcast_message(
     thread_id: str, role: str, content: str,
     media_url: str | None = None, metadata: dict | None = None,
@@ -2066,16 +2151,37 @@ async def _persist_and_broadcast_message(
                                metadata=metadata, source_id=source_id,
                                created_at=created_at)
     bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope the frame
-    await manager.broadcast(
-        {"type": "message", "thread_id": thread_id, "bot_id": bot_id,
-         "message": msg.model_dump()}
-    )
+    await manager.broadcast(_landing_frame(thread_id, bot_id, msg))
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
     if prep.pic_specs:
         await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
     return msg
+
+
+def _landing_frame(thread_id: str, bot_id: str | None,
+                   msg: MessageOut) -> dict:
+    """The frame that announces a newly persisted row.
+
+    Normally `message`. When this thread has a provisional bubble open — the
+    client has been watching these very words stream in under `run:<id>` — it
+    is a `stream_done` naming that bubble instead, so the row REPLACES what is
+    on screen rather than landing underneath it as a second copy.
+    """
+    # A sub row (tool chatter, a reaction-fire notice) that lands while the
+    # reply is still streaming is NOT the reply — claiming the bubble for it
+    # would swap the half-painted answer for a collapsed "working" line and
+    # then drop the real answer underneath as a second row.
+    meta = msg.metadata if isinstance(getattr(msg, "metadata", None), dict) else {}
+    prov = None if (meta.get("sub") or msg.role != "assistant") \
+        else _take_provisional(thread_id)
+    if prov is None:
+        return {"type": "message", "thread_id": thread_id, "bot_id": bot_id,
+                "message": msg.model_dump()}
+    return {"type": "stream_done", "thread_id": thread_id, "bot_id": bot_id,
+            "message_id": msg.id, "message": msg.model_dump(),
+            "provisional_id": prov}
 
 
 def _unpersisted_message(thread_id: str, role: str) -> MessageOut:
@@ -2128,11 +2234,14 @@ async def _persist_and_stream_message(
     bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope frames
 
     is_sub = bool(metadata and metadata.get("sub"))
-    if role != "assistant" or is_sub or len(content) < _STREAM_MIN_CHARS:
-        await manager.broadcast(
-            {"type": "message", "thread_id": thread_id, "bot_id": bot_id,
-             "message": msg.model_dump()}
-        )
+    # THE REAL STREAM WINS. When the gateway's live deltas already painted this
+    # reply word by word, replaying it a second time from the finished text
+    # would rewind the bubble and type it out again. `_landing_frame` closes
+    # the provisional bubble with the persisted row and the simulation is
+    # skipped — one animation per reply, whichever road it came down.
+    if (role != "assistant" or is_sub or len(content) < _STREAM_MIN_CHARS
+            or thread_id in _provisional_runs):
+        await manager.broadcast(_landing_frame(thread_id, bot_id, msg))
         if fired:
             await _fire_marker_reactions(fired, thread_id, bot_id,
                                          autopilot=prep.autopilot)
@@ -2144,11 +2253,12 @@ async def _persist_and_stream_message(
     chunk_chars = max(_STREAM_CHUNK_CHARS, len(content) // _STREAM_MAX_CHUNKS)
 
     await manager.broadcast({
-        "type": "stream_start", "thread_id": thread_id, "message_id": msg.id,
+        "type": "stream_start", "thread_id": thread_id, "bot_id": bot_id,
+        "message_id": msg.id,
     })
     for i in range(0, len(content), chunk_chars):
         await manager.broadcast({
-            "type": "stream_chunk", "thread_id": thread_id,
+            "type": "stream_chunk", "thread_id": thread_id, "bot_id": bot_id,
             "message_id": msg.id, "text": content[i: i + chunk_chars],
         })
         await asyncio.sleep(_STREAM_DELAY_S)
@@ -3229,6 +3339,84 @@ async def _reaction_pool_loop() -> None:
 # --------------------------------------------------------------------------- #
 
 
+# --------------------------------------------------------------------------- #
+# The transcript backstops, and when they are simply not there
+#
+# The watcher, the follower, the reconciler, the gap sweep and the mirror
+# poller all read `~/.openclaw/agents/<bot>/sessions/*.jsonl`, indexed by
+# `sessions.json`. OpenClaw 8.1 moved sessions into
+# `agent/openclaw-agent.sqlite`; on such a host neither the index nor the
+# transcripts exist, `resolve_session_file` always answers None, and every one
+# of those paths does nothing — silently, and at a cost: `_follow_session`
+# alone burns thirty two-second sleeps per turn polling for a file that will
+# never appear.
+#
+# The code is NOT removed. A host that still has the files is still served by
+# it, and deleting a whole redundant delivery path on the strength of one box's
+# layout is how a "cleanup" becomes an outage. Instead it is PROBED once, said
+# out loud once, reported in /api/health, and skipped while the socket — which
+# on such a host is the only transport there is — is the one carrying replies.
+# --------------------------------------------------------------------------- #
+
+_transcript_backstop: dict[str, Any] = {"probed": False, "available": True}
+
+
+def _probe_transcript_files() -> bool:
+    """Does this host keep live session transcripts on disk at all?
+
+    Deliberately about the STORE, not about one session: a brand-new session
+    has no file yet on a host where the store exists, so probing a single
+    lookup would call a healthy backstop dead.
+    """
+    try:
+        for agent_dir in openclaw.OPENCLAW_AGENTS_DIR.iterdir():
+            sessions = agent_dir / "sessions"
+            if (sessions / "sessions.json").is_file():
+                return True
+            if any(sessions.glob("*.jsonl")):
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def _transcript_files_available() -> bool:
+    if not _transcript_backstop["probed"]:
+        _transcript_backstop["available"] = _probe_transcript_files()
+        _transcript_backstop["probed"] = True
+        if not _transcript_backstop["available"]:
+            log.warning(
+                "no OpenClaw session transcripts under %s — the file-based "
+                "watcher/follower/reconciler/sweep backstops cannot run on "
+                "this host (sessions moved into the agent sqlite in 8.1). "
+                "The gateway socket is the delivery path; /api/health reports "
+                "transcript_backstop=unavailable.",
+                openclaw.OPENCLAW_AGENTS_DIR)
+    return bool(_transcript_backstop["available"])
+
+
+def _transcript_backstop_state() -> str:
+    if not _transcript_backstop["probed"]:
+        return "unprobed"
+    return "available" if _transcript_backstop["available"] else "unavailable"
+
+
+def _socket_delivery_live() -> bool:
+    """Is the gateway socket the transport carrying replies right now?"""
+    return (_gateway_router is not None
+            and SETTINGS.gateway_ws in ("1", "true", "on", "yes"))
+
+
+def _transcript_paths_dead() -> bool:
+    """Skip a file backstop: there are no files, and the socket is delivering.
+
+    Both halves matter. Without the socket, a host with no transcripts has no
+    delivery path at all and the loops should still run (and still find
+    nothing) rather than quietly stand down.
+    """
+    return not _transcript_files_available() and _socket_delivery_live()
+
+
 async def _watch_progress(
     thread_id: str, bot_id: str, session_key: str, handoff: dict,
 ) -> None:
@@ -3240,6 +3428,8 @@ async def _watch_progress(
     unconsumed line — so the post-turn follower can resume EXACTLY where this
     watcher stopped (a gap here would swallow fast subagent announces).
     """
+    if _transcript_paths_dead():
+        return
     offset: int | None = None
     path = openclaw.resolve_session_file(bot_id, session_key)
     if path is not None:
@@ -3519,7 +3709,12 @@ def _is_twin(a: str, b: str) -> bool:
     family chat) is the failure that actually happens. Inputs may be raw or
     already canonical.
     """
-    ca, cb = _canon_msg(a), _canon_msg(b)
+    # MEMOIZED, not recomputed. Both call sites already hand this function
+    # canonical strings — the in-memory claim set stores keys, and the
+    # whole-thread scan canonicalizes each row before comparing — so every
+    # comparison was re-running half a dozen regex passes over text that was
+    # already canonical, once per candidate, for every delivered message.
+    ca, cb = _canon_msg_cached(a), _canon_msg_cached(b)
     if ca == cb:
         return True
     if len(ca) < _TWIN_MIN_SHARED_PREFIX or len(cb) < _TWIN_MIN_SHARED_PREFIX:
@@ -3770,6 +3965,7 @@ async def _deliver_assistant_text(
     # and manual import, which have no source identity.
     if source_id and await db.source_id_seen(source_id):
         return None
+    superseded: MessageOut | None = None
     has_media = bool(media_url) or "[[media:" in (text or "")
     # Emptiness is judged AFTER scaffolding removal, matching what actually gets
     # persisted: a transcript row that is nothing but a runtime-context block
@@ -3812,28 +4008,43 @@ async def _deliver_assistant_text(
                 recent_window_s=(None if source_id or not dedup_recent_window
                                  else DEDUP_RECENT_WINDOW_S))
             if existing is not None:
-                if len(key) <= len(_canon_msg(existing.content or "")):
+                if len(key) <= len(_canon_msg_cached(existing.content or "")):
                     return None            # shorter/equal twin — keep the
                                            # longer/earlier copy; keep the claim
                 # Upgrade: the ABRIDGED copy was persisted first; the complete
                 # copy arriving now replaces it so exactly one post remains.
-                await db.delete_message(existing.id)
-                await manager.broadcast({
-                    "type": "message_deleted",
-                    "thread_id": thread_id,
-                    "bot_id": await _bot_of_thread(thread_id),
-                    "message_id": existing.id,
-                })
+                # THE REPLACEMENT IS WRITTEN FIRST. Deleting the abridged row
+                # up here and then persisting meant every failure in between —
+                # a closed database, a thread deleted mid-flight, the persist
+                # chokepoint deciding the message was all-marker — left the
+                # thread with NEITHER copy: a reply the family had already read
+                # vanishing to repair a duplicate.
+                superseded = existing
         if not await db.get_thread(thread_id):
             return None                        # thread deleted mid-flight
         if stream:
-            return await _persist_and_stream_message(
+            msg = await _persist_and_stream_message(
                 thread_id, "assistant", text, media_url=media_url,
                 metadata=metadata, source_id=source_id,
                 created_at=created_at)
-        msg = await _persist_and_broadcast_message(
-            thread_id, "assistant", text, media_url=media_url,
-            metadata=metadata, source_id=source_id, created_at=created_at)
+        else:
+            msg = await _persist_and_broadcast_message(
+                thread_id, "assistant", text, media_url=media_url,
+                metadata=metadata, source_id=source_id, created_at=created_at)
+        # Only once the complete copy is genuinely on disk. `msg` can be an
+        # unpersisted placeholder (an all-marker reply), and retiring the old
+        # row for one of those would delete a message and post nothing.
+        if superseded is not None and await db.get_message(msg.id) is not None:
+            await db.delete_message(superseded.id)
+            await manager.broadcast({
+                "type": "message_deleted",
+                "thread_id": thread_id,
+                "bot_id": await _bot_of_thread(thread_id),
+                "message_id": superseded.id,
+            })
+        # The streamed path returned straight out of here, so a thread's
+        # preview, unread count and ordering did not move for the ONE message
+        # type that matters most: the agent's final reply.
         await _broadcast_thread_update(thread_id)
         return msg
     except BaseException:
@@ -3855,6 +4066,8 @@ async def _reconcile_transcript(
     Prefers the authoritative path built from the CLI reply's exact sessionId
     (race-free) over the index lookup, which can lag for a brand-new session.
     """
+    if _transcript_paths_dead():
+        return []
     by_id = openclaw.session_file_by_id(bot_id, session_id) if session_id else None
     path = by_id or handoff.get("path") or openclaw.resolve_session_file(bot_id, session_key)
     if path is None:
@@ -3899,6 +4112,10 @@ async def _follow_session(
     skipped here would lose it. The turn's own reply may be re-read — the
     duplicate check filters it (it was just persisted to the thread).
     """
+    # No transcripts on this host: the polling loop below would sleep 30x2s
+    # per turn re-resolving a file that cannot exist.
+    if _transcript_paths_dead():
+        return
     if path is None and session_id:
         path = openclaw.session_file_by_id(bot_id, session_id)
     if path is None:
@@ -4103,6 +4320,83 @@ async def _gateway_deliver(thread_id: str, text: str, *, source_id: str | None,
         dedup_whole_thread=not live)
 
 
+# --------------------------------------------------------------------------- #
+# In-flight runs
+#
+# A turn dispatched over the socket and ACCEPTED keeps running on the gateway
+# even if our connection dies a millisecond later. Its reply is emitted to a
+# subscription that no longer exists — there is no queue and no replay — so
+# unless we can name the run afterwards it is simply gone, and the family sees
+# a thread that thought for a while and then said nothing.
+#
+# The id is the `idempotencyKey` we chose, which the gateway adopts verbatim as
+# the runId (principal.ts: `const runId = request.idempotencyKey`). That is what
+# makes `agent.wait` and the delta stream addressable at all.
+# --------------------------------------------------------------------------- #
+
+class _InflightRun(NamedTuple):
+    run_id: str
+    session_key: str
+    thread_id: str
+    bot_id: str
+    started: float
+
+
+_inflight_runs: dict[str, _InflightRun] = {}
+
+# How long an entry may sit before it is assumed dead. Longer than the turn
+# timeout, because the entry's whole purpose is to outlive the turn that
+# created it when the connection does not.
+INFLIGHT_TTL_S = 3600.0
+
+
+def _inflight_register(run: _InflightRun) -> None:
+    _expire_inflight()
+    _inflight_runs[run.run_id] = run
+
+
+def _inflight_done(run_id: str) -> None:
+    _inflight_runs.pop(run_id, None)
+
+
+def _expire_inflight() -> None:
+    """Drop entries older than the TTL.
+
+    A run whose socket died and whose `agent.wait` never answered would
+    otherwise be re-chased on every reconnect for the life of the process.
+    """
+    cutoff = time.time() - INFLIGHT_TTL_S
+    for run_id, run in list(_inflight_runs.items()):
+        if run.started < cutoff:
+            _inflight_runs.pop(run_id, None)
+
+
+async def _recover_inflight_runs(client, router) -> None:
+    """After a reconnect: ask about every run we lost track of, then repair.
+
+    WHATEVER `agent.wait` ANSWERS, THE BACKFILL RUNS. "The run finished" is not
+    "the reply was delivered" — it finished into a subscription that had gone
+    away, which is the entire reason we are here. The wait is what stops us
+    repairing a turn that is still mid-sentence; the backfill is what actually
+    recovers the words.
+    """
+    _expire_inflight()
+    runs = list(_inflight_runs.values())
+    if not runs:
+        return
+    log.info("gateway-ws reconnect: chasing %d in-flight run(s)", len(runs))
+    for run in runs:
+        with contextlib.suppress(Exception):
+            await client.agent_wait(run.run_id, timeout_ms=30_000)
+        try:
+            # `force`: a turn accepted just before the drop has no seq cursor
+            # at all, and resync used to skip exactly those sessions —
+            # declining to repair the one case it exists for.
+            await router.catch_up(run.session_key, force=True)
+        except Exception:
+            log.exception("gateway-ws catch-up failed for %s", run.session_key)
+
+
 async def _gateway_ws_start() -> None:
     """Bring the native transport up, if it is switched on."""
     global _gateway_client, _gateway_router
@@ -4112,7 +4406,15 @@ async def _gateway_ws_start() -> None:
         return
     router = gateway_router.SessionRouter(
         _gateway_resolve_thread,
-        _gateway_deliver if live else _gateway_shadow_deliver)
+        _gateway_deliver if live else _gateway_shadow_deliver,
+        # SHADOW MODE BROADCASTS NOTHING. A shadow run exists to compare what
+        # the transport WOULD do against the live path; a shadow that painted
+        # provisional bubbles onto the family's screens would not be a shadow.
+        broadcast=(manager.broadcast if live else None),
+        sanitize=_sanitize_delta,
+        open_stream=_open_provisional,
+        close_stream=_close_provisional,
+        stream_open=_provisional_open)
 
     async def _on_event(event: str, payload: dict) -> None:
         # This must not raise. An exception here kills the reader task and the
@@ -4133,10 +4435,24 @@ async def _gateway_ws_start() -> None:
             await client.subscribe_sessions()
         except Exception:
             log.exception("gateway-ws subscribe on connect failed")
+        # Per-session subscriptions die with the socket exactly like the global
+        # one. Re-established here, from the client's own set, so a reconnect
+        # cannot leave us connected and receiving transcript events but no
+        # deltas — the shape of failure that looks completely healthy.
+        try:
+            await client.resubscribe_sessions()
+        except Exception:
+            log.exception("gateway-ws per-session resubscribe failed")
         try:
             await router.resync_known()
         except Exception:
             log.exception("gateway-ws resync on reconnect failed")
+        # NOT INSIDE THE HANDLER, AND NOT AWAITED HERE. `agent.wait` is a
+        # `call()`, and _on_connect runs before the reader is draining
+        # responses for the connection it belongs to; awaiting one here would
+        # deadlock the connect path for the whole request timeout. It is also
+        # a wait, by definition — the connect path must not sit on it.
+        _track(asyncio.create_task(_recover_inflight_runs(client, router)))
 
     client = gateway_ws.GatewayClient(_on_event)
     client._on_connect = _on_connect
@@ -4162,6 +4478,12 @@ async def _gateway_ws_stop() -> None:
     if _gateway_router is not None:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(_gateway_router.flush_gaps(), timeout=10)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(_gateway_router.drain_detached(), timeout=10)
+        # Shutdown must never raise: whatever state the transport is in, the
+        # app still has to come down cleanly.
+        with contextlib.suppress(Exception):
+            _gateway_router.cancel_streams()
     if _gateway_client is not None:
         with contextlib.suppress(Exception):
             await _gateway_client.stop()
@@ -4194,6 +4516,10 @@ async def _gap_sweep_loop() -> None:
     the sweep for everyone.
     """
     await asyncio.sleep(60)                      # let startup settle
+    if _transcript_paths_dead():
+        log.info("gap sweep stood down: no transcripts on this host and the "
+                 "gateway socket is delivering")
+        return
     while True:
         try:
             cutoff = (datetime.now(UTC)
@@ -4994,8 +5320,39 @@ async def _dispatch_turn(bot_id: str, session_key: str, message: str
         client = _gateway_client
         if client is not None and client.connected.is_set():
             _turn_transport_counts["socket"] += 1
-            return await openclaw.send_via_gateway(
-                client, bot_id=bot_id, session_key=session_key, message=message)
+            # Name the run BEFORE sending it. The gateway adopts our
+            # idempotency key as the runId, so choosing it here is what lets
+            # the delta stream be routed to this thread and what lets a
+            # reconnect ask `agent.wait` how this exact turn ended.
+            run_id = uuid.uuid4().hex
+            thread_id = session_key.split(":", 2)[-1]
+            # Subscribing to the session is what admits its `chat` deltas and
+            # `session.tool` events; the global subscription only carries
+            # transcript messages. Failure is not fatal — it costs live
+            # streaming for this turn, never the reply.
+            try:
+                await client.subscribe_session(session_key)
+            except Exception:
+                client.track_session(session_key)
+                log.warning("could not subscribe to %s; live deltas may be "
+                            "silent for this turn", session_key, exc_info=True)
+            _inflight_register(_InflightRun(run_id, session_key, thread_id,
+                                            bot_id, time.time()))
+            try:
+                reply = await openclaw.send_via_gateway(
+                    client, bot_id=bot_id, session_key=session_key,
+                    message=message, run_id=run_id)
+            except (openclaw.GatewayUnavailable, gateway_ws.GatewayRunRefused):
+                # Refused at the door: nothing ran, so there is nothing to
+                # chase after a reconnect. Anything else — a timeout, a lost
+                # socket — leaves the entry in place ON PURPOSE, because the
+                # run is (or was) underway and its reply has nowhere else to
+                # come from.
+                _inflight_done(run_id)
+                raise
+            # The answer is in hand, so the run is over and cannot be stranded.
+            _inflight_done(run_id)
+            return reply
         if mode == "1":
             raise openclaw.GatewayUnavailable(
                 f"The agent gateway is down or restarting, so {bot_id} can't "
@@ -5151,16 +5508,25 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
                 )
                 if msg:
                     persisted.append(msg)
-            # POST-delivery, so its failure is not the turn's failure. The
-            # second look is a repair pass over messages the family has
-            # already read; letting it raise put the thread in `error` — a red
-            # banner over a conversation that went perfectly.
+            # THE TURN IS OVER THE MOMENT THE LAST PAYLOAD IS OUT. The second
+            # look is a repair pass over messages the family has ALREADY READ,
+            # and running it before the thread goes idle held the typing
+            # indicator up for its whole duration — measured at 276 ms of the
+            # bot visibly "still thinking" after it had finished speaking.
+            await db.update_thread_status(thread_id, "idle")
+            await manager.broadcast(
+                {"type": "thinking", "thread_id": thread_id, "bot_id": bot_id,
+                 "status": "stopped"}
+            )
+            await _broadcast_thread_update(thread_id)
+            # POST-delivery, so its failure is not the turn's failure. Letting
+            # it raise put the thread in `error` — a red banner over a
+            # conversation that went perfectly.
             try:
                 await _media_second_look(thread_id, bot_id, session_key, persisted)
             except Exception:
                 log.exception("media second look failed after a delivered turn "
                               "(%s/%s)", bot_id, thread_id)
-            await db.update_thread_status(thread_id, "idle")
         except openclaw.AgentError as e:
             log.warning("agent turn failed (%s/%s): %s — %s", bot_id, thread_id, e.message, e.detail)
             # The model may have finished and flushed its reply to the transcript
@@ -5429,7 +5795,17 @@ def _gateway_ws_stats() -> dict[str, Any] | None:
     client = _gateway_client
     connected = bool(client is not None and client.connected.is_set())
     return {"mode": SETTINGS.gateway_ws, "since": _gateway_ws_since,
-            "connected": connected, **router.stats}
+            "connected": connected,
+            # In-flight runs: how many turns the gateway has accepted and not
+            # yet answered. A number that only grows is the signal that
+            # reconnect recovery is not clearing what it chased.
+            "inflight_runs": len(_inflight_runs),
+            # Events the local queue could not hold. Visible loss beats silent
+            # loss, and it lived only in a log line before this.
+            "dropped_local": getattr(client, "dropped_local", 0),
+            "tick_closes": getattr(client, "tick_closes", 0),
+            "transcript_backstop": _transcript_backstop_state(),
+            **router.stats}
 
 
 # --------------------------------------------------------------------------- #
@@ -6441,6 +6817,46 @@ async def mark_read(request: Request, thread_id: str):
     await db.mark_thread_read(thread_id)
     await _broadcast_thread_update(thread_id)
     return {"ok": True}
+
+
+async def _abort_thread_turn(thread_id: str) -> dict:
+    """Stop the run this thread is waiting on. Full-access callers only.
+
+    Resolves the run by the same key everything else uses — the session key is
+    built from the thread, and the in-flight registry is keyed by the runId the
+    gateway adopted from our idempotency key. A run we cannot name is still
+    abortable by session; the gateway resolves the active one.
+    """
+    thread = await db.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(404, "Thread not found")
+    client = _gateway_client
+    if client is None or not client.connected.is_set():
+        raise HTTPException(503, "The agent gateway is not connected")
+    session_key = openclaw.session_key_for(thread.bot_id, thread_id)
+    run_id = next((r.run_id for r in _inflight_runs.values()
+                   if r.thread_id == thread_id), None)
+    try:
+        await client.abort_run(session_key, run_id)
+    except Exception as e:
+        log.warning("abort failed for %s: %s", thread_id, e)
+        raise HTTPException(502, "The gateway would not stop that turn")
+    log.info("aborted turn on %s (run %s)", thread_id, run_id or "unnamed")
+    return {"ok": True, "thread_id": thread_id, "run_id": run_id}
+
+
+@app.post("/api/threads/{thread_id}/abort", responses=problem.MACHINE)
+async def abort_turn(request: Request, thread_id: str):
+    """Stop a turn in flight.
+
+    A MUTATION, and gated like every other one: Safe Mode may view and send,
+    never cancel. A locked tablet that could abort a turn could silence any
+    conversation in the house.
+    """
+    _deny_decoy_mutation(request)
+    _require_full_access(request)
+    thread_id = await _canonical_thread_id(thread_id)
+    return await _abort_thread_turn(thread_id)
 
 
 @app.get("/api/unread", responses=problem.MACHINE)
@@ -8030,14 +8446,36 @@ def _mirror_state_path() -> Path:
     return config.DATA_DIR / "gateway-mirror.json"
 
 
+# Parsed mirror state, kept until the file changes underneath us.
+#
+# `_gateway_resolve_thread` calls _load_mirror_state() for EVERY event on the
+# firehose, and the firehose covers every session on the box — so a synchronous
+# read + JSON parse of a file that grows with the install was running on the
+# event loop, several times a second, to answer one membership test. The mtime
+# check keeps a hand-edited file (or another process) from being missed while
+# costing one stat instead of a read and a parse.
+_mirror_state_cache: dict[str, Any] = {"path": None, "mtime": None, "data": None}
+
+
 def _load_mirror_state() -> dict:
+    path = _mirror_state_path()
     try:
-        data = json.loads(_mirror_state_path().read_text())
-        if isinstance(data, dict) and isinstance(data.get("sessions"), dict):
-            return data
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    cache = _mirror_state_cache
+    if (cache["data"] is not None and cache["path"] == path
+            and cache["mtime"] == mtime):
+        return cache["data"]
+    data: dict = {"version": 1, "sessions": {}}
+    try:
+        parsed = json.loads(path.read_text())
+        if isinstance(parsed, dict) and isinstance(parsed.get("sessions"), dict):
+            data = parsed
     except (OSError, json.JSONDecodeError):
         pass
-    return {"version": 1, "sessions": {}}
+    cache["path"], cache["mtime"], cache["data"] = path, mtime, data
+    return data
 
 
 def _save_mirror_state(state: dict) -> None:
@@ -8045,6 +8483,13 @@ def _save_mirror_state(state: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(state, indent=1))
     tmp.replace(path)
+    # Adopt what we just wrote rather than re-reading it on the next event.
+    _mirror_state_cache["path"] = path
+    _mirror_state_cache["data"] = state
+    try:
+        _mirror_state_cache["mtime"] = path.stat().st_mtime_ns
+    except OSError:
+        _mirror_state_cache["mtime"] = None
 
 
 def _mirror_kind_set() -> set[str]:
@@ -8301,6 +8746,10 @@ def _mirror_delay(idle_cycles: int, base: int, idle_max: int) -> float:
 async def _gateway_mirror_loop() -> None:
     global _mirror_beat, _mirror_nudge_event
     if not SETTINGS.mirror_enabled:
+        return
+    if _transcript_paths_dead():
+        log.info("gateway mirror stood down: no transcripts on this host and "
+                 "the gateway socket is delivering")
         return
     if _mirror_nudge_event is None:
         _mirror_nudge_event = asyncio.Event()
@@ -8825,12 +9274,23 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None) -> bool:
 # Recently persisted client_msg_ids (WS send-ack protocol). A reconnecting
 # client re-sends its pending frames unchanged; a duplicate id is re-acked
 # 'ok' but never persisted twice. Bounded LRU — single user, tiny volume.
-_ACK_SEEN: OrderedDict[str, None] = OrderedDict()
+#
+# THE ENTRY RECORDS WHETHER THE TURN WAS SCHEDULED, not merely that the message
+# was stored. The id was marked immediately after `db.add_message` while the
+# agent turn is dispatched at the very end of the handler — and everything in
+# between can stall or die (the broadcast alone waits up to five seconds per
+# half-dead client). A resend then matched the id, was re-acked "ok", and
+# nothing ever ran: the message sat in the thread and the bot never answered.
+# Recording the dispatch as its own fact lets the replay finish the job instead
+# of confirming a turn that does not exist.
+_ACK_SEEN: OrderedDict[str, dict] = OrderedDict()
 _ACK_SEEN_CAP = 512
 
 
-def _ack_mark(client_msg_id: str) -> None:
-    _ACK_SEEN[client_msg_id] = None
+def _ack_mark(client_msg_id: str, **fields: Any) -> None:
+    entry = _ACK_SEEN.get(client_msg_id) or {"scheduled": False}
+    entry.update(fields)
+    _ACK_SEEN[client_msg_id] = entry
     _ACK_SEEN.move_to_end(client_msg_id)
     while len(_ACK_SEEN) > _ACK_SEEN_CAP:
         _ACK_SEEN.popitem(last=False)
@@ -8854,9 +9314,18 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     text = (data.get("text") or "").strip()
     cmid = data.get("client_msg_id")
     cmid = cmid if isinstance(cmid, str) and cmid else None
-    if cmid and cmid in _ACK_SEEN:
+    seen = _ACK_SEEN.get(cmid) if cmid else None
+    if seen is not None:
         # Reconnect resend of an already-persisted message: re-ack, don't dup.
         await _ack(ws, cmid, "ok")
+        if not seen.get("scheduled") and seen.get("thread_id"):
+            # Stored but never dispatched (see _ACK_SEEN). Finish the job
+            # rather than confirming a turn that was never started.
+            log.warning("resend of %s: the message was stored but its turn "
+                        "never ran — dispatching it now", cmid)
+            seen["scheduled"] = True
+            _track(asyncio.create_task(run_agent_turn(
+                seen["thread_id"], seen["bot_id"], seen["text"])))
         return
     if not thread_id or not text:
         await _ack(ws, cmid, "rejected", "Empty message")
@@ -8915,7 +9384,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         await _ack(ws, cmid, "rejected", "Server error — please retry")
         raise
     if cmid:
-        _ack_mark(cmid)
+        _ack_mark(cmid, thread_id=thread_id, bot_id=thread.bot_id, text=text)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     msg_frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
                  "message": user_msg.model_dump()}
@@ -8929,6 +9398,9 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     await _broadcast_thread_update(thread_id)
 
     _track(asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, text)))
+    if cmid:
+        # AFTER the dispatch, so "seen" can never mean "acked but never run".
+        _ack_mark(cmid, scheduled=True)
 
 
 async def _handle_create_thread(ws: WebSocket, data: dict) -> None:
@@ -9034,8 +9506,33 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
     _track(asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, last_user.content)))
 
 
+async def _handle_abort(ws: WebSocket, data: dict) -> None:
+    """Stop the turn a thread is waiting on. Unlocked connections only."""
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return
+    if manager.conn_decoy(ws):
+        # The same rule as every other mutation, stated here because a
+        # WebSocket never passes through the HTTP middleware that enforces it.
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Unlock for full access"})
+        return
+    try:
+        result = await _abort_thread_turn(thread_id)
+    except HTTPException as e:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": str(e.detail)})
+        return
+    frame = {"type": "ack", "status": "ok", "thread_id": result["thread_id"]}
+    cmid = data.get("client_msg_id")
+    if isinstance(cmid, str) and cmid:
+        frame["client_msg_id"] = cmid
+    await manager.send(ws, frame)
+
+
 WS_HANDLERS = {
     "send": _handle_send,
+    "abort": _handle_abort,
     "create_thread": _handle_create_thread,
     "get_threads": _handle_get_threads,
     "get_messages": _handle_get_messages,

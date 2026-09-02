@@ -255,6 +255,9 @@ async def test_a_truncated_projection_is_refetched_in_full():
     await router.handle("session.message", {
         "sessionKey": "agent:main:t1", "messageSeq": 1,
         "message": _msg(long_text, mid="big")})
+    # The refetch is a gateway round trip, so it runs OFF the single event
+    # consumer — see test_a_truncation_refetch_does_not_block_the_event_pump.
+    await router.drain_detached()
 
     assert router.stats["refetched"] == 1
     assert r.calls[0]["text"] == "the complete answer, all of it"
@@ -269,7 +272,11 @@ async def test_a_failed_refetch_keeps_the_projection_rather_than_dropping_it():
     await router.handle("session.message", {
         "sessionKey": "agent:main:t1", "messageSeq": 1,
         "message": _msg("y" * 10 + "\n...(truncated)...", mid="big2")})
+    await router.drain_detached()
     assert len(r.calls) == 1 and r.calls[0]["text"].endswith("...(truncated)...")
+    assert router.stats["refetch_failed"] == 1, (
+        "a repair that could not repair must SAY so; a clean refetched:0 "
+        "reads as good news rather than as a path that never worked")
 
 
 @pytest.mark.asyncio

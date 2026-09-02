@@ -116,6 +116,8 @@
     "placeholder_no_thread": "Escolhe uma conversa para escrever",
     "aria": "Mensagem",
     "send": "Enviar",
+    "stop": "Parar resposta",
+    "stopping": "A parar…",
     "waiting": "À espera de resposta…",
     "offline": "Sem ligação — a religar…",
     "chars": {
@@ -156,6 +158,16 @@
     "hint_hide": "ocultar o trabalho ▾",
     "title": "Clica para ver o que o modelo está a fazer",
     "idle": "À espera de atividade…"
+  },
+  "turn": {
+    "phase_preparing_context": "A preparar o contexto…",
+    "phase_preparing_workspace": "A preparar o espaço de trabalho…",
+    "phase_starting_model": "A carregar o modelo…",
+    "phase_waiting_model": "À espera do modelo…",
+    "phase_streaming": "A escrever…",
+    "phase_finishing": "A concluir…",
+    "phase_tool": "A usar {name}…",
+    "phase_generic": "A trabalhar…"
   },
   "settings": {
     "title": "Definições",
@@ -484,6 +496,7 @@
     "action_theme": "Alternar o tema",
     "action_search": "Procurar mensagens",
     "action_recovery": "Recuperar e exportar",
+    "action_stop": "Parar resposta",
     "action_lock": "Bloquear agora",
     "action_settings": "Definições",
     "action_health": "Painel de saúde",

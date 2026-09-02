@@ -58,6 +58,7 @@ const state = {
   streamingIds: new Set(), // message ids currently being streamed
   unread: {},          // thread_id -> ISO time of oldest unread bot message
   progress: {},        // thread_id -> live working items (thinking/tool calls)
+  turnPhase: {},       // thread_id -> gateway phase string ('starting_model', 'tool:brave_search', …)
   scrollPositions: {}, // thread_id -> last scrollTop when user navigated away
   auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
@@ -139,7 +140,7 @@ const $ = (id) => document.getElementById(id);
 const dom = {};
 ['app', 'bot-list', 'manage-bots', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
- 'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send',
+ 'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
  'retry-chip', 'retry-chip-btn',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
@@ -674,6 +675,24 @@ function renderSidebarInner() {
 }
 
 // ===================== Thread list =====================
+/** Which bots' VISIBLE identity changed between two roster snapshots.
+ *
+ *  Only the fields that are painted somewhere: everything else on a bot is
+ *  either invisible or already covered by renderSidebar(). Returns null when
+ *  there is nothing to compare against (the first frame) — callers read that
+ *  as "assume everything changed" and repaint exactly as they used to.
+ */
+function changedBotLooks(prev, next) {
+  if (!Array.isArray(prev) || !prev.length) return null;
+  const key = (b) => [b.avatar_url, b.name, b.emoji, b.model_hint, b.avatar_style].join(' ');
+  const before = new Map(prev.map((b) => [b.id, key(b)]));
+  const changed = new Set();
+  for (const b of next) {
+    if (!before.has(b.id) || before.get(b.id) !== key(b)) changed.add(b.id);
+  }
+  return changed;
+}
+
 function updateThreadListHeader() {
   const bot = botById(state.selectedBotId);
   if (!bot) return;
@@ -806,6 +825,21 @@ function patchThreadRow(threadId) {
   const fresh = threadRowEl(state.threads[idx], bot);
   existing.replaceWith(fresh);
   if (hadFocus) fresh.focus();
+  return true;
+}
+
+/** Repaint one thread's row, but ONLY when that thread is in the list on
+ *  screen. patchThreadRow() falls back to a full renderThreads() for a thread
+ *  it cannot find, which is right when the row *should* be there and wrong
+ *  here: a background bot's turn would rebuild the list you are reading (the
+ *  107ms-at-207-threads repaint threadRowEl exists to avoid) for a row that is
+ *  not even displayed. Nothing to repaint is not a reason to repaint
+ *  everything. Returns true if a row was patched or the list was rebuilt.
+ */
+function touchThreadRow(threadId) {
+  if (!threadId) return false;
+  if (!state.threads.some((x) => x.id === threadId)) return false;
+  patchThreadRow(threadId);
   return true;
 }
 
@@ -1391,6 +1425,72 @@ function renderProgressPanel() {
   panel.scrollTop = panel.scrollHeight;
 }
 
+// ===================== Turn status (gateway phase) =====================
+// The gateway reports what a turn is DOING before any token exists —
+// preparing context, loading a model, running a tool. On a cold local model
+// that is a minute of animated dots saying nothing; this turns it into a line
+// that says which minute it is.
+//
+// Literal keys, not t('turn.phase_' + phase): the phase strings come off the
+// wire, so a concatenated lookup would let the server name any key in the
+// catalogue (and tests/i18n-keys.test.js could not see which keys are live).
+// An unknown phase falls back to the generic label rather than rendering the
+// server's own word for it.
+const TURN_PHASE_KEYS = {
+  preparing_context: 'turn.phase_preparing_context',
+  preparing_workspace: 'turn.phase_preparing_workspace',
+  starting_model: 'turn.phase_starting_model',
+  loading_model: 'turn.phase_starting_model',
+  waiting_model: 'turn.phase_waiting_model',
+  streaming: 'turn.phase_streaming',
+  finishing: 'turn.phase_finishing',
+};
+
+function turnPhaseText(phase) {
+  if (!phase || typeof phase !== 'string') return '';
+  if (phase.startsWith('tool:')) {
+    const name = phase.slice(5).trim();
+    // A tool name is server-supplied text in a UI string — el()/textContent
+    // escape it, and the cap stops one long name from pushing the layout.
+    if (name) return t('turn.phase_tool', { name: name.slice(0, 40) });
+  }
+  const key = TURN_PHASE_KEYS[phase];
+  return key ? t(key) : t('turn.phase_generic');
+}
+
+/** Paint (or clear) the active thread's phase line.
+ *
+ *  It rides the typing indicator until the first token arrives, then the
+ *  streaming bubble — the typing indicator is REMOVED at stream_start, so a
+ *  line parented to it would vanish exactly when a tool call mid-reply makes
+ *  it most useful.
+ */
+function paintTurnPhase() {
+  const box = dom['messages'];
+  if (!box) return;
+  const phase = state.activeThreadId ? state.turnPhase[state.activeThreadId] : null;
+  const text = turnPhaseText(phase);
+  const host = box.querySelector('.msg.streaming .msg-col') || box.querySelector('.typing-col');
+  let line = box.querySelector('.turn-phase');
+  if (!text || !host) { if (line) line.remove(); return; }
+  // The typing element is rebuilt wholesale by refreshTyping(), and the
+  // streaming bubble replaces it — so re-home the line rather than assuming
+  // the node it was appended to still exists.
+  if (!line || line.parentElement !== host) {
+    if (line) line.remove();
+    line = el('div', { class: 'turn-phase' });
+    host.append(line);
+  }
+  if (line.textContent !== text) line.textContent = text;
+}
+
+function setTurnPhase(threadId, phase) {
+  if (!threadId) return;
+  if (phase) state.turnPhase[threadId] = phase;
+  else delete state.turnPhase[threadId];
+  if (threadId === state.activeThreadId) paintTurnPhase();
+}
+
 function refreshTyping() {
   const box = dom['messages'];
   const existing = box.querySelector('.typing');
@@ -1412,6 +1512,9 @@ function refreshTyping() {
     // ago. aria-atomic + empty text announces nothing.
     if (dom['sr-status']) dom['sr-status'].textContent = '';
   }
+  // Either branch can leave the phase line parented to a node that just went
+  // away (or arrive at a fresh typing bubble that needs it back).
+  paintTurnPhase();
 }
 
 function announceResponding() {
@@ -1560,7 +1663,50 @@ function reflectComposerState() {
   dom['waiting'].textContent = t(offline ? 'composer.offline' : 'composer.waiting');
   dom['waiting'].classList.toggle('offline-note', offline && !thinking);
   updateSendEnabled();
+  reflectStopButton();
   refreshTyping();
+}
+
+// ===================== Stop (abort a running turn) =====================
+// Which thread has an abort in flight. One at a time is enough: the button
+// belongs to the active thread and the state clears the moment the turn does.
+let stopRequestedThread = null;
+
+function clearStopRequest(threadId) {
+  if (!threadId || stopRequestedThread !== threadId) return;
+  stopRequestedThread = null;
+  reflectStopButton();
+}
+
+// Unlocked only. Safe Mode never shows it: the server 403s an abort from a
+// decoy session, so the button could only ever fail — and offering a control
+// that does nothing is exactly the tell the locked mode exists to avoid.
+function canStopReply() {
+  return !!(state.activeThreadId && state.thinking[state.activeThreadId] && !state.decoy);
+}
+
+function stopReply() {
+  if (!canStopReply()) return;
+  const tid = state.activeThreadId;
+  const ok = !!(socket && socket.send({ type: 'abort', thread_id: tid }));
+  if (!ok) { toast(t('toast.offline'), true); return; }
+  stopRequestedThread = tid;
+  reflectStopButton();
+}
+
+function reflectStopButton() {
+  const btn = dom['stop'];
+  if (!btn) return;
+  const show = canStopReply();
+  btn.classList.toggle('hidden', !show);
+  if (!show) { btn.disabled = false; return; }
+  // Disabled until the turn actually ends (or the server refuses, which comes
+  // back as an 'error' frame and releases it) — a second click would only
+  // send a duplicate abort for a turn already being torn down.
+  const pending = stopRequestedThread === state.activeThreadId;
+  btn.disabled = pending;
+  btn.setAttribute('aria-label', t(pending ? 'composer.stopping' : 'composer.stop'));
+  btn.title = t(pending ? 'composer.stopping' : 'composer.stop');
 }
 
 function updateSendEnabled() {
@@ -1600,6 +1746,11 @@ function sendMessage() {
   const ok = !!(socket && socket.send(frame));
   if (!ok) { toast(t('toast.offline'), true); return; }
   trackPendingSend(frame);
+  // Show what was just sent, immediately. Before this the composer emptied and
+  // nothing appeared until the server's broadcast came back — on a slow link
+  // (or a stalled turn) that reads as "my message was eaten", and the Retry
+  // chip fired 20s later against a chat that showed no trace of it.
+  showOptimisticSend(frame.client_msg_id, state.activeThreadId, full);
 
   dom['input'].value = '';
   clearAttachments();
@@ -1629,6 +1780,104 @@ function newClientMsgId() {
 
 function socketOpen() {
   return !!(socket && socket.ws && socket.ws.readyState === WebSocket.OPEN);
+}
+
+// ===================== Optimistic user bubbles =====================
+// client_msg_id -> { el, threadId, text, at }. DOM-only on purpose: these rows
+// are NOT pushed into state.messages. A row there needs a real message id —
+// Delete, Regenerate and the "is this the last message" check all key off it —
+// and a placeholder id would either 404 against the API or survive into the
+// next full render as a duplicate of the persisted message. The node carries
+// data-cmid instead of data-id, so nothing that addresses messages by id can
+// ever find it.
+const optimisticSends = new Map();
+
+function showOptimisticSend(cmid, threadId, text) {
+  if (!cmid || !threadId) return;
+  const box = dom['messages'];
+  if (!box) return;
+  const node = messageEl({
+    id: '', thread_id: threadId, role: 'user', content: text,
+    created_at: new Date().toISOString(), metadata: {},
+  });
+  // NIM returns null for a picture-only message — it has no row when it is
+  // persisted either, so there is nothing to preview.
+  if (!node) return;
+  delete node.dataset.id;              // never addressable as a message
+  node.dataset.cmid = cmid;
+  node.classList.add('pending');
+  // The action row acts on a message id this row does not have.
+  const acts = node.querySelector('.msg-actions');
+  if (acts) acts.remove();
+  const emptyState = box.querySelector('.empty-state');
+  if (emptyState) emptyState.remove();
+  const typing = box.querySelector('.typing');
+  if (typing) box.insertBefore(node, typing); else box.append(node);
+  optimisticSends.set(cmid, { el: node, threadId, text, at: Date.now() });
+  if (isNearBottom()) scrollToBottom();
+}
+
+function dropOptimistic(cmid) {
+  const entry = optimisticSends.get(cmid);
+  if (!entry) return false;
+  optimisticSends.delete(cmid);
+  if (entry.el && entry.el.isConnected) entry.el.remove();
+  return true;
+}
+
+function clearOptimisticSends() {
+  for (const cmid of [...optimisticSends.keys()]) dropOptimistic(cmid);
+}
+
+/** Reconcile a persisted 'message' frame against an optimistic bubble.
+ *
+ *  The server echoes client_msg_id on the frame it broadcasts for the send it
+ *  just persisted, so that is the identity used. The content fallback exists
+ *  because the persist chokepoint can REWRITE the text on the way through (a
+ *  typed `:react:x:` marker is stripped), and because an older server build
+ *  may not echo the id at all — in which case the only thing left is "same
+ *  thread, same author, same words, just now".
+ */
+function reconcileOptimistic(frame) {
+  const msg = frame && frame.message;
+  if (!msg || msg.role !== 'user') return;
+  const cmid = frame.client_msg_id || msg.client_msg_id;
+  if (cmid && dropOptimistic(cmid)) return;
+  if (!optimisticSends.size) return;
+  const body = (msg.content || '').trim();
+  for (const [key, entry] of optimisticSends) {
+    // A node wiped by a full re-render (thread switch, avatar repaint) is not
+    // a bubble any more; matching against it would consume the entry and leave
+    // the real pending one on screen.
+    if (!entry.el || !entry.el.isConnected) { optimisticSends.delete(key); continue; }
+    if (entry.threadId !== frame.thread_id) continue;
+    const mine = (entry.text || '').trim();
+    // startsWith, not equality: the marker strip only ever SHORTENS the text.
+    if (!(mine === body || (body && mine.startsWith(body)))) continue;
+    // "Recent" is measured against OUR OWN clock — how long this bubble has
+    // been waiting — never against msg.created_at. The server stamps that, and
+    // this app is reached from tablets over Tailscale whose clocks drift by
+    // minutes; comparing the two made the fallback fail exactly when the two
+    // machines disagreed, which is a condition the user cannot see and cannot
+    // fix. The window is only here to stop a much older pending send matching
+    // an unrelated identical message.
+    if (Date.now() - entry.at > 120000) continue;
+    dropOptimistic(key);
+    return;
+  }
+}
+
+// A bubble whose send has been pending too long is marked, not removed: the
+// text stays on screen (it is the only copy the user can see) and the existing
+// Retry chip is the affordance. Also prunes entries whose node was wiped by a
+// full re-render — a thread switch, for instance.
+function sweepOptimistic() {
+  const now = Date.now();
+  for (const [cmid, entry] of [...optimisticSends]) {
+    if (!entry.el || !entry.el.isConnected) { optimisticSends.delete(cmid); continue; }
+    const stale = pendingSends.has(cmid) && now - entry.at > PENDING_RETRY_MS;
+    entry.el.classList.toggle('failed', stale);
+  }
 }
 
 function trackPendingSend(frame) {
@@ -1663,12 +1912,14 @@ function clearPendingSend(clientMsgId) {
 // socket, and restored text must not linger into a locked composer.
 function dropAllPendingSends() {
   pendingSends.clear();
+  clearOptimisticSends();
   clearInterval(pendingSweepTimer); pendingSweepTimer = null;
   restoredComposerText = null;
   updateRetryChip();
 }
 
 function updateRetryChip() {
+  sweepOptimistic();
   const chip = dom['retry-chip'];
   if (!chip) return;
   const now = Date.now();
@@ -1710,6 +1961,11 @@ function retryPendingSends() {
 function handleSendRejected(p, reason) {
   // Neutral wording in Safe Mode — a reject reason could hint at the lock.
   toast((state.decoy || !reason) ? t('toast.not_sent') : t('toast.not_sent_reason', { reason }), true);
+  // The message was refused, so its optimistic bubble is a lie. Dropped by id
+  // rather than left to the renderMessages() below: that call only happens for
+  // the ACTIVE thread, and an entry whose node is gone but whose text is still
+  // in the map is exactly what makes a later reconcile match the wrong send.
+  if (p && p.frame) dropOptimistic(p.frame.client_msg_id);
   // Undo the optimistic "thinking" flag. No turn started, so nothing else will
   // ever clear it.
   const tid = p && p.thread_id;
@@ -4120,6 +4376,21 @@ function wireHarnessView() {
 // Render the accumulating reply as MARKDOWN while it streams (rAF-coalesced),
 // so it looks identical to the finalized row — no plain-text→formatted snap.
 const streamBuffers = {};
+// Ids whose stream_done already landed. A late stream_start/stream_chunk for
+// one of these (the router's terminal flush racing the persisted row) must
+// NOT rebuild the bubble the stream_done just retired — that is exactly the
+// duplicate, cursor-bearing copy of a reply seen on staging. Bounded so a
+// long session cannot grow it; 64 covers any plausible in-flight overlap.
+const settledStreamIds = [];
+const SETTLED_STREAM_CAP = 64;
+function markStreamSettled(id) {
+  if (!id) return;
+  const at = settledStreamIds.indexOf(id);
+  if (at !== -1) settledStreamIds.splice(at, 1);
+  settledStreamIds.push(id);
+  while (settledStreamIds.length > SETTLED_STREAM_CAP) settledStreamIds.shift();
+}
+function streamIsSettled(id) { return settledStreamIds.includes(id); }
 const streamPending = new Set();
 let streamRaf = 0;
 const STREAM_PAINT_MS = 100;      // ~10 repaints/sec: reads as smooth, costs 6x less
@@ -4151,6 +4422,56 @@ function scheduleStreamRender(id) {
     if (streamPending.size) setTimeout(() => scheduleStreamRender([...streamPending][0]), STREAM_PAINT_MS);
   });
 }
+/** Open a streaming bubble for `id` in the ACTIVE thread.
+ *
+ *  `id` may be a provisional "run:<runId>" — the live token stream starts
+ *  before any row is persisted — or a real message id (a chunked replay of a
+ *  row that already exists). Nothing here cares which: it is a DOM key and a
+ *  buffer key, and stream_done says which persisted message finally replaces
+ *  it. It is deliberately NOT put in state.messages.
+ *
+ *  Extracted from the stream_start handler so a stream_chunk that arrives
+ *  with no start (reconnect mid-turn) can open the same bubble, built by the
+ *  same code, instead of a hand-rolled second version that would drift.
+ */
+function beginStream(id) {
+  const box = dom['messages'];
+  if (!box) return;
+  // Already open (a duplicate start, or a chunk racing its own start).
+  if (id in streamBuffers) return;
+  state.streamingIds.add(id);
+  streamBuffers[id] = '';
+  // Remove the typing indicator — streaming is the new visual feedback.
+  const typing = box.querySelector('.typing');
+  const bot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
+  const av = avatarNode(bot, 'msg-avatar', state.activeThread);
+  // Same rule as the persisted-message avatar: Safe Mode gets no full-res
+  // affordance (the route 403s a decoy session — the click could only fail).
+  if (state.decoy) delete av.dataset.full;
+  const contentDiv = el('div', { class: 'stream-md' });
+  // dir="auto" here too, or a streaming reply flips direction the moment it
+  // is replaced by the final persisted bubble (which has it).
+  const streamBubble = el('div', { class: 'bubble', dir: 'auto' }, [contentDiv, el('span', { class: 'stream-cursor' })]);
+  const msgEl = el('div', { class: 'msg assistant streaming', dataset: { id } }, [
+    av,
+    el('div', { class: 'msg-col' }, [
+      el('div', { class: 'msg-head' }, [
+        nameSpan('msg-name', (bot && bot.name) ? bot.name : t('common.assistant'), bot),
+      ]),
+      streamBubble,
+      el('div', { class: 'msg-time stream-time', text: clockTime(new Date().toISOString()) }),
+    ]),
+  ]);
+  if (typing) { box.insertBefore(msgEl, typing); typing.remove(); }
+  else box.append(msgEl);
+  // The phase line was parented to the typing indicator that just went away.
+  paintTurnPhase();
+  // Instant snap to the streaming bubble — smooth would be cancelled by
+  // the first chunk arriving on the next rAF.
+  if (isNearBottom()) scrollToBottom(true);
+  else { showScrollButton(true); bumpUnseen(); }
+}
+
 function renderStreamMarkdown(id) {
   const msgEl = dom['messages'].querySelector(`[data-id="${CSS.escape(id)}"]`);
   if (!msgEl) return;
@@ -4188,6 +4509,7 @@ function handleWs(data) {
         // be able to put a full-access bot on a Safe-Mode rail. `safe` is
         // always present on the wire (Bot.to_dict), so this cannot empty the
         // list for a legitimate frame.
+        const prevBots = state.bots;
         state.bots = data.bots.filter((b) => b.visible && (!state.decoy || b.safe));
         const vb = visibleBots();
         // Only repair the selection if one existed and its bot vanished —
@@ -4202,17 +4524,33 @@ function handleWs(data) {
           // the sidebar left the headers' thumbnails on the OLD ?v= URL while
           // their data-full pointed at the (unversioned) new full-res: click a
           // header and the lightbox opened a different picture than the thumb.
-          updateThreadListHeader();
-          renderChatHeader();
-          // Thread-list ROWS too: a snapshotless thread (every pre-feature one)
-          // renders the live avatar in its row, so its thumbnail must repaint or
-          // it drifts from its own (no-cache) full-res the same way the header
-          // did. Rows with a pinned snapshot are immune.
-          renderThreads();
-          // Message avatars in a SNAPSHOTLESS thread render the live avatar
-          // too. Threads with a pin are immune — their faces are frozen.
-          if (state.activeThread && !state.activeThread.avatar_snapshot) {
-            renderMessages(false);
+          //
+          // …but ONLY for the bots whose look actually changed. This frame is
+          // re-broadcast for every bot edit on the box (a model hint, a safe
+          // flag, another bot's nightly avatar draw), and it was repainting the
+          // thread list AND every message in the open chat each time. `changed`
+          // is computed against the roster we were holding a moment ago; on the
+          // first frame (nothing to compare with) it is null and everything
+          // repaints, which keeps the boot path exactly as it was.
+          const changed = changedBotLooks(prevBots, state.bots);
+          if (changed === null || changed.has(state.selectedBotId)) {
+            updateThreadListHeader();
+            // Thread-list ROWS too: a snapshotless thread (every pre-feature
+            // one) renders the live avatar in its row, so its thumbnail must
+            // repaint or it drifts from its own (no-cache) full-res the same
+            // way the header did. Rows with a pinned snapshot are immune.
+            renderThreads();
+          }
+          const activeBotId = state.activeThread?.bot_id || state.selectedBotId;
+          if (changed === null || changed.has(activeBotId)) {
+            renderChatHeader();
+            // Message avatars in a SNAPSHOTLESS thread render the live avatar
+            // too. Threads with a pin are immune — their faces are frozen.
+            // Only the OPEN thread's own bot can change them, so another bot's
+            // nightly avatar draw no longer rebuilds this transcript.
+            if (state.activeThread && !state.activeThread.avatar_snapshot) {
+              renderMessages(false);
+            }
           }
         }
       }
@@ -4225,7 +4563,13 @@ function handleWs(data) {
     case 'thread_update':
       if (!data.thread) break;
       upsertThread(data.thread);
-      if (data.thread.bot_id === state.selectedBotId) renderThreads();
+      // upsertThread() has already re-sorted, so patchThreadRow's position
+      // check is the authority on whether this was a cheap change (title,
+      // preview, updated_at while the row was already on top) or one that
+      // moves the row — it rebuilds the list itself in that case. A plain
+      // renderThreads() here was one of six full repaints per incoming
+      // message; threadRowEl's own comment measures what that cost.
+      if (data.thread.bot_id === state.selectedBotId) patchThreadRow(data.thread.id);
       if (data.thread.id === state.activeThreadId) {
         state.activeThread = { ...state.activeThread, ...data.thread };
         renderChatHeader();
@@ -4246,13 +4590,18 @@ function handleWs(data) {
       if (!data.message) break;
       // Secondary ack: our own send echoed back as the persisted broadcast.
       clearPendingSend(data.client_msg_id || data.message.client_msg_id);
+      // …and take down the optimistic bubble BEFORE appendMessageToView runs,
+      // or the day separator and the consecutive-sender grouping below would
+      // both be computed around a row that is about to disappear.
+      reconcileOptimistic(data);
       const isFinalReply = data.message.role === 'assistant'
         && !(data.message.metadata && data.message.metadata.sub);
       // A delivered reply ends the visible "working" state immediately —
       // don't keep the typing bubble up waiting for the stopped event.
       if (isFinalReply && state.thinking[data.thread_id]) {
         state.thinking[data.thread_id] = false;
-        renderSidebar(); renderThreads();
+        setTurnPhase(data.thread_id, null);
+        renderSidebar(); touchThreadRow(data.thread_id);
       }
       if (data.thread_id === state.activeThreadId) {
         appendMessageToView(data.message);
@@ -4268,7 +4617,7 @@ function handleWs(data) {
         if (data.bot_id && !state.threadBot[data.thread_id]) state.threadBot[data.thread_id] = data.bot_id;
         if (!state.unread[data.thread_id]) {
           state.unread[data.thread_id] = data.message.created_at;
-          renderSidebar(); renderThreads();
+          renderSidebar(); touchThreadRow(data.thread_id);
         }
       }
       break;
@@ -4278,6 +4627,10 @@ function handleWs(data) {
       const on = data.status === 'started';
       state.thinking[data.thread_id] = on;
       if (on) state.progress[data.thread_id] = [];   // fresh turn, fresh log
+      // A finished turn has no phase; a starting one has not reported its
+      // first phase yet, and the previous turn's must not be left standing.
+      setTurnPhase(data.thread_id, null);
+      if (!on) clearStopRequest(data.thread_id);
       renderSidebar();
       // Only repaint the thread list when the turn belongs to the bot whose
       // list is on screen. A background agent's turn used to rebuild the list
@@ -4291,6 +4644,18 @@ function handleWs(data) {
         patchThreadRow(data.thread_id);
       }
       if (data.thread_id === state.activeThreadId) reflectComposerState();
+      break;
+    }
+    case 'turn_status': {
+      // What the gateway is doing right now, before (and between) tokens.
+      // Kept per-thread so a background bot's phase does not paint into the
+      // chat you are reading, and dropped for a thread that is not working —
+      // a phase line under nothing would outlive its turn.
+      // No "is this thread working" guard is needed: paintTurnPhase only
+      // renders where a typing indicator or a streaming bubble exists, so a
+      // phase for a finished (or background) turn has nowhere to land.
+      if (!data.thread_id) break;
+      setTurnPhase(data.thread_id, data.phase || null);
       break;
     }
     case 'progress': {
@@ -4320,8 +4685,12 @@ function handleWs(data) {
       // would otherwise leave that bot's sidebar dot pulsing forever.
       if (data.thread_id && state.thinking[data.thread_id]) {
         state.thinking[data.thread_id] = false;
-        renderSidebar(); renderThreads();
+        renderSidebar(); touchThreadRow(data.thread_id);
       }
+      // A refused/failed abort must give the button back rather than leaving
+      // it disabled until the next turn.
+      clearStopRequest(data.thread_id || state.activeThreadId);
+      setTurnPhase(data.thread_id || state.activeThreadId, null);
       if (data.thread_id === state.activeThreadId) {
         reflectComposerState();
         appendErrorBubble(data.message, data.thread_id);
@@ -4330,69 +4699,75 @@ function handleWs(data) {
     case 'stream_start': {
       if (!data.thread_id || !data.message_id) break;
       if (data.thread_id !== state.activeThreadId) break;
-      state.streamingIds.add(data.message_id);
-      streamBuffers[data.message_id] = '';
-      const box = dom['messages'];
-      // Remove the typing indicator — streaming is the new visual feedback.
-      const typing = box.querySelector('.typing');
-      const bot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
-      const av = avatarNode(bot, 'msg-avatar', state.activeThread);
-      // Same rule as the persisted-message avatar: Safe Mode gets no full-res
-      // affordance (the route 403s a decoy session — the click could only fail).
-      if (state.decoy) delete av.dataset.full;
-      const contentDiv = el('div', { class: 'stream-md' });
-      // dir="auto" here too, or a streaming reply flips direction the moment it
-      // is replaced by the final persisted bubble (which has it).
-      const streamBubble = el('div', { class: 'bubble', dir: 'auto' }, [contentDiv, el('span', { class: 'stream-cursor' })]);
-      const msgEl = el('div', { class: 'msg assistant streaming', dataset: { id: data.message_id } }, [
-        av,
-        el('div', { class: 'msg-col' }, [
-          el('div', { class: 'msg-head' }, [
-            nameSpan('msg-name', (bot && bot.name) ? bot.name : t('common.assistant'), bot),
-          ]),
-          streamBubble,
-          el('div', { class: 'msg-time stream-time', text: clockTime(new Date().toISOString()) }),
-        ]),
-      ]);
-      if (typing) { box.insertBefore(msgEl, typing); typing.remove(); }
-      else box.append(msgEl);
-      // Instant snap to the streaming bubble — smooth would be cancelled by
-      // the first chunk arriving on the next rAF.
-      if (isNearBottom()) scrollToBottom(true);
-      else { showScrollButton(true); bumpUnseen(); }
+      if (streamIsSettled(data.message_id)) break;
+      beginStream(data.message_id);
       break;
     }
     case 'stream_chunk': {
       if (!data.thread_id || !data.message_id) break;
       if (data.thread_id !== state.activeThreadId) break;
-      if (data.message_id in streamBuffers) {
-        streamBuffers[data.message_id] += data.text || '';
-        scheduleStreamRender(data.message_id);
-      }
+      if (streamIsSettled(data.message_id)) break;
+      // A chunk for an id we never saw start is a reconnect landing in the
+      // middle of a live turn: the stream_start went to a socket that no
+      // longer exists. Build the bubble now rather than dropping every token
+      // until the turn ends — the old code silently discarded the whole reply
+      // and only the final persisted message appeared, all at once.
+      if (!(data.message_id in streamBuffers)) beginStream(data.message_id);
+      // `replace` carries the FULL text so far (the server re-sends the whole
+      // buffer when it cannot know what this client already has — a resumed
+      // stream, a repaired truncation). Appending it would duplicate
+      // everything before the gap.
+      if (data.replace) streamBuffers[data.message_id] = data.text || '';
+      else streamBuffers[data.message_id] += data.text || '';
+      scheduleStreamRender(data.message_id);
       break;
     }
     case 'stream_done': {
-      if (!data.message_id) break;
-      const fullMsg = data.message;
-      if (!fullMsg) break;
-      state.streamingIds.delete(data.message_id);
-      delete streamBuffers[data.message_id];
-      streamPainted.delete(data.message_id);
-      announceMessage(fullMsg);
+      // The bubble on screen is keyed by whatever id its chunks arrived
+      // under: a PROVISIONAL "run:<id>" while the reply was only tokens in
+      // flight, or the real message id for a replayed/chunked persisted row.
+      // provisional_id is how the server says "the row you have been painting
+      // is this one, and its real id is message_id".
+      const streamId = data.provisional_id || data.message_id;
+      if (!streamId) break;
+      const fullMsg = data.message || null;
+      // Release BOTH ids: message_id is unused as a buffer key in the
+      // provisional case, but a defensive delete costs nothing and a leaked
+      // streamPainted entry is exactly the per-reply leak its comment warns of.
+      for (const id of new Set([streamId, data.message_id].filter(Boolean))) {
+        state.streamingIds.delete(id);
+        delete streamBuffers[id];
+        streamPainted.delete(id);
+        markStreamSettled(id);
+      }
+      setTurnPhase(data.thread_id, null);
+      clearStopRequest(data.thread_id);
+      if (fullMsg) announceMessage(fullMsg);
       // Streamed reply delivered — clear the working state right away.
       if (state.thinking[data.thread_id]) {
         state.thinking[data.thread_id] = false;
-        renderSidebar(); renderThreads();
+        renderSidebar(); touchThreadRow(data.thread_id);
         if (data.thread_id === state.activeThreadId) reflectComposerState();
       }
       if (data.thread_id === state.activeThreadId) {
-        const existingEl = dom['messages'].querySelector(`[data-id="${CSS.escape(data.message_id)}"]`);
+        const existingEl = dom['messages'].querySelector(`[data-id="${CSS.escape(streamId)}"]`);
+        if (!fullMsg) {
+          // Aborted or errored run: there is no persisted row to swap in, and
+          // half a sentence left sitting under a live cursor reads as a reply
+          // still arriving. Take the placeholder away; if the server made a
+          // failed-reply row it arrives on its own as an ordinary 'message'.
+          if (existingEl) existingEl.remove();
+          refreshTyping();
+          break;
+        }
         if (existingEl) {
           // Only the ACTIVE thread's array gets the message — pushing a
           // background thread's reply here would bleed it into this chat on the
           // next full re-render. Push BEFORE building the node: messageEl only
           // offers "Regenerate" when the message is the last one in state.
-          if (!state.messages.some((m) => m.id === data.message_id)) {
+          // Note the id used here is the REAL one (fullMsg.id / message_id) —
+          // a provisional id must never reach state.messages.
+          if (!state.messages.some((m) => m.id === fullMsg.id)) {
             state.messages.push(fullMsg);
             state.messages.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
           }
@@ -4409,13 +4784,13 @@ function handleWs(data) {
           // message (appendMessageToView pushes into state.messages itself).
           appendMessageToView(fullMsg);
         }
-      } else if (fullMsg.role !== 'user' && !state.unread[data.thread_id]) {
+      } else if (fullMsg && fullMsg.role !== 'user' && !state.unread[data.thread_id]) {
         // Streamed reply landed in a background thread — mark it unread, same
         // as the plain 'message' path does. Backfill threadBot first so the
         // sidebar dot resolves for bots whose threads we never loaded.
         if (data.bot_id && !state.threadBot[data.thread_id]) state.threadBot[data.thread_id] = data.bot_id;
         state.unread[data.thread_id] = fullMsg.created_at;
-        renderSidebar(); renderThreads();
+        renderSidebar(); touchThreadRow(data.thread_id);
       }
       break;
     }
@@ -4580,6 +4955,7 @@ function initModalFocusGuard() {
 function wireEvents() {
   initModalFocusGuard();
   dom['send'].addEventListener('click', sendMessage);
+  dom['stop'].addEventListener('click', stopReply);
   dom['retry-chip-btn'].addEventListener('click', retryPendingSends);
   dom['input'].addEventListener('input', () => { autosize(); updateSendEnabled(); });
   dom['input'].addEventListener('keydown', (e) => {
@@ -5881,6 +6257,9 @@ function cmdkActions() {
   } else {
     a.push({ icon: '📤', label: t('cmdk.action_send_file'), run: () => openDrop() });
   }
+  // canStopReply() already carries the Safe-Mode rule and the "is anything
+  // running" one, so the palette cannot offer a Stop the composer would not.
+  if (canStopReply()) a.push({ icon: '⏹', label: t('cmdk.action_stop'), run: () => stopReply() });
   if (state.auth && state.auth.pinSet && !state.decoy) a.push({ icon: '🔒', label: t('cmdk.action_lock'), run: () => lockNow() });
   return a;
 }

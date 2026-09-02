@@ -114,6 +114,8 @@
     "placeholder_no_thread": "チャットを選ぶと入力できます",
     "aria": "メッセージ",
     "send": "送信",
+    "stop": "返信を停止",
+    "stopping": "停止しています…",
     "waiting": "返信を待っています…",
     "offline": "オフライン — 再接続中…",
     "chars": {
@@ -152,6 +154,16 @@
     "hint_hide": "途中経過を隠す ▾",
     "title": "クリックするとモデルの動きを確認できます",
     "idle": "動きを待っています…"
+  },
+  "turn": {
+    "phase_preparing_context": "コンテキストを準備しています…",
+    "phase_preparing_workspace": "ワークスペースを準備しています…",
+    "phase_starting_model": "モデルを読み込んでいます…",
+    "phase_waiting_model": "モデルの応答を待っています…",
+    "phase_streaming": "書いています…",
+    "phase_finishing": "仕上げています…",
+    "phase_tool": "{name} を使用しています…",
+    "phase_generic": "処理しています…"
   },
   "settings": {
     "title": "設定",
@@ -470,6 +482,7 @@
     "action_theme": "テーマを切り替え",
     "action_search": "メッセージを検索",
     "action_recovery": "復元とエクスポート",
+    "action_stop": "返信を停止",
     "action_lock": "今すぐロック",
     "action_settings": "設定",
     "action_health": "ヘルスダッシュボード",

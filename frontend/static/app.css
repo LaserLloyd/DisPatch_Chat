@@ -419,6 +419,16 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 }
 .send-btn:not(:disabled) { background: var(--accent); color: #fff; }
 .send-btn:disabled { cursor: not-allowed; }
+/* Stop: same footprint as Send so the row does not reflow when it appears,
+   but deliberately not accent-coloured — it is a way out of something, not
+   the primary action, and it sits next to the button people aim for. */
+.stop-btn {
+  width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg-hover); color: var(--warning-text); font-size: 16px;
+  flex-shrink: 0; transition: background .12s, color .12s, opacity .12s;
+}
+.stop-btn:not(:disabled):hover { background: var(--error); border-color: var(--error); color: #fff; }
+.stop-btn:disabled { cursor: progress; opacity: .55; }
 .composer-foot { display: flex; justify-content: space-between; min-height: 14px; margin-top: 4px; padding: 0 4px; }
 .char-count, .waiting { font-size: 11px; color: var(--text-muted); }
 .waiting { color: var(--warning-text); }
@@ -574,6 +584,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .lightbox img { max-width: 94vw; max-height: 94vh; border-radius: 8px; }
 
 /* ===================== Streaming ===================== */
+/* A user message that is on screen but not yet acknowledged by the server.
+   Deliberately subtle: the text must read exactly as it will once it lands —
+   this says “in flight”, not “different”. `.failed` is the 20s mark, where the
+   Retry chip in the composer becomes the thing to act on. */
+.msg.pending .bubble { opacity: .62; }
+.msg.pending .msg-time { opacity: .62; font-style: italic; }
+.msg.failed .bubble { opacity: 1; border: 1px solid var(--error); }
+.msg.failed .msg-time { color: var(--error); font-style: normal; }
+/* The gateway's current phase, under the dots (or under the streaming reply
+   once tokens start). Muted and small: it is a reassurance, not content. */
+.turn-phase {
+  font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .msg.streaming .bubble { padding-bottom: 8px; }
 .stream-cursor {
   display: inline-block; width: 2px; height: 1.1em;
@@ -891,7 +915,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
   /* 16px stops iOS Safari from auto-zooming the page on input focus. */
   #input { font-size: 16px; min-height: 44px; }
-  .send-btn { width: 44px; height: 44px; }
+  .send-btn, .stop-btn { width: 44px; height: 44px; }
   .attach-btn { width: 44px; height: 44px; }
 
   /* --- Touch targets: comfortable finger sizes on phones/tablets --- */

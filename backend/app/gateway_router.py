@@ -86,6 +86,54 @@ GAP_BACKFILL_DELAY_S = 6.0
 # then served it in /api/health — unbounded growth from remote input.
 KNOWN_ROLES = ("user", "assistant", "system", "tool", "toolResult")
 
+# --- live deltas ----------------------------------------------------------- #
+#
+# `chat` events are the model's output as it is produced. They are sent
+# `dropIfSlow`, carry no per-frame sequence, and are explicitly a DISPLAY
+# channel: the transcript event (`session.message`) remains the only thing
+# anything is ever persisted from. A dropped delta must therefore be able to
+# cost nothing, which is why the text a client receives is derived from the
+# CUMULATIVE `message.content[].text` snapshot on every event rather than from
+# `deltaText`. Accumulating deltaText makes one dropped frame corrupt the rest
+# of the reply, silently, with no way to notice.
+
+# Smallest gap between two outgoing chunk frames for one run. The gateway
+# already paces itself, but a fast local model still out-runs what a phone can
+# usefully paint, and each chunk is a fan-out to every connected device. The
+# last chunk is always flushed, so coalescing costs latency, never text.
+CHUNK_MIN_INTERVAL_S = 0.1
+
+# How long a run's provisional bubble survives its own terminal event without a
+# persisted row arriving. After this the client is told the placeholder will
+# never be filled, rather than being left with a bubble that streams and then
+# hangs there for ever.
+RUN_SETTLE_S = 10.0
+
+# How many run records to keep. Bounded for the same reason the seq cursors
+# are: the subscription is a firehose, and most runs on this box are not ours.
+RUN_CACHE_MAX = 512
+
+
+class _ChatRun:
+    """One in-flight run's live-delta state.
+
+    `target` is the resolved (thread_id, bot_id) or None for a run belonging to
+    a session DisPatch does not own — cached either way, because resolving hits
+    the database and a foreign session emits a delta several times a second.
+    """
+
+    __slots__ = ("target", "sent", "pending", "replace", "flush",
+                 "started", "settle")
+
+    def __init__(self, target: tuple[str, str] | None) -> None:
+        self.target = target
+        self.sent: str = ""          # sanitized cumulative text already sent
+        self.pending: str | None = None
+        self.replace: bool = False   # the gateway said this is not an extension
+        self.flush: asyncio.Task | None = None
+        self.started: bool = False   # stream_start has been broadcast
+        self.settle: asyncio.Task | None = None
+
 
 def text_of(message: dict) -> str:
     """The visible text of a gateway message.
@@ -167,10 +215,40 @@ class SessionRouter:
         deliver: Callable[..., Awaitable[Any]],
         *,
         client: Any = None,
+        broadcast: Callable[[dict], Awaitable[None]] | None = None,
+        sanitize: Callable[[str], str] | None = None,
+        open_stream: Callable[[str, str], None] | None = None,
+        close_stream: Callable[[str, str], bool] | None = None,
+        stream_open: Callable[[str, str], bool] | None = None,
     ) -> None:
         self._resolve = resolve_thread
         self._deliver = deliver
         self._client = client
+        # Live-delta wiring. All four are optional: with none of them the
+        # router behaves exactly as it did before deltas existed, which is what
+        # keeps the transcript path (the only path anything is persisted from)
+        # provably unaffected by this feature.
+        #
+        # `sanitize` is NOT a nicety. Delta text is raw model output — it still
+        # carries `[[media:/abs/path]]`, `[[doc:…]]`, `[[pic:…]]` and
+        # `:react:…:` markers, and the internal-context scaffolding the persist
+        # chokepoint removes. Broadcasting it unsanitized would put absolute
+        # paths and internal markers on a LOCKED family device, which the
+        # persisted copy has never done.
+        self._broadcast = broadcast
+        self._sanitize = sanitize or (lambda t: t)
+        self._open_stream = open_stream
+        self._close_stream = close_stream
+        self._stream_open = stream_open
+        # runId -> _ChatRun, LRU-bounded (see _run_for).
+        self._runs: OrderedDict[str, _ChatRun] = OrderedDict()
+        # Off-consumer repairs (truncation refetches). Held so the garbage
+        # collector cannot drop a task mid-flight and lose the message.
+        self._detached: set[asyncio.Task] = set()
+        # sessionKey -> the newest `deltaCursor` the gateway gave us. A forward
+        # catch-up from a cursor replays exactly what was missed; the backward
+        # page walk is the fallback for when the cursor is too old to serve.
+        self._delta_cursor: OrderedDict[str, str] = OrderedDict()
         # sessionKey -> last messageSeq we processed. The gap detector.
         # sessionKey -> highest messageSeq seen. LRU-bounded (see _record_seq).
         self._seq: OrderedDict[str, int] = OrderedDict()
@@ -187,7 +265,12 @@ class SessionRouter:
                       "gaps_empty": 0, "gap_backfills_run": 0,
                       "backfill_attempts": 0, "deduped": 0,
                       "error_held": 0, "error_suppressed": 0,
-                      "error_released": 0}
+                      "error_released": 0,
+                      "streams_started": 0, "chunks_sent": 0,
+                      "streams_orphaned": 0, "status_frames": 0,
+                      "late_chunks_dropped": 0,
+                      "refetch_pending": 0, "refetch_failed": 0,
+                      "forward_catchups": 0, "cursor_resets": 0}
 
     def _record_seq(self, session_key: str, seq: int) -> None:
         """Advance one session's cursor, evicting the least-recently-used."""
@@ -198,6 +281,16 @@ class SessionRouter:
             self._seq.popitem(last=False)
 
     async def handle(self, event: str, payload: dict) -> None:
+        # Live, display-only families first. They never persist and never
+        # touch the seq cursor — a `chat` delta is the same words the
+        # transcript event will carry moments later, and treating it as a
+        # second source of truth is how you get every reply twice.
+        if event == "chat":
+            await self._handle_chat(payload)
+            return
+        if event in ("session.tool", "agent"):
+            await self._handle_tool(payload)
+            return
         if event != "session.message":
             return
         session_key = payload.get("sessionKey") or ""
@@ -279,7 +372,239 @@ class SessionRouter:
             log.info("gateway-ws suppressed transient error placeholder "
                      "session=%s (run continued)", session_key)
         await self._deliver_message(session_key, thread_id, bot_id, message,
-                                    live=True)
+                                    live=True, defer_refetch=True)
+
+    # -- live deltas ------------------------------------------------------- #
+
+    def provisional_id(self, run_id: str) -> str:
+        """The message id a client uses for a bubble that has no row yet."""
+        return f"run:{run_id}"
+
+    async def _run_for(self, run_id: str, session_key: str) -> _ChatRun | None:
+        """The cached state for one run, resolving its thread exactly once.
+
+        The negative answer is cached too. Most runs on this gateway are not
+        DisPatch conversations, and a foreign run emits several deltas a
+        second — re-resolving each one would put a database read on the event
+        loop for every frame of every session on the box.
+        """
+        run = self._runs.get(run_id)
+        if run is None:
+            run = _ChatRun(await self._resolve(session_key))
+            self._runs[run_id] = run
+            while len(self._runs) > RUN_CACHE_MAX:
+                _, evicted = self._runs.popitem(last=False)
+                self._cancel_run_tasks(evicted)
+        self._runs.move_to_end(run_id)
+        return run
+
+    @staticmethod
+    def _cancel_run_tasks(run: _ChatRun) -> None:
+        for task in (run.flush, run.settle):
+            if task is not None and not task.done():
+                task.cancel()
+
+    async def _emit(self, frame: dict) -> None:
+        if self._broadcast is None:
+            return
+        try:
+            await self._broadcast(frame)
+        except Exception:
+            # A display frame that cannot be sent must never take the event
+            # pump down with it — the transcript path rides the same pump.
+            log.exception("gateway-ws could not broadcast %s", frame.get("type"))
+
+    async def _handle_chat(self, payload: dict) -> None:
+        run_id = payload.get("runId")
+        session_key = payload.get("sessionKey") or ""
+        if not isinstance(run_id, str) or not run_id or not session_key:
+            return
+        state = payload.get("state")
+        if state not in ("delta", "status", "final", "aborted", "error"):
+            return
+        run = await self._run_for(run_id, session_key)
+        if run is None or run.target is None:
+            return
+        thread_id, bot_id = run.target
+        if state == "status":
+            phase = payload.get("phase")
+            if isinstance(phase, str) and phase:
+                self.stats["status_frames"] += 1
+                await self._emit({"type": "turn_status", "thread_id": thread_id,
+                                  "bot_id": bot_id, "run_id": run_id,
+                                  "phase": phase})
+            return
+        if state == "delta":
+            message = payload.get("message")
+            text = text_of(message) if isinstance(message, dict) else ""
+            if payload.get("replace"):
+                run.replace = True
+            await self._queue_chunk(run_id, run, text)
+            return
+        # Terminal. Flush whatever is buffered, then give the transcript event
+        # a bounded moment to land the real row before the bubble is retired.
+        await self._flush_chunk(run_id, run, force=True)
+        await self._arm_settle(run_id, run, state)
+
+    async def _queue_chunk(self, run_id: str, run: _ChatRun, text: str) -> None:
+        """Record the newest cumulative text; send it now or shortly."""
+        run.pending = text
+        if run.flush is not None and not run.flush.done():
+            return                      # a flush is already scheduled
+        await self._flush_chunk(run_id, run)
+
+    async def _flush_chunk(self, run_id: str, run: _ChatRun,
+                           *, force: bool = False) -> None:
+        if run.pending is None:
+            return
+        pending, run.pending = run.pending, None
+        # SANITIZE THE CUMULATIVE TEXT, THEN DIFF. Doing it the other way round
+        # — sanitizing each chunk — leaks any directive that straddles two
+        # chunks, which is precisely why streaming frames were kept away from
+        # Safe Mode until now.
+        clean = self._sanitize(pending)
+        replace, run.replace = run.replace, False
+        if clean == run.sent:
+            return
+        if not replace and clean.startswith(run.sent):
+            chunk = clean[len(run.sent):]
+            frame_extra: dict = {}
+        else:
+            chunk = clean
+            frame_extra = {"replace": True}
+        run.sent = clean
+        if not chunk:
+            return
+        thread_id, bot_id = run.target            # type: ignore[misc]
+        prov = self.provisional_id(run_id)
+        if (run.started and self._stream_open is not None
+                and not self._stream_open(thread_id, prov)):
+            # The persisted row already landed and its stream_done swapped the
+            # bubble for the real message. The run's own terminal event still
+            # flushes what it holds (the final message text, which can differ
+            # from the delta stream by a stripped marker), and that chunk would
+            # RE-CREATE the bubble the client just retired — seen on staging as
+            # a second, cursor-bearing copy of the whole reply under the real
+            # one. Nothing after the row is worth painting; retire the run.
+            self.stats["late_chunks_dropped"] += 1
+            self._runs.pop(run_id, None)
+            self._cancel_run_tasks(run)
+            return
+        if not run.started:
+            run.started = True
+            self.stats["streams_started"] += 1
+            if self._open_stream is not None:
+                self._open_stream(thread_id, prov)
+            await self._emit({"type": "stream_start", "thread_id": thread_id,
+                              "bot_id": bot_id, "message_id": prov})
+        self.stats["chunks_sent"] += 1
+        await self._emit({"type": "stream_chunk", "thread_id": thread_id,
+                          "bot_id": bot_id, "message_id": prov,
+                          "text": chunk, **frame_extra})
+        if not force:
+            run.flush = asyncio.create_task(self._flush_later(run_id))
+
+    async def _flush_later(self, run_id: str) -> None:
+        """Hold the next chunk for one interval, then send whatever arrived."""
+        try:
+            await asyncio.sleep(CHUNK_MIN_INTERVAL_S)
+        except asyncio.CancelledError:
+            return
+        run = self._runs.get(run_id)
+        if run is None:
+            return
+        run.flush = None
+        try:
+            await self._flush_chunk(run_id, run)
+        except Exception:
+            log.exception("gateway-ws chunk flush failed for run %s", run_id)
+
+    async def _arm_settle(self, run_id: str, run: _ChatRun, state: str) -> None:
+        """After a run ends, retire its provisional bubble if no row lands."""
+        if not run.started:
+            self._runs.pop(run_id, None)
+            self._cancel_run_tasks(run)
+            return
+        if run.settle is not None and not run.settle.done():
+            return
+        run.settle = asyncio.create_task(self._settle(run_id, state))
+
+    async def _settle(self, run_id: str, state: str) -> None:
+        # An aborted or errored run is retired at once: there is no row coming,
+        # and ten seconds of a bubble that has visibly stopped is ten seconds
+        # of the client believing more text is on the way.
+        if state == "final":
+            try:
+                await asyncio.sleep(RUN_SETTLE_S)
+            except asyncio.CancelledError:
+                return
+        run = self._runs.pop(run_id, None)
+        if run is None or run.target is None:
+            return
+        # Only the flush timer. `run.settle` IS this task — cancelling it here
+        # cancels the coroutine mid-retirement, and the bubble it was about to
+        # close stays open for ever.
+        run.settle = None
+        self._cancel_run_tasks(run)
+        thread_id, bot_id = run.target
+        prov = self.provisional_id(run_id)
+        # close_stream returns False when the persist chokepoint already
+        # claimed this provisional id — the row landed and sent its own
+        # stream_done, so there is nothing to retire.
+        if self._close_stream is not None and not self._close_stream(thread_id, prov):
+            return
+        self.stats["streams_orphaned"] += 1
+        log.info("gateway-ws run %s ended (%s) with no persisted row; "
+                 "retiring the provisional bubble", run_id, state)
+        await self._emit({"type": "stream_done", "thread_id": thread_id,
+                          "bot_id": bot_id, "message_id": prov,
+                          "message": None, "provisional_id": prov})
+
+    async def _handle_tool(self, payload: dict) -> None:
+        """Turn a tool lifecycle event into a display-only phase line."""
+        if payload.get("stream") != "tool":
+            return
+        data = payload.get("data")
+        if not isinstance(data, dict) or data.get("phase") != "start":
+            return
+        name = data.get("name") or data.get("tool") or data.get("toolName")
+        run_id = payload.get("runId")
+        session_key = payload.get("sessionKey") or ""
+        if not isinstance(name, str) or not name or not session_key:
+            return
+        if not isinstance(run_id, str) or not run_id:
+            return
+        run = await self._run_for(run_id, session_key)
+        if run is None or run.target is None:
+            return
+        thread_id, bot_id = run.target
+        self.stats["status_frames"] += 1
+        await self._emit({"type": "turn_status", "thread_id": thread_id,
+                          "bot_id": bot_id, "run_id": run_id,
+                          "phase": f"tool:{name}"})
+
+    async def open_provisional(self, run_id: str, session_key: str,
+                               text: str) -> None:
+        """Re-open a run's bubble after a reconnect, from its buffered text.
+
+        The client has been disconnected from the delta stream, so what it has
+        on screen is whatever arrived before the socket dropped — which may be
+        nothing, or may be stale. A `replace` carrying the whole buffer is the
+        only shape that is correct from either starting point.
+        """
+        run = await self._run_for(run_id, session_key)
+        if run is None or run.target is None or not text.strip():
+            return
+        run.sent = ""
+        run.replace = True
+        run.pending = text
+        await self._flush_chunk(run_id, run, force=True)
+
+    def cancel_streams(self) -> None:
+        """Drop every run's timers. Shutdown only."""
+        for run in self._runs.values():
+            self._cancel_run_tasks(run)
+        self._runs.clear()
 
     def _schedule_gap(self, session_key: str, thread_id: str, bot_id: str,
                       last: int) -> None:
@@ -388,9 +713,41 @@ class SessionRouter:
             log.exception("gateway-ws error placeholder delivery failed "
                           "session=%s", session_key)
 
+    def _spawn(self, coro) -> None:
+        """Run a coroutine detached, holding a reference so it is not GC'd."""
+        task = asyncio.create_task(coro)
+        self._detached.add(task)
+        task.add_done_callback(self._detached.discard)
+
+    async def drain_detached(self) -> None:
+        """Wait for the off-consumer repairs. Tests and shutdown."""
+        while self._detached:
+            await asyncio.gather(*list(self._detached), return_exceptions=True)
+
+    async def _deliver_refetched(self, session_key: str, thread_id: str,
+                                 bot_id: str, message: dict, mid: str,
+                                 projected: str, live: bool) -> None:
+        """Refetch a body the projection cut short, then deliver it."""
+        try:
+            full = await self._client.full_text(session_key, mid)
+        except Exception:
+            full = None
+        if full:
+            self.stats["refetched"] += 1
+            text = full
+        else:
+            self.stats["truncation_unrepaired"] += 1
+            self.stats["refetch_failed"] += 1
+            log.error("UNREPAIRED TRUNCATION session=%s id=%s len=%d",
+                      session_key, mid, len(projected))
+            text = projected
+        await self._deliver_and_count(session_key, thread_id, bot_id, message,
+                                      text, live)
+
     async def _deliver_message(self, session_key: str, thread_id: str,
                                bot_id: str, message: dict,
-                               *, live: bool = False) -> Any:
+                               *, live: bool = False,
+                               defer_refetch: bool = False) -> Any:
         text = text_of(message)
         if not text.strip():
             return None
@@ -401,6 +758,19 @@ class SessionRouter:
         if self._client is not None and self._client.blocks_truncated(message):
             oc = message.get("__openclaw") or {}
             mid = oc.get("id")
+            if defer_refetch and mid:
+                # OFF THE SINGLE CONSUMER. `full_text` is a round trip to the
+                # gateway; awaiting it here stops the one task that drains the
+                # event queue for EVERY session, so one long reply on one
+                # thread stalls delivery everywhere and fills the queue (which
+                # is what `dropped_local` counts). One task per truncated
+                # message instead: only these — a rare case — lose their place
+                # in the session's order, and delivery is idempotent by
+                # source_id, so nothing can be duplicated by the reordering.
+                self.stats["refetch_pending"] += 1
+                self._spawn(self._deliver_refetched(
+                    session_key, thread_id, bot_id, message, mid, text, live))
+                return None
             full = await self._client.full_text(session_key, mid) if mid else None
             if full:
                 self.stats["refetched"] += 1
@@ -414,6 +784,12 @@ class SessionRouter:
                 log.error("UNREPAIRED TRUNCATION session=%s id=%s len=%d",
                           session_key, mid, len(text))
 
+        return await self._deliver_and_count(session_key, thread_id, bot_id,
+                                             message, text, live)
+
+    async def _deliver_and_count(self, session_key: str, thread_id: str,
+                                 bot_id: str, message: dict, text: str,
+                                 live: bool) -> Any:
         # `live` travels with the message: a backfilled reply is history being
         # replayed, and the deliverer needs to know — it may sit behind later
         # turns (trailing-run dedup cannot see it) and its `:react:` markers
@@ -510,33 +886,136 @@ class SessionRouter:
             if await self._deliver_message(session_key, thread_id, bot_id, m):
                 self.stats["backfilled"] += 1
 
-    async def resync_known(self) -> None:
-        """Resync every session we hold a cursor for. The reconnect entry point.
+    def _record_cursor(self, session_key: str, cursor: Any) -> None:
+        if not isinstance(cursor, str) or not cursor:
+            return
+        self._delta_cursor[session_key] = cursor
+        self._delta_cursor.move_to_end(session_key)
+        while len(self._delta_cursor) > SEQ_CURSOR_MAX:
+            self._delta_cursor.popitem(last=False)
 
-        First connect: `_seq` is empty, so this is a no-op. Reconnect: it holds
-        the sessions we were tracking, so we backfill exactly those and nothing
-        else — bounded by construction, and the legacy transcript sweep plus
-        source_id dedup make any overlap harmless.
-        """
-        await self.resync(list(self._seq.keys()))
+    def cursor_for(self, session_key: str) -> str | None:
+        return self._delta_cursor.get(session_key)
 
-    async def resync(self, session_keys: list[str]) -> None:
-        """Backfill sessions after a reconnect.
-
-        Subscriptions die with the connection, so anything emitted while
-        disconnected was simply never sent — there is no queue. The cursor is
-        the only way to notice, and history is the only way to recover.
-        """
-        for key in session_keys:
-            last = self._seq.get(key)
-            if last is None:
+    async def _replay(self, session_key: str, thread_id: str, bot_id: str,
+                      messages: Any) -> None:
+        """Deliver a page of history as a replay (never live)."""
+        if not isinstance(messages, list):
+            return
+        for m in messages:
+            if not isinstance(m, dict) or m.get("role") != "assistant":
                 continue
-            target = await self._resolve(key)
-            if target is None:
-                continue
-            thread_id, bot_id = target
+            seq = (m.get("__openclaw") or {}).get("seq")
+            if isinstance(seq, int):
+                self._record_seq(session_key, seq)
+            self.stats["backfill_attempts"] += 1
+            if await self._deliver_message(session_key, thread_id, bot_id, m):
+                self.stats["backfilled"] += 1
+
+    async def _reopen_inflight(self, session_key: str, envelope: dict) -> None:
+        """Put a still-running turn's bubble back on screen after a reconnect.
+
+        Without this the client shows a bubble that stopped mid-sentence when
+        the socket dropped and never moves again — the run is alive on the
+        gateway and its remaining deltas went to a subscription that no longer
+        existed.
+        """
+        run = envelope.get("inFlightRun")
+        if not isinstance(run, dict):
+            return
+        run_id, text = run.get("runId"), run.get("text")
+        if not isinstance(run_id, str) or not run_id:
+            return
+        await self.open_provisional(run_id, session_key,
+                                    text if isinstance(text, str) else "")
+
+    async def catch_up(self, session_key: str, *, force: bool = False) -> None:
+        """Recover one session after a gap in the socket.
+
+        THREE ROADS, cheapest first. A `deltaCursor` gets a bounded forward
+        replay of exactly what was missed. A `reset` (the cursor is too old to
+        serve) or a session with only a seq cursor falls back to the backward
+        page walk. A session with NEITHER — which is every session whose turn
+        was dispatched but whose first transcript event never arrived, i.e.
+        precisely the runs a disconnect strands — used to be skipped entirely
+        and is now given a bounded tail read.
+        """
+        if self._client is None:
+            return
+        target = await self._resolve(session_key)
+        if target is None:
+            return
+        thread_id, bot_id = target
+        cursor = self._delta_cursor.get(session_key)
+        if cursor:
+            try:
+                res = await self._client.history_from_cursor(session_key, cursor)
+            except Exception:
+                log.warning("forward catch-up failed for %s", session_key,
+                            exc_info=True)
+                res = {}
+            if res.get("kind") == "delta":
+                self.stats["forward_catchups"] += 1
+                self._record_cursor(session_key, res.get("deltaCursor"))
+                await self._replay(session_key, thread_id, bot_id,
+                                   res.get("messages"))
+                await self._reopen_inflight(session_key, res)
+                return
+            if res.get("kind") == "reset":
+                # Not an error: the cursor is simply older than the window the
+                # gateway keeps. Falling back is the documented recovery, and
+                # returning here would make a reset a silent no-repair.
+                self.stats["cursor_resets"] += 1
+                force = True
+        last = self._seq.get(session_key)
+        if last is not None:
             # No upper bound: a reconnect has no idea how far the session moved
             # while the socket was down, and `last + 50` was a guess that
             # DISCARDED anything past it. The walk back to the cursor is what
             # bounds the read now.
-            await self._backfill(key, thread_id, bot_id, last, None)
+            await self._backfill(session_key, thread_id, bot_id, last, None)
+        elif not force:
+            return
+        try:
+            res = await self._client.history_tail(session_key,
+                                                  limit=BACKFILL_PAGE)
+        except Exception:
+            log.warning("tail catch-up failed for %s", session_key,
+                        exc_info=True)
+            return
+        self._record_cursor(session_key, res.get("deltaCursor"))
+        if last is None:
+            await self._replay(session_key, thread_id, bot_id,
+                               res.get("messages"))
+        await self._reopen_inflight(session_key, res)
+
+    async def resync_known(self) -> None:
+        """Resync every session we hold a cursor for. The reconnect entry point.
+
+        First connect: both cursor maps are empty, so this is a no-op.
+        Reconnect: they hold the sessions we were tracking, so we recover
+        exactly those and nothing else — bounded by construction, and
+        source_id dedup makes any overlap harmless.
+        """
+        keys = list(self._seq.keys())
+        keys += [k for k in self._delta_cursor if k not in self._seq]
+        await self.resync(keys)
+
+    async def resync(self, session_keys: list[str], *,
+                     force: bool = False) -> None:
+        """Backfill sessions after a reconnect.
+
+        Subscriptions die with the connection, so anything emitted while
+        disconnected was simply never sent — there is no queue. History is the
+        only way to recover it.
+
+        ``force`` covers a session we have never received an event for: a turn
+        accepted just before the socket dropped has no seq cursor at all, so
+        the cursor-less skip meant the one case a reconnect exists for was the
+        one it declined to repair.
+        """
+        for key in session_keys:
+            try:
+                await self.catch_up(key, force=force)
+            except Exception:
+                log.exception("resync failed for %s", key)
