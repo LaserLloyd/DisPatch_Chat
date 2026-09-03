@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import httpx
 from fastapi import (
     Body,
     Depends,
@@ -51,7 +52,7 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -1614,7 +1615,13 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # braces here on top of _require_terminal's own gate.
                         # Same for the harness: a headless job runs a shell
                         # agent in the operator's home directory.
-                        "/api/terminal", "/api/harness",
+                        # StudioForge is not code execution, but its panel is
+                        # an UNAUTHENTICATED admin surface for the LLM rig:
+                        # anyone who learns the address from a Safe-Mode device
+                        # can load and unload models on it. The status route
+                        # discloses that address, so it is operator-only too --
+                        # belt-and-braces on top of _require_studioforge.
+                        "/api/terminal", "/api/harness", "/api/studioforge",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
@@ -5937,6 +5944,7 @@ async def auth_status(request: Request):
         # show, and every other state is exactly where it is not.
         "features": ({"terminal": terminal_available(),
                       "harness": harness_available(),
+                      "studioforge": studioforge_available(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not cfg.pin_set) else {}),
@@ -8894,6 +8902,15 @@ def harness_available() -> bool:
     return SETTINGS.harness_enabled and auth.load().pin_set
 
 
+def studioforge_available() -> bool:
+    """Flag ON, an address configured, and a PIN set. The URL half matters as
+    much as the flag: with no address there is nothing to frame, and the panel
+    it points at has no authentication of its own, so the PIN gate is the only
+    thing standing between a passer-by and the rig's admin UI."""
+    return (SETTINGS.studioforge_enabled and bool(SETTINGS.studioforge_url)
+            and auth.load().pin_set)
+
+
 def _require_terminal(request: Request) -> None:
     if not SETTINGS.terminal_enabled:
         raise HTTPException(404, "Terminal disabled")
@@ -9298,6 +9315,80 @@ async def harness_cancel_job(request: Request):
 
 
 # --------------------------------------------------------------------------- #
+# StudioForge control panel (the LLM rig's own web UI, embedded)
+#
+# DisPatch does exactly three things here: say whether the feature is on, hand
+# the client the configured address, and answer "did a GET of it come back".
+# What it deliberately does NOT do:
+#
+#   * proxy. The panel's asset paths are absolute, so a sub-path mount cannot
+#     work -- but the real reason is WHO could reach the rig. Framed, the
+#     client device must itself be on the rig's network; proxied, every LAN
+#     device on :8765 and everything behind the Tailscale-Serve front door
+#     would inherit full admin on a panel that has no password.
+#   * touch the inference port, take a GPU lease, or call any mutating route.
+#     A benchmark may be holding the rig; a status widget must never be able to
+#     disturb it. Read-only GET of the panel URL, nothing else, ever.
+#   * hold a PIN or an API key. There is no credential in this feature.
+# --------------------------------------------------------------------------- #
+
+# How long a reachability answer is reused. A repainting client (or several
+# devices) must not turn a status widget into a poll of somebody else's box;
+# 15s is short enough that "the rig came back" shows up promptly and long
+# enough that a render loop costs one request, not hundreds.
+_SF_PROBE_TTL = 15.0
+_SF_PROBE_TIMEOUT = 3.0
+_sf_probe: tuple[float, bool] | None = None   # (checked_at, reachable)
+_sf_probe_lock = asyncio.Lock()
+
+
+def _require_studioforge(request: Request) -> None:
+    """404 when the feature is off or unconfigured (an install that was never
+    told the panel's address must not even admit the route exists), 403 with no
+    PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    if not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url:
+        raise HTTPException(404, "StudioForge panel disabled")
+    if not auth.load().pin_set:
+        raise HTTPException(403, _NO_PIN_MSG)
+    _deny_decoy_mutation(request)
+
+
+async def _studioforge_reachable() -> tuple[bool, float]:
+    """Plain GET of the panel URL, cached. ANY HTTP response counts as
+    reachable -- a 404, a 403, a redirect all prove something is listening and
+    answering, and the panel's own routing is none of our business. Only a
+    transport failure (refused, DNS, timeout) is "down"."""
+    global _sf_probe
+    now = time.time()
+    cached = _sf_probe
+    if cached and now - cached[0] < _SF_PROBE_TTL:
+        return cached[1], cached[0]
+    async with _sf_probe_lock:
+        cached = _sf_probe            # another caller may have filled it
+        if cached and time.time() - cached[0] < _SF_PROBE_TTL:
+            return cached[1], cached[0]
+        ok = False
+        try:
+            async with httpx.AsyncClient(timeout=_SF_PROBE_TIMEOUT,
+                                         follow_redirects=False) as client:
+                await client.get(SETTINGS.studioforge_url)
+            ok = True
+        except Exception:
+            ok = False
+        _sf_probe = (time.time(), ok)
+        return ok, _sf_probe[0]
+
+
+@app.get("/api/studioforge/status")
+async def studioforge_status(request: Request):
+    _require_studioforge(request)
+    reachable, checked_at = await _studioforge_reachable()
+    return {"url": SETTINGS.studioforge_url,
+            "reachable": reachable,
+            "checked_at": checked_at}
+
+
+# --------------------------------------------------------------------------- #
 # WebSocket
 # --------------------------------------------------------------------------- #
 
@@ -9672,12 +9763,46 @@ async def websocket_endpoint(ws: WebSocket):
 # --------------------------------------------------------------------------- #
 
 
+# The one directive in index.html's meta CSP that has to know about site
+# configuration. The StudioForge pane asks "can THIS device reach the rig"
+# with a no-cors fetch before it loads the frame -- reachability depends on the
+# viewing device's network, so it cannot be read off the hostname, and it
+# cannot be read off the iframe either (onload fires for the browser's own
+# error page, and the document is cross-origin and unreadable). `connect-src
+# 'self' ws: wss:` blocks that fetch, so the configured ORIGIN (never the full
+# URL) is spliced in at serve time. Widening by one operator-chosen origin, and
+# only when the feature is on -- an install with it off gets the shipped file
+# byte-for-byte, via the FileResponse below.
+_CSP_CONNECT_SRC = "connect-src 'self' ws: wss:;"
+
+
+def _studioforge_origin() -> str:
+    if not (SETTINGS.studioforge_enabled and SETTINGS.studioforge_url):
+        return ""
+    from urllib.parse import urlsplit
+    u = urlsplit(SETTINGS.studioforge_url)
+    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else ""
+
+
 @app.get("/")
 async def index():
     index_file = FRONTEND_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-    return JSONResponse({"error": "frontend not built"}, status_code=404)
+    if not index_file.exists():
+        return JSONResponse({"error": "frontend not built"}, status_code=404)
+    origin = _studioforge_origin()
+    if origin:
+        html = index_file.read_text(encoding="utf-8")
+        if _CSP_CONNECT_SRC in html:
+            html = html.replace(
+                _CSP_CONNECT_SRC,
+                f"connect-src 'self' ws: wss: {origin};", 1)
+            return HTMLResponse(html)
+        # The directive moved or was reformatted: serve the file unchanged
+        # rather than an app with a half-applied policy. The pane then reports
+        # "not reachable from this device" -- wrong, but honest and inert.
+        log.warning("index.html connect-src directive not found; "
+                    "StudioForge client probe will be blocked by CSP")
+    return FileResponse(index_file)
 
 
 # /media → user-uploaded images;  /static → app assets, avatars, vendor libs.

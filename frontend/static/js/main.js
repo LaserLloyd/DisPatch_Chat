@@ -73,6 +73,11 @@ const state = {
   // DeepSeek Harness pane: last /api/harness/status payload (service + models)
   // and the headless-job ledger the server broadcasts.
   harness: { status: null, jobs: { running: false, current: null, history: [] } },
+  studioforgeEnabled: false, // server-side feature flag (DISPATCH_STUDIOFORGE + a URL); full-session only
+  // StudioForge pane: last /api/studioforge/status payload, plus whether THIS
+  // browser could reach the panel (a separate question from whether the server
+  // could — see studioforgeProbe).
+  studioforge: { status: null, clientReachable: null },
 };
 
 // The coding terminal is rendered as a pseudo-bot in the sidebar (unlocked
@@ -80,6 +85,8 @@ const state = {
 const TERMINAL_ID = 'coding-terminal';
 // Same for the DeepSeek Harness (dsh) pane.
 const HARNESS_ID = 'deepseek-harness';
+// And for the StudioForge control panel (the LLM rig's own web UI, embedded).
+const STUDIOFORGE_ID = 'studioforge-panel';
 // Which bots appear in Safe Mode is a SERVER-side per-bot setting ("safe" in
 // the Bot Manager, full mode only) — the server filters /api/bots and the WS
 // hello for Safe-Mode sessions, so state.bots is already the right list.
@@ -197,6 +204,10 @@ const dom = {};
  'harness-note-text', 'harness-note-hint', 'harness-job-form', 'harness-task', 'harness-cwd',
  'harness-run', 'harness-cancel', 'harness-jobs', 'harness-dot', 'harness-status-label',
  'harness-model', 'harness-sf-link', 'harness-start', 'harness-restart', 'harness-stop',
+ // StudioForge panel pane
+ 'studioforge-view', 'studioforge-back', 'studioforge-subtitle', 'studioforge-open',
+ 'studioforge-pane', 'studioforge-frame', 'studioforge-note', 'studioforge-note-text',
+ 'studioforge-note-hint', 'studioforge-dot', 'studioforge-status-label', 'studioforge-url',
  // Locked-mode dedicated unlock button
  'unlock-btn',
 ].forEach((id) => { dom[id] = $(id); });
@@ -684,6 +695,22 @@ function renderSidebarInner() {
     hbtn.append(nameSpan('bot-name-label', hName, { name: hName }));
     hbtn.append(el('span', { class: 'bot-status-dot terminal-sidedot harness-sidedot harness-' + harnessServiceState() }));
     list.append(hbtn);
+  }
+  // StudioForge control panel — same rules again (unlocked, feature on AND an
+  // address configured; the server answers 404 otherwise and the flag stays false).
+  if (!state.decoy && state.studioforgeEnabled) {
+    const sbtn = el('button', {
+      class: 'bot-btn terminal-btn studioforge-btn' + (state.selectedBotId === STUDIOFORGE_ID ? ' active' : ''),
+      'aria-label': t('studioforge.sidebar_aria'),
+      draggable: 'false',
+      onclick: () => selectBot(STUDIOFORGE_ID),
+    });
+    const sName = t('studioforge.name');
+    sbtn.append(el('span', { class: 'bot-avatar terminal-avatar studioforge-avatar', text: 'SF' }));
+    sbtn.append(el('span', { class: 'bot-name-tip', text: sName }));
+    sbtn.append(nameSpan('bot-name-label', sName, { name: sName }));
+    sbtn.append(el('span', { class: 'bot-status-dot terminal-sidedot studioforge-sidedot studioforge-' + studioforgeState() }));
+    list.append(sbtn);
   }
 }
 
@@ -2239,9 +2266,11 @@ async function selectBot(id) {
   if (!id) return;
   if (id === TERMINAL_ID) { openTerminalView(); return; }
   if (id === HARNESS_ID) { openHarnessView(); return; }
+  if (id === STUDIOFORGE_ID) { openStudioForgeView(); return; }
   // Leaving the terminal for a real bot tears the view/socket down cleanly.
   if (terminalOpen) closeTerminalView();
   if (harnessOpen) closeHarnessView();
+  if (studioforgeOpen) closeStudioForgeView();
   state.selectedBotId = id;
   renderSidebar();
   updateThreadListHeader();
@@ -3739,6 +3768,7 @@ async function openTerminalView() {
     if (state.decoy || !state.terminalEnabled) return;
   }
   if (harnessOpen) closeHarnessView();
+  if (studioforgeOpen) closeStudioForgeView();
   state.selectedBotId = TERMINAL_ID;
   terminalOpen = true;
   renderSidebar();
@@ -4095,6 +4125,7 @@ function wireTerminal() {
   // which would surface the previous bot's stale admin-session placeholder).
   if (dom['terminal-back']) dom['terminal-back'].addEventListener('click', () => navigate('bots'));
   wireHarnessView();
+  wireStudioForgeView();
   if (dom['terminal-model-close']) dom['terminal-model-close'].addEventListener('click', closeModelPicker);
   if (dom['terminal-model-clear']) dom['terminal-model-clear'].addEventListener('click', () => { closeModelPicker(); setTerminalOptions({ model: null }); });
   if (dom['terminal-model-save']) dom['terminal-model-save'].addEventListener('click', saveModelPicker);
@@ -4224,6 +4255,7 @@ function renderHarnessSessionPanel() {
 function openHarnessView() {
   if (state.decoy || !state.harnessEnabled) return;
   if (terminalOpen) closeTerminalView();
+  if (studioforgeOpen) closeStudioForgeView();
   state.selectedBotId = HARNESS_ID;
   harnessOpen = true;
   renderSidebar();
@@ -4512,6 +4544,167 @@ function wireHarnessView() {
   dom['harness-task'].addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); harnessSubmitJob(); }
   });
+}
+
+// ===================== StudioForge control panel =====================
+// The LLM rig's own web UI, embedded. DisPatch manages nothing here: the rig is
+// a separate machine, so there is no service control, no jobs pane and no
+// credential — a frame, a link and two reachability facts.
+//
+// There are TWO reachability questions and they have different answers. The
+// server's (/api/studioforge/status) says the panel is up at all. The client's
+// says whether THIS device can get to it, which depends on the device being on
+// the rig's network — a phone on mobile data cannot, while the host can. Only
+// the client's answer decides whether the frame is worth loading, and it cannot
+// be guessed from the hostname. It also cannot be read off the iframe: `onload`
+// fires for the browser's own error page too, and the document is cross-origin
+// and unreadable. So we probe with fetch() first and only then set src.
+//
+// Deliberately NOT built: a reverse proxy or a socket relay. Framed, the viewer
+// must already be able to reach the rig; proxied, every device on the LAN port
+// and everything behind the Tailscale-Serve front door would inherit admin on a
+// panel that has no password of its own.
+let studioforgeOpen = false;
+let studioforgeProbing = false;
+
+function studioforgeState() {
+  const st = state.studioforge.status;
+  if (!st) return 'unknown';
+  if (studioforgeProbing) return 'checking';
+  if (st.reachable === false) return 'down';
+  if (state.studioforge.clientReachable === false) return 'unreachable';
+  return 'up';
+}
+
+async function refreshStudioForgeFeature() {
+  if (state.decoy) { state.studioforgeEnabled = false; return; }
+  if (state.auth.features && state.auth.features.studioforge === false) {
+    state.studioforgeEnabled = false; return;
+  }
+  try {
+    const st = await api.studioforgeStatus();
+    state.studioforgeEnabled = true;
+    applyStudioForgeStatus(st);
+  } catch (e) {
+    // 404 = the feature is off or has no address configured; 403 = Safe Mode or
+    // no PIN. Either way there is nothing to show and no reason to retry.
+    if (e.status === 404 || e.status === 403) state.studioforgeEnabled = false;
+  }
+  renderSidebar();
+}
+
+function applyStudioForgeStatus(st) {
+  if (!st || typeof st !== 'object') return;
+  state.studioforge.status = st;
+  renderStudioForge();
+}
+
+function renderStudioForgeSessionPanel() {
+  dom['tl-botname'].textContent = t('studioforge.name');
+  dom['tl-model'].textContent = t('studioforge.session_panel_title');
+  const wrap = dom['threads'];
+  wrap.innerHTML = '';
+  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
+    el('div', { class: 'empty-emoji', text: 'SF' }),
+    el('p', { text: t('studioforge.session_panel_heading') }),
+    el('p', { class: 'muted', text: t('studioforge.session_panel_body') }),
+  ]));
+}
+
+function openStudioForgeView() {
+  if (state.decoy || !state.studioforgeEnabled) return;
+  if (terminalOpen) closeTerminalView();
+  if (harnessOpen) closeHarnessView();
+  state.selectedBotId = STUDIOFORGE_ID;
+  studioforgeOpen = true;
+  renderSidebar();
+  renderStudioForgeSessionPanel();
+  dom['studioforge-view'].classList.remove('hidden');
+  document.body.classList.add('terminal-active');
+  if (isMobile()) navigate('chat');
+  renderStudioForge();
+  api.studioforgeStatus().then((st) => {
+    applyStudioForgeStatus(st);
+    probeStudioForgeFromClient();
+  }).catch(() => {});
+}
+
+function closeStudioForgeView() {
+  studioforgeOpen = false;
+  document.body.classList.remove('terminal-active');
+  dom['studioforge-view'].classList.add('hidden');
+  // Unload the frame: the panel holds a live socket.io telemetry stream, and a
+  // hidden iframe would keep it (and the rig's per-view session) alive.
+  const f = dom['studioforge-frame'];
+  if (f) { f.classList.add('hidden'); f.removeAttribute('src'); }
+}
+
+// Can THIS browser reach the panel? A no-cors GET tells us nothing about the
+// response — that is fine, we only need "did the request complete or did the
+// network refuse it". Short timeout so a black-holed address does not leave the
+// pane spinning.
+async function probeStudioForgeFromClient() {
+  const st = state.studioforge.status;
+  const url = st && st.url;
+  if (!url) return;
+  studioforgeProbing = true;
+  renderStudioForge();
+  let ok = false;
+  try {
+    await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    ok = true;
+  } catch (e) {
+    ok = false;
+  }
+  studioforgeProbing = false;
+  // The user may have left the pane while the probe was in flight.
+  state.studioforge.clientReachable = ok;
+  renderStudioForge();
+}
+
+function renderStudioForge() {
+  const st = state.studioforge.status;
+  const sv = studioforgeState();
+  const sd = dom['bot-list'] && dom['bot-list'].querySelector('.studioforge-sidedot');
+  if (sd) sd.className = 'bot-status-dot terminal-sidedot studioforge-sidedot studioforge-' + sv;
+  if (!studioforgeOpen) return;
+  const url = (st && st.url) || '';
+  if (dom['studioforge-dot']) dom['studioforge-dot'].className = 'terminal-dot studioforge-' + sv;
+  if (dom['studioforge-status-label']) dom['studioforge-status-label'].textContent = t('studioforge.state_' + sv);
+  // The address is shown, not hidden: it is the one fact an operator needs when
+  // the frame will not load, and this pane is unlocked-only anyway.
+  if (dom['studioforge-url']) dom['studioforge-url'].textContent = url;
+  if (dom['studioforge-open']) {
+    if (url) dom['studioforge-open'].href = url; else dom['studioforge-open'].removeAttribute('href');
+    dom['studioforge-open'].classList.toggle('hidden', !url);
+  }
+  const frame = dom['studioforge-frame'], note = dom['studioforge-note'];
+  if (!frame || !note) return;
+  let noteKey = null;
+  if (!url) noteKey = 'unconfigured';
+  else if (sv === 'checking') noteKey = 'checking';
+  // Server first: if DisPatch's own host cannot reach the panel either, the rig
+  // is down — a stronger and more useful signal than "this device can't". The
+  // client-network answer is only the right one when the server CAN reach it.
+  else if (st && st.reachable === false) noteKey = 'down';
+  else if (state.studioforge.clientReachable === false) noteKey = 'unreachable';
+  if (noteKey) {
+    if (!frame.classList.contains('hidden')) { frame.classList.add('hidden'); frame.removeAttribute('src'); }
+    dom['studioforge-note-text'].textContent = t(`studioforge.${noteKey}_text`);
+    dom['studioforge-note-hint'].textContent = t(`studioforge.${noteKey}_hint`);
+    note.classList.remove('hidden');
+  } else {
+    note.classList.add('hidden');
+    // sandbox/referrerpolicy are already on the element in the markup — set
+    // BEFORE src, which is the whole point of not writing src there too.
+    if (frame.getAttribute('src') !== url) frame.setAttribute('src', url);
+    frame.classList.remove('hidden');
+  }
+}
+
+function wireStudioForgeView() {
+  if (!dom['studioforge-view']) return;
+  dom['studioforge-back'].addEventListener('click', () => navigate('bots'));
 }
 
 // ===================== Live streaming render =====================
@@ -5558,6 +5751,7 @@ function closeAllOverlays() {
   // across a drop to Safe Mode.
   if (terminalOpen) closeTerminalView();
   if (harnessOpen) closeHarnessView();
+  if (studioforgeOpen) closeStudioForgeView();
   // Never n.remove() a lightbox directly: that skips pausing the video and
   // unbinding its window-level pan listeners.
   document.querySelectorAll('.lightbox').forEach((n) => {
@@ -5977,10 +6171,12 @@ async function startApp() {
     ensureFeatures().finally(() => {
       refreshTerminalFeature();
       refreshHarnessFeature();
+      refreshStudioForgeFeature();
     });
   } else {
     state.terminalEnabled = false;
     state.harnessEnabled = false;
+    state.studioforgeEnabled = false;
   }
   applyAuthChrome();
   renderSidebar();

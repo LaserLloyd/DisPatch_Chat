@@ -202,4 +202,9 @@ export const api = {
   harnessJobs: () => j('/api/harness/jobs'),
   harnessSubmitJob: (task, cwd) => j('/api/harness/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ task, cwd }) }),
   harnessCancelJob: () => j('/api/harness/jobs/cancel', { method: 'POST' }),
+
+  // StudioForge control panel (full-session only). Read-only: the address of
+  // the rig's panel plus whether the SERVER could reach it. There is no other
+  // route — DisPatch never manages the rig.
+  studioforgeStatus: () => j('/api/studioforge/status'),
 };

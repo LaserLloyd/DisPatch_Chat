@@ -64,6 +64,12 @@ const DYNAMIC = [
   // js/main.js  harness service ops:  t('harness.toast_' + verb)
   { re: /^harness\.toast_(started|stopped|restarted)$/,
     built: "main.js  t('harness.toast_' + …)" },
+  // js/main.js  renderStudioForge():  t('studioforge.state_' + sv)
+  { re: /^studioforge\.state_(up|down|unreachable|checking|unknown)$/,
+    built: "main.js  t('studioforge.state_' + sv)" },
+  // js/main.js  renderStudioForge():  t(`studioforge.${noteKey}_text` / `_hint`)
+  { re: /^studioforge\.(unconfigured|checking|down|unreachable)_(text|hint)$/,
+    built: 'main.js  t(`studioforge.${noteKey}_text|_hint`)' },
   // js/i18n.js  fileSize():  t(`unit.${u}`)
   { re: /^unit\.(b|kb|mb|gb|tb|pb)$/, built: 'i18n.js  t(`unit.${u}`)' },
   // js/dashboard.js  paintBanner():  T(`dash.count_${lv}`)

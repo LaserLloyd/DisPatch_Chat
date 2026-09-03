@@ -386,6 +386,40 @@ Routes: `GET /api/harness/status`, `POST /api/harness/{start,stop,restart}`,
 /api/harness/jobs`, `POST /api/harness/jobs/cancel`, `GET
 /api/harness/jobs/<id>`. All 403 in Safe Mode; 404 when disabled.
 
+### StudioForge control panel
+
+```
+DISPATCH_STUDIOFORGE=0          # 0 (default, off) | 1
+DISPATCH_STUDIOFORGE_URL=       # no default — e.g. http://192.0.2.5:8080
+```
+
+An **embed** of an LLM rig's own web control panel, as a pane beside the
+harness, so an operator can watch the rig without keeping a second tab open.
+Off by default and off until you name an address: there is no default URL,
+because the address of somebody's GPU box is site configuration, not something
+to ship. An invalid URL (a scheme other than `http`/`https`, no host, or
+credentials in it) is logged and treated as unset.
+
+DisPatch **manages nothing here**. The rig is a different machine — often a
+different operating system — so unlike the harness there is no service control
+and no jobs pane. The whole feature is: a frame, an `↗` link, and a cached
+15-second `GET` of the panel URL to answer "did it respond". Nothing else on
+the rig is ever contacted: no inference port, no admin API, no GPU lease.
+
+**It is deliberately not a reverse proxy.** With an iframe, the *viewing
+device* must itself be able to reach the rig's network, so the rig's exposure
+is unchanged. Proxied through DisPatch, every device on the LAN port and
+everything behind a remote front door would inherit whatever access the panel
+grants — and a panel like this typically has no password of its own. If the
+frame does not load, the honest answer is the note and the link, not a proxy.
+
+Admin-only, twice over: the rail button never renders in Safe Mode, and
+`/api/studioforge/*` 403s a locked session independently. With no PIN set the
+feature stays off entirely.
+
+Route: `GET /api/studioforge/status` → `{url, reachable, checked_at}`.
+403 in Safe Mode or with no PIN; 404 when disabled or unconfigured.
+
 ## Everything else the code reads
 
 Rarely-touched settings, listed so that the documented set and the set the code
@@ -409,6 +443,8 @@ actually reads are the same set.
 | `DISPATCH_HARNESS` | `auto` | Coding-agent harness pane: `auto` = on iff a `dsh` binary is found at boot, `1` forces on, `0` off + 404. |
 | `DISPATCH_HARNESS_UNIT` | `dsh-web.service` | The systemd `--user` unit that runs `dsh web`. |
 | `DISPATCH_HARNESS_PORT` | `3080` | The loopback port that unit binds. |
+| `DISPATCH_STUDIOFORGE` | `0` | StudioForge panel pane: `1` on, anything else off + 404. Needs a URL too. |
+| `DISPATCH_STUDIOFORGE_URL` | unset | The rig panel's address, scheme included. Empty = the feature is off whatever the flag says. |
 | `DSH_HOME` | `~/.dsh` | `dsh`'s own home — read straight from the environment under that name, because it is `dsh`'s variable, not ours. |
 | `DISPATCH_PBKDF2_ITERATIONS` | `200000` | PBKDF2 rounds for the PIN hash. Lower it only on hardware that genuinely cannot afford the default, and know what you are trading. |
 | `TMPDIR` | system | Where multipart uploads spool. Keep it on real disk on the data volume — on a tmpfs a 4 GiB upload is a 4 GiB RAM allocation. |

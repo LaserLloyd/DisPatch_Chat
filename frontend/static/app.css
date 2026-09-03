@@ -1605,6 +1605,38 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   .harness-model-select { max-width: 140px; }
 }
 
+/* StudioForge control panel — the harness pane's chrome minus the tabs, the
+   model picker and the service buttons: the rig is somebody else's machine, so
+   there is nothing here to press. Amber avatar so it never reads as the blue
+   harness at a glance. */
+.bot-avatar.studioforge-avatar { background: #b45309; font-size: 11px; letter-spacing: 0; }
+.terminal-avatar-mini.studioforge-avatar-mini { background: #b45309; font-size: 11px; }
+.terminal-sidedot.studioforge-up { background: var(--success); }
+.terminal-sidedot.studioforge-down { background: var(--error); }
+.terminal-sidedot.studioforge-unreachable { background: var(--warning, #f59e0b); }
+.terminal-sidedot.studioforge-checking { background: var(--warning, #f59e0b); }
+.terminal-sidedot.studioforge-unknown { background: var(--text-muted); }
+#studioforge-open { text-decoration: none; }
+.studioforge-body { flex-direction: column; }
+.studioforge-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.studioforge-frame { flex: 1 1 auto; width: 100%; height: 100%; border: 0; background: #fff; }
+.studioforge-note {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; padding: 24px; text-align: center;
+  color: var(--text-secondary);
+}
+.studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #b45309; }
+.studioforge-note p { max-width: 46ch; margin: 0; }
+.terminal-dot.studioforge-up { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
+.terminal-dot.studioforge-down { background: var(--error); }
+.terminal-dot.studioforge-unreachable { background: var(--warning, #f59e0b); }
+.terminal-dot.studioforge-checking { background: var(--warning, #f59e0b); }
+.studioforge-url {
+  font-family: var(--font-mono); font-size: 11.5px; max-width: 40ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 720px) { .studioforge-url { max-width: 22ch; } }
+
 /* The terminal replaces the chat pane: absolutely fills the chatview panel
    (over header, messages and composer) so it reads as a full console. It is a
    flex COLUMN — the xterm host takes all remaining height (min-height:0 so it

@@ -28,6 +28,15 @@
        · connect-src allows ws:/wss: for the live socket. It cannot be narrowed
          to the page origin here: DisPatch is reached by IP, by LAN hostname and
          over the tailnet, and the scheme-only form is what covers all three.
+       · connect-src is ALSO widened at serve time, by exactly one origin, when
+         the StudioForge panel is configured (DISPATCH_STUDIOFORGE_URL): the
+         pane asks "can THIS device reach the rig" with a no-cors fetch before
+         it loads the frame, and reachability depends on the viewing device's
+         network, so it cannot be answered from the hostname or from the
+         iframe (onload fires for the browser's own error page, and the
+         document is cross-origin and unreadable). The origin is added by
+         backend/app/main.py:index() and appears in NO shipped file — an
+         install with the feature off gets this policy byte-for-byte.
        · frame-src covers the DeepSeek Harness UI (loopback :3080, only ever
          framed when the browser is on the host itself) and the local viewer,
          which frames a page the UNLOCKED operator explicitly asked for — a
@@ -116,7 +125,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=53" />
+  <link rel="stylesheet" href="/static/app.css?v=54" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
@@ -419,6 +428,53 @@
             <button class="btn-secondary" id="harness-start" data-i18n="harness.start">▶ Start</button>
             <button class="btn-secondary" id="harness-restart" data-i18n="harness.restart">⟳ Restart</button>
             <button class="btn-secondary danger-text" id="harness-stop" data-i18n="harness.stop">■ Stop</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- StudioForge control panel: the LLM rig's OWN web UI, embedded. Unlike the
+           harness there is no service control and no jobs pane — the rig is a
+           different machine (usually a different OS), so DisPatch frames the panel,
+           links to it, and manages nothing. Full-session only; hidden unless the
+           feature is configured with an address. -->
+      <div class="terminal-view studioforge-view hidden" id="studioforge-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="studioforge-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini studioforge-avatar-mini" aria-hidden="true">SF</span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" data-i18n="studioforge.name">StudioForge</div>
+            <div class="muted terminal-subtitle" id="studioforge-subtitle" data-i18n="studioforge.subtitle">LLM rig control panel</div>
+          </div>
+          <a class="icon-btn ghost" id="studioforge-open" href="#" target="_blank" rel="noopener" title="Open the StudioForge panel in a new tab" aria-label="Open in new tab" data-i18n-attr="title=studioforge.open_title;aria-label=studioforge.open_title">↗</a>
+        </header>
+        <div class="terminal-body studioforge-body">
+          <div class="studioforge-pane" id="studioforge-pane">
+            <!-- Same sandbox string as the harness frame, and for the same reasons:
+                 the panel is a live app that needs scripts, forms, its own origin
+                 (its assets are ES modules — without allow-same-origin the frame's
+                 origin is `null` and every module fetch is blocked by CORS) and it
+                 opens links. allow-top-navigation is deliberately NOT granted, so
+                 nothing in there can navigate the DisPatch tab away, and `allow=""`
+                 drops every permission-policy feature it would otherwise inherit.
+                 allow-same-origin is not a hole here: the panel is cross-origin to
+                 DisPatch either way, so the flag only lets it be ITS own origin.
+                 src is assigned from /api/studioforge/status, never written here —
+                 the rig's address is site configuration, not repo content. -->
+            <iframe class="studioforge-frame hidden" id="studioforge-frame" title="StudioForge control panel" data-i18n-attr="title=studioforge.frame_title" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" allow=""></iframe>
+            <div class="studioforge-note hidden" id="studioforge-note">
+              <div class="empty-emoji" aria-hidden="true">SF</div>
+              <p id="studioforge-note-text"></p>
+              <p class="muted" id="studioforge-note-hint"></p>
+            </div>
+          </div>
+        </div>
+        <div class="terminal-bar studioforge-bar">
+          <span class="terminal-status">
+            <span class="terminal-dot stopped" id="studioforge-dot"></span>
+            <span id="studioforge-status-label" data-i18n="studioforge.state_unknown">Checking…</span>
+          </span>
+          <div class="terminal-actions">
+            <span class="muted studioforge-url" id="studioforge-url"></span>
           </div>
         </div>
       </div>
@@ -918,6 +974,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=69"></script>
+  <script type="module" src="/static/js/main.js?v=70"></script>
 </body>
 </html>

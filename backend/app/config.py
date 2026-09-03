@@ -79,6 +79,42 @@ def _harness_default(flag: str) -> bool:
     return bool(explicit) and os.access(explicit, os.X_OK)
 
 
+
+def _studioforge_url(raw: str) -> str:
+    """Validate DISPATCH_STUDIOFORGE_URL at load; return "" (feature off) if it
+    is not something we are willing to put in an iframe src.
+
+    The panel lives on somebody's GPU box, so there is NO default: shipping one
+    would bake a private address into a public tree. Rules: http/https only, a
+    non-empty host, and no credentials in the netloc (a userinfo URL in an
+    iframe src leaks the password into the DOM and every referrer). Anything
+    else is logged once and treated as unset — the feature simply never turns
+    on, rather than pointing a frame somewhere unexpected.
+    """
+    url = (raw or "").strip()
+    if not url:
+        return ""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+    except ValueError:
+        u = None
+    bad = None
+    if u is None:
+        bad = "unparseable"
+    elif u.scheme not in ("http", "https"):
+        bad = "scheme must be http or https"
+    elif not u.hostname:
+        bad = "no host"
+    elif u.username or u.password:
+        bad = "credentials in the URL are not allowed"
+    if bad:
+        import logging
+        logging.getLogger(__name__).warning(
+            "DISPATCH_STUDIOFORGE_URL ignored (%s) - StudioForge panel disabled", bad)
+        return ""
+    return url
+
 def _image_jobs_default(flag: str, endpoint: str) -> bool:
     """DISPATCH_IMAGE_JOBS: "auto" (default) = on iff an image server is
     configured; truthy = on; anything else = off.
@@ -321,6 +357,21 @@ class Settings:
         env("IMAGE_JOBS", "auto"), env("CLAWFORGE_URL", ""))
     harness_unit: str = env("HARNESS_UNIT", "dsh-web.service")
     harness_port: int = int(env("HARNESS_PORT", "3080") or 3080)
+    # StudioForge control panel: a read-only embed of the LLM rig's own web
+    # panel, so the operator can watch it from inside DisPatch instead of
+    # keeping a second tab open. There is no local process here and DisPatch
+    # never manages one -- the rig is a different machine, usually a different
+    # OS -- so unlike the harness this is a frame, a link and a reachability
+    # probe, and nothing else.
+    #
+    # Default OFF, deliberately not "auto": "auto" for the harness means "is
+    # the dsh binary on this disk", a local fact with no analogue for a box on
+    # the other side of the network. An install that has not been told the
+    # panel's address has no way to guess it, so off is the only honest default.
+    studioforge_enabled: bool = env("STUDIOFORGE", "0") not in ("0", "false", "False", "no", "off", "")
+    # No default: see _studioforge_url. Empty == feature off, whatever the flag
+    # says, which is what keeps a private address out of this repo.
+    studioforge_url: str = _studioforge_url(env("STUDIOFORGE_URL", ""))
     # Gateway chat mirror: continuously tail OpenClaw's own conversations (the
     # Control-UI webchat + each agent's main session) into DisPatch threads.
     # DISPATCH_MIRROR=0 disables the loop entirely.
