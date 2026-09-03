@@ -220,6 +220,52 @@ before you turn either of them on.
 Only `0`, `false`, `False` and empty read as off. `no` and `off` read as **on**;
 write `0` when you mean off.
 
+### Local viewer
+
+The local viewer opens a file, folder or static site from the **host's disk**
+inside the app, for a fully-unlocked session only. It is **off until you give it
+a root**: with no roots configured every route answers
+`404 {"detail": "Local viewer is off — add a root in Settings"}`.
+
+Configure it from **Settings → Device → Local viewer**, which writes
+`<data>/local-viewer.yaml` (0600, atomic):
+
+```yaml
+roots:                      # absolute or ~-prefixed directories; empty = OFF
+  - ~/Projects
+  - /srv/reports
+deny:                       # extra always-denied prefixes or globs, merged
+  - ~/Projects/private      #   with the built-in list (below)
+show_hidden: false          # dot-components BELOW a root are refused unless true
+max_text_bytes: 2000000     # in-app text render cap; larger files download only
+```
+
+A malformed file turns the feature **off** and logs one error — it does not
+guess. Changes are picked up without a restart (the file is mtime-cached).
+
+For containers and images, where there is no Settings pane on first boot, the
+roots can be seeded from the environment. It is only read when
+`local-viewer.yaml` is **absent**; once the file exists, the file wins:
+
+```
+DISPATCH_VIEWER_ROOTS=/srv/reports:/srv/site    # os.pathsep-separated
+```
+
+**What it will never serve, whatever you put in `roots` or `deny`:** `~/.ssh`,
+`~/.gnupg`, `~/.config/secrets`, `~/.openclaw/{secrets,agents}`,
+`~/.openclaw/gateway.systemd.env`, `~/.config/systemd`, `/etc`, `/proc`, `/sys`,
+`/dev`, this app's own `security.yaml`, `trusted-devices.yaml`,
+`RECOVERY-CODE.txt`, `chats.db*`, `backups/` and `local-viewer.yaml` — plus any
+file matching `*.env .env* *.pem *.key *.p12 *.pfx id_* *.kdbx *.gpg *.asc
+known_hosts authorized_keys *.sqlite *.db`. Denied paths, hidden paths and paths
+outside every root all answer the same `403 Not served by the local viewer`, so
+the surface cannot be used to probe the disk. Refusals are logged and counted as
+`viewer_denied_24h` in `/api/health`.
+
+The routes are **browser-only on purpose**: they are not on the machine-inbound
+surface, so an `X-API-Key` holder (an on-box cron, a GPU rig) gets Safe Mode
+here even on loopback. See [security.md](security.md).
+
 ### Agent image jobs
 
 ```

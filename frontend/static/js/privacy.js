@@ -38,6 +38,7 @@ export const APP_KEYS = [
   'dispatch-lang',            // i18n.js
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)
   'dispatch-custom-links',    // links.js (custom link buttons on the rail)
+  'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (unlock keypad "keep this device unlocked")
   // DELIBERATELY ABSENT: 'dispatch-nim'. No-Image Mode is a RATCHET — once on,

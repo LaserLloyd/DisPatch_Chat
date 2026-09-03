@@ -501,7 +501,9 @@
     "action_settings": "Réglages",
     "action_health": "Tableau de bord santé",
     "action_files": "Serveur de fichiers",
-    "action_send_file": "Envoyer un fichier"
+    "action_send_file": "Envoyer un fichier",
+    "open_local": "Ouvrir un fichier local…",
+    "open_local_prompt": "Chemin sur l’hôte DisPatch"
   },
   "recovery": {
     "aria": "Récupération et export",
@@ -875,6 +877,50 @@
     "add": "Ajouter",
     "remove": "Supprimer",
     "need_label": "Donnez un nom au bouton.",
-    "need_url": "Saisissez une adresse web complète commençant par http:// ou https://."
+    "need_url": "Saisis une URL http(s) ou un chemin local absolu.",
+    "open_in_viewer": "Ouvrir dans la visionneuse",
+    "url_or_path": "URL ou chemin local"
+  },
+  "viewer": {
+    "title": "Visionneuse locale",
+    "close": "Fermer",
+    "back": "Retour",
+    "open_tab": "Ouvrir dans un nouvel onglet",
+    "download": "Télécharger",
+    "reload": "Recharger",
+    "copy_path": "Copier le chemin",
+    "copied": "{path} copié",
+    "loading": "Chargement…",
+    "folder": "Dossier",
+    "empty_folder": "Ce dossier est vide",
+    "items": {
+      "one": "{n} élément",
+      "many": "{n} éléments",
+      "other": "{n} éléments"
+    },
+    "truncated": "Affichage des {n} premières entrées",
+    "no_index": "Pas de page d’index — voici le dossier",
+    "too_large": "Trop volumineux pour être affiché ici ({size}) — télécharge-le",
+    "not_found": "Introuvable",
+    "denied": "La visionneuse locale ne sert pas ce chemin",
+    "off": "La visionneuse locale est désactivée — ajoute un dossier dans Réglages → Appareil",
+    "open_settings": "Ouvrir les réglages",
+    "nim_hidden": "Masqué par le mode sans images",
+    "frame_hint": "Si cette page reste vide, elle refuse d’être intégrée — ouvre-la dans un onglet",
+    "wrap": "Retour à la ligne",
+    "settings_title": "Visionneuse locale",
+    "settings_hint": "Dossiers que l’app peut afficher quand un chemin local est ouvert. Les secrets, les fichiers cachés et les chemins système sont toujours refusés.",
+    "roots_none": "Désactivée — ajoute un dossier pour l’activer",
+    "roots_count": {
+      "one": "{n} dossier servi",
+      "many": "{n} dossiers servis",
+      "other": "{n} dossiers servis"
+    },
+    "add_root": "Ajouter un dossier",
+    "root_path": "Chemin du dossier",
+    "remove_root": "Retirer",
+    "show_hidden": "Afficher les fichiers et dossiers cachés",
+    "save_failed": "Enregistrement impossible : {error}",
+    "bad_root": "Ce n’est pas un dossier existant, ou c’est un dossier toujours refusé"
   }
 }

@@ -16,7 +16,7 @@
 // press Save. The saved provider becomes a real bot in config.yaml and chats
 // through the normal thread machinery; nothing here is a scratch playground.
 
-import { el } from './util.js?v=11';
+import { el } from './util.js?v=12';
 import { t, applyDom } from './i18n.js?v=3';
 
 // ===================== State =====================

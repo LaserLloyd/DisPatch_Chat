@@ -17,7 +17,7 @@
 // convenience, not an account preference, and the family tablet wanting a
 // different rail from the phone is the normal case, not an edge one.
 
-import { railIcon, RAIL_ICONS } from './util.js?v=11';
+import { railIcon, RAIL_ICONS } from './util.js?v=12';
 import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
 import { privacyEnabled, setPrivacy } from './privacy.js?v=5';
 

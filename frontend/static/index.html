@@ -28,8 +28,14 @@
        · connect-src allows ws:/wss: for the live socket. It cannot be narrowed
          to the page origin here: DisPatch is reached by IP, by LAN hostname and
          over the tailnet, and the scheme-only form is what covers all three.
-       · frame-src names the DeepSeek Harness UI (loopback :3080, only ever
-         framed when the browser is on the host itself). -->
+       · frame-src covers the DeepSeek Harness UI (loopback :3080, only ever
+         framed when the browser is on the host itself) and the local viewer,
+         which frames a page the UNLOCKED operator explicitly asked for — a
+         file under a configured root (same-origin /local/file/…) or an http(s)
+         URL they saved as a link button. Every framed document is sandboxed
+         WITHOUT allow-same-origin, so it gets an opaque origin and can read
+         nothing of DisPatch's DOM, cookies or storage. Safe Mode never opens
+         the viewer, and the server 403s its routes for a decoy session. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     script-src 'self' 'sha256-737X6nvcta4AdRTK/iBev34616mDyUYtk/vNSDWHzsI=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
@@ -37,7 +43,7 @@
     img-src 'self' data: blob:;
     media-src 'self' blob:;
     connect-src 'self' ws: wss:;
-    frame-src 'self' http://127.0.0.1:3080 http://localhost:3080;
+    frame-src 'self' http: https:;
     font-src 'self';
     object-src 'none';
     base-uri 'none';
@@ -110,7 +116,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=52" />
+  <link rel="stylesheet" href="/static/app.css?v=53" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
@@ -912,6 +918,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=67"></script>
+  <script type="module" src="/static/js/main.js?v=69"></script>
 </body>
 </html>

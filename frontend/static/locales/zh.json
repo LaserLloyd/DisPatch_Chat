@@ -487,7 +487,9 @@
     "action_settings": "设置",
     "action_health": "健康面板",
     "action_files": "文件服务器",
-    "action_send_file": "发送文件"
+    "action_send_file": "发送文件",
+    "open_local": "打开本地文件…",
+    "open_local_prompt": "DisPatch 主机上的路径"
   },
   "recovery": {
     "aria": "恢复与导出",
@@ -829,6 +831,46 @@
     "add": "添加",
     "remove": "移除",
     "need_label": "请为按钮命名。",
-    "need_url": "请输入以 http:// 或 https:// 开头的完整网址。"
+    "need_url": "请输入 http(s) 网址，或绝对路径的本地路径。",
+    "open_in_viewer": "在查看器中打开",
+    "url_or_path": "网址或本地路径"
+  },
+  "viewer": {
+    "title": "本地查看器",
+    "close": "关闭",
+    "back": "返回",
+    "open_tab": "在新标签页中打开",
+    "download": "下载",
+    "reload": "重新加载",
+    "copy_path": "复制路径",
+    "copied": "已复制 {path}",
+    "loading": "加载中…",
+    "folder": "文件夹",
+    "empty_folder": "这个文件夹是空的",
+    "items": {
+      "other": "{n} 项"
+    },
+    "truncated": "仅显示前 {n} 项",
+    "no_index": "没有索引页 — 显示文件夹内容",
+    "too_large": "太大，无法在这里显示（{size}）— 请下载查看",
+    "not_found": "未找到",
+    "denied": "本地查看器不提供该路径",
+    "off": "本地查看器已关闭 — 请在“设置 → 本设备”中添加文件夹",
+    "open_settings": "打开设置",
+    "nim_hidden": "已被无图模式隐藏",
+    "frame_hint": "如果这个页面一直空白，说明它拒绝被嵌入 — 请在新标签页中打开",
+    "wrap": "自动换行",
+    "settings_title": "本地查看器",
+    "settings_hint": "打开本地路径时，应用可以显示的文件夹。密钥、隐藏文件和系统路径始终会被拒绝。",
+    "roots_none": "已关闭 — 添加一个文件夹即可启用",
+    "roots_count": {
+      "other": "{n} 个文件夹已开放"
+    },
+    "add_root": "添加文件夹",
+    "root_path": "文件夹路径",
+    "remove_root": "移除",
+    "show_hidden": "显示隐藏的文件和文件夹",
+    "save_failed": "无法保存：{error}",
+    "bad_root": "不是已存在的文件夹，或者是始终会被拒绝的文件夹"
   }
 }

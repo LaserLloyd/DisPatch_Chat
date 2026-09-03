@@ -487,7 +487,9 @@
     "action_settings": "設定",
     "action_health": "ヘルスダッシュボード",
     "action_files": "ファイルサーバー",
-    "action_send_file": "ファイルを送る"
+    "action_send_file": "ファイルを送る",
+    "open_local": "ローカルファイルを開く…",
+    "open_local_prompt": "DisPatch ホスト上のパス"
   },
   "recovery": {
     "aria": "復元とエクスポート",
@@ -829,6 +831,46 @@
     "add": "追加",
     "remove": "削除",
     "need_label": "ボタンに名前を付けてください。",
-    "need_url": "http:// または https:// で始まる完全なウェブアドレスを入力してください。"
+    "need_url": "http(s) の URL か、絶対パスのローカルパスを入力してください。",
+    "open_in_viewer": "ビューアで開く",
+    "url_or_path": "URL またはローカルパス"
+  },
+  "viewer": {
+    "title": "ローカルビューア",
+    "close": "閉じる",
+    "back": "戻る",
+    "open_tab": "新しいタブで開く",
+    "download": "ダウンロード",
+    "reload": "再読み込み",
+    "copy_path": "パスをコピー",
+    "copied": "{path} をコピーしました",
+    "loading": "読み込み中…",
+    "folder": "フォルダ",
+    "empty_folder": "このフォルダは空です",
+    "items": {
+      "other": "{n} 件"
+    },
+    "truncated": "最初の {n} 件を表示しています",
+    "no_index": "インデックスページがありません — フォルダを表示します",
+    "too_large": "ここで表示するには大きすぎます（{size}）— ダウンロードしてください",
+    "not_found": "見つかりません",
+    "denied": "ローカルビューアでは配信されないパスです",
+    "off": "ローカルビューアはオフです — 設定 → この端末 でフォルダを追加してください",
+    "open_settings": "設定を開く",
+    "nim_hidden": "画像なしモードで非表示",
+    "frame_hint": "このページが空のままなら、埋め込みが拒否されています — タブで開いてください",
+    "wrap": "行を折り返す",
+    "settings_title": "ローカルビューア",
+    "settings_hint": "ローカルパスを開いたときにアプリが表示できるフォルダ。機密ファイル、隠しファイル、システムパスは常に拒否されます。",
+    "roots_none": "オフ — フォルダを追加すると有効になります",
+    "roots_count": {
+      "other": "{n} 個のフォルダを公開中"
+    },
+    "add_root": "フォルダを追加",
+    "root_path": "フォルダのパス",
+    "remove_root": "削除",
+    "show_hidden": "隠しファイルとフォルダを表示",
+    "save_failed": "保存できませんでした: {error}",
+    "bad_root": "存在しないフォルダか、常に拒否されるフォルダです"
   }
 }

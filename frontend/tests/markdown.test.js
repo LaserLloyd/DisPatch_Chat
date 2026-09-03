@@ -36,3 +36,31 @@ test('no local re-declaration shadows the module-level i18n `t`', () => {
     '\nThese shadow the module-level i18n `t` (rename the local):\n'
     + offenders.join('\n'));
 });
+
+// --- Local Viewer wiring (docs/design/2026-09-03-local-viewer-design.md §4.2)
+// Static guards: these three signatures are the contract main.js integrates
+// against, and a silently-renamed option would fail OPEN — Safe Mode would keep
+// rendering local-path links because `noLocal` simply never arrived.
+
+test('renderMarkdown and enhanceContent both accept the noLocal gate', () => {
+  assert.match(SRC, /export function renderMarkdown\(text,\s*\{[^}]*\bnoLocal\s*=\s*false/,
+    'renderMarkdown lost its noLocal option — Safe Mode would render local links');
+  assert.match(SRC, /export function enhanceContent\(container,\s*\{[^}]*\bnoLocal\s*=\s*false/,
+    'enhanceContent lost its noLocal option — a local href would stay navigable');
+});
+
+test('installMarkdownHandlers takes an onOpenFile callback', () => {
+  assert.match(SRC, /export function installMarkdownHandlers\(onToast,\s*\{\s*onOpenFile\s*\}\s*=\s*\{\}\)/,
+    'the file-link branch can no longer open the viewer');
+  // Shift/Alt-click and a long press must keep the clipboard copy.
+  assert.match(SRC, /e\.shiftKey \|\| e\.altKey \|\| longPress/,
+    'the copy-to-clipboard escape hatch is gone');
+});
+
+test('DisPatch\'s own URL prefixes are never treated as disk paths', () => {
+  // `/media/<uuid>` is the app's media route and `/media` is also a real Linux
+  // mount point. The app wins, or every inline picture would render as a file
+  // link to a path that does not exist on disk.
+  assert.match(SRC, /const APP_PATH_RE = .*api\|media\|static/,
+    'the app-URL exclusion is gone');
+});

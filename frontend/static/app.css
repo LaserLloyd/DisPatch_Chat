@@ -2796,6 +2796,39 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .bm-links-in-url { flex: 2 1 14em; min-width: 10em; direction: ltr; }
 .bm-links-error { color: var(--error, #e5484d); font-size: 12px; margin: 6px 0 0; }
 
+/* "Open in viewer" — the checkbox on the link add row, and the same control
+   again on the local-viewer section below. It has to come AFTER the
+   `.bm-links-addrow input` rule above: that rule dresses text fields, and a
+   checkbox inheriting its padding + border renders as a bordered grey square
+   with the tick floating inside it. Equal specificity, so source order is what
+   opts back out. */
+.bm-links-viewer-toggle {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  min-height: 32px; color: var(--text-secondary); font-size: 12.5px;
+  cursor: pointer; user-select: none;
+}
+.bm-links-viewer-toggle input {
+  width: 16px; height: 16px; flex: 0 0 auto;
+  padding: 0; border: 0; background: none;
+  accent-color: var(--accent); cursor: pointer;
+}
+/* Forced on (a local path has nowhere else to open): say so in the colour as
+   well as in the disabled state, or it reads as a control that ignored you. */
+.bm-links-viewer-toggle input:disabled { cursor: default; }
+.bm-links-viewer-toggle:has(input:disabled) { color: var(--text-muted); }
+/* The ⧉ beside a saved link's label: this one opens in the viewer, not a tab. */
+.link-viewer-mark { color: var(--text-muted); font-size: 11px; margin-inline-start: 2px; }
+
+/* ---- Local viewer roots (Settings → Device) ------------------------------ */
+/* The section reuses the links editor's skeleton (.bm-links-list/-item/-url/
+   -remove/-addrow), so all that is left is the spacing that separates it from
+   the editor above, the show-hidden row — which sits on its own line rather
+   than in the add row, because it governs every root and not the one being
+   typed — and the status line. */
+.bm-viewer { margin-top: 12px; }
+.bm-viewer .bm-viewer-hidden { margin-top: 8px; }
+.bm-viewer-status { margin: 6px 0 0; font-size: 12px; }
+
 /* The ★ next to the harness model picker: docs link for the starred provider.
    Accent-coloured so it reads as a link, not a decoration. */
 .harness-sf-link {
@@ -2826,3 +2859,196 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 /* The rows are labels wrapping a checkbox; they need to be flex for the pin's
    `margin-left: auto` to push it over. */
 .bm-avatar-style:has(.pin-toggle) { display: flex; align-items: center; gap: 8px; }
+
+/* ===================== Local viewer ===================== */
+/* A full-screen pane, not a picture on a backdrop: `.viewer` reuses `.lightbox`
+   (so the global Escape route, closeAllOverlays and the z-index all apply
+   unchanged) but replaces its centred-media layout with a header + body grid
+   that fills the screen edge to edge. The backdrop is opaque app chrome rather
+   than a dimmed page, because on a phone there is nothing behind it to see.
+
+   Sizing: `100dvh` (with a `100vh` fallback for browsers that lack it) so the
+   iOS URL bar collapsing does not crop the footer, and safe-area insets on all
+   four sides so the header buttons clear the notch and the body clears the home
+   indicator in landscape. Every control is ≥44px. */
+.lightbox.viewer {
+  background: var(--bg-primary);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-items: stretch;
+  justify-content: stretch;
+  cursor: default;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.viewer-header {
+  display: flex; align-items: center; gap: 6px;
+  min-height: 44px;
+  padding: 4px calc(8px + env(safe-area-inset-right)) 4px calc(8px + env(safe-area-inset-left));
+  padding-top: calc(4px + env(safe-area-inset-top));
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.viewer-actions { display: flex; align-items: center; gap: 2px; margin-inline-start: auto; }
+
+.viewer-btn, .lightbox-close.viewer-close {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 0; border-radius: var(--radius-md);
+  color: var(--text-secondary); cursor: pointer;
+}
+.viewer-btn:hover, .lightbox-close.viewer-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+.viewer-btn .rail-icon { width: 20px; height: 20px; }
+/* The close button is a `.lightbox-close` so the global Escape handler finds
+   it; that class is absolutely positioned for the image lightbox, which would
+   float it over the header here. Put it back in the flow. */
+.lightbox-close.viewer-close {
+  position: static; inset: auto; font-size: 18px;
+  border: 0; background: none; color: var(--text-secondary);
+}
+.viewer-btn.hidden, .viewer-header .hidden { display: none; }
+
+.viewer-title {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 0 6px;
+  background: none; border: 0; border-radius: var(--radius-md);
+  color: var(--text-primary); font-size: 13.5px; text-align: start; cursor: pointer;
+}
+.viewer-title:hover { background: var(--bg-hover); }
+.viewer-title-icon { display: flex; flex-shrink: 0; color: var(--text-muted); }
+.viewer-title-icon .rail-icon { width: 18px; height: 18px; }
+.viewer-title-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: ltr;             /* a filesystem path is LTR even in an RTL UI */
+  unicode-bidi: plaintext;
+}
+
+.viewer-body {
+  min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+  padding-bottom: env(safe-area-inset-bottom);
+  /* PHYSICAL left/right, not `padding-inline`: the safe-area insets are
+     physical, so the logical property would swap them in an RTL locale and put
+     the notch's inset on the wrong edge. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  background: var(--bg-primary);
+}
+/* The frame fills the pane: a scrolling iframe inside a scrolling body is two
+   scrollbars racing each other. */
+.viewer-frame-wrap { position: relative; height: 100%; }
+.viewer-frame { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.viewer-frame-hint {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  background: var(--bg-secondary); border-top: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 13px;
+}
+.viewer-frame-hint.hidden { display: none; }
+.viewer-hint-btn {
+  min-height: 36px; padding: 6px 14px; border-radius: 999px;
+  background: var(--accent); color: #fff; border: 0; font-weight: 600; cursor: pointer;
+}
+
+.viewer-media { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 12px; }
+/* `cursor`/`transition`/`user-select` are reset explicitly: `.lightbox img`
+   dresses the picture lightbox, where a click zooms. The viewer has no zoom
+   handler, so inheriting `cursor: zoom-in` would advertise a gesture that does
+   nothing. */
+.viewer-media img, .viewer-media video {
+  max-width: 100%; max-height: 100%; border-radius: var(--radius-md);
+  cursor: default; transition: none; user-select: auto;
+}
+.viewer-audio audio { width: min(520px, 92vw); }
+
+.viewer-note {
+  padding: 24px 18px; color: var(--text-muted); font-size: 14px; text-align: center;
+}
+
+/* Text: monospace, no wrapping by default (a log's columns are information),
+   with a toggle. Nothing is persisted — the next file starts unwrapped. */
+.viewer-textwrap { padding: 10px 12px 24px; }
+.viewer-wrap-btn {
+  min-height: 36px; padding: 6px 14px; margin-bottom: 8px;
+  border-radius: 999px; border: 1px solid var(--border-light);
+  background: var(--bg-tertiary); color: var(--text-secondary); font-size: 13px; cursor: pointer;
+}
+.viewer-wrap-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
+.viewer-text {
+  margin: 0; padding: 12px; border-radius: var(--radius-md);
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.55;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  white-space: pre; direction: ltr; unicode-bidi: plaintext;
+}
+.viewer-text.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.viewer-doc {
+  padding: 14px 16px 32px; max-width: 860px; margin: 0 auto;
+  color: var(--text-primary);
+}
+/* The rendered document reuses `.bubble` so it inherits every markdown rule in
+   this file; strip the bubble's own chrome so it reads as a page, not a chat
+   message. */
+.viewer-doc.bubble { background: none; border: 0; border-radius: 0; box-shadow: none; }
+
+/* Listing */
+.viewer-listing { padding: 8px 8px 24px; }
+.viewer-crumbs {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  padding: 4px 6px; font-size: 13px; direction: ltr; unicode-bidi: plaintext;
+}
+.viewer-crumb {
+  min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--accent-text); font-size: 13px; cursor: pointer;
+}
+.viewer-crumb:hover { background: var(--bg-hover); }
+.viewer-crumb.static { color: var(--text-muted); cursor: default; }
+.viewer-crumb + .viewer-crumb::before { content: "/"; color: var(--text-muted); margin-inline-end: 6px; }
+.viewer-list-meta {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  padding: 2px 12px 8px; color: var(--text-muted); font-size: 12.5px;
+}
+.viewer-warn { color: var(--warning-text); }
+.viewer-list { display: flex; flex-direction: column; }
+.viewer-entry {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  background: none; border: 0; border-bottom: 1px solid var(--border);
+  color: var(--text-primary); font-size: 14px; text-align: start; cursor: pointer;
+}
+.viewer-entry:hover { background: var(--bg-hover); }
+.viewer-entry .rail-icon { width: 18px; height: 18px; flex-shrink: 0; color: var(--text-muted); }
+.viewer-entry-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-entry-meta { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
+
+/* Cards: download, too-large, No-Image-Mode placeholder. Same shape for all
+   three so "you are not seeing the bytes, here is why" reads one way. */
+.viewer-card {
+  margin: 28px auto; max-width: 420px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 22px 18px; text-align: center;
+  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.viewer-card-name { font-weight: 600; word-break: break-word; }
+.viewer-card-meta, .viewer-card-note { color: var(--text-muted); font-size: 13px; }
+.viewer-card-btn {
+  min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  margin-top: 6px; padding: 10px 22px; border: 0; border-radius: 999px;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 14px;
+  text-decoration: none; cursor: pointer;
+}
+.viewer-card-btn:hover { background: var(--accent-hover); }
+
+.viewer-error {
+  margin: 28px auto; max-width: 420px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 22px 18px; text-align: center;
+  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.viewer-error-text { color: var(--text-secondary); font-size: 14px; }

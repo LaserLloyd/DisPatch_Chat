@@ -151,6 +151,38 @@ export const RAIL_ICONS = {
     'M17 8l-5-5-5 5',
     'M12 3v12',
   ],
+  // --- Local viewer chrome -------------------------------------------------
+  // Chevron pointing back. The viewer's own history (listing → file), not the
+  // browser's — hidden at depth 0.
+  'viewer-back': ['M15 5 8 12l7 7'],
+  // The same external-link arrow as `link`, kept separate so the rail's
+  // meaning ("a link button") and the viewer's ("open this in a tab") can
+  // drift apart later without one of them silently changing.
+  'viewer-open': [
+    'M15 3h6v6',
+    'M10 14 21 3',
+    'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
+  ],
+  // Tray with an arrow into it: save this file.
+  'viewer-download': [
+    'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',
+    'M7 10l5 5 5-5',
+    'M12 15V3',
+  ],
+  // Circular arrow: re-fetch the pane.
+  'viewer-reload': [
+    'M21 12a9 9 0 1 1-2.64-6.36',
+    'M21 3v6h-6',
+  ],
+  // Folder, in the listing and as a directory entry's icon.
+  'viewer-folder': [
+    'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z',
+  ],
+  // Page with a folded corner: every non-directory entry.
+  'viewer-file': [
+    'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z',
+    'M14 3v5h5',
+  ],
   gear: [
     'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
     'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',

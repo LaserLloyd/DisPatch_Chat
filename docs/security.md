@@ -80,6 +80,64 @@ snapshots, but a snapshot is not a backup until it is off the machine and you
 have restored one. Note that snapshots cover the database, not the media and
 file blobs — copy the whole data directory.
 
+## The local viewer
+
+The local viewer hands a browser bytes from the host's filesystem, which makes
+it the widest read surface in the app. Its threat model, in full:
+
+- **Unlocked operator only.** Safe Mode never renders the affordance, *and* the
+  server refuses every viewer route for a limited session. Both halves are
+  required; neither is sufficient. It is also deliberately absent from the
+  machine-inbound surface, so the inbound API token — which belongs to on-box
+  automation and, in some setups, a separate render machine — is not a key to
+  your home directory.
+- **Allowlist, not blocklist, first.** Nothing is served unless it resolves
+  (symlinks followed) to inside a directory you configured. The default
+  configuration is *no directories*, so the feature does nothing until you turn
+  it on.
+- **A deny list your configuration cannot override** sits on top of that: SSH
+  and GPG keys, secret stores, agent state, `/etc /proc /sys /dev`, systemd
+  units, this app's own credentials and database, and a filename pattern list
+  for keys, `.env` files and databases. A root of `~` is therefore usable
+  without exposing `~/.ssh`.
+- **Dotfiles below a root are refused** unless you ask for them. Dotfiles
+  *above* a root are your business: `~/.agent/workspace` is a legal root.
+- **One refusal message.** Outside a root, on the deny list, or hidden — all
+  three answer `Not served by the local viewer`. The client is never told which,
+  so the endpoint cannot be walked to map the disk. Every refusal is logged with
+  the path and the caller, and counted in `/api/health` as `viewer_denied_24h`.
+- **Framing is sandboxed with an opaque origin.** HTML is served with
+  `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups
+  allow-modals allow-downloads; frame-ancestors 'self'` — never
+  `allow-same-origin`. A framed page can run its own scripts but cannot read
+  DisPatch's DOM, cookies or storage.
+- **Framed pages load their assets through a scoped ticket, not the cookie.**
+  An opaque origin sends no cookie, so a framed page is served from
+  `/local/view/<ticket>/…`: a random capability minted by the authenticated
+  `stat` call, bound to the caller's address, expiring after two idle hours,
+  and valid only inside the page's own directory. A hostile HTML file you open
+  can `fetch()` its own folder and nothing else; the ticket route refuses
+  parent, sibling and symlink escapes with the same uniform message and is
+  never on the machine-inbound surface. Every non-HTML
+  viewer response gets `default-src 'none'; sandbox; frame-ancestors 'self'`,
+  and all of them get `nosniff`, `Referrer-Policy: no-referrer`,
+  `Cache-Control: private, max-age=0, must-revalidate` and
+  `X-Robots-Tag: noindex`.
+- **Content types come from a fixed extension table, never from sniffing**, so a
+  `.txt` that begins with `<html>` cannot become an active document, and an
+  unknown extension is sent as an attachment rather than rendered.
+- **Directory listings never name an entry the file route would refuse**, so a
+  listing cannot be the disclosure.
+
+What it does *not* protect against: an operator who deliberately roots the
+viewer at a directory full of things they did not want to share, or a **hard
+link** inside a root to a file outside it (a hard link has no target to
+resolve; only symlinks are seen through). The allowlist is the control; choose
+it deliberately. The `*secret*` and `*credentials*` filename patterns are
+deliberately broad and will also hide innocent files with those words in their
+names. See
+[configuration.md](configuration.md#local-viewer).
+
 ## Privacy mode
 
 For a device you would rather leave no trace on — a shared tablet, a phone that

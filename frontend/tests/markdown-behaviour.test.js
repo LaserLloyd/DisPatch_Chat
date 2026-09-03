@@ -449,3 +449,196 @@ test('the thread-list preview drops a callout marker too', () => {
     'label on the same line body');
   assert.equal(toPlainPreview('> a plain quote'), 'a plain quote');
 });
+
+// ---------------------------------------------------------------------------
+// 4. Local viewer: bare paths, [[view:]] cards, local markdown links
+//     (design: docs/design/2026-09-03-local-viewer-design.md §4.2)
+//
+// The affordance is UNLOCKED-ONLY. `noLocal` is the client half of that gate
+// (the server 403s the viewer routes for a decoy independently): with it set,
+// nothing here may produce a link, a card, or a navigable href — a local path
+// left as `<a href="/var/x">` would navigate the app's own origin.
+// ---------------------------------------------------------------------------
+
+test('a bare local path becomes a file link', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('see /var/home/user/site/index.html now');
+  assert.match(out, /class="markdown-file-link"/, out);
+  assert.match(out, /data-file-path="\/var\/home\/user\/site\/index\.html"/, out);
+  assert.match(out, /<code>\/var\/home\/user\/site\/index\.html<\/code>/, out);
+
+  // every documented root spelling
+  for (const [src, want] of [
+    ['~/reports/x.md', '~/reports/x.md'],
+    ['file:///tmp/a.log', '/tmp/a.log'],
+    ['/home/user/notes.txt', '/home/user/notes.txt'],
+    ['/mnt/backup/x', '/mnt/backup/x'],
+    ['/opt/thing/y', '/opt/thing/y'],
+    ['/srv/www/z', '/srv/www/z'],
+    ['/run/media/user/stick', '/run/media/user/stick'],
+    ['/Users/user/a.md', '/Users/user/a.md'],
+    ['/root/x', '/root/x'],
+    ['~/Projects/foo/', '~/Projects/foo/'],   // a directory keeps its slash
+  ]) {
+    const o = renderMarkdown(`open ${src} please`);
+    assert.match(o, new RegExp(`data-file-path="${want.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`),
+      `${src} -> ${o}`);
+  }
+
+  // a line/column suffix travels as data-file-line, like a code-span link
+  const lined = renderMarkdown('crash at /var/home/user/app/main.py:412');
+  assert.match(lined, /data-file-path="\/var\/home\/user\/app\/main\.py"/, lined);
+  assert.match(lined, /data-file-line="412"/, lined);
+});
+
+test('trailing sentence punctuation is not part of a bare path', { skip: dom.skip }, async () => {
+  await withDom();
+  for (const [src, want] of [
+    ['open /var/log/syslog.', '/var/log/syslog'],
+    ['open /var/log/syslog,', '/var/log/syslog'],
+    ['open /var/log/syslog!', '/var/log/syslog'],
+    ['(see /var/log/syslog)', '/var/log/syslog'],
+    ['"~/a/b.md"', '~/a/b.md'],
+  ]) {
+    const o = renderMarkdown(src);
+    assert.match(o, new RegExp(`data-file-path="${want.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`),
+      `${src} -> ${o}`);
+  }
+});
+
+test('app URLs and paths inside a URL are never linkified', { skip: dom.skip }, async () => {
+  await withDom();
+  for (const src of ['GET /api/health returns ok', 'the picture /media/abc123.png',
+                     '/static/js/main.js is the bundle',
+                     'https://example.com/var/home/x is a website']) {
+    const out = renderMarkdown(src);
+    assert.ok(!/markdown-file-link/.test(out), `${src} -> ${out}`);
+  }
+});
+
+test('bare paths inside a fence stay literal', { skip: dom.skip }, async () => {
+  await withDom();
+  const fenced = '```\ncp /var/home/user/a.txt ~/b.txt\n/var/log/syslog\n```';
+  const out = renderMarkdown(fenced);
+  assert.ok(!/markdown-file-link/.test(out), out);
+  assert.match(out, /\/var\/home\/user\/a\.txt/);
+});
+
+test('a rooted directory in a code span becomes a file link', { skip: dom.skip }, async () => {
+  await withDom();
+  for (const dir of ['~/Projects/dispatch-chat/', '/var/log', '~/Projects', '/var/home/user/site/']) {
+    const out = renderMarkdown(`look in \`${dir}\``);
+    assert.match(out, /class="markdown-file-link"/, `${dir} -> ${out}`);
+    assert.match(out, new RegExp(`data-file-path="${dir.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`), out);
+  }
+  // a bare root is not a directory reference, and app paths never are
+  for (const notDir of ['/var', '~', '/api/health', '/media/x']) {
+    const out = renderMarkdown(`look in \`${notDir}\``);
+    assert.ok(!/markdown-file-link/.test(out), `${notDir} -> ${out}`);
+  }
+});
+
+test('[[view:path|label]] renders a viewer card', { skip: dom.skip }, async () => {
+  await withDom();
+  const out = renderMarkdown('[[view:/var/home/user/report.html|The report]]');
+  assert.match(out, /class="doc-card view-card"/, out);
+  assert.match(out, /class="doc-icon">👁</, out);
+  assert.match(out, /class="markdown-file-link doc-link" data-file-path="\/var\/home\/user\/report\.html"/, out);
+  assert.match(out, />The report</, out);
+  // no href at all — a viewer card is not navigable markup
+  assert.ok(!/view-card[\s\S]*?<a[^>]*href/.test(out), out);
+  // …and it is not a thumbnail, so it must not claim a full-resolution original
+  assert.ok(!/data-full/.test(out), out);
+
+  // the label defaults to the ~-shortened path
+  const bare = renderMarkdown('[[view:/var/home/user/report.html]]');
+  assert.match(bare, /data-file-path="\/var\/home\/user\/report\.html"/, bare);
+  assert.match(bare, />~\/report\.html</, bare);
+});
+
+test('[[view:]] inside backticks stays literal', { skip: dom.skip }, async () => {
+  await withDom();
+  const span = renderMarkdown('write `[[view:/var/x.html|x]]` to link it');
+  assert.ok(!/doc-card/.test(span), span);
+  assert.match(span, /\[\[view:\/var\/x\.html\|x\]\]/, span);
+  const fence = renderMarkdown('```\n[[view:/var/x.html|x]]\n```');
+  assert.ok(!/doc-card/.test(fence), fence);
+});
+
+test('a markdown link whose href is a local path becomes a file link', { skip: dom.skip }, async () => {
+  await withDom();
+  for (const [src, want] of [
+    ['[the report](~/x.md)', '~/x.md'],
+    ['[a](/var/home/user/y.txt)', '/var/home/user/y.txt'],
+    ['[b](file:///tmp/z.log)', '/tmp/z.log'],
+  ]) {
+    const out = renderMarkdown(src);
+    assert.match(out, new RegExp(`data-file-path="${want.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`),
+      `${src} -> ${out}`);
+    assert.ok(!/<a[^>]*href/.test(out), `${src} kept a navigable href: ${out}`);
+  }
+  // ordinary links are untouched
+  assert.match(renderMarkdown('[c](https://example.com/)'), /href="https:\/\/example\.com\/"/);
+  // …and an app-relative link stays a link
+  assert.match(renderMarkdown('[d](/api/files/1/download)'), /href="\/api\/files\/1\/download"/);
+});
+
+test('noLocal suppresses every local affordance', { skip: dom.skip }, async () => {
+  await withDom();
+  const cases = [
+    'see /var/home/user/site/index.html now',
+    '[[view:/var/home/user/report.html|The report]]',
+    '[the report](~/x.md)',
+    'look in `~/Projects/dispatch-chat/`',
+    'crash at `/var/home/user/app/main.py:412`',
+  ];
+  for (const md of cases) {
+    const out = renderMarkdown(md, { noLocal: true });
+    assert.ok(!/markdown-file-link/.test(out), `${md} -> ${out}`);
+    assert.ok(!/data-file-path/.test(out), `${md} -> ${out}`);
+    assert.ok(!/doc-card/.test(out), `${md} -> ${out}`);
+  }
+  // the directive degrades to its label, not to raw syntax
+  const card = renderMarkdown('[[view:/var/home/user/report.html|The report]]', { noLocal: true });
+  assert.ok(!/\[\[view:/.test(card), card);
+  assert.match(card, /The report/, card);
+  // a local markdown link keeps its words and loses its href
+  const link = renderMarkdown('[the report](~/x.md)', { noLocal: true });
+  assert.ok(!/href/.test(link), link);
+  assert.match(link, /the report/, link);
+  // and the ordinary affordances are unaffected
+  assert.match(renderMarkdown('[c](https://example.com/)', { noLocal: true }), /href="https:\/\/example\.com\/"/);
+});
+
+test('enhanceContent rewrites a local href, and removes it under noLocal', { skip: dom.skip }, async () => {
+  const win = await withDom();
+  const { enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
+
+  const div = win.document.createElement('div');
+  div.innerHTML = '<p><a href="/var/home/user/a.md">a</a> <a href="/api/files/1/raw">keep</a></p>';
+  win.document.body.appendChild(div);
+  enhanceContent(div);
+  const a = div.querySelector('a[data-file-path]');
+  assert.ok(a, `no file link produced: ${div.innerHTML}`);
+  assert.equal(a.getAttribute('data-file-path'), '/var/home/user/a.md');
+  assert.equal(a.getAttribute('href'), null, 'a local path must not stay navigable');
+  assert.ok(a.classList.contains('markdown-file-link'));
+  assert.equal(div.querySelector('a[href="/api/files/1/raw"]')?.tagName, 'A', 'app links untouched');
+  div.remove();
+
+  const safe = win.document.createElement('div');
+  safe.innerHTML = '<p><a href="/var/home/user/a.md">a</a><a class="markdown-file-link" data-file-path="~/b.md">b</a></p>';
+  win.document.body.appendChild(safe);
+  enhanceContent(safe, { noLocal: true });
+  assert.equal(safe.querySelector('a[href^="/var/"]'), null, safe.innerHTML);
+  assert.equal(safe.querySelector('[data-file-path]'), null, safe.innerHTML);
+  assert.match(safe.textContent, /a/);
+  assert.match(safe.textContent, /b/);
+  safe.remove();
+});
+
+test('the thread preview shows a [[view:]] label, never the syntax', () => {
+  assert.equal(toPlainPreview('[[view:/var/home/user/report.html|The report]]'), 'The report');
+  assert.equal(toPlainPreview('[[view:/var/home/user/report.html]]'), '/var/home/user/report.html');
+  assert.equal(toPlainPreview('here [[view:~/a.md|notes]] ok'), 'here notes ok');
+});

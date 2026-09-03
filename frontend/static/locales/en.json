@@ -494,7 +494,9 @@
     "action_settings": "Settings",
     "action_health": "Health dashboard",
     "action_files": "File Server",
-    "action_send_file": "Send a file"
+    "action_send_file": "Send a file",
+    "open_local": "Open a local file…",
+    "open_local_prompt": "Path on the DisPatch host"
   },
   "recovery": {
     "aria": "Recovery and export",
@@ -852,6 +854,48 @@
     "add": "Add",
     "remove": "Remove",
     "need_label": "Give the button a name.",
-    "need_url": "Enter a full web address starting with http:// or https://."
+    "need_url": "Enter an http(s) URL or an absolute local path.",
+    "open_in_viewer": "Open in viewer",
+    "url_or_path": "URL or local path"
+  },
+  "viewer": {
+    "title": "Local viewer",
+    "close": "Close",
+    "back": "Back",
+    "open_tab": "Open in a new tab",
+    "download": "Download",
+    "reload": "Reload",
+    "copy_path": "Copy path",
+    "copied": "Copied {path}",
+    "loading": "Loading…",
+    "folder": "Folder",
+    "empty_folder": "This folder is empty",
+    "items": {
+      "one": "{n} item",
+      "other": "{n} items"
+    },
+    "truncated": "Showing the first {n} entries",
+    "no_index": "No index page — showing the folder",
+    "too_large": "Too large to show here ({size}) — download it instead",
+    "not_found": "Not found",
+    "denied": "Not served by the local viewer",
+    "off": "The local viewer is off — add a folder in Settings → Device",
+    "open_settings": "Open Settings",
+    "nim_hidden": "Hidden by No-Image Mode",
+    "frame_hint": "If this page stays blank it refused to be framed — open it in a tab",
+    "wrap": "Wrap lines",
+    "settings_title": "Local viewer",
+    "settings_hint": "Folders the app may show when a local path is opened. Secrets, dotfiles and system paths are always refused.",
+    "roots_none": "Off — add a folder to enable",
+    "roots_count": {
+      "one": "{n} folder served",
+      "other": "{n} folders served"
+    },
+    "add_root": "Add folder",
+    "root_path": "Folder path",
+    "remove_root": "Remove",
+    "show_hidden": "Show hidden files and folders",
+    "save_failed": "Could not save: {error}",
+    "bad_root": "Not an existing folder, or a folder that is always refused"
   }
 }

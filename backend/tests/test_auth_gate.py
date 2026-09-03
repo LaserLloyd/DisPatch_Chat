@@ -91,6 +91,15 @@ DECOY_BLOCKED = [
     ("GET", "/api/terminal/status"),
     ("GET", "/api/harness/status"),
     ("POST", "/api/harness/jobs"),
+    # Local Viewer — reads arbitrary bytes off the host's disk. The router has
+    # its own gate too (localview._require_full_access); these rows pin the
+    # middleware half, and note that the routes are deliberately absent from
+    # _is_inbound so an API key does not open them either.
+    ("GET", "/local/file/tmp/x.txt"),
+    ("GET", "/api/local/stat?path=/tmp"),
+    ("GET", "/api/local/ls?path=/tmp"),
+    ("GET", "/api/local/roots"),
+    ("PUT", "/api/local/config"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
     # The three avatar routes that used to live here moved to the INBOUND set
     # when on-box agents were given avatar management (they were documented in

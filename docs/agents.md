@@ -199,6 +199,43 @@ MCP endpoint), `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff that
 URL is set) and the optional `DISPATCH_CALLBACK_BASE`, which only makes a
 finished render appear sooner. See [configuration.md](configuration.md).
 
+## Pointing at a file on the host
+
+An agent that has just written a report, a log or a generated HTML page can hand
+it over as a **link the operator opens in the app** rather than as an
+attachment. Write the path in the reply:
+
+```
+Build finished. [[view:/var/log/dispatch/build.html|build report]]
+```
+
+That renders a 👁 card; tapping it opens the file full-screen inside DisPatch —
+an HTML page, a PDF, markdown, a log, an image, a video, or a folder listing —
+on whatever device the operator is holding. A bare path in the text
+(`/var/log/dispatch/build.html`, `~/reports/`) becomes the same link, as does a
+markdown link whose href is a local path.
+
+The file is never copied. That has two consequences worth stating: the link
+breaks if you delete the file, and **only paths under the folders the operator
+configured for the local viewer open at all** — everything else answers "Not
+served by the local viewer", as do secrets, dotfiles and system paths whatever
+the configuration says. It is also an unlocked-tier affordance: a Safe-Mode
+device sees the path as plain text and nothing happens when it is tapped. See
+[configuration.md](configuration.md) and [security.md](security.md).
+
+The four markers an agent can write in a message:
+
+| Marker | Renders as | Use it for |
+|---|---|---|
+| `[[view:/abs/path\|label]]` | 👁 card, opens in the app | Something the operator should **look at**: a page, a report, a log, a folder |
+| `[[doc:<id>\|name]]` | Download card | Something they should **keep** — the id comes from `POST /api/upload` |
+| `[[media:/abs/path\|caption]]` | Inline image or video | Pictures and video you already have on disk; the bytes are copied into the media store |
+| `[[pic:<prompt>\|caption]]` | Placeholder, then the picture | A picture that does not exist yet (see above) |
+
+Anything else in `[[…]]` is literal text. A marker inside backticks or a fenced
+block is quoted and does nothing — that is how you show a path without linking
+it.
+
 ## Interactive checklist tables
 
 An agent can post a **daily routine or task list** that renders as an

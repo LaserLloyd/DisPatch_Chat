@@ -1,7 +1,7 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=11';
+import { loadScript, loadStyle, escapeHtml } from './util.js?v=12';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
@@ -113,9 +113,12 @@ export function toPlainPreview(md) {
   // or a frame glyph when it has none. A picture that showed NOTHING left a
   // thread whose newest row is an image (every agent-fired image job) reading
   // "No messages yet" in the list, under a picture that plainly exists.
-  s = s.replace(/\[\[(?:doc|media|image):[^\]|]*\|([^\]]*)\]\]/g, '$1');
+  s = s.replace(/\[\[(?:doc|media|image|view):[^\]|]*\|([^\]]*)\]\]/g, '$1');
   s = s.replace(/\[\[(?:media|image):[^\]]*\]\]/g, ' \u{1F5BC}\uFE0F ');
   s = s.replace(/\[\[doc:[^\]]*\]\]/g, ' ');
+  // A viewer card with no label shows the path \u2014 the preview must never show
+  // the reader `[[view:` itself.
+  s = s.replace(/\[\[view:([^\]]*)\]\]/g, '$1');
   // Images before links — ![alt](url) would otherwise leave a stray "!".
   s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
   s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
@@ -474,6 +477,124 @@ export function parseFilePath(value) {
   return splitFileLine(trimmed);
 }
 
+// --- local paths (the Local Viewer affordance) -----------------------------
+// A path on the DisPatch HOST that the operator can open in-app. Three
+// spellings become a file link: a bare path in prose, `[[view:/p|label]]`, and
+// a markdown link whose href is a local path.
+//
+// UNLOCKED ONLY. `noLocal` (renderMarkdown/enhanceContent option, set from
+// state.decoy) is the client half of the gate; the server 403s every viewer
+// route for a decoy session independently. Neither half is sufficient — and a
+// local href left in place would navigate the APP's own origin, which is why
+// the suppressed form is plain text/span rather than "a link that 404s".
+const LOCAL_ROOTS = 'var|home|tmp|mnt|opt|srv|media|run\\/media|Users|root';
+// Roots the design allows, as one token. The trailing character class is what
+// bounds the path: whitespace, angle brackets, quotes, a backtick, a pipe, `]`
+// or `)` all belong to the sentence (or to the markdown around it), not to the
+// filename. Trailing sentence punctuation is trimmed afterwards.
+const LOCAL_PATH_SRC =
+  `(?:file:\\/\\/)?(?:~|\\/(?:${LOCAL_ROOTS}))\\/[^\\s<>"'\`|\\]\\)]*`;
+// `/media` is a real Linux mount point AND the app's own media route; the app
+// wins. `/api/…`, `/media/…` and `/static/…` are DisPatch URLs, never disk.
+const APP_PATH_RE = /^(?:file:\/\/)?\/(?:api|media|static)\//;
+const LOCAL_HREF_RE = new RegExp(`^(?:file:\\/\\/)?(?:~|\\/(?:${LOCAL_ROOTS}))\\/`);
+// A rooted DIRECTORY: no file extension, and either a trailing slash or at
+// least two segments (so `/var` and `~` alone are prose, `~/Projects` is not).
+const LOCAL_DIR_RE = new RegExp(`^(?:~|\\/(?:${LOCAL_ROOTS}))(?:\\/${FL_SEG})*\\/?$`);
+
+// Ordering matters and is not obvious. This runs on a NON-code segment that
+// has already had [[media:]]/[[doc:]]/[[view:]] expanded (each of those parks
+// its HTML behind a placeholder, or leaves a `![](…)` image), so a path that
+// already became a picture or a card cannot be linkified a second time. The
+// alternation below then skips, in order: a markdown link/image (its
+// destination is an href, not prose), an autolink or raw tag, and a
+// reference-link definition line. Only what is left is prose.
+const LOCAL_SCAN_RE = new RegExp(
+  '(!?\\[(?:[^\\]\\\\]|\\\\.)*\\]\\([^)\\n]*\\))' +          // 1 md link/image
+  '|(<[^\\s<>]*>)' +                                          // 2 autolink / raw tag
+  '|(^[ \\t]{0,3}\\[[^\\]\\n]+\\]:[^\\n]*$)' +                // 3 reference definition
+  `|(^|[\\s(\\[{"'])(${LOCAL_PATH_SRC})`,                     // 4 boundary, 5 the path
+  'gm');
+// Start-of-token is group 4: without it `https://example.com/var/home/x` would
+// match from its `/var/` onwards and a website would render as a local file.
+
+const LOCAL_TRAIL_RE = /[.,;:!?)'"]+$/;
+
+function stripFileScheme(value) {
+  return value.startsWith('file://') ? value.slice(7) : value;
+}
+
+// The label a `[[view:]]` card falls back to. `~` EXPANSION is the server's
+// job (it knows the home directory); this only shortens for DISPLAY, and the
+// data-file-path always carries the path verbatim.
+function shortenHome(path) {
+  return path.replace(/^(?:\/var)?\/home\/[^/]+(?=\/|$)/, '~')
+             .replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
+}
+
+/** A rooted directory reference, or null. Used for code spans, where
+ *  parseFilePath (which requires a file extension) has already declined. */
+export function parseLocalDir(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed || APP_PATH_RE.test(trimmed) || !LOCAL_DIR_RE.test(trimmed)) return null;
+  const segs = trimmed.replace(/\/+$/, '').split('/').filter(Boolean);
+  if (!segs.length) return null;
+  if (/\.[A-Za-z0-9]{1,8}$/.test(segs[segs.length - 1])) return null;  // that's a file
+  if (segs.length < 2 && !trimmed.endsWith('/')) return null;
+  return { path: trimmed, line: null };
+}
+
+/** A bare local path, or null. `value` is one whitespace-delimited token. */
+export function parseLocalPath(value) {
+  const raw = stripFileScheme((value || '').trim());
+  // Trailing punctuation belongs to the sentence. A directory's trailing
+  // slash does not, so it is trimmed only when punctuation follows it.
+  const trimmed = raw.replace(LOCAL_TRAIL_RE, '');
+  if (!trimmed || !LOCAL_HREF_RE.test(trimmed) || APP_PATH_RE.test(trimmed)) return null;
+  const { path, line } = splitFileLine(trimmed);
+  if (!LOCAL_HREF_RE.test(path)) return null;
+  return { path, line };
+}
+
+function fileLinkHtml(path, line, inner, extraClass = '') {
+  const cls = extraClass ? `markdown-file-link ${extraClass}` : 'markdown-file-link';
+  const ln = line === null || line === undefined ? '' : ` data-file-line="${escapeHtml(String(line))}"`;
+  return `<a class="${cls}" data-file-path="${escapeHtml(path)}"${ln}>${inner}</a>`;
+}
+
+// `[[view:<path>|<label>]]` — the explicit directive agents write. Parked HTML
+// exactly like expandDocDirectives: raw HTML in the SOURCE is escaped by the
+// renderer, so generated HTML has to travel behind a placeholder instead.
+function expandViewDirectives(text, parker, noLocal) {
+  return subOutsideCode(text, (seg) => seg.replace(/\[\[view:([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, p, label) => {
+    const path = stripFileScheme(p.trim());
+    const shown = (label || '').trim() || shortenHome(path);
+    // Safe Mode: the directive degrades to its label as plain text. Leaving
+    // the raw `[[view:…]]` would show the reader syntax instead of words.
+    if (noLocal) return shown;
+    const card = `<div class="doc-card view-card"><span class="doc-icon">👁</span>` +
+      `${fileLinkHtml(path, null, escapeHtml(shown), 'doc-link')}</div>`;
+    return `\n\n${parker.park(card)}\n\n`;
+  }));
+}
+
+// Bare paths in prose. Parked, not emitted as markdown: the anchor must not be
+// re-parsed (a path with `_` or `*` in it would otherwise pick up emphasis).
+function linkifyLocalPaths(text, parker, noLocal) {
+  if (noLocal) return text;
+  return subOutsideCode(text, (seg) => seg.replace(LOCAL_SCAN_RE,
+    (whole, mdLink, tag, refDef, boundary, token) => {
+      if (mdLink || tag || refDef) return whole;         // not prose — hands off
+      const raw = token;
+      const trimmed = raw.replace(LOCAL_TRAIL_RE, '');
+      const parsed = parseLocalPath(raw);
+      if (!parsed) return whole;
+      const anchor = fileLinkHtml(parsed.path, parsed.line,
+        `<code>${escapeHtml(trimmed)}</code>`);
+      return `${boundary}${parker.park(anchor)}${raw.slice(trimmed.length)}`;
+    }));
+}
+
 // --- code blocks (ported) --------------------------------------------------
 // Upstream registers exactly these languages and auto-detects only among them,
 // so an untagged fence can't be mis-detected as something exotic.
@@ -679,6 +800,11 @@ const CALLOUT_ICONS = {
 };
 
 // --- marked renderer overrides (Control UI parity) -------------------------
+// The renderer is registered ONCE per module (marked.use is global), so a
+// per-call option cannot be passed through it. `_noLocal` is set around the
+// synchronous marked.parse() call in renderMarkdown and restored in a finally;
+// nothing yields in between, so there is no interleaving to worry about.
+let _noLocal = false;
 let _rendererReady = false;
 function ensureRenderer() {
   if (_rendererReady || !window.marked) return;
@@ -716,10 +842,26 @@ function ensureRenderer() {
       // matching or `&amp;` in a filename would never match the grammar.
       const decoded = raw.replace(/&amp;/g, '&').replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-      const f = parseFilePath(decoded);
-      if (!f) return html;
-      const line = f.line === null ? '' : ` data-file-line="${escapeHtml(String(f.line))}"`;
-      return `<a class="markdown-file-link" data-file-path="${escapeHtml(f.path)}"${line}>${html}</a>`;
+      // A rooted directory (`~/Projects/`, `/var/log`) has no extension, so the
+      // file grammar declines it — but it is exactly what the viewer opens as a
+      // listing, and it is what agents write when they name a folder.
+      const f = parseFilePath(decoded) || parseLocalDir(decoded);
+      // Safe Mode produces no local affordance at all: plain quoted code.
+      if (!f || _noLocal) return html;
+      return fileLinkHtml(f.path, f.line, html);
+    },
+    // A markdown link to a local path (`[report](~/x.md)`, `(/var/y)`,
+    // `(file:///tmp/z)`) is rewritten HERE rather than after sanitization,
+    // because `~/…` and `file://…` are not in ALLOWED_URI_REGEXP — DOMPurify
+    // would have deleted the href and left an anchor with nothing to open.
+    // Returning false falls back to marked's own link renderer.
+    link(token) {
+      const href = String(token.href || '');
+      if (!LOCAL_HREF_RE.test(href) || APP_PATH_RE.test(href)) return false;
+      const inner = this.parser.parseInline(token.tokens);
+      if (_noLocal) return inner;
+      const { path, line } = splitFileLine(stripFileScheme(href));
+      return fileLinkHtml(path, line, inner);
     },
     // Upstream renders <s>; marked defaults to <del>.
     del(token) { return `<s>${this.parser.parseInline(token.tokens)}</s>`; },
@@ -763,7 +905,7 @@ function truncate(text) {
   return `${cut}\n\n… truncated (${text.length} chars, showing first ${cut.length}).`;
 }
 
-export function renderMarkdown(text, { noMedia = false } = {}) {
+export function renderMarkdown(text, { noMedia = false, noLocal = false } = {}) {
   // Scrub placeholder codepoints from the SOURCE first: a model that emitted
   // them verbatim could otherwise forge a token and pull in parked HTML.
   const cleaned = stripInternalScaffolding(stripCitations(String(text || '')))
@@ -776,16 +918,29 @@ export function renderMarkdown(text, { noMedia = false } = {}) {
   // Oversized text: skip the parser entirely rather than let it grind.
   if (src.length > PLAIN_TEXT_CHARS) return sanitize(plainTextFallback(src), noMedia);
 
+  // Checked before anything is expanded: without the parser there is nothing to
+  // restore the parked HTML, and a placeholder codepoint would be shown raw.
+  if (!window.marked) return sanitize(plainTextFallback(src), noMedia);
   const parker = makeHtmlParker();
-  const expanded = expandDocDirectives(expandMediaDirectives(src, parker), parker);
-  if (!window.marked) return sanitize(plainTextFallback(expanded), noMedia);
+  // Order is load-bearing: every directive is expanded (media, doc, view)
+  // BEFORE bare paths are linkified, so a path that has already become a
+  // picture, a document card or a viewer card is behind a placeholder and
+  // cannot be rewritten a second time.
+  const expanded = linkifyLocalPaths(
+    expandViewDirectives(
+      expandDocDirectives(expandMediaDirectives(src, parker), parker),
+      parker, noLocal),
+    parker, noLocal);
   ensureRenderer();
   let rawHtml;
+  _noLocal = noLocal;
   try {
     rawHtml = marked.parse(expanded);
   } catch (e) {
     console.warn('[markdown] parse failed, falling back to plain text:', e && e.message);
     return sanitize(plainTextFallback(src), noMedia);
+  } finally {
+    _noLocal = false;
   }
   return sanitize(parker.restore(rawHtml), noMedia);
 }
@@ -981,8 +1136,36 @@ function enhanceTable(table) {
 }
 
 // Highlight code blocks and add copy buttons inside a rendered container.
-export function enhanceContent(container) {
+export function enhanceContent(container, { noLocal = false } = {}) {
   if (!container) return;
+  // Local paths that arrived as a real <a href> — a markdown link rendered
+  // elsewhere, or content re-enhanced after a paint. renderMarkdown's link
+  // renderer already handles the common case; this is the backstop, and the
+  // ONLY place that can catch an href the sanitizer left navigable.
+  //
+  // `/var/x` matches ALLOWED_URI_REGEXP, so without this a Safe-Mode session
+  // would be offered a link that navigates the APP's origin to a path that
+  // isn't a route. Under noLocal the anchor is replaced by a plain span: the
+  // words survive, the affordance does not.
+  container.querySelectorAll('a').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    const local = href && LOCAL_HREF_RE.test(href) && !APP_PATH_RE.test(href);
+    if (!local && !a.hasAttribute('data-file-path')) return;
+    if (noLocal) {
+      const span = document.createElement('span');
+      span.textContent = a.textContent || '';
+      a.replaceWith(span);
+      return;
+    }
+    if (!local) return;
+    const { path, line } = splitFileLine(stripFileScheme(href));
+    a.removeAttribute('href');
+    a.removeAttribute('target');
+    a.removeAttribute('rel');
+    a.classList.add('markdown-file-link');
+    a.dataset.filePath = path;
+    if (line !== null) a.dataset.fileLine = String(line);
+  });
   // Wrap markdown tables in a scroll container so a wide table scrolls sideways
   // instead of collapsing its columns (see app.css), then make them sortable +
   // resizable. Idempotent: skips tables already inside a .table-scroll.
@@ -1074,9 +1257,26 @@ export function enhanceContent(container) {
 // Registered once, on document, so streamed/re-rendered content is covered
 // without re-binding per message.
 let _delegatedReady = false;
-export function installMarkdownHandlers(onToast) {
+export function installMarkdownHandlers(onToast, { onOpenFile } = {}) {
   if (_delegatedReady) return;
   _delegatedReady = true;
+  // A long press is the touch equivalent of Shift-click: it keeps the old
+  // copy-to-clipboard behaviour when the primary action became "open". Measured
+  // on touchend rather than by a timer, so the copy fires with the same click
+  // the finger produces instead of racing it.
+  let touchStartedAt = 0;
+  let longPress = false;
+  const LONG_PRESS_MS = 500;
+  document.addEventListener('touchstart', (e) => {
+    if (!e.target.closest?.('a[data-file-path]')) return;
+    touchStartedAt = Date.now();
+    longPress = false;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!e.target.closest?.('a[data-file-path]')) return;
+    longPress = touchStartedAt > 0 && (Date.now() - touchStartedAt) >= LONG_PRESS_MS;
+    touchStartedAt = 0;
+  }, { passive: true });
   document.addEventListener('click', async (e) => {
     const copyBtn = e.target.closest?.('.code-block-copy');
     if (copyBtn) {
@@ -1098,14 +1298,22 @@ export function installMarkdownHandlers(onToast) {
       }
       return;
     }
-    // Upstream opens a side panel here; DisPatch has none, so the useful
-    // equivalent is handing the path over.
+    // Upstream opens a side panel here; DisPatch has the Local Viewer, so a
+    // plain click OPENS the path and the modifier/long-press keeps the old
+    // copy. Without an onOpenFile (Safe Mode, or a host that has no viewer)
+    // copying stays the only behaviour.
     const fileLink = e.target.closest?.('a[data-file-path]');
     if (fileLink) {
       e.preventDefault();
       const path = fileLink.dataset.filePath || '';
       const line = fileLink.dataset.fileLine;
       const full = line ? `${path}:${line}` : path;
+      const wantCopy = e.shiftKey || e.altKey || longPress;
+      longPress = false;
+      if (onOpenFile && !wantCopy) {
+        onOpenFile(path, line ? Number.parseInt(line, 10) : null, e);
+        return;
+      }
       try {
         await navigator.clipboard.writeText(full);
         onToast?.(`Copied ${full}`);

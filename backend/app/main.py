@@ -66,6 +66,7 @@ from . import (
     harness,
     image_jobs,
     llm_api,
+    localview,
     openclaw,
     openclaw_text,
     pool_guard,
@@ -467,6 +468,28 @@ async def media_security_headers(request: Request, call_next):
     if path.startswith(("/media/", "/api/media", "/api/files", "/api/reactions/")):
         response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
         response.headers["X-Content-Type-Options"] = "nosniff"
+    # Local Viewer. HTML is the one thing here that is ALLOWED to be an active
+    # document (the operator asked to open that page), so it gets a sandbox
+    # that runs script under an OPAQUE origin — never allow-same-origin, or the
+    # framed page could read this app's DOM, cookies and storage. Everything
+    # else gets the inert policy. `frame-ancestors 'self'` on both so a viewer
+    # response cannot be framed by another site.
+    elif path.startswith(("/local/", "/api/local")):
+        html = response.headers.get("content-type", "").startswith("text/html")
+        response.headers["Content-Security-Policy"] = (
+            "sandbox allow-scripts allow-forms allow-popups allow-modals "
+            "allow-downloads; frame-ancestors 'self'" if html
+            else "default-src 'none'; sandbox; frame-ancestors 'self'")
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+        response.headers["X-Robots-Tag"] = "noindex"
+    # The app's own shell says in index.html that frame-ancestors is the
+    # server's job, and the server did not do it. A header CSP is ADDITIVE to
+    # the meta one, so this adds clickjacking protection without touching the
+    # meta policy's script/style rules.
+    elif path in ("/", "/static/index.html"):
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'")
     # The HTML entry point and the service worker must ALWAYS revalidate, or the
     # browser heuristically caches a stale index.html (no Cache-Control => it may
     # serve from cache without hitting us) and keeps loading old `?v=` assets — so
@@ -576,6 +599,14 @@ async def auth_gate(request: Request, call_next):
 
     path = request.url.path
     method = request.method
+
+    # Local Viewer frame tickets: a page framed under `sandbox` runs as an
+    # opaque origin and sends NO cookie for its stylesheets/scripts, so this
+    # prefix is authenticated by the random ticket in the URL instead (minted
+    # by the cookie-bearing stat call, client-bound, expiring). The route is
+    # its own lock and fails closed — see localview.local_view.
+    if path.startswith(localview.TICKET_PREFIX):
+        return await call_next(request)
 
     # Always-open: app shell, static assets, auth endpoints, health.
     # Exception: avatar images stay behind the session EXCEPT for safe bots,
@@ -1583,7 +1614,12 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # braces here on top of _require_terminal's own gate.
                         # Same for the harness: a headless job runs a shell
                         # agent in the operator's home directory.
-                        "/api/terminal", "/api/harness")):
+                        "/api/terminal", "/api/harness",
+                        # Local Viewer: reads arbitrary bytes off the host's
+                        # disk. Unlocked operator only — Safe Mode never even
+                        # renders the affordance, and this is the server half
+                        # of that promise.
+                        "/local/", "/api/local")):
         return True
     if path == "/api/reactions" or path.startswith("/api/reactions/"):
         # Safe Mode gets the reaction feature READ-ONLY, through the `safe`
@@ -5719,6 +5755,10 @@ async def health(request: Request):
             reactions.fire_failure_stats()["failures_24h"],
         "image_job_failures_24h":
             image_jobs.failure_stats()["failures_24h"],
+        # Local Viewer refusals (outside a root, denied path, hidden file).
+        # Count only, same rule as the reaction failures above: the paths a
+        # refusal names are exactly what must not leak into a health body.
+        "viewer_denied_24h": localview.denial_stats()["denials_24h"],
         # Is the rig answering RIGHT NOW (the worker's breaker), and if not,
         # for how long. Reachability, not prose: no rig URL, no job ids.
         "image_rig": (_clawforge().status() if _image_jobs_configured()
@@ -9645,6 +9685,10 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 # Operator dashboard (admin-only; the router carries its own fail-closed
 # dependency, so it does not rely on auth_gate having run).
 app.include_router(dashboard_routes.router)
+# Local Viewer: /local/file/* + /api/local/*. The router carries its own
+# full-access gate (localview._require_full_access), and _decoy_blocked bars
+# the prefixes one layer earlier — both, deliberately.
+app.include_router(localview.router)
 
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 # BEFORE /static, and that order is the whole trick: Starlette matches mounts in

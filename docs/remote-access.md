@@ -123,6 +123,22 @@ unavailable. Use a hostname.
 
 ---
 
+## The local viewer follows you
+
+Whichever rung you land on, the **local viewer** works from it: a phone on
+mobile data opens a file on the host the same way the desktop in the next room
+does, because the server reads the bytes and the browser only renders them. No
+filesystem access, no VPN-specific plumbing, nothing to configure per device.
+
+Which is worth saying out loud in a remote-access guide: an unlocked session
+from anywhere can read the folders you named as viewer roots. It is off until
+you name one, it refuses secrets, dotfiles and system paths regardless, and
+Safe Mode never reaches it at all — but the roots you choose are readable from
+wherever your PIN travels. Choose them with that in mind; see
+[security.md](security.md).
+
+---
+
 ## Authentication
 
 > **Not yet implemented.** This section describes the

@@ -121,6 +121,11 @@ on a phone, in both themes.
   status, and a checklist that tells you what is misconfigured and how to fix it
 - Automatic rotating database backups with integrity verification
 - Crash recovery that reconciles interrupted conversations rather than losing them
+- **Local viewer**: tap a path in a message and the file opens inside the app —
+  an HTML page or a whole static site, a PDF, markdown, a log, an image, a
+  video, a folder listing. The server reads the bytes, so it works from a phone
+  as well as the desktop. It serves nothing until you name a folder, and never
+  serves secrets, dotfiles or system paths; unlocked sessions only
 
 **Interface**
 - Eight languages — English, العربية, Deutsch, Español, Français, 日本語,

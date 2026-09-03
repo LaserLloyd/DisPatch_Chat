@@ -501,7 +501,9 @@
     "action_settings": "Ajustes",
     "action_health": "Panel de salud",
     "action_files": "Servidor de archivos",
-    "action_send_file": "Enviar un archivo"
+    "action_send_file": "Enviar un archivo",
+    "open_local": "Abrir un archivo local…",
+    "open_local_prompt": "Ruta en el host de DisPatch"
   },
   "recovery": {
     "aria": "Recuperación y exportación",
@@ -875,6 +877,50 @@
     "add": "Añadir",
     "remove": "Quitar",
     "need_label": "Ponle un nombre al botón.",
-    "need_url": "Introduce una dirección web completa que empiece por http:// o https://."
+    "need_url": "Escribe una URL http(s) o una ruta local absoluta.",
+    "open_in_viewer": "Abrir en el visor",
+    "url_or_path": "URL o ruta local"
+  },
+  "viewer": {
+    "title": "Visor local",
+    "close": "Cerrar",
+    "back": "Atrás",
+    "open_tab": "Abrir en una pestaña nueva",
+    "download": "Descargar",
+    "reload": "Recargar",
+    "copy_path": "Copiar la ruta",
+    "copied": "{path} copiada",
+    "loading": "Cargando…",
+    "folder": "Carpeta",
+    "empty_folder": "Esta carpeta está vacía",
+    "items": {
+      "one": "{n} elemento",
+      "many": "{n} elementos",
+      "other": "{n} elementos"
+    },
+    "truncated": "Se muestran las primeras {n} entradas",
+    "no_index": "No hay página de índice — se muestra la carpeta",
+    "too_large": "Demasiado grande para mostrarlo aquí ({size}) — descárgalo",
+    "not_found": "No encontrado",
+    "denied": "El visor local no sirve esta ruta",
+    "off": "El visor local está apagado — añade una carpeta en Ajustes → Dispositivo",
+    "open_settings": "Abrir Ajustes",
+    "nim_hidden": "Oculto por el modo sin imágenes",
+    "frame_hint": "Si esta página se queda en blanco, no permite incrustarse — ábrela en una pestaña",
+    "wrap": "Ajustar líneas",
+    "settings_title": "Visor local",
+    "settings_hint": "Carpetas que la app puede mostrar cuando se abre una ruta local. Los secretos, los archivos ocultos y las rutas del sistema siempre se rechazan.",
+    "roots_none": "Apagado — añade una carpeta para activarlo",
+    "roots_count": {
+      "one": "{n} carpeta servida",
+      "many": "{n} carpetas servidas",
+      "other": "{n} carpetas servidas"
+    },
+    "add_root": "Añadir carpeta",
+    "root_path": "Ruta de la carpeta",
+    "remove_root": "Quitar",
+    "show_hidden": "Mostrar archivos y carpetas ocultos",
+    "save_failed": "No se pudo guardar: {error}",
+    "bad_root": "No es una carpeta existente, o es una carpeta que siempre se rechaza"
   }
 }

@@ -47,6 +47,34 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   again; `/api/health` gains `image_rig` (`reachable`, `unreachable_for_s`,
   `last_error`).
 
+- **Local viewer.** An unlocked operator taps a path in a message and the
+  thing opens inside the app, full-screen: an HTML page or a whole static site
+  folder, a PDF, markdown, a log, an image, a video, a directory listing. The
+  server reads the bytes, so it works from any device that can reach DisPatch
+  — a phone on the sofa opens a file on the host with no filesystem access of
+  its own. Three ways in: a bare path in a message (`/var/log/x.log`,
+  `~/reports/`), the `[[view:/abs/path|label]]` directive an agent can write,
+  and a markdown link whose href is a local path. A gear-rail link button can
+  point at a local path (or open an http(s) URL in the viewer instead of a
+  tab), and the command palette gains **"Open a local file…"** — type a path,
+  and the last eight you opened are offered as rows of their own
+  (`dispatch-viewer-recent`, per device and on the privacy wipe list).
+  Settings → Device gains a **Local viewer** section that edits the served
+  folders: add or remove a root, toggle "show hidden files", each change saved
+  straight to the server (`PUT /api/local/config`) like every other preference
+  in that pane. Unlocked sessions only — the section is not built in Safe
+  Mode.
+
+  It serves **nothing** until you name a folder in Settings → Device, and then
+  only what resolves inside it. `~/.ssh`, `~/.config/secrets`, `/etc`, `/proc`,
+  the database, the security files, and anything matching `*.env *.pem *.key
+  id_* known_hosts …` are refused whatever the roots say; dotfiles below a root
+  are refused unless you turn them on. Safe Mode never sees any of it — the
+  affordance is not rendered and every route answers 403 — and `/api/health`
+  counts refusals as `viewer_denied_24h`. Framed pages run under a sandbox
+  with an opaque origin: their own scripts and relative assets work, `fetch()`
+  from inside them does not.
+
 ### Changed
 
 - **No dropped replies.** Every run the gateway accepts is registered in an
@@ -107,6 +135,9 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in a `bot_id` or mood name passed `^…$` and became a path component.
 - The `image_jobs` loop reported a 20-second period to `/api/health`'s
   loop beats while ticking every 5.
+- **The app's own pages now send `Content-Security-Policy: frame-ancestors
+  'self'` as a header.** `index.html` said that was the server's job and the
+  server never did it, so nothing stopped another site from framing DisPatch.
 
 ## [1.0.0] — unreleased
 

@@ -494,7 +494,9 @@
     "action_settings": "Einstellungen",
     "action_health": "Gesundheits-Dashboard",
     "action_files": "Dateiserver",
-    "action_send_file": "Datei senden"
+    "action_send_file": "Datei senden",
+    "open_local": "Lokale Datei öffnen…",
+    "open_local_prompt": "Pfad auf dem DisPatch-Host"
   },
   "recovery": {
     "aria": "Wiederherstellung und Export",
@@ -852,6 +854,48 @@
     "add": "Hinzufügen",
     "remove": "Entfernen",
     "need_label": "Gib dem Button einen Namen.",
-    "need_url": "Gib eine vollständige Webadresse ein, beginnend mit http:// oder https://."
+    "need_url": "Gib eine http(s)-URL oder einen absoluten lokalen Pfad ein.",
+    "open_in_viewer": "In der Anzeige öffnen",
+    "url_or_path": "URL oder lokaler Pfad"
+  },
+  "viewer": {
+    "title": "Lokale Anzeige",
+    "close": "Schließen",
+    "back": "Zurück",
+    "open_tab": "In neuem Tab öffnen",
+    "download": "Herunterladen",
+    "reload": "Neu laden",
+    "copy_path": "Pfad kopieren",
+    "copied": "{path} kopiert",
+    "loading": "Wird geladen…",
+    "folder": "Ordner",
+    "empty_folder": "Dieser Ordner ist leer",
+    "items": {
+      "one": "{n} Eintrag",
+      "other": "{n} Einträge"
+    },
+    "truncated": "Es werden die ersten {n} Einträge gezeigt",
+    "no_index": "Keine Indexseite — es wird der Ordner gezeigt",
+    "too_large": "Zu groß für die Anzeige hier ({size}) — lade es stattdessen herunter",
+    "not_found": "Nicht gefunden",
+    "denied": "Wird von der lokalen Anzeige nicht ausgeliefert",
+    "off": "Die lokale Anzeige ist aus — füge unter Einstellungen → Gerät einen Ordner hinzu",
+    "open_settings": "Einstellungen öffnen",
+    "nim_hidden": "Vom bildfreien Modus ausgeblendet",
+    "frame_hint": "Wenn diese Seite leer bleibt, lässt sie sich nicht einbetten — öffne sie in einem Tab",
+    "wrap": "Zeilen umbrechen",
+    "settings_title": "Lokale Anzeige",
+    "settings_hint": "Ordner, die die App zeigen darf, wenn ein lokaler Pfad geöffnet wird. Geheimnisse, versteckte Dateien und Systempfade werden immer abgelehnt.",
+    "roots_none": "Aus — füge einen Ordner hinzu",
+    "roots_count": {
+      "one": "{n} Ordner freigegeben",
+      "other": "{n} Ordner freigegeben"
+    },
+    "add_root": "Ordner hinzufügen",
+    "root_path": "Ordnerpfad",
+    "remove_root": "Entfernen",
+    "show_hidden": "Versteckte Dateien und Ordner zeigen",
+    "save_failed": "Konnte nicht gespeichert werden: {error}",
+    "bad_root": "Kein vorhandener Ordner, oder ein Ordner, der immer abgelehnt wird"
   }
 }

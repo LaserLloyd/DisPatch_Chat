@@ -184,6 +184,12 @@ export const api = {
   avatarPoolPrompts: (botId) => j(`/api/avatar-pool/${encodeURIComponent(botId)}/prompts`),
   saveAvatarPoolPrompts: (botId, prompts) => j(`/api/avatar-pool/${encodeURIComponent(botId)}/prompts`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ prompts }) }),
 
+  // Local viewer roots (full-session only; the server 403s these in Safe Mode).
+  // The viewer's own stat/ls calls do NOT come through here — viewer.js fetches
+  // them itself so the module stays usable without importing the app's client.
+  localRoots: () => j('/api/local/roots'),
+  saveLocalConfig: (body) => j('/api/local/config', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+
   // Coding terminal (full-session only)
   terminalStatus: () => j('/api/terminal/status'),
   terminalAction: (action) => j(`/api/terminal/${encodeURIComponent(action)}`, { method: 'POST' }),

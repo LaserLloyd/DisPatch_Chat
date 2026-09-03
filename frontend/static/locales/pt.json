@@ -501,7 +501,9 @@
     "action_settings": "Definições",
     "action_health": "Painel de saúde",
     "action_files": "Servidor de ficheiros",
-    "action_send_file": "Enviar um ficheiro"
+    "action_send_file": "Enviar um ficheiro",
+    "open_local": "Abrir um ficheiro local…",
+    "open_local_prompt": "Caminho no anfitrião do DisPatch"
   },
   "recovery": {
     "aria": "Recuperar e exportar",
@@ -875,6 +877,50 @@
     "add": "Adicionar",
     "remove": "Remover",
     "need_label": "Dê um nome ao botão.",
-    "need_url": "Insira um endereço web completo começando com http:// ou https://."
+    "need_url": "Introduz um URL http(s) ou um caminho local absoluto.",
+    "open_in_viewer": "Abrir no visualizador",
+    "url_or_path": "URL ou caminho local"
+  },
+  "viewer": {
+    "title": "Visualizador local",
+    "close": "Fechar",
+    "back": "Voltar",
+    "open_tab": "Abrir numa nova aba",
+    "download": "Transferir",
+    "reload": "Recarregar",
+    "copy_path": "Copiar o caminho",
+    "copied": "{path} copiado",
+    "loading": "A carregar…",
+    "folder": "Pasta",
+    "empty_folder": "Esta pasta está vazia",
+    "items": {
+      "one": "{n} item",
+      "many": "{n} itens",
+      "other": "{n} itens"
+    },
+    "truncated": "A mostrar as primeiras {n} entradas",
+    "no_index": "Sem página de índice — a mostrar a pasta",
+    "too_large": "Demasiado grande para mostrar aqui ({size}) — transfere-o",
+    "not_found": "Não encontrado",
+    "denied": "O visualizador local não serve este caminho",
+    "off": "O visualizador local está desligado — adiciona uma pasta em Definições → Dispositivo",
+    "open_settings": "Abrir as definições",
+    "nim_hidden": "Oculto pelo modo sem imagens",
+    "frame_hint": "Se esta página ficar em branco, recusou ser incorporada — abre-a numa aba",
+    "wrap": "Quebrar linhas",
+    "settings_title": "Visualizador local",
+    "settings_hint": "Pastas que a app pode mostrar quando um caminho local é aberto. Segredos, ficheiros ocultos e caminhos do sistema são sempre recusados.",
+    "roots_none": "Desligado — adiciona uma pasta para ativar",
+    "roots_count": {
+      "one": "{n} pasta servida",
+      "many": "{n} pastas servidas",
+      "other": "{n} pastas servidas"
+    },
+    "add_root": "Adicionar pasta",
+    "root_path": "Caminho da pasta",
+    "remove_root": "Remover",
+    "show_hidden": "Mostrar ficheiros e pastas ocultos",
+    "save_failed": "Não foi possível guardar: {error}",
+    "bad_root": "Não é uma pasta existente, ou é uma pasta sempre recusada"
   }
 }

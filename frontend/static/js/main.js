@@ -2,11 +2,11 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=20';
+import { api, setOnLocked } from './api.js?v=21';
 import { ChatSocket } from './ws.js?v=8';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=24';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=25';
 import { installChecklists, applyChecklistState } from './checklist.js?v=2';
-import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=11';
+import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=12';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -29,7 +29,11 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=5';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle } from './pins.js?v=6';
-import { renderLinkRail, linksSection } from './links.js?v=3';
+import { renderLinkRail, linksSection } from './links.js?v=4';
+// The local viewer owns its own overlay (built like openLightbox, closed by the
+// same closeAllOverlays route). main.js only decides WHEN it may open: never in
+// Safe Mode, which is why isDecoy is a live callback rather than a boolean.
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=2';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=2';
 
@@ -522,6 +526,12 @@ const VIEW_AT_DEPTH = ['bots', 'threads', 'chat'];
 
 function navigate(view) {
   if (!isMobile()) { setView(view); return; }
+  // A closed viewer can leave its own entry on top (a framed page that
+  // navigated added joint entries its close() could not count). Reclaim it
+  // as the view we are actually showing so the depth arithmetic stays true.
+  if (history.state?.viewer && !viewerOpen()) {
+    history.replaceState({ view: dom.app.dataset.view || 'bots' }, '');
+  }
   const cur = VIEW_DEPTH[history.state?.view] ?? 0;
   const target = VIEW_DEPTH[view] ?? 0;
   if (target === cur) {
@@ -542,6 +552,9 @@ function navigate(view) {
 
 window.addEventListener('popstate', (e) => {
   if (!isMobile()) return;
+  // Landed on a viewer entry with no viewer open: a stale one left behind by
+  // a framed page's own navigations. Step over it instead of painting "bots".
+  if (e.state?.viewer) { if (!viewerOpen()) history.back(); return; }
   setView(e.state?.view || 'bots');
 });
 
@@ -1119,7 +1132,11 @@ function messageEl(msg) {
   // (so the browser never even requests it) and img/video tags are forbidden in
   // sanitization. The server already redacts decoy traffic — this is the
   // belt-and-suspenders layer, and it covers sub bubbles too.
-  const mdOpts = { noMedia: mediaHidden() };
+  // noLocal is the same idea one tier up: local-path affordances (bare paths,
+  // [[view:]] cards, local markdown links) are an unlocked-operator feature, so
+  // a Safe-Mode render must not produce them at all. mediaHidden() is the wrong
+  // gate here — No-Image Mode hides pictures, it does not lock the device.
+  const mdOpts = { noMedia: mediaHidden(), noLocal: state.decoy };
   if (isSub) {
     // Intermediate / working output: collapsed by default, click to expand.
     wrap.classList.add('sub-msg');
@@ -1127,7 +1144,7 @@ function messageEl(msg) {
     details.append(el('summary', { text: t('msg.working') }));
     const inner = el('div', { class: 'sub-content' });
     inner.innerHTML = renderMarkdown(msg.content || '', mdOpts);
-    enhanceContent(inner);
+    enhanceContent(inner, { noLocal: state.decoy });
     details.append(inner);
     bubble.append(details);
   } else if (role === 'assistant') {
@@ -1142,7 +1159,7 @@ function messageEl(msg) {
       bubble.append(jobCard);
     } else {
       bubble.innerHTML = renderMarkdown(msg.content || '', mdOpts);
-      enhanceContent(bubble);
+      enhanceContent(bubble, { noLocal: state.decoy });
     }
   } else {
     // User / system: plain text with preserved line breaks; attachments
@@ -2489,9 +2506,15 @@ function mountLanguagePicker() {
   // buttons nor the URLs behind them.
   const oldLinks = document.getElementById('links-row');
   if (oldLinks) oldLinks.remove();
+  // Local viewer roots: fifth device preference, same rules, rebuilt on every
+  // open so its contents reflect the CURRENT session and the current server
+  // config rather than whatever was loaded the last time Settings was opened.
+  const oldViewer = document.getElementById('viewer-row');
+  if (oldViewer) oldViewer.remove();
   if (!state.decoy) {
     const lr = linksSection(t, { onChange: renderPins });
     nr.after(lr);
+    lr.after(viewerSection());
   }
   // About: version + the source link. In the Device pane on purpose — it is the
   // one settings tab a Safe-Mode session can open, so every user of the running
@@ -2503,6 +2526,125 @@ function mountLanguagePicker() {
   // LAST in the pane, under the action buttons: it is reference information,
   // not a control, and inserting it between two toggles reads as a setting.
   (dom['spane-device'] || nr.parentNode).append(ab);
+}
+
+/** Settings → Device: the local viewer's served roots.
+ *
+ *  Built here rather than in viewer.js because it is a settings control, not
+ *  part of the overlay — viewer.js stays the module that shows files, and this
+ *  is the module that decides which files it may show.
+ *
+ *  Unlocked sessions only. Not "disabled in Safe Mode": not built at all, like
+ *  the links editor beside it. A locked device must not learn which folders of
+ *  the host this app can serve, and the server 403s the routes anyway, so a
+ *  built-but-empty section would only be a broken control that leaks a fact.
+ *
+ *  Every change saves immediately (PUT /api/local/config) — same instant-apply
+ *  contract as the rest of the pane, nothing to press Save on.
+ */
+function viewerSection() {
+  const wrap = el('div', { class: 'bm-links bm-viewer', id: 'viewer-row' });
+  wrap.append(el('span', {}, [
+    el('strong', { text: t('viewer.settings_title') }),
+    ` — ${t('viewer.settings_hint')}`,
+  ]));
+
+  const list = el('div', { class: 'bm-links-list' });
+  const status = el('p', { class: 'muted bm-viewer-status' });
+  const err = el('p', { class: 'bm-links-error', role: 'alert', hidden: '' });
+  const showErr = (msg) => { err.textContent = msg || ''; err.hidden = !msg; };
+
+  // Last loaded server state. The pane is a view of it; a failed save leaves
+  // this untouched so the next edit is not built on a value the server refused.
+  let cfg = { roots: [], show_hidden: false, enabled: false };
+
+  const hidden = el('input', { type: 'checkbox', id: 'viewer-show-hidden' });
+  const path = el('input', {
+    class: 'bm-links-in-url', type: 'text', id: 'viewer-root-input',
+    placeholder: t('viewer.root_path'), 'aria-label': t('viewer.root_path'),
+    autocomplete: 'off', spellcheck: 'false',
+  });
+
+  const paint = () => {
+    list.innerHTML = '';
+    for (const root of cfg.roots) {
+      list.append(el('div', { class: 'bm-links-item' }, [
+        el('span', { class: 'bm-links-glyph', 'aria-hidden': 'true' }, [railIcon(RAIL_ICONS['viewer-folder'])]),
+        // The path is the whole row: no label to give it, and truncating it
+        // would hide exactly the segment that decides what is served.
+        el('span', { class: 'bm-links-url', text: root.path }),
+        el('button', {
+          type: 'button',
+          class: 'bm-links-remove',
+          title: t('viewer.remove_root'),
+          'aria-label': `${t('viewer.remove_root')}: ${root.path}`,
+          text: '✕',
+          onclick: () => save({ roots: cfg.roots.filter((r) => r.path !== root.path).map((r) => r.path) }),
+        }),
+      ]));
+    }
+    hidden.checked = !!cfg.show_hidden;
+    const n = cfg.roots.length;
+    // Both `n` (the {n} placeholder) and `count` (which form i18n picks) —
+    // pass only `n` and every locale falls back to its plural `other`.
+    status.textContent = n ? t('viewer.roots_count', { n, count: n }) : t('viewer.roots_none');
+  };
+
+  /** Send a config change and adopt whatever the server says the state now is.
+   *  `patch` carries only what changed; the rest is re-sent from `cfg`. */
+  async function save(patch) {
+    showErr('');
+    const body = {
+      roots: patch.roots !== undefined ? patch.roots : cfg.roots.map((r) => r.path),
+      show_hidden: patch.show_hidden !== undefined ? patch.show_hidden : !!cfg.show_hidden,
+    };
+    try {
+      cfg = await api.saveLocalConfig(body);
+      paint();
+      return true;
+    } catch (e) {
+      // 400 is the server's one specific verdict — a root that is not an
+      // existing folder, or one the built-in deny list always refuses. It
+      // deliberately does not say WHICH, so neither do we.
+      const msg = e.status === 400 ? t('viewer.bad_root') : t('viewer.save_failed', { error: e.message });
+      showErr(msg);
+      toast(msg, true);
+      paint();          // the checkbox must snap back to the saved value
+      return false;
+    }
+  }
+
+  hidden.addEventListener('change', () => save({ show_hidden: hidden.checked }));
+
+  const addRoot = async () => {
+    const value = path.value.trim();
+    if (!value) { path.focus(); return; }
+    const ok = await save({ roots: [...cfg.roots.map((r) => r.path), value] });
+    if (ok) path.value = '';
+  };
+  path.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addRoot(); } });
+
+  wrap.append(
+    list,
+    el('div', { class: 'bm-links-addrow' }, [
+      path,
+      el('button', { type: 'button', class: 'btn-secondary bm-links-add', text: t('viewer.add_root'), onclick: addRoot }),
+    ]),
+    el('label', { class: 'bm-links-viewer-toggle bm-viewer-hidden' }, [
+      hidden, el('span', { text: t('viewer.show_hidden') }),
+    ]),
+    status,
+    err,
+  );
+
+  // Async load after the section is in the DOM: the pane must not wait on a
+  // request to appear, and a failure here leaves the honest "off" state up
+  // rather than an empty box.
+  api.localRoots().then((r) => { cfg = r; paint(); }).catch((e) => {
+    showErr(t('viewer.save_failed', { error: e.message }));
+  });
+  paint();
+  return wrap;
 }
 
 // Keep the Minimal-avatars control honest about who is driving it.
@@ -4282,7 +4424,7 @@ function renderHarnessJobs() {
       // containing an image built a real <img> and fetched it on a No-Image /
       // Safe-Mode device — the one surface where the source-strip chokepoint
       // was bypassed.
-      if (out) { outEl.innerHTML = renderMarkdown(out, { noMedia: mediaHidden() }); enhanceContent(outEl); }
+      if (out) { outEl.innerHTML = renderMarkdown(out, { noMedia: mediaHidden(), noLocal: state.decoy }); enhanceContent(outEl, { noLocal: state.decoy }); }
       else outEl.textContent = '(no output)';
       card.append(outEl);
       if ((body.error || '').trim()) {
@@ -4479,7 +4621,7 @@ function renderStreamMarkdown(id) {
   if (!md) return;
   // noMedia in Safe Mode (same redaction as final). Code highlight is deferred
   // to stream_done (messageEl + enhanceContent) — too costly per frame.
-  md.innerHTML = renderMarkdown(streamBuffers[id] || '', { noMedia: mediaHidden() });
+  md.innerHTML = renderMarkdown(streamBuffers[id] || '', { noMedia: mediaHidden(), noLocal: state.decoy });
   // Instant scroll — smooth would fight itself across rapid streaming frames.
   if (isNearBottom(220)) scrollToBottom(true);
 }
@@ -5263,7 +5405,7 @@ function renderPins() {
   // Custom link buttons share the rail and the rebuild-on-tier-change rule,
   // but not the registry: they are unlocked-only (the URLs are exactly what
   // Safe Mode must not advertise) and links.js enforces that on every render.
-  renderLinkRail(document.getElementById('gear-row'), { decoy: state.decoy });
+  renderLinkRail(document.getElementById('gear-row'), { decoy: state.decoy, openViewer });
 }
 
 // ---- Idle auto-lock (full mode only → drops back to Safe Mode) ----
@@ -5421,6 +5563,11 @@ function closeAllOverlays() {
   document.querySelectorAll('.lightbox').forEach((n) => {
     if (typeof n._close === 'function') n._close(); else n.remove();
   });
+  // The viewer IS a .lightbox and the sweep above closes it — this is the
+  // belt-and-braces half: if its node ever left the DOM by another route, the
+  // module would still hold it as the open overlay (and keep app.inert set).
+  // A no-op when nothing is open.
+  closeViewer();
   // Native <dialog>s (rename/confirm prompts, Cmd+K palette) live in the
   // browser top layer, above everything — they too must never survive a lock.
   document.querySelectorAll('dialog[open]').forEach((d) => { try { d.close(); } catch { /* ignore */ } });
@@ -5785,7 +5932,13 @@ async function startApp() {
   iconifyRail();
   // Delegated code-block / file-path copy handlers (idempotent, survives
   // re-render + streaming since it binds on document, not per message).
-  installMarkdownHandlers(toast);
+  // A plain click on a file path opens it in the local viewer; Shift/Alt-click
+  // and a long-press still copy the path (markdown.js owns that split). The
+  // decoy check is belt-and-braces — openViewer refuses in Safe Mode too, and
+  // Safe-Mode markdown never renders a file link in the first place.
+  installMarkdownHandlers(toast, {
+    onOpenFile: (path) => { if (!state.decoy) openViewer({ path }); },
+  });
   // Stale unread dots (>24h) auto-dismiss at render time; navigation and WS
   // events already re-render, but a re-paint on an idle, untouched tab lets a
   // dot that has just crossed the 24h line clear itself without interaction.
@@ -6238,6 +6391,42 @@ function wireRecoveryUi() {
 // model commands (DisPatch has no slash-command bot triggers by design).
 let cmdkItems = [];
 let cmdkSel = 0;
+
+// Paths the operator has opened in the local viewer, newest first, so the
+// second visit to a report is a keystroke instead of a retyped path. Per
+// device (like every other preference here) and on the privacy wipe list —
+// a list of host paths says plenty about what this machine does.
+const VIEWER_RECENT_KEY = 'dispatch-viewer-recent';
+const VIEWER_RECENT_MAX = 8;
+function viewerRecent() {
+  // Safe Mode never reads it back: the palette entry does not exist there, and
+  // a locked device must not be able to surface host paths from storage.
+  if (state.decoy) return [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(VIEWER_RECENT_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((p) => typeof p === 'string' && p).slice(0, VIEWER_RECENT_MAX) : [];
+  } catch { return []; }
+}
+function rememberViewerPath(path) {
+  const p = String(path || '').trim();
+  if (!p) return;
+  const next = [p, ...viewerRecent().filter((x) => x !== p)].slice(0, VIEWER_RECENT_MAX);
+  try { localStorage.setItem(VIEWER_RECENT_KEY, JSON.stringify(next)); } catch { /* storage off */ }
+}
+/** Ask for a path, remember it, open it. Shared by the palette entry and its
+ *  recent-path rows so "remember" can never be attached to one and not the other. */
+async function openLocalPath(path) {
+  if (state.decoy) return;
+  let target = path;
+  if (!target) {
+    target = await uiPrompt(t('cmdk.open_local_prompt'));
+    if (!target) return;
+  }
+  target = String(target).trim();
+  if (!target) return;
+  rememberViewerPath(target);
+  openViewer({ path: target });
+}
 function cmdkActions() {
   const a = [
     { icon: '＋', label: t('cmdk.action_new_chat'), run: () => newChat() },
@@ -6254,6 +6443,12 @@ function cmdkActions() {
     a.push({ icon: '⚙️', label: t('cmdk.action_settings'), run: () => openSettingsTab('device') });
     a.push({ icon: '🩺', label: t('cmdk.action_health'), run: () => openSettingsTab('health') });
     a.push({ icon: '📁', label: t('cmdk.action_files'), run: () => openFileServer() });
+    // Open a path on the DisPatch host in the viewer. Unlocked only, with the
+    // rest of the admin surface: Safe Mode gets no hint the feature exists.
+    a.push({ icon: '👁', label: t('cmdk.open_local'), run: () => openLocalPath() });
+    for (const p of viewerRecent()) {
+      a.push({ icon: '👁', label: p, sub: t('cmdk.open_local'), run: () => openLocalPath(p) });
+    }
   } else {
     a.push({ icon: '📤', label: t('cmdk.action_send_file'), run: () => openDrop() });
   }
@@ -6408,6 +6603,18 @@ async function init() {
     openSettingsTab,
   });
   initLlmPanel(llmCtx());
+  // The local viewer, same shape: it holds no app state, it just needs the
+  // app's toast and a live read of the tier. The default fetch-based api is
+  // fine — /api/local/{stat,ls} are plain GETs with no client-side state.
+  installViewerHandlers({ onToast: toast, isDecoy: () => state.decoy });
+  // The viewer's feature-off pane offers a way to Settings rather than telling
+  // the operator to go find it. It cannot import openSettingsTab (that would be
+  // a cycle back into main.js), so it asks by event and this is the answer.
+  document.addEventListener('dispatch:open-settings', (ev) => {
+    const tab = (ev.detail && ev.detail.tab) || 'device';
+    closeViewer();          // Settings is a modal too — do not stack them
+    openSettingsTab(tab);
+  });
   wireAuthEvents();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
