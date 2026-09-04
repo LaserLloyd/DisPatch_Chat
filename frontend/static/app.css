@@ -121,7 +121,19 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   padding: 14px 0;
   gap: 12px;
 }
-.bot-list { display: flex; flex-direction: column; gap: 12px; flex: 1; align-items: center; overflow-y: auto; width: 100%; }
+/* overflow-x is explicit because `overflow-y: auto` alone makes the x axis
+   compute to `auto` too, and .bot-name-tip is absolutely positioned at
+   inset-inline-start: 64px — past the 71px rail — so it extended the
+   scrollable area and produced a horizontal scrollbar under the avatars.
+   Nothing is lost by clipping: measured live, the tip renders at left 72px
+   against a list ending at 71px, i.e. 0 visible pixels, and it is display:none
+   in the mobile bots view — it has never been visible anywhere. */
+.bot-list { display: flex; flex-direction: column; gap: 12px; flex: 1; align-items: center; overflow-y: auto; overflow-x: hidden; width: 100%; }
+/* NOT `overflow-x: clip`: paired with `overflow-y: auto` it is invalid and
+   computes back to `hidden` (verified live — computed overflowX stayed
+   "hidden"), so it would read as a stronger guarantee than it delivers.
+   `hidden` still permits programmatic scrollLeft, which is harmless here:
+   nothing in the rail scrolls itself, and no scrollbar is rendered. */
 .bot-avatar {
   width: 56px; height: 56px;
   border-radius: 16px;
@@ -278,7 +290,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .msg.error .bubble { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.4); color: var(--error-text); }
 .msg-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; padding: 0 4px; }
 .msg-media { margin-top: 8px; max-width: 100%; }
-.msg-media img { max-width: 100%; max-height: 420px; border-radius: var(--radius-md); border: 1px solid var(--border); display: block; cursor: zoom-in; }
+.msg-media img { max-width: 100%; max-height: min(420px, 70vh); border-radius: var(--radius-md); border: 1px solid var(--border); display: block; cursor: zoom-in; }
 
 /* Document cards (in messages and markdown) */
 .doc-card { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; max-width: 100%; }
@@ -304,6 +316,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    scrolls sideways instead of collapsing its columns. */
 .bubble .table-scroll { max-width: 100%; overflow-x: auto; margin: 8px 0; -webkit-overflow-scrolling: touch; }
 .bubble table { border-collapse: collapse; font-size: 13px; margin: 0; }
+/* Fill the reading width. A markdown table sizes to its content by default,
+   so a 7-column table of short cells drew ~650px of a 1500px pane and read
+   as a cramped block floating in empty space. It still scrolls inside
+   .table-scroll when its content genuinely needs more room, and a table the
+   user has resized (data-fixed="1") keeps the widths they dragged. */
+.bubble .table-scroll > table { width: 100%; }
+.bubble .table-scroll > table[data-fixed="1"] { width: auto; min-width: 100%; }
 .bubble th, .bubble td { border: 1px solid var(--border); padding: 5px 9px; overflow-wrap: normal; word-break: normal; }
 .bubble th { background: var(--bg-hover); white-space: nowrap; }
 .bubble tbody tr:nth-child(even) { background: color-mix(in oklab, var(--bg-hover) 45%, transparent); }
@@ -345,7 +364,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .bubble h1 { font-size: 1.35em; } .bubble h2 { font-size: 1.22em; } .bubble h3 { font-size: 1.1em; }
 .bubble h4 { font-size: 1em; } .bubble h5 { font-size: .95em; } .bubble h6 { font-size: .9em; color: var(--text-secondary); }
 .bubble hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
-.bubble img { max-width: 100%; border-radius: var(--radius-sm); }
+.bubble img {
+  /* Height cap, not just width: a tall image (an agent-sent chart or a
+     portrait render) used to paint at its natural height and push the rest
+     of the reply off screen. 70vh keeps the whole picture on one screen
+     with room for the bubble around it; the lightbox still opens it full. */
+  max-width: 100%; max-height: 70vh; height: auto; object-fit: contain;
+  border-radius: var(--radius-sm);
+}
 .copy-btn {
   position: absolute; top: 6px; inset-inline-end: 6px; font-size: 11px; padding: 3px 8px;
   background: var(--bg-hover); border: 1px solid var(--border-light); border-radius: 6px;
@@ -654,7 +680,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
 /* ===================== Inline video ===================== */
 .bubble video, .msg-media video {
-  max-width: 100%; max-height: 420px; border-radius: var(--radius-md);
+  max-width: 100%; max-height: min(420px, 70vh); border-radius: var(--radius-md);
   border: 1px solid var(--border); display: block; cursor: zoom-in; background: #000;
 }
 .bubble .media-only, .bubble.media-only { padding: 0; background: none; border: none; }
@@ -1150,9 +1176,18 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 
 /* ===================== Modern message surface ===================== */
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT
-   style), capped to a comfortable reading column; USER messages keep their
-   right-aligned bubble for the texting-vs-tool contrast. */
-.msg.assistant .msg-col { max-width: min(760px, 100%); }
+   style); USER messages keep their right-aligned bubble for the
+   texting-vs-tool contrast.
+   The 760px reading column was removed 2026-09-04 by request: on a wide window it
+   left agent prose AND markdown tables sitting in the left half of the pane
+   while the rest of the pane stayed empty. Agent turns here are working
+   output — tables, code, checklists — not an article, so they get the whole
+   reading window. Tune with --assistant-col if a measure cap is ever wanted
+   back (e.g. `min(760px, 100%)`); every assistant surface reads this one var
+   so the streamed row, the finalized row and the typing placeholder cannot
+   drift apart. */
+:root { --assistant-col: 100%; }
+.msg.assistant .msg-col { max-width: var(--assistant-col); }
 .msg.assistant > .msg-col > .bubble:not(.sub) {
   background: transparent; border: none; padding: 2px 0 0;
   font-size: 15px; line-height: 1.6;
@@ -1332,8 +1367,8 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* ---- Live streaming parity: match the final assistant row exactly so the
    reply doesn't reflow when it finalizes (F2/F12). The streamed bubble now
    renders markdown live (JS), so style it like the final bubble. ---- */
-.msg.assistant.streaming .msg-col { max-width: min(760px, 100%); }
-.typing-col { max-width: min(760px, 100%); }
+.msg.assistant.streaming .msg-col { max-width: var(--assistant-col); }
+.typing-col { max-width: var(--assistant-col); }
 .msg.streaming > .msg-col > .bubble { background: transparent; border: none; padding: 2px 0 0; font-size: 15px; line-height: 1.6; }
 .stream-pre { font-size: 15px; line-height: 1.6; }
 .stream-cursor { background: var(--accent-hover); }
@@ -3084,3 +3119,36 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
 .viewer-error-text { color: var(--text-secondary); font-size: 14px; }
+
+/* ===================== Operator tools popover =====================
+   Reasonix, the DeepSeek Harness and StudioForge collapsed out of the rail into
+   one ⌥ entry. Fixed positioning so the menu escapes the rail's overflow clip;
+   .menu above supplies the surface, border and shadow. */
+.tools-menu {
+  /* .menu pins itself with inset-inline-end/top for the in-panel popovers.
+     This one is positioned from script (openToolsMenu writes left/top), so
+     the inherited end/top anchors must be released or they fight it. */
+  position: fixed; inset-inline-end: auto; right: auto; top: auto;
+  min-width: 232px; z-index: 60; padding: 4px;
+}
+.tools-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: none; border: none; text-align: start; font-size: 14px;
+  color: inherit; cursor: pointer;
+}
+.tools-item:hover, .tools-item:focus-visible { background: var(--bg-hover); }
+.tools-item.active { background: var(--bg-hover); font-weight: 600; }
+.tools-item .bot-avatar {
+  width: 26px; height: 26px; min-width: 26px; font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* The label takes the slack so every dot lines up on the trailing edge. */
+.tools-item-label { flex: 1 1 auto; }
+.tools-item .bot-status-dot { position: static; margin-inline-start: auto; }
+/* The rail button's own glyph reads as a control, not an agent's face. */
+.tools-avatar { font-size: 15px; }
+/* Divider between the operator tools and any bots parked in the menu. Hidden
+   by renderMenuBots when either half is empty, so the menu never opens with a
+   rule floating above or below nothing. */
+.tools-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }

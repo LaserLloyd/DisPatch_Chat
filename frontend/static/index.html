@@ -125,7 +125,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
        bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=54" />
+  <link rel="stylesheet" href="/static/app.css?v=58" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
@@ -211,6 +211,43 @@
       <button class="gear-btn" id="manage-bots" title="Settings" aria-label="Settings" data-i18n-attr="title=nav.settings;aria-label=nav.settings">⚙</button>
       </div>
     </nav>
+
+    <!-- Operator tools popover: Reasonix, the DeepSeek Harness and StudioForge
+         used to sit in the rail as three more avatar buttons. Unlocked, that
+         made the rail read as clutter rather than navigation, so they collapse
+         into one ⌥ button that opens this menu (same pattern as the terminal's
+         options popover: position:fixed so it escapes the rail's overflow clip,
+         closed by the next outside click).
+
+         It lives OUTSIDE #bot-list on purpose. renderSidebarInner() clears that
+         container on every repaint, and these rows carry the live service dots
+         that renderTerminal/renderHarness/renderStudioForge patch in place —
+         inside the rail they would be wiped mid-flight. The three updaters were
+         re-scoped from #bot-list to this menu in the same change; a row here and
+         a querySelector there must move together or the dots silently freeze. -->
+    <div class="menu tools-menu" id="tools-menu" role="menu" aria-labelledby="tools-btn" hidden>
+      <button class="tools-item" id="tools-terminal" role="menuitem" type="button" data-i18n-attr="aria-label=terminal.sidebar_aria" hidden>
+        <span class="bot-avatar terminal-avatar" aria-hidden="true">&gt;_</span>
+        <span class="tools-item-label" data-i18n="terminal.name">Coding terminal</span>
+        <span class="bot-status-dot terminal-sidedot"></span>
+      </button>
+      <button class="tools-item" id="tools-harness" role="menuitem" type="button" data-i18n-attr="aria-label=harness.sidebar_aria" hidden>
+        <span class="bot-avatar terminal-avatar harness-avatar" aria-hidden="true">dsh</span>
+        <span class="tools-item-label" data-i18n="harness.name">DeepSeek Harness</span>
+        <span class="bot-status-dot terminal-sidedot harness-sidedot"></span>
+      </button>
+      <button class="tools-item" id="tools-studioforge" role="menuitem" type="button" data-i18n-attr="aria-label=studioforge.sidebar_aria" hidden>
+        <span class="bot-avatar terminal-avatar studioforge-avatar" aria-hidden="true">SF</span>
+        <span class="tools-item-label" data-i18n="studioforge.name">StudioForge</span>
+        <span class="bot-status-dot terminal-sidedot studioforge-sidedot"></span>
+      </button>
+      <!-- Bots parked here from Settings → Bots (the ⌥ badge). Unlike the three
+           rows above these are rebuilt on every sidebar repaint by
+           renderMenuBots(), because they carry no dot that is patched in place.
+           The separator hides itself when either half is empty. -->
+      <div class="tools-sep" id="tools-bots-sep" role="separator" hidden></div>
+      <div id="tools-bots"></div>
+    </div>
 
     <!-- Thread list -->
     <section class="panel threadlist" id="threadlist">
@@ -974,6 +1011,6 @@
        open a code block or the terminal. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=70"></script>
+  <script type="module" src="/static/js/main.js?v=72"></script>
 </body>
 </html>
