@@ -385,3 +385,115 @@ def test_job_env_leaves_path_alone_when_unconfigured(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.delenv("DISPATCH_HARNESS_PATH", raising=False)
     assert harness._job_env()["PATH"] == "/usr/bin"
+
+
+# --------------------------------------------------------------------------- #
+# set_default_model: the shared settings.yaml must survive being written to
+# --------------------------------------------------------------------------- #
+
+SETTINGS_WITH_KNOWLEDGE = """\
+# DeepSeek Harness (dsh) user settings — $DSH_HOME/settings.yaml
+# Hot-reloads: model/provider changes apply on the NEXT request.
+agent-default-model:
+  provider: minimax
+  model: MiniMax-M3
+  reasoningEffort: high
+llm-pi-ai:
+  providers:
+    buildpc:
+      displayName: Local LLM server
+      models:
+        # Curated to the models actually wired into the agent fleet, not the
+        # rig's whole disk. JoyFox is deliberately absent: 0/5 on tool calls,
+        # and dsh is a tool-using agent.
+        - id: some/model
+          name: Some Model
+"""
+
+
+def _write_settings(tmp_path, text=SETTINGS_WITH_KNOWLEDGE):
+    p = tmp_path / "settings.yaml"
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_set_default_model_preserves_comments(tmp_path):
+    """A model switch must not delete the file's documentation.
+
+    Regression: the PyYAML round-trip erased the curated-catalog note and the
+    'JoyFox is deliberately absent' warning — knowledge written down to stop
+    someone repeating a known mistake.
+    """
+    p = _write_settings(tmp_path)
+    harness.set_default_model("deepseek-official", "deepseek-v4-flash", path=p)
+    out = p.read_text(encoding="utf-8")
+    assert "JoyFox is deliberately absent" in out
+    assert "Curated to the models actually wired" in out
+    assert "Hot-reloads: model/provider changes apply" in out
+    data = yaml.safe_load(out)
+    assert data["agent-default-model"]["provider"] == "deepseek-official"
+    assert data["agent-default-model"]["model"] == "deepseek-v4-flash"
+
+
+def test_set_default_model_keeps_sibling_keys_in_the_block(tmp_path):
+    p = _write_settings(tmp_path)
+    harness.set_default_model("deepseek-official", "deepseek-v4-pro", path=p)
+    data = yaml.safe_load(p.read_text(encoding="utf-8"))
+    assert data["agent-default-model"]["reasoningEffort"] == "high"
+    # and the rest of the document is untouched
+    assert data["llm-pi-ai"]["providers"]["buildpc"]["displayName"] == "Local LLM server"
+
+
+def test_set_default_model_appends_when_block_absent(tmp_path):
+    p = _write_settings(tmp_path, "# just a comment\nllm-deepseek:\n  reasoningEffort: high\n")
+    harness.set_default_model("minimax", "MiniMax-M3", path=p)
+    out = p.read_text(encoding="utf-8")
+    assert "# just a comment" in out
+    data = yaml.safe_load(out)
+    assert data["agent-default-model"] == {"provider": "minimax", "model": "MiniMax-M3"}
+    assert data["llm-deepseek"]["reasoningEffort"] == "high"
+
+
+def test_set_default_model_is_0600(tmp_path):
+    p = _write_settings(tmp_path)
+    harness.set_default_model("minimax", "MiniMax-M3", path=p)
+    assert oct(p.stat().st_mode & 0o777) == "0o600"
+
+
+def test_set_default_model_concurrent_writes_never_corrupt(tmp_path):
+    """Concurrent writers may race for last-write, but must not interleave.
+
+    The old implementation took no lock and used a fixed .tmp path. Every
+    surviving file must still parse and name one of the models written.
+    """
+    import threading
+    p = _write_settings(tmp_path)
+    models = [f"model-{i}" for i in range(12)]
+    errors = []
+
+    def worker(m):
+        try:
+            harness.set_default_model("deepseek-official", m, path=p)
+        except Exception as e:  # noqa: BLE001 - the assertion is "no errors at all"
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=worker, args=(m,)) for m in models]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    data = yaml.safe_load(p.read_text(encoding="utf-8"))
+    assert data["agent-default-model"]["model"] in models
+    assert data["agent-default-model"]["reasoningEffort"] == "high"
+    assert "JoyFox is deliberately absent" in p.read_text(encoding="utf-8")
+    assert not list(tmp_path.glob("*.tmp")), "temp files left behind"
+
+
+def test_set_default_model_still_validates(tmp_path):
+    p = _write_settings(tmp_path)
+    with pytest.raises(harness.ValidationError):
+        harness.set_default_model("bad provider!", "m", path=p)
+    with pytest.raises(harness.ValidationError):
+        harness.set_default_model("ok", "bad model!", path=p)
+    assert "JoyFox is deliberately absent" in p.read_text(encoding="utf-8")

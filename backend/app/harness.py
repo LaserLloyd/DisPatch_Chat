@@ -38,6 +38,8 @@ import contextlib
 import json
 import logging
 import os
+import tempfile
+import fcntl
 import re
 import shutil
 import signal
@@ -499,37 +501,131 @@ def discover_models(path: Path | None = None) -> dict:
     return {"providers": providers, "current": current}
 
 
+# `agent-default-model:` at column 0, through to the next top-level key. Used to
+# rewrite ONLY that block in place, so every other line of the file — including
+# every comment — survives byte-for-byte.
+_ADM_BLOCK_RE = re.compile(
+    r"^agent-default-model:[ \t]*\n(?:(?:[ \t]+[^\n]*|[ \t]*#[^\n]*|[ \t]*)\n)*",
+    re.M)
+
+
+def _rewrite_adm_block(text: str, provider: str, model: str) -> str | None:
+    """Replace provider/model inside the existing `agent-default-model:` block.
+
+    Returns the new file text, or None if the block is not there in a shape we
+    recognise (caller then appends one). Sibling keys in the block, such as
+    `reasoningEffort`, are preserved along with their comments.
+    """
+    m = _ADM_BLOCK_RE.search(text)
+    if not m:
+        return None
+    block = m.group(0)
+    seen = {"provider": False, "model": False}
+    out = []
+    for line in block.splitlines(keepends=True):
+        for key, value in (("provider", provider), ("model", model)):
+            km = re.match(rf"^([ \t]+){key}:[ \t]*\S.*$", line.rstrip("\n"))
+            if km:
+                line = f"{km.group(1)}{key}: {value}\n"
+                seen[key] = True
+                break
+        out.append(line)
+    if not (seen["provider"] and seen["model"]):
+        return None
+    return text[:m.start()] + "".join(out) + text[m.end():]
+
+
 def set_default_model(provider: str, model: str, path: Path | None = None) -> dict:
-    """Rewrite `agent-default-model` in settings.yaml (atomic replace, 0600).
-    dsh re-reads the file, so the change applies to the next new session in
-    both the Web UI and headless runs. Comments in the file are NOT preserved
-    (PyYAML round-trip) — the header comment is re-emitted verbatim."""
+    """Rewrite `agent-default-model` in settings.yaml, preserving the file.
+
+    Two properties this needs and did not used to have:
+
+    * **Comments survive.** The old implementation round-tripped the whole file
+      through PyYAML, which drops every comment. One model switch from the
+      DisPatch pane erased the curated buildpc catalog note and the "JoyFox is
+      deliberately absent: 0/5 on tool calls" warning — knowledge written down
+      precisely so nobody repeats a known mistake. Now only the two scalars
+      inside the `agent-default-model:` block are rewritten, in place.
+    * **Concurrent writers cannot interleave.** The file is shared with every
+      other dsh caller, and the old read-modify-write took no lock and used a
+      fixed `.tmp` path, so simultaneous writes silently last-writer-wins (and
+      two writers could fight over the same temp file). Now an exclusive flock
+      on a sidecar covers read-through-replace, and the temp file is unique.
+
+    dsh re-reads the file, so the change applies to the next new session in both
+    the Web UI and headless runs. Agents should NOT call this: give a job its own
+    scratch `DSH_HOME` instead (see the `dsh` skill). It exists for the
+    human-facing picker, where the operator is deliberately choosing a shared
+    default for everything on the machine.
+    """
     if not (isinstance(provider, str) and _ID_RE.match(provider)):
         raise ValidationError("provider must match ^[A-Za-z0-9._:/-]{1,128}$")
     if not (isinstance(model, str) and _ID_RE.match(model)):
         raise ValidationError("model must match ^[A-Za-z0-9._:/-]{1,128}$")
     p = path or settings_path()
-    data = _load_settings(p)
-    data["agent-default-model"] = {"provider": provider, "model": model}
-    body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    p.parent.mkdir(parents=True, exist_ok=True)
     header = ("# DeepSeek Harness (dsh) user settings — $DSH_HOME/settings.yaml\n"
               "# Hot-reloads: model/provider changes apply on the NEXT request.\n"
               "# Secrets never live here: apiKeyEnv is a reference resolved from\n"
               "# .credentials.yaml (0600) or the environment.\n"
               "# `agent-default-model` is managed by DisPatch's DeepSeek Harness pane too.\n")
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
+    lock_path = p.with_name(p.name + ".lock")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(header + body)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, p)
+        lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
     except OSError as e:
+        raise HarnessError(f"cannot lock {p.name}: {e}") from e
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            original = p.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            original = ""
+        except OSError as e:
+            raise HarnessError(f"cannot read {p.name}: {e}") from e
+
+        body = _rewrite_adm_block(original, provider, model) if original.strip() else None
+        if body is None:
+            # No recognisable block: keep every existing line and append one.
+            # Falling back to a PyYAML round-trip here would reintroduce exactly
+            # the comment loss this function exists to avoid.
+            prefix = original if original.startswith("#") or not original else original
+            if prefix and not prefix.endswith("\n"):
+                prefix += "\n"
+            if not prefix:
+                prefix = header
+            body = (f"{prefix}\nagent-default-model:\n"
+                    f"  provider: {provider}\n  model: {model}\n")
+
+        # Never write something dsh cannot read back.
+        try:
+            check = yaml.safe_load(body)
+        except yaml.YAMLError as e:
+            raise HarnessError(f"refusing to write unparseable {p.name}: {e}") from e
+        adm = (check or {}).get("agent-default-model")
+        if not (isinstance(adm, dict) and adm.get("provider") == provider
+                and adm.get("model") == model):
+            raise HarnessError(
+                f"refusing to write {p.name}: the rewritten file does not read back "
+                f"as {provider}/{model}")
+
+        fd, tmp_name = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(body)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, p)
+        except OSError as e:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise HarnessError(f"cannot write {p.name}: {e}") from e
+    finally:
         with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise HarnessError(f"cannot write {p.name}: {e}") from e
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
     return {"provider": provider, "model": model}
 
 
