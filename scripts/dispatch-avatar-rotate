@@ -50,6 +50,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import yaml
 from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
@@ -133,6 +134,12 @@ BASE_URL = os.environ.get("LOCAL_CHAT_URL", "http://127.0.0.1:8765")
 HISTORY_KEEP = 10
 
 CURL_TIMEOUT = "60"  # seconds; a multi-MB upload plus PIL work on the server
+
+# The image CLI (ClawForge) the dated-pair generation shells out to. The daily
+# timer's unit sets no DISPATCH_IMAGE_CLI, so fall back to the on-box path; an
+# explicit env override still wins. Same binary the app's avatar_pool uses.
+IMAGE_CLI = (os.environ.get("DISPATCH_IMAGE_CLI", "").strip()
+             or str(HOME / "bin" / "clawforge"))
 
 
 # ── logging ─────────────────────────────────────────────────────────────────
@@ -276,6 +283,178 @@ def burn_pool_pair(bot_id: str, stem: str, log: Log) -> None:
         log.warn(f"{bot_id}: could not burn {stem}: {e}")
 
 
+# ── dated-pair generation ───────────────────────────────────────────────────
+# The dated bank (choose()'s first preference) has been dead since the pool
+# migration: nothing produced it, so every rotation drew a pool pair and the
+# "<prefix>-YYYY-MM-DD" branch never fired. One ClawForge pair a day, generated
+# into the avatar dir BEFORE the pool pick, revives it.
+#
+# Same rules as the app's avatar_pool.generate_pair: full portrait first via a
+# plain generate, then the rig's detector for the square face (--crop-face) —
+# never a local blind crop. Same ClawForge binary the app uses (IMAGE_CLI).
+def _prompt_bank(bot_id: str, log: Log) -> dict:
+    """The bot's prompt bank (avatar-prompts-<bot>.yaml), or {} when absent."""
+    path = DATA_DIR / f"avatar-prompts-{bot_id}.yaml"
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        log.warn(f"{bot_id}: unreadable prompt bank {path.name}: {exc}")
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _unlink_quiet(p: Path) -> None:
+    try:
+        p.unlink()
+    except OSError:
+        pass
+
+
+def _run_clawforge(flags: list[str], log: Log, timeout: int = 300) -> list[Path]:
+    """One ClawForge call; the saved image files it reported, or [] on failure."""
+    try:
+        proc = subprocess.run([IMAGE_CLI, *flags], capture_output=True,
+                              text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.error(f"clawforge call failed ({exc})")
+        return []
+    try:
+        result = json.loads((proc.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        log.error(f"clawforge returned non-JSON: {(proc.stdout or '')[:200]!r}")
+        return []
+    if result.get("status") != "ok":
+        msg = str(result.get("message") or result.get("error_code") or result)
+        log.error(f"clawforge refused: {msg[:300]}")
+        return []
+    out: list[Path] = []
+    for raw in (result.get("files") or []):
+        try:
+            f = Path(raw)
+        except (TypeError, ValueError):
+            continue
+        if f.is_file() and f.stat().st_size > 0:
+            out.append(f)
+    return out
+
+
+def generate_dated_pair(bot_id: str, cfg: dict, today: str, log: Log) -> bool:
+    """Produce today's dated pair (<prefix>-YYYY-MM-DD-{face,full}.png) in the
+    avatar dir — the bank choose() prefers. Idempotent (a complete pair already
+    there short-circuits) and best-effort: on failure choose() falls back to a
+    pool pair, so a rig outage or a bank with no base never blocks rotation."""
+    dated = f"{cfg['dated_prefix']}-{today}"
+    if complete(dated):
+        return True
+
+    bank = _prompt_bank(bot_id, log)
+    base = str(bank.get("base") or "").strip()
+    if not base:
+        log.warn(f"{bot_id}: no 'base' in the prompt bank; skipping dated "
+                 "generation (pool pick will cover it)")
+        return False
+    variations = [str(v).strip() for v in (bank.get("variations") or [])
+                  if str(v).strip()]
+    prompt = base
+    if variations:
+        prompt = f"{base.rstrip(',')}, {random.choice(variations).rstrip(',')}"
+
+    workflow = str(bank.get("workflow") or "").strip()
+    ratio = str(bank.get("ratio") or "1:1").strip()
+    shot = str(bank.get("shot") or "").strip()
+    look = str(bank.get("look") or "").strip()
+
+    # Stage on the data filesystem (same fs as AVATAR_DIR) so the final moves
+    # are atomic renames; TemporaryDirectory removes anything left behind.
+    try:
+        with tempfile.TemporaryDirectory(prefix="avatar-dated-",
+                                         dir=str(DATA_DIR)) as stage:
+            gen = ["--count", "1", "--priority", "3", "--ratio", ratio,
+                   "--output", stage]
+            if workflow and not workflow.startswith("-"):
+                gen += ["--workflow", workflow]
+            gen += ["--", prompt]
+            fulls = _run_clawforge(gen, log, timeout=300)
+            if not fulls:
+                log.warn(f"{bot_id}: dated full render produced nothing")
+                return False
+
+            crop = ["--crop-face", str(fulls[0]), "--output", stage]
+            if shot in ("extreme_close", "close", "wide", "bust", "waist"):
+                crop += ["--shot", shot]
+            if look in ("anime", "realistic"):
+                crop += ["--look", look]
+            faces = _run_clawforge(crop, log, timeout=180)
+            if not faces:
+                log.warn(f"{bot_id}: dated face crop produced nothing")
+                return False
+
+            face_dst, full_dst = pair_for(dated)
+            try:
+                full_dst.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(fulls[0], full_dst)
+            except OSError as exc:
+                log.warn(f"{bot_id}: cannot publish dated full {full_dst.name}: {exc}")
+                return False
+            try:
+                os.replace(faces[0], face_dst)
+            except OSError as exc:
+                _unlink_quiet(full_dst)
+                log.warn(f"{bot_id}: cannot publish dated face {face_dst.name}: {exc}")
+                return False
+    except OSError as exc:
+        log.warn(f"{bot_id}: dated staging failed: {exc}")
+        return False
+
+    log.info(f"{bot_id}: generated dated pair {dated}")
+    return True
+
+
+def repin_daily_thread(bot_id: str, today: str, log: Log) -> None:
+    """Re-pin the bot's daily thread (daily-<bot>-<today>) to the avatar just
+    uploaded, if that thread already exists. The upload's own re-pin sweep only
+    touches MESSAGE-LESS threads; a daily thread that already carries the
+    morning brief has messages, so it must be re-pinned explicitly. No-op when
+    the thread does not exist yet (the sweep will handle it at creation)."""
+    want = f"daily-{bot_id}-{today}"
+    try:
+        proc = subprocess.run(
+            ["curl", "-s", "--max-time", "20",
+             f"{BASE_URL}/api/threads?bot_id={bot_id}"],
+            capture_output=True, text=True, timeout=40)
+    except subprocess.TimeoutExpired:
+        log.warn(f"{bot_id}: thread list fetch timed out; daily re-pin skipped")
+        return
+    if proc.returncode != 0:
+        log.warn(f"{bot_id}: thread list fetch failed rc={proc.returncode}")
+        return
+    try:
+        threads = (json.loads((proc.stdout or "").strip() or "{}")
+                   .get("threads") or [])
+    except json.JSONDecodeError:
+        log.warn(f"{bot_id}: thread list returned non-JSON")
+        return
+    tid = next((t.get("id") for t in threads if t.get("id") == want), None)
+    if tid is None:
+        return
+
+    try:
+        proc = subprocess.run(
+            ["curl", "-s", "-S", "--max-time", "30", "-X", "POST",
+             f"{BASE_URL}/api/threads/{tid}/avatar?source=current",
+             "-o", os.devnull, "-w", "%{http_code}"],
+            capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        log.warn(f"{bot_id}: daily re-pin for {tid} timed out")
+        return
+    status = (proc.stdout or "").strip()
+    if status == "200":
+        log.info(f"{bot_id}: re-pinned daily thread {tid} to the current avatar")
+    else:
+        log.warn(f"{bot_id}: daily re-pin for {tid} HTTP {status} "
+                 f"{(proc.stderr or '').strip()[:200]}")
+
+
 def choose(bot_id: str, cfg: dict, today: str, history: list[str],
            log: Log) -> tuple[str, str] | tuple[None, None]:
     """Pick this bot's pair for today. Returns (stem, source) or (None, None)
@@ -372,6 +551,13 @@ def rotate_bot(bot_id: str, cfg: dict, state: dict, today: str,
                  "(--force overrides)")
         return "skip"
 
+    # Produce today's dated pair FIRST, before the pool pick, so choose()'s
+    # dated branch has something to find. Best-effort: on failure (or dry-run)
+    # the pool pick still covers the day. Dry-run must change nothing, so it
+    # never generates.
+    if not args.dry_run:
+        generate_dated_pair(bot_id, cfg, today, log)
+
     stem, source = choose(bot_id, cfg, today, history, log)
     if stem is None:
         # cfg['pool_glob'] used to be interpolated here. It was removed from
@@ -401,6 +587,11 @@ def rotate_bot(bot_id: str, cfg: dict, state: dict, today: str,
         return "fail"
     if source == "pool":
         burn_pool_pair(bot_id, stem, log)
+
+    # If today's daily thread already exists (rotation ran late, or a --force
+    # re-run), it pinned yesterday's face — the upload's own sweep only re-pins
+    # MESSAGE-LESS threads, and the daily thread already carries the brief.
+    repin_daily_thread(bot_id, today, log)
 
     state[bot_id] = {
         "last_used": [stem] + [s for s in history if s != stem][: HISTORY_KEEP - 1],
