@@ -59,7 +59,9 @@
     "label_unlock": "فتح القفل",
     "label_files": "الملفات",
     "label_send_file": "إرسال ملف",
-    "label_reactions": "التفاعلات"
+    "label_reactions": "التفاعلات",
+    "tools": "الأدوات",
+    "tools_aria": "أدوات المشغّل — الطرفية، أداة البرمجة، منصة LLM"
   },
   "theme": {
     "dark": "المظهر الداكن — انقر للفاتح",
@@ -217,7 +219,9 @@
     "show_in_sidebar": "إظهار البوت في الشريط الجانبي",
     "recovery": "🛟 الاسترداد والتصدير",
     "lock_now": "🔒 قفل الآن",
-    "discard_confirm": "تجاهل التغييرات؟"
+    "discard_confirm": "تجاهل التغييرات؟",
+    "menu_badge": "⌥",
+    "menu_title": "نقل هذا البوت إلى قائمة ⌥ الأدوات (هذا الجهاز فقط)"
   },
   "companions": {
     "title": "الرفاق",

@@ -55,7 +55,9 @@
     "label_unlock": "Entsperren",
     "label_files": "Dateien",
     "label_send_file": "Datei senden",
-    "label_reactions": "Reaktionen"
+    "label_reactions": "Reaktionen",
+    "tools": "Werkzeuge",
+    "tools_aria": "Betriebswerkzeuge — Terminal, Coding-Harness, LLM-Rig"
   },
   "theme": {
     "dark": "Dunkles Design — für helles klicken",
@@ -209,7 +211,9 @@
     "show_in_sidebar": "Bot in der Seitenleiste zeigen",
     "recovery": "🛟 Wiederherstellung & Export",
     "lock_now": "🔒 Jetzt sperren",
-    "discard_confirm": "Änderungen verwerfen?"
+    "discard_confirm": "Änderungen verwerfen?",
+    "menu_badge": "⌥",
+    "menu_title": "Diesen Bot ins ⌥ Werkzeuge-Menü verschieben (nur dieses Gerät)"
   },
   "companions": {
     "title": "Begleiter",

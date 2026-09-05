@@ -19,7 +19,7 @@
 
 import { railIcon, RAIL_ICONS } from './util.js?v=12';
 import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=5';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=6';
 
 const KEY = 'dispatch-pinned-settings';
 

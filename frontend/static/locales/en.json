@@ -55,7 +55,9 @@
     "label_unlock": "Unlock",
     "label_files": "Files",
     "label_send_file": "Send file",
-    "label_reactions": "Reactions"
+    "label_reactions": "Reactions",
+    "tools": "Tools",
+    "tools_aria": "Operator tools — terminal, coding harness, LLM rig"
   },
   "theme": {
     "dark": "Dark theme — click for light",
@@ -209,7 +211,9 @@
     "show_in_sidebar": "Show bot in sidebar",
     "recovery": "🛟 Recovery & Export",
     "lock_now": "🔒 Lock now",
-    "discard_confirm": "Discard changes?"
+    "discard_confirm": "Discard changes?",
+    "menu_badge": "⌥",
+    "menu_title": "Move this bot into the ⌥ Tools menu (this device only)"
   },
   "companions": {
     "title": "Companions",

@@ -54,7 +54,9 @@
     "label_unlock": "ロック解除",
     "label_files": "ファイル",
     "label_send_file": "ファイルを送る",
-    "label_reactions": "リアクション"
+    "label_reactions": "リアクション",
+    "tools": "ツール",
+    "tools_aria": "運用ツール — ターミナル、コーディングハーネス、LLMリグ"
   },
   "theme": {
     "dark": "ダークテーマ — クリックでライトに",
@@ -207,7 +209,9 @@
     "show_in_sidebar": "サイドバーにボットを表示",
     "recovery": "🛟 復元とエクスポート",
     "lock_now": "🔒 今すぐロック",
-    "discard_confirm": "変更を破棄しますか？"
+    "discard_confirm": "変更を破棄しますか？",
+    "menu_badge": "⌥",
+    "menu_title": "このボットを ⌥ ツールメニューへ移動（この端末のみ）"
   },
   "companions": {
     "title": "コンパニオン",

@@ -56,7 +56,9 @@
     "label_unlock": "Desbloquear",
     "label_files": "Archivos",
     "label_send_file": "Enviar archivo",
-    "label_reactions": "Reacciones"
+    "label_reactions": "Reacciones",
+    "tools": "Herramientas",
+    "tools_aria": "Herramientas de operador — terminal, harness de código, rig LLM"
   },
   "theme": {
     "dark": "Tema oscuro — pulsa para el claro",
@@ -211,7 +213,9 @@
     "show_in_sidebar": "Mostrar el bot en la barra lateral",
     "recovery": "🛟 Recuperación y exportación",
     "lock_now": "🔒 Bloquear ahora",
-    "discard_confirm": "¿Descartar los cambios?"
+    "discard_confirm": "¿Descartar los cambios?",
+    "menu_badge": "⌥",
+    "menu_title": "Mover este bot al menú ⌥ Herramientas (solo este dispositivo)"
   },
   "companions": {
     "title": "Acompañantes",

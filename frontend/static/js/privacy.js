@@ -38,6 +38,7 @@ export const APP_KEYS = [
   'dispatch-lang',            // i18n.js
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)
   'dispatch-custom-links',    // links.js (custom link buttons on the rail)
+  'dispatch-menu-bots',       // menubots.js (which bots were parked in the ⌥ menu)
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (unlock keypad "keep this device unlocked")

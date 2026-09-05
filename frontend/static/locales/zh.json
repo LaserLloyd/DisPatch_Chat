@@ -54,7 +54,9 @@
     "label_unlock": "解锁",
     "label_files": "文件",
     "label_send_file": "发送文件",
-    "label_reactions": "反应图片"
+    "label_reactions": "反应图片",
+    "tools": "工具",
+    "tools_aria": "运维工具 — 终端、编码工具、LLM 机架"
   },
   "theme": {
     "dark": "深色主题 — 点击切换浅色",
@@ -207,7 +209,9 @@
     "show_in_sidebar": "在侧边栏显示机器人",
     "recovery": "🛟 恢复与导出",
     "lock_now": "🔒 立即锁定",
-    "discard_confirm": "放弃更改？"
+    "discard_confirm": "放弃更改？",
+    "menu_badge": "⌥",
+    "menu_title": "将此机器人移入 ⌥ 工具菜单（仅此设备）"
   },
   "companions": {
     "title": "伙伴",

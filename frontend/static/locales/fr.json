@@ -56,7 +56,9 @@
     "label_unlock": "Déverrouiller",
     "label_files": "Fichiers",
     "label_send_file": "Envoyer un fichier",
-    "label_reactions": "Réactions"
+    "label_reactions": "Réactions",
+    "tools": "Outils",
+    "tools_aria": "Outils d'opérateur — terminal, harnais de code, rig LLM"
   },
   "theme": {
     "dark": "Thème sombre — clic pour clair",
@@ -211,7 +213,9 @@
     "show_in_sidebar": "Afficher le bot dans la barre latérale",
     "recovery": "🛟 Récupération et export",
     "lock_now": "🔒 Verrouiller",
-    "discard_confirm": "Abandonner les modifications ?"
+    "discard_confirm": "Abandonner les modifications ?",
+    "menu_badge": "⌥",
+    "menu_title": "Déplacer ce bot dans le menu ⌥ Outils (cet appareil uniquement)"
   },
   "companions": {
     "title": "Compagnons",
