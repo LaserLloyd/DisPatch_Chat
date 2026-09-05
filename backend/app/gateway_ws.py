@@ -154,7 +154,7 @@ def gateway_token(config_path: Path | None = None) -> str | None:
 class _AgentCall:
     """One in-flight turn dispatch: its acceptance, and its finished result."""
 
-    __slots__ = ("final", "accepted", "accepted_payload")
+    __slots__ = ("accepted", "accepted_payload", "final")
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self.final: asyncio.Future = loop.create_future()

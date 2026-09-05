@@ -474,7 +474,7 @@ def test_set_default_model_concurrent_writes_never_corrupt(tmp_path):
     def worker(m):
         try:
             harness.set_default_model("deepseek-official", m, path=p)
-        except Exception as e:  # noqa: BLE001 - the assertion is "no errors at all"
+        except Exception as e:
             errors.append(repr(e))
 
     threads = [threading.Thread(target=worker, args=(m,)) for m in models]

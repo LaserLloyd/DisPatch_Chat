@@ -35,14 +35,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import json
 import logging
 import os
-import tempfile
-import fcntl
 import re
 import shutil
 import signal
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -589,7 +589,7 @@ def set_default_model(provider: str, model: str, path: Path | None = None) -> di
             # No recognisable block: keep every existing line and append one.
             # Falling back to a PyYAML round-trip here would reintroduce exactly
             # the comment loss this function exists to avoid.
-            prefix = original if original.startswith("#") or not original else original
+            prefix = original
             if prefix and not prefix.endswith("\n"):
                 prefix += "\n"
             if not prefix:

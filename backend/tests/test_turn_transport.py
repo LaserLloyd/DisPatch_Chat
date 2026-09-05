@@ -40,6 +40,7 @@ class TurnWS:
         self._final_delay = final_delay
         self._accept_delay = accept_delay
         self._fail_accept = fail_accept
+        self._tasks: list[asyncio.Task] = []
         self.closed = False
 
     async def send(self, raw: str) -> None:
@@ -47,7 +48,7 @@ class TurnWS:
         self.sent.append(req)
         if req.get("method") != "agent":
             return
-        asyncio.create_task(self._answer(req["id"]))
+        self._tasks.append(asyncio.create_task(self._answer(req["id"])))
 
     async def _answer(self, rid: str) -> None:
         if self._fail_accept is not None:

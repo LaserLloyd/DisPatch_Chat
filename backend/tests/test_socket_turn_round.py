@@ -306,7 +306,7 @@ def test_twin_comparison_does_not_recanonicalize_canonical_text():
     main._canon_memo.clear()
     orig = main._canon_msg
     try:
-        main._canon_msg = counted           # noqa: SLF001 - module-level swap
+        main._canon_msg = counted
         a, b = real("first message here"), real("second message here")
         main._is_twin(a, b)
         first = calls["n"]
@@ -626,7 +626,8 @@ def test_health_reports_the_things_that_only_fail_silently(app_client,
     """Each of these had NO surface at all: in-flight runs that never clear,
     events the local queue dropped, and file backstops that do nothing."""
     class _Router:
-        stats = {"delivered": 0}
+        def __init__(self):
+            self.stats = {"delivered": 0}
 
     class _Client:
         def __init__(self):

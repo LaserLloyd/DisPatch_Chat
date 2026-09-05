@@ -264,7 +264,8 @@ def test_gateway_ws_stats_report_live_socket_state(env, monkeypatch):
     env()
 
     class _Router:
-        stats = {"delivered": 0}
+        def __init__(self):
+            self.stats = {"delivered": 0}
 
     class _Client:
         def __init__(self):
@@ -285,6 +286,7 @@ def test_gateway_ws_stats_report_live_socket_state(env, monkeypatch):
 def test_first_run_card_keys_off_socket_as_well_as_cli(env, monkeypatch):
     """A dead CLI with a live gateway socket is a working install."""
     import asyncio
+
     from app import main, openclaw
 
     class _Client:

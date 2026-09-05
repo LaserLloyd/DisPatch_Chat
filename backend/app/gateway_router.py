@@ -122,8 +122,15 @@ class _ChatRun:
     the database and a foreign session emits a delta several times a second.
     """
 
-    __slots__ = ("target", "sent", "pending", "replace", "flush",
-                 "started", "settle")
+    __slots__ = (
+        "flush",
+        "pending",
+        "replace",
+        "sent",
+        "settle",
+        "started",
+        "target",
+    )
 
     def __init__(self, target: tuple[str, str] | None) -> None:
         self.target = target
