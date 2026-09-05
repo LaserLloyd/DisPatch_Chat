@@ -126,6 +126,29 @@ def gpu_status() -> dict | None:
     return _run_json([bin_, "status", "--json"])
 
 
+def _host_restarts_backend(status: dict | None) -> bool:
+    """True when the image host stops its renderer when idle and starts it
+    again on the next request.
+
+    ClawForge unloads ComfyUI after ``idle_unload.minutes`` of quiet. On an
+    hourly picture cadence that leaves ``comfy.running`` false for most of
+    every hour while the rig is perfectly able to render -- it simply spends a
+    cold start doing it. Treating that as an outage is what skipped 70 refill
+    rounds on 2026-09-03 (proven wrong by a 62 s render taken while running
+    was false).
+
+    ``minutes: 0`` disables idle-unload, so the host is NOT promising to bring
+    the backend back and a stopped renderer means what it says.
+    """
+    idle = (status or {}).get("idle_unload")
+    if not isinstance(idle, dict):
+        return False
+    try:
+        return float(idle.get("minutes") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def image_backend_state(status: dict | None = None) -> dict:
     """What the image host says about its own rendering backend.
 
@@ -148,11 +171,11 @@ def image_backend_state(status: dict | None = None) -> dict:
         status = _image_cli_status()
     if not isinstance(status, dict):
         return {"known": False, "running": None, "gpu_selected": None,
-                "error": ""}
+                "error": "", "auto_start": False}
     comfy = status.get("comfy")
     if not isinstance(comfy, dict):
         return {"known": False, "running": None, "gpu_selected": None,
-                "error": ""}
+                "error": "", "auto_start": False}
     running = comfy.get("running")
     try:
         sel = int(comfy.get("gpu_selected"))
@@ -161,7 +184,8 @@ def image_backend_state(status: dict | None = None) -> dict:
     return {"known": True,
             "running": running if isinstance(running, bool) else None,
             "gpu_selected": sel,
-            "error": str(comfy.get("last_error") or "")[:200]}
+            "error": str(comfy.get("last_error") or "")[:200],
+            "auto_start": _host_restarts_backend(status)}
 
 
 def _image_cli_status() -> dict | None:
@@ -201,6 +225,43 @@ def rig_lease_holder() -> str | None:
     url = lease_url()
     if not url:
         return None
+    data = _fetch_leases(url)
+    if data is None:
+        return None
+    mine = (image_self_lease_holder() or "").strip().lower()
+    for lease in (data.get("leases") or []):
+        holder = str(lease.get("holder") or "").strip()
+        if not holder:
+            continue
+        # The image host leases the rig IN ORDER TO RENDER for us. Backing off
+        # from our own provider is a deadlock, not politeness: it blocked 35
+        # refill rounds on 2026-09-03 under holder "clawforge2".
+        if mine and holder.lower() == mine:
+            continue
+        if not _lease_is_live(lease):
+            continue
+        return holder[:80]
+    return None
+
+
+#: Lease states that mean the holder has finished. `holder` stays populated
+#: after release (ClawForge reports state "none", detail "released"), so the
+#: name alone cannot say whether the cards are actually booked. Anything NOT
+#: listed here -- including a lease book with no `state` field at all -- is
+#: treated as live, so an unfamiliar shape still fails safe.
+_LEASE_DEAD_STATES = frozenset({"none", "released", "expired", "done",
+                                "cancelled", "canceled", "finished", "closed"})
+
+
+def _lease_is_live(lease: dict) -> bool:
+    state = lease.get("state")
+    if state is None:
+        return True                       # pre-`state` lease book: fail safe
+    return str(state).strip().lower() not in _LEASE_DEAD_STATES
+
+
+def _fetch_leases(url: str) -> dict | None:
+    """The lease book, or None when it could not be read (fail OPEN)."""
     try:
         import urllib.request
         # `url` is built from our own config (lease_url()), never from a request,
@@ -208,17 +269,30 @@ def rig_lease_holder() -> str | None:
         # caller-supplied URL does not apply. (That rule's family is not
         # enabled, so the reason lives in prose rather than a suppression.)
         with urllib.request.urlopen(url, timeout=5.0) as r:
-            data = json.loads(r.read().decode("utf-8", "replace") or "{}")
+            return json.loads(r.read().decode("utf-8", "replace") or "{}")
     except Exception as e:
-        # Blind `except Exception` on purpose (see the docstring): every failure
-        # mode here must fail OPEN, or an unreachable rig becomes a pool outage.
+        # Blind `except Exception` on purpose (see rig_lease_holder's docstring):
+        # every failure mode here must fail OPEN, or an unreachable rig becomes
+        # a pool outage.
         log.debug("pool_guard: lease check failed (%s) — assuming unleased", e)
         return None
-    for lease in (data.get("leases") or []):
-        holder = str(lease.get("holder") or "").strip()
-        if holder:
-            return holder[:80]
-    return None
+
+
+def image_self_lease_holder(status: dict | None = None) -> str:
+    """The holder id the image host uses when IT leases the rig.
+
+    Read from the host's own lease view rather than hard-coded, so a rename on
+    the rig (clawforge2 -> clawforge3) cannot quietly reintroduce the deadlock.
+    """
+    if status is None:
+        status = _image_cli_status()
+    comfy = (status or {}).get("comfy")
+    if not isinstance(comfy, dict):
+        return ""
+    lease = comfy.get("lease")
+    if not isinstance(lease, dict):
+        return ""
+    return str(lease.get("holder") or "").strip()[:80]
 
 
 # --------------------------------------------------------------------------- #
@@ -341,7 +415,13 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     # mint_gpu_free_gb) to find the GPU it selected.
     cli_status = _image_cli_status()
     backend = image_backend_state(cli_status)
-    if backend["known"] and (backend["running"] is False or backend["error"]):
+    # A host that restarts its own renderer turns "not running" into "cold",
+    # not "down" -- only a fault it reports itself is worth skipping the round
+    # for. A genuinely dead backend is still caught at the generate call and
+    # classified `backend-down` from the rig's own structured error code, so
+    # nothing is lost by declining to guess here.
+    stopped = backend["running"] is False and not backend.get("auto_start")
+    if backend["known"] and (stopped or backend["error"]):
         # The backend is down or reporting a fault of its own. Every mint this
         # round would fail identically at the generate call — one wasted rig
         # call per mood, per bot, per cycle — and the reason would be recorded
@@ -451,6 +531,22 @@ def classify_cli_failure(message: str, code: str = "") -> str:
     if "connecterror" in text or "all connection attempts failed" in text:
         return KIND_BACKEND_DOWN
     return "refused"
+
+
+#: Backend verdicts that get their own failure kind. Everything else is a
+#: genuine VRAM shortage. This lives here, once, because the same three-way
+#: branch was written out at both refill sites and BOTH of them only handled
+#: "down" -- so every lease block on 2026-09-03 was filed as `vram-short` on a
+#: rig with 23 GB free, in /api/health and in each pool's last_error.
+_BACKEND_KINDS = {"down": (KIND_BACKEND_DOWN, "rig-backend-down"),
+                  "leased": ("leased", "rig-leased")}
+
+
+def refill_block_labels(guard: dict) -> tuple[str, str]:
+    """(failure kind, last_error text) for a refill round the guard refused."""
+    kind, prefix = _BACKEND_KINDS.get(str(guard.get("backend") or ""),
+                                      ("vram-short", "rig-vram-short"))
+    return kind, f"{prefix} ({guard.get('reason', '')})"[:300]
 
 
 def note_refill_failure(kind: str, reason: str, *, actor: str = "") -> None:

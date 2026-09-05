@@ -899,12 +899,8 @@ def refill(limit: int | None = None, *, bot_id: str, only_low: bool = False) -> 
     # idle LLM models on the image host.
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
-        update_state(bot_id,
-                     last_error=(f"rig-backend-down ({guard['reason']})"
-                                 if guard.get("backend") == "down"
-                                 else f"rig-vram-short ({guard['reason']})")[:300])
-        kind = (pool_guard.KIND_BACKEND_DOWN
-                if guard.get("backend") == "down" else "vram-short")
+        kind, why = pool_guard.refill_block_labels(guard)
+        update_state(bot_id, last_error=why)
         pool_guard.note_refill_failure(kind, guard["reason"], actor=bot_id)
         log.error("avatar pool refill for %s BLOCKED (%s): %s",
                   bot_id, kind, guard["reason"])

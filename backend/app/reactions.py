@@ -2819,12 +2819,8 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
     # is what stops the overnight silent refusal hammer at the source.
     guard = pool_guard.free_vram_before_mint()
     if not guard["ok"]:
-        _pool_update(bot_id,
-                     last_error=(f"rig-backend-down ({guard['reason']})"
-                                 if guard.get("backend") == "down"
-                                 else f"rig-vram-short ({guard['reason']})")[:300])
-        kind = (pool_guard.KIND_BACKEND_DOWN
-                if guard.get("backend") == "down" else "vram-short")
+        kind, why = pool_guard.refill_block_labels(guard)
+        _pool_update(bot_id, last_error=why)
         pool_guard.note_refill_failure(kind, guard["reason"],
                                        actor=resolve_bot_id(bot_id))
         log.error("pool refill for %s BLOCKED (%s): %s",

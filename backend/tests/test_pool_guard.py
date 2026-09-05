@@ -404,7 +404,7 @@ def test_backend_state_unknown_without_a_cli(monkeypatch):
     monkeypatch.setattr(pool_guard, "_image_cli_status", lambda: None)
     st = pool_guard.image_backend_state()
     assert st == {"known": False, "running": None, "gpu_selected": None,
-                  "error": ""}
+                  "error": "", "auto_start": False}
 
 
 def test_backend_state_tolerates_a_status_without_the_running_field():
@@ -506,9 +506,177 @@ def test_stats_break_the_count_down_by_kind():
 
 def test_a_trailing_newline_does_not_pass_an_id_as_a_path_component():
     # `^…$` + .match() accepts "main\n"; the id becomes a directory name.
-    from app import reactions, avatar_pool
+    from app import avatar_pool, reactions
     for rx in (reactions.ID_RE, reactions.MOOD_DIR_RE, reactions.BOT_ID_RE,
                avatar_pool._BOT_ID_RE):
         assert rx.match("main")
         assert not rx.match("main\n")
         assert not rx.match("ma/in")
+
+
+# --------------------------------------------------------------------------- #
+# Idle-unload is not an outage (2026-09-03)
+#
+# ClawForge stops ComfyUI after `idle_unload.minutes` of quiet and starts it
+# again on the next render. On an hourly picture cadence that means
+# `comfy.running` is false for most of every hour, and the pools -- which look
+# every 300 s -- spent 2026-09-03 reading a normal idle state as a dead
+# backend: 70 refill rounds skipped while the rig rendered on demand the whole
+# time (proven with a live 62 s render taken while running was false).
+# --------------------------------------------------------------------------- #
+
+
+def _idle_status(running=False, last_error="", selected=1, idle_minutes=10):
+    """A status from a host that manages ComfyUI's lifecycle itself."""
+    return {"comfy": {"running": running, "gpu_selected": selected,
+                      "last_error": last_error},
+            "idle_unload": {"minutes": idle_minutes, "active_jobs": 0,
+                            "idle_s": 725, "models_unloaded": True}}
+
+
+def test_backend_state_reports_that_the_host_starts_it_on_demand():
+    st = pool_guard.image_backend_state(_idle_status())
+    assert st["known"] is True
+    assert st["running"] is False
+    assert st["auto_start"] is True
+
+
+def test_backend_state_without_idle_unload_does_not_claim_auto_start():
+    st = pool_guard.image_backend_state({"comfy": {"running": False}})
+    assert st["auto_start"] is False
+
+
+def test_a_disabled_idle_unload_is_not_auto_start():
+    """minutes: 0 means the host is NOT going to bring it back by itself."""
+    st = pool_guard.image_backend_state(_idle_status(idle_minutes=0))
+    assert st["auto_start"] is False
+
+
+def test_idle_unloaded_backend_does_not_block_the_round(monkeypatch):
+    """THE 2026-09-03 regression: 70 blocked refills on a healthy rig."""
+    _patched_rig(monkeypatch, {0: 25.0, 1: 25.0}, selected=1)
+    monkeypatch.setattr(pool_guard, "_image_cli_status", lambda: _idle_status())
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is True
+    assert verdict["backend"] != "down"
+
+
+def test_a_host_that_cannot_restart_it_still_blocks(monkeypatch):
+    """No idle-unload contract → running:false is still a real outage."""
+    _patched_rig(monkeypatch, {0: 25.0}, selected=0)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=False))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is False and verdict["backend"] == "down"
+
+
+def test_an_idle_backend_reporting_a_fault_still_blocks(monkeypatch):
+    """Auto-start does not excuse an error the backend reported itself."""
+    _patched_rig(monkeypatch, {0: 25.0}, selected=0)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _idle_status(last_error="CUDA error: no device"))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is False and verdict["backend"] == "down"
+    assert "no device" in verdict["reason"]
+
+
+# --------------------------------------------------------------------------- #
+# The image host's own lease must not lock the pools out (2026-09-03)
+#
+# ClawForge takes a lease on the LLM rig in order to render, under its own
+# holder id. The guard backed off from it as if it were a competing tenant --
+# 35 rounds -- and the holder field stays populated after release
+# ("state": "none", "detail": "released"), so a finished lease blocked too.
+# --------------------------------------------------------------------------- #
+
+
+def _leases(*entries):
+    return {"leases": list(entries)}
+
+
+def test_lease_by_the_image_host_itself_is_not_a_blocker(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "clawforge2",
+                                             "state": "active"}))
+    monkeypatch.setattr(pool_guard, "image_self_lease_holder",
+                        lambda: "clawforge2")
+    assert pool_guard.rig_lease_holder() is None
+
+
+def test_self_holder_match_ignores_case(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "ClawForge2",
+                                             "state": "active"}))
+    monkeypatch.setattr(pool_guard, "image_self_lease_holder",
+                        lambda: "clawforge2")
+    assert pool_guard.rig_lease_holder() is None
+
+
+def test_a_released_lease_does_not_block(monkeypatch):
+    """holder stays populated after release; state is the live part."""
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bench-runner",
+                                             "state": "none"}))
+    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
+    assert pool_guard.rig_lease_holder() is None
+
+
+def test_a_real_third_party_lease_still_blocks(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bench-runner",
+                                             "state": "active"}))
+    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
+    assert pool_guard.rig_lease_holder() == "bench-runner"
+
+
+def test_a_lease_without_a_state_field_still_blocks(monkeypatch):
+    """A lease book that predates `state` must keep failing safe."""
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bench-runner"}))
+    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
+    assert pool_guard.rig_lease_holder() == "bench-runner"
+
+
+def test_self_holder_is_read_from_the_image_hosts_own_lease_view():
+    status = {"comfy": {"lease": {"holder": "clawforge2", "state": "none"}}}
+    assert pool_guard.image_self_lease_holder(status) == "clawforge2"
+
+
+# --------------------------------------------------------------------------- #
+# A leased rig is reported as leased, not as a VRAM shortage (2026-09-03)
+#
+# free_vram_before_mint returns backend "leased", but both refill callers only
+# special-cased "down" -- so 35 lease blocks were filed under `vram-short` on a
+# rig with 23 GB free, in /api/health and in every pool's last_error.
+# --------------------------------------------------------------------------- #
+
+
+def test_reaction_refill_names_a_lease_as_a_lease(rx_env, monkeypatch):
+    monkeypatch.setattr(pool_guard, "free_vram_before_mint",
+                        lambda **kw: {"ok": False, "backend": "leased",
+                                      "reason": "rig leased by bench-runner"})
+    monkeypatch.setattr(reactions, "_pool_generate_one",
+                        lambda *a, **k: pytest.fail("must not mint"))
+    assert pool_refill(bot_id="main") == 0
+    st = reactions.pool_load("main")
+    assert st.last_error.startswith("rig-leased")
+    assert "vram" not in st.last_error.lower()
+    assert pool_guard.refill_failure_stats()["by_kind"] == {"leased": 1}
+
+
+def test_avatar_refill_names_a_lease_as_a_lease(avatar_env, monkeypatch):
+    monkeypatch.setattr(pool_guard, "free_vram_before_mint",
+                        lambda **kw: {"ok": False, "backend": "leased",
+                                      "reason": "rig leased by bench-runner"})
+    monkeypatch.setattr(avatar_pool, "generate_pair",
+                        lambda *a, **k: pytest.fail("must not mint"))
+    assert avatar_pool.refill(bot_id="main") == 0
+    st = avatar_pool.load_state("main")
+    assert st.last_error.startswith("rig-leased")
+    assert "vram" not in st.last_error.lower()
+    assert pool_guard.refill_failure_stats()["by_kind"] == {"leased": 1}
