@@ -1191,7 +1191,35 @@ def _redact_message_dict(m: dict) -> dict:
                            if k not in ("reaction_id", "reaction_name")}
         actor = str(meta.get("actor") or "Someone")
         out["content"] = f"⚡ {actor} reacted"
+    # An image job's own text is the request: "🖼️ Generating an image… — <the
+    # prompt>", and on failure the rig's prose verbatim. Its metadata carries
+    # the prompt, that prose, the workflow and the seed. The picture itself
+    # cannot reach a locked device (`/media/` is barred, the directive is
+    # stripped), but the words about it could — which contradicts the rule
+    # /api/health follows two screens away, that prompts and rig errors do not
+    # go anywhere a locked device can reach.
+    #
+    # Inert today only because no safe bot has `image_jobs` — that is a config
+    # flag, not a structure, and this gate is not allowed to depend on one.
+    elif isinstance(meta, dict) and meta.get("kind") == _IMAGE_JOB_KIND:
+        out["metadata"] = {k: v for k, v in meta.items()
+                           if k not in ("prompt", "caption", "error",
+                                        "workflow", "seed", "media_url")}
+        out["content"] = _IMAGE_JOB_DECOY_TEXT.get(
+            str(meta.get("status") or ""), "🖼️ Image")
     return out
+
+
+#: The `metadata.kind` an image-job placeholder carries, and the neutral line a
+#: locked device sees instead of the prompt-bearing one.
+_IMAGE_JOB_KIND = "image_job"
+_IMAGE_JOB_DECOY_TEXT = {
+    "queued": "🖼️ Generating an image…",
+    "running": "🖼️ Generating an image…",
+    "done": "🖼️ Image",
+    "failed": "⚠️ image failed",
+    "cancelled": "✋ The image was cancelled.",
+}
 
 
 def _redact_thread_dict(t: dict) -> dict:
@@ -1993,6 +2021,10 @@ class _Prepared(NamedTuple):
     # message of its own. Never mutated in place — and the default is a tuple
     # precisely so the shared class-level default CANNOT be mutated (RUF012).
     pic_specs: Sequence = ()
+    # Markers that were found and produced NO job (invalid, over the cap, rate
+    # limited). Carried rather than dropped so the caller can leave a visible
+    # trace: silence here is indistinguishable from "the model never asked".
+    pic_drops: Sequence = ()
 
 
 async def _prepare_persist(
@@ -2011,6 +2043,7 @@ async def _prepare_persist(
     """
     fired: list[str] = []
     pic_specs: list = []
+    pic_drops: list = []
     bot_id: str | None = None
     autopilot = False
     if role == "assistant":
@@ -2048,7 +2081,7 @@ async def _prepare_persist(
         # picture, and obeys the same replay rule: an old reply keeps its
         # marker stripped but must not occupy a GPU for news that has already
         # been read.
-        content, pic_specs = _pic_specs_from_markers(
+        content, pic_specs, pic_drops = _pic_specs_from_markers(
             content, bot_id, metadata=metadata,
             replaying=replaying and not _replay_is_fresh(created_at))
         metadata = _demote_tool_warning(content, metadata)
@@ -2089,7 +2122,7 @@ async def _prepare_persist(
     # dropped a blank bubble into the thread.
     skip = not (content or "").strip() and not media_url
     return _Prepared(content, metadata, bot_id, fired, autopilot, skip,
-                     pic_specs)
+                     pic_specs, pic_drops)
 
 
 # --------------------------------------------------------------------------- #
@@ -2186,9 +2219,10 @@ async def _persist_and_broadcast_message(
             await _fire_marker_reactions(
                 fired, thread_id, bot_id or await _bot_of_thread(thread_id),
                 autopilot=prep.autopilot)
-        if prep.pic_specs:
+        if prep.pic_specs or prep.pic_drops:
             await _start_pic_jobs(prep.pic_specs, thread_id,
-                                  bot_id or await _bot_of_thread(thread_id))
+                                  bot_id or await _bot_of_thread(thread_id),
+                                  drops=prep.pic_drops)
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
@@ -2198,8 +2232,9 @@ async def _persist_and_broadcast_message(
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
-    if prep.pic_specs:
-        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
+    if prep.pic_specs or prep.pic_drops:
+        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id,
+                              drops=prep.pic_drops)
     return msg
 
 
@@ -2267,9 +2302,10 @@ async def _persist_and_stream_message(
             await _fire_marker_reactions(
                 fired, thread_id, bot_id or await _bot_of_thread(thread_id),
                 autopilot=prep.autopilot)
-        if prep.pic_specs:
+        if prep.pic_specs or prep.pic_drops:
             await _start_pic_jobs(prep.pic_specs, thread_id,
-                                  bot_id or await _bot_of_thread(thread_id))
+                                  bot_id or await _bot_of_thread(thread_id),
+                                  drops=prep.pic_drops)
         return _unpersisted_message(thread_id, role)
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
@@ -2288,8 +2324,9 @@ async def _persist_and_stream_message(
         if fired:
             await _fire_marker_reactions(fired, thread_id, bot_id,
                                          autopilot=prep.autopilot)
-        if prep.pic_specs:
-            await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
+        if prep.pic_specs or prep.pic_drops:
+            await _start_pic_jobs(prep.pic_specs, thread_id, bot_id,
+                                  drops=prep.pic_drops)
         return msg
 
     # Adaptive chunk size so total stream time converges to ~2.5 s.
@@ -2313,8 +2350,9 @@ async def _persist_and_stream_message(
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
-    if prep.pic_specs:
-        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id)
+    if prep.pic_specs or prep.pic_drops:
+        await _start_pic_jobs(prep.pic_specs, thread_id, bot_id,
+                              drops=prep.pic_drops)
     return msg
 
 
@@ -2613,12 +2651,57 @@ def _clawforge() -> image_jobs.ClawForge:
     return c
 
 
-def _image_job_waiting_text(spec: image_jobs.ImageSpec, why: str) -> str:
-    """The pending line while the rig cannot be reached: still pending, but
-    honest about it. Same shape as the pending text so the card is unchanged."""
+def _image_job_waiting_text(spec: image_jobs.ImageSpec, why: str,
+                            kind: str = "unreachable") -> str:
+    """The pending line while the render cannot start: still pending, but
+    honest about WHY. Same shape as the pending text so the card is unchanged.
+
+    Three different waits, three different sentences, because they are three
+    different things to a reader: the rig is down, the rig is BOOKED by
+    somebody else, or our own renders are queued behind each other. "Waiting
+    for the image rig (gpu_leased)" would technically be true and would tell a
+    human nothing they could act on.
+    """
     what = spec.caption or spec.prompt
     tail = f" — {what[:80]}" if what else ""
+    if kind == "reserved":
+        return (f"🖼️ The image rig is reserved by {why} — waiting for it to "
+                f"free up…{tail}")
+    if kind == "quota":
+        return f"🖼️ Waiting for a free slot on the image rig…{tail}"
     return f"🖼️ Waiting for the image rig ({why})…{tail}"
+
+
+#: A short human phrase per coded refusal, for the pending line. Without one,
+#: the placeholder took the rig's own sentence and normalised it to the text
+#: after its last colon — which on a live staging run produced
+#: "🖼️ Waiting for the image rig (llama-server.exe)…", a process name on a
+#: Windows box, in a family chat, as the explanation for a missing picture.
+_WAITING_WORDS = {
+    "insufficient_vram": "the GPUs are busy",
+    "backend_unavailable": "the renderer is starting up",
+    "captioner_unavailable": "the captioner is busy",
+}
+
+
+def _waiting_words(e: image_jobs.ImageJobError) -> str:
+    return _WAITING_WORDS.get(e.code) or e.message
+
+
+def _image_job_reserved_text(reservation: str) -> str:
+    """The ending for a booking we are not going to sit through.
+
+    A benchmark holds every card for hours; the deadline would run out first
+    and the reader would get a ⚠️ that blamed the render. This says what
+    actually happened, and that the answer is to ask again later.
+
+    Built from the holder and the kind, NOT from the rig's own sentence: that
+    sentence is free prose and has been seen to name the rig's internal
+    ComfyUI URL, and this line lands in a family thread. The rig's wording
+    goes to the journal.
+    """
+    return (f"🗓️ The image rig is reserved by {reservation or 'another job'} "
+            f"— no picture this time; ask again once it is free.")
 
 
 def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
@@ -2651,7 +2734,7 @@ def _image_job_cancelled_text(reason: str = "") -> str:
 def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
                     *, error: str = "", progress: dict | None = None,
                     seed: int | None = None) -> dict:
-    meta = {"kind": "image_job", "job_id": job_id, "status": status,
+    meta = {"kind": _IMAGE_JOB_KIND, "job_id": job_id, "status": status,
             "prompt": spec.prompt[:200], "caption": spec.caption}
     if spec.workflow:
         meta["workflow"] = spec.workflow
@@ -2715,7 +2798,7 @@ async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
 def _pic_specs_from_markers(content: str, bot_id: str | None, *,
                             metadata: dict | None = None,
                             replaying: bool = False,
-                            ) -> tuple[str, list[image_jobs.ImageSpec]]:
+                            ) -> tuple[str, list[image_jobs.ImageSpec], list[str]]:
     """Strip `[[pic:…]]` from an assistant reply and decide what it earned.
 
     The STRIP is unconditional — marker syntax must never reach a chat bubble,
@@ -2723,59 +2806,106 @@ def _pic_specs_from_markers(content: str, bot_id: str | None, *,
     text persists clean, one line goes to the journal, and nothing is created.
     A refusal that ate the reply's text, or one that answered the model, would
     both be worse than a picture that does not arrive.
+
+    Returns ``(clean_text, specs, drops)``. A DROP is a marker that was found
+    and produced nothing, and it is returned rather than merely logged for the
+    reason reactions grew the same thing in August: the marker is stripped
+    either way, the model is told nothing either way, and the model's own
+    skill forbids it from mentioning pictures — so a dropped marker with only
+    a journal line is a request that vanished without anybody, human or agent,
+    being able to tell it ever existed. The house calls that class of defect
+    "a failure that looks like success".
+
+    Deliberately NOT a drop: the guards above the loop (a replay, a sub row,
+    no image server, a bot without the capability). Those are decisions about
+    the whole message, they are correct, and a chat row for each would be
+    noise — the same line reactions' autopilot draws between a server-chosen
+    miss and a bot's explicit ask.
     """
     content, markers = image_jobs.extract_pic_markers(content)
     if not markers:
-        return content, []
+        return content, [], []
     meta = metadata or {}
     if replaying:
         # Same rule as reaction markers: replaying HISTORY has no side effects.
         log.info("suppressed %d image marker(s) on a recovered message",
                  len(markers))
-        return content, []
+        return content, [], []
     if meta.get("sub") or meta.get("kind") == "image_job":
         # A placeholder is a receipt for a render, not a reply — letting one
         # spawn renders of its own is a loop with a GPU on the end of it.
-        return content, []
+        return content, [], []
     if not _image_jobs_configured():
         log.info("ignored %d image marker(s): no image server configured",
                  len(markers))
-        return content, []
+        return content, [], []
     bot = config.resolve_bot(bot_id)
     if bot is None or not bot.image_jobs:
         log.info("ignored %d image marker(s): not enabled for %s",
                  len(markers), bot_id)
-        return content, []
+        return content, [], []
 
     specs: list[image_jobs.ImageSpec] = []
+    drops: list[str] = []
     for prompt, caption in markers:
-        if image_jobs.limiter.check(bot.id.lower()):
+        if refusal := image_jobs.limiter.check(bot.id.lower()):
             log.info("image marker refused by the rate limiter (%s)", bot.id)
+            drops.append(refusal)
             break
+        # CLAMPED, not rejected. A 2,500-character styled prompt is a model
+        # doing its job well, and truncating it renders a picture while
+        # refusing it renders nothing at all — the marker is already stripped
+        # by the time we find out, so "nothing" is genuinely nothing.
+        clamped = prompt[:image_jobs.MAX_PROMPT_CHARS]
+        if len(prompt) > len(clamped):
+            log.info("clamped an image prompt from %s: %d -> %d chars",
+                     bot.id, len(prompt), len(clamped))
         try:
             specs.append(image_jobs.ImageSpec(
-                prompt=prompt, caption=caption, workflow=bot.image_workflow))
+                prompt=clamped, caption=caption, workflow=bot.image_workflow))
         except ValueError as e:
             # A marker the bot mis-typed is dropped, not fatal: the reply it
             # arrived in is already sanitized and about to be persisted.
             image_jobs.limiter.refund(bot.id.lower())
             log.info("ignored an image marker from %s: %s", bot.id, e)
-    return content, specs
+            drops.append(str(e))
+    return content, specs, drops
 
 
 async def _start_pic_jobs(specs: list, thread_id: str,
-                          bot_id: str | None) -> None:
-    """Start the jobs a persisted message's markers earned.
+                          bot_id: str | None, *, drops: Sequence = ()) -> None:
+    """Start the jobs a persisted message's markers earned — and mark the ones
+    it did not.
 
     Called by the persist chokepoints AFTER the reply itself exists, so the
     placeholder always lands under the sentence that asked for it.
     """
+    for reason in drops:
+        await _note_pic_refusal(thread_id, reason)
     bot = config.resolve_bot(bot_id)
     if bot is None:
         return
     for spec in specs:
         if await _start_image_job(thread_id, bot, spec) is None:
             break
+
+
+async def _note_pic_refusal(thread_id: str, reason: str) -> None:
+    """A collapsed sub row marking a `[[pic:…]]` that earned no picture.
+
+    Same shape and the same reasoning as the reaction refusal row next door:
+    quiet enough for the family view, visible enough that the owner and the
+    agent's next transcript read can see why no picture appeared. Best effort
+    — a failure to note a failure must not cascade — and it also ticks the
+    health counter, so a bot dropping markers all day is a number an operator
+    can see without reading the journal.
+    """
+    image_jobs.note_marker_drop(reason)
+    with contextlib.suppress(Exception):
+        await _persist_and_broadcast_message(
+            thread_id, "assistant",
+            f"⚠️ No picture: {image_jobs._clip(reason, 160)}",
+            metadata={"sub": True})
 
 
 async def _broadcast_message_update(msg: MessageOut, thread_id: str) -> None:
@@ -2819,28 +2949,103 @@ async def _rewrite_image_job_message(job: dict, content: str,
 
 
 async def _fail_image_job(job: dict, reason: str, *,
-                          state: str = image_jobs.FAILED) -> None:
+                          state: str = image_jobs.FAILED,
+                          text: str = "", counts: bool | None = None) -> None:
     """Terminal ending: the row, the message and the counter, in that order.
 
     `state` is the third terminal value, cancelled, taking the same path — the
     bookkeeping is identical and only the wording differs, so splitting it into
     a second function is how the two drift.
+
+    `text` overrides the sentence for an ending that is neither a fault nor a
+    withdrawal (a rig booked by somebody else), and `counts` overrides whether
+    it moves the /api/health failure counter — that number exists to make a rig
+    going WRONG visible, and a rig that is merely busy is not that.
     """
     reason = image_jobs._clip(reason, 200)
     spec = _image_job_spec(job)
     cancelled = state == image_jobs.CANCELLED
-    text = (_image_job_cancelled_text(reason) if cancelled
-            else _image_job_failed_text(reason))
-    await db.update_image_job(job["id"], state=state, error=reason)
+    text = text or (_image_job_cancelled_text(reason) if cancelled
+                    else _image_job_failed_text(reason))
+    if not await db.update_image_job(job["id"], state=state, error=reason,
+                                     require_open=True):
+        # Somebody else ended this job first (a delivery that was inside
+        # `fetch()` when the deadline came round), or the placeholder was
+        # deleted under us. Either way the message must NOT be rewritten:
+        # that is how a delivered picture became "⚠️ image failed: timed out".
+        log.info("image job %s: already closed, not writing %r over it",
+                 job["id"], state)
+        return
     await _rewrite_image_job_message(
         job, text, _image_job_meta(job["id"], state, spec, error=reason,
                                    seed=job.get("seed")))
     # A cancellation is an outcome somebody chose, not the rig letting us
     # down, so it deliberately does NOT move the failure counter /api/health
     # exposes — that number exists to make a rig going wrong visible.
-    if not cancelled:
+    if counts if counts is not None else not cancelled:
         image_jobs.note_failure(job["id"], reason, bot=job.get("bot_id", ""))
     log.info("image job %s %s: %s", job["id"], state, reason)
+
+
+async def _reserve_image_job(job: dict, reservation: str, detail: str = "") -> None:
+    """End a job because the rig is BOOKED by somebody else.
+
+    Terminal, and deliberately not dressed as a fault: nothing went wrong, the
+    GPUs are promised to a benchmark for the next few hours. It therefore does
+    not move the failure counter either — that number is for a rig going
+    wrong, and a night of benchmarking would otherwise light it up.
+    """
+    log.info("image job %s: standing down, the rig is reserved by %s (%s)",
+             job["id"], reservation or "another job", detail or "—")
+    # A machine-readable marker for this ending, in the progress block (which
+    # `GET /api/image-jobs/<id>` already returns) rather than a new column: a
+    # cron caller must be able to tell "the rig was booked, ask later" from
+    # "the render failed" without matching on our prose.
+    prog = {**_without_waiting(_image_job_progress(job) or {}),
+            "reserved": reservation or "another job"}
+    await db.update_image_job(job["id"], progress=json.dumps(prog))
+    job["progress"] = json.dumps(prog)
+    await _fail_image_job(
+        job, f"the rig is reserved by {reservation or 'another job'}",
+        text=_image_job_reserved_text(reservation), counts=False)
+
+
+async def _retry_stalled(job: dict) -> bool:
+    """One more go at a render that moved and then went quiet.
+
+    `[stalled]` is the rig's word for a job that made progress and then stopped
+    making it past the ceiling — a wedged sampler rather than a graph that
+    cannot run, which is why it is the one failure worth resubmitting. ONCE:
+    the marker lives in the progress block (no column, and it survives the
+    row), so a rig stalling every attempt still ends visibly rather than
+    looping until the deadline.
+
+    Returns True when the job was put back in the queue and the caller must
+    stop; False when it has already had its retry and should fail normally.
+    """
+    prog = _image_job_progress(job) or {}
+    if prog.get("stall_retry"):
+        return False
+    if _image_job_expired(job):
+        # No point re-queueing into a deadline that has already passed.
+        return False
+    prog = {**_without_waiting(prog), "stall_retry": 1}
+    await db.update_image_job(job["id"], state=image_jobs.QUEUED,
+                              rig_job_id=None, progress=json.dumps(prog))
+    job["state"], job["rig_job_id"] = image_jobs.QUEUED, None
+    job["progress"] = json.dumps(prog)
+    # The card is carrying the step counter of the render that stalled. Put it
+    # back to a plain "generating" rather than leaving a frozen 87% on screen
+    # for the second attempt, which reads as a hung DisPatch.
+    spec = _image_job_spec(job)
+    await _rewrite_image_job_message(
+        job, _image_job_pending_text(spec),
+        _image_job_meta(job["id"], image_jobs.QUEUED, spec,
+                        seed=job.get("seed")))
+    log.info("image job %s: the rig reported [stalled]; resubmitting once",
+             job["id"])
+    _wake_image_jobs()
+    return True
 
 
 async def _cancel_on_rig(job: dict, why: str) -> None:
@@ -2919,6 +3124,10 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
     if "[[media:/media/" not in content:
         with contextlib.suppress(OSError):
             dest.unlink()
+        # The directive itself, in the journal: this branch used to be
+        # indistinguishable from a real storage failure, and the one bug that
+        # ever reached it was in the directive, not the disk.
+        log.warning("image job %s: the ingest declined %r", job["id"], directive)
         await _fail_image_job(job, "the image could not be stored")
         return
 
@@ -2926,8 +3135,19 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
                            seed=job.get("seed"))
     media_url = content.split("[[media:", 1)[1].split("|", 1)[0].rstrip("]")
     meta["media_url"] = media_url
-    await db.update_image_job(job["id"], state=image_jobs.DONE,
-                              media_url=media_url, error=None)
+    if not await db.update_image_job(job["id"], state=image_jobs.DONE,
+                                     media_url=media_url, error=None,
+                                     require_open=True):
+        # Nothing left to deliver INTO: the job was ended by the deadline
+        # while this fetch was in flight, or the placeholder (and with it, by
+        # cascade, the row) was deleted. Throw the bytes away rather than
+        # leaving a file nothing references — this used to write the picture,
+        # rewrite a message that no longer existed, and log "delivered".
+        with contextlib.suppress(OSError):
+            dest.unlink()
+        log.warning("image job %s: finished, but the job was already closed "
+                    "or deleted — discarding the picture", job["id"])
+        return
     await _rewrite_image_job_message(job, content, meta)
     log.info("image job %s delivered (%d bytes)", job["id"], len(data))
 
@@ -2942,6 +3162,16 @@ def _image_job_expired(job: dict) -> bool:
     # abandon the sweep — so normalise instead of assuming.
     now = datetime.now(UTC) if started.tzinfo else datetime.now()
     return (now - started).total_seconds() > image_jobs.DEADLINE_S
+
+
+#: Progress keys the WORKER writes, not the rig: the waiting wording, and its
+#: flavour. They are dropped the moment the rig reports real progress, which is
+#: what turns "Waiting for the image rig…" back into "Generating an image…".
+_WAITING_KEYS = ("waiting", "waiting_kind")
+
+
+def _without_waiting(progress: dict) -> dict:
+    return {k: v for k, v in progress.items() if k not in _WAITING_KEYS}
 
 
 async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
@@ -2959,10 +3189,14 @@ async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
         if not stored.get("waiting"):
             return
         # Reachable again but no step counter yet: drop the waiting wording.
-        progress = {k: v for k, v in stored.items() if k != "waiting"}
-    elif progress == {k: v for k, v in stored.items() if k != "waiting"}:
+        progress = _without_waiting(stored)
+    elif progress == _without_waiting(stored):
         if not stored.get("waiting"):
             return
+    # A marker the worker owns rather than the rig (the one stall retry this
+    # job is allowed) has to survive the rig's own progress block replacing it.
+    if "stall_retry" in stored:
+        progress = {**progress, "stall_retry": stored["stall_retry"]}
     await db.update_image_job(job["id"], progress=json.dumps(progress))
     await _rewrite_image_job_message(
         job, _image_job_pending_text(_image_job_spec(job)),
@@ -2971,19 +3205,33 @@ async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
     job["progress"] = json.dumps(progress)
 
 
-async def _mark_image_job_waiting(job: dict, why: str) -> None:
-    """Rewrite the placeholder to say the rig is unreachable — once per
-    outage, not once per tick (the marker is `waiting` in the progress block)."""
+async def _mark_image_job_waiting(job: dict, why: str,
+                                  kind: str = "unreachable") -> None:
+    """Rewrite the placeholder to say why the render has not started — once
+    per REASON, not once per tick (the marker is `waiting` in the progress
+    block).
+
+    Keyed on the stored value rather than on its mere presence: a wait that
+    began as "the rig is unreachable" and became "the rig is reserved by
+    bench-runner" is new information, and a reader watching the bubble should
+    get it. The same wait repeating is not, and stays silent.
+    """
     prog = _image_job_progress(job) or {}
-    if prog.get("waiting"):
+    # Only the transport wording needs trimming ("image server unreachable:
+    # ConnectError (backing off)" -> "ConnectError"). A reservation is already
+    # short and its parenthesis is the lease KIND, which is the informative
+    # half — cutting at "(" would turn "bench-runner (benchmark)" into
+    # "bench-runner" and lose the reason a reader would care about.
+    short = (why.split(":", 1)[-1].split("(")[0].strip() or "unreachable"
+             if kind == "unreachable" else image_jobs._clip(why, 80))
+    if prog.get("waiting") == short and prog.get("waiting_kind") == kind:
         return
-    short = why.split(":", 1)[-1].split("(")[0].strip() or "unreachable"
     spec = _image_job_spec(job)
-    prog = {**prog, "waiting": short}
+    prog = {**prog, "waiting": short, "waiting_kind": kind}
     await db.update_image_job(job["id"], progress=json.dumps(prog))
     job["progress"] = json.dumps(prog)
     await _rewrite_image_job_message(
-        job, _image_job_waiting_text(spec, short),
+        job, _image_job_waiting_text(spec, short, kind),
         _image_job_meta(job["id"], job["state"], spec, progress=prog,
                         seed=job.get("seed")))
 
@@ -3009,6 +3257,20 @@ async def _advance_image_job(job: dict) -> None:
         return
     _image_jobs_in_flight.add(job["id"])
     try:
+        if _image_job_expired(job):
+            # INSIDE the guard, deliberately. This check used to sit in the
+            # sweep, outside it, so a fetch that spanned the deadline (the
+            # fetch timeout is 180 s of the 600) raced its own delivery: one
+            # coroutine wrote the picture, the other wrote "timed out", and
+            # whichever landed second was what the thread said.
+            #
+            # Withdraw it first: past the deadline nobody is going to be shown
+            # this picture, and a render left running holds a GPU the next
+            # request wants. The local ending does not wait on the answer.
+            await _cancel_on_rig(job, "deadline")
+            await _fail_image_job(
+                job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
+            return
         await _advance_image_job_locked(job)
     finally:
         _image_jobs_in_flight.discard(job["id"])
@@ -3019,9 +3281,49 @@ async def _advance_image_job_locked(job: dict) -> None:
     spec = _image_job_spec(job)
     try:
         if job["state"] == image_jobs.QUEUED:
-            res = await forge.enqueue(
-                spec, callback_url=_image_job_callback_url(job["id"]),
-                callback_token=job.get("callback_token") or "")
+            # Ask the rig whether a submit would run at all before making one.
+            # One cached `comfy_status` serves the whole sweep, and it is the
+            # rig's own answer rather than an inference from `comfy.running` —
+            # which says "false" routinely on a rig that renders fine, because
+            # ClawForge unloads the backend when idle and starts it on the next
+            # job. Fails OPEN: an unknown answer submits as before.
+            ready = await forge.readiness()
+            if ready.blocked:
+                if ready.stand_down:
+                    # A benchmark holds every card for hours. Waiting it out
+                    # means a spinner that runs the full deadline and then
+                    # blames the render, so end it now and say who has the rig.
+                    await _reserve_image_job(job, ready.reservation, ready.detail)
+                elif ready.leased:
+                    await _mark_image_job_waiting(job, ready.reservation,
+                                                  kind="reserved")
+                else:
+                    await _mark_image_job_waiting(job, ready.reason)
+                log.info("image job %s: not submitting — %s (%s)",
+                         job["id"], ready.reason, ready.detail or "—")
+                return
+            try:
+                res = await forge.enqueue(
+                    spec, callback_url=_image_job_callback_url(job["id"]),
+                    callback_token=job.get("callback_token") or "")
+            except image_jobs.ImageJobError as e:
+                if not e.uncertain:
+                    raise
+                # The submit left the box and the answer did not come back, so
+                # the rig may be rendering this right now. Resubmitting is the
+                # tempting move and the wrong one: there is no idempotency key
+                # on `generate_image`, so a lost answer inside the deadline
+                # could mean up to ten real renders for one placeholder, nine
+                # of them with no job id — unpollable, uncancellable, and
+                # holding cards on the box's most contended resource.
+                #
+                # One visible ending beats nine invisible renders.
+                log.warning("image job %s: submit answer lost (%s) — not "
+                            "sending it a second time", job["id"], e.message)
+                await _fail_image_job(
+                    job, "the image server did not answer the request; it may "
+                         "have started rendering, so it was not asked twice")
+                return
             if res.seed is not None:
                 # Known at enqueue on this rig, and the only moment it is
                 # offered on the fast path — an idle rig delivers the file in
@@ -3059,6 +3361,8 @@ async def _advance_image_job_locked(job: dict) -> None:
                                   state=image_jobs.CANCELLED)
             return
         if poll.error:
+            if poll.code == image_jobs.STALLED and await _retry_stalled(job):
+                return
             await _fail_image_job(job, poll.error)
             return
         if poll.done:
@@ -3066,14 +3370,29 @@ async def _advance_image_job_locked(job: dict) -> None:
             return
         await _record_image_job_progress(job, poll.progress)
     except image_jobs.ImageJobError as e:
+        if e.code == image_jobs.GPU_LEASED and not e.retryable:
+            # Somebody else's benchmark owns the cards. The rig's own advice is
+            # to stand down rather than retry into a reservation, and a reader
+            # is better served by "come back later" now than by a ⚠️ in ten
+            # minutes that reads as if the picture went wrong.
+            await _reserve_image_job(job, e.reservation, e.message)
+            return
         if e.retryable and not _image_job_expired(job):
-            # The rig is briefly unreachable (a restart, a dropped link). Say
-            # so once and let the deadline decide — failing on the first blip
-            # would turn every rig restart into a thread full of ⚠️ lines.
-            # The placeholder does change wording, once, so a reader knows the
-            # wait is the rig and not DisPatch — and changes back on progress.
-            log.info("image job %s: %s (will retry)", job["id"], e.message)
-            await _mark_image_job_waiting(job, e.message)
+            # The rig is briefly unreachable (a restart, a dropped link), or it
+            # is busy in a way it says will pass. Say so once and let the
+            # deadline decide — failing on the first blip would turn every rig
+            # restart into a thread full of ⚠️ lines. The placeholder does
+            # change wording, once, so a reader knows the wait is the rig and
+            # not DisPatch — and changes back on progress.
+            log.info("image job %s: %s (will retry%s)", job["id"], e.message,
+                     f", rig asked for {int(e.retry_after_s)}s"
+                     if e.retry_after_s else "")
+            if e.code == image_jobs.GPU_LEASED:
+                await _mark_image_job_waiting(job, e.reservation, kind="reserved")
+            elif e.code == image_jobs.CLIENT_QUOTA:
+                await _mark_image_job_waiting(job, "quota", kind="quota")
+            else:
+                await _mark_image_job_waiting(job, _waiting_words(e))
             return
         await _fail_image_job(job, e.message)
     except Exception:
@@ -3095,16 +3414,14 @@ async def _image_job_sweep() -> None:
         async with sem:
             if _shutting_down:
                 return
-            if _image_job_expired(job):
-                # Withdraw it first: past the deadline nobody is going to be
-                # shown this picture, and a render left running holds a GPU
-                # the next request wants. The local ending does not wait on
-                # the answer.
-                await _cancel_on_rig(job, "deadline")
-                await _fail_image_job(
-                    job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
-                return
+            # Expiry is checked by `_advance_image_job`, behind the in-flight
+            # guard — not here, where it raced the delivery it was ending.
             await _advance_image_job(job)
+            # Beat per JOB, not per sweep: one slow multi-megabyte fetch can
+            # hold the sweep for up to FETCH_TIMEOUT_S, and a beat only at the
+            # end of it made /api/health report this loop as stalled while it
+            # was doing exactly its job.
+            _loop_beat("image_jobs", _IMAGE_JOB_TICK_S)
 
     jobs = await db.open_image_jobs()
     if jobs:
@@ -3133,6 +3450,10 @@ async def _resume_image_jobs() -> None:
         elif job["state"] == image_jobs.QUEUED or not job.get("rig_job_id"):
             await _fail_image_job(job, "interrupted by a restart")
         elif _image_job_expired(job):
+            # Withdraw it too. Failing it locally and leaving it running is how
+            # a deploy-time restart leaves renders burning GPUs that nobody is
+            # waiting on — on a rig that is usually the contended resource.
+            await _cancel_on_rig(job, "expired during downtime")
             await _fail_image_job(job, "timed out while DisPatch was down")
     log.info("image jobs: %d open at startup", len(open_jobs))
 
@@ -3167,7 +3488,7 @@ async def _image_job_loop() -> None:
             # Sleep a tick, or less if something new arrives.
             try:
                 await asyncio.wait_for(_image_job_wake.wait(), _IMAGE_JOB_TICK_S)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
     except asyncio.CancelledError:
         pass
@@ -5770,6 +6091,10 @@ async def health(request: Request):
         # for how long. Reachability, not prose: no rig URL, no job ids.
         "image_rig": (_clawforge().status() if _image_jobs_configured()
                       else {"reachable": None}),
+        # Markers that asked for a picture and got none. A different problem
+        # from a failed render — a bot writing markers the pipeline cannot
+        # honour — so a different number, count-only like the rest.
+        "image_marker_drops_24h": image_jobs.marker_drop_stats()["drops_24h"],
         # Pool-refill refusals (VRAM contention / rig down) — the guard's
         # alert counter, same count-only rule as fire failures above.
         "pool_refill_failures_24h":

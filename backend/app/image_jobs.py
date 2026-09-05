@@ -38,6 +38,19 @@ refill themselves. Three calls matter:
 * ``get_job(job_id)`` → ``{"state", "done", "error", "files_rel": [...]}``.
 * ``GET <files_url>/<files_rel[0]>`` → the actual bytes.
 
+A fourth, ``comfy_status()``, is asked only "can you render right now?" — see
+:class:`RigReadiness`. Every submit is tagged with ``client: "dispatch"`` so
+the rig can attribute the work and resolve its own ``"last"`` per client, and
+every job is followed by ``job_id``, never by ``"last"``, which is rig-wide
+and races with whoever else is generating.
+
+Refusals arrive coded (``structuredContent.error.code``) and the code, not the
+prose, decides what happens next: some are worth waiting out, ``gpu_leased``
+means the rig is BOOKED by somebody else, and a ``benchmark`` booking is one
+to stand down from rather than sit through. Payloads carry a
+``schema_version`` that bumps only when a field moves; it is recorded and
+reported so that day is visible rather than mysterious.
+
 This module is pure: no FastAPI, no database, no broadcasting. It knows how to
 talk to the rig and how to tell a real image from an error page. The routes,
 the placeholder message and the worker loop compose it in main.py, which is
@@ -65,7 +78,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -87,6 +100,11 @@ CONNECT_TIMEOUT_S = 10.0
 #: loop-beat never sees a stall, longer than one tick so a down rig costs one
 #: connect timeout per window rather than one per job per tick.
 RIG_BACKOFF_S = 15.0
+
+#: Transport failures that happened BEFORE the request was sent, so repeating
+#: one cannot have doubled anything. Everything else — a read timeout, a reset
+#: mid-answer — leaves the question of whether the rig acted on it open.
+_SAFE_TO_REPEAT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError)
 
 #: Fetching the finished image. Generous — this is a multi-megabyte PNG over a
 #: home network, and by this point the render has already succeeded.
@@ -118,7 +136,8 @@ class ImageJobError(Exception):
     """
 
     def __init__(self, message: str, *, retryable: bool = False,
-                 code: str = ""):
+                 code: str = "", retry_after_s: float = 0.0,
+                 facts: dict | None = None, uncertain: bool = False):
         super().__init__(message)
         self.message = _clip(message)
         # Retryable failures are transport-shaped (the rig briefly unreachable)
@@ -130,7 +149,41 @@ class ImageJobError(Exception):
         # the prose rather than instead of it: the sentence is what a human
         # reads in the thread, the code is what the worker decides on.
         self.code = code
+        # How long the rig says to wait, when it says. Advisory: this pipeline
+        # has a deadline of its own and the sweep is what actually retries.
+        self.retry_after_s = float(retry_after_s or 0.0)
+        # Whatever the rig attached to the refusal (a lease holder, its kind,
+        # an expiry). Used for wording, never for a decision that matters more
+        # than the code does.
+        self.facts = facts or {}
+        # The request LEFT this box and the answer did not come back, so we do
+        # not know whether the rig acted on it. Only meaningful for a call that
+        # starts work: repeating a poll is free, repeating a submit is a second
+        # render on a contended GPU that nothing will ever poll or cancel.
+        self.uncertain = uncertain
 
+    @property
+    def reservation(self) -> str:
+        """"bench-runner (benchmark)" for a `gpu_leased` refusal, else ""."""
+        if self.code != GPU_LEASED:
+            return ""
+        who = str(self.facts.get("holder_family")
+                  or self.facts.get("holder") or "somebody else")
+        kind = str(self.facts.get("kind") or "")
+        return f"{who} ({kind})" if kind else who
+
+
+#: A submit refused because the card is inside somebody else's GPU lease
+#: (ClawForge2 2.2.1, 2026-09-04). Not a failure of ours and not a shortage:
+#: the rig is BOOKED, and the honest answer to a human is "come back later".
+GPU_LEASED = "gpu_leased"
+#: Our own client tag has too many renders in flight. A refusal, not a hold —
+#: the rig returns at once and owns no work, so the wait is ours to serve.
+CLIENT_QUOTA = "client_quota"
+#: The render started, moved, and then went quiet past the rig's ceiling.
+#: Distinct from a job that never moved at all, and worth ONE more attempt:
+#: a stall is usually a wedged sampler, not a graph that cannot run.
+STALLED = "stalled"
 
 #: Refusal codes the rig says are worth another attempt before the deadline.
 #: Anything else — a workflow that does not exist, a graph ComfyUI rejected, a
@@ -140,7 +193,35 @@ RETRYABLE_CODES = frozenset({
     "insufficient_vram",        # a co-tenant is holding the card; it frees up
     "backend_unavailable",      # ComfyUI was starting or briefly down
     "captioner_unavailable",    # the captioner's LLM backend was busy
+    CLIENT_QUOTA,               # our own queue is full; it drains
 })
+
+#: Lease kinds we do NOT wait out. A benchmark books every card for hours and
+#: the rig's own advice is to stand down entirely rather than retry into it —
+#: so the placeholder becomes an honest ending now instead of a spinner that
+#: runs the full deadline and fails anyway.
+STAND_DOWN_LEASE_KINDS = frozenset({"benchmark"})
+
+
+def _retry_policy(code: str, facts: dict) -> tuple[bool, float]:
+    """``(retryable, retry_after_s)`` for one coded refusal.
+
+    ``gpu_leased`` is the one code whose answer depends on the payload rather
+    than the code: a render or agent lease clears in minutes and is worth
+    waiting for, a benchmark lease is a promise to its holder that will still
+    be standing when our deadline runs out.
+    """
+    wait = _positive_float(facts.get("retry_after_s"))
+    if code == GPU_LEASED:
+        kind = str(facts.get("kind") or "").strip().lower()
+        return kind not in STAND_DOWN_LEASE_KINDS, wait
+    return code in RETRYABLE_CODES, wait
+
+
+def _positive_float(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return float(value) if value > 0 else 0.0
 
 
 def _clip(text: str, limit: int = 300) -> str:
@@ -178,6 +259,98 @@ def _sse_json(body: str) -> dict:
             except json.JSONDecodeError:
                 continue
     return {}
+
+
+#: The rig's closed vocabulary for "why not" (ClawForge2 2.2.1). Kept here so
+#: an unlisted reason is visibly new rather than quietly mistaken for one of
+#: ours — `unknown` is OURS, for a probe that could not be made at all.
+CAN_RENDER_REASONS = frozenset({
+    "backend_reachable",        # ComfyUI answered and the card is ours to use
+    "startable",                # not running, but the next job starts it
+    "unmanaged_backend_down",   # nothing answering and ClawForge may not start it
+    "comfyui_path_invalid",
+    "circuit_open",             # crash-loop breaker tripped on the rig
+    "backoff",                  # cooling down after an early exit
+    "port_taken",
+    "no_suitable_gpu",
+    "cards_leased",             # every candidate card is in a foreign lease
+})
+
+#: Reasons that mean "submitting now would be refused or wasted". Everything
+#: else — including `startable`, which is a cold start and not an outage, and
+#: any reason we do not recognise — lets the submit go ahead.
+NOT_READY_REASONS = frozenset({
+    "unmanaged_backend_down", "comfyui_path_invalid", "circuit_open",
+    "backoff", "port_taken", "no_suitable_gpu", "cards_leased",
+})
+
+#: How long one readiness answer is reused. Long enough that a sweep over many
+#: open jobs costs ONE `comfy_status`, short enough that a lease clearing is
+#: noticed within a tick or two of it happening.
+READINESS_TTL_S = 20.0
+
+
+@dataclass
+class RigReadiness:
+    """``can_render`` and why, off the rig's own ``comfy_status``.
+
+    This replaces reading ``comfy.running``, which was never the question:
+    ClawForge unloads ComfyUI's models when idle and starts the backend on the
+    next job, so `running: false` is routinely a rig that renders fine (the
+    live rig said exactly that while this was written — `running: false`,
+    `can_render: true`). The rig now answers the real question itself, and the
+    predicate fails OPEN on its side too: an inconclusive probe is `true`.
+
+    So does this one. ``can_render`` is True whenever we could not ask, with
+    ``reason`` left at "unknown" — the submit then goes ahead and the rig's own
+    refusal is the authority, exactly as it was before this existed.
+    """
+
+    can_render: bool = True
+    reason: str = "unknown"
+    detail: str = ""
+    checked_at: float = 0.0
+    #: Who is holding the cards and what kind of work it is, when the reason
+    #: is `cards_leased`. The same two facts the `[gpu_leased]` refusal
+    #: carries, read from `leases.foreign` — so the pre-flight and the submit
+    #: refusal reach the SAME verdict about a benchmark instead of the
+    #: pre-flight parking a job the submit would have ended honestly.
+    lease_holder: str = ""
+    lease_kind: str = ""
+
+    @property
+    def known(self) -> bool:
+        return self.reason != "unknown"
+
+    @property
+    def stand_down(self) -> bool:
+        """A booking not worth sitting through (see STAND_DOWN_LEASE_KINDS)."""
+        return self.leased and self.lease_kind in STAND_DOWN_LEASE_KINDS
+
+    @property
+    def reservation(self) -> str:
+        who = self.lease_holder or "another job"
+        return f"{who} ({self.lease_kind})" if self.lease_kind else who
+
+    @property
+    def blocked(self) -> bool:
+        """True only when the rig named a reason we know means "not now"."""
+        return not self.can_render and self.reason in NOT_READY_REASONS
+
+    @property
+    def leased(self) -> bool:
+        return self.reason == "cards_leased"
+
+    def as_dict(self) -> dict:
+        """The health-safe half: the verdict, the closed-vocabulary reason and
+        its age. `detail` is deliberately NOT here — it is a free sentence
+        written by the rig and has been seen to name the rig's own ComfyUI
+        URL, and /api/health is readable by a locked device. It goes to the
+        journal instead, which is where the rest of this module's specifics
+        already live."""
+        return {"can_render": self.can_render, "reason": self.reason,
+                "age_s": (int(time.monotonic() - self.checked_at)
+                          if self.checked_at else None)}
 
 
 @dataclass
@@ -218,6 +391,15 @@ class ClawForge:
     _last_error: str = field(default="", init=False, repr=False)
     #: Sessions started, for tests and for the log line that proves reuse.
     handshakes: int = field(default=0, init=False, repr=False)
+    #: The rig's payload contract version, last seen. 0 until it says.
+    schema_version: int = field(default=0, init=False, repr=False)
+    #: Last answer to "would a job submitted right now run?", and when.
+    _readiness: RigReadiness | None = field(default=None, init=False, repr=False)
+    #: JSON-RPC request ids. One counter per client, never reused, because the
+    #: sweep makes up to `_IMAGE_JOB_CONCURRENCY` calls at once ON ONE SESSION
+    #: and the id is the ONLY thing that tells two in-flight answers apart.
+    #: See `_next_id` for what a shared id actually did.
+    _rpc_id: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.url = (self.url or "").strip()
@@ -248,6 +430,32 @@ class ClawForge:
     def _timeout(seconds: float) -> httpx.Timeout:
         return httpx.Timeout(seconds, connect=CONNECT_TIMEOUT_S)
 
+    def _next_id(self) -> int:
+        """A fresh JSON-RPC id. Never a constant, and never reused.
+
+        This is not hygiene, it is the fix for a wedge measured live against
+        ClawForge2 2.2.1 on 2026-09-04. Every ``tools/call`` used to be sent as
+        ``"id": 2``, and the sweep sends up to three at once over ONE MCP
+        session. The rig matches an answer to a request BY ID, so identical
+        ids collide: with three concurrent calls, one coroutine received
+        another's answer (a `comfy_status` came back holding a `get_job`
+        refusal — proven by body length and by the echoed id) and a second
+        connection was closed with its answer unread.
+
+        Inside DisPatch that surfaced as a permanent hang, not an error: the
+        sweep never returned, `/api/health` reported `image_jobs` stale, and
+        every open render sat at its last percentage until the app was
+        restarted. Reproduced twice, then reproduced away by this counter —
+        duplicate ids cross-deliver and hang, unique ids answer all three
+        correctly.
+
+        The worse outcome it also closes is silent: a cross-delivered poll
+        could have handed one job another's ``files_rel``, i.e. the wrong
+        picture into the wrong family thread.
+        """
+        self._rpc_id += 1
+        return self._rpc_id
+
     # Breaker ----------------------------------------------------------------
 
     def _note_unreachable(self, why: str) -> None:
@@ -268,15 +476,26 @@ class ClawForge:
         self._last_error = ""
 
     def status(self) -> dict:
-        """For /api/health: is the rig answering, and if not, since when."""
+        """For /api/health: is the rig answering, and if not, since when.
+
+        Synchronous on purpose — the health route must not make a rig call to
+        answer. The readiness block is therefore the LAST one the worker took,
+        with its age, rather than a fresh probe.
+        """
         down = bool(self._unreachable_since)
-        return {
+        out = {
             "reachable": not down,
             "unreachable_for_s": (int(time.monotonic() - self._unreachable_since)
                                   if down else 0),
             "last_error": self._last_error,
             "session": bool(self._sid),
+            # Zero until the rig has told us. It bumps only on a breaking
+            # change, so a number that is not 1 is worth a look.
+            "schema_version": self.schema_version,
         }
+        if self._readiness is not None:
+            out["readiness"] = self._readiness.as_dict()
+        return out
 
     def _check_breaker(self) -> None:
         if self._unreachable_until and time.monotonic() < self._unreachable_until:
@@ -286,13 +505,14 @@ class ClawForge:
 
     # Session ----------------------------------------------------------------
 
-    _HEADERS = {"content-type": "application/json",
-                "accept": "application/json, text/event-stream"}
+    _HEADERS: ClassVar[dict[str, str]] = {
+        "content-type": "application/json",
+        "accept": "application/json, text/event-stream"}
 
     async def _initialize(self, timeout: float) -> str:
         http = self._http()
         init = {
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "jsonrpc": "2.0", "id": self._next_id(), "method": "initialize",
             "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                        "clientInfo": {"name": self.client_name, "version": "2"}},
         }
@@ -319,12 +539,16 @@ class ClawForge:
         if not self.url:
             raise ImageJobError("no image server configured")
         self._check_breaker()
-        req = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-               "params": {"name": tool, "arguments": args}}
         try:
             body: dict = {}
             for attempt in (0, 1):
                 sid = self._sid or await self._initialize(timeout)
+                # A NEW id per attempt as well as per call: a retried request
+                # is a new request on the wire, and the answer to the first one
+                # may still be in flight.
+                rpc_id = self._next_id()
+                req = {"jsonrpc": "2.0", "id": rpc_id, "method": "tools/call",
+                       "params": {"name": tool, "arguments": args}}
                 r = await self._http().post(
                     self.url, json=req,
                     headers={**self._HEADERS, "mcp-session-id": sid},
@@ -337,6 +561,7 @@ class ClawForge:
                     continue
                 r.raise_for_status()
                 body = _sse_json(r.text)
+                _check_rpc_id(tool, rpc_id, body)
                 break
         except ImageJobError:
             raise
@@ -344,13 +569,32 @@ class ClawForge:
             # Unreachable / timed out: the rig may be restarting. Worth another
             # poll before the deadline, so mark it retryable — and trip the
             # breaker so the other open jobs do not each pay the same timeout.
+            #
+            # `uncertain` splits the two shapes that look alike here. A CONNECT
+            # failure means the request never left: repeating it is free. A
+            # read timeout or a reset means it did leave and the answer was
+            # lost, and repeating a SUBMIT then means two renders for one
+            # placeholder — one of which nothing will ever poll or cancel.
             why = type(e).__name__
             self._note_unreachable(why)
             self._sid = None
-            raise ImageJobError(f"image server unreachable: {why}", retryable=True)
+            raise ImageJobError(f"image server unreachable: {why}",
+                                retryable=True,
+                                uncertain=not isinstance(e, _SAFE_TO_REPEAT))
+        except httpx.HTTPStatusError as e:
+            # A status, not a blip. 4xx will say exactly the same thing in ten
+            # minutes' time, and reporting it as "timed out after 10 minutes"
+            # — which is what retrying it to the deadline did — names the
+            # wrong cause, late. 408/429 are the two that mean "later".
+            status = e.response.status_code
+            later = status in (408, 429) or status >= 500
+            if later:
+                self._note_unreachable(f"HTTP {status}")
+            raise ImageJobError(f"image server returned HTTP {status}",
+                                retryable=later, uncertain=later)
         except httpx.HTTPError as e:
             raise ImageJobError(f"image server unreachable: {type(e).__name__}",
-                                retryable=True)
+                                retryable=True, uncertain=True)
         self._note_reachable()
         if body.get("error"):
             raise ImageJobError(f"image server refused {tool}: "
@@ -378,17 +622,93 @@ class ClawForge:
         blocks = [b for b in (res.get("content") or []) if isinstance(b, dict)]
         text = " ".join((b.get("text") or "") for b in blocks).strip()
         if res.get("isError"):
+            # "Error executing tool generate_image: " is the MCP SDK talking to
+            # a developer, and this string's destination is a family chat
+            # bubble. Drop the prefix; keep every word the rig itself wrote.
+            text = _SDK_ERROR_PREFIX_RE.sub("", text, count=1)
             code = _error_code(res)
+            facts = _error_facts(res)
+            retryable, wait = _retry_policy(code, facts)
             raise ImageJobError(text or f"{tool} failed (no reason given)",
-                                code=code, retryable=code in RETRYABLE_CODES)
+                                code=code, retryable=retryable,
+                                retry_after_s=wait, facts=facts)
         for b in blocks:
             t = (b.get("text") or "").strip()
             if t.startswith("{"):
                 try:
-                    return json.loads(t)
+                    payload = json.loads(t)
                 except json.JSONDecodeError:
                     continue
+                self._note_schema_version(tool, payload)
+                return payload
         return {}
+
+    def _note_schema_version(self, tool: str, payload: dict) -> None:
+        """Record the rig's ``schema_version``, and say so when it moves.
+
+        ClawForge2 2.2.1 stamps it on ``status()``, ``list_jobs``, ``get_job``
+        and every generation result, and bumps it ONLY when a field moves, is
+        removed or changes type — adding one does not. So a bump is exactly the
+        event that breaks a parser in this file, and the whole value of the
+        field is that it is visible BEFORE the breakage: the log line and
+        ``status()`` are what make "the rig moved a field" a thing an operator
+        reads rather than a thing they debug.
+        """
+        seen = payload.get("schema_version")
+        if not isinstance(seen, int) or isinstance(seen, bool):
+            return
+        if self.schema_version and seen != self.schema_version:
+            log.warning("image server schema_version moved %s -> %s (on %s) — "
+                        "a field has moved, been removed or changed type; "
+                        "check app/image_jobs.py against the rig's release note",
+                        self.schema_version, seen, tool)
+        self.schema_version = seen
+
+    async def readiness(self, *, max_age_s: float = READINESS_TTL_S
+                        ) -> RigReadiness:
+        """"Would a job submitted right now be accepted and run?"
+
+        One cached ``comfy_status`` — deliberately WITHOUT
+        ``include_recent_jobs``, which is opt-in since 2.2.1 and was 73% of the
+        response: this asks three fields' worth of question and should not pull
+        the rig's job history across the network to answer it.
+
+        Never raises. A rig that will not answer leaves the previous answer
+        standing (or an "unknown" one), because the alternative — treating an
+        unreachable rig as "cannot render" — would fail jobs the breaker
+        already handles better, one retryable blip at a time.
+        """
+        cached = self._readiness
+        if (cached is not None
+                and time.monotonic() - cached.checked_at < max_age_s):
+            return cached
+        try:
+            res = await self._tool_json("comfy_status", {}, timeout=20.0)
+        except ImageJobError as e:
+            log.debug("readiness probe failed (%s) — assuming the rig can render",
+                      e.message)
+            return cached or RigReadiness(checked_at=time.monotonic())
+        can = res.get("can_render")
+        reason = str(res.get("can_render_reason") or "").strip()
+        if not isinstance(can, bool) or not reason:
+            # A rig that predates `can_render` (or a shape we do not know).
+            # Not an outage, and emphatically not a reason to stop submitting.
+            return RigReadiness(checked_at=time.monotonic())
+        if reason not in CAN_RENDER_REASONS:
+            # New vocabulary. Say so once per probe and treat it as inconclusive
+            # rather than guessing which side of the gate it belongs on.
+            log.info("image server reported an unfamiliar can_render_reason %r "
+                     "— treating it as inconclusive", reason[:60])
+        holder, kind = _foreign_lease(res)
+        ready = RigReadiness(can_render=can, reason=reason,
+                             detail=_clip(str(res.get("can_render_detail") or "")),
+                             checked_at=time.monotonic(),
+                             lease_holder=holder, lease_kind=kind)
+        if cached is None or cached.reason != ready.reason:
+            log.info("image server can_render=%s (%s): %s",
+                     ready.can_render, ready.reason, ready.detail or "—")
+        self._readiness = ready
+        return ready
 
     async def enqueue(self, spec: ImageSpec, *, callback_url: str = "",
                       callback_token: str = "") -> EnqueueResult:
@@ -432,8 +752,30 @@ class ClawForge:
                              seed=_first_seed(res))
 
     async def poll(self, job_id: str) -> PollResult:
-        """One ``get_job``. Terminal states are reported, not raised."""
-        res = await self._tool_json("get_job", {"job_id": job_id})
+        """One ``get_job``. Terminal states are reported, not raised.
+
+        ``get_job`` takes no ``client`` argument (checked against the live
+        tool schema on 2.2.1) — and does not need one: a job id is exact, and
+        preferring it to ``"last"`` is the whole point of tagging the submit.
+        """
+        try:
+            res = await self._tool_json("get_job", {"job_id": job_id})
+        except ImageJobError as e:
+            # The rig only remembers job ids for the life of ITS process, and
+            # it gets restarted — by its maintainers, by the watchdog, by
+            # a VRAM self-heal. Every job in flight then fails at
+            # once, and what the reader used to get was the rig's developer
+            # sentence about which tools mint job ids, clipped mid-word.
+            #
+            # The discriminator is the id: the refusal quotes back the very id
+            # we asked about. That is a fact, not a wording match. (The code is
+            # `tool_error` on ClawForge2 2.2.1, not the documented
+            # `job_not_found` — probed live 2026-09-04, reported to the rig.)
+            if e.code in ("job_not_found", "tool_error") and job_id in str(e):
+                raise ImageJobError(
+                    "the image server restarted and lost this render",
+                    code="job_lost") from None
+            raise
         rel = _first_rel(res)
         err = str(res.get("error") or "").strip()
         state = str(res.get("state") or "").strip() or "unknown"
@@ -442,7 +784,7 @@ class ClawForge:
             err = str(res.get("note") or f"render {state}")
         return PollResult(state=state, done=done, files_rel=rel,
                           error=_clip(err), seed=_first_seed(res),
-                          progress=_progress(res))
+                          progress=_progress(res), code=_job_error_code(res, err))
 
     async def cancel(self, job_id: str) -> dict:
         """Withdraw a render from the rig. Best effort by contract.
@@ -497,6 +839,29 @@ class ClawForge:
         return data
 
 
+def _check_rpc_id(tool: str, sent: int, body: dict) -> None:
+    """Refuse an answer that is not the answer to the question we asked.
+
+    The id is the only thing distinguishing two in-flight calls on one MCP
+    session, so a mismatch means somebody else's result is in our hands. The
+    honest move is to treat that as a transport failure and poll again —
+    NEVER to act on it, because the payload this pipeline reads off a poll is
+    ``files_rel``, and acting on another job's ``files_rel`` puts the wrong
+    picture in the wrong thread.
+
+    Retryable on purpose: a mismatch is a race, and the next poll is clean.
+    Tolerant of a server that omits the id (some send only a result) — this
+    guards against the WRONG id, not against a missing one.
+    """
+    got = body.get("id")
+    if got is None or got == sent:
+        return
+    log.warning("image server answered %s with id %r, not %r — discarding it "
+                "rather than acting on another call's result", tool, got, sent)
+    raise ImageJobError("the image server's answers crossed over; retrying",
+                        retryable=True)
+
+
 def _error_text(err: Any) -> str:
     if isinstance(err, dict):
         return _clip(str(err.get("message") or err))
@@ -524,6 +889,81 @@ def _error_code(res: dict) -> str:
     err = sc.get("error") if isinstance(sc, dict) else None
     code = err.get("code") if isinstance(err, dict) else None
     return str(code).strip()[:64] if isinstance(code, str) else ""
+
+
+def _foreign_lease(status: dict) -> tuple[str, str]:
+    """``(holder_family, kind)`` of the first lease somebody ELSE is holding.
+
+    ``leases.foreign`` already excludes ours BY LEASE ID (not by holder name),
+    so everything in it is genuinely somebody else's. The distinction the rig
+    is careful about is kept here too: ``[]`` means "asked, nothing standing",
+    ``null`` means "could not ask" — both leave us with no facts, and neither
+    is an occasion to invent one.
+    """
+    leases = status.get("leases")
+    foreign = leases.get("foreign") if isinstance(leases, dict) else None
+    if not isinstance(foreign, list):
+        return "", ""
+    for lease in foreign:
+        if not isinstance(lease, dict):
+            continue
+        holder = str(lease.get("holder_family") or lease.get("holder") or "")
+        kind = str(lease.get("kind") or "").strip().lower()
+        if holder or kind:
+            return _clip(holder, 60), kind[:32]
+    return "", ""
+
+
+#: Fields the rig attaches to a coded refusal that are worth keeping. A lease
+#: refusal carries who holds it, what family they are, what KIND of work it is
+#: (the field the retry decision turns on) and when it ends.
+_FACT_KEYS = ("holder", "holder_family", "kind", "expires_at", "expires_in_s",
+              "reason", "retry_after_s", "devices")
+
+
+def _error_facts(res: dict) -> dict:
+    """The scalars the rig hung on a refusal, from wherever it hung them.
+
+    ``structuredContent.error`` is the contract; whether the lease block sits
+    flat on it or nested under a key (``lease``, and StudioForge's sibling
+    envelope nests under its own name) is not something this file should be
+    brittle about. One level of nesting is searched, a flat key wins over a
+    nested one, and anything that is not a scalar is dropped — nothing here is
+    ever executed or trusted, it only chooses wording and one retry decision.
+    """
+    sc = res.get("structuredContent")
+    err = sc.get("error") if isinstance(sc, dict) else None
+    if not isinstance(err, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for source in ([v for v in err.values() if isinstance(v, dict)] + [err]):
+        for key in _FACT_KEYS:
+            v = source.get(key)
+            if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+                out[key] = v if not isinstance(v, str) else _clip(v, 120)
+    return out
+
+
+#: The MCP SDK's own wrapper around a tool failure. Stripped before the rig's
+#: sentence is shown to anyone: it names internal tool names and helps nobody
+#: reading a chat thread.
+_SDK_ERROR_PREFIX_RE = re.compile(r"^Error executing tool [A-Za-z0-9_]+:\s*")
+
+#: A coded job failure reads ``[stalled] the render moved and then …``. This
+#: is a prose parse and is deliberately the SECOND choice: an explicit
+#: ``error_code`` on the payload wins. It is safe where the same parse on an
+#: ``isError`` block is not, because a job's stored error string carries no
+#: SDK "Error executing tool …:" prefix — the bracket is the first thing in it.
+_JOB_CODE_RE = re.compile(r"^\[([a-z][a-z0-9_]{1,40})\]")
+
+
+def _job_error_code(res: dict, error_text: str = "") -> str:
+    for key in ("error_code", "code"):
+        v = res.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()[:64]
+    m = _JOB_CODE_RE.match((error_text or "").strip())
+    return m.group(1) if m else ""
 
 
 def _progress(res: dict) -> dict | None:
@@ -605,6 +1045,10 @@ MAX_CAPTION_CHARS = 200
 
 _RATIO_RE = re.compile(r"^\d{1,2}:\d{1,2}$")
 
+#: See ImageSpec.__post_init__ — a caption is prose, and prose does not need
+#: the two characters that close a media directive early.
+_CAPTION_BRACKETS_RE = re.compile(r"[\[\]]")
+
 
 @dataclass
 class ImageSpec:
@@ -631,7 +1075,20 @@ class ImageSpec:
             raise ValueError(f"prompt is longer than {MAX_PROMPT_CHARS} characters")
         self.workflow = (self.workflow or "").strip()[:80]
         self.negative = (self.negative or "").strip()[:MAX_PROMPT_CHARS]
-        self.caption = (self.caption or "").strip()[:MAX_CAPTION_CHARS]
+        # Square brackets are REMOVED from the caption, not rejected, and it
+        # happens here so that every path — the inline marker, the endpoint,
+        # a spec read back off a row — is covered by one rule.
+        #
+        # The caption's destiny is a `[[media:<path>|<caption>]]` directive
+        # whose grammar cannot express a `]` inside the caption group. A
+        # caption with one in it made the finished directive fail to match,
+        # which made the delivery test fail, which DELETED a rendered image
+        # and told the family "the image could not be stored" — a correct
+        # picture destroyed, blamed on the disk, by a regex. `[[pic:a bar
+        # chart|panel 5] of 6]]` is all it took, and a bot writing "panel 5]"
+        # has done nothing wrong. Neither bracket survives; a caption is prose.
+        self.caption = _CAPTION_BRACKETS_RE.sub(
+            "", (self.caption or "")).strip()[:MAX_CAPTION_CHARS]
         self.ratio = (self.ratio or "").strip()
         if self.ratio and not _RATIO_RE.match(self.ratio):
             raise ValueError("ratio must look like 3:2")
@@ -683,6 +1140,10 @@ class PollResult:
     error: str = ""
     seed: int | None = None
     progress: dict | None = None
+    #: The rig's code for a failed render, when it gave one — `stalled` is the
+    #: one this pipeline branches on (a job that moved and then went quiet is
+    #: worth one more attempt; a job that never moved is not).
+    code: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -786,6 +1247,28 @@ def reset_failures() -> None:
     _FAILURES.clear()
 
 
+#: Markers that asked for a picture and got none (invalid, over the per-message
+#: cap, rate limited). A SEPARATE number from the failures above, because they
+#: are a different problem with a different owner: a failure is the rig going
+#: wrong, a drop is a bot writing markers the pipeline cannot honour. Same
+#: count-only rule — the reasons stay in the journal and the chat sub row.
+_MARKER_DROPS: list[dict] = []
+
+
+def note_marker_drop(reason: str) -> None:
+    _MARKER_DROPS.append({"at": time.time(), "reason": str(reason)[:200]})
+    del _MARKER_DROPS[:-_FAILURES_MAX]
+
+
+def marker_drop_stats(window_s: float = 24 * 3600.0) -> dict:
+    cutoff = time.time() - window_s
+    return {"drops_24h": len([d for d in _MARKER_DROPS if d["at"] >= cutoff])}
+
+
+def reset_marker_drops() -> None:
+    _MARKER_DROPS.clear()
+
+
 # --------------------------------------------------------------------------- #
 # Inline markers — how an agent asks for a picture from inside a reply
 #
@@ -800,7 +1283,27 @@ def reset_failures() -> None:
 #: Single line and non-greedy: a marker may not span a paragraph, and the first
 #: `]]` closes it, so two markers on one line are two markers rather than one
 #: swallowing everything between them.
-PIC_MARKER_RE = re.compile(r"\[\[pic:([^\n]*?)\]\]", re.IGNORECASE)
+#:
+#: Whitespace around `pic` is tolerated because `[[ pic:a cat]]` is a shape
+#: models actually produce and there is nothing else it could mean — refusing
+#: it only ever meant printing the syntax at the family instead of a picture.
+PIC_MARKER_RE = re.compile(r"\[\[\s*pic\s*:([^\n]*?)\]\]", re.IGNORECASE)
+
+#: The same opening, used as a cheap "is there anything to do here" test.
+_PIC_HINT_RE = re.compile(r"\[\[\s*pic\s*:", re.IGNORECASE)
+
+#: An opening that never closes on its own line: a reply cut off by a token
+#: cap, a marker the model wrapped across a newline, a nested one whose tail
+#: was eaten. The lookahead is what keeps this from touching a COMPLETE
+#: marker, so a documented `[[pic:example]]` in backticks still survives.
+#:
+#: Applied to the whole text, code regions included, and unconditionally —
+#: every guard above may decide not to render, but none of them is a reason to
+#: print internal syntax into a family thread. (A complete marker inside an
+#: UNCLOSED ``` fence is the one case left standing: it is indistinguishable
+#: from documentation, and it renders as code rather than as prose.)
+_PIC_REMNANT_RE = re.compile(r"\[\[\s*pic\s*:(?![^\n]*\]\])[^\n]*",
+                             re.IGNORECASE)
 
 #: Same ceiling as reaction markers, for the same reason: a model in a loop
 #: must not be able to occupy the rig for the length of one reply.
@@ -829,8 +1332,14 @@ def extract_pic_markers(content: str) -> tuple[str, list[tuple[str, str]]]:
     CODE IS SKIPPED, for the reason the reaction markers learned it: a quoted
     `[[pic:…]]` is an agent DESCRIBING the syntax, and firing it both corrupts
     the sentence and spends rig time on documentation.
+
+    A marker that never closes is a different animal and is removed EVERYWHERE
+    (see :data:`_PIC_REMNANT_RE`): it renders nothing, it is never
+    documentation, and leaving it produced the worst outcome available —
+    `here you go [[pic:a blue teapot` sitting in the family thread, on the
+    locked tablets too, with no picture.
     """
-    if not content or "[[pic:" not in content.lower():
+    if not content or not _PIC_HINT_RE.search(content):
         return content, []
     found: list[tuple[str, str]] = []
     dropped = 0
@@ -853,11 +1362,33 @@ def extract_pic_markers(content: str) -> tuple[str, list[tuple[str, str]]]:
         segment = re.sub(r"[ \t]{2,}", " ", segment)
         return re.sub(r"\n{3,}", "\n\n", segment)
 
-    cleaned = openclaw_text.sub_outside_code(content, _clean).strip()
+    walked = openclaw_text.sub_outside_code(content, _clean)
+    if _PIC_REMNANT_RE.search(walked):
+        log.info("stripped an unterminated [[pic: marker from a reply")
+    cleaned = _strip_remnants(walked)
     if dropped:
         log.info("dropped %d [[pic:…]] marker(s) — empty prompt or over the "
                  "%d-per-message cap", dropped, MAX_PIC_MARKERS_PER_MESSAGE)
     return cleaned, found
+
+
+def _strip_remnants(text: str) -> str:
+    """Remove unterminated `[[pic:` openings and tidy what they leave.
+
+    Shared by both entry points below so that ``strip_pic_markers`` stays
+    byte-identical to ``extract_pic_markers(...)[0]`` — the property the dedup
+    key depends on, and the one that once re-posted a reply five times when it
+    slipped. Pure and silent for that reason — the caller does the logging.
+    """
+    if not _PIC_REMNANT_RE.search(text):
+        return text.strip()
+    text = _PIC_REMNANT_RE.sub("", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # A remnant eaten off the end of a line leaves the space in front of it
+    # behind ("before [[pic:x" -> "before "), which is invisible in a bubble
+    # and very visible in a dedup key.
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def strip_pic_markers(content: str) -> str:
@@ -867,7 +1398,7 @@ def strip_pic_markers(content: str) -> str:
     exactly this: a canonical key must mirror every transform persisting
     applies, and computing one must not log.
     """
-    if not content or "[[pic:" not in content.lower():
+    if not content or not _PIC_HINT_RE.search(content):
         return content
 
     def _clean(segment: str) -> str:
@@ -875,4 +1406,4 @@ def strip_pic_markers(content: str) -> str:
         segment = re.sub(r"[ \t]{2,}", " ", segment)
         return re.sub(r"\n{3,}", "\n\n", segment)
 
-    return openclaw_text.sub_outside_code(content, _clean).strip()
+    return _strip_remnants(openclaw_text.sub_outside_code(content, _clean))

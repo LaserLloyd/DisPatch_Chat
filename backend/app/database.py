@@ -963,13 +963,25 @@ class Database:
                 "callback_token": callback_token, "progress": None,
                 "seed": None, "created_at": ts, "updated_at": ts}
 
-    async def update_image_job(self, job_id: str, **fields: Any) -> None:
+    async def update_image_job(self, job_id: str, *, require_open: bool = False,
+                               **fields: Any) -> int:
         """Patch a job row. Only the columns named are touched.
 
         A whitelist rather than an f-string over ``fields``: this is the one
         place a caller's dict reaches SQL, and a typo'd key should be a loud
         KeyError here rather than a silently-ignored update that leaves a job
         stuck in `running` forever.
+
+        ``require_open`` makes the write a COMPARE-AND-SET on the state, and
+        the returned rowcount says whether it landed. Every write that ENDS a
+        job must use it, because two coroutines can hold the same row: the
+        deadline sweep and a delivery that is still inside `fetch()`. Without
+        the predicate the loser overwrites the winner, and both orderings are
+        wrong — a delivered picture rewritten into "⚠️ timed out", or a
+        terminal row un-terminaled. It also covers the row simply being GONE
+        (deleting the placeholder cascades the job away), which is how a
+        delivery into a deleted thread used to write a file, rewrite nothing
+        and log "delivered".
         """
         allowed = ("state", "rig_job_id", "error", "media_url", "progress",
                    "seed")
@@ -980,12 +992,16 @@ class Database:
             sets.append(f"{k} = ?")
             values.append(v)
         if not sets:
-            return
+            return 0
         sets.append("updated_at = ?")
         values.extend([now_iso(), job_id])
-        await self.db.execute(
-            f"UPDATE image_jobs SET {', '.join(sets)} WHERE id = ?", values)
+        where = "id = ?"
+        if require_open:
+            where += " AND state IN ('queued', 'running')"
+        cur = await self.db.execute(
+            f"UPDATE image_jobs SET {', '.join(sets)} WHERE {where}", values)
         await self.db.commit()
+        return cur.rowcount or 0
 
     async def get_image_job(self, job_id: str) -> dict | None:
         cur = await self.db.execute(

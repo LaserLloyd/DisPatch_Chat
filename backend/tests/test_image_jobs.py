@@ -143,14 +143,22 @@ class FakeForge:
     real worker — only the socket is replaced.
     """
 
-    def __init__(self, *, enqueue=None, poll=None, fetch=None, cancel=None):
+    def __init__(self, *, enqueue=None, poll=None, fetch=None, cancel=None,
+                 readiness=None):
         self._enqueue, self._poll, self._fetch = enqueue, poll, fetch
         self._cancel = cancel
+        # "Can you render right now?" — a rig that has not been asked answers
+        # the way the real client's probe does when it cannot ask: fail open.
+        self._readiness = readiness or image_jobs.RigReadiness()
         self.calls: list[str] = []
         # What the worker actually submitted — the callback wiring, the
         # priority band and the spec are only real if they reach the rig.
         self.enqueue_args: list[dict] = []
         self.cancelled: list[str] = []
+
+    async def readiness(self, *, max_age_s=0.0):
+        self.calls.append("readiness")
+        return self._readiness
 
     async def enqueue(self, spec, *, callback_url="", callback_token=""):
         self.calls.append("enqueue")
@@ -338,7 +346,9 @@ def test_success_rewrites_the_same_message_into_the_picture(env, monkeypatch):
     # picture its lightbox, its origin ledger entry and its Safe-Mode strip.
     assert "[[media:/media/" in row["content"]
     assert "Generating" not in row["content"]
-    assert forge.calls == ["enqueue", "poll", "fetch"]
+    # The readiness probe comes FIRST: the rig is asked whether a submit would
+    # run before one is made (`can_render`, not `comfy.running`).
+    assert forge.calls == ["readiness", "enqueue", "poll", "fetch"]
 
 
 def test_the_thread_list_preview_follows_the_rewrite(env, monkeypatch):
@@ -775,17 +785,31 @@ def test_the_rate_limiter_refuses_a_marker_without_eating_the_reply(env):
     _say(c, tid, "one more [[pic:a teapot]]")
 
     assert len(_placeholders(c, tid)) == image_jobs.RATE_LIMIT
-    assert "one more" in _messages(c, tid)[-1]["content"]
+    body = [m for m in _messages(c, tid)
+            if not (m.get("metadata") or {}).get("sub")][-1]
+    assert "one more" in body["content"]
+    # ...and the refusal is VISIBLE, in a collapsed sub row of its own. It used
+    # to be a journal line, which nobody — human or agent — could tell apart
+    # from a reply that never asked for a picture.
+    assert any(m["content"].startswith("⚠️ No picture")
+               for m in _messages(c, tid) if (m.get("metadata") or {}).get("sub"))
 
 
 def test_an_unusable_marker_is_dropped_not_fatal(env):
     """ImageSpec is the validator; a marker it refuses costs the reply
-    nothing."""
+    nothing.
+
+    An EMPTY prompt is unusable and is dropped by the extractor. An over-long
+    one is not: it is clamped, because truncating a 2,500-character styled
+    prompt renders a picture and refusing it renders nothing.
+    """
     c = env()
     tid = _thread(c)
     _say(c, tid, "[[pic:]] and [[pic:" + "x" * 3000 + "]] anyway")
 
-    assert _placeholders(c, tid) == []
+    placeholders = _placeholders(c, tid)
+    assert len(placeholders) == 1
+    assert len(_job_of(c, placeholders[0])["prompt"]) == image_jobs.MAX_PROMPT_CHARS
     assert _messages(c, tid)[0]["content"] == "and anyway"
 
 
@@ -1376,8 +1400,12 @@ def test_a_retryable_refusal_waits_and_a_terminal_one_does_not(env, monkeypatch)
         "[insufficient_vram] Not enough free VRAM — short by 15.9 GB",
         code="insufficient_vram", retryable=True)))
     asyncio.run(main._image_job_sweep())
-    assert [m for m in _messages(c, tid)
-            if m["id"] == vram["message_id"]][0]["metadata"]["status"] == "queued"
+    row = [m for m in _messages(c, tid) if m["id"] == vram["message_id"]][0]
+    assert row["metadata"]["status"] == "queued"
+    # ...and the pending line says something a human can read. It used to take
+    # the rig's sentence and keep the text after its last colon, which on a
+    # live run produced "Waiting for the image rig (llama-server.exe)".
+    assert "the GPUs are busy" in row["content"]
 
     missing = _fire(c, tid).json()
     _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
@@ -1511,3 +1539,482 @@ def test_a_callback_and_the_sweep_cannot_advance_one_job_twice(env, monkeypatch)
                              main._advance_image_job(dict(job)))
     asyncio.run(race())
     assert forge.calls.count("enqueue") == 1, "the second advancer must yield"
+
+
+# --------------------------------------------------------------------------- #
+# A rig somebody else has booked (ClawForge2 2.2.1, 2026-09-04)
+#
+# `[gpu_leased]` is not a shortage and not a fault: the GPUs are promised to
+# another holder. The distinction that matters to a reader is the lease KIND —
+# a render or an agent lease clears in minutes and is worth waiting out, a
+# benchmark holds every card for hours and is one to stand down from.
+# --------------------------------------------------------------------------- #
+
+
+def _leased(kind: str, holder: str = "bench-runner",
+            retry_after_s: int = 300) -> image_jobs.ImageJobError:
+    """The refusal as the rig raises it, built through the real parser so the
+    payload shape is what is under test — not a hand-set flag."""
+    res = {"isError": True,
+           "content": [{"type": "text", "text":
+                        f"Error executing tool generate_image: [gpu_leased] "
+                        f"CUDA 3 is leased to {holder}-judge [{kind}]"}],
+           "structuredContent": {"error": {
+               "code": "gpu_leased", "tool": "generate_image",
+               "message": "[gpu_leased] …",
+               "lease": {"holder": f"{holder}-judge", "holder_family": holder,
+                         "kind": kind, "expires_at": 1788500360.9,
+                         "retry_after_s": retry_after_s}}}}
+    forge = image_jobs.ClawForge(ENDPOINT)
+
+    async def drive():
+        async def fake_call(*a, **k):
+            return res
+        forge.call = fake_call
+        with pytest.raises(image_jobs.ImageJobError) as e:
+            await forge._tool_json("generate_image", {})
+        return e.value
+    return asyncio.run(drive())
+
+
+def test_a_lease_refusal_carries_its_holder_and_kind_off_the_payload():
+    err = _leased("benchmark")
+    assert err.code == image_jobs.GPU_LEASED
+    assert err.facts["holder_family"] == "bench-runner"
+    assert err.facts["kind"] == "benchmark"
+    assert err.retry_after_s == 300
+    assert err.reservation == "bench-runner (benchmark)"
+    # A benchmark is not waited out; a render lease is.
+    assert err.retryable is False
+    assert _leased("render").retryable is True
+
+
+def test_a_benchmark_lease_ends_the_job_honestly_instead_of_spinning(env,
+                                                                    monkeypatch):
+    """The reader is told the rig is booked — not shown a ⚠️ that reads as if
+    the picture went wrong, and not left with a spinner for the full deadline
+    when the answer will not change for hours."""
+    c = env()
+    tid = _thread(c)
+    before = main.image_jobs.failure_stats()["failures_24h"]
+    fired = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=_leased("benchmark")))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "reserved by bench-runner (benchmark)" in row["content"]
+    assert "⚠️" not in row["content"], "a booked rig is not a failed render"
+    assert "ask again" in row["content"]
+    # And it does NOT move the health counter: that number is for a rig going
+    # wrong, and a night of benchmarking would otherwise light it up.
+    assert main.image_jobs.failure_stats()["failures_24h"] == before
+    # A cron caller must be able to tell this ending from a failed render
+    # without matching on prose.
+    job = c.get(f"/api/image-jobs/{fired['job_id']}").json()
+    assert job["progress"]["reserved"] == "bench-runner (benchmark)"
+
+
+def test_a_render_lease_waits_and_says_who_has_the_rig(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=_leased("render", holder="doxy-pics")))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "queued", "still pending, not failed"
+    assert "reserved by doxy-pics (render)" in row["content"]
+
+
+def test_a_client_quota_refusal_waits_for_a_slot(env, monkeypatch):
+    """Our own tag is over its active-render quota. A refusal, not a fault —
+    and one that says something a reader can understand."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "[client_quota] dispatch already has 3 renders in flight",
+        code="client_quota", retryable=True, retry_after_s=42.0)))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "queued"
+    assert "free slot" in row["content"]
+
+
+def test_a_stalled_render_is_resubmitted_exactly_once(env, monkeypatch):
+    """`[stalled]` means the job moved and then went quiet — a wedged sampler,
+    not a graph that cannot run. Worth one more go, and only one: a rig that
+    stalls every attempt must still end visibly."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    stalled = image_jobs.PollResult(
+        state="failed", done=True,
+        error="[stalled] no progress for 240s", code="stalled")
+    forge = _use(monkeypatch, FakeForge(poll=stalled))
+
+    asyncio.run(main._image_job_sweep())      # queued -> running
+    asyncio.run(main._image_job_sweep())      # poll -> stalled -> requeued
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "queued", "put back, not failed"
+
+    asyncio.run(main._image_job_sweep())      # queued -> running (2nd submit)
+    asyncio.run(main._image_job_sweep())      # poll -> stalled -> now it fails
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "no progress" in row["content"]
+    assert forge.calls.count("enqueue") == 2, "exactly one extra attempt"
+
+
+# --------------------------------------------------------------------------- #
+# `can_render`: asking the rig whether a submit would run at all
+# --------------------------------------------------------------------------- #
+
+
+def test_a_leased_rig_is_not_submitted_into_at_all(env, monkeypatch):
+    """The pre-flight and the submit refusal must reach the same verdict —
+    otherwise the pre-flight parks a job the submit would have ended."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(readiness=image_jobs.RigReadiness(
+        can_render=False, reason="cards_leased",
+        detail="CUDA [0,1,2,3] are leased to bench-runner-judge [benchmark]",
+        lease_holder="bench-runner", lease_kind="benchmark",
+        checked_at=1.0)))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "reserved by bench-runner (benchmark)" in row["content"]
+    assert "enqueue" not in forge.calls, "no submit into somebody's reservation"
+    # The rig's own sentence names its internal ComfyUI host: journal, not chat.
+    assert "CUDA" not in row["content"]
+
+
+def test_a_rig_that_cannot_start_waits_without_burning_a_submit(env, monkeypatch):
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(readiness=image_jobs.RigReadiness(
+        can_render=False, reason="circuit_open",
+        detail="crash-loop circuit tripped", checked_at=1.0)))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "queued", "pending, not failed"
+    assert "circuit_open" in row["content"]
+    assert "enqueue" not in forge.calls
+
+
+@pytest.mark.parametrize("reason", ["startable", "backend_reachable",
+                                    "something_new", "unknown"])
+def test_everything_else_submits_exactly_as_before(env, monkeypatch, reason):
+    """`startable` is a cold start, not an outage; an unfamiliar reason is
+    inconclusive. Both submit — the rig's refusal remains the authority."""
+    c = env()
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge(readiness=image_jobs.RigReadiness(
+        can_render=(reason in ("startable", "backend_reachable", "unknown")),
+        reason=reason, checked_at=1.0)))
+    asyncio.run(main._image_job_sweep())
+    assert "enqueue" in forge.calls
+
+
+# --------------------------------------------------------------------------- #
+# Review round, 2026-09-04 — the endings that used to overwrite each other,
+# the caption that deleted its own picture, and the markers that vanished.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("caption", ["nice ]bracket", "5] of 6", "]x", "a]]b",
+                                     "[[media:/etc/passwd]]"])
+def test_a_caption_with_a_bracket_still_delivers_its_picture(env, monkeypatch,
+                                                             caption):
+    """The one that cost a real render: `[[media:…|<caption>]]` cannot express
+    a `]` inside the caption, so the finished directive failed to match, the
+    delivery test failed, and the code DELETED the validated image and told the
+    family "the image could not be stored" — a correct picture destroyed, and
+    the blame put on the disk."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid, caption=caption).json()
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+    asyncio.run(drive())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "done", row["content"]
+    assert "[[media:/media/" in row["content"]
+    assert "could not be stored" not in row["content"]
+    # And the file is still on disk, not unlinked by the failure branch.
+    assert list((main.MEDIA_DIR).glob("*.png")), "the picture was deleted"
+
+
+def test_the_deadline_cannot_overwrite_a_picture_that_landed(env, monkeypatch):
+    """A fetch may span the deadline (the fetch timeout is 180 s of the 600).
+    Whoever ends the job first wins; the loser must not rewrite the message."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+
+    async def drive():
+        await main._image_job_sweep()          # queued -> running
+        await main._image_job_sweep()          # poll + fetch -> delivered
+        # Now the deadline comes round on a row the sweep had already read.
+        job = await main.db.get_image_job(fired["job_id"])
+        stale = dict(job)
+        stale["created_at"] = "1999-01-01T00:00:00+00:00"
+        await main._advance_image_job(stale)
+    asyncio.run(drive())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "done", "the picture was overwritten"
+    assert "[[media:/media/" in row["content"]
+    assert "timed out" not in row["content"]
+    assert main.image_jobs.failure_stats()["failures_24h"] == 0
+    assert forge.calls.count("fetch") == 1
+
+
+def test_a_picture_finishing_into_a_deleted_thread_is_discarded_not_logged(
+        env, monkeypatch):
+    """Deleting the placeholder cascades the job row away. The delivery used to
+    write the file, rewrite a message that no longer existed, and log
+    "delivered"."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="done", done=True,
+                                   files_rel="out/a.png")))
+
+    async def drive():
+        await main._image_job_sweep()          # queued -> running
+        job = dict(await main.db.get_image_job(fired["job_id"]))
+        await main.db.delete_message(fired["message_id"])
+        await main._advance_image_job(job)     # delivers into nothing
+    asyncio.run(drive())
+
+    assert asyncio.run(main.db.get_image_job(fired["job_id"])) is None
+    assert not list(main.MEDIA_DIR.glob("*.png")), \
+        "the bytes must not be kept when there is nothing to deliver into"
+
+
+def test_a_rig_that_forgot_the_job_says_so_in_english(env, monkeypatch):
+    """ClawForge2 only remembers job ids for the life of its own process, and
+    it gets restarted. What the family used to get was the rig's developer
+    sentence about which tools mint job ids, clipped mid-word."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+
+    forge = image_jobs.ClawForge(ENDPOINT)
+
+    async def fake_call(tool, args, **kw):
+        if tool == "get_job":
+            return {"isError": True, "content": [{"type": "text", "text":
+                    "Error executing tool get_job: No job called 'rig-1'. Job "
+                    "ids come from generate_image / generate_portrait / "
+                    "crop_to_face and are only remembered for this server "
+                    "session — nothing has been generated yet."}],
+                    "structuredContent": {"error": {"code": "tool_error"}}}
+        return {"content": [{"type": "text",
+                             "text": json.dumps({"job_id": "rig-1"})}]}
+    forge.call = fake_call
+    forge.readiness = lambda **kw: _ready()
+    monkeypatch.setattr(main, "_clawforge", lambda: forge)
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+    asyncio.run(drive())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert row["content"] == ("⚠️ image failed: the image server restarted and "
+                              "lost this render")
+    assert "generate_portrait" not in row["content"]
+    assert "Error executing tool" not in row["content"]
+
+
+async def _ready():
+    return image_jobs.RigReadiness()
+
+
+def test_a_lost_submit_answer_is_not_sent_twice(env, monkeypatch):
+    """`generate_image` has no idempotency key. A read timeout after the rig
+    accepted the job used to leave the row QUEUED, and the sweep resubmitted —
+    up to ten real renders for one placeholder, nine of them unpollable."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "image server unreachable: ReadTimeout", retryable=True,
+        uncertain=True)))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+    asyncio.run(drive())
+
+    assert forge.calls.count("enqueue") == 1, "asked twice for one picture"
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    assert "not asked twice" in row["content"]
+
+
+def test_a_connect_failure_is_still_retried(env, monkeypatch):
+    """The other half of the same rule: a connect failure never left the box,
+    so repeating it cannot have doubled anything."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "image server unreachable: ConnectError", retryable=True)))
+
+    async def drive():
+        await main._image_job_sweep()
+        await main._image_job_sweep()
+    asyncio.run(drive())
+
+    assert forge.calls.count("enqueue") == 2
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "queued"
+
+
+def test_an_expired_job_is_withdrawn_from_the_rig_at_boot(env, monkeypatch):
+    """A restart during renders used to fail them locally and leave them
+    burning GPUs nobody was waiting on."""
+    c = env()
+    tid = _thread(c)
+    fired = _fire(c, tid).json()
+    forge = _use(monkeypatch, FakeForge())
+
+    async def drive():
+        await main._image_job_sweep()          # queued -> running (rig-1)
+        await main.db.update_image_job(
+            fired["job_id"], progress=None)
+        await main.db.db.execute(
+            "UPDATE image_jobs SET created_at = ? WHERE id = ?",
+            ("1999-01-01T00:00:00+00:00", fired["job_id"]))
+        await main.db.db.commit()
+        await main._resume_image_jobs()
+    asyncio.run(drive())
+
+    assert forge.cancelled == ["rig-1"], "the render was left running"
+
+
+# --------------------------------------------------------------------------- #
+# Markers that produce nothing must not produce silence either
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("here you go [[pic:a blue teapot", "here you go"),
+    ("[[pic:a very\nlong prompt]]", "long prompt]]"),
+    ("before [[pic:x\nafter", "before\nafter"),
+])
+def test_an_unterminated_marker_never_reaches_a_bubble(env, text, expected):
+    """The worst outcome available: internal syntax on the family's screens,
+    on the locked tablets too, and no picture."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, text)
+    body = [m for m in _messages(c, tid) if not (m.get("metadata") or {}).get("sub")][-1]
+    assert "[[pic:" not in body["content"]
+    assert expected in body["content"]
+
+
+def test_a_documented_marker_in_backticks_still_survives(env):
+    """The skill tells agents to show the syntax in backticks. That is code,
+    it fires nothing, and it must not be eaten by the remnant strip."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "write it like `[[pic:a cat]]` in your reply")
+    body = _messages(c, tid)[-1]
+    assert "`[[pic:a cat]]`" in body["content"]
+    assert not _placeholders(c, tid)
+
+
+def test_a_spaced_marker_renders_rather_than_printing_itself(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "look [[ pic:a blue teapot]]")
+    rows = _placeholders(c, tid)
+    assert len(rows) == 1, "a shape models actually produce"
+    assert "[[" not in [m for m in _messages(c, tid)
+                        if m["id"] != rows[0]["id"]][-1]["content"]
+
+
+def test_strip_and_extract_still_agree_byte_for_byte():
+    """The dedup key depends on this equality; when it slipped once, a reply
+    was re-posted five times."""
+    for text in ("a [[pic:x]] b", "here you go [[pic:unterminated",
+                 "`[[pic:doc]]`", "[[ pic:spaced]]", "[[pic:a]]\n[[pic:b",
+                 "plain text", "```\n[[pic:in a fence]]\n```"):
+        assert (image_jobs.strip_pic_markers(text)
+                == image_jobs.extract_pic_markers(text)[0]), text
+
+
+def test_a_dropped_marker_leaves_a_visible_trace_and_a_counter(env):
+    """A marker that earns no picture used to be a journal line and nothing
+    else — indistinguishable, to everyone including the agent, from a reply
+    that never asked for one."""
+    c = env()
+    tid = _thread(c)
+    image_jobs.reset_marker_drops()
+    # Four markers: two render (the per-message cap), and the limiter refuses
+    # the rest of the minute.
+    for _ in range(3):
+        _say(c, tid, "[[pic:one]] [[pic:two]]")
+    subs = [m for m in _messages(c, tid)
+            if (m.get("metadata") or {}).get("sub")
+            and m["content"].startswith("⚠️ No picture")]
+    assert subs, "the refusal was invisible"
+    assert "Too many image requests" in subs[0]["content"]
+    assert image_jobs.marker_drop_stats()["drops_24h"] >= 1
+    assert c.get("/api/health").json()["image_marker_drops_24h"] >= 1
+
+
+def test_an_over_length_prompt_is_clamped_rather_than_dropped(env):
+    """Truncating a 2,500-character styled prompt renders a picture; refusing
+    it renders nothing, and the marker is already stripped by then."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, f"[[pic:{'a beautifully detailed teapot, ' * 120}]]")
+    rows = _placeholders(c, tid)
+    assert len(rows) == 1
+    job = _job_of(c, rows[0])
+    assert len(job["prompt"]) == image_jobs.MAX_PROMPT_CHARS
+
+
+def test_a_locked_device_sees_the_card_but_not_the_prompt(env):
+    """The rule /api/health follows two screens away: prompts and rig errors do
+    not go anywhere a locked device can reach."""
+    redacted = main._redact_message_dict({
+        "id": "m1", "content": "🖼️ Generating an image… — a very private prompt",
+        "media_url": None,
+        "metadata": {"kind": "image_job", "job_id": "j1", "status": "queued",
+                     "prompt": "a very private prompt", "caption": "",
+                     "workflow": "anima", "seed": 12345}})
+    assert redacted["content"] == "🖼️ Generating an image…"
+    assert redacted["metadata"] == {"kind": "image_job", "job_id": "j1",
+                                    "status": "queued"}
+    failed = main._redact_message_dict({
+        "id": "m2", "content": "⚠️ image failed: CUDA 3 is leased to someone",
+        "media_url": None,
+        "metadata": {"kind": "image_job", "status": "failed",
+                     "error": "CUDA 3 is leased to someone"}})
+    assert failed["content"] == "⚠️ image failed"
+    assert "error" not in failed["metadata"]
