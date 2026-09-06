@@ -471,6 +471,10 @@ def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
 #                avatar-prompts-main.yaml carries Tier 1 alone, so it must set
 #                this key or it silently loses its Tier 2 fragments.
 #
+# `base`, `suffix` and `negative` hold up to 2000 characters each — a canonical
+# character description runs to several hundred, and an over-long value is
+# WARNED about, never silently cut mid-word.
+#
 # A composed prompt is `base, suffix, <one expression>, background` on the bank
 # path and `tier1, tier2, <one expression>, background` on the bits-prompt one.
 # The negative follows the identity: a bank's own `negative` always wins, and
@@ -539,6 +543,42 @@ def _face_pct(v) -> int | None:
     return int(f)
 
 
+# The identity strings. Generous on purpose: a canonical character description
+# is several hundred characters (the one this was raised for is 781), and a cap
+# that bites is a cap that cuts a sentence in half.
+_IDENTITY_MAX = 2000
+
+
+def _capped(raw: dict, key: str, limit: int) -> str:
+    """One bank string, truncated at ``limit`` — but never in silence.
+
+    A quiet cut lands mid-word inside a character description and surfaces
+    weeks later as a strange render rather than as an error, so an over-long
+    value says which key it was and how far over.
+    """
+    value = str(raw.get(key) or "")
+    if len(value) > limit:
+        log.warning("avatar prompt bank: %r is %d characters, over the %d-character "
+                    "cap — the tail was dropped, so the render will not see it",
+                    key, len(value), limit)
+        return value[:limit]
+    return value
+
+
+def _flagless(value: str, key: str) -> str:
+    """Drop a bank value that the image CLI would read as an OPTION.
+
+    ``bank_save`` refuses one at the write, but a bank may also be hand-dropped
+    into the data dir, and these reach the CLI as option VALUES — where the
+    ``--`` separator that protects the prompt does not help.
+    """
+    if value.strip().startswith("-"):
+        log.error("avatar prompt bank: %r starts with '-' and would be read as a "
+                  "command-line option by the image CLI — ignoring the value", key)
+        return ""
+    return value
+
+
 def _clean_bank(raw: dict) -> dict | None:
     """Normalise a v5 avatar bank (categories[].expressions/prompts + crop
     knobs). Returns None — logging LOUDLY — when the bank has no usable
@@ -590,17 +630,19 @@ def _clean_bank(raw: dict) -> dict | None:
         "version": 5,
         # The identity keys. Dropping these was the whole defect: without them
         # every bot's pool composed the SAME character out of bits-prompt.
-        "base": str(raw.get("base") or "")[:600],
-        "suffix": str(raw.get("suffix") or "")[:300],
+        "base": _capped(raw, "base", _IDENTITY_MAX),
+        "suffix": _capped(raw, "suffix", _IDENTITY_MAX),
         "identity_source": src,
-        "negative": str(raw.get("negative") or "")[:600],
+        # An option VALUE, so a leading dash is a real hazard on the hand-drop
+        # path — dropped here, and still refused outright at the write.
+        "negative": _flagless(_capped(raw, "negative", _IDENTITY_MAX), "negative"),
         "categories": categories,
         "crop_size": _int_or(raw.get("crop_size"), 1024),
         "face_percent": _float_or(raw.get("face_percent"), 0.55),
         "face_y_percent": _float_or(raw.get("face_y_percent"), 0.45),
-        "workflow": str(raw.get("workflow") or "")[:60],
-        "ratio": str(raw.get("ratio") or "1:1")[:12],
-        "background": str(raw.get("background") or "clean black background")[:200],
+        "workflow": _capped(raw, "workflow", 60),
+        "ratio": _flagless(_capped(raw, "ratio", 12), "ratio") or "1:1",
+        "background": _capped(raw, "background", 200) or "clean black background",
     }
 
 
@@ -637,11 +679,13 @@ def bank_save(raw: dict, bot_id: str) -> dict:
         raise PoolError(
             "Malformed prompt bank: no usable categories (a v5 bank needs a "
             "non-empty 'categories' mapping with expressions/prompts)", 400)
-    # `negative` is an option VALUE, so a leading dash there really would be
-    # read as a flag; `base`/`suffix` are positional, and refused for the same
-    # reason reactions refuses them — loudly at the write, not at 05:00.
+    # `negative` and `ratio` are option VALUES, so a leading dash there really
+    # would be read as a flag; `base`/`suffix` are positional, and refused for
+    # the same reason reactions refuses them — loudly at the write, not at
+    # 05:00. Judged on the RAW value: _clean_bank quietly repairs the two the
+    # hand-drop path relies on, and a PUT must be refused, not repaired.
     for key in ("base", "suffix", "negative", "workflow", "ratio", "background"):
-        _reject_dash_lead(bank[key], f"Prompt bank {key}")
+        _reject_dash_lead(str(raw.get(key) or ""), f"Prompt bank {key}")
     for cat in bank["categories"]:
         for text in cat["expressions"] + cat["prompts"]:
             _reject_dash_lead(text, "Prompt bank body")

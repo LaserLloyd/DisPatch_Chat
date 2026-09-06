@@ -141,6 +141,23 @@ def test_a_bank_that_owns_its_identity_sends_no_borrowed_negative(rx_env, rig, m
     assert "--negative" not in rig[0]
 
 
+def test_a_bank_identity_is_the_positional_prompt_the_cli_receives(rx_env, rig, monkeypatch):
+    """The composed string is asserted in test_avatar_pool; this is the same
+    claim one layer down — what actually lands in the process table."""
+    monkeypatch.setattr(
+        avatar_pool, "_bits_prompt",
+        lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
+    avatar_pool.bank_save({"base": "a lighthouse keeper", "suffix": "85mm lens",
+                           "background": "a weathered harbour",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "expressions": ["a level gaze"]}}}, "main")
+    _enable_pool()
+    assert avatar_pool.generate_pair("main") is not None
+    argv = rig[0]
+    assert argv[-2] == "--"
+    assert argv[-1] == "a lighthouse keeper, 85mm lens, a level gaze, a weathered harbour"
+
+
 def test_the_helpers_negative_still_rides_with_the_helpers_identity(rx_env, rig, monkeypatch):
     _save_v5_bank(monkeypatch)          # no `base` — the helper owns the face
     monkeypatch.setattr(                # …re-stubbed: _save_v5_bank sets its own

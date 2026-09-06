@@ -13,6 +13,7 @@ What must hold for this to ship:
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 import pytest
@@ -370,10 +371,59 @@ def test_an_unknown_identity_source_falls_back_to_the_bank(pool_env, monkeypatch
 
 def test_a_flag_shaped_identity_value_is_refused_at_the_write(pool_env):
     cats = {"calm": {"label": "Calm", "prompts": ["at a desk"]}}
-    for key in ("base", "suffix", "negative"):
+    for key in ("base", "suffix", "negative", "ratio"):
         with pytest.raises(avatar_pool.PoolError) as e:
             avatar_pool.bank_save({key: "--output=/tmp", "categories": cats}, "main")
         assert e.value.status == 400, key
+
+
+def test_a_long_canonical_base_survives_intact(pool_env):
+    """A canonical character description is several hundred characters — the
+    one this cap was raised for is 781. A silent cut at 600 landed mid-word and
+    took the style anchors with it, and nothing downstream could see that."""
+    base = ("a lighthouse keeper, " * 40)[:781]
+    assert len(base) == 781
+    avatar_pool.bank_save({"base": base, "background": "harbour",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "expressions": ["a level gaze"]}}}, "main")
+    assert avatar_pool.bank_load("main")["base"] == base, "the base was truncated"
+    assert avatar_pool.compose_prompt("main").startswith(base.strip().strip(","))
+
+
+def test_an_over_long_value_is_truncated_LOUDLY(pool_env, caplog):
+    """Truncation is still the outcome — being told about it is the point."""
+    with caplog.at_level(logging.WARNING, logger="local-chat.avatar_pool"):
+        avatar_pool.bank_save({"base": "x" * 2400, "negative": "y" * 2400,
+                               "categories": {"calm": {"label": "Calm",
+                                                       "prompts": ["at a desk"]}}}, "main")
+    bank = avatar_pool.bank_load("main")
+    assert len(bank["base"]) == 2000 and len(bank["negative"]) == 2000
+    said = [r.getMessage() for r in caplog.records if "over the" in r.getMessage()]
+    assert any("'base'" in m and "2400" in m for m in said), said
+    assert any("'negative'" in m for m in said), said
+
+
+def test_a_hand_dropped_flag_shaped_negative_is_ignored_not_run(pool_env, caplog):
+    """The write boundary refuses one; a bank dropped straight into the data
+    dir never crosses it, and `negative` reaches the image CLI as an option
+    VALUE, where the `--` that protects the prompt does not help."""
+    avatar_pool.bank_path("main").parent.mkdir(parents=True, exist_ok=True)
+    avatar_pool.bank_path("main").write_text(
+        "version: 5\n"
+        "base: a lighthouse keeper\n"
+        "negative: '--output=/tmp'\n"
+        "ratio: '--ratio'\n"
+        "categories:\n"
+        "  calm:\n"
+        "    label: Calm\n"
+        "    expressions: [a level gaze]\n", encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger="local-chat.avatar_pool"):
+        bank = avatar_pool.bank_load("main")
+    assert bank["negative"] == "", "a flag-shaped negative reached the CLI"
+    assert bank["ratio"] == "1:1", "a flag-shaped ratio reached the CLI"
+    assert avatar_pool.compose_prompt("main"), "the rest of the bank must still work"
+    assert sum("would be read as a command-line option" in r.getMessage()
+               for r in caplog.records) == 2
 
 
 def test_an_empty_bank_still_refuses_to_compose(pool_env):
