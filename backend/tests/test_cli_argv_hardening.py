@@ -107,6 +107,51 @@ def test_avatar_pair_puts_the_prompt_after_a_double_dash(rx_env, rig, monkeypatc
     assert "a portrait" in argv[-1]
 
 
+def _enable_pool() -> None:
+    st = avatar_pool.load_state("main")
+    st.config.enabled = True
+    avatar_pool.save_state(st, "main")
+
+
+def test_a_banks_own_negative_replaces_the_helpers(rx_env, rig, monkeypatch):
+    """The negative follows the identity. The helper's names specific hair,
+    eyes and species, so sending it with somebody else's `base` would fight
+    that character on every render."""
+    monkeypatch.setattr(
+        avatar_pool, "_bits_prompt",
+        lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
+    avatar_pool.bank_save({"base": "a photoreal instructor", "negative": "blurry, extra limbs",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "prompts": ["a portrait"]}}}, "main")
+    _enable_pool()
+    assert avatar_pool.generate_pair("main") is not None
+    argv = rig[0]
+    assert argv[argv.index("--negative") + 1] == "blurry, extra limbs"
+
+
+def test_a_bank_that_owns_its_identity_sends_no_borrowed_negative(rx_env, rig, monkeypatch):
+    monkeypatch.setattr(
+        avatar_pool, "_bits_prompt",
+        lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
+    avatar_pool.bank_save({"base": "a photoreal instructor",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "prompts": ["a portrait"]}}}, "main")
+    _enable_pool()
+    assert avatar_pool.generate_pair("main") is not None
+    assert "--negative" not in rig[0]
+
+
+def test_the_helpers_negative_still_rides_with_the_helpers_identity(rx_env, rig, monkeypatch):
+    _save_v5_bank(monkeypatch)          # no `base` — the helper owns the face
+    monkeypatch.setattr(                # …re-stubbed: _save_v5_bank sets its own
+        avatar_pool, "_bits_prompt",
+        lambda *f: "helper negative" if "--negative" in f else "helper identity")
+    _enable_pool()
+    assert avatar_pool.generate_pair("main") is not None
+    argv = rig[0]
+    assert argv[argv.index("--negative") + 1] == "helper negative"
+
+
 # --------------------------------------------------------------------------- #
 # queue band
 #

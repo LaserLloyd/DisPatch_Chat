@@ -468,3 +468,47 @@ legacy), like everything else in this file.
 
 Both integrations are entirely optional: with neither CLI present the pools
 simply never refill themselves, and nothing else changes.
+
+### Avatar prompt banks
+
+One yaml per bot, `avatar-prompts-<bot>.yaml` in the data directory, also
+reachable at `GET`/`PUT /api/avatar-pool/<bot>/prompts`. It is what the nightly
+avatar-pool top-up generates from, and it is deliberately data — no deploy is
+needed to change how a bot looks.
+
+```yaml
+version: 5
+base: "the character itself — prefixed to every prompt"
+suffix: ""                  # optional detail fragment, carried with `base`
+identity_source: bank       # bank (default) | bits-prompt
+negative: ""                # optional, for the full render
+workflow: ""                # image-CLI knobs; the pool config's workflow wins
+ratio: "1:1"
+background: clean simple background, soft studio lighting
+crop_size: 1024             # crop knobs for the face half of the pair
+face_percent: 0.55
+face_y_percent: 0.45
+categories:                 # required — one is picked at random per pair
+  neutral:
+    label: Neutral
+    expressions:            # wins over `prompts` when both are present
+      - neutral expression, calm gaze level with the camera
+```
+
+A composed prompt is `base, suffix, <one expression>, background`. Keep the
+identity in `base` and the expression lines about face and pose only, so one
+bank change restyles every mood at once.
+
+`identity_source` says where the character comes from. The default, `bank`,
+reads it from this file, which is the only way each bot gets its own face. A
+bank with an empty `base` names nobody, so it falls back to the external prompt
+helper the pool shipped with; `identity_source: bits-prompt` makes that
+fallback explicit and permanent for banks whose `base` holds only part of what
+the helper emits. A bank's own `negative` always wins, and the helper's — which
+names specific hair, eyes and species — is only ever sent alongside the
+identity it belongs to.
+
+A category needs at least one non-empty `expressions` or `prompts` entry, and a
+bank with no usable category is refused (`400`) rather than saved as something
+that would generate base-only output. No value may start with `-`: it would be
+read as an option by the image CLI.

@@ -296,6 +296,95 @@ def test_bank_round_trip_and_compose(pool_env):
     assert p.endswith("clean black background")                         # bank background
 
 
+def test_a_bank_with_a_base_is_its_own_character(pool_env, monkeypatch):
+    """The defect this exists for: compose_prompt shelled out to bits-prompt
+    for EVERY bot, so a second bot's pool minted the first bot's face. A bank
+    that names a character composes from that character and never calls out."""
+    def _never(*flags):
+        raise AssertionError(f"bits-prompt was called with {flags}")
+    monkeypatch.setattr(avatar_pool, "_bits_prompt", _never)
+    avatar_pool.bank_save({"base": "a tall red-haired instructor in a gym",
+                           "suffix": "photoreal, 85mm portrait lens",
+                           "categories": {"smirk": {"label": "Smirk",
+                                                    "expressions": ["one eyebrow raised"]}},
+                           "background": "clean gym background"}, "main")
+    p = avatar_pool.compose_prompt("main")
+    assert p == ("a tall red-haired instructor in a gym, photoreal, 85mm portrait lens, "
+                 "one eyebrow raised, clean gym background")
+
+
+def test_the_identity_keys_survive_a_bank_round_trip(pool_env):
+    """_clean_bank used to drop base/suffix, which is why the composer could
+    not have used them even if it had wanted to."""
+    avatar_pool.bank_save({"base": "someone specific", "suffix": "soft light",
+                           "negative": "blurry, extra limbs",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "prompts": ["at a desk"]}}}, "main")
+    bank = avatar_pool.bank_load("main")
+    assert bank["base"] == "someone specific"
+    assert bank["suffix"] == "soft light"
+    assert bank["negative"] == "blurry, extra limbs"
+    assert bank["identity_source"] == "bank", "the default is the bank's own base"
+
+
+def test_a_bank_with_no_base_still_uses_the_prompt_helper(pool_env, monkeypatch):
+    """Unchanged behaviour for a bank that names nobody — it holds expression
+    bodies only, so the character has to come from somewhere."""
+    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+                        lambda *f: "tier1 identity" if "--tier1" in f else "tier2 detail")
+    avatar_pool.bank_save({"categories": {"calm": {"label": "Calm",
+                                                   "expressions": ["a level gaze"]}},
+                           "background": "clean black background"}, "main")
+    assert avatar_pool.compose_prompt("main") == (
+        "tier1 identity, tier2 detail, a level gaze, clean black background")
+
+
+def test_identity_source_opts_a_bank_back_in_to_the_helper(pool_env, monkeypatch):
+    """The escape hatch for a bank whose `base` is only PART of what the helper
+    emits: avatar-prompts-main.yaml carries Tier 1 alone, so composing from it
+    would silently drop the Tier 2 fragments."""
+    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+                        lambda *f: "tier1 identity" if "--tier1" in f else "tier2 detail")
+    avatar_pool.bank_save({"base": "tier1 identity", "identity_source": "bits-prompt",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "expressions": ["a level gaze"]}},
+                           "background": "clean black background"}, "main")
+    bank = avatar_pool.bank_load("main")
+    assert avatar_pool.bank_owns_identity(bank) is False
+    assert avatar_pool.compose_prompt("main") == (
+        "tier1 identity, tier2 detail, a level gaze, clean black background")
+
+
+def test_an_unknown_identity_source_falls_back_to_the_bank(pool_env, monkeypatch):
+    """A typo must not silently hand the bot somebody else's face."""
+    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+                        lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
+    avatar_pool.bank_save({"base": "someone specific", "identity_source": "wat",
+                           "categories": {"calm": {"label": "Calm",
+                                                   "prompts": ["at a desk"]}},
+                           "background": ""}, "main")
+    assert avatar_pool.bank_load("main")["identity_source"] == "bank"
+    assert avatar_pool.compose_prompt("main") == (
+        "someone specific, at a desk, clean black background")   # the default background
+
+
+def test_a_flag_shaped_identity_value_is_refused_at_the_write(pool_env):
+    cats = {"calm": {"label": "Calm", "prompts": ["at a desk"]}}
+    for key in ("base", "suffix", "negative"):
+        with pytest.raises(avatar_pool.PoolError) as e:
+            avatar_pool.bank_save({key: "--output=/tmp", "categories": cats}, "main")
+        assert e.value.status == 400, key
+
+
+def test_an_empty_bank_still_refuses_to_compose(pool_env):
+    """Unchanged: no categories is the loud 'no-prompt-bank' path, and the
+    empty bank now reports the identity keys too so the GET shape is stable."""
+    bank = avatar_pool.bank_load("main")
+    assert bank["categories"] == [] and bank["base"] == ""
+    assert bank["identity_source"] == "bank" and bank["negative"] == ""
+    assert avatar_pool.compose_prompt("main") is None
+
+
 def test_deficit_and_low_water(pool_env):
     avatar_pool.update_config({"target": 3, "min_ready": 2}, "main")
     _seed_pair("main", "one")
@@ -384,6 +473,21 @@ def test_prompts_round_trip_over_the_api(client):
     cats = r.json()["prompts"]["categories"]
     assert [c["name"] for c in cats] == ["calm"]
     assert cats[0]["prompts"] == ["the companion at a desk"]
+
+
+def test_prompts_round_trip_carries_the_identity(client):
+    """A bank PUT over the API is what an on-box agent writes; if `base` does
+    not come back out of the GET, the bot has no face of its own."""
+    bank = {"base": "a specific character", "suffix": "soft rim light",
+            "identity_source": "bank", "negative": "blurry",
+            "categories": {"calm": {"label": "Calm", "expressions": ["a level gaze"]}}}
+    r = client.put("/api/avatar-pool/main/prompts", json={"prompts": bank})
+    assert r.status_code == 200, r.text
+    saved = r.json()["prompts"]
+    assert saved["base"] == "a specific character" and saved["suffix"] == "soft rim light"
+    got = client.get("/api/avatar-pool/main/prompts").json()["prompts"]
+    assert got["base"] == "a specific character"
+    assert got["identity_source"] == "bank" and got["negative"] == "blurry"
 
 
 def test_prompts_put_refuses_a_v1_bank(client):

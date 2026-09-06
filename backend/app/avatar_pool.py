@@ -448,18 +448,44 @@ def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
 # choice, so an empty bank simply generates nothing (hand-dropped pairs and
 # the existing bank keep the pool alive meanwhile).
 #
-#     base: "<character description prefixed to every prompt>"
-#     suffix: "<fragment appended to every prompt>"          # optional
+#     version: 5
+#     base: "<the character itself, prefixed to every prompt>"
+#     suffix: "<detail fragment carried with `base`>"        # optional
+#     identity_source: bank | bits-prompt   # where the character comes from
+#     negative: "<negative prompt for the FULL render>"      # optional
 #     ratio / style / workflow: image CLI knobs for the FULL render
-#     shot: face framing for the crop (wide|close|bust|waist|extreme_close)
-#     look: detector hint for the crop (anime|realistic)
-#     variations: ["...", ...]     # one is picked per generation
+#     crop_size / face_percent / face_y_percent: crop knobs for the face half
+#     background: "<appended last to every prompt>"
+#     categories: {<id>: {label, expressions: [...], prompts: [...]}}
+#
+# WHERE THE CHARACTER COMES FROM — `identity_source`, default `bank`:
+#
+#   bank         the bank's own `base` (+ `suffix`) IS the character, exactly
+#                the way reactions.compose_prompt has always worked. This is
+#                the only way a second bot gets its OWN face. An empty `base`
+#                means the bank names nobody, so the composer falls back to
+#                the helper below rather than emitting a bodiless expression.
+#   bits-prompt  shell out to ~/bin/bits-prompt for Tier 1 + Tier 2 + the
+#                negative, ignoring `base`/`suffix`. Opt-in, for a bank whose
+#                `base` holds only part of that helper's output —
+#                avatar-prompts-main.yaml carries Tier 1 alone, so it must set
+#                this key or it silently loses its Tier 2 fragments.
+#
+# A composed prompt is `base, suffix, <one expression>, background` on the bank
+# path and `tier1, tier2, <one expression>, background` on the bits-prompt one.
+# The negative follows the identity: a bank's own `negative` always wins, and
+# bits-prompt's (which names the wrong hair, eyes and species for anybody else)
+# is only ever sent along with the identity it belongs to.
 
 # A v5 bank with nothing to generate — bank_load's fallback when a malformed
 # bank fails _clean_bank. compose_prompt returns None on it, which surfaces as
 # a loud "no-prompt-bank" last_error instead of silent degenerate output.
 _EMPTY_BANK: dict = {
     "version": 5,
+    "base": "",
+    "suffix": "",
+    "identity_source": "bank",
+    "negative": "",
     "categories": [],
     "crop_size": 0,
     "face_percent": 0.0,
@@ -468,6 +494,12 @@ _EMPTY_BANK: dict = {
     "ratio": "1:1",
     "background": "",
 }
+
+# Who the composer asks for the character. `bank` (the default) reads it from
+# the bank itself; `bits-prompt` is the explicit opt-in to the helper that
+# predates per-bot banks. Underscores are accepted for the second one — it is a
+# yaml value people type by hand.
+_IDENTITY_SOURCES = {"bank", "bits-prompt"}
 
 _SHOTS = {"", "extreme_close", "close", "wide", "bust", "waist"}
 _LOOKS = {"", "anime", "realistic"}
@@ -549,8 +581,19 @@ def _clean_bank(raw: dict) -> dict | None:
                   "refill will fail visibly instead of regenerating "
                   "base-only degenerate avatars")
         return None
+    src = str(raw.get("identity_source") or "bank").strip().lower().replace("_", "-")
+    if src not in _IDENTITY_SOURCES:
+        log.warning("avatar prompt bank: unknown identity_source %r — composing "
+                    "from the bank (known: %s)", src, ", ".join(sorted(_IDENTITY_SOURCES)))
+        src = "bank"
     return {
         "version": 5,
+        # The identity keys. Dropping these was the whole defect: without them
+        # every bot's pool composed the SAME character out of bits-prompt.
+        "base": str(raw.get("base") or "")[:600],
+        "suffix": str(raw.get("suffix") or "")[:300],
+        "identity_source": src,
+        "negative": str(raw.get("negative") or "")[:600],
         "categories": categories,
         "crop_size": _int_or(raw.get("crop_size"), 1024),
         "face_percent": _float_or(raw.get("face_percent"), 0.55),
@@ -594,7 +637,10 @@ def bank_save(raw: dict, bot_id: str) -> dict:
         raise PoolError(
             "Malformed prompt bank: no usable categories (a v5 bank needs a "
             "non-empty 'categories' mapping with expressions/prompts)", 400)
-    for key in ("workflow", "ratio", "background"):
+    # `negative` is an option VALUE, so a leading dash there really would be
+    # read as a flag; `base`/`suffix` are positional, and refused for the same
+    # reason reactions refuses them — loudly at the write, not at 05:00.
+    for key in ("base", "suffix", "negative", "workflow", "ratio", "background"):
         _reject_dash_lead(bank[key], f"Prompt bank {key}")
     for cat in bank["categories"]:
         for text in cat["expressions"] + cat["prompts"]:
@@ -629,12 +675,33 @@ def _bits_prompt(*flags: str) -> str | None:
     return proc.stdout.strip()
 
 
+def bank_owns_identity(bank: dict) -> bool:
+    """Does this bank carry the character itself?
+
+    True when it has a `base` and has not opted back in to the bits-prompt
+    helper. False means the composer must shell out for Tier 1 / Tier 2 — the
+    original behaviour, and still the right one for a bank that holds only
+    expression bodies.
+    """
+    src = str(bank.get("identity_source") or "").strip().lower().replace("_", "-")
+    if src == "bits-prompt":
+        return False
+    return bool(str(bank.get("base") or "").strip())
+
+
 def compose_prompt(bank_or_id: str | dict) -> str | None:
-    """Tier 1 + Tier 2 (face/neck/hands) + one random expression body + the
-    bank's background directive. Accepts a bot_id (loads the live bank) or a
-    bank dict (raw v5 yaml or already cleaned). None when the bank has no
-    usable categories — an avatar without an expression bank would come out
-    base-only and degenerate."""
+    """The character + one random expression body + the bank's background
+    directive. Accepts a bot_id (loads the live bank) or a bank dict (raw v5
+    yaml or already cleaned). None when the bank has no usable categories — an
+    avatar without an expression bank would come out base-only and degenerate.
+
+    The character is the bank's own `base`/`suffix`, per bot, the way
+    reactions.compose_prompt builds one. Only a bank that names nobody (no
+    `base`) or explicitly asks for it (`identity_source: bits-prompt`) gets the
+    Tier 1 + Tier 2 strings out of ~/bin/bits-prompt — that helper describes one
+    specific character and takes no bot id, so every pool that reached for it
+    minted the same face.
+    """
     if isinstance(bank_or_id, str):
         bank = bank_load(bank_or_id)
     else:
@@ -646,18 +713,20 @@ def compose_prompt(bank_or_id: str | dict) -> str | None:
     categories = bank.get("categories") or []
     if not categories:
         return None
-    t1 = _bits_prompt("--tier1")
-    t2 = _bits_prompt("--tier2", "--face", "--neck", "--hands")
-    if t1 is None or t2 is None:
-        return None
+    if bank_owns_identity(bank):
+        identity = [str(bank.get("base") or ""), str(bank.get("suffix") or "")]
+    else:
+        t1 = _bits_prompt("--tier1")
+        t2 = _bits_prompt("--tier2", "--face", "--neck", "--hands")
+        if t1 is None or t2 is None:
+            return None
+        identity = [t1, t2]
     cat = random.choice(categories)
     bodies = cat.get("expressions") or cat.get("prompts") or []
     if not bodies:
         return None
-    parts = [t1.strip().strip(","), t2.strip().strip(","),
-             random.choice(bodies).strip().strip(","),
-             str(bank.get("background") or "").strip().strip(",")]
-    return ", ".join(p for p in parts if p)
+    parts = [*identity, random.choice(bodies), str(bank.get("background") or "")]
+    return ", ".join(p for p in (x.strip().strip(",").strip() for x in parts) if p)
 
 
 # --------------------------------------------------------------------------- #
@@ -809,7 +878,13 @@ def generate_pair(bot_id: str) -> str | None:
         argv += ["--style", style[:60]]
     if workflow and not workflow.strip().startswith("-"):
         argv += ["--workflow", workflow[:60]]
-    negative = _bits_prompt("--negative")
+    # The bank's own negative wins; bits-prompt's is only fetched for a bank
+    # that took its identity from bits-prompt too. It negates "realistic",
+    # "dark skin", "short hair" and a list of hair and eye colours — sending it
+    # with somebody else's `base` would fight that character every render.
+    negative = str(bank.get("negative") or "").strip()
+    if not negative and not bank_owns_identity(bank):
+        negative = _bits_prompt("--negative") or ""
     if negative:
         argv += ["--negative", negative]
     # `--` ends option parsing: the composed prompt is a positional, never a flag.
