@@ -607,18 +607,30 @@ class ClawForge:
     async def comfy_restart(self, *, timeout: float = 30.0) -> tuple[bool, str]:
         """Ask the image server to restart its ComfyUI, and REPIN the card.
 
-        This is the one lever that clears an `insufficient_vram` refusal on
-        this rig. The shortage is not our render being too big -- it is a
-        background LLM sprawled onto the card ComfyUI is pinned to, and it
-        clears on that model's own idle TTL (900s for the background tier),
-        which is LONGER than a job's 600s deadline. So waiting cannot work:
-        the placeholder would always die first. Restarting makes the image
-        server re-pick the freest card, which is what the standalone picture
-        CLI has always done and what DisPatch was missing.
+        MEASURED 2026-09-07: on this rig `comfy_control` is PRIVILEGED and
+        refuses us --
 
-        Deliberately NOT paired with an "unload the background models" call:
-        that needs the inference server's admin PIN, and DisPatch has no
-        business holding it. Repinning is enough and needs no credential.
+            [not_privileged] comfy_control starts, stops and re-pins the GPU
+            backend every other client on this rig is sharing, so it is only
+            allowed from the rig itself or with the server's auth token
+
+        -- and no such token exists anywhere on this box. So this call cannot
+        succeed from DisPatch today. It is kept ONLY because the refusal is
+        cheap, bounded to once per job, and the honest failure path below is
+        what actually runs; if a token is ever provisioned this starts working
+        with no further change.
+
+        What actually frees VRAM on this rig is unloading the idle
+        background-tier models, and that needs the inference server's ADMIN
+        PIN. DisPatch is the family-facing web service and has no business
+        holding it, so the picture CLI (which does hold it, and whose unload
+        call is verified working) remains the only self-heal path. A DisPatch
+        job that hits a VRAM shortage waits and then ends honestly.
+
+        The earlier version of this docstring claimed repinning "needs no
+        credential". That was wrong, and the tests passed only because the
+        test double returned success -- the code path was exercised, the
+        capability never was.
 
         Never raises -- a self-heal that can itself fail the job is worse than
         no self-heal. Returns (ok, note).

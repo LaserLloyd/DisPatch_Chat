@@ -2490,8 +2490,19 @@ def test_the_vram_repin_happens_only_once_per_job(env, monkeypatch):
 
 
 def test_a_failed_repin_does_not_wedge_the_job(env, monkeypatch):
-    """If the restart itself fails we fall back to the ordinary wait, and we
-    still record the attempt so the next tick does not retry it forever."""
+    """The REAL case on this rig, not a hypothetical.
+
+    Measured 2026-09-07: `comfy_control` is privileged and refuses DisPatch
+    with `[not_privileged]`, and no auth token for it exists on this box. So
+    the restart ALWAYS fails here, and this test pins what happens then: fall
+    back to the ordinary wait, record the attempt so the next tick does not
+    retry forever, and never wedge the job.
+
+    The sibling test above (which uses a test double that SUCCEEDS) proves the
+    code path; this one proves the outcome that actually occurs. Keeping both
+    is deliberate -- a green suite that only exercised the happy double is how
+    a no-op shipped looking like a safety net.
+    """
     c = env()
     _armed(monkeypatch)
     tid = _thread(c)
