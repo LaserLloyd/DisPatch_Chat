@@ -2657,6 +2657,14 @@ _IMAGE_JOB_TICK_S = 5.0
 #: thumb ("keep parallel calls ≤ 2–3") and, more to the point, stops N jobs
 #: against a down rig from costing N connect timeouts in series.
 _IMAGE_JOB_CONCURRENCY = 3
+
+#: How many renders may be OUTSTANDING on the image server at once, across
+#: every bot and thread. The server is one serial ComfyUI: one rendering plus a
+#: short queue behind it is the most that can finish inside a job's deadline,
+#: and anything past that is just building a backlog that will time out. This
+#: is a QUEUE, not a limit -- a held job keeps its placeholder and goes on the
+#: next tick.
+MAX_OPEN_RENDERS = 4
 #: Set by anything that just changed what the worker should look at (a new
 #: job, a rig callback) so the sweep runs NOW instead of at the next tick —
 #: the tick was the only DisPatch-side latency on the whole path.
@@ -3206,6 +3214,58 @@ async def _reserve_image_job(job: dict, reservation: str, detail: str = "") -> N
         text=_image_job_reserved_text(reservation), counts=False)
 
 
+async def _repin_for_vram(job: dict, forge) -> bool:
+    """Clear an `insufficient_vram` refusal by making the rig repin its card.
+
+    Waiting this one out does not work, which is why it needs its own path.
+    The shortage on this rig is a background model sprawled onto the card
+    ComfyUI is pinned to, and that clears on the model's own idle TTL (900s
+    for the background tier) -- LONGER than a job's 600s deadline. A job that
+    politely waits therefore always dies first, and the reader gets a ⚠️ for
+    something that a single restart would have fixed in about a minute. The
+    standalone picture CLI has done exactly this for months; the marker path
+    was the one that just waited.
+
+    ONCE per job, like `_retry_stalled`: the marker lives in the progress
+    block, so a rig that is genuinely out of memory still ends visibly instead
+    of restarting ComfyUI in a loop.
+
+    Returns True when the job was re-queued and the caller must stop.
+    """
+    prog = _image_job_progress(job) or {}
+    if prog.get("vram_repin"):
+        return False
+    if _image_job_expired(job):
+        return False
+
+    ok, note = await forge.comfy_restart()
+    log.info("image job %s: insufficient VRAM; asked the rig to repin (%s: %s)",
+             job["id"], "ok" if ok else "failed", note)
+    if not ok:
+        # The restart itself failed. Still mark the attempt so we do not spin,
+        # and fall through to the ordinary retryable-wait path.
+        prog = {**prog, "vram_repin": 1}
+        await db.update_image_job(job["id"], progress=json.dumps(prog),
+                                  require_open=True)
+        job["progress"] = json.dumps(prog)
+        return False
+
+    prog = {**_without_waiting(prog), "vram_repin": 1}
+    if not await db.update_image_job(job["id"], state=image_jobs.QUEUED,
+                                     rig_job_id=None, progress=json.dumps(prog),
+                                     require_open=True):
+        return True          # ended under us (superseded); nothing left to do
+    job["state"], job["rig_job_id"] = image_jobs.QUEUED, None
+    job["progress"] = json.dumps(prog)
+    spec = _image_job_spec(job)
+    await _rewrite_image_job_message(
+        job, _image_job_pending_text(spec),
+        _image_job_meta(job["id"], image_jobs.QUEUED, spec,
+                        seed=job.get("seed")))
+    _wake_image_jobs()
+    return True
+
+
 async def _retry_stalled(job: dict) -> bool:
     """One more go at a render that moved and then went quiet.
 
@@ -3666,6 +3726,9 @@ async def _advance_image_job_locked(job: dict) -> None:
             log.info("image job %s: %s (will retry%s)", job["id"], e.message,
                      f", rig asked for {int(e.retry_after_s)}s"
                      if e.retry_after_s else "")
+            if e.code == "insufficient_vram" and await _repin_for_vram(job, forge):
+                # Re-queued behind a fresh card; the sweep picks it straight up.
+                return
             if e.code == image_jobs.GPU_LEASED:
                 await _mark_image_job_waiting(job, e.reservation, kind="reserved")
             elif e.code == image_jobs.CLIENT_QUOTA:
@@ -3703,8 +3766,31 @@ async def _image_job_sweep() -> None:
             _loop_beat("image_jobs", _IMAGE_JOB_TICK_S)
 
     jobs = await db.open_image_jobs()
-    if jobs:
-        await asyncio.gather(*(one(j) for j in jobs))
+    if not jobs:
+        return
+
+    # ADMISSION CAP. `_IMAGE_JOB_CONCURRENCY` bounds how many rig CALLS this
+    # sweep makes at once; it does not bound how many renders are open on the
+    # rig, and the rig is ONE serial ComfyUI. Coalescing bounds a single bot in
+    # a single thread, but three bots firing per turn is ~9 submits a minute
+    # against roughly 1.2 renders a minute, and the first thing to break is the
+    # 600s deadline -- a thread of "⚠️ timed out" for pictures that were never
+    # going to get a card.
+    #
+    # So: jobs already ACCEPTED by the rig are always advanced (they are its
+    # problem now, and abandoning them would strand real renders), but new
+    # submissions are held back once MAX_OPEN_RENDERS are outstanding. A held
+    # job keeps its placeholder and is picked up by the next tick -- this is a
+    # queue, not a refusal, and nothing is lost.
+    accepted = [j for j in jobs if j.get("rig_job_id")]
+    waiting = [j for j in jobs if not j.get("rig_job_id")]
+    room = max(0, MAX_OPEN_RENDERS - len(accepted))
+    if len(waiting) > room:
+        held = waiting[room:]
+        waiting = waiting[:room]
+        log.info("image queue: %d render(s) open on the rig, holding %d "
+                 "submission(s) for the next tick", len(accepted), len(held))
+    await asyncio.gather(*(one(j) for j in accepted + waiting))
 
 
 async def _resume_image_jobs() -> None:

@@ -145,7 +145,7 @@ class FakeForge:
     """
 
     def __init__(self, *, enqueue=None, poll=None, fetch=None, cancel=None,
-                 readiness=None):
+                 readiness=None, restart_ok=True):
         self._enqueue, self._poll, self._fetch = enqueue, poll, fetch
         self._cancel = cancel
         # "Can you render right now?" — a rig that has not been asked answers
@@ -156,6 +156,8 @@ class FakeForge:
         # priority band and the spec are only real if they reach the rig.
         self.enqueue_args: list[dict] = []
         self.cancelled: list[str] = []
+        self._restart_ok = restart_ok
+        self.restarts = 0
 
     async def readiness(self, *, max_age_s=0.0):
         self.calls.append("readiness")
@@ -191,6 +193,12 @@ class FakeForge:
         if isinstance(self._fetch, Exception):
             raise self._fetch
         return self._fetch if self._fetch is not None else _png()
+
+    async def comfy_restart(self, *, timeout=30.0):
+        """The VRAM self-heal lever. `restart_ok=False` simulates it failing."""
+        self.calls.append("comfy_restart")
+        self.restarts += 1
+        return (self._restart_ok, "restarted" if self._restart_ok else "refused")
 
 
 def _use(monkeypatch, forge):
@@ -1417,6 +1425,12 @@ def test_a_retryable_refusal_waits_and_a_terminal_one_does_not(env, monkeypatch)
     _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
         "[insufficient_vram] Not enough free VRAM — short by 15.9 GB",
         code="insufficient_vram", retryable=True)))
+    # TWO sweeps: since the VRAM self-heal landed, the FIRST insufficient_vram
+    # refusal spends this job's one repin (see the self-heal tests below) and
+    # re-queues behind a freshly-picked card. Only once that has been used does
+    # the refusal fall through to the ordinary retryable wait this test is
+    # about. A single sweep here asserts the pre-self-heal behaviour.
+    asyncio.run(main._image_job_sweep())
     asyncio.run(main._image_job_sweep())
     row = [m for m in _messages(c, tid) if m["id"] == vram["message_id"]][0]
     assert row["metadata"]["status"] == "queued"
@@ -2425,3 +2439,160 @@ def test_coalescing_via_the_explicit_endpoint_too(env):
     second_job = c.get(f"/api/image-jobs/{second['job_id']}").json()
     assert first_job["state"] == "cancelled"
     assert second_job["state"] == "queued"
+
+
+# --------------------------------------------------------------------------- #
+# VRAM self-heal.
+#
+# The shortage on a rig like this is not our render being too big -- it is a
+# background model sprawled onto the card the image backend is pinned to, and
+# it clears on that model's own idle TTL, which is LONGER than a job's
+# deadline. So the polite "retryable, wait for it" path can never succeed: the
+# placeholder always dies first. Restarting makes the backend repin to the
+# freest card, which is what the standalone picture CLI has always done.
+# --------------------------------------------------------------------------- #
+
+def _vram_refusal():
+    return image_jobs.ImageJobError(
+        "Not enough free VRAM", code="insufficient_vram", retryable=True)
+
+
+def test_insufficient_vram_repins_instead_of_just_waiting(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    forge = _use(monkeypatch, FakeForge(enqueue=_vram_refusal()))
+
+    asyncio.run(main._image_job_sweep())
+
+    assert forge.restarts == 1, "the rig was never asked to repin"
+    row = asyncio.run(main.db.get_image_job(jid))
+    assert row["state"] == image_jobs.QUEUED, (
+        "job should be re-queued behind a fresh card, not left waiting")
+    assert json.loads(row["progress"] or "{}").get("vram_repin") == 1
+
+
+def test_the_vram_repin_happens_only_once_per_job(env, monkeypatch):
+    """A rig that is genuinely out of memory must end visibly, not loop."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge(enqueue=_vram_refusal()))
+
+    asyncio.run(main._image_job_sweep())   # repins
+    asyncio.run(main._image_job_sweep())   # must NOT repin again
+    asyncio.run(main._image_job_sweep())
+
+    assert forge.restarts == 1, (
+        f"restarted {forge.restarts}x — a self-heal must not become a loop")
+
+
+def test_a_failed_repin_does_not_wedge_the_job(env, monkeypatch):
+    """If the restart itself fails we fall back to the ordinary wait, and we
+    still record the attempt so the next tick does not retry it forever."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    forge = _use(monkeypatch, FakeForge(enqueue=_vram_refusal(),
+                                        restart_ok=False))
+
+    asyncio.run(main._image_job_sweep())
+    asyncio.run(main._image_job_sweep())
+
+    assert forge.restarts == 1
+    row = asyncio.run(main.db.get_image_job(jid))
+    assert row["state"] in (image_jobs.QUEUED, image_jobs.RUNNING)
+    assert json.loads(row["progress"] or "{}").get("vram_repin") == 1
+
+
+def test_a_non_vram_refusal_never_restarts_the_backend(env, monkeypatch):
+    """Restarting is for one specific refusal. Everything else waits."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    _fire(c, tid)
+    forge = _use(monkeypatch, FakeForge(enqueue=image_jobs.ImageJobError(
+        "ComfyUI was starting", code="backend_unavailable", retryable=True)))
+
+    asyncio.run(main._image_job_sweep())
+
+    assert forge.restarts == 0
+
+
+# --------------------------------------------------------------------------- #
+# The image queue (global admission cap).
+#
+# `_IMAGE_JOB_CONCURRENCY` bounds how many rig CALLS a sweep makes at once; it
+# never bounded how many renders are OPEN on the rig, and the rig is one serial
+# renderer. Coalescing bounds a single bot in a single thread, so several bots
+# firing per turn could still build a backlog that runs into the deadline --
+# a thread of "timed out" for pictures that never got a card.
+# --------------------------------------------------------------------------- #
+
+def test_submissions_are_held_once_the_rig_is_full(env, monkeypatch):
+    """More requests than MAX_OPEN_RENDERS: the excess waits its turn."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    n = main.MAX_OPEN_RENDERS + 3
+    # A THREAD EACH: coalescing is per (bot, thread) and would correctly
+    # collapse repeats in one thread, which is not what this cap is about.
+    tids = [_thread(c) for _ in range(n)]
+    for one_tid in tids:
+        image_jobs.limiter.reset()   # isolate the CAP from the per-bot limiter
+        _fire(c, one_tid)
+    # Nothing ever completes, so every accepted job stays open.
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="running", done=False)))
+
+    asyncio.run(main._image_job_sweep())
+
+    submitted = forge.calls.count("enqueue")
+    assert submitted == main.MAX_OPEN_RENDERS, (
+        f"submitted {submitted} renders at once; the cap is "
+        f"{main.MAX_OPEN_RENDERS} — the rig is one serial renderer")
+
+
+def test_a_held_submission_is_queued_not_dropped(env, monkeypatch):
+    """The cap is a QUEUE. A held job keeps its placeholder and goes later."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    n = main.MAX_OPEN_RENDERS + 2
+    tids = [_thread(c) for _ in range(n)]
+    for one_tid in tids:
+        image_jobs.limiter.reset()
+        _fire(c, one_tid)
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="running", done=False)))
+
+    asyncio.run(main._image_job_sweep())
+
+    # Every request still has a live placeholder — none was refused or failed.
+    rows = [r for one_tid in tids for r in _placeholders(c, one_tid)]
+    assert len(rows) == n
+    assert all(r["metadata"]["status"] in ("queued", "running") for r in rows), \
+        "a held submission must not be failed or dropped"
+
+
+def test_jobs_the_rig_already_accepted_are_always_advanced(env, monkeypatch):
+    """The cap holds NEW submissions; it must never strand a real render."""
+    c = env()
+    _armed(monkeypatch)
+    tid = _thread(c)
+    for _ in range(main.MAX_OPEN_RENDERS + 2):
+        image_jobs.limiter.reset()
+        _fire(c, _thread(c))
+    forge = _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="running", done=False)))
+    asyncio.run(main._image_job_sweep())     # fills the rig
+    forge.calls.clear()
+
+    asyncio.run(main._image_job_sweep())     # second pass
+
+    assert forge.calls.count("poll") == main.MAX_OPEN_RENDERS, (
+        "every render the rig accepted must still be polled")
+    assert forge.calls.count("enqueue") == 0, "the rig is full; hold new work"

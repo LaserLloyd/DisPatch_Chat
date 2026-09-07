@@ -604,6 +604,33 @@ class ClawForge:
 
     # -- tool wrappers ----------------------------------------------------- #
 
+    async def comfy_restart(self, *, timeout: float = 30.0) -> tuple[bool, str]:
+        """Ask the image server to restart its ComfyUI, and REPIN the card.
+
+        This is the one lever that clears an `insufficient_vram` refusal on
+        this rig. The shortage is not our render being too big -- it is a
+        background LLM sprawled onto the card ComfyUI is pinned to, and it
+        clears on that model's own idle TTL (900s for the background tier),
+        which is LONGER than a job's 600s deadline. So waiting cannot work:
+        the placeholder would always die first. Restarting makes the image
+        server re-pick the freest card, which is what the standalone picture
+        CLI has always done and what DisPatch was missing.
+
+        Deliberately NOT paired with an "unload the background models" call:
+        that needs the inference server's admin PIN, and DisPatch has no
+        business holding it. Repinning is enough and needs no credential.
+
+        Never raises -- a self-heal that can itself fail the job is worse than
+        no self-heal. Returns (ok, note).
+        """
+        try:
+            res = await self._tool_json("comfy_control", {"action": "restart"},
+                                        timeout=timeout)
+        except Exception as e:  # best effort, by contract: never raise
+            return False, f"{type(e).__name__}: {str(e)[:160]}"
+        note = str(res.get("note") or res.get("state") or "restarted")[:200]
+        return True, note
+
     async def _tool_json(self, tool: str, args: dict, *,
                          timeout: float = MCP_TIMEOUT_S) -> dict:
         """``tools/call`` whose result is the JSON object in the first text block.
