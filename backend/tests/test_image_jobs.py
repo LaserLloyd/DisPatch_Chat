@@ -20,6 +20,7 @@ import time
 import zlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -259,11 +260,14 @@ def test_the_route_is_503_when_no_image_server_is_configured(env, monkeypatch):
 
 
 def test_the_rate_limit_refuses_a_burst(env):
+    """Distinct threads, deliberately: coalescing (see the block below) only
+    supersedes a bot's own still-QUEUED job in the SAME thread, so a burst
+    across separate threads still exhausts the bot-wide limiter exactly as it
+    did before coalescing existed."""
     c = env()
-    tid = _thread(c)
     for _ in range(image_jobs.RATE_LIMIT):
-        assert _fire(c, tid).status_code == 202
-    r = _fire(c, tid)
+        assert _fire(c, _thread(c)).status_code == 202
+    r = _fire(c, _thread(c))
     assert r.status_code == 429
     assert "Too many image requests" in r.json()["detail"]
 
@@ -778,13 +782,16 @@ def test_at_most_two_markers_per_message_render(env):
 
 
 def test_the_rate_limiter_refuses_a_marker_without_eating_the_reply(env):
+    # Distinct threads for the burst — coalescing only supersedes a bot's own
+    # still-QUEUED job in the SAME thread (see the block below), so filling
+    # the bot-wide limiter still needs independent threads.
     c = env()
-    tid = _thread(c)
     for _ in range(image_jobs.RATE_LIMIT):
-        assert _fire(c, tid).status_code == 202
+        assert _fire(c, _thread(c)).status_code == 202
+    tid = _thread(c)
     _say(c, tid, "one more [[pic:a teapot]]")
 
-    assert len(_placeholders(c, tid)) == image_jobs.RATE_LIMIT
+    assert len(_placeholders(c, tid)) == 0, "the limiter refused this one"
     body = [m for m in _messages(c, tid)
             if not (m.get("metadata") or {}).get("sub")][-1]
     assert "one more" in body["content"]
@@ -953,14 +960,24 @@ def test_a_valid_callback_advances_exactly_that_job(env, monkeypatch):
     _armed(monkeypatch)
     tid = _thread(c)
     first = _fire(c, tid).json()
+    # Advance `first` all the way to REAL progress before firing `second`:
+    # coalescing supersedes not only a QUEUED job but a RUNNING one the rig
+    # has not actually started rendering yet (see the block below) — only
+    # once the rig has reported real step/percent progress is a job safe from
+    # a later marker in the same thread, and this test wants two genuinely
+    # independent open jobs.
+    _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())          # QUEUED -> RUNNING (enqueue)
+    _use(monkeypatch, FakeForge(poll=image_jobs.PollResult(
+        state="running", done=False,
+        progress={"step": 1, "steps": 10, "percent": 10.0})))
+    asyncio.run(main._image_job_sweep())          # rig reports real progress
     second = _fire(c, tid).json()
+
     forge = _use(monkeypatch, FakeForge(
         poll=image_jobs.PollResult(state="done", done=True,
                                    files_rel="out/a.png")))
-
-    # Both are handed to the rig; only the first one's callback arrives.
-    asyncio.run(main._image_job_sweep())
-    forge.calls.clear()
+    # Only the first one's callback arrives; `second` is never swept.
     r = _callback(c, first["job_id"], asyncio.run(_token_of(first["job_id"])))
 
     assert r.status_code == 200, r.text
@@ -1178,11 +1195,12 @@ def test_deleting_the_placeholder_withdraws_the_render(env, monkeypatch):
 def test_deleting_the_thread_withdraws_every_open_render(env, monkeypatch):
     c = env()
     tid = _thread(c)
-    _fire(c, tid)
-    _fire(c, tid)
     forge = _use(monkeypatch, FakeForge(
         enqueue=lambda spec: image_jobs.EnqueueResult(job_id=f"rig-{spec.prompt}")))
-    asyncio.run(main._image_job_sweep())
+    _fire(c, tid, prompt="a blue ceramic teapot")
+    asyncio.run(main._image_job_sweep())          # -> RUNNING, so it survives
+    _fire(c, tid, prompt="a second one")          # coalescing (still QUEUED)
+    asyncio.run(main._image_job_sweep())          # -> RUNNING too
 
     assert c.delete(f"/api/threads/{tid}?hard=true").status_code == 200
     assert len(forge.cancelled) == 2
@@ -1292,10 +1310,10 @@ def test_the_chat_path_submits_at_the_interactive_band(env, monkeypatch):
     """Everything through a thread has a placeholder somebody is looking at."""
     c = env()
     tid = _thread(c)
-    _fire(c, tid)
-    _say(c, tid, "[[pic:a teapot]]")
     forge = _use(monkeypatch, FakeForge())
-
+    _fire(c, tid)
+    asyncio.run(main._image_job_sweep())          # -> RUNNING, survives coalescing
+    _say(c, tid, "[[pic:a teapot]]")
     asyncio.run(main._image_job_sweep())
 
     assert [a["spec"].priority for a in forge.enqueue_args] == [1, 1]
@@ -1506,10 +1524,12 @@ def test_a_submit_wakes_the_worker_instead_of_waiting_for_the_tick(env, monkeypa
 
 
 def test_the_sweep_advances_jobs_concurrently_not_in_series(env, monkeypatch):
+    # Distinct threads: same-thread requests now coalesce onto the newest one
+    # (see the block below), so three jobs genuinely open together need three
+    # threads.
     c = env()
-    tid = _thread(c)
     for i in range(3):
-        assert _fire(c, tid, prompt=f"teapot {i}").status_code == 202
+        assert _fire(c, _thread(c), prompt=f"teapot {i}").status_code == 202
     active = {"now": 0, "peak": 0}
 
     class SlowForge(FakeForge):
@@ -1972,12 +1992,14 @@ def test_a_dropped_marker_leaves_a_visible_trace_and_a_counter(env):
     else — indistinguishable, to everyone including the agent, from a reply
     that never asked for one."""
     c = env()
-    tid = _thread(c)
     image_jobs.reset_marker_drops()
-    # Four markers: two render (the per-message cap), and the limiter refuses
-    # the rest of the minute.
-    for _ in range(3):
-        _say(c, tid, "[[pic:one]] [[pic:two]]")
+    # Exhaust the bot-wide limiter across distinct threads (coalescing only
+    # protects a bot's own still-QUEUED job in the SAME thread — see the block
+    # below), then ask for one more in a fresh thread.
+    for _ in range(image_jobs.RATE_LIMIT):
+        assert _fire(c, _thread(c)).status_code == 202
+    tid = _thread(c)
+    _say(c, tid, "[[pic:one more teapot]]")
     subs = [m for m in _messages(c, tid)
             if (m.get("metadata") or {}).get("sub")
             and m["content"].startswith("⚠️ No picture")]
@@ -1999,22 +2021,407 @@ def test_an_over_length_prompt_is_clamped_rather_than_dropped(env):
     assert len(job["prompt"]) == image_jobs.MAX_PROMPT_CHARS
 
 
-def test_a_locked_device_sees_the_card_but_not_the_prompt(env):
-    """The rule /api/health follows two screens away: prompts and rig errors do
-    not go anywhere a locked device can reach."""
-    redacted = main._redact_message_dict({
-        "id": "m1", "content": "🖼️ Generating an image… — a very private prompt",
-        "media_url": None,
-        "metadata": {"kind": "image_job", "job_id": "j1", "status": "queued",
-                     "prompt": "a very private prompt", "caption": "",
-                     "workflow": "anima", "seed": 12345}})
-    assert redacted["content"] == "🖼️ Generating an image…"
-    assert redacted["metadata"] == {"kind": "image_job", "job_id": "j1",
-                                    "status": "queued"}
-    failed = main._redact_message_dict({
-        "id": "m2", "content": "⚠️ image failed: CUDA 3 is leased to someone",
-        "media_url": None,
-        "metadata": {"kind": "image_job", "status": "failed",
-                     "error": "CUDA 3 is leased to someone"}})
-    assert failed["content"] == "⚠️ image failed"
-    assert "error" not in failed["metadata"]
+def test_a_locked_device_never_sees_an_image_job_row_at_all(env):
+    """Locked DisPatch is a family-safe afterthought: rather than hand-craft a
+    degraded card, an image-job placeholder (at any stage of its life) simply
+    does not exist for a locked viewer."""
+    for status, extra in [
+        ("queued", {"prompt": "a very private prompt", "caption": "",
+                    "workflow": "anima", "seed": 12345}),
+        ("failed", {"error": "CUDA 3 is leased to someone"}),
+        ("cancelled", {"error": "superseded by a newer request"}),
+        ("done", {"media_url": "/media/x.png"}),
+    ]:
+        redacted = main._redact_message_dict({
+            "id": "m1", "content": f"anything, status={status}",
+            "media_url": None,
+            "metadata": {"kind": "image_job", "status": status, **extra}})
+        assert redacted is None, f"a {status} image-job row leaked to Safe Mode"
+
+
+def test_an_image_job_frame_is_dropped_not_delivered_with_a_null_message(env):
+    frame = {"type": "message_update", "thread_id": "t", "bot_id": "main",
+             "message_id": "m",
+             "message": {"id": "m", "thread_id": "t", "role": "assistant",
+                         "content": "🖼️ Generating an image…",
+                         "metadata": {"kind": "image_job", "status": "queued",
+                                      "job_id": "j1"}}}
+    assert main.redact_for_decoy(frame) is None
+
+
+def test_an_image_job_row_is_absent_from_a_redacted_message_list(env):
+    frame = {"type": "messages", "messages": [
+        {"id": "m1", "role": "assistant", "content": "hello",
+         "metadata": None},
+        {"id": "m2", "role": "assistant", "content": "🖼️ Generating…",
+         "metadata": {"kind": "image_job", "status": "queued", "job_id": "j1"}},
+    ]}
+    out = main.redact_for_decoy(frame)
+    assert [m["id"] for m in out["messages"]] == ["m1"]
+
+
+# --------------------------------------------------------------------------- #
+# Per-bot identity injection (`image_identity_source`)
+#
+# A companion whose look is curated (Doxy) should write the SCENE ONLY — the
+# server prepends her canonical identity block before the prompt ever reaches
+# the rig. See app/image_jobs.identity_prompt, which parses the exact same
+# "## Canonical base prompt" file+format the `doxy-pics` CLI does.
+# --------------------------------------------------------------------------- #
+
+IDENTITY_PROMPT = (
+    "athletic curvy dog-girl kemono, floppy dog ears, wagging tail, "
+    "auburn hair, warm brown eyes, anime illustration, soft studio lighting"
+)
+
+
+def _write_identity_file(tmp_path, prompt: str = IDENTITY_PROMPT,
+                         name: str = "identity.md") -> str:
+    path = tmp_path / name
+    path.write_text(
+        "# Test Bot — Canonical Visual Identity\n\n"
+        "## Identity spec\n\n- some bullet points here\n\n"
+        "## Canonical base prompt\n\n```\n" + prompt + "\n```\n\n"
+        "## Generation & delivery\n\nsome trailing prose nobody parses.\n")
+    return str(path)
+
+
+def _set_identity_source(bot_id: str, source: str) -> None:
+    bots = config.load_bots()
+    for b in bots:
+        if b.id == bot_id:
+            b.image_identity_source = source
+    config._write_bots([config._bot_entry(b) for b in bots])
+    config._invalidate_bots_cache()
+    assert config.get_bot(bot_id).image_identity_source == source
+
+
+def test_identity_injection_prepends_the_canonical_prompt(env, tmp_path):
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    tid = _thread(c)
+    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+
+    job = _job_of(c, _placeholders(c, tid)[0])
+    assert job["prompt"].startswith(IDENTITY_PROMPT)
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window, morning light"
+
+
+def test_identity_injection_keeps_the_identity_out_of_the_visible_line(env,
+                                                                       tmp_path):
+    """The canonical identity paragraph must never reach a chat bubble — only
+    the scene the bot actually wrote does, on a locked device too."""
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    tid = _thread(c)
+    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+
+    placeholder = _placeholders(c, tid)[0]
+    assert IDENTITY_PROMPT not in placeholder["content"]
+    assert "kneeling by the window, morning light" in placeholder["content"]
+    assert placeholder["metadata"]["prompt"].startswith(IDENTITY_PROMPT), (
+        "the STORED spec is the full rig-bound prompt")
+    # ...and a locked device is redacted down to the card either way.
+    redacted = main._redact_message_dict(placeholder)
+    assert IDENTITY_PROMPT not in json.dumps(redacted)
+
+
+def test_a_bots_own_caption_survives_identity_injection(env, tmp_path):
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    tid = _thread(c)
+    _say(c, tid, "[[pic:kneeling by the window|Good morning]]")
+
+    placeholder = _placeholders(c, tid)[0]
+    assert "Good morning" in placeholder["content"]
+    assert IDENTITY_PROMPT not in placeholder["content"]
+    assert _job_of(c, placeholder)["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window"
+
+
+def test_a_bot_without_the_flag_gets_no_identity_injection(env):
+    """Every other bot's behaviour is byte-identical to before this
+    feature existed: no `image_identity_source` means no injection at all."""
+    c = env()
+    assert config.get_bot("main").image_identity_source == ""
+    tid = _thread(c)
+    _say(c, tid, "[[pic:a blue ceramic teapot]]")
+
+    job = _job_of(c, _placeholders(c, tid)[0])
+    assert job["prompt"] == "a blue ceramic teapot"
+
+
+def test_a_missing_identity_file_drops_the_marker_not_the_reply(env, tmp_path):
+    """A bot that opted into identity injection is refusing to guess its own
+    look, the same way `doxy-pics die()`s on a missing file — but the marker
+    is dropped, not the reply it arrived in."""
+    c = env()
+    _set_identity_source("main", str(tmp_path / "does-not-exist.md"))
+    tid = _thread(c)
+    _say(c, tid, "sure [[pic:a teapot]]")
+
+    rows = _messages(c, tid)
+    assert "[[pic:" not in rows[0]["content"]
+    assert _placeholders(c, tid) == []
+    assert any(m["content"].startswith("⚠️ No picture")
+               for m in _messages(c, tid) if (m.get("metadata") or {}).get("sub"))
+
+
+def test_identity_injection_also_applies_to_the_explicit_endpoint(env, tmp_path):
+    """`/api/image-jobs` cannot be used to bypass server-side identity
+    injection and post an off-model picture under an identity-bound bot."""
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    tid = _thread(c)
+    body = _fire(c, tid, prompt="kneeling by the window").json()
+    job = c.get(f"/api/image-jobs/{body['job_id']}").json()
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window"
+
+
+def test_the_identity_parser_matches_doxy_pics_byte_for_byte():
+    """image_jobs.identity_prompt must stay the SAME parser doxy-pics uses —
+    one file, one regex, one 40-char floor — never a second, diverging copy."""
+    import re as _re
+    doxy_pics_src = Path.home().joinpath(".local/bin/doxy-pics").read_text()
+    m = _re.search(r'PROMPT_BLOCK_RE = re\.compile\(\s*(r".*?")', doxy_pics_src,
+                   _re.S)
+    if not m:
+        pytest.skip("doxy-pics not present on this box")
+    assert eval(m.group(1)) == image_jobs._IDENTITY_BLOCK_RE.pattern
+
+
+def test_identity_injection_for_a_doxy_style_bot(env, tmp_path):
+    """The real-world case this feature exists for: a companion whose look is
+    curated writes the scene only, and the server prepends her canonical
+    identity block, her curated workflow, and her curated aspect ratio — the
+    same three things live `doxy-pics` config carries for her
+    (`anima-Bits`, `aspect_ratio: "2:3"`)."""
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    _set_workflow("anima-Bits")
+    bots = config.load_bots()
+    for b in bots:
+        if b.id == "main":
+            b.image_ratio = "2:3"
+    config._write_bots([config._bot_entry(b) for b in bots])
+    config._invalidate_bots_cache()
+
+    tid = _thread(c)
+    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+
+    job = _job_of(c, _placeholders(c, tid)[0])
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window, morning light"
+    assert job["workflow"] == "anima-Bits"
+    assert c.get(f"/api/image-jobs/{job['job_id']}").json()["prompt"].startswith(
+        IDENTITY_PROMPT)
+    # The ratio isn't echoed by the status route today; the stored spec is
+    # the ground truth for what actually reaches the rig.
+    stored_spec = image_jobs.ImageSpec.from_json(
+        asyncio.run(main.db.get_image_job(job["job_id"]))["spec"])
+    assert stored_spec.ratio == "2:3"
+
+
+def test_no_bot_gets_identity_injection_without_explicit_opt_in(env):
+    """Every bot in the roster without an explicit opt-in must be
+    byte-identical to before this feature existed: `image_identity_source`
+    defaults to empty for every shipped and test bot, with no exceptions."""
+    for b in config.load_bots():
+        assert b.image_identity_source == "", (
+            f"{b.id} carries a default image_identity_source — "
+            "identity injection must be an explicit opt-in")
+
+
+def test_a_captionless_marker_never_leaks_the_composed_prompt_as_caption(env,
+                                                                         tmp_path):
+    """A bot that writes no caption of its own must never have the composed
+    (identity + scene) prompt stand in for one — the visible line is always
+    the scene, at most, never the character's canonical description."""
+    c = env()
+    _set_identity_source("main", _write_identity_file(tmp_path))
+    tid = _thread(c)
+    _say(c, tid, "[[pic:stretching after a long day]]")
+
+    placeholder = _placeholders(c, tid)[0]
+    assert placeholder["metadata"]["caption"] == "stretching after a long day"
+    assert IDENTITY_PROMPT not in placeholder["metadata"]["caption"]
+    assert IDENTITY_PROMPT not in placeholder["content"]
+    assert placeholder["metadata"]["prompt"] == (
+        f"{IDENTITY_PROMPT}, stretching after a long day")
+
+
+# --------------------------------------------------------------------------- #
+# Coalescing — newest scene wins
+#
+# The rate limiter used to refuse a burst outright and stop there. Now a new
+# `[[pic:…]]` for a bot with an unfinished render in this thread quietly
+# supersedes it instead: fast chat yields fewer pictures, never late or
+# refused ones. "Unfinished" is not "still QUEUED" — `enqueue()` answers in
+# about a second, so a row is RUNNING almost immediately; the real backlog on
+# a serial rig is a RUNNING row the RIG has not actually started rendering
+# yet (see `_job_unstarted_on_rig`), and that is what gets superseded too.
+# --------------------------------------------------------------------------- #
+
+
+def test_a_second_marker_supersedes_the_first_still_queued_job(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    first = _placeholders(c, tid)[0]
+    _say(c, tid, "[[pic:scene two]]")
+
+    placeholders = _placeholders(c, tid)
+    assert len(placeholders) == 2
+    first_after = [m for m in placeholders if m["id"] == first["id"]][0]
+    # A distinct MESSAGE status, not `cancelled`: imagejobs.js renders any
+    # recognised non-pending status as a failure card, and a supersede is
+    # normal operation, not a failure. The underlying job row still ends
+    # CANCELLED for bookkeeping — see the terminal-state test below.
+    assert first_after["metadata"]["status"] == "superseded"
+    assert first_after["metadata"].get("sub") is True, (
+        "rendered as a collapsed one-line trace, like a reaction sub row")
+    assert "superseded" in first_after["content"]
+    second = [m for m in placeholders if m["id"] != first["id"]][0]
+    assert second["metadata"]["status"] == "queued"
+    assert _job_of(c, second)["prompt"] == "scene two"
+
+
+def test_superseding_does_not_emit_a_refusal_or_drop_row(env):
+    """"Silent" means no REFUSAL — the superseded placeholder itself is
+    expected to collapse to a sub row (see the test above); what must NOT
+    appear is a "Too many image requests" / "No picture" drop."""
+    c = env()
+    image_jobs.reset_marker_drops()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    _say(c, tid, "[[pic:scene two]]")
+    _say(c, tid, "[[pic:scene three]]")
+
+    drops = [m for m in _messages(c, tid)
+             if m["content"].startswith("⚠️ No picture")]
+    assert drops == [], "superseding must be silent — no drop row, no refusal"
+    assert image_jobs.marker_drop_stats()["drops_24h"] == 0
+
+
+def test_superseding_refunds_the_rate_limiter(env):
+    """Coalescing a stale request must not cost the bot capacity it would
+    otherwise have had for a genuinely new one — this fires well past
+    RATE_LIMIT in one thread and none of it is refused."""
+    c = env()
+    tid = _thread(c)
+    n = image_jobs.RATE_LIMIT + 3
+    for i in range(n):
+        _say(c, tid, f"[[pic:scene {i}]]")
+
+    assert len(_placeholders(c, tid)) == n
+    assert not any(m["content"].startswith("⚠️ No picture")
+                   for m in _messages(c, tid))
+
+
+def test_a_rig_queued_running_job_is_superseded_too(env, monkeypatch):
+    """The real backlog on a serial rig: `enqueue()` answers in ~1s, so a job
+    is RUNNING almost immediately in OUR db while the RIG itself may still be
+    sitting on it behind other work. A RUNNING job with no real progress yet
+    is exactly as supersedable as one still locally QUEUED."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    first = _placeholders(c, tid)[0]
+    _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())          # -> RUNNING, never polled
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert job["state"] == "running"
+
+    _say(c, tid, "[[pic:scene two]]")
+
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert job["state"] == "cancelled"
+    rows = {m["id"]: m for m in _messages(c, tid)}
+    assert rows[first["id"]]["metadata"]["status"] == "superseded"
+
+
+def test_a_running_job_with_real_progress_is_left_to_finish(env, monkeypatch):
+    """Only once the RIG has reported real step/percent progress has a job
+    actually spent GPU time — cancelling it then would waste that time, so
+    it is left alone."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    first = _placeholders(c, tid)[0]
+    _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())          # -> RUNNING
+    _use(monkeypatch, FakeForge(poll=image_jobs.PollResult(
+        state="running", done=False,
+        progress={"step": 3, "steps": 20, "percent": 15.0})))
+    asyncio.run(main._image_job_sweep())          # rig reports real progress
+    _say(c, tid, "[[pic:scene two]]")
+
+    rows = {m["id"]: m for m in _messages(c, tid)}
+    assert rows[first["id"]]["metadata"]["status"] == "running", (
+        "message metadata is written at creation and only rewritten on a "
+        "terminal ending or a progress update — a protected job gets neither")
+    assert len(_placeholders(c, tid)) == 2
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert job["state"] == "running"
+
+
+def test_a_rig_reported_queued_state_is_superseded(env, monkeypatch):
+    """A rig that explicitly says a job is still `queued` on ITS side (not
+    merely unpolled) is just as supersedable — the rig_state string itself is
+    the strongest signal, ahead of the no-progress default."""
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    first = _placeholders(c, tid)[0]
+    _use(monkeypatch, FakeForge())
+    asyncio.run(main._image_job_sweep())          # -> RUNNING, never polled
+    _use(monkeypatch, FakeForge(
+        poll=image_jobs.PollResult(state="queued", done=False)))
+    asyncio.run(main._image_job_sweep())          # rig says: still queued there
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert json.loads(job["progress"])["rig_state"] == "queued"
+
+    _say(c, tid, "[[pic:scene two]]")
+
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert job["state"] == "cancelled"
+
+
+def test_a_superseded_placeholder_reaches_a_terminal_state(env):
+    c = env()
+    tid = _thread(c)
+    _say(c, tid, "[[pic:scene one]]")
+    first = _placeholders(c, tid)[0]
+    _say(c, tid, "[[pic:scene two]]")
+
+    row = [m for m in _messages(c, tid) if m["id"] == first["id"]][0]
+    # The MESSAGE says "superseded"; the underlying job row still ends
+    # CANCELLED — a real terminal state, not a status nothing recognises.
+    assert row["metadata"]["status"] == "superseded"
+    job = asyncio.run(main.db.get_image_job(first["metadata"]["job_id"]))
+    assert job["state"] in image_jobs.TERMINAL_STATES
+    assert job["state"] == image_jobs.CANCELLED
+    assert job["error"] == "superseded by a newer request"
+
+
+def test_coalescing_does_not_cross_threads(env):
+    c = env()
+    tid_a, tid_b = _thread(c), _thread(c)
+    _say(c, tid_a, "[[pic:scene one]]")
+    a_first = _placeholders(c, tid_a)[0]
+    _say(c, tid_b, "[[pic:scene two]]")
+
+    assert _placeholders(c, tid_a)[0]["id"] == a_first["id"]
+    assert _placeholders(c, tid_a)[0]["metadata"]["status"] == "queued"
+
+
+def test_coalescing_via_the_explicit_endpoint_too(env):
+    """The same coalesce rule applies to `/api/image-jobs`, not only markers —
+    one chokepoint (`_supersede_stale_pic_jobs`), two entry points."""
+    c = env()
+    tid = _thread(c)
+    first = _fire(c, tid, prompt="scene one").json()
+    second = _fire(c, tid, prompt="scene two").json()
+
+    first_job = c.get(f"/api/image-jobs/{first['job_id']}").json()
+    second_job = c.get(f"/api/image-jobs/{second['job_id']}").json()
+    assert first_job["state"] == "cancelled"
+    assert second_job["state"] == "queued"

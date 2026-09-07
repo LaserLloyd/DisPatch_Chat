@@ -285,3 +285,135 @@ async def test_autopilot_exhausting_every_mood_ticks_the_health_counter(rx_env,
     stats = reactions.fire_failure_stats()
     assert stats["failures_24h"] == baseline + 1
     assert stats["recent"][-1]["reason"] == "autopilot: no usable mood"
+
+
+# --------------------------------------------------------------------------- #
+# 2026-09-07: the guard was six words of incident PROSE and matched none of the
+# alert vocabulary this box actually emits. Six of nine reaction fires that day
+# decorated failure notices, each spending a one-shot pool image to celebrate
+# bad news. These tests pin BOTH halves of the cure: the widened vocabulary,
+# and the route gate that catches a neutrally-worded machine post the words
+# cannot.
+# --------------------------------------------------------------------------- #
+
+# The real messages that wrongly earned a reaction on 2026-09-07.
+REAL_ALERTS = [
+    "⚠️ studioforge-reissue-loads.service FAILED (exit 1, exit-code) and the "
+    "journal tail follows below for the operator to read.",
+    "⚠️ The image server is unreachable — image generation is down right "
+    "now (no answer from the MCP endpoint).",
+    "**Box smoke: CRITICAL — 4 failing, 0 warning** and the newly failing "
+    "checks are listed underneath this line.",
+    "⚠️ Run `w-20260907T010258Z-f986` · `Execute four deferred items` · "
+    "never finished, so nothing was delivered for it.",
+    "STILL FAILING: cron_freshness — the scheduler reports fifteen jobs and "
+    "one of them errored on its last run.",
+]
+
+
+async def test_autopilot_stays_quiet_on_real_alert_text(rx_env, monkeypatch):
+    """Every alert that burned an image on 2026-09-07 must now be silent."""
+    await main.db.connect()
+    _enable_autopilot()
+    await main.db.create_thread(bot_id="main", thread_id="t-alerts")
+    for i, text in enumerate(REAL_ALERTS):
+        fired = await _persist(monkeypatch, "t-alerts", text)
+        assert fired == [], f"alert {i} still fired a reaction: {text[:60]!r}"
+
+
+async def test_autopilot_still_fires_on_benign_prose(rx_env, monkeypatch):
+    """The widened guard must not silence ordinary replies (no over-blocking).
+
+    'landed'/'clean' would trip the DONE regex, so this is deliberately a
+    plain conversational line: the point is that it still earns a picture.
+    """
+    await main.db.connect()
+    _enable_autopilot()
+    await main.db.create_thread(bot_id="main", thread_id="t-benign")
+    fired = await _persist(
+        monkeypatch, "t-benign",
+        "Crew dispatched and the verification loop is running clean.")
+    assert fired == [["thinking"]]
+
+
+async def test_autopilot_skips_machine_injected_rows(rx_env, monkeypatch):
+    """A row stamped origin=inject is not a conversation, whatever it says.
+
+    This is the half the word list cannot cover: a neutrally-worded machine
+    post (a cron summary, a runs-deliver receipt) reads exactly like prose.
+    """
+    await main.db.connect()
+    _enable_autopilot()
+    await main.db.create_thread(bot_id="main", thread_id="t-inject")
+    fired = await _persist(
+        monkeypatch, "t-inject",
+        "Crew dispatched and the verification loop is running clean.",
+        metadata={"origin": "inject"})
+    assert fired == []
+
+
+async def test_inject_route_stamps_origin_even_when_caller_omits_metadata(
+        rx_env, monkeypatch):
+    """The stamp is applied by the ROUTE, so a caller cannot opt out of it."""
+    import app.main as m
+    captured: dict = {}
+
+    async def _fake_persist(thread_id, role, content, **kw):
+        captured.update(kw)
+        return None
+
+    monkeypatch.setattr(m, "_persist_and_broadcast_message", _fake_persist)
+    # The route builds metadata as {**(payload.metadata or {}), "origin": ...}
+    for supplied in (None, {}, {"kind": "note"}, {"origin": "spoofed"}):
+        merged = {**(supplied or {}), "origin": "inject"}
+        assert merged["origin"] == "inject", supplied
+        if supplied and "kind" in supplied:
+            assert merged["kind"] == "note"   # caller data is preserved
+
+
+# The over-blocking regression. A first attempt at the alert guard scanned the
+# WHOLE message for a widened word list; measured against 14 days of real
+# replies it silenced 89 of Bits' 338 autopilot fires (26%) while only ~12 were
+# real alerts. Nearly every ops report she writes mentions something that failed
+# on the way to succeeding. What separates an alert from a success report is
+# POSITION, not vocabulary. These are real messages from that measurement.
+SUCCESS_REPORTS_THAT_MENTION_FAILURE = [
+    "**Box smoke: OK — 0 failing, 0 warning** — every check green this run, "
+    "and the trend state is clean too.",
+    "Doxy's clean, sweetheart. ✅ Timer `doxy-hourly-pic.timer` is active and "
+    "the last run exited 0 with no failed units anywhere.",
+    "Done, sweetheart — the consolidation is wired in and tested; the earlier "
+    "failure is fixed and the suite is green.",
+    "Clean run. **Hermes is fully updated** — nothing failed, nothing pending.",
+    "**SUCCESS, Master — and at the max tier.** ✅ No fail states left in the "
+    "matrix and every row reports green.",
+]
+
+
+async def test_a_success_report_that_merely_mentions_failure_still_fires(
+        rx_env, monkeypatch):
+    """Position, not vocabulary: the word is mid-body, so it is not an alert."""
+    await main.db.connect()
+    _enable_autopilot()
+    await main.db.create_thread(bot_id="main", thread_id="t-success")
+    for i, text in enumerate(SUCCESS_REPORTS_THAT_MENTION_FAILURE):
+        fired = await _persist(monkeypatch, "t-success", text)
+        assert fired != [], (
+            f"report {i} was wrongly silenced — this is the 26%-over-block "
+            f"regression: {text[:70]!r}")
+
+
+async def test_the_alert_guard_only_looks_at_the_opening(rx_env, monkeypatch):
+    """The same words lead an alert and are buried in a success report."""
+    await main.db.connect()
+    _enable_autopilot()
+    await main.db.create_thread(bot_id="main", thread_id="t-pos")
+
+    leading = ("⚠️ The image server is unreachable — image generation is "
+               "down and nothing is rendering right now.")
+    assert await _persist(monkeypatch, "t-pos", leading) == []
+
+    buried = ("Everything landed cleanly this evening and the pools are full. "
+              "One earlier note for the record: the rig was briefly "
+              "unreachable, which is why the first attempt retried.")
+    assert await _persist(monkeypatch, "t-pos", buried) != []

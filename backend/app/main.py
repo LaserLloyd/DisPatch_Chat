@@ -1177,7 +1177,20 @@ def _decoy_keep_uploaded_media(s: str | None) -> str | None:
     return s
 
 
-def _redact_message_dict(m: dict) -> dict:
+def _redact_message_dict(m: dict) -> dict | None:
+    """The locked-view copy of one message, or ``None`` to hide it entirely.
+
+    Locked DisPatch is a family-safe afterthought, not a second product: the
+    only hard requirement is that nothing — a prompt, a caption, a rig error,
+    a filesystem path — leaks to an unauthenticated viewer. Beyond that, the
+    cheapest correct answer for something Safe Mode has no real use for is to
+    make it not exist there, not to hand-craft a degraded version of it. An
+    image-job placeholder is exactly that case: it names its own prompt in
+    `content`, carries the prompt/caption/rig-error/workflow/seed in
+    `metadata`, and Safe Mode has no bot that can fire one today anyway (that
+    is a config flag, not a structure, so the hide cannot depend on it staying
+    true) — so it is simply not shown, at any stage of its life.
+    """
     out = dict(m)
     out["media_url"] = None
     if out.get("content"):
@@ -1191,35 +1204,14 @@ def _redact_message_dict(m: dict) -> dict:
                            if k not in ("reaction_id", "reaction_name")}
         actor = str(meta.get("actor") or "Someone")
         out["content"] = f"⚡ {actor} reacted"
-    # An image job's own text is the request: "🖼️ Generating an image… — <the
-    # prompt>", and on failure the rig's prose verbatim. Its metadata carries
-    # the prompt, that prose, the workflow and the seed. The picture itself
-    # cannot reach a locked device (`/media/` is barred, the directive is
-    # stripped), but the words about it could — which contradicts the rule
-    # /api/health follows two screens away, that prompts and rig errors do not
-    # go anywhere a locked device can reach.
-    #
-    # Inert today only because no safe bot has `image_jobs` — that is a config
-    # flag, not a structure, and this gate is not allowed to depend on one.
     elif isinstance(meta, dict) and meta.get("kind") == _IMAGE_JOB_KIND:
-        out["metadata"] = {k: v for k, v in meta.items()
-                           if k not in ("prompt", "caption", "error",
-                                        "workflow", "seed", "media_url")}
-        out["content"] = _IMAGE_JOB_DECOY_TEXT.get(
-            str(meta.get("status") or ""), "🖼️ Image")
+        return None
     return out
 
 
-#: The `metadata.kind` an image-job placeholder carries, and the neutral line a
-#: locked device sees instead of the prompt-bearing one.
+#: The `metadata.kind` an image-job placeholder carries — hidden outright from
+#: a locked device, see `_redact_message_dict`.
 _IMAGE_JOB_KIND = "image_job"
-_IMAGE_JOB_DECOY_TEXT = {
-    "queued": "🖼️ Generating an image…",
-    "running": "🖼️ Generating an image…",
-    "done": "🖼️ Image",
-    "failed": "⚠️ image failed",
-    "cancelled": "✋ The image was cancelled.",
-}
 
 
 def _redact_thread_dict(t: dict) -> dict:
@@ -1362,7 +1354,13 @@ def redact_for_decoy(frame: dict):
 
     if (t in ("message", "message_update", "stream_done")
             and isinstance(frame.get("message"), dict)):
-        return {**frame, "message": _redact_message_dict(frame["message"])}
+        redacted = _redact_message_dict(frame["message"])
+        # An image-job placeholder redacts to nothing (see
+        # _redact_message_dict) — the whole frame is dropped, same as an
+        # unsafe bot's frame above, rather than delivered with a null message.
+        if redacted is None:
+            return None
+        return {**frame, "message": redacted}
     if t in ("thread_update", "thread_created") and isinstance(frame.get("thread"), dict):
         return {**frame, "thread": _redact_thread_dict(frame["thread"])}
     if t in ("threads_list", "threads", "messages"):
@@ -1370,7 +1368,15 @@ def redact_for_decoy(frame: dict):
         items = frame.get(key)
         if isinstance(items, list):
             fn = _redact_message_dict if t == "messages" else _redact_thread_dict
-            return {**frame, key: [fn(x) if isinstance(x, dict) else x for x in items]}
+            kept = []
+            for x in items:
+                if not isinstance(x, dict):
+                    kept.append(x)
+                    continue
+                r = fn(x)
+                if r is not None:      # an image-job row hides outright
+                    kept.append(r)
+            return {**frame, key: kept}
     return frame
 
 
@@ -1934,8 +1940,42 @@ REACTION_REPLAY_FRESH_S = 600
 # refusals surface exactly like marker fires (sub row + health counter).
 _AUTOPILOT_MIN_CHARS = 40
 _AUTOPILOT_NIGHT_HOURS = range(7)          # box-local; "never at night"
+# 2026-09-07. Two lessons, in order.
+#
+# The list used to be six words of INCIDENT PROSE and matched none of the alert
+# vocabulary this box emits, so six of nine reaction fires that day decorated
+# failure notices, each spending a one-shot pool image to celebrate bad news.
+#
+# The first fix was to widen the vocabulary and scan the whole message. Measured
+# against 14 days of real replies, that silenced 89 of Bits' 338 autopilot fires
+# (26%) while only ~12 of them were actual alerts. Nearly every ops report she
+# writes mentions something that failed on the way to succeeding -- "Box smoke:
+# OK — 0 failing", "Done, sweetheart… ✅" with a ⚠️ inside a status table -- so a
+# whole-body scan reads a success report as an emergency.
+#
+# What actually separates the two is POSITION, not vocabulary: a real alert
+# LEADS with it ("⚠️ …", "**Box smoke: CRITICAL…", "Morning brief failed…"),
+# while a success report buries the word mid-body. So the test is scoped to the
+# opening of the message.
+#
+# Note this is the SECOND net. The origin gate in _prepare_persist already
+# blocks every machine-injected row by route, which covered all six of the
+# 2026-09-07 fires on its own. This one only catches a bot RELAYING an alert in
+# its own conversational turn, so it can afford to be narrow -- and being narrow
+# is what keeps it from eating the replies autopilot exists for.
+_AUTOPILOT_ALERT_HEAD_CHARS = 120
+
 _AUTOPILOT_SERIOUS_RE = re.compile(
-    r"\b(outage|security|breach|urgent|emergency|incident)\b", re.IGNORECASE)
+    r"(?:^\s*(?:\*\*)?\s*(?:⚠️|❌|🚨)"
+    r"|\b(?:outage|security\s+breach|breach|urgent|emergency|incident)\b"
+    r"|\bbox\s+smoke:\s*(?:critical|warn)"
+    r"|\b(?:still|newly)\s+failing\b"
+    r"|\bnever\s+finished\b"
+    r"|\bunreachable\b"
+    r"|\bcritical(?:ly)?\s+(?:fail|error|down|broken)"
+    r")", re.IGNORECASE)
+
+
 _AUTOPILOT_DONE_RE = re.compile(
     r"\b(deploy(?:ed)?|shipp?ed|publish(?:ed)?|done|completed?|fixed|landed|"
     r"passed|verified|green)\b", re.IGNORECASE)
@@ -1958,7 +1998,8 @@ async def _reaction_autopilot_mood(thread_id: str, content: str) -> str | None:
         return None
     if text.endswith("?"):
         return None
-    if _AUTOPILOT_SERIOUS_RE.search(text):
+    # Position, not vocabulary: only the OPENING of the message is tested.
+    if _AUTOPILOT_SERIOUS_RE.search(text[:_AUTOPILOT_ALERT_HEAD_CHARS]):
         return None
     hour = _autopilot_now_hour()
     if hour in _AUTOPILOT_NIGHT_HOURS:
@@ -2081,8 +2122,8 @@ async def _prepare_persist(
         # picture, and obeys the same replay rule: an old reply keeps its
         # marker stripped but must not occupy a GPU for news that has already
         # been read.
-        content, pic_specs, pic_drops = _pic_specs_from_markers(
-            content, bot_id, metadata=metadata,
+        content, pic_specs, pic_drops = await _pic_specs_from_markers(
+            content, bot_id, thread_id, metadata=metadata,
             replaying=replaying and not _replay_is_fresh(created_at))
         metadata = _demote_tool_warning(content, metadata)
         # Autopilot fills the silence AFTER the demote so a collapsed tool
@@ -2092,8 +2133,17 @@ async def _prepare_persist(
         # that is still rendering. Letting autopilot decorate it would spend a
         # one-shot pool image on "generating an image…", and then the row it
         # decorated gets rewritten into something else entirely.
+        # A machine-injected row is not a conversation. Watchdogs, box-smoke,
+        # cron reports and runs-deliver all post through /api/inject; on
+        # 2026-09-07 six of nine reaction fires decorated exactly those rows.
+        # The word guard above catches the ones that read like alerts, but it
+        # cannot catch a neutrally-worded machine post, so gate on the ROUTE
+        # too: autopilot exists to fill silence in a bot's own conversational
+        # replies. (doxy-pics deliveries arrive the same way and are excluded
+        # by the same rule -- they already carry a picture.)
         if (not fired and not replaying and bot_id
                 and not (metadata or {}).get("sub")
+                and (metadata or {}).get("origin") != "inject"
                 and (metadata or {}).get("kind") != "image_job"):
             bot = config.get_bot(bot_id)
             if bot is not None and bot.reactions and bot.reaction_autopilot:
@@ -2731,6 +2781,108 @@ def _image_job_cancelled_text(reason: str = "") -> str:
     return f"✋ The image was cancelled on the rig.{tail}"
 
 
+def _image_job_superseded_text() -> str:
+    """The quiet ending for a placeholder a newer request overtook.
+
+    Not a failure, not a withdrawal somebody chose against their will, and
+    emphatically not a refusal: in a fast exchange the scene simply changed
+    before the rig ever picked the old one up, so the picture that was coming
+    is not the picture anybody still wants. No warning glyph, and — the whole
+    point — no NEW row in the thread: coalescing a stale request onto the
+    newest one is normal operation, and dressing it up as an error would train
+    a reader to worry about something that worked exactly as intended.
+    """
+    return "🖼️ (superseded by a newer picture)"
+
+
+def _compose_pic_prompt(bot, scene: str, caption: str) -> tuple[str, str]:
+    """The rig-bound prompt and the chat-visible caption for one `[[pic:…]]`.
+
+    A bot with `image_identity_source` writes the SCENE ONLY — the caller
+    passes exactly what was inside the marker, e.g. "kneeling by the window,
+    morning light" — and this prepends the bot's canonical identity block (see
+    `image_jobs.identity_prompt`) so the render still looks like the character
+    without the bot ever having to restate its own appearance.
+
+    The identity block does NOT reach the visible "generating…" line. Without
+    a caption of its own that line falls back to `spec.prompt` (see
+    `_image_job_pending_text`), and an unabridged canonical-identity paragraph
+    landing in a family chat bubble would be exactly the leak this feature
+    must not create — so a bot that left the caption blank gets the SCENE as
+    its caption instead, never the composed prompt.
+
+    A bot with no `image_identity_source` gets `(scene, caption)` back
+    unchanged — this is the byte-identical-behaviour guarantee for every bot
+    that has not opted in.
+    """
+    if not bot.image_identity_source:
+        return scene, caption
+    identity = image_jobs.identity_prompt(bot.image_identity_source)
+    room = max(image_jobs.MAX_PROMPT_CHARS - len(identity) - 2, 0)
+    trimmed_scene = scene[:room]
+    full_prompt = f"{identity}, {trimmed_scene}" if trimmed_scene else identity
+    display_caption = caption or scene[:image_jobs.MAX_CAPTION_CHARS]
+    return full_prompt, display_caption
+
+
+#: The MESSAGE's displayed status for a superseded job — deliberately NOT
+#: `image_jobs.CANCELLED` (see `_fail_image_job`'s `visible_status`/`sub`):
+#: the DB row still ends CANCELLED for every bookkeeping purpose, but
+#: `imagejobs.js` renders any recognised non-pending status as a failure card,
+#: and a supersede is normal operation, not a failure.
+_IMAGE_JOB_SUPERSEDED_STATUS = "superseded"
+
+
+async def _supersede_stale_pic_jobs(bot_id: str, thread_id: str) -> int:
+    """Quietly end this bot's not-yet-actually-rendering jobs in this thread.
+    Returns how many were ended.
+
+    Called before a NEW `[[pic:…]]`/`/api/image-jobs` request is admitted, so
+    a fast exchange (the roleplay case this exists for) coalesces onto the
+    newest scene instead of piling up stale placeholders or hitting the rate
+    limiter's hard, final refusal.
+
+    "Unstarted" is NOT the same as "still QUEUED in our own db". `enqueue()`
+    answers in about a second and a submit wakes the sweep immediately
+    (`_wake_image_jobs`), so a row spends only ~1s locally QUEUED before
+    becoming RUNNING — on a shared, serial renderer the real backlog is
+    RUNNING rows the RIG itself has not started yet. `_job_unstarted_on_rig`
+    is what tells those apart from a job actually generating: only a job that
+    is either still QUEUED here, or RUNNING but not yet rendering on the rig,
+    is fair game. One the rig IS rendering has already spent GPU minutes, and
+    cancelling it would waste them — it is asked to withdraw via
+    `_cancel_on_rig` when it was handed to the rig at all, but the local
+    ending happens either way (that call is best-effort by contract; see
+    `_cancel_on_rig`'s own docstring, and this module's report for what could
+    and could not be verified against the live rig from here).
+
+    "Silent" per the design: this ends the job through the same terminal path
+    every other ending uses (so the placeholder is always rewritten, never
+    left to just stop changing), but with a distinct visible status and no
+    new row anywhere — see `_fail_image_job`'s `visible_status`/`sub`.
+    Superseding a stale request is normal operation, not an error, and must
+    not read as one.
+    """
+    jobs = await db.open_image_jobs_for_thread(thread_id)
+    superseded = 0
+    for job in jobs:
+        if (job.get("bot_id") or "").lower() != bot_id.lower():
+            continue
+        if job["state"] == image_jobs.QUEUED:
+            pass
+        elif job["state"] == image_jobs.RUNNING and _job_unstarted_on_rig(job):
+            await _cancel_on_rig(job, "superseded by a newer request")
+        else:
+            continue
+        await _fail_image_job(
+            job, "superseded by a newer request",
+            state=image_jobs.CANCELLED,
+            text=_image_job_superseded_text(), counts=False,
+            visible_status=_IMAGE_JOB_SUPERSEDED_STATUS, sub=True)
+        superseded += 1
+    return superseded
+
+
 def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
                     *, error: str = "", progress: dict | None = None,
                     seed: int | None = None) -> dict:
@@ -2795,10 +2947,11 @@ async def _start_image_job(thread_id: str, bot, spec: image_jobs.ImageSpec
     return job_id, msg.id
 
 
-def _pic_specs_from_markers(content: str, bot_id: str | None, *,
-                            metadata: dict | None = None,
-                            replaying: bool = False,
-                            ) -> tuple[str, list[image_jobs.ImageSpec], list[str]]:
+async def _pic_specs_from_markers(content: str, bot_id: str | None,
+                                  thread_id: str, *,
+                                  metadata: dict | None = None,
+                                  replaying: bool = False,
+                                  ) -> tuple[str, list[image_jobs.ImageSpec], list[str]]:
     """Strip `[[pic:…]]` from an assistant reply and decide what it earned.
 
     The STRIP is unconditional — marker syntax must never reach a chat bubble,
@@ -2821,6 +2974,14 @@ def _pic_specs_from_markers(content: str, bot_id: str | None, *,
     the whole message, they are correct, and a chat row for each would be
     noise — the same line reactions' autopilot draws between a server-chosen
     miss and a bot's explicit ask.
+
+    Before the rate limiter runs, a marker first COALESCES onto this bot's own
+    not-yet-actually-rendering jobs in this thread (see
+    `_supersede_stale_pic_jobs`) — a fast exchange replaces a stale render
+    with the current scene instead of burning through the limiter's window
+    and then hitting its final refusal. Every slot freed that way is
+    refunded, so coalescing never costs a bot capacity it would otherwise
+    have had for a genuinely new request.
     """
     content, markers = image_jobs.extract_pic_markers(content)
     if not markers:
@@ -2848,10 +3009,6 @@ def _pic_specs_from_markers(content: str, bot_id: str | None, *,
     specs: list[image_jobs.ImageSpec] = []
     drops: list[str] = []
     for prompt, caption in markers:
-        if refusal := image_jobs.limiter.check(bot.id.lower()):
-            log.info("image marker refused by the rate limiter (%s)", bot.id)
-            drops.append(refusal)
-            break
         # CLAMPED, not rejected. A 2,500-character styled prompt is a model
         # doing its job well, and truncating it renders a picture while
         # refusing it renders nothing at all — the marker is already stripped
@@ -2860,15 +3017,40 @@ def _pic_specs_from_markers(content: str, bot_id: str | None, *,
         if len(prompt) > len(clamped):
             log.info("clamped an image prompt from %s: %d -> %d chars",
                      bot.id, len(prompt), len(clamped))
+
+        # BUILD THE REPLACEMENT FIRST, retire the old one second. Composing can
+        # fail — a mis-typed marker, or for an identity-injected bot a missing
+        # or mangled identity file — and superseding before we know we have
+        # something to put in its place kills the queued picture and delivers
+        # nothing, leaving the reader a "(superseded by a newer picture)" line
+        # with no newer picture behind it. A supersede that hides a real drop
+        # is the house's "failure that looks like success", built by hand.
         try:
-            specs.append(image_jobs.ImageSpec(
-                prompt=clamped, caption=caption, workflow=bot.image_workflow))
-        except ValueError as e:
-            # A marker the bot mis-typed is dropped, not fatal: the reply it
-            # arrived in is already sanitized and about to be persisted.
-            image_jobs.limiter.refund(bot.id.lower())
+            full_prompt, display_caption = _compose_pic_prompt(
+                bot, clamped, caption)
+            spec = image_jobs.ImageSpec(
+                prompt=full_prompt, caption=display_caption,
+                workflow=bot.image_workflow, ratio=bot.image_ratio)
+        except (ValueError, image_jobs.ImageJobError) as e:
+            # Dropped, not fatal: the reply it arrived in is already sanitized
+            # and about to be persisted. Nothing was superseded and no limiter
+            # slot was spent, so there is nothing to refund.
             log.info("ignored an image marker from %s: %s", bot.id, e)
             drops.append(str(e))
+            continue
+
+        # Now there is a real replacement. Coalescing stays AHEAD of the
+        # limiter (and refunds what it frees) so a fast exchange replaces a
+        # stale render instead of burning the window and hitting the final
+        # refusal — which is the whole point of coalescing.
+        freed = await _supersede_stale_pic_jobs(bot.id, thread_id)
+        for _ in range(freed):
+            image_jobs.limiter.refund(bot.id.lower())
+        if refusal := image_jobs.limiter.check(bot.id.lower()):
+            log.info("image marker refused by the rate limiter (%s)", bot.id)
+            drops.append(refusal)
+            break
+        specs.append(spec)
     return content, specs, drops
 
 
@@ -2950,7 +3132,8 @@ async def _rewrite_image_job_message(job: dict, content: str,
 
 async def _fail_image_job(job: dict, reason: str, *,
                           state: str = image_jobs.FAILED,
-                          text: str = "", counts: bool | None = None) -> None:
+                          text: str = "", counts: bool | None = None,
+                          visible_status: str = "", sub: bool = False) -> None:
     """Terminal ending: the row, the message and the counter, in that order.
 
     `state` is the third terminal value, cancelled, taking the same path — the
@@ -2961,6 +3144,16 @@ async def _fail_image_job(job: dict, reason: str, *,
     withdrawal (a rig booked by somebody else), and `counts` overrides whether
     it moves the /api/health failure counter — that number exists to make a rig
     going WRONG visible, and a rig that is merely busy is not that.
+
+    `visible_status`/`sub` split the MESSAGE's displayed ending from the DB
+    row's real one — used by a supersede (see `_supersede_stale_pic_jobs`),
+    which is a CANCELLED row for every bookkeeping purpose (audit, counters,
+    TERMINAL_STATES) but must not draw the frontend's `is-failed` card a plain
+    `cancelled` status would: `imagejobs.js` only recognises a fixed status
+    vocabulary and falls through to a plain, uncarded row for anything else,
+    so a distinct status string ("superseded") is what keeps it from reading
+    as a failure. `sub` additionally collapses it to a one-line trace, the
+    same treatment a reaction refusal gets.
     """
     reason = image_jobs._clip(reason, 200)
     spec = _image_job_spec(job)
@@ -2976,9 +3169,12 @@ async def _fail_image_job(job: dict, reason: str, *,
         log.info("image job %s: already closed, not writing %r over it",
                  job["id"], state)
         return
-    await _rewrite_image_job_message(
-        job, text, _image_job_meta(job["id"], state, spec, error=reason,
-                                   seed=job.get("seed")))
+    status = visible_status or state
+    meta = ({"sub": True, "kind": _IMAGE_JOB_KIND, "status": status,
+            "job_id": job["id"]} if sub else
+           _image_job_meta(job["id"], status, spec, error=reason,
+                           seed=job.get("seed")))
+    await _rewrite_image_job_message(job, text, meta)
     # A cancellation is an outcome somebody chose, not the rig letting us
     # down, so it deliberately does NOT move the failure counter /api/health
     # exposes — that number exists to make a rig going wrong visible.
@@ -3164,14 +3360,73 @@ def _image_job_expired(job: dict) -> bool:
     return (now - started).total_seconds() > image_jobs.DEADLINE_S
 
 
-#: Progress keys the WORKER writes, not the rig: the waiting wording, and its
-#: flavour. They are dropped the moment the rig reports real progress, which is
-#: what turns "Waiting for the image rig…" back into "Generating an image…".
-_WAITING_KEYS = ("waiting", "waiting_kind")
+#: Progress keys the WORKER writes, not the rig: the waiting wording and its
+#: flavour, and (see `_note_rig_state`) the rig's own last-reported job state.
+#: None of these is the step/percent a reader watches, so none of them may
+#: make an unrelated re-poll look like "the visible progress changed".
+_WAITING_KEYS = ("waiting", "waiting_kind", "rig_state")
 
 
 def _without_waiting(progress: dict) -> dict:
     return {k: v for k, v in progress.items() if k not in _WAITING_KEYS}
+
+
+#: Rig-reported states (PollResult.state) that mean "not actually rendering
+#: yet" for a job OUR db already calls RUNNING — still sitting in the rig's
+#: OWN queue behind other work. `done`/`failed`/`cancelled` never reach this
+#: check: each ends the job through its own path before `_job_unstarted_on_rig`
+#: is ever consulted.
+_RIG_UNSTARTED_STATES = frozenset({"queued", "pending"})
+
+
+async def _note_rig_state(job: dict, rig_state: str) -> None:
+    """Persist the rig's OWN state for this job into the existing progress
+    JSON blob (no schema migration).
+
+    Read only by the coalesce decision (`_job_unstarted_on_rig`): a job the
+    rig has not actually started rendering — still queued on ITS side, or
+    handed off with no progress reported yet — is fair game to supersede; one
+    it is actually generating must be left to finish. Written UNCONDITIONALLY
+    on every poll of a RUNNING job, independently of
+    `_record_image_job_progress`'s broadcast dedup, so the coalesce decision
+    is never working off a rig_state a "nothing visible changed" skip left
+    un-persisted.
+    """
+    if not rig_state:
+        return
+    stored = _image_job_progress(job) or {}
+    if stored.get("rig_state") == rig_state:
+        return
+    merged = {**stored, "rig_state": rig_state}
+    if not await db.update_image_job(job["id"], progress=json.dumps(merged),
+                                     require_open=True):
+        return          # ended under us (superseded); do not touch it further
+    job["progress"] = json.dumps(merged)
+
+
+def _job_unstarted_on_rig(job: dict) -> bool:
+    """True when a RUNNING (in OUR db) job has not actually begun rendering.
+
+    Coalescing a QUEUED job — never even reached the rig — is unconditionally
+    safe (see `_supersede_stale_pic_jobs`). A RUNNING job is the harder call
+    a design review raised: `enqueue()` answers in about a second and the
+    sweep wakes on submission, so a job can sit RUNNING in OUR state machine
+    for most of a serial renderer's queue length while the RIG has not
+    actually started it — THAT is the real backlog a fast exchange builds,
+    not the ~1s a row spends locally QUEUED. This reads the rig's own
+    last-reported state (persisted by `_note_rig_state`) to tell the two
+    apart: still queued on the rig, or handed off with no progress reported
+    yet, is fair game; real step/percent progress means it is actually
+    generating, and cancelling it would throw away GPU time already spent.
+    """
+    prog = _image_job_progress(job) or {}
+    if prog.get("rig_state") in _RIG_UNSTARTED_STATES:
+        return True
+    step, percent = prog.get("step"), prog.get("percent")
+    has_progress = ((isinstance(step, int) and not isinstance(step, bool) and step > 0)
+                    or (isinstance(percent, (int, float))
+                        and not isinstance(percent, bool) and percent > 0))
+    return not has_progress
 
 
 async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
@@ -3197,7 +3452,14 @@ async def _record_image_job_progress(job: dict, progress: dict | None) -> None:
     # job is allowed) has to survive the rig's own progress block replacing it.
     if "stall_retry" in stored:
         progress = {**progress, "stall_retry": stored["stall_retry"]}
-    await db.update_image_job(job["id"], progress=json.dumps(progress))
+    # CAS: if a supersede collapsed this row while we were inside forge.poll(),
+    # rewriting it from our stale in-memory state would restore the pending
+    # text AND the full meta (prompt, caption, workflow) on a row no sweep will
+    # ever touch again -- a permanent "Generating an image… 46%" with the
+    # prompt on screen. A failure that looks like progress.
+    if not await db.update_image_job(job["id"], progress=json.dumps(progress),
+                                     require_open=True):
+        return
     await _rewrite_image_job_message(
         job, _image_job_pending_text(_image_job_spec(job)),
         _image_job_meta(job["id"], job["state"], _image_job_spec(job),
@@ -3228,7 +3490,9 @@ async def _mark_image_job_waiting(job: dict, why: str,
         return
     spec = _image_job_spec(job)
     prog = {**prog, "waiting": short, "waiting_kind": kind}
-    await db.update_image_job(job["id"], progress=json.dumps(prog))
+    if not await db.update_image_job(job["id"], progress=json.dumps(prog),
+                                     require_open=True):
+        return          # same race as _record_image_job_progress above
     job["progress"] = json.dumps(prog)
     await _rewrite_image_job_message(
         job, _image_job_waiting_text(spec, short, kind),
@@ -3335,8 +3599,19 @@ async def _advance_image_job_locked(job: dict) -> None:
                 data = await forge.fetch(res.files_rel)
                 await _deliver_image_job(job, data, res.files_rel)
                 return
-            await db.update_image_job(job["id"], state=image_jobs.RUNNING,
-                                      rig_job_id=res.job_id)
+            # CAS, not a blind write. `_supersede_stale_pic_jobs` runs OUTSIDE
+            # the in-flight guard, so a marker arriving during this ~0.8s
+            # enqueue can cancel this row while we are inside it. A blind write
+            # flips the row back to RUNNING with a rig id, the next sweep polls
+            # it, and the collapsed "superseded" line silently becomes a
+            # picture -- two renders, and the stale prompt is the one delivered.
+            if not await db.update_image_job(job["id"], state=image_jobs.RUNNING,
+                                             rig_job_id=res.job_id,
+                                             require_open=True):
+                # It was ended under us. The rig is still holding the job, so
+                # tell it to stop; the local row is already terminal.
+                await _cancel_on_rig({**job, "rig_job_id": res.job_id},
+                                     "superseded during submit")
             return
 
         rig_id = job.get("rig_job_id")
@@ -3346,6 +3621,10 @@ async def _advance_image_job_locked(job: dict) -> None:
             await _fail_image_job(job, "the render was lost")
             return
         poll = await forge.poll(rig_id)
+        # ALWAYS, independent of anything below: the coalesce decision reads
+        # this off the row and must never see a stale rig_state a "nothing
+        # visible changed" skip elsewhere left un-persisted.
+        await _note_rig_state(job, poll.state)
         if poll.seed is not None and job.get("seed") is None:
             await db.update_image_job(job["id"], seed=poll.seed)
             job["seed"] = poll.seed
@@ -7138,7 +7417,8 @@ async def get_messages(request: Request, thread_id: str,
     msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before_id)
     out = [m.model_dump() for m in msgs]
     if _is_decoy(request):
-        out = [_redact_message_dict(m) for m in out]
+        # An image-job placeholder hides outright — see _redact_message_dict.
+        out = [r for m in out if (r := _redact_message_dict(m)) is not None]
     return {
         "thread_id": thread_id,
         "messages": out,
@@ -8140,17 +8420,31 @@ async def image_job_create(request: Request, payload: ImageJobIn):
     if not bot.image_jobs:
         raise HTTPException(403, f"Image requests aren't enabled for {bot.name}")
 
+    # Same coalesce rule the inline marker takes: a fast burst of explicit
+    # requests replaces a still-QUEUED render of this bot's own rather than
+    # piling placeholders up behind each other, and every slot freed that way
+    # is handed straight back to the rate limiter below.
+    freed = await _supersede_stale_pic_jobs(bot.id, canonical)
+    for _ in range(freed):
+        image_jobs.limiter.refund(bot.id.lower())
+
     try:
+        # Same server-side identity injection the inline marker gets: a bot
+        # configured with `image_identity_source` has its canonical prompt
+        # prepended here too, so this explicit route cannot be used to bypass
+        # it and post an off-model picture under that bot's name.
+        full_prompt, display_caption = _compose_pic_prompt(
+            bot, payload.prompt, payload.caption or "")
         spec = image_jobs.ImageSpec(
             # A request that names no workflow gets the bot's own default, if
             # it has one — the same rule the inline marker path uses, since a
             # marker has no room to name one at all.
-            prompt=payload.prompt,
+            prompt=full_prompt,
             workflow=payload.workflow or bot.image_workflow,
-            ratio=payload.ratio or "", width=payload.width,
+            ratio=payload.ratio or bot.image_ratio, width=payload.width,
             height=payload.height, negative=payload.negative or "",
-            caption=payload.caption or "", priority=payload.priority)
-    except ValueError as e:
+            caption=display_caption, priority=payload.priority)
+    except (ValueError, image_jobs.ImageJobError) as e:
         raise HTTPException(422, str(e))
 
     err = image_jobs.limiter.check(bot.id.lower())
@@ -8402,7 +8696,13 @@ async def inject_message(request: Request, payload: InjectIn):
 
     msg = await _persist_and_broadcast_message(
         thread.id, payload.role, payload.content,
-        media_url=_normalize_media(payload.media_url), metadata=payload.metadata,
+        media_url=_normalize_media(payload.media_url),
+        # Stamp the ROUTE, not the payload. This is what lets the reaction (and
+        # any future image) autopilot tell a machine post from a bot's own
+        # conversational reply -- see the origin gate in _prepare_persist. A
+        # caller cannot spoof its way out of it by omitting metadata, and a
+        # caller that sets its own `origin` is overridden here on purpose.
+        metadata={**(payload.metadata or {}), "origin": "inject"},
     )
     await _broadcast_thread_update(thread.id)
     return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}

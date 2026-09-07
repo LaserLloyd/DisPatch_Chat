@@ -78,6 +78,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 import httpx
@@ -1020,6 +1021,70 @@ def image_suffix(data: bytes, files_rel: str = "") -> str:
             return kind
     suffix = files_rel.rsplit(".", 1)[-1].lower() if "." in files_rel else ""
     return f".{suffix}" if suffix.isalnum() and len(suffix) <= 4 else ".png"
+
+
+# --------------------------------------------------------------------------- #
+# Per-bot identity injection
+#
+# A bot writing `[[pic:kneeling by the window]]` should never have to restate
+# its own appearance — that is what made Doxy's pictures fast-but-wrong the
+# moment she was ever let near `[[pic:]]` unmodified: without a fixed identity
+# block prepended server-side, "kneeling by the window" alone renders SOME
+# dog-girl, not her.
+#
+# This is deliberately the SAME file and the SAME parser `doxy-pics` already
+# uses on every run (`canonical_prompt()` in `~/.local/bin/doxy-pics`): one
+# "## Canonical base prompt" fenced block, one regex, one 40-character sanity
+# floor. A second, silently-diverging parser of the same file would be exactly
+# the kind of drift this house's CLAUDE.md calls out — two things that read
+# the same source and disagree.
+# --------------------------------------------------------------------------- #
+
+#: Mirrors doxy-pics' PROMPT_BLOCK_RE byte for byte.
+_IDENTITY_BLOCK_RE = re.compile(
+    r"##\s*Canonical base prompt\s*```[a-z]*\s*(?P<p>.+?)```", re.S | re.I)
+
+#: Same floor doxy-pics uses to catch a truncated/mangled block rather than
+#: silently rendering off three words.
+_IDENTITY_MIN_CHARS = 40
+
+#: path -> (mtime, prompt). A 1-2 KB markdown file changes rarely (hand-
+#: edits it), and re-reading + re-matching it on every `[[pic:]]` marker in a
+#: fast exchange is pure waste the mtime check avoids for free.
+_IDENTITY_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def identity_prompt(path: str) -> str:
+    """The canonical base prompt parsed out of one bot's identity file.
+
+    Raises :class:`ImageJobError` — never silently falls back to "no
+    identity" — because a bot configured with `image_identity_source` is
+    opting INTO server-side identity injection specifically because its look
+    must not be guessed; a missing or mangled file is exactly the "refusing
+    to guess" case `doxy-pics die()`s on, and a dropped `[[pic:…]]` marker
+    (the caller's job) is the honest outcome here too.
+    """
+    p = Path(path)
+    try:
+        mtime = p.stat().st_mtime
+    except OSError as e:
+        raise ImageJobError(f"identity file unavailable: {e}") from e
+    cached = _IDENTITY_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as e:
+        raise ImageJobError(f"identity file unavailable: {e}") from e
+    m = _IDENTITY_BLOCK_RE.search(text)
+    if not m:
+        raise ImageJobError(
+            f"no '## Canonical base prompt' block in {path}")
+    prompt = " ".join(m.group("p").split())
+    if len(prompt) < _IDENTITY_MIN_CHARS:
+        raise ImageJobError(f"canonical prompt in {path} looks truncated")
+    _IDENTITY_CACHE[path] = (mtime, prompt)
+    return prompt
 
 
 # --------------------------------------------------------------------------- #

@@ -448,6 +448,24 @@ class Bot:
     # the inline `[[pic:…]]` marker has no room to say so — it carries a prompt
     # and a caption, nothing else. Empty means the image server's own default.
     image_workflow: str = ""
+    # Path to a markdown file holding this bot's canonical appearance, as a
+    # fenced "## Canonical base prompt" block — the SAME file+format the
+    # `doxy-pics` CLI parses on every run (see app/image_jobs.identity_prompt).
+    # When set, an inline `[[pic:…]]` (and an explicit `/api/image-jobs` call)
+    # has that prompt prepended SERVER-SIDE before it ever reaches the rig, so
+    # the bot can write just the scene ("kneeling by the window") and never
+    # has to restate its own appearance. Empty (every shipped bot's default)
+    # means no injection at all — behaviour is byte-identical to before this
+    # existed. Opt-in per bot, same reasoning as `image_jobs`/`image_workflow`.
+    image_identity_source: str = ""
+    # This bot's default aspect ratio ("2:3" style), used when a request names
+    # none — the same "fills a gap, an explicit one still wins" rule as
+    # `image_workflow`, and for the same reason: `[[pic:…]]` has no room to
+    # name one, and a curated look (Doxy's live `doxy-pics` config carries
+    # `aspect_ratio: "2:3"`) should not silently change shape depending on
+    # which path asked for the picture. Empty means the image server's own
+    # default.
+    image_ratio: str = ""
     # Direct-provider backend ("Connect an AI"). When present this bot does NOT
     # go through the agent CLI at all — its turns are HTTP calls to an LLM API.
     # Shape (every field optional except provider + model):
@@ -502,6 +520,8 @@ class Bot:
             "avatar_pool": self.avatar_pool,
             "image_jobs": self.image_jobs,
             "image_workflow": self.image_workflow,
+            "image_identity_source": self.image_identity_source,
+            "image_ratio": self.image_ratio,
             "api_provider": str((self.api or {}).get("provider") or ""),
         }
 
@@ -600,6 +620,8 @@ def _bot_entry(b: Bot) -> dict:
         "avatar_pool": b.avatar_pool,
         "image_jobs": b.image_jobs,
         "image_workflow": b.image_workflow,
+        "image_identity_source": b.image_identity_source,
+        "image_ratio": b.image_ratio,
     }
     if b.api:
         entry["api"] = dict(b.api)
@@ -725,6 +747,11 @@ def load_bots() -> list[Bot]:
                                       base.image_jobs if base else False)),
                 image_workflow=str(e.get("image_workflow",
                                          base.image_workflow if base else "")),
+                image_identity_source=str(e.get(
+                    "image_identity_source",
+                    base.image_identity_source if base else "")),
+                image_ratio=str(e.get("image_ratio",
+                                      base.image_ratio if base else "")),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,
