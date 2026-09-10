@@ -101,6 +101,20 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rig trips a 15-second breaker so queued jobs fail fast rather than each
   waiting out a connect timeout in series.
 
+### Removed
+
+- **The coding-terminal pane.** The server-side PTY (`backend/app/terminal.py`,
+  `/api/terminal/*`, `WS /ws/terminal`, the `terminal_state` frame), its
+  sidebar row, action bar, find box and model picker, the `terminal.*` locale
+  namespace in all eight languages, the `DISPATCH_TERMINAL*` /
+  `LOCAL_CHAT_TERMINAL` switches and the vendored terminal-emulator bundle
+  (six files, 317KB) are gone. The pane existed to host one operator-side
+  CLI that is no longer part of the stack; the DeepSeek Harness pane is the
+  coding-agent surface. Nothing loosens: the harness and StudioForge routes
+  keep their own full-session gates, and the `/api/terminal` prefix is now
+  simply unrouted (404) rather than decoy-blocked (403). `features.terminal`
+  no longer appears in `/api/auth/status`.
+
 ### Fixed
 
 - **First-run "Connect an AI" hero on a socket-only host.** `features.agent`

@@ -5,7 +5,7 @@ MOUNTING IT (the exact change in main.py — one added name, one added line):
     1. add ``dashboard_routes`` to the existing package import near the top:
 
            from . import (auth, config, dashboard_routes, openclaw,
-                          openclaw_text, reactions, terminal)
+                          openclaw_text, reactions)
 
     2. THE ONE LINE, anywhere after ``app = FastAPI(...)`` and before the static
        mounts at the bottom of the file:
@@ -17,7 +17,7 @@ MOUNTING IT (the exact change in main.py — one added name, one added line):
 
            if path.startswith(("/media/", "/api/media", "/api/files",
                                "/api/search", "/api/export", "/api/recover",
-                               "/api/openclaw", "/api/terminal",
+                               "/api/openclaw", "/api/harness",
                                "/api/dashboard")):        # <- add this
                return True
 

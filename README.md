@@ -174,9 +174,8 @@ you a file; they cannot browse or retrieve anything). Every mutating endpoint
 answers 403. The app does not even hint that it unlocks.
 
 **Unlocked — with the PIN.** Everything: the full-power agents, files, settings,
-deletion, the host dashboard, and the coding-agent panes (the server-side
-terminal, and the DeepSeek Harness pane when `dsh` is installed) if you turned
-them on.
+deletion, the host dashboard, and the DeepSeek Harness pane (when `dsh` is
+installed) if you turned it on.
 
 The split is enforced on the server, not in the interface — a locked device that
 crafts the request by hand gets the same 403 as one that presses the button.

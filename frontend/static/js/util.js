@@ -27,11 +27,11 @@ export function el(tag, attrs = {}, children = []) {
 }
 
 // --- Lazy asset loading ----------------------------------------------------
-// The heavy vendor bundles (highlight.js 127KB, xterm + addons 317KB) used to
-// be plain <script> tags in the document, so every cold start — including a
-// phone that only ever reads a message — paid for them before first paint.
-// They are now fetched the first time something actually needs them. Both
-// helpers memoise per URL, so concurrent callers share one network request.
+// The heavy vendor bundle (highlight.js, 127KB) used to be a plain <script>
+// tag in the document, so every cold start — including a phone that only ever
+// reads a message — paid for it before first paint. It is now fetched the
+// first time something actually needs it. Both helpers memoise per URL, so
+// concurrent callers share one network request.
 const _assetCache = new Map();
 
 export function loadScript(src) {

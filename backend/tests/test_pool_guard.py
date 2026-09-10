@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from app import avatar_pool, config, pool_guard, reactions
+from app import avatar_pool, config, image_jobs, pool_guard, reactions
 from app.reactions import pool_refill
 
 # --------------------------------------------------------------------------- #
@@ -391,6 +391,17 @@ def _cli_status(running=True, selected=3, last_error=""):
                       "last_error": last_error}}
 
 
+def _fake_readiness(can_render=True, reason="unknown", detail=""):
+    """A canned `RigReadiness`, for monkeypatching `pool_guard.rig_readiness`.
+
+    The gate (12.6) reads `can_render` only — never `comfy.running` — so this
+    is the one seam the "backend down" tests below need; `_image_cli_status`
+    keeps supplying `gpu_selected` for the headroom math, which is unrelated.
+    """
+    return image_jobs.RigReadiness(can_render=can_render, reason=reason,
+                                   detail=detail)
+
+
 def test_backend_state_reads_the_image_cli(monkeypatch):
     monkeypatch.setattr(pool_guard, "_image_cli_status",
                         lambda: _cli_status(running=False, last_error="boom"))
@@ -414,25 +425,27 @@ def test_backend_state_tolerates_a_status_without_the_running_field():
     assert st["gpu_selected"] == 1
 
 
-def test_guard_blocks_and_names_a_dead_render_backend(monkeypatch):
+def test_guard_blocks_and_names_a_backend_the_rig_says_cannot_render(monkeypatch):
     _patched_rig(monkeypatch, {0: 25.0, 1: 25.0}, selected=1)
-    monkeypatch.setattr(pool_guard, "_image_cli_status",
-                        lambda: _cli_status(running=False))
+    monkeypatch.setattr(
+        pool_guard, "rig_readiness",
+        lambda: _fake_readiness(can_render=False, reason="circuit_open",
+                                detail="crash-loop breaker tripped"))
     verdict = pool_guard.free_vram_before_mint()
-    # Plenty of VRAM — and still a refusal, because every mint would fail.
+    # Plenty of VRAM — and still a refusal, because the rig itself said no.
     assert verdict["ok"] is False
     assert verdict["backend"] == "down"
-    assert "image backend down" in verdict["reason"]
+    assert "crash-loop breaker tripped" in verdict["reason"]
 
 
-def test_guard_blocks_when_the_backend_reports_its_own_error(monkeypatch):
+def test_guard_blocks_when_the_rig_reports_no_suitable_gpu(monkeypatch):
     _patched_rig(monkeypatch, {0: 25.0}, selected=0)
     monkeypatch.setattr(
-        pool_guard, "_image_cli_status",
-        lambda: _cli_status(last_error="CUDA error: out of memory"))
+        pool_guard, "rig_readiness",
+        lambda: _fake_readiness(can_render=False, reason="no_suitable_gpu"))
     verdict = pool_guard.free_vram_before_mint()
     assert verdict["ok"] is False and verdict["backend"] == "down"
-    assert "out of memory" in verdict["reason"]
+    assert "no_suitable_gpu" in verdict["reason"]
 
 
 def test_running_backend_is_not_held_to_the_selection_threshold(monkeypatch):
@@ -561,32 +574,60 @@ def test_idle_unloaded_backend_does_not_block_the_round(monkeypatch):
     assert verdict["backend"] != "down"
 
 
-def test_a_host_that_cannot_restart_it_still_blocks(monkeypatch):
-    """No idle-unload contract → running:false is still a real outage."""
+def test_a_stopped_backend_the_rig_says_it_can_still_render_does_not_block(
+        monkeypatch):
+    """`can_render` is the ONLY gate (12.6) — `comfy.running: false` alone,
+
+    with the rig itself saying a job would run (``can_render: True``,
+    e.g. reason ``startable``), must not block: the next job just starts it.
+    """
     _patched_rig(monkeypatch, {0: 25.0}, selected=0)
     monkeypatch.setattr(pool_guard, "_image_cli_status",
                         lambda: _cli_status(running=False))
+    monkeypatch.setattr(pool_guard, "rig_readiness",
+                        lambda: _fake_readiness(can_render=True,
+                                                reason="startable"))
+    verdict = pool_guard.free_vram_before_mint()
+    assert verdict["ok"] is True and verdict["backend"] != "down"
+
+
+def test_a_rig_that_says_the_backend_cannot_be_started_blocks(monkeypatch):
+    """`can_render: False` blocks regardless of `comfy.running`/idle-unload."""
+    _patched_rig(monkeypatch, {0: 25.0}, selected=0)
+    monkeypatch.setattr(pool_guard, "_image_cli_status",
+                        lambda: _cli_status(running=False))
+    monkeypatch.setattr(
+        pool_guard, "rig_readiness",
+        lambda: _fake_readiness(can_render=False,
+                                reason="unmanaged_backend_down"))
     verdict = pool_guard.free_vram_before_mint()
     assert verdict["ok"] is False and verdict["backend"] == "down"
 
 
-def test_an_idle_backend_reporting_a_fault_still_blocks(monkeypatch):
-    """Auto-start does not excuse an error the backend reported itself."""
+def test_no_configured_rig_client_fails_open_on_the_can_render_gate(
+        monkeypatch):
+    """No `DISPATCH_CLAWFORGE_URL` → `rig_readiness()` is None → the gate
+
+    does not fire at all (the headroom check downstream still can).
+    """
     _patched_rig(monkeypatch, {0: 25.0}, selected=0)
     monkeypatch.setattr(pool_guard, "_image_cli_status",
                         lambda: _idle_status(last_error="CUDA error: no device"))
+    monkeypatch.setattr(pool_guard, "rig_readiness", lambda: None)
     verdict = pool_guard.free_vram_before_mint()
-    assert verdict["ok"] is False and verdict["backend"] == "down"
-    assert "no device" in verdict["reason"]
+    assert verdict["backend"] != "down"
 
 
 # --------------------------------------------------------------------------- #
-# The image host's own lease must not lock the pools out (2026-09-03)
+# Only a `benchmark` lease is a stand-down (rig contract §12.5, G24 2026-09-10)
 #
-# ClawForge takes a lease on the LLM rig in order to render, under its own
-# holder id. The guard backed off from it as if it were a competing tenant --
-# 35 rounds -- and the holder field stays populated after release
-# ("state": "none", "detail": "released"), so a finished lease blocked too.
+# `kind` is the ONLY signal. A `render`/`agent` lease is ordinary contention
+# for a card — most commonly ClawForge's own near-permanent idle hold on its
+# own ComfyUI card (`holder=clawforge2 kind=render state=idle`, re-asked
+# every 60s) — and must never earn the same block a real benchmark does.
+# This also retires the old self-holder exclusion (2026-09-03): a `render`
+# lease is never a stand-down whether it is ours or somebody else's, so
+# there is nothing left here that needs to know who "we" are.
 # --------------------------------------------------------------------------- #
 
 
@@ -594,55 +635,87 @@ def _leases(*entries):
     return {"leases": list(entries)}
 
 
-def test_lease_by_the_image_host_itself_is_not_a_blocker(monkeypatch):
+def test_a_render_lease_is_never_a_blocker_even_when_it_is_our_own(monkeypatch):
+    """THE 2026-09-10 regression: 20 `leased` refusals/day against ClawForge's
+    own permanent idle hold on its ComfyUI card."""
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
                         lambda url: _leases({"holder": "clawforge2",
-                                             "state": "active"}))
-    monkeypatch.setattr(pool_guard, "image_self_lease_holder",
-                        lambda: "clawforge2")
+                                             "kind": "render",
+                                             "state": "idle"}))
     assert pool_guard.rig_lease_holder() is None
 
 
-def test_self_holder_match_ignores_case(monkeypatch):
+def test_a_render_lease_is_never_a_blocker_from_a_third_party_either(
+        monkeypatch):
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
-                        lambda url: _leases({"holder": "ClawForge2",
+                        lambda url: _leases({"holder": "somebody-else",
+                                             "kind": "render",
                                              "state": "active"}))
-    monkeypatch.setattr(pool_guard, "image_self_lease_holder",
-                        lambda: "clawforge2")
     assert pool_guard.rig_lease_holder() is None
 
 
-def test_a_released_lease_does_not_block(monkeypatch):
+def test_an_agent_lease_does_not_block(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bits", "kind": "agent",
+                                             "state": "active"}))
+    assert pool_guard.rig_lease_holder() is None
+
+
+def test_an_other_lease_does_not_block(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "somebody",
+                                             "kind": "other",
+                                             "state": "active"}))
+    assert pool_guard.rig_lease_holder() is None
+
+
+def test_a_released_benchmark_lease_does_not_block(monkeypatch):
     """holder stays populated after release; state is the live part."""
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
                         lambda url: _leases({"holder": "bench-runner",
+                                             "kind": "benchmark",
                                              "state": "none"}))
-    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
     assert pool_guard.rig_lease_holder() is None
 
 
-def test_a_real_third_party_lease_still_blocks(monkeypatch):
+def test_a_real_benchmark_lease_still_blocks(monkeypatch):
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bench-runner",
+                                             "kind": "benchmark",
+                                             "state": "active"}))
+    assert pool_guard.rig_lease_holder() == "bench-runner"
+
+
+def test_a_benchmark_lease_without_a_state_field_still_blocks(monkeypatch):
+    """A lease book that predates `state` must keep failing safe."""
+    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
+    monkeypatch.setattr(pool_guard, "_fetch_leases",
+                        lambda url: _leases({"holder": "bench-runner",
+                                             "kind": "benchmark"}))
+    assert pool_guard.rig_lease_holder() == "bench-runner"
+
+
+def test_a_lease_with_no_kind_at_all_does_not_block(monkeypatch):
+    """A lease book that predates `kind` fails the same way `kind` itself
+    does when it is unrecognised: not one of the closed vocabulary's
+    stand-down kinds, so not a blocker (§12.5: branch on `kind` and ONLY on
+    `kind`)."""
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
                         lambda url: _leases({"holder": "bench-runner",
                                              "state": "active"}))
-    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
-    assert pool_guard.rig_lease_holder() == "bench-runner"
-
-
-def test_a_lease_without_a_state_field_still_blocks(monkeypatch):
-    """A lease book that predates `state` must keep failing safe."""
-    monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
-    monkeypatch.setattr(pool_guard, "_fetch_leases",
-                        lambda url: _leases({"holder": "bench-runner"}))
-    monkeypatch.setattr(pool_guard, "image_self_lease_holder", lambda: "")
-    assert pool_guard.rig_lease_holder() == "bench-runner"
+    assert pool_guard.rig_lease_holder() is None
 
 
 def test_self_holder_is_read_from_the_image_hosts_own_lease_view():
+    """`image_self_lease_holder()` itself still works — it is just no longer
+    called by `rig_lease_holder()`, which reads `kind` instead."""
     status = {"comfy": {"lease": {"holder": "clawforge2", "state": "none"}}}
     assert pool_guard.image_self_lease_holder(status) == "clawforge2"
 

@@ -9,7 +9,7 @@
 // minimal (absent = full). This isolated module (no app state, no imports)
 // owns the button; 'system' was retired in favour of the explicit toggle.
 import { applyDom, hasDictionary } from './i18n.js?v=3';
-import { railIcon, RAIL_ICONS } from './util.js?v=12';
+import { railIcon, RAIL_ICONS } from './util.js?v=13';
 
 const THEME_KEY = 'dispatch-theme';
 // The button's label depends on which theme is active, so it is TWO keys, not

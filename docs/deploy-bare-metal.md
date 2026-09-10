@@ -1,7 +1,7 @@
 # Deploying DisPatch Chat on bare Linux (systemd)
 
 No container. The app is a single Python process, so this is genuinely simple — and it
-is the **only** deployment where the optional agent, terminal and service-control
+is the **only** deployment where the optional agent, harness and service-control
 features work properly, because those features drive the host operating system.
 
 Two variants, and the choice is not about taste:
@@ -12,7 +12,7 @@ Two variants, and the choice is not about taste:
 | Starts at boot | yes, always | yes, **but only with linger enabled** |
 | Sandboxing | full systemd sandbox | limited |
 | Agent CLI in your home | awkward | natural |
-| Coding terminal | no | yes |
+| DeepSeek Harness pane | no | yes |
 | **Pick this if** | you want a chat server | you want the agent integrations |
 
 ---
@@ -149,8 +149,8 @@ prebuilt venv cannot.
 
 ### Never add `--workers`
 
-The app keeps unlock sessions, WebSocket clients, rate-limit counters, the terminal PTY
-and the backup/mirror loops **in process memory**. A second worker gets its own copy of
+The app keeps unlock sessions, WebSocket clients, rate-limit counters, the harness job
+ledger and the backup/mirror loops **in process memory**. A second worker gets its own copy of
 all of it:
 
 - unlock the app in one tab, still locked in the next
@@ -198,32 +198,14 @@ journalctl --user -u dispatch | grep -i openclaw
 The app logs a warning at boot if the binary is missing, and agent turns then fail with
 a clean error rather than hanging.
 
-### Coding terminal
+### DeepSeek Harness pane
 
-```ini
-Environment=DISPATCH_TERMINAL=1
-```
-
-**Understand what this is.** It spawns an interactive CLI on a server-side PTY, running
-as your user, with your filesystem access, reachable over a WebSocket. It is gated
-behind the PIN and restricted to fully-unlocked sessions — which makes setting a
-PIN a precondition, not an afterthought, since with no credential configured
-there is no unlocked session for the gate to check — but you are putting a
-remote shell on your network. Set a strong PIN
-first, and do not enable this on a machine reachable from the internet.
-
-The CLI it spawns is **external and not distributed with this project** — name
-it with `DISPATCH_TERMINAL_BIN` (a bare name resolved on `PATH`, or an absolute
-path). There is deliberately no default: with the variable unset the terminal
-reports that no CLI is configured rather than guessing at a binary.
-
-```ini
-Environment=DISPATCH_TERMINAL_BIN=your-cli
-# optional: extra PATH entries for the spawned CLI, colon-separated
-Environment=DISPATCH_TERMINAL_PATH=%h/.local/share/your-cli/bin
-# optional: TOML the model picker reads for a CLI that keeps providers in a file
-Environment=DISPATCH_TERMINAL_CONFIG=%h/.config/your-cli/config.toml
-```
+See `docs/configuration.md` § DeepSeek Harness. **Understand what this is.** A
+headless job runs a shell agent as your user, in your home directory. It is
+gated behind the PIN and restricted to fully-unlocked sessions — which makes
+setting a PIN a precondition, not an afterthought, since with no credential
+configured there is no unlocked session for the gate to check. Set a strong
+PIN first, and do not enable this on a machine reachable from the internet.
 
 ---
 

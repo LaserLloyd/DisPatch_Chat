@@ -177,11 +177,10 @@ _ATTR_RE = re.compile(
 
 # Values that are legitimately identical to English in most locales.
 IDENTICAL_OK = {
-    "app.name", "app.title", "terminal.name",
+    "app.name", "app.title",
     "recovery.export_json", "recovery.export_md", "recovery.export_html",
-    "terminal.yolo", "terminal.picker_placeholder", "lock.recover_placeholder",
-    "terminal.start",
-    "terminal.restart", "terminal.stop", "msg.working", "msg.retry",
+    "lock.recover_placeholder",
+    "msg.working", "msg.retry",
     "settings.safe_badge", "settings.react_badge", "composer.not_delivered",
     "transcript.filter_text", "transcript.filter_note", "transcript.filter_user",
     "transcript.filter_tool", "transcript.filter_tool_result",

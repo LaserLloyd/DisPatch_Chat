@@ -642,3 +642,69 @@ test('the thread preview shows a [[view:]] label, never the syntax', () => {
   assert.equal(toPlainPreview('[[view:/var/home/user/report.html]]'), '/var/home/user/report.html');
   assert.equal(toPlainPreview('here [[view:~/a.md|notes]] ok'), 'here notes ok');
 });
+
+// ---------------------------------------------------------------------------
+// 3. Loopback links, retargeted at the reading device
+// ---------------------------------------------------------------------------
+// Agents write `http://127.0.0.1:8777/` because that is the address on the box.
+// Read the same chat on a phone over the tailnet and 127.0.0.1 is the PHONE, so
+// the link opens a tab that connects to nothing. Every one of these is about
+// which links may be moved and which must be left exactly as written.
+
+const { retargetLoopbackHref } = await import(join(STATIC, 'js', 'markdown.js'));
+
+test('a loopback host becomes the host the reader reached the app on', () => {
+  for (const [href, want] of [
+    ['http://127.0.0.1:8777/', 'http://homeserver:8777/'],
+    ['http://localhost:8099/a/b?x=1#f', 'http://homeserver:8099/a/b?x=1#f'],
+    ['http://0.0.0.0:8765/', 'http://homeserver:8765/'],
+    ['http://127.0.1.1:9000/', 'http://homeserver:9000/'],
+    ['https://localhost:8443/panel', 'https://homeserver:8443/panel'],
+  ]) {
+    assert.equal(retargetLoopbackHref(href, 'homeserver'), want, href);
+  }
+});
+
+test('the port, path, query, fragment and scheme all survive the move', () => {
+  assert.equal(
+    retargetLoopbackHref('http://127.0.0.1:1234/v1/models?q=a%20b#top', 'homeserver.example.ts.net'),
+    'http://homeserver.example.ts.net:1234/v1/models?q=a%20b#top');
+});
+
+test('anything that is not a loopback http(s) URL is left alone', () => {
+  for (const href of [
+    'http://192.0.2.10:8700/',         // a different machine — we cannot name it
+    'http://203.0.113.8:8080/',        // some other host, already addressable
+    'https://example.com/',
+    'mailto:someone@example.com',
+    'ftp://127.0.0.1/x',               // loopback, but not a scheme we retarget
+    '/api/threads',                    // our own route, relative
+    '#section',
+    '',
+    'not a url',
+  ]) {
+    assert.equal(retargetLoopbackHref(href, 'homeserver'), null, href);
+  }
+});
+
+test('with no better host to offer, nothing is rewritten', () => {
+  // retargetHost() returns null when the reader IS on the box; every call site
+  // is gated on that, and the rewriter refuses a falsy host on its own too.
+  assert.equal(retargetLoopbackHref('http://127.0.0.1:8777/', null), null);
+  assert.equal(retargetLoopbackHref('http://127.0.0.1:8777/', ''), null);
+});
+
+test('rewriting is idempotent — a moved link has no loopback host left', () => {
+  const once = retargetLoopbackHref('http://127.0.0.1:8777/x', 'homeserver');
+  assert.equal(retargetLoopbackHref(once, 'homeserver'), null);
+});
+
+test('the plain-text user bubble retargets too, not just rendered markdown', () => {
+  // A pasted `http://127.0.0.1:8765/` is exactly as dead on a phone as an
+  // agent's, and the user path does not go through enhanceContent — so it has
+  // to call the retargeter itself. A silent removal here would look like
+  // "only some links get fixed", which is worse than none of them.
+  const MAIN = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
+  assert.match(MAIN, /linkifyPlain\(text\)[\s\S]{0,120}retargetLinks\(bubble\)/,
+    'main.js no longer retargets links in the plain-text (user) bubble');
+});

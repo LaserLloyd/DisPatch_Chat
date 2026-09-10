@@ -87,8 +87,7 @@ DECOY_BLOCKED = [
     ("GET", "/api/openclaw/sessions?bot_id=main"),
     ("GET", "/api/bots/all"),
     # Code-execution surfaces. Each route has its own gate; these entries are
-    # the structural belt-and-braces in the middleware, same as /api/terminal.
-    ("GET", "/api/terminal/status"),
+    # the structural belt-and-braces in the middleware.
     ("GET", "/api/harness/status"),
     ("POST", "/api/harness/jobs"),
     # Local Viewer — reads arbitrary bytes off the host's disk. The router has
@@ -347,7 +346,7 @@ def test_unlocked_session_reaches_avatar_statics(gate_env):
 @pytest.mark.parametrize("path", ["/openapi.json", "/docs", "/redoc"])
 def test_api_docs_routes_do_not_exist(gate_env, path):
     """FastAPI's docs would hand a sessionless LAN caller the complete route +
-    model inventory (terminal, inject, recovery…) on a 0.0.0.0 bind. They are
+    model inventory (harness, inject, recovery…) on a 0.0.0.0 bind. They are
     disabled in this deployment — for locked AND unlocked alike."""
     client = gate_env()
     auth.set_pin("1234")

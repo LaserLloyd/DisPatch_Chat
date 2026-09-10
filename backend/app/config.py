@@ -323,9 +323,6 @@ class Settings:
     turn_transport: str = env("TURN_TRANSPORT", "auto").strip().lower()
     # If true, a fresh thread shows a short canned greeting (no LLM call).
     greeting: bool = env("GREETING", "0") not in ("", "0", "false", "False")
-    # Gates the coding terminal (server-side PTY, full-session only).
-    # Default on; set DISPATCH_TERMINAL=0 to disable + 404 the routes.
-    terminal_enabled: bool = env("TERMINAL", "1") not in ("0", "false", "False")
     # Gates the DeepSeek Harness (dsh) pane: `dsh web` service control, the
     # default-model switch and headless jobs (full-session only — code
     # execution). Default "auto": on when a `dsh` binary is found at boot,

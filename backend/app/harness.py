@@ -1,5 +1,4 @@
-"""DeepSeek Harness (`dsh`) integration: the second coding-agent engine next to
-the coding terminal.
+"""DeepSeek Harness (`dsh`) integration: the coding-agent pane.
 
 Unlike a TUI-first CLI, dsh has no TUI in the official package — its two shipped
 profiles are `web` (a browser UI on 127.0.0.1:3080) and `headless` (one task
@@ -677,7 +676,7 @@ def validate_cwd(cwd, home: Path | None = None) -> Path:
 
 def _job_env() -> dict[str, str]:
     env = dict(os.environ)
-    env.pop("TMPDIR", None)              # see terminal._child_env: keep tool byproducts out of the data dir
+    env.pop("TMPDIR", None)              # keep tool byproducts out of the data dir
     # Extra PATH entries for the job, colon-separated — for an install whose
     # node/npm prefix is outside the service's PATH. Unset = inherit unchanged.
     extra = [e for e in os.environ.get("DISPATCH_HARNESS_PATH", "").split(":") if e.strip()]

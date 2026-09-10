@@ -41,6 +41,7 @@ Environment
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -50,7 +51,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from . import config
+from . import config, image_jobs
 
 log = logging.getLogger("pool_guard")
 
@@ -195,6 +196,56 @@ def _image_cli_status() -> dict | None:
     return _run_json([bin_, "--status"])
 
 
+#: A ClawForge MCP client of this module's own, so the pool guard can ask
+#: `can_render` without reaching into main.py's `_clawforge()` singleton
+#: (which would be a circular import — main imports this module). It is a
+#: second client, but NOT a second gate: readiness() below is the SAME
+#: `RigReadiness` code the job-submission path uses (image_jobs.py:707-749),
+#: just called from a second place, which is what "reuse the code path" means
+#: here — the alternative, re-deriving can_render from comfy.running/
+#: last_error/idle_unload the way this module used to, is exactly the
+#: duplication that let the two gates drift apart.
+_rig_readiness_client: image_jobs.ClawForge | None = None
+
+
+def _rig_readiness_client_get() -> image_jobs.ClawForge | None:
+    global _rig_readiness_client
+    url = config.SETTINGS.clawforge_url
+    if not url:
+        return None
+    c = _rig_readiness_client
+    if c is None or c.url != url:
+        c = image_jobs.ClawForge(url,
+                                 files_url=config.SETTINGS.clawforge_files_url,
+                                 client_name="dispatch-pool-guard")
+        _rig_readiness_client = c
+    return c
+
+
+def rig_readiness() -> image_jobs.RigReadiness | None:
+    """``can_render`` / ``can_render_reason`` off the rig's own ``comfy_status``.
+
+    None when no ClawForge endpoint is configured (fail open — same as every
+    other probe in this module when its CLI/URL is unset). ``ClawForge.
+    readiness()`` itself never raises: an unreachable rig leaves the previous
+    answer standing, or an "unknown" one, both of which read as
+    ``can_render: True``.
+
+    Sync wrapper because this module's callers (``avatar_pool.refill``,
+    ``reactions.pool_refill``) run via ``asyncio.to_thread`` — a worker thread
+    with no event loop of its own, so a fresh ``asyncio.run`` here never
+    collides with one already running.
+    """
+    client = _rig_readiness_client_get()
+    if client is None:
+        return None
+    try:
+        return asyncio.run(client.readiness())
+    except Exception as e:  # pragma: no cover - readiness() itself fails open
+        log.debug("pool_guard: rig readiness probe raised unexpectedly: %s", e)
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # GPU leases — somebody else has booked the whole rig
 # --------------------------------------------------------------------------- #
@@ -209,15 +260,34 @@ def lease_url() -> str | None:
     return config.env("GPU_LEASE_URL") or None
 
 
-def rig_lease_holder() -> str | None:
-    """Who holds an exclusive lease on the image host's GPUs, or None.
+#: Lease kinds worth a full stand-down (rig contract §12.5): a `benchmark`
+#: books every card for hours and expects nothing planned onto or evicted
+#: from them for the duration, which is exactly what this guard's
+#: `DISPATCH_POOL_FREE_VRAM=1` unload path would otherwise do. Everything
+#: else — `render`, `agent`, `other` — is ordinary, short-lived contention
+#: for a card, and per the contract must NOT trigger the same block: in
+#: practice the single live lease on this rig for most of a day is
+#: ClawForge's own near-permanent idle hold on its own ComfyUI card
+#: (`holder=clawforge2 kind=render state=idle`, re-asked every 60s), and
+#: standing the pool down against that for 3600s at a time (2026-09-10,
+#: `pool_refill_failures_24h` = 20 `leased` refusals in a day) was this
+#: function reading ANY foreign live lease as a benchmark. Branch on `kind`
+#: and ONLY on `kind` — a missing/unrecognised kind is the closed
+#: vocabulary's "not benchmark", so it fails the same way: not a blocker.
+_STAND_DOWN_LEASE_KINDS = frozenset({"benchmark"})
 
-    A lease means another tenant (a benchmark run, a long job) has booked the
-    cards and expects nothing to be planned onto or evicted from them for the
-    duration. Minting a decorative image into that is exactly the eviction the
-    lease exists to prevent -- and this guard is allowed to UNLOAD models when
-    DISPATCH_POOL_FREE_VRAM is on, so without this check a nightly top-up
-    could throw out the very model the lease was protecting.
+
+def rig_lease_holder() -> str | None:
+    """Who holds a `benchmark` lease on the image host's GPUs, or None.
+
+    Branching on `kind` makes the old self-holder exclusion unnecessary and
+    it is gone: a `render`/`agent`/`other` lease is never a stand-down
+    whether it is ours (ClawForge's own idle hold) or somebody else's, so
+    there is nothing left here that needs to ask who "we" are — the second
+    probe (`image_self_lease_holder` -> `_image_cli_status`) that exclusion
+    depended on could itself fail closed and misread our own lease as
+    foreign, which is the deadlock the 2026-09-03 fix was patching over
+    instead of removing.
 
     Fails OPEN on every error (unreachable host, bad JSON, timeout): a lease
     view we cannot read must not become an outage for the pools.
@@ -228,15 +298,12 @@ def rig_lease_holder() -> str | None:
     data = _fetch_leases(url)
     if data is None:
         return None
-    mine = (image_self_lease_holder() or "").strip().lower()
     for lease in (data.get("leases") or []):
         holder = str(lease.get("holder") or "").strip()
         if not holder:
             continue
-        # The image host leases the rig IN ORDER TO RENDER for us. Backing off
-        # from our own provider is a deadlock, not politeness: it blocked 35
-        # refill rounds on 2026-09-03 under holder "clawforge2".
-        if mine and holder.lower() == mine:
+        kind = str(lease.get("kind") or "").strip().lower()
+        if kind not in _STAND_DOWN_LEASE_KINDS:
             continue
         if not _lease_is_live(lease):
             continue
@@ -405,32 +472,40 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     # holder booked the cards, not the spare bytes.
     holder = rig_lease_holder()
     if holder:
+        # `rig_lease_holder()` only ever returns non-None for a `benchmark`
+        # lease now (§12.5) — say so, rather than a bare holder name that
+        # reads the same whether the rig is genuinely booked for hours or
+        # just doing its own idle housekeeping on a `render` lease we no
+        # longer stop for.
         return {"ok": False, "headroom_before": None, "headroom_after": None,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
                 "backend": "leased",
-                "reason": f"rig leased by {holder}"}
+                "reason": f"rig leased by {holder} (benchmark)"}
 
-    # One image-CLI probe for the whole round, read twice: once to decide
-    # whether the rendering backend is up at all, once (inside
-    # mint_gpu_free_gb) to find the GPU it selected.
+    # One image-CLI probe for the whole round, for `mint_gpu_free_gb` below
+    # (and the `live` headroom check below) to find the GPU ComfyUI selected
+    # and whether it is warm. It is NOT what decides whether the backend can
+    # render right now — that question goes to the rig's own `can_render`,
+    # not to this CLI's `comfy.running`/`last_error`.
     cli_status = _image_cli_status()
     backend = image_backend_state(cli_status)
-    # A host that restarts its own renderer turns "not running" into "cold",
-    # not "down" -- only a fault it reports itself is worth skipping the round
-    # for. A genuinely dead backend is still caught at the generate call and
-    # classified `backend-down` from the rig's own structured error code, so
-    # nothing is lost by declining to guess here.
-    stopped = backend["running"] is False and not backend.get("auto_start")
-    if backend["known"] and (stopped or backend["error"]):
-        # The backend is down or reporting a fault of its own. Every mint this
-        # round would fail identically at the generate call — one wasted rig
-        # call per mood, per bot, per cycle — and the reason would be recorded
-        # as a generic refusal. Name it and skip.
-        why = backend["error"] or "the image backend is not running"
+    # Gate on `can_render` ONLY (rig contract §12.6). Never `comfy.running` —
+    # ClawForge unloads ComfyUI's models when idle and starts it on the next
+    # job, so `running: false` is routinely a rig that renders fine. Never an
+    # `idle_unload`-derived `auto_start` guess either: both of those read an
+    # idle-but-startable backend as "down" and stood this gate down wrongly,
+    # which is the bug `image_jobs.RigReadiness` (image_jobs.py:707-749) was
+    # already written to fix on the job-submission path — reused here rather
+    # than re-derived. A rig that could not be asked, or gave an answer we do
+    # not recognise, leaves `can_render` True (fail open); only a reason in
+    # the rig's own closed "not ready" vocabulary blocks the round.
+    ready = rig_readiness()
+    if ready is not None and not ready.can_render:
+        why = ready.detail or ready.reason
         return {"ok": False, "headroom_before": None, "headroom_after": None,
                 "unloaded": [], "skipped_pinned": [], "skipped_active": [],
                 "backend": "down",
-                "reason": f"image backend down ({why})"}
+                "reason": f"image backend not ready ({why})"}
 
     if min_free_gb is None:
         # A live backend has already made the choice the 10 GB threshold

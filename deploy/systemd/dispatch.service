@@ -16,7 +16,7 @@
 #
 #  IMPORTANT — DO NOT ADD `--workers N`.
 #  This app keeps WebSocket connections, unlock sessions, rate-limit counters,
-#  the terminal PTY and the backup/mirror loops in PROCESS MEMORY. A second
+#  the harness job ledger and the backup/mirror loops in PROCESS MEMORY. A second
 #  worker gets its own copy of all of it: unlock on one tab, still locked on
 #  the next; two processes racing the same SQLite file; duplicate backups.
 #  One process. Scale by not needing to.
@@ -75,9 +75,8 @@ Environment=PYTHONUNBUFFERED=1
 Environment=LOCAL_CHAT_HOST=0.0.0.0
 Environment=LOCAL_CHAT_PORT=8765
 # Host-OS integrations. On a system unit running as a locked-down service
-# account these cannot work: there is no home directory to drop a shell into.
+# account these cannot work: there is no home directory for them to reach into.
 # Off by default; see the bare-metal doc.
-Environment=LOCAL_CHAT_TERMINAL=0
 # Uncomment and point at a real agent CLI to enable bot replies.
 #Environment=OPENCLAW_BIN=/usr/local/bin/openclaw
 #Environment=LOCAL_CHAT_MIRROR=1
@@ -153,9 +152,6 @@ ReadWritePaths=%S/dispatch
 # Enabling an agent backend that lives in a user's home:
 #   ProtectHome=read-only
 #   ReadOnlyPaths=/home/youruser/.openclaw
-# Enabling the coding terminal (spawns an interactive shell as this user —
-# understand that this is a remote shell before you do it):
-#   LOCAL_CHAT_TERMINAL=1, ProtectHome=no, drop SystemCallFilter=~@privileged
 
 [Install]
 WantedBy=multi-user.target

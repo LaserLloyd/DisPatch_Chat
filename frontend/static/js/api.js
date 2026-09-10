@@ -190,11 +190,6 @@ export const api = {
   localRoots: () => j('/api/local/roots'),
   saveLocalConfig: (body) => j('/api/local/config', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
 
-  // Coding terminal (full-session only)
-  terminalStatus: () => j('/api/terminal/status'),
-  terminalAction: (action) => j(`/api/terminal/${encodeURIComponent(action)}`, { method: 'POST' }),
-  terminalOptions: (opts) => j('/api/terminal/options', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(opts) }),
-  terminalModels: () => j('/api/terminal/models'),
   // DeepSeek Harness (full-session only)
   harnessStatus: () => j('/api/harness/status'),
   harnessAction: (action) => j(`/api/harness/${encodeURIComponent(action)}`, { method: 'POST' }),

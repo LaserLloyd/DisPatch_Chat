@@ -5,7 +5,7 @@
 #
 #  Use this variant on a machine you log into, when DisPatch should be able to
 #  reach things that live in YOUR home directory — an agent CLI, its session
-#  transcripts, a shell for the coding terminal. That is the whole reason to
+#  transcripts, the DeepSeek Harness. That is the whole reason to
 #  pick user over system: the optional integrations are all
 #  home-directory-shaped.
 #
@@ -87,13 +87,6 @@ Environment=LOCAL_CHAT_PORT=8765
 # and the app's own availability check handles absolute paths explicitly.
 #Environment=OPENCLAW_BIN=%h/.local/bin/openclaw
 #Environment=LOCAL_CHAT_MIRROR=1
-
-# Host-OS integration. This is the reason you chose the user unit; it is still
-# OFF by default because it is powerful:
-#   LOCAL_CHAT_TERMINAL=1 exposes an interactive shell running as YOU over a
-#   WebSocket. It is gated behind the PIN, but treat enabling it as "I am
-#   putting a remote shell on my LAN" and set a strong PIN first.
-#Environment=LOCAL_CHAT_TERMINAL=1
 
 # Longer lists belong in a file rather than 30 Environment= lines. The leading
 # `-` means "do not fail if it is missing".

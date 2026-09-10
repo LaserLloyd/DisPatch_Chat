@@ -123,9 +123,9 @@
        and not the active locale — that one is fetched in parallel by init(). -->
   <link rel="modulepreload" href="/static/js/i18n.js?v=3" />
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
-  <!-- github-dark.css (highlight.js) and xterm.css load on demand with the
-       bundles they belong to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=58" />
+  <!-- github-dark.css (highlight.js) loads on demand with the bundle it
+       belongs to — see js/util.js loadStyle(). -->
+  <link rel="stylesheet" href="/static/app.css?v=60" />
   <link rel="stylesheet" href="/static/dashboard.css?v=4" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
@@ -212,25 +212,19 @@
       </div>
     </nav>
 
-    <!-- Operator tools popover: Reasonix, the DeepSeek Harness and StudioForge
-         used to sit in the rail as three more avatar buttons. Unlocked, that
-         made the rail read as clutter rather than navigation, so they collapse
-         into one ⌥ button that opens this menu (same pattern as the terminal's
-         options popover: position:fixed so it escapes the rail's overflow clip,
-         closed by the next outside click).
+    <!-- Operator tools popover: the DeepSeek Harness and StudioForge used to
+         sit in the rail as more avatar buttons. Unlocked, that made the rail
+         read as clutter rather than navigation, so they collapse into one ⌥
+         button that opens this menu (position:fixed so it escapes the rail's
+         overflow clip, closed by the next outside click).
 
          It lives OUTSIDE #bot-list on purpose. renderSidebarInner() clears that
          container on every repaint, and these rows carry the live service dots
-         that renderTerminal/renderHarness/renderStudioForge patch in place —
-         inside the rail they would be wiped mid-flight. The three updaters were
+         that renderHarness/renderStudioForge patch in place — inside the
+         rail they would be wiped mid-flight. The updaters were
          re-scoped from #bot-list to this menu in the same change; a row here and
          a querySelector there must move together or the dots silently freeze. -->
     <div class="menu tools-menu" id="tools-menu" role="menu" aria-labelledby="tools-btn" hidden>
-      <button class="tools-item" id="tools-terminal" role="menuitem" type="button" data-i18n-attr="aria-label=terminal.sidebar_aria" hidden>
-        <span class="bot-avatar terminal-avatar" aria-hidden="true">&gt;_</span>
-        <span class="tools-item-label" data-i18n="terminal.name">Coding terminal</span>
-        <span class="bot-status-dot terminal-sidedot"></span>
-      </button>
       <button class="tools-item" id="tools-harness" role="menuitem" type="button" data-i18n-attr="aria-label=harness.sidebar_aria" hidden>
         <span class="bot-avatar terminal-avatar harness-avatar" aria-hidden="true">dsh</span>
         <span class="tools-item-label" data-i18n="harness.name">DeepSeek Harness</span>
@@ -241,7 +235,7 @@
         <span class="tools-item-label" data-i18n="studioforge.name">StudioForge</span>
         <span class="bot-status-dot terminal-sidedot studioforge-sidedot"></span>
       </button>
-      <!-- Bots parked here from Settings → Bots (the ⌥ badge). Unlike the three
+      <!-- Bots parked here from Settings → Bots (the ⌥ badge). Unlike the
            rows above these are rebuilt on every sidebar repaint by
            renderMenuBots(), because they carry no dot that is patched in place.
            The separator hides itself when either half is empty. -->
@@ -334,63 +328,6 @@
         <!-- No accept filter: the composer "＋" accepts any file type. Images and
              videos render inline; everything else is shared as a download link. -->
         <input type="file" id="file-input" multiple hidden />
-      </div>
-
-      <!-- Coding terminal: replaces the chat pane when the terminal pseudo-bot
-           is selected. Full-session only (never appears in Safe Mode). -->
-      <div class="terminal-view hidden" id="terminal-view">
-        <header class="terminal-head">
-          <button class="back-btn" id="terminal-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
-          <span class="terminal-avatar-mini" aria-hidden="true">&gt;_</span>
-          <div class="terminal-head-info">
-            <div class="terminal-title" data-i18n="terminal.name">Coding terminal</div>
-            <div class="muted terminal-subtitle" data-i18n="terminal.subtitle">server-side PTY</div>
-          </div>
-          <button class="icon-btn ghost" id="terminal-find-btn" title="Find in terminal (Ctrl/⌘+F)" aria-label="Find in terminal" data-i18n-attr="title=terminal.find_title;aria-label=terminal.find">🔍</button>
-        </header>
-        <div class="terminal-body">
-          <div class="terminal-host" id="terminal-host"></div>
-          <div class="terminal-find hidden" id="terminal-find" role="search">
-            <input type="text" id="terminal-find-input" autocomplete="off" spellcheck="false" placeholder="Find" aria-label="Find text" data-i18n-attr="placeholder=terminal.find_placeholder;aria-label=terminal.find_aria" />
-            <button class="icon-btn ghost" id="terminal-find-prev" title="Previous match" aria-label="Previous match" data-i18n-attr="title=terminal.find_prev;aria-label=terminal.find_prev">↑</button>
-            <button class="icon-btn ghost" id="terminal-find-next" title="Next match" aria-label="Next match" data-i18n-attr="title=terminal.find_next;aria-label=terminal.find_next">↓</button>
-            <button class="icon-btn ghost" id="terminal-find-close" title="Close find" aria-label="Close find" data-i18n-attr="title=terminal.find_close;aria-label=terminal.find_close">✕</button>
-          </div>
-        </div>
-        <div class="terminal-bar">
-          <span class="terminal-status">
-            <span class="terminal-dot stopped" id="terminal-dot"></span>
-            <span id="terminal-status-label" data-i18n="terminal.state_stopped">Stopped</span>
-          </span>
-          <div class="terminal-actions">
-            <!-- Spawn options grouped into one popover so the bar never crowds
-                 (YOLO / Model / Session resume-mode all apply on next Start/Restart). -->
-            <div class="term-opts-wrap">
-              <button class="btn-secondary term-opt" id="terminal-opts" aria-haspopup="menu" aria-expanded="false" title="Session options — YOLO, model and resume mode (apply on next Start/Restart)" data-i18n="terminal.options" data-i18n-attr="title=terminal.options_title">⚙ Options</button>
-              <div class="menu term-opts-menu" id="terminal-opts-menu" role="menu" hidden>
-                <button class="term-opts-item" id="terminal-yolo" role="menuitemcheckbox" aria-checked="false" title="Run without approval prompts" data-i18n-attr="title=terminal.yolo_title">
-                  <!-- The two .term-opts-val spans are live state, written by
-                       renderTerminalOptions(); the markup here is only what a
-                       no-JS load would show. -->
-                  <span class="term-opts-name" data-i18n="terminal.yolo">YOLO</span><span class="term-opts-val" id="terminal-yolo-val">off</span>
-                </button>
-                <button class="term-opts-item" id="terminal-model" role="menuitem" title="Choose the model the CLI launches with" data-i18n-attr="title=terminal.model_title">
-                  <span class="term-opts-name" data-i18n="terminal.model">Model</span><span class="term-opts-val" id="terminal-model-val">default</span>
-                </button>
-                <div class="term-opts-sep" role="separator"></div>
-                <div class="term-opts-grouphdr" data-i18n="terminal.session_group">Session on start</div>
-                <button class="term-opts-radio" data-resume="none" role="menuitemradio" aria-checked="true" data-i18n="terminal.session_new">New session</button>
-                <button class="term-opts-radio" data-resume="continue" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_continue">Continue latest (-c)</button>
-                <button class="term-opts-radio" data-resume="resume" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_resume">Resume… (pick in TUI)</button>
-                <button class="term-opts-radio" data-resume="copy" role="menuitemradio" aria-checked="false" data-i18n="terminal.session_copy">Copy latest (--copy)</button>
-                <div class="term-opts-note muted" data-i18n="terminal.session_note">Applies on the next Start / Restart.</div>
-              </div>
-            </div>
-            <button class="btn-secondary" id="terminal-start" data-i18n="terminal.start">▶ Start</button>
-            <button class="btn-secondary" id="terminal-restart" data-i18n="terminal.restart">⟳ Restart</button>
-            <button class="btn-secondary danger-text" id="terminal-stop" data-i18n="terminal.stop">■ Stop</button>
-          </div>
-        </div>
       </div>
 
       <!-- DeepSeek Harness (dsh): replaces the chat pane when the Harness pseudo-bot
@@ -752,28 +689,6 @@
   </div>
   <input type="file" id="drop-input" multiple hidden />
 
-  <!-- Coding terminal model picker -->
-  <div class="modal-backdrop hidden" id="terminal-model-backdrop">
-    <div class="modal term-model-modal" role="dialog" aria-modal="true" aria-label="Choose model" data-i18n-attr="aria-label=terminal.picker_aria">
-      <header class="modal-header">
-        <h2 data-i18n="terminal.model">Model</h2>
-        <button class="icon-btn ghost" id="terminal-model-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
-      </header>
-      <div class="term-model-body">
-        <p class="muted modal-hint" id="terminal-model-hint" data-i18n="terminal.picker_hint">Pick the model the CLI launches with. Applies on the next Start / Restart.</p>
-        <div class="term-model-list" id="terminal-model-list"></div>
-        <div class="term-model-custom">
-          <label for="terminal-model-input" data-i18n="terminal.picker_custom_label">Or type a model name</label>
-          <input type="text" id="terminal-model-input" autocomplete="off" spellcheck="false" placeholder="provider/model" data-i18n-attr="placeholder=terminal.picker_placeholder" />
-        </div>
-      </div>
-      <footer class="modal-footer">
-        <button class="btn-secondary" id="terminal-model-clear" data-i18n="terminal.picker_use_default">Use default</button>
-        <button class="btn-primary" id="terminal-model-save" data-i18n="terminal.picker_select">Select</button>
-      </footer>
-    </div>
-  </div>
-
   <!-- Avatar crop modal -->
   <div class="modal-backdrop hidden" id="crop-backdrop">
     <div class="modal crop-modal" role="dialog" aria-modal="true" aria-label="Crop avatar" data-i18n-attr="aria-label=crop.aria">
@@ -1006,11 +921,10 @@
        ahead of the module below without blocking the parser.
          · marked + DOMPurify (~72KB) — every message body goes through them.
          · highlight.js (127KB)  → fetched on the first code block.
-         · xterm + 4 addons (317KB) → fetched when the terminal is opened.
-       That is 444KB removed from every cold start, including phones that never
-       open a code block or the terminal. -->
+       That is 127KB removed from every cold start, including phones that never
+       open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=73"></script>
+  <script type="module" src="/static/js/main.js?v=75"></script>
 </body>
 </html>

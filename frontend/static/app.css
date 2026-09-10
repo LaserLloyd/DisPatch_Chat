@@ -44,6 +44,14 @@
   --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
   --bot-bubble:  light-dark(#ffffff, #1e1e3a);
 
+  /* Markdown emphasis + quotes (see `.bubble blockquote` below for the why).
+     Teal is deliberately not reused anywhere else in the app. */
+  --md-quote:      light-dark(#0f766e, #5eead4);
+  --md-quote-text: light-dark(#155e57, #a5f3ea);
+  --md-em:         light-dark(#9a3412, #fcd34d);
+  --md-strong:     light-dark(#101018, #ffffff);
+  --md-mark-bg:    light-dark(#fde68a, rgba(251,191,36,.30));
+
   --success: #34d399;
   --error: #f87171;
   --warning: #fbbf24;
@@ -308,7 +316,50 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .bubble code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-inline); padding: 1px 5px; border-radius: 5px; }
 .bubble pre { background: #0d1117; color: var(--code-block-text); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 12px 12px; overflow-x: auto; margin: 8px 0; position: relative; }
 .bubble pre code { background: none; padding: 0; font-size: 13px; line-height: 1.45; }
-.bubble blockquote { border-inline-start: 3px solid var(--accent); padding-inline-start: 10px; margin: 6px 0; color: var(--text-secondary); }
+/* Quotes, and the emphasis ladder.
+   Borrowed from the ClawChat formatting pack, trimmed to the parts that earn
+   their keep in a chat everyone in the house reads. Three ideas:
+
+   1. A QUOTE looks quoted. It used to be grey text behind the app's own purple
+      rail, which read as "de-emphasised paragraph" rather than "someone else's
+      words". Teal is the one hue nothing else in the app claims — the accent is
+      purple, and the five callout kinds already own blue/green/violet/amber/red
+      — so a quote is now unmistakably its own thing without inventing a sixth
+      semantic colour.
+
+   2. Emphasis is a LADDER, quiet to loud: *italic* is a warm aside, **bold**
+      is a crisp contrast bump (weight, not hue — bold is the one people use by
+      the paragraph, and a paragraph of coloured text is a paragraph nobody
+      reads), and ***both*** is the loudest mark in a message and takes the
+      accent. Colouring bold instead would have spent the loudest treatment on
+      the most common marker.
+
+   3. ==highlight== finally renders (markdown.js adds the inline rule) — the
+      mark an agent reaches for to point at the one line that matters.
+
+   Every colour is light-dark() and was checked against both bubble grounds
+   (--bot-bubble, and the accent-tinted --user-bubble). */
+.bubble blockquote {
+  border-inline-start: 3px solid var(--md-quote);
+  padding-block: 4px; padding-inline: 12px 0;
+  margin: 8px 0; color: var(--md-quote-text); font-style: italic;
+  background: color-mix(in srgb, var(--md-quote) 8%, transparent);
+  border-start-end-radius: var(--radius-sm); border-end-end-radius: var(--radius-sm);
+}
+.bubble blockquote p:last-child { margin-bottom: 0; }
+/* A quote's own code/links keep their normal upright faces — italic monospace
+   is unreadable, and a link that changes colour inside a quote reads as broken. */
+.bubble blockquote code, .bubble blockquote pre { font-style: normal; }
+.bubble em { color: var(--md-em); }
+.bubble strong { color: var(--md-strong); font-weight: 700; }
+/* Both, in either nesting order — marked emits <em><strong> or <strong><em>
+   depending on which marker the author opened first. */
+.bubble strong em, .bubble em strong { color: var(--accent-text); font-style: italic; }
+.bubble mark {
+  background: var(--md-mark-bg); color: inherit;
+  padding: 0 3px; border-radius: 3px;
+}
+.bubble s, .bubble del { color: var(--text-muted); text-decoration-thickness: 1px; }
 /* Markdown tables. The old `.bubble table { display:block }` broke the table's
    intrinsic column sizing and — with the bubble's overflow-wrap:anywhere — split
    headers mid-word ("Explicit peak" -> "Expli cit"). Tables now stay real tables
@@ -1548,8 +1599,11 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   .bm-safe-btn { padding: 8px 10px; }
 }
 
-/* ===================== Coding terminal ===================== */
-/* Sidebar pseudo-bot: a monospace ">_" block instead of a photo avatar. */
+/* ===================== Operator tool panes (shared chrome) ===================== */
+/* The harness / StudioForge panes and the ⌥ tools entry share this chrome; the
+   `terminal-*` class names are the surviving vocabulary from the console pane
+   they were first built for. */
+/* Sidebar pseudo-bot: a monospace text block instead of a photo avatar. */
 .terminal-avatar {
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-weight: 700; font-size: 15px;
@@ -1562,7 +1616,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   border: 2px solid var(--bg-tertiary); box-shadow: 0 0 0 1px var(--border-light);
   /* .bot-avatar's 0.7 resting dim is for PHOTOS — it makes them recede until
      hovered. This is the one avatar made of TEXT, and that dim measured its
-     ">_" at 4.29:1 (dark) / 3.97:1 (light) off real painted pixels: under AA
+     glyph at 4.29:1 (dark) / 3.97:1 (light) off real painted pixels: under AA
      for a 15px glyph. Text doesn't get to be decorative. Full opacity here
      takes it to 5.70:1 / 7.10:1; the hover scale still marks the interaction. */
   opacity: 1;
@@ -1572,7 +1626,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .terminal-sidedot.exited  { background: var(--error); }
 
 /* ===================== DeepSeek Harness (dsh) ===================== */
-/* Sidebar pseudo-bot: shares the terminal tile shape, but a distinct hue so the
+/* Sidebar pseudo-bot: shares the tool tile shape, but a distinct hue so the
    two engines never get confused at a glance. */
 .bot-avatar.harness-avatar { background: #1d4ed8; font-size: 11px; letter-spacing: 0; }
 .terminal-avatar-mini.harness-avatar-mini { background: #1d4ed8; font-size: 11px; }
@@ -1649,6 +1703,9 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .terminal-sidedot.studioforge-up { background: var(--success); }
 .terminal-sidedot.studioforge-down { background: var(--error); }
 .terminal-sidedot.studioforge-unreachable { background: var(--warning, #f59e0b); }
+/* Reachable, but the panel refuses to be framed — a green dot would be a lie
+   (nothing loads here) and a red one would be too: the ↗ link works. */
+.terminal-sidedot.studioforge-blocked { background: var(--success); opacity: .55; }
 .terminal-sidedot.studioforge-checking { background: var(--warning, #f59e0b); }
 .terminal-sidedot.studioforge-unknown { background: var(--text-muted); }
 #studioforge-open { text-decoration: none; }
@@ -1665,6 +1722,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .terminal-dot.studioforge-up { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
 .terminal-dot.studioforge-down { background: var(--error); }
 .terminal-dot.studioforge-unreachable { background: var(--warning, #f59e0b); }
+.terminal-dot.studioforge-blocked { background: var(--success); opacity: .55; }
 .terminal-dot.studioforge-checking { background: var(--warning, #f59e0b); }
 .studioforge-url {
   font-family: var(--font-mono); font-size: 11.5px; max-width: 40ch;
@@ -1672,18 +1730,17 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 @media (max-width: 720px) { .studioforge-url { max-width: 22ch; } }
 
-/* The terminal replaces the chat pane: absolutely fills the chatview panel
-   (over header, messages and composer) so it reads as a full console. It is a
-   flex COLUMN — the xterm host takes all remaining height (min-height:0 so it
-   can actually shrink) and the action bar is a normal, non-overlaying flex row
-   that reserves its own height below it. The host clips overflow, so a stale
-   (pre-fit) xterm can never bleed under the bar. */
+/* A tool pane replaces the chat pane: absolutely fills the chatview panel
+   (over header, messages and composer) so it reads as a full panel. It is a
+   flex COLUMN — the body takes all remaining height (min-height:0 so it can
+   actually shrink) and the action bar is a normal, non-overlaying flex row
+   that reserves its own height below it. */
 .terminal-view {
   position: absolute; inset: 0; z-index: 5;
   display: flex; flex-direction: column; min-height: 0;
   background: var(--bg-tertiary);
 }
-/* While the coding terminal is up, the thread-list panel shows an admin-session
+/* While a tool pane is up, the thread-list panel shows an admin-session
    placeholder — hide the per-bot chrome (stale avatar + chat/search/collapse
    actions) that make no sense for a pseudo-bot with no chats. */
 body.terminal-active .tl-avatar,
@@ -1691,7 +1748,7 @@ body.terminal-active #new-chat,
 body.terminal-active #search-btn,
 body.terminal-active #collapse-threads { display: none; }
 .terminal-session-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; }
-/* Terminal header: a stable title so the console never shows stale chat header
+/* Pane header: a stable title so the panel never shows stale chat header
    content bleeding through. Mirrors the chat header height/chrome. */
 .terminal-head {
   flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
@@ -1707,42 +1764,22 @@ body.terminal-active #collapse-threads { display: none; }
 .terminal-head-info { flex: 1 1 auto; min-width: 0; }
 .terminal-title { font-weight: 600; font-size: 15px; color: var(--text-primary); }
 .terminal-subtitle { font-size: 12px; }
-/* Body wraps the xterm host + the (absolutely-positioned) find box. */
+/* Body wraps the pane's content. */
 .terminal-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
-/* 4px bottom padding guarantees a gap: FitAddon fits rows into the host's
-   content box, so the reserved bottom padding means the last terminal row can
-   never round flush against (or under) the bar. */
-.terminal-host { flex: 1 1 auto; min-width: 0; min-height: 0; padding-block: 6px 4px; padding-inline: 8px 4px; overflow: hidden; }
-/* Find box: floats top-right over the terminal, never steals a bar slot. */
-.terminal-find {
-  position: absolute; top: 8px; inset-inline-end: 12px; z-index: 6;
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 6px; border-radius: 10px;
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  box-shadow: var(--shadow-md, 0 6px 20px rgba(0,0,0,.25));
-}
-.terminal-find input {
-  width: 150px; max-width: 40vw; background: var(--bg-input);
-  border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
-  color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);
-}
-.terminal-find input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
-.terminal-find .icon-btn { width: 30px; height: 30px; font-size: 14px; }
-.terminal-host .xterm, .terminal-host .xterm-viewport { height: 100%; }
 .terminal-bar {
-  flex: 0 0 auto;   /* never grow, never shrink INTO the terminal */
+  flex: 0 0 auto;   /* never grow, never shrink INTO the body */
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 8px 12px; border-top: 1px solid var(--border);
   background: var(--bg-secondary);
-  /* NEVER wrap: a wrapping bar grows to 2–3 rows at narrow widths and covers
-     the terminal's own bottom status line. The bar stays a single, fixed-height
-     row; if the controls can't fit, .terminal-actions scrolls horizontally. */
+  /* NEVER wrap: a wrapping bar grows to 2–3 rows at narrow widths and eats
+     into the body. The bar stays a single, fixed-height row; if the controls
+     can't fit, .terminal-actions scrolls horizontally. */
   flex-wrap: nowrap;
 }
 /* Status never shrinks — the labels (Running/Stopped/Exited) are always short,
    so the action buttons take the remaining width and scroll if needed. */
 .terminal-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); flex: 0 0 auto; }
-.terminal-status #terminal-status-label { white-space: nowrap; }
+.terminal-status [id$="-status-label"] { white-space: nowrap; }
 .terminal-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex: 0 0 auto; }
 .terminal-dot.running { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
 .terminal-dot.stopped { background: var(--text-muted); }
@@ -1757,79 +1794,6 @@ body.terminal-active #collapse-threads { display: none; }
 .terminal-actions::-webkit-scrollbar { height: 5px; }
 .terminal-actions::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
 .terminal-actions .btn-secondary { padding: 7px 11px; white-space: nowrap; flex: 0 0 auto; }
-
-.term-opt { font-size: 12.5px; }
-/* Options popover: one bar button (⚙ Options) that opens a compact menu holding
-   YOLO / Model / Session resume-mode — keeps the bar to four items so it never
-   crowds or clips on a narrow phone. Badges when any non-default option is
-   armed. Menu is position:fixed (coords set in JS) so it escapes the bar's
-   overflow-x:auto clip — an absolutely-positioned menu would be clipped to
-   nothing inside the scrolling .terminal-actions. */
-.term-opts-wrap { position: relative; flex: 0 0 auto; }
-#terminal-opts.opts-set {
-  color: var(--accent-text); border-color: var(--accent-muted); background: var(--accent-muted);
-}
-.term-opts-menu {
-  position: fixed; z-index: 40;
-  min-width: 232px; max-width: min(300px, 92vw);
-  display: flex; flex-direction: column; padding: 5px;
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  box-shadow: var(--shadow-md, 0 10px 30px rgba(0,0,0,.35));
-}
-.term-opts-menu[hidden] { display: none; }
-.term-opts-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  text-align: start; padding: 10px 11px; border: none; border-radius: 8px;
-  background: none; color: var(--text-primary); font-size: 13.5px; cursor: pointer;
-}
-.term-opts-item:hover, .term-opts-item:focus-visible,
-.term-opts-radio:hover, .term-opts-radio:focus-visible { background: var(--bg-hover); outline: none; }
-.term-opts-val { color: var(--text-secondary); font-size: 12.5px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#terminal-yolo[aria-checked="true"] .term-opts-val { color: var(--warning-text); font-weight: 700; }
-.term-opts-sep { height: 1px; background: var(--border); margin: 5px 6px; }
-.term-opts-grouphdr { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); padding: 4px 11px 3px; }
-.term-opts-radio {
-  text-align: start; padding-block: 9px; padding-inline: 30px 11px; position: relative;
-  border: none; border-radius: 8px; background: none;
-  color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap;
-}
-.term-opts-radio::before {
-  content: ""; position: absolute; inset-inline-start: 11px; top: 50%; transform: translateY(-50%);
-  width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border-light);
-}
-.term-opts-radio[aria-checked="true"] { color: var(--accent-text); font-weight: 600; }
-.term-opts-radio[aria-checked="true"]::before {
-  border-color: var(--accent);
-  background: radial-gradient(circle at center, var(--accent) 0 4px, transparent 4px);
-}
-.term-opts-note { padding: 7px 11px 4px; font-size: 11.5px; }
-/* "Applies on restart" affordance: a small warning dot on the Restart button. */
-#terminal-restart.pending { position: relative; }
-#terminal-restart.pending::after {
-  content: ""; position: absolute; top: -3px; inset-inline-end: -3px;
-  width: 8px; height: 8px; border-radius: 50%; background: var(--warning);
-  border: 1px solid var(--bg-secondary);
-}
-
-/* Model picker modal */
-.term-model-modal { width: min(440px, 94vw); max-height: 84vh; }
-.term-model-body { padding: 4px 18px 8px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-.term-model-list { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow-y: auto; }
-.term-model-row {
-  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
-  border-radius: var(--radius-md); cursor: pointer; font-size: 13.5px;
-}
-.term-model-row:hover { background: var(--bg-hover); }
-.term-model-row input { accent-color: var(--accent); }
-.term-model-custom { display: flex; flex-direction: column; gap: 5px; }
-.term-model-custom label { font-size: 12.5px; color: var(--text-secondary); }
-.term-model-custom input {
-  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; color: var(--text-primary); font-size: 14px; font-family: var(--font-mono);
-}
-.term-model-custom input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
-.term-model-empty, .term-model-loading { font-size: 12.5px; padding: 6px 4px; }
 
 /* ===================== Connect an AI ===================== */
 /* Deliberately built out of the pieces that already exist — .modal, .sec-field,
@@ -1882,16 +1846,14 @@ body.terminal-active #collapse-threads { display: none; }
 /* Dedicated unlock padlock (locked mode only). Matches the gear-btn chrome. */
 .unlock-btn { font-size: 18px; }
 
-/* Narrow widths: compact the option labels so the bar doesn't crowd the
-   Start/Restart/Stop controls (host still flex-shrinks if the bar wraps). */
+/* Narrow widths: compact the bar so it doesn't crowd the
+   Start/Restart/Stop controls. */
 @media (max-width: 560px) {
   .terminal-bar { padding: 8px 10px; gap: 8px; }
   .terminal-actions { gap: 6px; }
   /* Keep tap targets ~40px tall even while compacting the labels. */
   .terminal-actions .btn-secondary { padding: 8px 11px; font-size: 12px; min-height: 40px; }
   .terminal-status { font-size: 12.5px; }
-  .term-opts-menu { min-width: 220px; }
-  .term-opts-item, .term-opts-radio { padding-top: 12px; padding-bottom: 12px; }
 }
 
 /* ===================== Minimal-avatar mode ===================== */
@@ -2588,13 +2550,7 @@ code.markdown-block-art,
 .tx-item .tx-body,
 .terminal-view,
 .harness-job-out,
-.harness-job-cwd,
-.terminal-host,
-.terminal-host .xterm,
-.terminal-host .xterm-viewport,
-.terminal-host .xterm-screen,
-.terminal-host .xterm-rows,
-.terminal-host .xterm-decoration-container {
+.harness-job-cwd {
   direction: ltr;
   text-align: left;
 }
@@ -2608,7 +2564,6 @@ a.markdown-file-link > code,
 .model-pill,
 .sec-path,
 .rx-row-id,
-.term-opts-val,
 .welcome-sub,
 .cmdk-item .sub {
   direction: ltr;
@@ -2620,8 +2575,6 @@ a.markdown-file-link > code,
    so text-align:left is deliberately NOT added here). */
 #recover-code,
 .sec-field input,
-.terminal-find input,
-.term-model-custom input,
 /* Connect an AI: a base URL, an API key, an env-var name and a model id are
    all identifiers, not prose — they read left-to-right in every locale. */
 #llm-model,
@@ -3137,7 +3090,7 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .viewer-error-text { color: var(--text-secondary); font-size: 14px; }
 
 /* ===================== Operator tools popover =====================
-   Reasonix, the DeepSeek Harness and StudioForge collapsed out of the rail into
+   The DeepSeek Harness and StudioForge collapsed out of the rail into
    one ⌥ entry. Fixed positioning so the menu escapes the rail's overflow clip;
    .menu above supplies the surface, border and shadow. */
 .tools-menu {

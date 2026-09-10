@@ -7,7 +7,6 @@ Run with:  uvicorn app.main:app --host 127.0.0.1 --port 8765
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import errno
 import fcntl
@@ -73,7 +72,6 @@ from . import (
     pool_guard,
     problem,
     reactions,
-    terminal,
 )
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .database import Database, local_date, new_id, now_iso
@@ -331,10 +329,8 @@ async def lifespan(app: FastAPI):
     # Same idea for the per-thread avatar store: a pinned snapshot whose file
     # has vanished is data loss, and used to show up only as a broken image.
     await _audit_avatar_snapshots()
-    # Coding terminal: broadcast state flips (running/exited/…) to open tabs.
+    # DeepSeek Harness: broadcast headless-job start/end flips to open tabs.
     # add_state_hook is idempotent, so repeated lifespans (tests) don't stack.
-    terminal.session.add_state_hook(_terminal_state_changed)
-    # DeepSeek Harness: headless-job start/end flips, same broadcast shape.
     harness.runner.add_state_hook(_harness_state_changed)
     purge_task = asyncio.create_task(_session_purge_loop())
     _track(purge_task)
@@ -367,15 +363,10 @@ async def lifespan(app: FastAPI):
     finally:
         global _shutting_down
         _shutting_down = True
-        # The PTY child would die with us anyway (SIGHUP on master close) —
-        # a clean SIGTERM just lets the CLI exit gracefully.
-        terminal.session.remove_state_hook(_terminal_state_changed)
         harness.runner.remove_state_hook(_harness_state_changed)
         with contextlib.suppress(Exception):
             await harness.runner.shutdown()
         await _gateway_ws_stop()
-        with contextlib.suppress(Exception):
-            await terminal.session.shutdown()
         # Only OUR loop's tasks: a second app instance (tests open several
         # clients) parks its tasks in this same module-level set, and cancelling
         # a future from another loop raises instead of shutting down cleanly.
@@ -395,7 +386,7 @@ async def lifespan(app: FastAPI):
 
 # The interactive API docs are disabled in this deployment: /openapi.json,
 # /docs and /redoc would hand a sessionless caller the complete route + model
-# inventory (terminal, inject, recovery, reactions…) — exactly the unlocked
+# inventory (harness, inject, recovery, reactions…) — exactly the unlocked
 # feature surface Safe Mode exists to hide, on a service bound to 0.0.0.0.
 #
 # The schema itself is still BUILT — it is served, gated, at /api/openapi.json
@@ -1280,9 +1271,8 @@ def _frame_bot(frame: dict) -> str | None:
 #
 # Deliberately NOT here, and why:
 #   progress                     raw reply text, tool args, file paths
-#   terminal_state               the coding terminal is full-session only —
-#                                Safe Mode must not learn a session exists
-#   harness_state                same, for the DeepSeek Harness pane
+#   harness_state                the DeepSeek Harness pane is full-session
+#                                only — Safe Mode must not learn a job exists
 #   reaction_pool / avatar_pool  pool telemetry: batch sizes, prompts, rig
 #                                errors, absolute paths, every bot's id
 #   message_update               a message that was already delivered, rewritten
@@ -1645,17 +1635,17 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # operator only — a locked device sees the resulting
                         # message (redacted) and nothing else.
                         "/api/image-jobs",
-                        # The terminal is arbitrary code execution — belt-and-
-                        # braces here on top of _require_terminal's own gate.
-                        # Same for the harness: a headless job runs a shell
-                        # agent in the operator's home directory.
+                        # The harness is code execution — a headless job runs
+                        # a shell agent in the operator's home directory —
+                        # so this is belt-and-braces on top of
+                        # _require_harness's own gate.
                         # StudioForge is not code execution, but its panel is
                         # an UNAUTHENTICATED admin surface for the LLM rig:
                         # anyone who learns the address from a Safe-Mode device
                         # can load and unload models on it. The status route
                         # discloses that address, so it is operator-only too --
                         # belt-and-braces on top of _require_studioforge.
-                        "/api/terminal", "/api/harness", "/api/studioforge",
+                        "/api/harness", "/api/studioforge",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
@@ -3038,7 +3028,12 @@ async def _pic_specs_from_markers(content: str, bot_id: str | None,
                 bot, clamped, caption)
             spec = image_jobs.ImageSpec(
                 prompt=full_prompt, caption=display_caption,
-                workflow=bot.image_workflow, ratio=bot.image_ratio)
+                workflow=bot.image_workflow, ratio=bot.image_ratio,
+                # Explicit, not the dataclass default: this is the bot
+                # decorating its own reply, nobody is waiting on it, and the
+                # rig contract reserves tier 1 for work a person IS waiting
+                # on. Background, always.
+                priority=3)
         except (ValueError, image_jobs.ImageJobError) as e:
             # Dropped, not fatal: the reply it arrived in is already sanitized
             # and about to be persisted. Nothing was superseded and no limiter
@@ -6492,7 +6487,7 @@ async def openapi_schema(request: Request):
 
     /openapi.json, /docs and /redoc stay disabled: on a service bound to
     0.0.0.0 they hand a stranger the whole route and model inventory
-    (terminal, inject, recovery, reactions), which is precisely what Safe Mode
+    (harness, inject, recovery, reactions), which is precisely what Safe Mode
     exists to hide.
 
     That reasoning never applied to a process on this box. An agent calling
@@ -6632,8 +6627,7 @@ async def auth_status(request: Request):
         # the client nothing: a fresh install with no agent CLI and no connected
         # provider is exactly the state where the card is the right thing to
         # show, and every other state is exactly where it is not.
-        "features": ({"terminal": terminal_available(),
-                      "harness": harness_available(),
+        "features": ({"harness": harness_available(),
                       "studioforge": studioforge_available(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
@@ -8497,6 +8491,17 @@ async def image_job_create(request: Request, payload: ImageJobIn):
     if canonical is None:
         raise HTTPException(404, "Unknown thread")
 
+    # Explicit, not the model's own default: this route always has a
+    # placeholder sitting in a thread with somebody looking at it — the
+    # genuinely user-initiated case the rig contract reserves tier 1 for —
+    # so an OMITTED priority means interactive here, even though
+    # `ImageJobIn.priority` itself now defaults to background (3) per the
+    # contract's general rule for every other, unspecified caller.
+    # `model_fields_set` is what tells "the caller said 3" apart from
+    # "the caller said nothing and pydantic filled in 3".
+    priority = (payload.priority if "priority" in payload.model_fields_set
+               else 1)
+
     bot = config.resolve_bot(payload.bot_id)
     if bot is None:
         raise HTTPException(404, f"Unknown bot: {payload.bot_id}")
@@ -8529,7 +8534,7 @@ async def image_job_create(request: Request, payload: ImageJobIn):
             workflow=payload.workflow or bot.image_workflow,
             ratio=payload.ratio or bot.image_ratio, width=payload.width,
             height=payload.height, negative=payload.negative or "",
-            caption=display_caption, priority=payload.priority)
+            caption=display_caption, priority=priority)
     except (ValueError, image_jobs.ImageJobError) as e:
         raise HTTPException(422, str(e))
 
@@ -9590,9 +9595,8 @@ async def _mirror_watchdog_loop() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Coding terminal (server-side PTY behind /ws/terminal + control routes).
-# A terminal is arbitrary code execution: every surface here — status included —
-# is FULL-SESSION ONLY. Safe Mode gets 403, never state.
+# Code-execution surfaces: the shared PIN gate + feature-availability helpers
+# used by the harness / StudioForge panes and the /api/auth/status inventory.
 # --------------------------------------------------------------------------- #
 
 
@@ -9603,10 +9607,6 @@ async def _mirror_watchdog_loop() -> None:
 # PIN is what gates access to it, so "enabled" plus "no PIN" is off, not open.
 _NO_PIN_MSG = ("Set a PIN first — this feature runs code and stays unavailable "
                "until DisPatch has one.")
-
-
-def terminal_available() -> bool:
-    return SETTINGS.terminal_enabled and auth.load().pin_set
 
 
 def harness_available() -> bool:
@@ -9622,252 +9622,9 @@ def studioforge_available() -> bool:
             and auth.load().pin_set)
 
 
-def _require_terminal(request: Request) -> None:
-    if not SETTINGS.terminal_enabled:
-        raise HTTPException(404, "Terminal disabled")
-    if not auth.load().pin_set:
-        raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
-
-
-def _raise_for_terminal_error(e: Exception):
-    """Map terminal's typed errors to HTTP status — never a raw 500 trace."""
-    if isinstance(e, terminal.OptionsValidationError):
-        raise HTTPException(422, str(e)) from e
-    if isinstance(e, terminal.TerminalBusyError):
-        raise HTTPException(409, str(e)) from e
-    raise HTTPException(502, str(e)) from e
-
-
-def _terminal_state_changed(status: dict) -> None:
-    """State hook (registered in lifespan): broadcast running/exited flips to
-    every open tab. Safe-Mode connections never see these frames — the
-    redactor drops type 'terminal_state' outright."""
-    if _shutting_down:
-        return
-    _track(asyncio.create_task(manager.broadcast(_terminal_state_frame(status))))
-
-
-def _terminal_state_frame(status: dict) -> dict:
-    return {"type": "terminal_state", "state": status.get("state"),
-            "exit_code": status.get("exit_code"),
-            "options": status.get("options"),
-            "pending_options": status.get("pending_options")}
-
-
-@app.get("/api/terminal/status")
-async def terminal_status(request: Request):
-    _require_terminal(request)
-    return terminal.session.status()
-
-
-@app.post("/api/terminal/start")
-async def terminal_start(request: Request):
-    _require_terminal(request)
-    try:
-        return await terminal.session.start()
-    except terminal.TerminalError as e:
-        _raise_for_terminal_error(e)
-
-
-@app.post("/api/terminal/stop")
-async def terminal_stop(request: Request):
-    _require_terminal(request)
-    try:
-        return await terminal.session.stop()
-    except terminal.TerminalError as e:
-        _raise_for_terminal_error(e)
-
-
-@app.post("/api/terminal/restart")
-async def terminal_restart(request: Request):
-    _require_terminal(request)
-    try:
-        return await terminal.session.restart()
-    except terminal.TerminalError as e:
-        _raise_for_terminal_error(e)
-
-
-@app.post("/api/terminal/options")
-async def terminal_options(request: Request):
-    """Set spawn-time options (yolo / model / resume), applied on the next
-    start/restart. Broadcasts terminal_state so other unlocked viewers pick up
-    the pending flag."""
-    _require_terminal(request)
-    body = {}
-    with contextlib.suppress(Exception):
-        body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(422, "body must be an object")
-    kwargs = {}
-    if "yolo" in body:
-        kwargs["yolo"] = body["yolo"]
-    if "model" in body:
-        kwargs["model"] = body["model"]
-    if "resume" in body:
-        kwargs["resume"] = body["resume"]
-    try:
-        terminal.session.set_options(**kwargs)
-    except terminal.TerminalError as e:
-        _raise_for_terminal_error(e)
-    st = terminal.session.status()
-    if not _shutting_down:
-        await manager.broadcast(_terminal_state_frame(st))
-    return st
-
-
-@app.get("/api/terminal/models")
-async def terminal_models(request: Request):
-    """Model names discovered from the CLI's config, for the picker (best-effort)."""
-    _require_terminal(request)
-    return await asyncio.to_thread(terminal.discover_models)
-
-
-def _b64_output_frame(data: bytes) -> dict:
-    # base64, not text: a chunk can split a multibyte char or escape sequence,
-    # and invalid UTF-8 would poison the JSON frame. The client feeds the
-    # decoded bytes straight into xterm.
-    return {"type": "output", "data": base64.b64encode(data).decode("ascii")}
-
-
-async def _terminal_sender(ws: WebSocket, q: asyncio.Queue[dict],
-                           token: str | None) -> None:
-    """Drain the per-connection frame queue onto the socket. Decoupling the PTY
-    read loop from each client's send keeps one slow viewer from stalling the
-    terminal for everyone.
-
-    Re-checks session liveness per frame: the receive loop only notices a lapse
-    when the client SENDS something, so without this a silent viewer would keep
-    receiving terminal output after the session expired / a PIN was set. This
-    socket is code execution — a lapsed session stops getting output instantly.
-    """
-    with contextlib.suppress(Exception):
-        while True:
-            frame = await q.get()
-            lapsed = (auth.get_session(token) is None) if token is not None \
-                else auth.load().pin_set
-            if lapsed:
-                await ws.send_json({"type": "locked"})
-                await ws.close(code=1008)
-                return
-            await ws.send_json(frame)
-
-
-@app.websocket("/ws/terminal")
-async def terminal_ws(ws: WebSocket):
-    # CSWSH guard — identical to /ws: a present Origin must positively match
-    # the request Host; empty/mismatched → reject.
-    origin = ws.headers.get("origin")
-    if origin:
-        from urllib.parse import urlparse
-        origin_host = urlparse(origin).netloc
-        host = ws.headers.get("host", "")
-        if not origin_host or not host or origin_host != host:
-            await ws.close(code=1008)
-            return
-    if not SETTINGS.terminal_enabled:
-        await ws.close(code=1008)
-        return
-    # HTTP middleware doesn't run for the websocket scope. Unlike /ws there is
-    # NO Safe-Mode tier here: no full session means no socket — and with no PIN
-    # configured there is no such thing as a full session, so the PTY stays
-    # shut rather than open to anyone who can reach the port.
-    cfg = auth.load()
-    if not cfg.pin_set:
-        await ws.close(code=1008, reason=_NO_PIN_MSG)
-        return
-    session = auth.get_session(ws.cookies.get(COOKIE_NAME))
-    if session is None:
-        await ws.close(code=1008)
-        return
-    await manager.connect(ws, decoy=False, token=session.token)
-
-    term = terminal.session
-    q: asyncio.Queue[dict] = asyncio.Queue(maxsize=512)
-
-    def _enqueue(frame: dict) -> None:
-        try:
-            q.put_nowait(frame)
-        except asyncio.QueueFull:
-            pass    # slow client: drop output rather than stall the PTY reader
-
-    def on_output(data: bytes) -> None:
-        _enqueue(_b64_output_frame(data))
-
-    def _state_frame(status: dict) -> dict:
-        return {"type": "state", "state": status.get("state"),
-                "exit_code": status.get("exit_code"),
-                "options": status.get("options"),
-                "pending_options": status.get("pending_options")}
-
-    def on_state(status: dict) -> None:
-        _enqueue(_state_frame(status))
-
-    # First-open convenience: a never-started ('stopped') session comes up by
-    # itself. An 'exited' one does NOT — that's a deliberate Start/Restart.
-    if term.status()["state"] == "stopped":
-        try:
-            await term.start()
-        except terminal.TerminalError as e:
-            log.warning("terminal auto-start failed: %s", e)
-
-    # Attach, then enqueue the initial state + scrollback replay BEFORE the
-    # sender starts and with no await in between: everything below is sync, so
-    # no PTY output can slip into the queue ahead of the replay (a direct
-    # send here would race the sender task and garble the replay order).
-    scrollback = term.attach(on_output)
-    term.add_state_hook(on_state)
-    _enqueue(_state_frame(term.status()))
-    if scrollback:
-        _enqueue(_b64_output_frame(scrollback))
-    sender = asyncio.create_task(_terminal_sender(ws, q, session.token if session else None))
-    _track(sender)
-    try:
-        while True:
-            data = await ws.receive_json()
-            # The session can lapse mid-connection (idle expiry, PIN set since
-            # a token-less handshake) — re-check before every op, exactly like
-            # /ws. This socket is code execution: it drops, not demotes.
-            if session is not None:
-                if auth.get_session(session.token) is None:
-                    with contextlib.suppress(Exception):
-                        await ws.send_json({"type": "locked"})
-                    break
-            elif auth.load().pin_set:
-                with contextlib.suppress(Exception):
-                    await ws.send_json({"type": "locked"})
-                break
-            mtype = data.get("type")
-            if mtype == "ping":
-                await ws.send_json({"type": "pong"})
-                continue
-            if session is not None:
-                auth.touch_session(session.token)
-            if mtype == "input":
-                text = data.get("data")
-                if isinstance(text, str) and text:
-                    with contextlib.suppress(terminal.TerminalError):
-                        term.write(text.encode("utf-8"))
-            elif mtype == "resize":
-                try:
-                    term.resize(int(data.get("cols")), int(data.get("rows")))
-                except (TypeError, ValueError):
-                    pass
-    except WebSocketDisconnect:
-        pass
-    except Exception:  # pragma: no cover - defensive
-        log.exception("terminal websocket error")
-    finally:
-        # Detach only — the session keeps running; reattach replays scrollback.
-        term.detach(on_output)
-        term.remove_state_hook(on_state)
-        sender.cancel()
-        await manager.disconnect(ws)
-
-
 # --------------------------------------------------------------------------- #
 # DeepSeek Harness (dsh): `dsh web` service control + default model + headless
-# jobs. Same posture as the terminal — a headless job is code execution, so
+# jobs. A headless job is code execution, so
 # every surface (status included) is FULL-SESSION ONLY; Safe Mode gets 403.
 # --------------------------------------------------------------------------- #
 
@@ -10049,7 +9806,7 @@ async def harness_cancel_job(request: Request):
 # enough that a render loop costs one request, not hundreds.
 _SF_PROBE_TTL = 15.0
 _SF_PROBE_TIMEOUT = 3.0
-_sf_probe: tuple[float, bool] | None = None   # (checked_at, reachable)
+_sf_probe: tuple[float, bool, bool | None] | None = None   # (checked_at, reachable, framable)
 _sf_probe_lock = asyncio.Lock()
 
 
@@ -10064,38 +9821,80 @@ def _require_studioforge(request: Request) -> None:
     _deny_decoy_mutation(request)
 
 
-async def _studioforge_reachable() -> tuple[bool, float]:
+def _framable(headers) -> bool:
+    """Whether a browser would let us put this response in an <iframe>.
+
+    Not a guess and not a policy of ours -- it is the two headers the browser
+    itself obeys, read from the panel's own answer:
+
+      * `X-Frame-Options: DENY` / `SAMEORIGIN` (we are never same-origin with
+        the rig, so both refuse us).
+      * CSP `frame-ancestors`, which SUPERSEDES X-Frame-Options where both are
+        present. `'none'` refuses everyone; a source list is only satisfied by
+        an origin on it, and DisPatch is served from whatever host the reader
+        typed -- a value we do not know here. So any frame-ancestors that is
+        not a bare wildcard is treated as a refusal: a wrong "yes" costs the
+        reader a blank rectangle and no explanation, a wrong "no" costs one
+        extra click on a link that is already on screen.
+
+    Anything else (no header at all, an unparseable one) is framable, which is
+    the web's own default."""
+    # frame-ancestors first: where both are present the CSP directive wins and
+    # the browser ignores X-Frame-Options entirely.
+    csp = (headers.get("content-security-policy") or "").lower()
+    for directive in csp.split(";"):
+        parts = directive.split()
+        if parts and parts[0] == "frame-ancestors":
+            return parts[1:] == ["*"]
+    xfo = (headers.get("x-frame-options") or "").strip().lower()
+    if xfo in ("deny", "sameorigin") or xfo.startswith("allow-from"):
+        return False
+    return True
+
+
+async def _studioforge_reachable() -> tuple[bool, float, bool | None]:
     """Plain GET of the panel URL, cached. ANY HTTP response counts as
     reachable -- a 404, a 403, a redirect all prove something is listening and
     answering, and the panel's own routing is none of our business. Only a
-    transport failure (refused, DNS, timeout) is "down"."""
+    transport failure (refused, DNS, timeout) is "down".
+
+    The same response also answers the second question the pane needs: whether
+    the panel permits being framed. StudioForge as shipped does NOT (it sends
+    `X-Frame-Options: DENY`), so the embedded frame could only ever draw an
+    empty box -- which is exactly what it did. Reading the headers here means
+    the pane can say so and offer the link instead of pretending."""
     global _sf_probe
     now = time.time()
     cached = _sf_probe
     if cached and now - cached[0] < _SF_PROBE_TTL:
-        return cached[1], cached[0]
+        return cached[1], cached[0], cached[2]
     async with _sf_probe_lock:
         cached = _sf_probe            # another caller may have filled it
         if cached and time.time() - cached[0] < _SF_PROBE_TTL:
-            return cached[1], cached[0]
+            return cached[1], cached[0], cached[2]
         ok = False
+        framable: bool | None = None
         try:
             async with httpx.AsyncClient(timeout=_SF_PROBE_TIMEOUT,
                                          follow_redirects=False) as client:
-                await client.get(SETTINGS.studioforge_url)
+                resp = await client.get(SETTINGS.studioforge_url)
             ok = True
+            framable = _framable(resp.headers)
         except Exception:
             ok = False
-        _sf_probe = (time.time(), ok)
-        return ok, _sf_probe[0]
+        _sf_probe = (time.time(), ok, framable)
+        return ok, _sf_probe[0], framable
 
 
 @app.get("/api/studioforge/status")
 async def studioforge_status(request: Request):
     _require_studioforge(request)
-    reachable, checked_at = await _studioforge_reachable()
+    reachable, checked_at, framable = await _studioforge_reachable()
     return {"url": SETTINGS.studioforge_url,
             "reachable": reachable,
+            # None when the panel could not be reached at all -- "we do not
+            # know yet", which the pane must not read as "refused".
+            "framable": framable,
             "checked_at": checked_at}
 
 

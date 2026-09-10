@@ -170,10 +170,9 @@ ENV LOCAL_CHAT_DATA_DIR=/data \
 # /static/avatars from the data directory ahead of the general /static mount,
 # which keeps the URL identical.
 # Host-OS integrations, OFF in a container because they drive the host's
-# systemd and the host's shell. See docs/deploy-docker.md § "What does not
+# systemd and the host's files. See docs/deploy-docker.md § "What does not
 # work in a container". Turning them on here produces broken UI, not features.
-ENV LOCAL_CHAT_TERMINAL=0 \
-    LOCAL_CHAT_MIRROR=0
+ENV LOCAL_CHAT_MIRROR=0
 
 # NOTE: no `VOLUME /data`. A VOLUME instruction would silently create an
 # anonymous volume for anyone who forgets to mount one — their data would

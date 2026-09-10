@@ -82,7 +82,7 @@ Understanding these assumptions will tell you whether something is a bug:
   yet a meaningful report. What *is* a real bug, and worth reporting, is a
   crossing of the boundary that does exist: a Safe-Mode (no-PIN) client
   reaching anything reserved for an unlocked session — an unsafe bot, media,
-  a mutating endpoint, the terminal or harness panes, the dashboard.
+  a mutating endpoint, the harness pane, the dashboard.
   DisPatch is in any case not designed to withstand a determined insider who
   also controls the host.
 - **Anything exposed to the internet belongs behind TLS.** The shipped

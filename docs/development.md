@@ -47,8 +47,8 @@ PWA cannot load.
 **Nothing type-checks your JavaScript.** CI runs `node --check` on every module,
 which catches syntax errors and nothing else.
 
-Heavy vendor bundles load on demand — `highlight.js` on the first code block,
-`xterm` when the terminal opens. If you add a dependency that only some users
+Heavy vendor bundles load on demand — `highlight.js` on the first code block.
+If you add a dependency that only some users
 need, follow that pattern (`loadScript` / `loadStyle` in `js/util.js`) rather
 than adding a `<script>` tag that everyone pays for.
 

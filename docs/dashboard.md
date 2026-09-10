@@ -136,7 +136,7 @@ No PIN is configured.
 
 - 🔴 **Red** when the app is reachable over the network. Anyone who can reach
   this machine has full access: every conversation, the file store, and the
-  terminal if it is enabled.
+  harness pane if it is enabled.
 - 🟢 **Green** when bound to `127.0.0.1`, because nothing off this box can
   connect.
 
@@ -186,7 +186,7 @@ PIN hash and the API token.
 Running as the root user.
 
 - 🟠 **On bare metal.** DisPatch does not need root. Anything that can talk it
-  into writing a file writes as root — the terminal feature especially.
+  into writing a file writes as root — the harness feature especially.
   **Fix:** run it as a normal user (a systemd *user* unit, or `User=` in a
   system unit) and `chown` the data directory to that user.
 - 🟢 **Inside a container**, where it is the norm and the blast radius stops at

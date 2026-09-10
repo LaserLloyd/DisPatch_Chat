@@ -2,18 +2,18 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=21';
+import { api, setOnLocked } from './api.js?v=22';
 import { ChatSocket } from './ws.js?v=8';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, stripMediaSource, toPlainPreview } from './markdown.js?v=25';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, stripMediaSource, toPlainPreview } from './markdown.js?v=26';
 import { installChecklists, applyChecklistState } from './checklist.js?v=2';
-import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=12';
+import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=13';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
 import {
   t, tHtml, init as i18nInit, onChange as onI18nChange, languageSelect, localeLoadFailed, hasDictionary,
   relTime, clockTime, dayLabel, dayKey, fileSize,
-  n as fmtNumber, percent as fmtPercent, list as fmtList,
+  n as fmtNumber, percent as fmtPercent,
 } from './i18n.js?v=3';
 import {
   initReactions, loadReactions, resetReactions, handleReactionFrame, handlePoolFrame,
@@ -68,8 +68,6 @@ const state = {
   auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
   started: false,      // app has booted (bots loaded, socket connected)
-  terminalEnabled: false, // server-side feature flag (LOCAL_CHAT_TERMINAL); full-session only
-  terminal: { state: 'stopped', yolo: false, model: null, resume: 'none', pending: false },
   harnessEnabled: false, // server-side feature flag (DISPATCH_HARNESS); full-session only
   // DeepSeek Harness pane: last /api/harness/status payload (service + models)
   // and the headless-job ledger the server broadcasts.
@@ -81,10 +79,8 @@ const state = {
   studioforge: { status: null, clientReachable: null },
 };
 
-// The coding terminal is rendered as a pseudo-bot in the sidebar (unlocked
-// mode only). Its id never collides with a real OpenClaw agent id.
-const TERMINAL_ID = 'coding-terminal';
-// Same for the DeepSeek Harness (dsh) pane.
+// The DeepSeek Harness (dsh) pane is rendered as a pseudo-bot in the sidebar
+// (unlocked mode only). Its id never collides with a real OpenClaw agent id.
 const HARNESS_ID = 'deepseek-harness';
 // And for the StudioForge control panel (the LLM rig's own web UI, embedded).
 const STUDIOFORGE_ID = 'studioforge-panel';
@@ -151,7 +147,7 @@ async function refreshUnread() {
 const $ = (id) => document.getElementById(id);
 const dom = {};
 ['app', 'bot-list', 'manage-bots',
- 'tools-menu', 'tools-terminal', 'tools-harness', 'tools-studioforge',
+ 'tools-menu', 'tools-harness', 'tools-studioforge',
  'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
@@ -192,15 +188,6 @@ const dom = {};
  'browse-sessions', 'recover-result', 'recover-done',
  'tx-backdrop', 'tx-close', 'tx-title', 'tx-summary', 'tx-filter',
  'tx-import', 'tx-list',
- // Coding terminal
- 'terminal-view', 'terminal-host', 'terminal-dot', 'terminal-status-label',
- 'terminal-start', 'terminal-restart', 'terminal-stop',
- 'terminal-yolo', 'terminal-model',
- 'terminal-back', 'terminal-find-btn', 'terminal-find', 'terminal-find-input',
- 'terminal-find-prev', 'terminal-find-next', 'terminal-find-close',
- 'terminal-opts', 'terminal-opts-menu', 'terminal-yolo-val', 'terminal-model-val',
- 'terminal-model-backdrop', 'terminal-model-close', 'terminal-model-hint',
- 'terminal-model-list', 'terminal-model-input', 'terminal-model-clear', 'terminal-model-save',
  // DeepSeek Harness pane
  'harness-view', 'harness-back', 'harness-subtitle', 'harness-tab-ui', 'harness-tab-jobs',
  'harness-open', 'harness-pane-ui', 'harness-pane-jobs', 'harness-frame', 'harness-note',
@@ -674,21 +661,20 @@ function renderSidebarInner() {
     list.append(btn);
   });
 
-  // Operator tools — Reasonix, the DeepSeek Harness and StudioForge. All three
-  // are unlocked-only (they execute code or drive another machine) and each is
+  // Operator tools — the DeepSeek Harness and StudioForge. Both are
+  // unlocked-only (they execute code or drive another machine) and each is
   // gated on its own server feature flag, so the button appears only when at
-  // least one is actually available. They used to be three sibling avatars in
-  // this rail; unlocked, that pushed the roster down the screen and read as
+  // least one is actually available. They used to be sibling avatars in this
+  // rail; unlocked, that pushed the roster down the screen and read as
   // clutter rather than navigation, so they collapse into one entry that opens
   // #tools-menu. The rows themselves live in index.html — see the comment there
   // for why they must NOT be built here.
   const toolsAvailable = !state.decoy && (
-    state.terminalEnabled || state.harnessEnabled || state.studioforgeEnabled
+    state.harnessEnabled || state.studioforgeEnabled
     || menuBots.length > 0);
   if (toolsAvailable) {
     const toolsName = t('nav.tools');
-    const selected = state.selectedBotId === TERMINAL_ID
-      || state.selectedBotId === HARNESS_ID
+    const selected = state.selectedBotId === HARNESS_ID
       || state.selectedBotId === STUDIOFORGE_ID;
     const btn = el('button', {
       class: 'bot-btn terminal-btn tools-btn' + (selected ? ' active' : ''),
@@ -720,7 +706,7 @@ function renderSidebarInner() {
 /** Bots the user parked in the ⌥ menu, drawn under the tool rows.
  *
  *  Rebuilt wholesale on every sidebar repaint, which is safe because — unlike
- *  the three tool rows above — these carry no dot that anything patches in
+ *  the tool rows above — these carry no dot that anything patches in
  *  place; their unread/thinking state is computed here from the same snapshot
  *  the rail uses, so the two can never disagree.
  */
@@ -729,7 +715,7 @@ function renderMenuBots(menuBots, thinkingBots, unreadBots) {
   const sep = dom['tools-bots-sep'];
   if (!host) return;
   host.innerHTML = '';
-  const anyTools = state.terminalEnabled || state.harnessEnabled || state.studioforgeEnabled;
+  const anyTools = state.harnessEnabled || state.studioforgeEnabled;
   if (sep) sep.hidden = !(menuBots.length && anyTools && !state.decoy);
   menuBots.forEach((bot) => {
     const row = el('button', {
@@ -749,7 +735,6 @@ function renderMenuBots(menuBots, thinkingBots, unreadBots) {
 /** Which tool rows the menu should offer, in rail order. */
 function toolsMenuEntries() {
   return [
-    { id: 'tools-terminal', botId: TERMINAL_ID, on: !!state.terminalEnabled },
     { id: 'tools-harness', botId: HARNESS_ID, on: !!state.harnessEnabled },
     { id: 'tools-studioforge', botId: STUDIOFORGE_ID, on: !!state.studioforgeEnabled },
   ];
@@ -759,8 +744,8 @@ function toolsMenuEntries() {
  *
  *  Row visibility is driven from the same flags the rail button is, so a
  *  feature switched off server-side cannot leave a dead row behind. The dots
- *  are NOT touched here — renderTerminal/renderHarness/renderStudioForge own
- *  those and run on their own cadence.
+ *  are NOT touched here — renderHarness/renderStudioForge own those and run
+ *  on their own cadence.
  */
 function syncToolsMenuRows() {
   let visible = 0;
@@ -775,10 +760,9 @@ function syncToolsMenuRows() {
   return visible;
 }
 
-/** Worst-of the three service states, for the collapsed rail dot. */
+/** Worst-of the service states, for the collapsed rail dot. */
 function toolsGroupState() {
   const states = [];
-  if (state.terminalEnabled) states.push(state.terminal.state);
   if (state.harnessEnabled) states.push(harnessServiceState());
   if (state.studioforgeEnabled) states.push(studioforgeState());
   if (states.some((s) => s === 'error' || s === 'stopped' || s === 'down')) return 'error';
@@ -1268,6 +1252,7 @@ function messageEl(msg) {
     // Plain text with line breaks — but a pasted URL becomes a real link
     // (linkifyPlain escapes everything else exactly as escapeHtml did).
     bubble.innerHTML = linkifyPlain(text).replace(/\n/g, '<br>');
+    retargetLinks(bubble);
     if (!text && media.length && !state.decoy) bubble.classList.add('media-only');
     // Render document cards below the bubble.
     if (!state.decoy) {
@@ -2336,11 +2321,9 @@ function openAvatarLightbox(botId) {
 // ===================== Actions =====================
 async function selectBot(id) {
   if (!id) return;
-  if (id === TERMINAL_ID) { openTerminalView(); return; }
   if (id === HARNESS_ID) { openHarnessView(); return; }
   if (id === STUDIOFORGE_ID) { openStudioForgeView(); return; }
-  // Leaving the terminal for a real bot tears the view/socket down cleanly.
-  if (terminalOpen) closeTerminalView();
+  // Leaving a tool pane for a real bot tears the view down cleanly.
   if (harnessOpen) closeHarnessView();
   if (studioforgeOpen) closeStudioForgeView();
   state.selectedBotId = id;
@@ -3674,333 +3657,7 @@ function wireFileServer() {
   });
 }
 
-// ===================== Coding terminal =====================
-// A server-side PTY running the configured coding CLI, mirrored over /ws/terminal into
-// an xterm.js instance. Selecting the terminal pseudo-bot replaces the chat
-// pane with the terminal; switching away detaches (the session keeps running,
-// reattach replays scrollback). Full-session only — the pseudo-bot never shows
-// in Safe Mode and the server 403s/refuses every terminal surface there.
-let terminalOpen = false;
-let termInstance = null;
-let termFit = null;
-let termSock = null;
-let termReconnectTimer = null;
-let termReconnectDelay = 500;
-let termResizeObs = null;
-let termSearch = null;   // xterm search addon (find box)
-let termEarlyFits = 0;   // remaining "refit on next output frame" passes
-
-function b64ToBytes(b64) {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function termTheme() {
-  // Our palette vars use light-dark()/color-mix(), so reading the raw custom
-  // property yields a literal "light-dark(...)" string that xterm can't parse —
-  // it silently falls back to BLACK (invisible on the dark app, a glaring black
-  // box on the light one). Apply each var to a probe element and read back the
-  // COMPUTED colour, which resolves against the active color-scheme to real rgb.
-  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
-  const probe = document.createElement('span');
-  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
-  document.body.appendChild(probe);
-  const resolve = (varName, fb) => {
-    probe.style.color = 'transparent';
-    probe.style.color = `var(${varName})`;
-    const c = getComputedStyle(probe).color;
-    return (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') ? c : fb;
-  };
-  const theme = {
-    background: resolve('--bg-tertiary', dark ? '#1e1e3a' : '#ffffff'),
-    foreground: resolve('--text-primary', dark ? '#e8e8f0' : '#1c1c28'),
-    cursor: resolve('--accent', '#7c3aed'),
-    selectionBackground: resolve('--accent-muted', 'rgba(124,58,237,.3)'),
-  };
-  probe.remove();
-  return theme;
-}
-
-// Accepts a status/frame object {state, options, pending_options}. A bare
-// string is tolerated (older call sites) and treated as the state only.
-function applyTerminalStatus(obj) {
-  if (!obj) return;
-  if (typeof obj === 'string') obj = { state: obj };
-  const st = obj.state || state.terminal.state;
-  state.terminal.state = st;
-  if (obj.options && typeof obj.options === 'object') {
-    state.terminal.yolo = !!obj.options.yolo;
-    state.terminal.model = obj.options.model || null;
-    state.terminal.resume = obj.options.resume || 'none';
-  }
-  if (typeof obj.pending_options === 'boolean') state.terminal.pending = obj.pending_options;
-  const stateKeys = { running: 'terminal.state_running', stopped: 'terminal.state_stopped',
-                      exited: 'terminal.state_exited' };
-  if (dom['terminal-status-label']) {
-    dom['terminal-status-label'].textContent = stateKeys[st] ? t(stateKeys[st]) : st;
-  }
-  if (dom['terminal-dot']) dom['terminal-dot'].className = 'terminal-dot ' + st;
-  const running = st === 'running';
-  if (dom['terminal-start']) dom['terminal-start'].disabled = running;
-  if (dom['terminal-stop']) dom['terminal-stop'].disabled = !running;
-  if (dom['terminal-restart']) dom['terminal-restart'].disabled = false;
-  renderTerminalOptions();
-  // Keep the sidebar side-dot in sync without a full re-render churn.
-  const sd = dom['tools-terminal'] && dom['tools-terminal'].querySelector('.bot-status-dot');
-  if (sd) sd.className = 'bot-status-dot terminal-sidedot ' + st;
-}
-
-// Resume-mode presentation. The value set maps 1:1 to the CLI's spawn flags on
-// the server (none / -c / --resume / --copy); we only render labels here.
-const RESUME_KEYS = { none: 'terminal.resume_none', continue: 'terminal.resume_continue',
-                      resume: 'terminal.resume_resume', copy: 'terminal.resume_copy' };
-
-// Reflect the current spawn options on the bottom bar: YOLO toggle label +
-// warning colour when on, the Model button's short label, and the
-// "applies on restart" hint on Restart when a running session has pending opts.
-function renderTerminalOptions() {
-  const mode = state.terminal.resume || 'none';
-  const yolo = !!state.terminal.yolo;
-  const model = state.terminal.model;
-  // YOLO row (menuitemcheckbox) in the popover.
-  const yb = dom['terminal-yolo'];
-  if (yb) yb.setAttribute('aria-checked', yolo ? 'true' : 'false');
-  if (dom['terminal-yolo-val']) dom['terminal-yolo-val'].textContent = t(yolo ? 'common.on' : 'common.off');
-  // Model row.
-  if (dom['terminal-model-val']) {
-    dom['terminal-model-val'].textContent = model ? shortModel(model) : t('terminal.model_default');
-    dom['terminal-model-val'].title = model ? model : t('terminal.model_default_long');
-  }
-  // Session resume radios.
-  const menu = dom['terminal-opts-menu'];
-  if (menu) menu.querySelectorAll('button[data-resume]').forEach((b) =>
-    b.setAttribute('aria-checked', b.dataset.resume === mode ? 'true' : 'false'));
-  // ⚙ Options button badges when anything non-default is armed.
-  const ob = dom['terminal-opts'];
-  if (ob) {
-    const armed = yolo || !!model || mode !== 'none';
-    ob.classList.toggle('opts-set', armed);
-    const bits = [];
-    if (yolo) bits.push(t('terminal.options_yolo_on'));
-    if (model) bits.push(shortModel(model));
-    if (mode !== 'none') bits.push(t('terminal.options_session', { mode: RESUME_KEYS[mode] ? t(RESUME_KEYS[mode]) : mode }));
-    // Intl.ListFormat rather than ', ' — the conjunction and the separator are
-    // both language-specific.
-    ob.title = bits.length
-      ? t('terminal.options_title_set', { summary: fmtList(bits) })
-      : t('terminal.options_title');
-  }
-  const rb = dom['terminal-restart'];
-  if (rb) {
-    const pending = !!state.terminal.pending;
-    rb.classList.toggle('pending', pending);
-    rb.title = pending ? t('terminal.restart_pending') : '';
-  }
-}
-
-// Compact model label for the narrow bar: keep the part after the last "/".
-function shortModel(m) {
-  const s = String(m);
-  const i = s.lastIndexOf('/');
-  return i >= 0 ? s.slice(i + 1) : s;
-}
-
-// The terminal is a pseudo-bot with no chat threads. Selecting it must not leave the
-// previous bot's thread list (a separate panel the terminal overlay doesn't
-// cover) on screen — replace it with an admin-session placeholder. selectBot()
-// restores the real header + threads when switching back to a normal bot.
-function renderTerminalSessionPanel() {
-  dom['tl-botname'].textContent = t('terminal.name');
-  dom['tl-model'].textContent = t('terminal.session_panel_title');
-  const wrap = dom['threads'];
-  wrap.innerHTML = '';
-  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
-    el('div', { class: 'empty-emoji', text: '›_' }),
-    el('p', { text: t('terminal.session_panel_heading') }),
-    el('p', { class: 'muted', text: t('terminal.session_panel_body') }),
-  ]));
-}
-
-// xterm + its four addons + xterm.css are 317KB — more than half the app's
-// entire vendor payload — and only the full-session terminal ever uses them.
-// Fetched on first open instead of on every page load.
-let _xtermPromise = null;
-function ensureXterm() {
-  if (window.Terminal) return Promise.resolve(true);
-  if (!_xtermPromise) {
-    _xtermPromise = loadStyle('/static/vendor/xterm.css')
-      .then(() => loadScript('/static/vendor/xterm.js'))
-      // Addons attach to the core, so they must land after it. Each is
-      // individually optional — the call sites below already guard on the
-      // global — so one failure degrades a feature rather than the terminal.
-      .then(() => Promise.all([
-        loadScript('/static/vendor/xterm-addon-fit.js'),
-        loadScript('/static/vendor/xterm-addon-unicode11.js'),
-        loadScript('/static/vendor/xterm-addon-web-links.js'),
-        loadScript('/static/vendor/xterm-addon-search.js'),
-      ].map((pr) => pr.catch(() => {}))))
-      .then(() => !!window.Terminal)
-      .catch(() => false);
-  }
-  return _xtermPromise;
-}
-
-async function openTerminalView() {
-  if (state.decoy || !state.terminalEnabled) return;
-  if (!window.Terminal) {
-    if (!await ensureXterm()) { toast('Could not load the terminal', true); return; }
-    // Awaiting yields to the event loop: the user may have navigated away or
-    // the session may have locked while the bundle was in flight.
-    if (state.decoy || !state.terminalEnabled) return;
-  }
-  if (harnessOpen) closeHarnessView();
-  if (studioforgeOpen) closeStudioForgeView();
-  state.selectedBotId = TERMINAL_ID;
-  terminalOpen = true;
-  renderSidebar();
-  renderTerminalSessionPanel();
-  dom['terminal-view'].classList.remove('hidden');
-  document.body.classList.add('terminal-active');
-  if (isMobile()) navigate('chat');
-  if (!termInstance) {
-    termInstance = new window.Terminal({
-      convertEol: false,
-      cursorBlink: true,
-      fontFamily: "var(--font-mono), ui-monospace, 'JetBrains Mono', monospace",
-      fontSize: 13,
-      scrollback: 8000,          // generous history for long TUI runs
-      fastScrollModifier: 'alt', // Alt+wheel scrolls a page at a time
-      allowProposedApi: true,    // required by the unicode11 addon
-      theme: termTheme(),
-    });
-    termFit = new window.FitAddon.FitAddon();
-    termInstance.loadAddon(termFit);
-    // Best-practice addons (all vendored locally, no CDN at runtime):
-    //  - unicode11: correct width for emoji/CJK/box-drawing so a TUI
-    //    columns line up. activeVersion must be set AFTER loading.
-    //  - web-links: OSC-8 + plain URLs the CLI prints become clickable.
-    //  - search: powers the find box (Ctrl/⌘+F).
-    try {
-      if (window.Unicode11Addon) {
-        termInstance.loadAddon(new window.Unicode11Addon.Unicode11Addon());
-        termInstance.unicode.activeVersion = '11';
-      }
-    } catch (e) { /* non-fatal: fall back to default widths */ }
-    try {
-      if (window.WebLinksAddon) termInstance.loadAddon(new window.WebLinksAddon.WebLinksAddon());
-    } catch (e) { /* non-fatal */ }
-    try {
-      if (window.SearchAddon) { termSearch = new window.SearchAddon.SearchAddon(); termInstance.loadAddon(termSearch); }
-    } catch (e) { termSearch = null; }
-    termInstance.open(dom['terminal-host']);
-    termInstance.onData((d) => {
-      if (termSock && termSock.readyState === WebSocket.OPEN) {
-        termSock.send(JSON.stringify({ type: 'input', data: d }));
-      }
-    });
-    // Copy-on-select (standard terminal UX): whenever a selection exists, mirror
-    // it to the clipboard. localhost is a secure context so writeText is allowed.
-    termInstance.onSelectionChange(() => {
-      const sel = termInstance.getSelection();
-      if (sel && navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(sel).catch(() => {});
-      }
-    });
-    // Key handling: intercept ONLY Find, explicit Copy (Ctrl/⌘+Shift+C) and
-    // Paste (Ctrl/⌘+V). Everything else — crucially plain Ctrl+C — falls through
-    // to the PTY, so Ctrl+C still delivers SIGINT rather than being hijacked.
-    termInstance.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown') return true;
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return true;
-      const k = e.key.toLowerCase();
-      if (k === 'f' && !e.shiftKey) { toggleTermFind(true); return false; }
-      if (k === 'c' && e.shiftKey) { termCopySelection(); return false; }
-      if (k === 'v' && !e.shiftKey) { termPaste(); return false; }
-      return true;
-    });
-    // Observe BOTH the host and the action bar. A bar whose height changes
-    // (e.g. it briefly wraps, or a long status label reflows) shrinks the host,
-    // and re-fitting keeps the terminal's own bottom line clear of the bar.
-    termResizeObs = new ResizeObserver(() => fitTerminal());
-    termResizeObs.observe(dom['terminal-host']);
-    const bar = dom['terminal-view'].querySelector('.terminal-bar');
-    if (bar) termResizeObs.observe(bar);
-  }
-  // Fit only after layout has actually settled: a single rAF can run before the
-  // freshly-unhidden view has its final size. Double-rAF + a fonts.ready pass
-  // (cell metrics depend on the mono font) makes the row count correct so a TUI
-  // like one that draws its own bottom status line, isn't clipped.
-  termEarlyFits = 6;
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    fitTerminal();
-    termInstance && termInstance.focus();
-  }));
-  if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => { if (terminalOpen) fitTerminal(); });
-  }
-  connectTerminal();
-}
-
-function closeTerminalView() {
-  terminalOpen = false;
-  document.body.classList.remove('terminal-active');
-  dom['terminal-view'].classList.add('hidden');
-  toggleTermFind(false);
-  closeOptsMenu();
-  if (termReconnectTimer) { clearTimeout(termReconnectTimer); termReconnectTimer = null; }
-  if (termSock) { try { termSock.close(); } catch {} termSock = null; }
-  if (termResizeObs) { try { termResizeObs.disconnect(); } catch {} termResizeObs = null; }
-  if (termInstance) { try { termInstance.dispose(); } catch {} termInstance = null; termFit = null; termSearch = null; }
-}
-
-// ---- Copy / paste / find helpers ----
-function termCopySelection() {
-  if (!termInstance) return;
-  const sel = termInstance.getSelection();
-  if (sel && navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(sel).catch(() => {});
-  }
-}
-
-function termPaste() {
-  if (!termInstance) return;
-  // Route through term.paste() so bracketed-paste + onData forwarding is handled
-  // uniformly; fall back to xterm's native textarea paste if the clipboard API
-  // is unavailable (non-secure context).
-  if (navigator.clipboard && navigator.clipboard.readText) {
-    navigator.clipboard.readText().then((t) => { if (t) termInstance.paste(t); }).catch(() => {});
-  }
-}
-
-function toggleTermFind(show) {
-  const box = dom['terminal-find'];
-  if (!box) return;
-  if (show && termSearch) {
-    box.classList.remove('hidden');
-    const inp = dom['terminal-find-input'];
-    if (inp) { inp.focus(); inp.select(); }
-  } else {
-    box.classList.add('hidden');
-    if (termSearch) { try { termSearch.clearDecorations && termSearch.clearDecorations(); } catch {} }
-    if (termInstance) termInstance.focus();
-  }
-}
-
-function termFind(dir) {
-  if (!termSearch) return;
-  const q = (dom['terminal-find-input'] && dom['terminal-find-input'].value) || '';
-  if (!q) return;
-  const opts = { incremental: false };
-  try {
-    if (dir < 0) termSearch.findPrevious(q, opts);
-    else termSearch.findNext(q, opts);
-  } catch { /* addon may reject on an empty buffer */ }
-}
-
-// ---- Operator tools popover (Reasonix / DeepSeek Harness / StudioForge) ----
+// ---- Operator tools popover (DeepSeek Harness / StudioForge) ----
 // Click-driven, not hover. This app is used on family Android tablets and as an
 // installed PWA, where a hover-only menu is unreachable; desktop hover is added
 // on top in wireToolsMenu() for pointers that actually have it.
@@ -4105,232 +3762,6 @@ function wireToolsMenu() {
   });
 }
 
-// ---- Options popover (YOLO / Model / Session resume-mode) ----
-function toggleOptsMenu() {
-  const menu = dom['terminal-opts-menu'];
-  if (!menu) return;
-  if (menu.hasAttribute('hidden')) openOptsMenu(); else closeOptsMenu();
-}
-function openOptsMenu() {
-  const menu = dom['terminal-opts-menu'];
-  const btn = dom['terminal-opts'];
-  if (!menu || !btn) return;
-  menu.removeAttribute('hidden');
-  btn.setAttribute('aria-expanded', 'true');
-  // Fixed positioning (coords here) so the pop-up escapes the bar's overflow
-  // clip. Open upward + left-aligned to the button; fall back to below when
-  // there isn't room above (very short viewports).
-  const r = btn.getBoundingClientRect();
-  const mw = menu.offsetWidth || 232;
-  const mh = menu.offsetHeight || 260;
-  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
-  const above = r.top - mh - 6;
-  menu.style.top = (above >= 8 ? above : r.bottom + 6) + 'px';
-  // Close on the next outside click.
-  setTimeout(() => document.addEventListener('click', _optsOutside, { once: true }), 0);
-}
-function closeOptsMenu() {
-  const menu = dom['terminal-opts-menu'];
-  if (menu) menu.setAttribute('hidden', '');
-  if (dom['terminal-opts']) dom['terminal-opts'].setAttribute('aria-expanded', 'false');
-}
-function _optsOutside(e) {
-  const wrap = dom['terminal-opts'] && dom['terminal-opts'].closest('.term-opts-wrap');
-  const menu = dom['terminal-opts-menu'];
-  // The menu is position:fixed, so it may not be a DOM descendant hit-box under
-  // the wrap for contains() — check both the wrap and the menu explicitly.
-  if ((wrap && wrap.contains(e.target)) || (menu && menu.contains(e.target))) {
-    if (menu && !menu.hasAttribute('hidden')) {
-      document.addEventListener('click', _optsOutside, { once: true });
-    }
-    return;
-  }
-  closeOptsMenu();
-}
-
-function fitTerminal() {
-  if (!termFit || !termInstance || !terminalOpen) return;
-  try { termFit.fit(); } catch { return; }
-  // FitAddon floors by the CSS cell height, but the browser renders each row
-  // rounded UP to a whole pixel — so the grid can end up a few px taller than
-  // the host's content box and spill its bottom row under the action bar. Shrink
-  // rows using the ACTUAL rendered row height so the grid always fits inside the
-  // padded host (this is what keeps a full-screen TUI's bottom line clear).
-  const host = dom['terminal-host'];
-  const rowsEl = host && host.querySelector('.xterm-rows');
-  const firstRow = rowsEl && rowsEl.children[0];
-  if (host && firstRow) {
-    const cs = getComputedStyle(host);
-    const avail = host.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
-    // A single rendered row's height is the true cell height (constant for the
-    // font, and unaffected by an in-flight row-count change on .xterm-rows).
-    const rowH = firstRow.getBoundingClientRect().height;
-    if (rowH > 0) {
-      const maxRows = Math.max(2, Math.floor(avail / rowH));
-      if (termInstance.rows > maxRows) termInstance.resize(termInstance.cols, maxRows);
-    }
-  }
-  const dims = { cols: termInstance.cols, rows: termInstance.rows };
-  if (termSock && termSock.readyState === WebSocket.OPEN) {
-    termSock.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-  }
-}
-
-function connectTerminal() {
-  if (!terminalOpen) return;
-  if (termSock && (termSock.readyState === WebSocket.OPEN || termSock.readyState === WebSocket.CONNECTING)) return;
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  let sock;
-  try { sock = new WebSocket(`${proto}://${location.host}/ws/terminal`); }
-  catch { scheduleTerminalReconnect(); return; }
-  termSock = sock;
-  sock.onopen = () => {
-    termReconnectDelay = 500;
-    fitTerminal();
-  };
-  sock.onmessage = (ev) => {
-    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-    if (msg.type === 'output') {
-      if (termInstance) termInstance.write(b64ToBytes(msg.data || ''));
-      // A full-screen TUI redraws to whatever size it thinks it has; re-fit on
-      // the first few output frames so the size it settles on is the true one.
-      if (termEarlyFits > 0) { termEarlyFits--; requestAnimationFrame(() => fitTerminal()); }
-    }
-    else if (msg.type === 'state') applyTerminalStatus(msg);
-    else if (msg.type === 'locked') { handleLocked(); }
-  };
-  sock.onclose = () => {
-    if (termSock === sock) termSock = null;
-    if (terminalOpen) scheduleTerminalReconnect();
-  };
-  sock.onerror = () => { try { sock.close(); } catch {} };
-}
-
-function scheduleTerminalReconnect() {
-  if (!terminalOpen || termReconnectTimer) return;
-  if (termInstance) termInstance.write('\r\n\x1b[2m' + t('terminal.disconnected') + '\x1b[0m\r\n');
-  termReconnectTimer = setTimeout(() => {
-    termReconnectTimer = null;
-    connectTerminal();
-  }, termReconnectDelay);
-  termReconnectDelay = Math.min(termReconnectDelay * 2, 10000);
-}
-
-async function terminalControl(action) {
-  dom['terminal-start'].disabled = true;
-  dom['terminal-stop'].disabled = true;
-  dom['terminal-restart'].disabled = true;
-  try {
-    const st = await api.terminalAction(action);
-    applyTerminalStatus(st);
-    // Restart from an exited session needs a live socket again; a stopped→exit
-    // transition just updates buttons. The server does not push output on a
-    // control POST, so (re)connect if we somehow lost the socket.
-    if (terminalOpen && !termSock) connectTerminal();
-  } catch (e) {
-    toast(cleanErr(e), true);
-    applyTerminalStatus(state.terminal.state);
-  }
-}
-
-// ---- Spawn options: YOLO toggle + model picker (applied on next start/restart) ----
-async function setTerminalOptions(payload) {
-  try {
-    const st = await api.terminalOptions(payload);
-    applyTerminalStatus(st);
-  } catch (e) {
-    toast(cleanErr(e), true);
-  }
-}
-
-function toggleTerminalYolo() {
-  setTerminalOptions({ yolo: !state.terminal.yolo });
-}
-
-async function openModelPicker() {
-  dom['terminal-model-input'].value = '';
-  const box = dom['terminal-model-list'];
-  box.innerHTML = '';
-  box.append(el('div', { class: 'muted term-model-loading', text: t('terminal.picker_loading') }));
-  dom['terminal-model-backdrop'].classList.remove('hidden');
-  let data = { models: [], current_default: null };
-  try { data = await api.terminalModels(); } catch { /* best-effort; free-text still works */ }
-  box.innerHTML = '';
-  const cur = state.terminal.model;
-  // "Default" radio (clears the override).
-  box.append(modelRow('', data.current_default
-    ? t('terminal.model_default_named', { name: shortModel(data.current_default) })
-    : t('terminal.model_default_long'), cur === null));
-  (data.models || []).forEach((m) => box.append(modelRow(m, m, cur === m)));
-  if (!(data.models || []).length) {
-    box.append(el('p', { class: 'muted term-model-empty', text: t('terminal.picker_empty') }));
-  }
-}
-
-function modelRow(value, label, checked) {
-  const row = el('label', { class: 'term-model-row' });
-  const radio = el('input', { type: 'radio', name: 'term-model', value });
-  radio.checked = !!checked;
-  row.append(radio, el('span', { text: label }));
-  return row;
-}
-
-function closeModelPicker() { dom['terminal-model-backdrop'].classList.add('hidden'); }
-
-function saveModelPicker() {
-  const typed = dom['terminal-model-input'].value.trim();
-  let model;
-  if (typed) model = typed;
-  else {
-    const sel = dom['terminal-model-list'].querySelector('input[name="term-model"]:checked');
-    model = sel ? sel.value : '';   // '' → clear to default
-  }
-  closeModelPicker();
-  setTerminalOptions({ model: model || null });
-}
-
-function wireTerminal() {
-  if (dom['terminal-start']) dom['terminal-start'].addEventListener('click', () => terminalControl('start'));
-  if (dom['terminal-restart']) dom['terminal-restart'].addEventListener('click', () => terminalControl('restart'));
-  if (dom['terminal-stop']) dom['terminal-stop'].addEventListener('click', () => terminalControl('stop'));
-  // Options popover: ⚙ button toggles it; YOLO toggles in place; Model opens the
-  // picker (closing the popover); Session radios apply + close.
-  if (dom['terminal-opts']) dom['terminal-opts'].addEventListener('click', (e) => { e.stopPropagation(); toggleOptsMenu(); });
-  if (dom['terminal-yolo']) dom['terminal-yolo'].addEventListener('click', (e) => { e.stopPropagation(); toggleTerminalYolo(); });
-  if (dom['terminal-model']) dom['terminal-model'].addEventListener('click', (e) => { e.stopPropagation(); closeOptsMenu(); openModelPicker(); });
-  if (dom['terminal-opts-menu']) dom['terminal-opts-menu'].addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-resume]');
-    if (!b) return;
-    closeOptsMenu();
-    setTerminalOptions({ resume: b.dataset.resume });
-  });
-  // Find box
-  if (dom['terminal-find-btn']) dom['terminal-find-btn'].addEventListener('click', () => toggleTermFind(!dom['terminal-find'] || dom['terminal-find'].classList.contains('hidden')));
-  if (dom['terminal-find-next']) dom['terminal-find-next'].addEventListener('click', () => termFind(1));
-  if (dom['terminal-find-prev']) dom['terminal-find-prev'].addEventListener('click', () => termFind(-1));
-  if (dom['terminal-find-close']) dom['terminal-find-close'].addEventListener('click', () => toggleTermFind(false));
-  if (dom['terminal-find-input']) dom['terminal-find-input'].addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); termFind(e.shiftKey ? -1 : 1); }
-    else if (e.key === 'Escape') { e.preventDefault(); toggleTermFind(false); }
-  });
-  // Mobile back affordance (hidden on desktop via .back-btn CSS).
-  // The terminal has no thread list, so Back returns to the bot list (not 'threads',
-  // which would surface the previous bot's stale admin-session placeholder).
-  if (dom['terminal-back']) dom['terminal-back'].addEventListener('click', () => navigate('bots'));
-  wireHarnessView();
-  wireStudioForgeView();
-  if (dom['terminal-model-close']) dom['terminal-model-close'].addEventListener('click', closeModelPicker);
-  if (dom['terminal-model-clear']) dom['terminal-model-clear'].addEventListener('click', () => { closeModelPicker(); setTerminalOptions({ model: null }); });
-  if (dom['terminal-model-save']) dom['terminal-model-save'].addEventListener('click', saveModelPicker);
-  if (dom['terminal-model-backdrop']) dom['terminal-model-backdrop'].addEventListener('click', (e) => { if (e.target === dom['terminal-model-backdrop']) closeModelPicker(); });
-  if (dom['terminal-model-input']) dom['terminal-model-input'].addEventListener('keydown', (e) => { if (e.key === 'Enter') saveModelPicker(); });
-  // Keep the xterm palette in sync when the app theme toggles while the terminal
-  // is open. theme.js only flips data-theme; the canvas theme is otherwise fixed
-  // at construction (the bar re-themes for free via its CSS vars).
-  new MutationObserver(() => { if (termInstance) termInstance.options.theme = termTheme(); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-}
-
 /** Make sure `state.auth.features` describes the session we are actually in.
  *
  *  The server discloses the optional-subsystem inventory only to a FULL
@@ -4353,28 +3784,8 @@ async function ensureFeatures() {
   } catch { /* fall back to probing */ }
 }
 
-// Probe the terminal feature flag at startup: only 404 (disabled) / 403
-// (no access) hide the pseudo-bot.
-async function refreshTerminalFeature() {
-  if (state.decoy) { state.terminalEnabled = false; return; }
-  // The server tells us up front now. Probing a disabled feature still worked
-  // (404 -> off) but logged a failed request on every boot of a default
-  // install, where it IS off.
-  if (state.auth.features && state.auth.features.terminal === false) {
-    state.terminalEnabled = false; return;
-  }
-  try {
-    const st = await api.terminalStatus();
-    state.terminalEnabled = true;
-    applyTerminalStatus(st);
-  } catch (e) {
-    if (e.status === 404 || e.status === 403) state.terminalEnabled = false;
-  }
-  renderSidebar();
-}
-
 // ===================== DeepSeek Harness (dsh) =====================
-// dsh ships no TUI, so unlike the coding terminal this pane is not a PTY: it embeds the
+// dsh ships no TUI, so this pane is not a PTY: it embeds the
 // `dsh web` UI (loopback :3080, controlled as a systemd --user unit), offers the
 // default-model switch (settings.yaml, hot-reloaded by dsh) and runs one-shot
 // headless jobs whose final answer is shown in a short history. Full-session
@@ -4447,7 +3858,6 @@ function renderHarnessSessionPanel() {
 
 function openHarnessView() {
   if (state.decoy || !state.harnessEnabled) return;
-  if (terminalOpen) closeTerminalView();
   if (studioforgeOpen) closeStudioForgeView();
   state.selectedBotId = HARNESS_ID;
   harnessOpen = true;
@@ -4766,6 +4176,11 @@ function studioforgeState() {
   if (studioforgeProbing) return 'checking';
   if (st.reachable === false) return 'down';
   if (state.studioforge.clientReachable === false) return 'unreachable';
+  // Reachable, but it will not be framed. Distinct from 'up' because it is a
+  // permanent property of the panel, not a network condition — and it is the
+  // state the panel has ALWAYS been in (StudioForge sends X-Frame-Options:
+  // DENY), which is why the embedded pane only ever drew an empty rectangle.
+  if (st.framable === false) return 'blocked';
   return 'up';
 }
 
@@ -4806,7 +4221,6 @@ function renderStudioForgeSessionPanel() {
 
 function openStudioForgeView() {
   if (state.decoy || !state.studioforgeEnabled) return;
-  if (terminalOpen) closeTerminalView();
   if (harnessOpen) closeHarnessView();
   state.selectedBotId = STUDIOFORGE_ID;
   studioforgeOpen = true;
@@ -4881,6 +4295,9 @@ function renderStudioForge() {
   // client-network answer is only the right one when the server CAN reach it.
   else if (st && st.reachable === false) noteKey = 'down';
   else if (state.studioforge.clientReachable === false) noteKey = 'unreachable';
+  // Last, because it is the least urgent of the four: the panel is up and this
+  // device can reach it — only the frame is refused, and the ↗ link above works.
+  else if (st && st.framable === false) noteKey = 'blocked';
   if (noteKey) {
     if (!frame.classList.contains('hidden')) { frame.classList.add('hidden'); frame.removeAttribute('src'); }
     dom['studioforge-note-text'].textContent = t(`studioforge.${noteKey}_text`);
@@ -5387,16 +4804,10 @@ function handleWs(data) {
       // The full session expired server-side → fall back to Safe Mode.
       handleLocked();
       break;
-    case 'terminal_state': {
-      // Full-session only — Safe-Mode clients never receive this frame (the
-      // server redactor drops it). Keeps the sidebar dot + open view live when
-      // the session changes from another tab.
-      if (!data.state) break;
-      applyTerminalStatus(data);
-      break;
-    }
     case 'harness_state': {
-      // Same posture. Carries whichever slice changed: jobs / service / models.
+      // Full-session only — Safe-Mode clients never receive this frame (the
+      // server redactor drops it). Carries whichever slice changed: jobs /
+      // service / models.
       applyHarnessFrame(data);
       break;
     }
@@ -5533,7 +4944,6 @@ function wireEvents() {
   wireSettingsTabs();
   wireFileServer();
   wireDrop();
-  wireTerminal();
   wireToolsMenu();
 
   // Foldable / rotation: when the viewport crosses the mobile breakpoint
@@ -5637,7 +5047,6 @@ function wireEvents() {
       dom['recover-backdrop'].classList.add('hidden');
       dom['tx-backdrop'].classList.add('hidden');
       dom['companions-backdrop'].classList.add('hidden');
-      if (!dom['terminal-model-backdrop'].classList.contains('hidden')) closeModelPicker();
       toggleThreadMenu(false);
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newChat(); }
@@ -5941,9 +5350,8 @@ function closeAllOverlays() {
    'companions-backdrop', 'search-backdrop', 'recover-backdrop', 'tx-backdrop',
    'drop-backdrop']
     .forEach((k) => dom[k] && dom[k].classList.add('hidden'));
-  // The terminal is full-session only — never leave its socket/view alive
-  // across a drop to Safe Mode.
-  if (terminalOpen) closeTerminalView();
+  // The tool panes are full-session only — never leave a view alive across
+  // a drop to Safe Mode.
   if (harnessOpen) closeHarnessView();
   if (studioforgeOpen) closeStudioForgeView();
   // Never n.remove() a lightbox directly: that skips pausing the video and
@@ -6357,18 +5765,16 @@ async function startApp() {
     // Refresh the feature inventory FIRST, and only then probe. reboot() calls
     // startApp() directly rather than refreshAuthAndBoot(), so after an unlock
     // `state.auth.features` was still the LOCKED payload — `{}`, which is
-    // truthy but says nothing. `features.terminal === false` was therefore
-    // false, the probes ran, and an install with the terminal and the harness
-    // switched off answered 404 twice on every unlock. The requests are
+    // truthy but says nothing. `features.harness === false` was therefore
+    // false, the probes ran, and an install with the harness switched off
+    // answered 404 on every unlock. The requests are
     // harmless; the console errors the browser writes for them are not — they
     // are the first thing anyone looks at when something else breaks.
     ensureFeatures().finally(() => {
-      refreshTerminalFeature();
       refreshHarnessFeature();
       refreshStudioForgeFeature();
     });
   } else {
-    state.terminalEnabled = false;
     state.harnessEnabled = false;
     state.studioforgeEnabled = false;
   }
@@ -6930,9 +6336,6 @@ function reRenderForLocale() {
   else clearChatView();
   reflectComposerState();
   updateDropBusy();
-  renderTerminalOptions();
-  applyTerminalStatus(state.terminal.state);
-  if (terminalOpen) renderTerminalSessionPanel();
   if (harnessOpen) { renderHarnessSessionPanel(); renderHarness(); }
   const open = (id) => dom[id] && !dom[id].classList.contains('hidden');
   // Settings repaints per TAB: only the visible pane's renderer has anything to

@@ -1314,17 +1314,33 @@ def test_a_junk_progress_block_is_dropped_rather_than_shown():
 # --------------------------------------------------------------------------- #
 
 
-def test_the_chat_path_submits_at_the_interactive_band(env, monkeypatch):
-    """Everything through a thread has a placeholder somebody is looking at."""
+def test_the_explicit_ask_submits_at_the_interactive_band(env, monkeypatch):
+    """An explicit ask through a thread has a placeholder somebody is waiting
+    on, so an omitted priority still means interactive here — even though
+    `ImageJobIn.priority` itself now defaults to background for any other,
+    unspecified caller (the rig contract's default; see `image_job_create`).
+    """
     c = env()
     tid = _thread(c)
     forge = _use(monkeypatch, FakeForge())
     _fire(c, tid)
     asyncio.run(main._image_job_sweep())          # -> RUNNING, survives coalescing
+
+    assert [a["spec"].priority for a in forge.enqueue_args] == [1]
+
+
+def test_the_bots_own_spontaneous_marker_submits_at_the_background_band(
+        env, monkeypatch):
+    """A bot decorating its own reply — nobody is waiting on it specifically —
+    is the case the rig contract reserves tier 3 for.
+    """
+    c = env()
+    tid = _thread(c)
+    forge = _use(monkeypatch, FakeForge())
     _say(c, tid, "[[pic:a teapot]]")
     asyncio.run(main._image_job_sweep())
 
-    assert [a["spec"].priority for a in forge.enqueue_args] == [1, 1]
+    assert [a["spec"].priority for a in forge.enqueue_args] == [3]
 
 
 def test_the_endpoint_accepts_a_band_and_refuses_the_rest(env, monkeypatch):
@@ -2547,7 +2563,6 @@ def test_submissions_are_held_once_the_rig_is_full(env, monkeypatch):
     """More requests than MAX_OPEN_RENDERS: the excess waits its turn."""
     c = env()
     _armed(monkeypatch)
-    tid = _thread(c)
     n = main.MAX_OPEN_RENDERS + 3
     # A THREAD EACH: coalescing is per (bot, thread) and would correctly
     # collapse repeats in one thread, which is not what this cap is about.
@@ -2571,7 +2586,6 @@ def test_a_held_submission_is_queued_not_dropped(env, monkeypatch):
     """The cap is a QUEUE. A held job keeps its placeholder and goes later."""
     c = env()
     _armed(monkeypatch)
-    tid = _thread(c)
     n = main.MAX_OPEN_RENDERS + 2
     tids = [_thread(c) for _ in range(n)]
     for one_tid in tids:
@@ -2593,7 +2607,6 @@ def test_jobs_the_rig_already_accepted_are_always_advanced(env, monkeypatch):
     """The cap holds NEW submissions; it must never strand a real render."""
     c = env()
     _armed(monkeypatch)
-    tid = _thread(c)
     for _ in range(main.MAX_OPEN_RENDERS + 2):
         image_jobs.limiter.reset()
         _fire(c, _thread(c))

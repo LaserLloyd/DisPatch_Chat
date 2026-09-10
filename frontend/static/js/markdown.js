@@ -1,7 +1,7 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=12';
+import { loadScript, loadStyle, escapeHtml } from './util.js?v=13';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
@@ -502,6 +502,89 @@ const LOCAL_HREF_RE = new RegExp(`^(?:file:\\/\\/)?(?:~|\\/(?:${LOCAL_ROOTS}))\\
 // least two segments (so `/var` and `~` alone are prose, `~/Projects` is not).
 const LOCAL_DIR_RE = new RegExp(`^(?:~|\\/(?:${LOCAL_ROOTS}))(?:\\/${FL_SEG})*\\/?$`);
 
+// --- loopback links, retargeted at the device that is reading ---------------
+// An agent writes `http://127.0.0.1:8777/` because that is where the thing is
+// FROM THE BOX. On the box that link works. On a phone reading the same chat
+// over the tailnet, `127.0.0.1` is the phone — so the tab opens and connects to
+// nothing. That is not an exotic case: half the links the bots post are a
+// local service's address, and every one of them was dead on every device
+// except the host.
+//
+// So a loopback host is rewritten to whatever host the READER reached the app
+// on, keeping the scheme, port, path and query. Read the app at
+// `http://homeserver:8765/` and `http://127.0.0.1:8777/x` becomes
+// `http://homeserver:8777/x`; read it at `http://127.0.0.1:8765/` and nothing is
+// rewritten, because there is nothing better to point at.
+//
+// Deliberately NOT rewritten: a private LAN address (`192.168.x`, `10.x`). It
+// is a different machine, and this app has no idea what that machine is called
+// on the tailnet — guessing would turn a link that is merely unreachable into
+// one that points somewhere real and wrong. A rewrite also cannot make a
+// loopback-BOUND service (one listening on 127.0.0.1 only) reachable; it can
+// only stop the ones bound to 0.0.0.0 from being wrongly unreachable.
+//
+// The original address is kept in the title, so a dead link is still
+// diagnosable rather than quietly a different address than the text says.
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0']);
+
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase();
+  return LOOPBACK_HOSTS.has(h) || h.endsWith('.localhost') || /^127\./.test(h);
+}
+
+/** The host to retarget loopback links at, or null when there is no better
+ *  answer than the one already written (the reader IS on the box, or the page
+ *  has no usable host — a `file://` open, say). */
+export function retargetHost() {
+  try {
+    const here = location.hostname;
+    if (!here || isLoopbackHost(here)) return null;
+    return here;
+  } catch { return null; }
+}
+
+/** Rewrite one href's loopback host, or return null when it is left alone.
+ *
+ *  Absolute URLs only — parsed with no base on purpose. A relative href is an
+ *  app route (`/api/…`, `#x`), already on the right host by construction, and
+ *  resolving it against the page would only invite rewriting our own links. */
+export function retargetLoopbackHref(href, host) {
+  if (!host || !href) return null;
+  let u;
+  try { u = new URL(String(href)); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (!isLoopbackHost(u.hostname)) return null;
+  u.hostname = host;
+  return u.href;
+}
+
+/** Point every loopback link in a rendered container at the host this device
+ *  reached the app on. Called from enhanceContent (agent messages) and from
+ *  the plain-text user-bubble path — a pasted `http://127.0.0.1:…` is exactly
+ *  as dead on a phone as an agent's, and it is a link either way.
+ *
+ *  Idempotent by construction: a rewritten anchor no longer has a loopback
+ *  host, so a second pass finds nothing to do. Runs AFTER the local-path pass
+ *  in enhanceContent, where a file link has already lost its href. */
+export function retargetLinks(container) {
+  if (!container) return;
+  const host = retargetHost();
+  if (!host) return;
+  container.querySelectorAll('a[href]').forEach((a) => {
+    const was = a.getAttribute('href');
+    const now = retargetLoopbackHref(was, host);
+    if (!now) return;
+    a.setAttribute('href', now);
+    a.dataset.originalHref = was;
+    if (!a.getAttribute('title')) a.setAttribute('title', t('msg.link_retargeted', { url: was }));
+    // A bare autolink shows its own URL as the text. Left at the written
+    // address, that is a link visibly saying one host and going to another —
+    // so when the text IS the address, it moves too. A link with words for
+    // text keeps its words; only the title records where it was pointed.
+    if (a.textContent.trim() === was) a.textContent = now;
+  });
+}
+
 // Ordering matters and is not obvious. This runs on a NON-code segment that
 // has already had [[media:]]/[[doc:]]/[[view:]] expanded (each of those parks
 // its HTML behind a placeholder, or leaves a `![](…)` image), so a path that
@@ -891,7 +974,27 @@ function ensureRenderer() {
         `${escapeHtml(t(`msg.callout_${kind}`))}</p>${body}</div>`;
     },
   };
-  marked.use({ renderer });
+  // `==highlight==` — the one inline mark markdown itself never got. Agents
+  // reach for it to point at the answer inside a long reply ("the culprit is
+  // ==line 412=="), and without it the reader saw the equals signs. Inline
+  // level, so it composes with the rest: `==**this**==` is a highlighted bold.
+  //
+  // The `(?=\S)…\S` guard is what keeps `a == b` and `x ==` from being read
+  // as an unterminated mark, and it must stay single-line: a `==` opening at
+  // the end of one paragraph and closing three lines later is arithmetic, not
+  // emphasis.
+  const highlight = {
+    name: 'highlight',
+    level: 'inline',
+    start(src) { return src.indexOf('=='); },
+    tokenizer(src) {
+      const m = /^==(?=[^\s=])([^\n]*?[^\s=])==/.exec(src);
+      if (!m) return undefined;
+      return { type: 'highlight', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+    },
+    renderer(token) { return `<mark>${this.parser.parseInline(token.tokens)}</mark>`; },
+  };
+  marked.use({ renderer, extensions: [highlight] });
 }
 
 function plainTextFallback(text) {
@@ -950,7 +1053,7 @@ export function renderMarkdown(text, { noMedia = false, noLocal = false } = {}) 
 // h5/h6 were missing: DOMPurify kept the text but dropped the tag, so a deep
 // heading rendered as a bare run of words glued to the next line.
 const ALLOWED_TAGS = ('a b blockquote br button code del details div em h1 h2 h3 h4 h5 h6 hr i ' +
-  'input li ol p pre s span strong summary table tbody td th thead tr ul img ' +
+  'input li ol mark p pre s span strong summary table tbody td th thead tr ul img ' +
   'video source').split(' ');
 const ALLOWED_ATTR = ['checked', 'class', 'disabled', 'href', 'rel', 'target', 'title',
   'start', 'src', 'alt', 'data-code', 'data-code-encoding', 'data-file-line',
@@ -1166,6 +1269,7 @@ export function enhanceContent(container, { noLocal = false } = {}) {
     a.dataset.filePath = path;
     if (line !== null) a.dataset.fileLine = String(line);
   });
+  retargetLinks(container);
   // Wrap markdown tables in a scroll container so a wide table scrolls sideways
   // instead of collapsing its columns (see app.css), then make them sortable +
   // resizable. Idempotent: skips tables already inside a .table-scroll.

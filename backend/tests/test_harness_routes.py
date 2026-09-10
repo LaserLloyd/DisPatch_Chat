@@ -1,6 +1,6 @@
 """Route-level tests for /api/harness/* — FastAPI TestClient with systemctl /
-health / the job runner mocked (never touches systemd or spawns dsh). Mirrors
-test_terminal_routes.py. Run: cd backend && uv run pytest.
+health / the job runner mocked (never touches systemd or spawns dsh).
+Run: cd backend && uv run pytest.
 """
 from __future__ import annotations
 

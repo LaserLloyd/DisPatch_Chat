@@ -186,36 +186,18 @@ bot's daily thread.
 ## Feature switches
 
 ```
-DISPATCH_TERMINAL=0     # host shell in the browser
 DISPATCH_MIRROR=0       # import an agent runner's own conversations
 ```
 
-The terminal additionally needs to be told *which* CLI to run. There is no
-default binary — an unset `DISPATCH_TERMINAL_BIN` leaves the feature reporting
-"not configured" rather than guessing at somebody's install layout:
-
-```
-DISPATCH_TERMINAL_BIN=          # name resolved on PATH, or an absolute path
-DISPATCH_TERMINAL_PATH=         # optional: extra PATH entries, colon-separated
-DISPATCH_TERMINAL_CONFIG=       # optional: TOML paths the model picker reads
-```
-
-The CLI itself is external and not distributed with this project.
-
-**Read the defaults carefully: in the code both are ON (`1`).** They are
-host-install features, so what actually turns them off for most people is the
+**Read the default carefully: in the code it is ON (`1`).** It is a
+host-install feature, so what actually turns it off for most people is the
 shipping configuration rather than the code — the container image and
-`.env.example` set both to `0`, and the system unit sets the terminal to `0`.
-On a bare-metal install started by hand they are on.
+`.env.example` set it to `0`. On a bare-metal install started by hand it is on.
 
-**Both the terminal and the harness stay unavailable (403, and the terminal socket
-refuses) until a PIN is set** — they run code, and with no credential there is no
-unlocked session for the gate to check. `DISPATCH_TERMINAL` gives an authenticated admin an interactive shell on the
-host, running as the app's user. It is exactly as dangerous as it sounds. It and
-the harness pane below are gated on a fully-unlocked session — which means
-**setting a PIN is a precondition, not an afterthought**: with no credential
-configured there is no unlocked session for the gate to check. Set the PIN
-before you turn either of them on.
+**The harness pane stays unavailable (403) until a PIN is set** — it runs code,
+and with no credential there is no unlocked session for the gate to check. It
+is gated on a fully-unlocked session — which means **setting a PIN is a
+precondition, not an afterthought**. Set the PIN before you turn it on.
 
 Only `0`, `false`, `False` and empty read as off. `no` and `off` read as **on**;
 write `0` when you mean off.
@@ -343,12 +325,12 @@ DISPATCH_HARNESS_PORT=3080
 DSH_HOME=~/.dsh                 # dsh's own home (settings.yaml, .credentials.yaml)
 ```
 
-A second coding-agent engine next to the terminal, for
+A coding-agent pane for
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 (`npm i -g @deepseek-ai/dsh`). `auto` turns the pane on only when a `dsh`
 binary is found at boot, so an install without it never grows a stray
-sidebar entry. The pane is **admin-only, like the terminal** — a headless job
-is code execution — and Safe Mode never sees it or its state frames.
+sidebar entry. The pane is **admin-only** — a headless job is code
+execution — and Safe Mode never sees it or its state frames.
 
 What it does:
 

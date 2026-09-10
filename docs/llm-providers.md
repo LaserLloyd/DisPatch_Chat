@@ -140,7 +140,7 @@ The setup panel and all three routes behind it (`/api/llm/providers`,
 `/api/llm/test`, `/api/llm/connect`) are **full-session only** — a PIN-locked
 device never sees the 🔌 AI models tab and gets a 403 if it constructs the request by
 hand. Setting up a provider spends money and writes a credential; it belongs on
-the same side of the door as the dashboard and the terminal.
+the same side of the door as the dashboard and the harness pane.
 
 A newly connected bot is created with `safe: false`, so it does **not** appear
 on Safe-Mode devices until you flip that yourself in **Settings → Bot Manager**.

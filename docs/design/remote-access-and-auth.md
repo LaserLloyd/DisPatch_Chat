@@ -7,6 +7,13 @@
 
 [← Back to the README](../../README.md) · Companion document: [Multi-User Architecture Design](multi-user.md)
 
+> **Historical note (2026-09-09).** The coding terminal (`/ws/terminal`, the
+> server-side PTY) was removed from DisPatch. Every mention of it below —
+> the "terminal enabled by default" row, the step-up rule for `/ws/terminal`,
+> the "no PIN ⇒ PTY open" finding — describes code that no longer exists.
+> The analysis is left intact because the fail-open and step-up reasoning
+> still applies to the surviving code-execution surface (the harness pane).
+
 ---
 
 ## 0. The one-paragraph answer

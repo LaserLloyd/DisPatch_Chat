@@ -78,15 +78,9 @@ that one directory and you have backed up everything.
 
 ## What does not work in a container
 
-Be clear-eyed about this before you start. Two features of this app drive the *host
-operating system*, and a container is specifically designed to stop that.
-
-### The coding terminal — disabled
-
-It spawns an interactive CLI on a server-side PTY and exposes it over a WebSocket.
-Inside a container it would give you a shell *in the container*, which is what
-`docker exec -it dispatch bash` already does, with better isolation and no network
-exposure. `DISPATCH_TERMINAL=0` in the image; leave it there.
+Be clear-eyed about this before you start. Some features of this app drive the *host
+operating system* (the agent runtime, the DeepSeek Harness pane, the gateway mirror),
+and a container is specifically designed to stop that.
 
 ### Agent replies — optional, and genuinely awkward
 

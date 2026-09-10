@@ -13,8 +13,13 @@ accounts, ahead of a public open-source release. Written against the code as of
 > service panel, its systemd control, `_require_comfy`, `_broadcast_comfy_state`
 > or the `/api/comfy/*` routes describes code that no longer exists. The
 > analysis is left intact because the *tier* reasoning it illustrates still
-> applies to the surviving host-control surfaces (the coding terminal, the
-> harness pane).
+> applies to the surviving host-control surfaces (the harness pane).
+>
+> **Historical note (2026-09-09).** The coding terminal was removed the same
+> way: `backend/app/terminal.py`, `/api/terminal/*`, `WS /ws/terminal`,
+> `_require_terminal`, `terminal_ws` and the `terminal_state` frame are gone.
+> Every mention of them below is likewise a description of code that no longer
+> exists; the owner-only reasoning transfers to the harness pane unchanged.
 
 ---
 

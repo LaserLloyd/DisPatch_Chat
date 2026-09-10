@@ -20,9 +20,9 @@
 // Sort is per-paint (like markdown.js's generic table sort): the persisted
 // state is checkbox state + check order, exactly what the feature promises to
 // survive a reload.
-import { api } from './api.js?v=21';
+import { api } from './api.js?v=22';
 import { t } from './i18n.js?v=3';
-import { cellSortValue, compareCells } from './markdown.js?v=25';
+import { cellSortValue, compareCells } from './markdown.js?v=26';
 
 // The checkbox column is always column 0; data columns start at 1.
 const CHECK_COL = 0;

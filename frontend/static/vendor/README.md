@@ -16,12 +16,6 @@ and update the version in the table below.
 | `github-dark.min.css` | highlight.js theme "GitHub Dark" | ships with highlight.js 11.11.1 | BSD-3-Clause | https://github.com/highlightjs/highlight.js/blob/main/src/styles/github-dark.css |
 | `marked.min.js` | marked | 18.0.5 | MIT | https://github.com/markedjs/marked |
 | `purify.min.js` | DOMPurify | 3.4.9 | Apache-2.0 OR MPL-2.0 | https://github.com/cure53/DOMPurify |
-| `xterm.js` | xterm.js | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js |
-| `xterm.css` | xterm.js stylesheet | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js |
-| `xterm-addon-fit.js` | xterm.js addon: fit | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit |
-| `xterm-addon-search.js` | xterm.js addon: search | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js/tree/master/addons/addon-search |
-| `xterm-addon-unicode11.js` | xterm.js addon: unicode11 | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js/tree/master/addons/addon-unicode11 |
-| `xterm-addon-web-links.js` | xterm.js addon: web-links | version unknown — bundled 2026-08 | MIT | https://github.com/xtermjs/xterm.js/tree/master/addons/addon-web-links |
 
 ### Notes on versions
 
@@ -30,43 +24,10 @@ and update the version in the table below.
 * `github-dark.min.css` is a theme shipped inside the highlight.js distribution; its own
   header carries only a theme "Updated: 2021-05-15" date, not a library version, so it is
   recorded as the version of the highlight.js build it came with.
-* The xterm.js bundle and its four addons are minified with their license banners
-  stripped and carry no version string. The files are the pre-scope-rename `xterm` /
-  `xterm-addon-*` package builds (i.e. the 5.x series, before the packages moved to the
-  `@xterm/` npm scope), and the bundle contains the `windowsPty`, `documentOverride` and
-  `rescaleOverlappingGlyphs` options — but that is a fingerprint, not a version, so the
-  exact release is recorded honestly as unknown rather than guessed. xterm.js has been
-  MIT-licensed for its entire history; `xterm.css` retains its MIT header in this tree.
 
 ---
 
 ## MIT License
-
-Applies to `xterm.js`, `xterm.css` and the four `xterm-addon-*.js` files:
-
-```
-Copyright (c) 2017-2022, The xterm.js authors (https://github.com/xtermjs/xterm.js)
-Copyright (c) 2014, The xterm.js authors. All rights reserved.
-Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/term.js)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
 
 Applies to `marked.min.js` (copyright lines taken from the banner in the file itself):
 

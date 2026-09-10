@@ -168,7 +168,11 @@ def _fake_leases(monkeypatch, payload):
 
 
 def test_lease_holder_is_reported(monkeypatch):
-    _fake_leases(monkeypatch, {"leases": [{"holder": "gauntlet"}], "count": 1})
+    # `kind` is the only signal (rig contract §12.5) — a benchmark lease is
+    # the one kind that stands the pool refill down.
+    _fake_leases(monkeypatch,
+                 {"leases": [{"holder": "gauntlet", "kind": "benchmark"}],
+                  "count": 1})
     assert pool_guard.rig_lease_holder() == "gauntlet"
 
 

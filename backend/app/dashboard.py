@@ -1140,7 +1140,7 @@ def _security_findings(bind: dict | None = None) -> list[dict]:
         out.append(_finding(
             "auth.no_pin", FAIL, "No PIN set while reachable on the network",
             f"The app answers on {where} ({why}), so anyone who can reach this "
-            "machine gets full access — including the terminal, file store and "
+            "machine gets full access — including the harness, file store and "
             "every conversation.",
             "Open Settings → 🔒 Security & PIN and set a PIN. To keep it "
             "machine-local instead, start it with --host 127.0.0.1 (and set "
@@ -1265,7 +1265,7 @@ def _build_findings(*, process: dict, storage: dict, database: dict, agent: dict
             out.append(_finding(
                 "process.root", WARN, "Running as root",
                 "DisPatch does not need root. Anything that can talk it into "
-                "writing a file — the terminal especially — writes as root.",
+                "writing a file — the harness especially — writes as root.",
                 "Run the service as a normal user (systemd user unit, or "
                 "User= in a system unit) and chown the data directory to them."))
     elif process:

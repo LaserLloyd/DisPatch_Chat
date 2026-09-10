@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -62,7 +63,7 @@ def no_real_probe(monkeypatch):
 
     async def probe():
         calls.append(1)
-        return True, 1_700_000_000.0
+        return True, 1_700_000_000.0, True
 
     monkeypatch.setattr(main, "_studioforge_reachable", probe)
     return calls
@@ -85,6 +86,7 @@ def test_status_returns_url_and_reachability(route_client, no_real_probe):
     body = r.json()
     assert body["url"] == PANEL_URL
     assert body["reachable"] is True
+    assert body["framable"] is True
     assert isinstance(body["checked_at"], (int, float))
     assert len(no_real_probe) == 1
 
@@ -196,7 +198,10 @@ class _FakeClient:
         self._seen.append(("GET", url))
         if self._raiser:
             raise self._raiser
-        return object()          # status code is deliberately never inspected
+        # The status code is deliberately never inspected; the HEADERS are, so
+        # this has to be response-shaped. No framing headers = framable, which
+        # is the web's own default.
+        return httpx.Response(200)
 
 
 @pytest.mark.parametrize("raiser,expected", [
@@ -211,14 +216,18 @@ def test_probe_reachability_and_cache(monkeypatch, raiser, expected):
     monkeypatch.setattr(main.httpx, "AsyncClient",
                         lambda **kw: _FakeClient(seen, raiser, **kw))
 
-    ok, at = asyncio.run(_REAL_PROBE())
+    ok, at, framable = asyncio.run(_REAL_PROBE())
     assert ok is expected
+    # A panel that answered is also asked whether it permits framing; one that
+    # never answered leaves the question open (None), which the pane must not
+    # read as "refused".
+    assert framable is (True if expected else None)
     assert seen == [("GET", PANEL_URL)]
 
     # Second call inside the TTL reuses the cached answer: a repainting client
     # must not turn this into a poll of somebody else's machine.
-    ok2, at2 = asyncio.run(_REAL_PROBE())
-    assert (ok2, at2) == (ok, at)
+    ok2, at2, framable2 = asyncio.run(_REAL_PROBE())
+    assert (ok2, at2, framable2) == (ok, at, framable)
     assert len(seen) == 1
 
 
@@ -270,3 +279,32 @@ def test_no_origin_without_the_flag(monkeypatch):
     monkeypatch.setattr(main, "SETTINGS", replace(
         config.SETTINGS, studioforge_enabled=False, studioforge_url="http://198.51.100.7:8080"))
     assert main._studioforge_origin() == ""
+
+
+# --------------------------------------------------------------------------- #
+# Framability — the two headers a browser actually obeys
+# --------------------------------------------------------------------------- #
+# StudioForge ships with `X-Frame-Options: DENY`, so the embedded pane could
+# never draw anything but an empty rectangle. These pin the reading of that.
+
+@pytest.mark.parametrize("headers, expected", [
+    ({}, True),
+    ({"X-Frame-Options": "DENY"}, False),
+    ({"X-Frame-Options": "deny"}, False),
+    ({"X-Frame-Options": "SAMEORIGIN"}, False),          # never same-origin with the rig
+    ({"X-Frame-Options": "ALLOW-FROM https://example.com"}, False),
+    ({"Content-Security-Policy": "frame-ancestors 'none'"}, False),
+    ({"Content-Security-Policy": "frame-ancestors 'self'"}, False),
+    ({"Content-Security-Policy": "frame-ancestors https://a.example"}, False),
+    ({"Content-Security-Policy": "frame-ancestors *"}, True),
+    ({"Content-Security-Policy": "default-src 'self'"}, True),
+    # The real pair StudioForge sends.
+    ({"X-Frame-Options": "DENY",
+      "Content-Security-Policy": "frame-ancestors 'none'"}, False),
+    # frame-ancestors supersedes X-Frame-Options, and a wildcard is a yes even
+    # when a stale XFO header says otherwise.
+    ({"X-Frame-Options": "DENY",
+      "Content-Security-Policy": "default-src 'self'; frame-ancestors *"}, True),
+])
+def test_framable_reads_the_headers(headers, expected):
+    assert main._framable(httpx.Headers(headers)) is expected
