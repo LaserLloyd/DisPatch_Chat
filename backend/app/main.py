@@ -2752,6 +2752,34 @@ def _image_job_reserved_text(reservation: str) -> str:
             f"— no picture this time; ask again once it is free.")
 
 
+def _image_job_backend_shape_text() -> str:
+    """The ending for a workflow the rig's renderer is not set up to run.
+
+    `[multi_gpu_required]`: the workflow's graph splits its work across more
+    GPUs than the rig's ComfyUI was given. Two reasons this gets its own
+    sentence rather than the generic `⚠️ image failed: <reason>`:
+
+    First, the rig's own sentence is rig-admin prose — it names the workflow,
+    the card counts, `gpu_multi_mode` and a `comfy_control(action="repin", …)`
+    call. That is an instruction for whoever administers the rig, and this line
+    lands in a family thread where nobody can act on it. Same reasoning as
+    `_image_job_reserved_text`: build the sentence from what we know, and let
+    the rig's wording go to the journal.
+
+    Second, the code READS like `insufficient_vram` — and a reader who has seen
+    that one learns "ask for something simpler", which is exactly wrong here.
+    The picture was not too big; the renderer is set up for one card and this
+    workflow wants more. So the sentence must not invite a smaller retry.
+
+    It does move the health counter (unlike a booked rig): a renderer pinned to
+    the wrong shape is a setup problem somebody should see, not contention that
+    clears on its own.
+    """
+    return ("⚠️ That picture needs the image rig set up differently than it is "
+            "right now, so it could not be made. Nothing you can change on "
+            "this end — worth flagging to whoever looks after the image rig.")
+
+
 def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
     """What the thread says while the render is in flight.
 
@@ -3697,6 +3725,14 @@ async def _advance_image_job_locked(job: dict) -> None:
         if poll.error:
             if poll.code == image_jobs.STALLED and await _retry_stalled(job):
                 return
+            if poll.code == image_jobs.MULTI_GPU_REQUIRED:
+                # Not reachable today — the rig's shape gate runs before it
+                # accepts a job, so this arrives as a submit refusal above.
+                # Kept so the two paths cannot say different things about the
+                # same code if the rig ever moves the check.
+                await _fail_image_job(job, poll.error,
+                                      text=_image_job_backend_shape_text())
+                return
             await _fail_image_job(job, poll.error)
             return
         if poll.done:
@@ -3710,6 +3746,18 @@ async def _advance_image_job_locked(job: dict) -> None:
             # is better served by "come back later" now than by a ⚠️ in ten
             # minutes that reads as if the picture went wrong.
             await _reserve_image_job(job, e.reservation, e.message)
+            return
+        if e.code == image_jobs.MULTI_GPU_REQUIRED:
+            # Terminal, and the one refusal whose generic wording would teach
+            # the reader the wrong lesson (see `_image_job_backend_shape_text`).
+            # Checked before the retryable branch even though the code is not
+            # retryable, so a future widening of RETRYABLE_CODES cannot quietly
+            # put this one into a poll loop against an answer that cannot move.
+            log.warning("image job %s: the rig's ComfyUI is short of GPUs for "
+                        "workflow %s (%s)", job["id"],
+                        _image_job_spec(job).workflow or "default", e.message)
+            await _fail_image_job(job, e.message,
+                                  text=_image_job_backend_shape_text())
             return
         if e.retryable and not _image_job_expired(job):
             # The rig is briefly unreachable (a restart, a dropped link), or it

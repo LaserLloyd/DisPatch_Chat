@@ -1677,6 +1677,67 @@ def test_a_render_lease_waits_and_says_who_has_the_rig(env, monkeypatch):
     assert "reserved by doxy-pics (render)" in row["content"]
 
 
+def _wrong_shape(needs: int = 2, have: int = 1) -> image_jobs.ImageJobError:
+    """`[multi_gpu_required]` as ClawForge2 raises it (B27, 2026-09-10), built
+    through the real parser so the payload shape is what is under test."""
+    res = {"isError": True,
+           "content": [{"type": "text", "text":
+                        f"Error executing tool generate_image: "
+                        f"[multi_gpu_required] workflow 'krea2-dual' needs "
+                        f"{needs} GPUs, this ComfyUI was given {have} — set "
+                        f"gpu_multi_mode in config, or call "
+                        f"comfy_control(action='repin', workflow='krea2-dual')"}],
+           "structuredContent": {"error": {
+               "code": "multi_gpu_required", "tool": "generate_image",
+               "message": "[multi_gpu_required] …"}}}
+    forge = image_jobs.ClawForge(ENDPOINT)
+
+    async def drive():
+        async def fake_call(*a, **k):
+            return res
+        forge.call = fake_call
+        with pytest.raises(image_jobs.ImageJobError) as e:
+            await forge._tool_json("generate_image", {})
+        return e.value
+    return asyncio.run(drive())
+
+
+def test_a_wrong_shaped_backend_is_terminal_and_not_retried():
+    """The code reads like insufficient_vram and behaves like its opposite: it
+    is not transient, so it must never join RETRYABLE_CODES."""
+    err = _wrong_shape()
+    assert err.code == image_jobs.MULTI_GPU_REQUIRED
+    assert err.retryable is False
+    assert image_jobs.MULTI_GPU_REQUIRED not in image_jobs.RETRYABLE_CODES
+
+
+def test_a_wrong_shaped_backend_says_so_without_rig_admin_prose(env,
+                                                                monkeypatch):
+    """The rig's own sentence names a workflow, card counts and a
+    `comfy_control(action='repin', …)` call. That is an instruction for the rig
+    operator, and this line lands in a family thread where nobody can act on
+    it — the same reason `_image_job_reserved_text` is built from facts rather
+    than from the rig's prose."""
+    c = env()
+    tid = _thread(c)
+    before = main.image_jobs.failure_stats()["failures_24h"]
+    fired = _fire(c, tid).json()
+    _use(monkeypatch, FakeForge(enqueue=_wrong_shape()))
+    asyncio.run(main._image_job_sweep())
+
+    row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
+    assert row["metadata"]["status"] == "failed"
+    content = row["content"]
+    # Says what happened, in words a reader can act on.
+    assert "wrong" in content.lower() or "set up" in content.lower()
+    # And says NONE of the rig's admin sentence.
+    for leak in ("comfy_control", "repin", "gpu_multi_mode", "krea2-dual",
+                 "multi_gpu_required", "GPUs"):
+        assert leak not in content, f"rig admin prose leaked: {leak}"
+    # It IS a misconfiguration the operator should see, unlike a booked rig.
+    assert main.image_jobs.failure_stats()["failures_24h"] == before + 1
+
+
 def test_a_client_quota_refusal_waits_for_a_slot(env, monkeypatch):
     """Our own tag is over its active-render quota. A refusal, not a fault —
     and one that says something a reader can understand."""

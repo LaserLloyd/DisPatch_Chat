@@ -185,6 +185,15 @@ CLIENT_QUOTA = "client_quota"
 #: Distinct from a job that never moved at all, and worth ONE more attempt:
 #: a stall is usually a wedged sampler, not a graph that cannot run.
 STALLED = "stalled"
+#: The workflow's graph splits its work across more GPUs than the rig's ComfyUI
+#: was started with (ClawForge2 B27, 2026-09-10). It READS like
+#: ``insufficient_vram``/``insufficient_compute_cap`` and is their opposite:
+#: those two mean the workflow is too big for the card, and the reflex they
+#: train — pick something lighter — is the wrong move here, where the workflow
+#: is fine and the BACKEND is short of cards. Terminal: nothing this side can
+#: do changes the answer, because the fix is a re-pin of the rig's ComfyUI and
+#: that is a privileged rig-side action DisPatch holds no credential for.
+MULTI_GPU_REQUIRED = "multi_gpu_required"
 
 #: Refusal codes the rig says are worth another attempt before the deadline.
 #: Anything else — a workflow that does not exist, a graph ComfyUI rejected, a
