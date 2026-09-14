@@ -1,91 +1,7 @@
-:root {
-  /* Dark is the default app skin; light + system are opt-in (see theme.js).
-     Every color is light-dark(LIGHT, DARK) — the DARK side keeps the original
-     values, so with the default `data-theme="dark"` the UI is pixel-identical
-     to before. The light side is new. */
-  color-scheme: light dark;
-
-  --bg-primary:   light-dark(#eceae4, #0f0f1a);
-  --bg-secondary: light-dark(#f6f5f2, #16162a);
-  --bg-tertiary:  light-dark(#ffffff, #1e1e3a);
-  --bg-hover:     light-dark(#e7e4dd, #252545);
-  --bg-input:     light-dark(#ffffff, #1a1a30);
-  --bg-sidebar:   light-dark(#efece6, #14142a);
-  --tint-subtle:  light-dark(rgba(0,0,0,.035), rgba(255,255,255,.02));
-  --code-inline:  light-dark(rgba(0,0,0,.07), rgba(0,0,0,.35));
-  --code-block-text: #c9d1d9;   /* code blocks stay dark in both themes */
-
-  --text-primary:   light-dark(#1c1c28, #e8e8f0);
-  /* dark side #8888aa → #8d8db0: it measured 4.48:1 on the progress panel
-     (--tint-subtle over a bot bubble) and 4.30:1 on --bg-hover, i.e. it missed
-     AA on the two surfaces it is used on most. A ~3% lift clears both without
-     collapsing the gap to --text-muted. */
-  --text-secondary: light-dark(#55556a, #8d8db0);
-  --text-muted:     light-dark(#5f5f74, #9a9ab8);   /* both sides bumped to pass AA (light was #73738c ≈3.8:1) */
-
-  --accent:       light-dark(#6d28d9, #7c3aed);
-  --accent-hover: light-dark(#7c3aed, #8b5cf6);
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        light-dark(#6d28d9, #a78bfa);
-  /* THE ACCENT AS TEXT — not as a fill. --accent / --accent-hover are tuned to
-     sit UNDER white (buttons, the send gradient, dots), and every place they
-     were used as small coloured text failed WCAG AA: 2.74–4.30:1 in dark
-     (model pill 3.69, Safe chip 3.35, bubble links 3.81, reaction names 2.83)
-     and 3.75–4.37:1 in light on the tinted chips. Both values below are
-     already in the palette — light reuses --accent's light value, dark reuses
-     --focus's — so nothing new enters the visual identity; the worst case is
-     now 4.67:1 and most sites land above 5.5:1. Fills keep using --accent /
-     --accent-hover; only TEXT uses this. */
-  --accent-text:  light-dark(#6d28d9, #a78bfa);
-
-  --border:       light-dark(#e0ddd6, #2a2a45);
-  --border-light: light-dark(#cfcbc4, #333355);
-
-  --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
-  --bot-bubble:  light-dark(#ffffff, #1e1e3a);
-
-  /* Markdown emphasis + quotes (see `.bubble blockquote` below for the why).
-     Teal is deliberately not reused anywhere else in the app. */
-  --md-quote:      light-dark(#0f766e, #5eead4);
-  --md-quote-text: light-dark(#155e57, #a5f3ea);
-  --md-em:         light-dark(#9a3412, #fcd34d);
-  --md-strong:     light-dark(#101018, #ffffff);
-  --md-mark-bg:    light-dark(#fde68a, rgba(251,191,36,.30));
-
-  --success: #34d399;
-  --error: #f87171;
-  --warning: #fbbf24;
-  /* …and the same three AS TEXT. The values above are picked to read as dots,
-     bars and fills on the DARK skin; used as small coloured text on the light
-     skin they collapse — the reaction manager's "image host unreachable" warning
-     measured 1.53:1 on the light modal, and --error text sat at 2.18–2.77:1.
-     The dark side is unchanged (it already passes, 4.54:1 at worst); only the
-     light side is darkened. Fills, dots, bars and badge backgrounds keep the
-     originals, so nothing about the app's colour identity moves. */
-  --success-text: light-dark(#065f46, #34d399);
-  --error-text:   light-dark(#b91c1c, #f87171);
-  --warning-text: light-dark(#92400e, #fbbf24);
-
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-
-  --sidebar-width: 72px;
-  --threadlist-width: 320px;
-
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-
-  /* Fluid type scale (rem-anchored, zoom-safe; max <= 2.5x min for WCAG 1.4.4) */
-  --step--1: clamp(.8125rem, .78rem + .18vw, .9rem);
-  --step-0:  clamp(1rem, .97rem + .18vw, 1.0625rem);
-  --step-1:  clamp(1.0625rem, 1rem + .35vw, 1.1875rem);
-  --step-2:  clamp(1.25rem, 1.15rem + .5vw, 1.45rem);
-}
-/* Manual theme override forces the scheme so light-dark() resolves; absence of
-   data-theme === "system" (follows the OS via color-scheme: light dark). */
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"]  { color-scheme: dark; }
+/* Theme tokens live in theme.css — must be loaded before this file. The
+   @import guarantees the cascade order even if an HTML omits theme.css
+   explicitly (graceful degradation: app.css still self-imports it). */
+@import "./theme.css";
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -350,6 +266,32 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 /* A quote's own code/links keep their normal upright faces — italic monospace
    is unreadable, and a link that changes colour inside a quote reads as broken. */
 .bubble blockquote code, .bubble blockquote pre { font-style: normal; }
+/* Quoted speech — the SAME colour as a block quote, deliberately. Both are
+   "someone else's words", so they get one colour and the app gains a reading
+   rule instead of a sixth hue: teal means quoted, wherever it appears.
+   (A warm cream was tried first, the way the ClawChat pack does it — but that
+   pack's body text is dimmer than ours, and against near-white body text a
+   cream is invisible, which is the whole complaint it was meant to fix.)
+   Not underlined and not purple, so it is never mistaken for a link. */
+.bubble .md-speech { color: var(--md-quote-text); }
+/* A parenthetical aside, dropped to the secondary text colour — quieter than
+   the sentence it interrupts, which is what an aside IS. Colour only: no
+   italics (that is emphasis's job) and no size change (that would reflow the
+   line). --text-secondary is already tuned to pass AA on both bubbles. */
+.bubble .md-paren { color: var(--text-secondary); }
+/* A footnote marker, and the notes themselves under a hairline. Small, muted
+   and out of the way: the note's text is on the marker's tooltip too. */
+.bubble .md-fn-ref { font-size: .75em; line-height: 0; color: var(--accent-text); }
+.bubble .md-footnotes {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: .9em; color: var(--text-secondary);
+}
+.bubble .md-footnotes ol { margin: 0; padding-inline-start: 20px; }
+.bubble .md-footnotes li { margin: 2px 0; }
+/* Keep a sub/superscript from stretching the line it sits in. */
+.bubble sub, .bubble sup { font-size: .75em; line-height: 0; position: relative; vertical-align: baseline; }
+.bubble sup { top: -0.5em; }
+.bubble sub { bottom: -0.25em; }
 .bubble em { color: var(--md-em); }
 .bubble strong { color: var(--md-strong); font-weight: 700; }
 /* Both, in either nesting order — marked emits <em><strong> or <strong><em>
@@ -887,9 +829,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .mobile-tabs { display: none; }
 
 /* ===================== Responsive ===================== */
-@media (max-width: 1024px) {
-  :root { --threadlist-width: 280px; }
-}
+/* --threadlist-width override below 1024px lives in theme.css (section 2). */
 
 @media (max-width: 768px) {
   /* The tab bar is 56px of content PLUS the gesture-bar inset (border-box), so
@@ -1044,6 +984,29 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   }
   .mobile-tabs .tab span { font-size: 19px; }
   .mobile-tabs .tab.active { color: var(--accent-text); }
+
+  /* --- Jobs board (mobile) ---
+   * The host lives at #job-board-host and is mutually exclusive with
+   * #chatview. We give it a full-viewport panel sized to clear the tab
+   * bar (56px + safe-area), with the toolbar pinned at the top and the
+   * list scrolling underneath. No composers, no chat-header, no scroll
+   * residue — the panel is its own screen. */
+  .app[data-view="jobs"] #job-board-host {
+    width: 100vw;
+    height: calc(100dvh - 56px - env(safe-area-inset-bottom));
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+  .app[data-view="jobs"] #job-board-host .jobs-toolbar {
+    /* The toolbar stays pinned so the dropdowns are always reachable above
+       the fold; the list scrolls beneath it. */
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-primary);
+  }
+  .app[data-view="jobs"] #job-board-host .jobs-list {
+    /* Only the list scrolls; the toolbar is the chrome. */
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /* ===================== Lock / PIN / Safe Mode ===================== */
@@ -1229,15 +1192,8 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT
    style); USER messages keep their right-aligned bubble for the
    texting-vs-tool contrast.
-   The 760px reading column was removed 2026-09-04 by request: on a wide window it
-   left agent prose AND markdown tables sitting in the left half of the pane
-   while the rest of the pane stayed empty. Agent turns here are working
-   output — tables, code, checklists — not an article, so they get the whole
-   reading window. Tune with --assistant-col if a measure cap is ever wanted
-   back (e.g. `min(760px, 100%)`); every assistant surface reads this one var
-   so the streamed row, the finalized row and the typing placeholder cannot
-   drift apart. */
-:root { --assistant-col: 100%; }
+   --assistant-col is defined in theme.css (section 3). See that file for the
+   history of the 760px reading column. */
 .msg.assistant .msg-col { max-width: var(--assistant-col); }
 .msg.assistant > .msg-col > .bubble:not(.sub) {
   background: transparent; border: none; padding: 2px 0 0;
@@ -1355,34 +1311,10 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 
 /* ========================================================================= *
  * REDESIGN 2026 — slicker surfaces, motion, skeletons, status, recovery UI.
- * Appended so it overrides the base by source order; the dark-purple identity
- * and every WS/REST + Safe-Mode behaviour are unchanged. New tokens only add.
+ * The token definitions for this redesign (--shadow-*, --ring, --accent-grad,
+ * --easing, --radius-xl, --bg-elevated, --scrollbar-thumb) live in theme.css
+ * sections 4 + 5. This banner stays so the marker remains grep-able.
  * ========================================================================= */
-:root {
-  /* Elevation: soft, layered shadows give depth without heavy borders. */
-  --shadow-sm: 0 1px 2px light-dark(rgba(40,30,70,.08), rgba(0,0,0,.30));
-  --shadow-md: 0 6px 20px light-dark(rgba(40,30,70,.12), rgba(0,0,0,.40));
-  --shadow-lg: 0 18px 50px light-dark(rgba(40,30,70,.20), rgba(0,0,0,.55));
-  --ring: var(--focus);
-  /* A subtle brand gradient reused on the send button, active states, etc. */
-  --accent-grad: linear-gradient(135deg, var(--accent-hover), var(--accent));
-  --easing: cubic-bezier(.22, 1, .36, 1);   /* gentle "spring-ish" ease-out */
-  --radius-xl: 20px;
-  --bg-elevated: light-dark(#ffffff, #20203c);
-  --scrollbar-thumb: var(--border-light);
-}
-:root[data-theme="dark"], :root:not([data-theme]) {
-  /* Lift dark surfaces a touch + add a faint cool cast so panels read as
-     layered glass rather than flat slabs. Values stay within the original
-     navy-purple family so the app is instantly recognizable. */
-  --bg-primary:   #0e0e1b;
-  --bg-secondary: #15152a;
-  --bg-tertiary:  #1d1d39;
-  --bg-elevated:  #232342;
-  --bg-hover:     #262648;
-  --border:       #292945;
-  --border-light: #38385c;
-}
 
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
@@ -2894,6 +2826,27 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .lightbox.viewer {
   background: var(--bg-primary);
   display: grid;
+  /* `minmax(0, 1fr)`, and it is load-bearing — NOT the implicit column this
+     grid used to get. An implicit column is `auto`, which is sized from its
+     items' content and does not shrink to the container: on a 390px phone the
+     header's own content (four 44px buttons that must not shrink, plus a
+     nowrap path) sized the single column to 594px, and BOTH rows — header and
+     the story frame with them — became 594px wide inside a 390px screen.
+
+     The overflow was not merely ugly, it was unreachable. This container is
+     `overflow: hidden`, so the reader cannot scroll it; but hidden overflow is
+     still SCROLLABLE PROGRAMMATICALLY, and opening the viewer focuses the
+     close button — which sits at the far right of that 594px row. The browser
+     dutifully scrolled the container 204px to reveal it and left the first
+     204px of every line permanently off the left edge, with no way to scroll
+     back and no way to zoom out. That is the "I can't see the left side of the
+     story" report, and it reproduced in Chromium at 390px, not just on iOS.
+
+     A `1fr` track resolves against the container, and the `minmax(0, …)` is
+     what lets it go BELOW its content's minimum instead of being floored by
+     it. With the column pinned, scrollWidth equals clientWidth, so there is no
+     longer any scroll for a focus to trigger. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   align-items: stretch;
   justify-content: stretch;
@@ -2902,6 +2855,10 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   height: 100dvh;
   overflow: hidden;
 }
+/* Grid items default to `min-width: auto`, which refuses to shrink below the
+   content's minimum — the same floor the column above just escaped. Both rows
+   opt out, so a long path or a future button cannot blow the row back out. */
+.viewer-header, .viewer-body { min-width: 0; }
 
 .viewer-header {
   display: flex; align-items: center; gap: 6px;
@@ -3121,3 +3078,148 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
    by renderMenuBots when either half is empty, so the menu never opens with a
    rule floating above or below nothing. */
 .tools-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }
+
+/* ===================== Jobs board =====================
+ * Added 2026-09-14. Pure additive — no existing rule overridden. The
+ * planner said "no overrides to existing rules"; this set uses its
+ * own class namespace (.job-*, .jobs-*) and reuses --chip / --padding
+ * variables that the rest of the app already defines.
+ *
+ * 2026-09-15: jobs(mobile) + jobs(unmount) — the board now lives in a
+ * dedicated #job-board-host slot (a sibling of #chatview, not a child).
+ * The previous rule made .chatview show the board list, which stacked
+ * the toolbar on top of the chat header / composer on phones. The new
+ * slot is mutually exclusive with .chatview / #messages: when the
+ * board is up the chat panel hides entirely, so an unmount leak cannot
+ * leave board chrome under a chat. */
+
+/* The host slot. Hidden by default (the [hidden] attr starts it that
+ * way); revealed when setView('jobs') flips it. Sits inside #app next
+ * to #chatview so its flex-column layout matches the other panels. */
+#job-board-host {
+  display: none;
+  flex-direction: column;
+  background: var(--bg-primary);
+  position: relative;
+  overflow: hidden;
+  /* Default full-height: matches .panel behaviour on desktop. The mobile
+     override below adds top safe-area inset and bottom tab-bar clearance. */
+  height: 100%;
+}
+.app[data-view="jobs"] #job-board-host { display: flex; }
+.app[data-view="jobs"] #chatview,
+.app[data-view="jobs"] #messages { display: none; }
+
+/* The board list itself */
+.jobs-toolbar {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 12px 16px; border-bottom: 1px solid var(--border, #e3e3e3);
+}
+.jobs-toolbar select,
+.jobs-toolbar input {
+  padding: 6px 10px; border: 1px solid var(--border, #e3e3e3);
+  border-radius: 8px; background: var(--bg-elevated, #fff);
+  color: var(--text-primary, #111); font: inherit;
+}
+.jobs-list { list-style: none; padding: 12px 16px; margin: 0; }
+.jobs-empty { padding: 24px; color: var(--text-muted, #888); text-align: center; }
+.jobs-empty--error { color: var(--danger, #c0392b); }
+.job-row {
+  padding: 14px 16px; margin-bottom: 8px;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 10px; background: var(--bg-elevated, #fff);
+  color: var(--text-primary, #111);
+}
+.job-row:hover { border-color: var(--accent, #6e56cf); }
+.job-row--archived { opacity: 0.6; }
+.job-row__head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.job-row__title {
+  font-weight: 600; font-size: 16px; color: var(--text-primary, #111);
+  text-decoration: none;
+}
+.job-row__title:hover { text-decoration: underline; }
+.job-row__meta { color: var(--text-muted, #888); font-size: 13px; margin: 4px 0; }
+.job-row__salary { font-size: 14px; color: var(--text-primary, #111); margin: 4px 0; }
+.job-row__tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.job-row__foot { font-size: 12px; color: var(--text-muted, #888); margin-top: 4px; }
+
+/* Generic chip class — used by both list and card */
+.job-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-hover, #f1f1f4); color: var(--text-primary, #333);
+  font-size: 12px; line-height: 18px;
+}
+.job-chip-state { font-weight: 500; }
+.job-chip-state--pending { background: #f1f1f4; color: #555; }
+.job-chip-state--yes { background: #d4f8d4; color: #1d6b3a; }
+.job-chip-state--no { background: #fde2e2; color: #8a2222; }
+.job-chip-state--maybe { background: #fff5d4; color: #8a6a1f; }
+.job-chip-state--applied { background: #d4e6f8; color: #1f4d8a; }
+.job-chip-state--archived { background: #ececec; color: #888; }
+.job-chip-state--duplicate { background: #ececec; color: #888; }
+.job-chip--dup { background: #ececec; color: #555; }
+.job-chip--expired { background: #fde2e2; color: #8a2222; }
+
+/* Header card on the chat thread (one per active job thread) */
+.job-card {
+  padding: 14px 16px; margin: 0 16px 12px;
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 12px; background: var(--bg-elevated, #fff);
+  color: var(--text-primary, #111);
+}
+.job-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.job-card__title { font-weight: 700; font-size: 18px; margin: 0; flex: 1; color: var(--text-primary, #111); }
+.job-card__meta { color: var(--text-muted, #888); font-size: 13px; margin: 6px 0; }
+.job-card__tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.job-card__brief { white-space: pre-wrap; margin: 8px 0; color: var(--text-primary, #111); }
+.job-card__link {
+  display: inline-block; padding: 6px 12px; border-radius: 8px;
+  background: var(--accent, #6e56cf); color: #fff;
+  text-decoration: none; font-size: 13px; margin: 4px 0;
+}
+.job-card__link:hover { filter: brightness(1.1); }
+.job-card__why { margin-top: 8px; font-size: 13px; }
+.job-card__why-summary { cursor: pointer; color: var(--accent, #6e56cf); }
+.job-card__why ul { margin: 4px 0 0 16px; color: var(--text-muted, #888); }
+.job-card__why-note { color: var(--text-muted, #888); margin: 4px 0; font-size: 12px; }
+
+/* Vote controls + reason picker modal */
+.job-vote { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.job-vote__btn {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border, #e3e3e3);
+  background: var(--bg-elevated, #fff); color: var(--text-primary, #111);
+  font: inherit; cursor: pointer;
+}
+.job-vote__btn:hover { border-color: var(--accent, #6e56cf); }
+.job-vote__btn--yes { background: #d4f8d4; border-color: #1d6b3a; color: #1d6b3a; }
+.job-vote__btn--no { background: #fde2e2; border-color: #8a2222; color: #8a2222; }
+.job-vote__btn--maybe { background: #fff5d4; border-color: #8a6a1f; color: #8a6a1f; }
+.job-vote__btn--applied { background: #d4e6f8; border-color: #1f4d8a; color: #1f4d8a; }
+.job-vote__btn--undo { color: var(--text-muted, #888); }
+
+.job-reason-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+}
+.job-reason {
+  background: var(--bg-elevated, #fff); color: var(--text-primary, #111);
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 12px;
+  padding: 20px; min-width: 280px; max-width: 360px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.job-reason h4 { margin: 0 0 8px; }
+.job-reason__opt {
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border, #e3e3e3);
+  background: var(--bg-input, #fff); color: var(--text-primary, #111);
+  text-align: left; cursor: pointer;
+}
+.job-reason__opt:hover { border-color: var(--accent, #6e56cf); }
+.job-reason__cancel {
+  padding: 6px 12px; border-radius: 8px; border: 0;
+  background: transparent; color: var(--text-muted, #888); cursor: pointer;
+}

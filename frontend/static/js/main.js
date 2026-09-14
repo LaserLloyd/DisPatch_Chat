@@ -4,7 +4,7 @@
 
 import { api, setOnLocked } from './api.js?v=22';
 import { ChatSocket } from './ws.js?v=8';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, stripMediaSource, toPlainPreview } from './markdown.js?v=26';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=28';
 import { installChecklists, applyChecklistState } from './checklist.js?v=2';
 import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=13';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -22,6 +22,8 @@ import {
   reactionMessageEl, botHasReactions,
 } from './reactions.js?v=15';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=6';
+import { mountJobs, unmountJobs } from './jobs.js?v=3';
+import { mountJobCard, unmountJobCard } from './job-thread.js?v=2';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -152,6 +154,7 @@ const dom = {};
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
+ 'job-board-host', 'tab-jobs',
  'retry-chip', 'retry-chip-btn',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
  'collapse-threads', 'expand-threads', 'crop-backdrop', 'crop-img', 'crop-box',
@@ -516,7 +519,11 @@ function setView(view) {
     t.classList.toggle('active', on);
     if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
+  // Jobs board: jobs(mobile) introduces the host slot; the routing is
+  // completed in jobs(unmount). For now the slot exists but is unused.
 }
+
+// History-aware navigation (mobile only). The bots screen is the root of the
 
 // History-aware navigation (mobile only). The bots screen is the root of the
 // history stack, so the browser/hardware Back button walks chat → threads →
@@ -619,7 +626,17 @@ function renderSidebarInner() {
       // .bot-name-tip hover tip on desktop.
       'aria-label': bot.name,
       draggable: state.decoy ? 'false' : 'true',
-      onclick: () => selectBot(bot.id),
+      onclick: () => {
+        if (bot.id === 'jobboard') {
+          // The jobboard bot gets its own entry-point: clicking it opens
+          // the board list view rather than the daily-thread fallback.
+          // A full session is required; decoy callers are refused by
+          // the backend's _is_decoy redaction in GET /api/jobs.
+          setView('jobs');
+          return;
+        }
+        selectBot(bot.id);
+      },
     });
     btn.append(avatarNode(bot, 'bot-avatar'));
     btn.append(el('span', { class: 'bot-name-tip', text: bot.name }));
@@ -1253,6 +1270,8 @@ function messageEl(msg) {
     // (linkifyPlain escapes everything else exactly as escapeHtml did).
     bubble.innerHTML = linkifyPlain(text).replace(/\n/g, '<br>');
     retargetLinks(bubble);
+    markSpeech(bubble);
+    markParens(bubble);
     if (!text && media.length && !state.decoy) bubble.classList.add('media-only');
     // Render document cards below the bubble.
     if (!state.decoy) {
@@ -1382,6 +1401,19 @@ function renderSkeleton() {
 function renderMessages(stick = true) {
   const box = dom['messages'];
   box.innerHTML = '';
+  // Job header card — only when the active thread's bot is `jobboard`,
+  // a no-op for every other bot (the brief mirrors the dashboard mount
+  // pattern). The card prepends above the messages and pushes everything
+  // down; the composer and the existing message renderer are untouched.
+  if (state.activeThread && state.activeThread.bot_id === 'jobboard') {
+    const cardHost = document.createElement('div');
+    cardHost.id = 'job-card-host';
+    cardHost.dataset.threadId = state.activeThread.id;
+    box.append(cardHost);
+    mountJobCard(cardHost).catch(() => {});
+  } else {
+    unmountJobCard();
+  }
   if (!state.messages.length) {
     const wbot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
     const welcome = el('div', { class: 'empty-state welcome' }, [
@@ -2364,7 +2396,7 @@ let suppressScrollSave = false;
 function releaseScrollSave() {
   requestAnimationFrame(() => setTimeout(() => { suppressScrollSave = false; }, 0));
 }
-async function openThread(id, { background = false } = {}) {
+async function openThread(id, { background = false, botId = null } = {}) {
   const switching = state.activeThreadId !== id;
   suppressScrollSave = true;
   // The jump-to-new counter is per-view: a real switch starts it fresh so it
@@ -2382,6 +2414,30 @@ async function openThread(id, { background = false } = {}) {
   const t = state.threads.find((x) => x.id === id);
   state.activeThreadId = id;
   state.activeThread = t || state.activeThread;
+  // From the jobs board (or any other path that hands a thread_id without
+  // first calling selectBot()): state.threads only holds the previously-
+  // selected bot's threads, so `t` is undefined and the stub above leaves
+  // state.activeThread as null. The chat header's "Job Board · Senior Eng"
+  // title and the .job-card auto-mount in renderMessages() both gate on
+  // state.activeThread.bot_id === 'jobboard' — without a stub they silently
+  // never fire. Board callers pass botId='jobboard' so we can stub the
+  // minimum needed for routing; the async fetch below patches in the real
+  // title/avatar_snapshot once /api/jobs/<id> resolves, without blocking the
+  // first paint. Existing threads (Bits, etc.) are unaffected: they
+  // always come through selectBot() first, so `t` is found and this branch
+  // is skipped. The local `t` above shadows the imported i18n `t`, so the
+  // stub title is a hardcoded fallback — `threads.untitled` resolves to the
+  // same string in every shipped locale, so a translate() pass isn't worth
+  // the shadowing gymnastics (and the WS-fetched title below replaces this
+  // within a round-trip anyway).
+  if (!t && botId) {
+    state.activeThread = { id, bot_id: botId, title: 'New Chat' };
+    api.jobs.get(id).then((r) => {
+      if (state.activeThreadId !== id || !r || !r.thread) return;
+      state.activeThread = { ...state.activeThread, ...r.thread };
+      renderChatHeader();
+    }).catch(() => {});
+  }
   // One-directional reconcile from the LOCAL cache: only ever SET the flag.
   // Clearing here could race a just-sent message (the cached status lags the
   // server); clears come from thinking/stopped events and server-fetched
@@ -5137,6 +5193,17 @@ function applyAuthChrome() {
     resetReactions();
     loadReactions(true);
   }
+  // Mobile Jobs tab: shown only when the server has a 'jobboard' bot
+  // configured AND the user is unlocked (the route is full-session only —
+  // /api/jobs returns the empty shape for a decoy, see backend/app/jobs.py).
+  // The tab starts hidden in index.html, so the default boot of a no-jobs
+  // install does not show a dead button.
+  const hasJobboard = state.bots.some((b) => b.id === 'jobboard');
+  if (dom['tab-jobs']) {
+    const show = !state.decoy && hasJobboard;
+    dom['tab-jobs'].classList.toggle('hidden', !show);
+    dom['tab-jobs'].hidden = !show;
+  }
   dom['lock-now'].classList.toggle('hidden', !full);
   dom['bm-lock'].classList.toggle('hidden', !full);
   dom['attach-btn'].classList.remove('hidden');
@@ -6368,6 +6435,11 @@ async function init() {
   // time-boxed internally, so a hung fetch degrades to English rather than
   // holding the boot veil up.
   await i18nInit();
+  // Expose openThread + setView + unmountJobs for cross-module callers.
+  // Wired up by jobs(unmount); see that commit for the rationale.
+  // window.__openThread = openThread;
+  // window.__setView = setView;
+  // window.unmountJobs = unmountJobs;
   onI18nChange(reRenderForLocale);
   applyRailLabels();
   // Privacy mode, if this device has it on: drop the offline cache, unregister
@@ -6411,6 +6483,7 @@ async function init() {
   wireAuthEvents();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
+  // jobs(unmount) backstop will live here in the next commit.
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
   // list's relative timestamps ("5m") drift.
   let lastTick = '';

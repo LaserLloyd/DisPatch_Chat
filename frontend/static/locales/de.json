@@ -49,6 +49,7 @@
     "tab_bots": "Bots",
     "tab_chats": "Chats",
     "tab_messages": "Nachrichten",
+    "tab_jobs": "Jobs",
     "label_lock": "Sperren",
     "label_unlock": "Entsperren",
     "label_files": "Dateien",
@@ -873,5 +874,74 @@
     "show_hidden": "Versteckte Dateien und Ordner zeigen",
     "save_failed": "Konnte nicht gespeichert werden: {error}",
     "bad_root": "Kein vorhandener Ordner, oder ein Ordner, der immer abgelehnt wird"
+  },
+  "jobs": {
+    "title": "Job Board",
+    "empty": "No jobs yet — post one via the API or wait for the curator.",
+    "loading": "Loading…",
+    "error": "Could not load jobs: {msg}",
+    "untitled": "(untitled)",
+    "link": {
+      "apply": "View original posting →"
+    },
+    "badge": {
+      "duplicate": "duplicate",
+      "expired": "expired"
+    },
+    "sort": {
+      "label": "Sort",
+      "updated": "Last activity",
+      "salary": "Salary",
+      "posted": "Newest posted"
+    },
+    "filter": {
+      "all": "All states",
+      "any_remote": "Any remote type",
+      "tag_placeholder": "Filter by tag"
+    },
+    "state": {
+      "pending": "Pending",
+      "yes": "Yes",
+      "no": "No",
+      "maybe": "Maybe",
+      "applied": "Applied",
+      "archived": "Archived",
+      "duplicate": "Duplicate"
+    },
+    "remote": {
+      "remote": "Remote",
+      "hybrid": "Hybrid",
+      "onsite": "Onsite"
+    },
+    "age": {
+      "today": "today",
+      "yesterday": "yesterday",
+      "days_ago": "{n}d ago"
+    },
+    "vote": {
+      "yes": "👍 Yes",
+      "no": "👎 No",
+      "maybe": "🤔 Maybe",
+      "applied": "✓ Applied",
+      "undo": "↺ Undo",
+      "no_reason": "Why no?",
+      "cancel": "Cancel"
+    },
+    "reasons": {
+      "wrong_location": "Wrong location",
+      "too_senior": "Too senior",
+      "too_junior": "Too junior",
+      "compensation": "Compensation",
+      "company": "Company",
+      "wrong_domain": "Wrong domain",
+      "already_applied": "Already applied",
+      "duplicate": "Duplicate",
+      "other": "Other"
+    },
+    "score": {
+      "why": "Score {score}",
+      "embed_unavailable": "Score {score} (embedding unavailable)",
+      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    }
   }
 }

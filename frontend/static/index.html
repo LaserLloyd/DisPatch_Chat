@@ -125,8 +125,9 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/app.css?v=60" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=4" />
+  <link rel="stylesheet" href="/static/theme.css?v=1" />
+  <link rel="stylesheet" href="/static/app.css?v=64" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=5" />
   <script type="module" src="/static/js/theme.js?v=13"></script>
 </head>
 <body>
@@ -453,6 +454,15 @@
         </div>
       </div>
     </section>
+
+    <!-- Job board host. A SIBLING of #chatview (not a child), so the board has
+         its own full-height panel and shares no DOM with the chat chrome.
+         Previous mount painted the board into #chatview, so on mobile the
+         toolbar sat on top of the chat header / composer when the user
+         switched views without an explicit unmount — see jobs(unmount) and
+         jobs(mobile). Hidden by default; setView('jobs') reveals it and
+         mountJobs() appends a [data-jobs-root] inside. -->
+    <section class="panel jobboard-host" id="job-board-host" hidden aria-label="Job Board"></section>
   </div>
 
   <!-- Mobile bottom tabs -->
@@ -462,6 +472,11 @@
     <button data-view="bots" class="tab active" aria-current="page"><span>🤖</span><span class="tab-label" data-i18n="nav.tab_bots">Bots</span></button>
     <button data-view="threads" class="tab"><span>💬</span><span class="tab-label" data-i18n="nav.tab_chats">Chats</span></button>
     <button data-view="chat" class="tab"><span>🗨️</span><span class="tab-label" data-i18n="nav.tab_messages">Messages</span></button>
+    <!-- Jobs tab: only useful when JOBS_ENABLED=1 and the 'jobboard' bot is
+         configured. The click handler is a no-op (toast) otherwise. Hidden by
+         default; main.js boot reveals it once state.bots resolves to include
+         a jobboard bot. Reuses jobs.title for the accessible name. -->
+    <button data-view="jobs" class="tab hidden" id="tab-jobs" hidden aria-label="Job Board" data-i18n-attr="aria-label=jobs.title"><span>📋</span><span class="tab-label" data-i18n="nav.tab_jobs">Jobs</span></button>
   </nav>
 
   <!-- Settings modal — a tab container.
@@ -925,6 +940,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=75"></script>
+  <script type="module" src="/static/js/main.js?v=78"></script>
 </body>
 </html>

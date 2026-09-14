@@ -2,9 +2,10 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v89';  // v89: inline links are retargeted at the reading device's host (a bot's http://127.0.0.1:… was dead on every device but the box), the StudioForge pane stops framing a panel that sends X-Frame-Options: DENY, and markdown gains coloured quotes, an emphasis ladder and ==highlight==.
+const CACHE = 'local-chat-v96';  // v96: jobs(mobile) + jobs(unmount) — dedicated #job-board-host slot (sibling of #chatview, not child), mobile Jobs tab, mount path now uses the slot so the toolbar cannot bleed into the chat panel.
 const SHELL = [
   '/',
+  '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css',
   '/static/js/main.js', '/static/js/api.js', '/static/js/ws.js',
@@ -14,6 +15,10 @@ const SHELL = [
   '/static/js/nim.js', '/static/js/about.js', '/static/js/pins.js',
   '/static/js/imagejobs.js', '/static/js/links.js', '/static/js/viewer.js',
   '/static/js/menubots.js',
+  // Jobs board (added 2026-09-14). Additive modules only — must be in the
+  // shell or the cold offline start loads the new sidebar entry but no
+  // module, and the click fails silently with a blank panel.
+  '/static/js/jobs.js', '/static/js/job-thread.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.
