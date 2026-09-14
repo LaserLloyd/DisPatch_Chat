@@ -4847,9 +4847,15 @@ async def _deliver_assistant_text(
                                  else DEDUP_RECENT_WINDOW_S))
             if existing is not None:
                 if source_id:
+                    # MessageOut doesn't carry source_id (deliberately — it
+                    # would leak onto the wire). Pull just that one column
+                    # for the identity comparison; the wipe-fix path is
+                    # rare-race so the extra round-trip is fine.
+                    existing_source_id = await db.get_message_source_id(
+                        existing.id)
                     same_message = (
-                        existing.source_id is None
-                        or existing.source_id == source_id
+                        existing_source_id is None
+                        or existing_source_id == source_id
                     )
                     if not same_message:
                         existing = None

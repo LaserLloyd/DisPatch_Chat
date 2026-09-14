@@ -1027,6 +1027,16 @@ class Database:
         row = await cur.fetchone()
         return self._message_from_row(row) if row else None
 
+    async def get_message_source_id(self, msg_id: str) -> str | None:
+        # Just the source_id column — the wipe-fix path needs it for the
+        # identity check without paying for a full MessageOut roundtrip and
+        # without leaking source_id onto the wire (MessageOut deliberately
+        # omits it; only this rare-race dedup gate reads it back from the row).
+        cur = await self.db.execute(
+            "SELECT source_id FROM messages WHERE id = ?", (msg_id,))
+        row = await cur.fetchone()
+        return row["source_id"] if row else None
+
     async def delete_message(self, msg_id: str) -> None:
         await self.db.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
         await self.db.commit()
