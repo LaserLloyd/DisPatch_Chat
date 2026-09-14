@@ -182,10 +182,10 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   const sw = readFileSync(join(STATIC, 'sw.js'), 'utf8');
   const m = /const CACHE = '([^']+)'/.exec(sw);
   assert.ok(m, 'sw.js must declare CACHE');
-  // Pin against the shipped CACHE name (v97 after threads(desktop) bumped
-  // v96→v97 to install thread-sections.js). If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v97',
-    'sw.js CACHE must be local-chat-v97 so old shells drop and the new modules install');
+  // Pin against the shipped CACHE name (v98 after threads(desktop) bumped
+  // v97→v98 to install thread-sections.js). If you bump again, bump here too.
+  assert.equal(m[1], 'local-chat-v98',
+    'sw.js CACHE must be local-chat-v98 so old shells drop and the new modules install');
 });
 
 // =============================================================================

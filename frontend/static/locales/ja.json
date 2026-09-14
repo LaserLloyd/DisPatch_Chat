@@ -80,7 +80,11 @@
     "empty_no_threads": "{name} とのチャットはまだありません",
     "empty_cta": "最初のチャットを始める →",
     "preview_empty": "メッセージはまだありません",
-    "preview_thinking": "考え中…"
+    "preview_thinking": "考え中…",
+    "section": {
+      "today": "今日",
+      "older": "過去"
+    }
   },
   "chat": {
     "select": "チャットを選択",

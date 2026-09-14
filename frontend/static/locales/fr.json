@@ -82,7 +82,11 @@
     "empty_no_threads": "Aucun chat avec {name}",
     "empty_cta": "Démarre ton premier chat →",
     "preview_empty": "Aucun message",
-    "preview_thinking": "réfléchit…"
+    "preview_thinking": "réfléchit…",
+    "section": {
+      "today": "Aujourd'hui",
+      "older": "Plus anciens"
+    }
   },
   "chat": {
     "select": "Choisis une conversation",

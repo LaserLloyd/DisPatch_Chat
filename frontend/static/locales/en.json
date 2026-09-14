@@ -81,7 +81,11 @@
     "empty_no_threads": "No chats with {name} yet",
     "empty_cta": "Start your first chat →",
     "preview_empty": "No messages yet",
-    "preview_thinking": "thinking…"
+    "preview_thinking": "thinking…",
+    "section": {
+      "today": "Today",
+      "older": "Older"
+    }
   },
   "chat": {
     "select": "Select a chat",

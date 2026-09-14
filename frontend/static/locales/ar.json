@@ -85,7 +85,11 @@
     "empty_no_threads": "لا توجد محادثات مع {name} بعد",
     "empty_cta": "ابدأ محادثتك الأولى ←",
     "preview_empty": "لا رسائل بعد",
-    "preview_thinking": "يفكّر…"
+    "preview_thinking": "يفكّر…",
+    "section": {
+      "today": "اليوم",
+      "older": "أقدم"
+    }
   },
   "chat": {
     "select": "اختر محادثة",

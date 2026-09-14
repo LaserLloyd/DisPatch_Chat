@@ -646,6 +646,48 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .thread-pin-icon { font-size: 11px; margin-inline-end: 3px; opacity: 0.8; flex-shrink: 0; }
 .thread-item.pinned { border-inline-start: 2px solid var(--accent); padding-inline-start: 8px; }
 
+/* ===================== Thread list — Today / Older section headers =====================
+ * Desktop-only chrome. The mobile @media below sets `display: none` so the
+ * list stays flat under 769px. repaintPreserving() rebuilds the list on every
+ * WS frame, but the heads are tiny and the gradient border is one painted
+ * line, so the repaint cost is the same as a few extra empty rows.
+ *
+ * Pinned rows already have .pinned — they keep their accent bar; the section
+ * head sits ABOVE them, not on top. The Today header does not pin to the top
+ * of the list (first-cut requirement); a future iteration can add
+ * `position: sticky; top: 0` without re-touching the JS.
+ */
+.thread-section-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 8px 6px 8px;
+  margin: 0;
+  position: relative;
+}
+/* The hairline rule fades right-to-transparent so the list does not have a
+ * hard pixel edge under the label. Pseudo-element rather than border-image:
+ * the latter is unreliable with a gradient on a single border side across
+ * browsers, and the pseudo keeps the actual border available for any future
+ * hover/focus style. The gradient sits in the same horizontal slot as a
+ * normal .thread-item divider would. */
+.thread-section-head::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; bottom: 0;
+  height: 1px;
+  background: linear-gradient(to right, var(--border), transparent);
+  pointer-events: none;
+}
+.thread-section-head__label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  user-select: none;
+}
+/* Mobile: flat list, no headers. Mirrors the existing @media (max-width: 768px)
+ * gate used for the rest of the mobile layout. Re-stated under the mobile
+ * block below for clarity. */
+
 /* ===================== Sub messages (collapsed "working" box) ===================== */
 .msg.sub-msg { margin: 2px 0; }
 .bubble.sub { padding: 0; background: transparent; border: none; }
@@ -922,6 +964,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .app[data-view="threads"] .threadlist { display: flex; width: 100vw; border-inline-end: none; }
   .app[data-view="chat"] .chatview { display: flex; }
   .thread-item { padding: 13px 10px; }       /* bigger touch targets */
+  /* Today / Older section heads are desktop chrome — mobile list is flat.
+   * main.js also skips the headers under isMobile(); the CSS is the backstop
+   * in case a render lands with a stale DOM before the JS gate fires. */
+  .thread-section-head { display: none; }
   .icon-btn { width: 44px; height: 44px; }
   .collapse-btn, .expand-btn { display: none; }  /* desktop-only feature */
 

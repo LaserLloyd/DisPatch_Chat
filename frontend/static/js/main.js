@@ -86,6 +86,19 @@ const state = {
   // browser could reach the panel (a separate question from whether the server
   // could — see studioforgeProbe).
   studioforge: { status: null, clientReachable: null },
+  // Today / Older section bucketing — cached across repaints. The signature
+  // captures everything that can move a thread between buckets, so a WS frame
+  // that doesn't change `state.threads` (the common heartbeat) skips
+  // re-bucketing. Cleared implicitly when state.threads is reassigned
+  // (different array reference → different signature by construction).
+  _lastSectionSig: null,
+  _lastSections: null,
+  // threadId → 'user' | 'assistant' | 'system'. Currently unused for
+  // bucketing — the backend does not expose role on the thread row — but the
+  // map is wired in so the (b) "user-message within 7 days" rule can be
+  // turned on by populating it from the WS message frames. See the open issue
+  // in the report.
+  lastMessageRole: new Map(),
 };
 
 // The DeepSeek Harness (dsh) pane is rendered as a pseudo-bot in the sidebar
@@ -881,10 +894,43 @@ function renderThreadsInner() {
     ]));
     return;
   }
-  // `th`, not `t`: the translator is imported under that name and a thread
-  // variable called `t` would shadow it for the whole loop body.
-  for (const th of state.threads) {
-    wrap.append(threadRowEl(th, bot));
+  // Desktop-only: split into Today / Older (suppressed on mobile and while the
+  // search modal is open — see shouldShowThreadSections). The pure bucketing
+  // function lives in thread-sections.js; this caller is just a controller.
+  const showSections = shouldShowThreadSections({
+    isMobile: isMobile(),
+    // The search modal sits over the threads list on a wide viewport, so a
+    // single Older-thread hit could otherwise appear under a misleading
+    // "Older" header. Hide the chrome while the modal is up; it returns when
+    // the user closes search.
+    searchOpen: !!(dom['search-backdrop'] && !dom['search-backdrop'].classList.contains('hidden')),
+  });
+  if (!showSections) {
+    // `th`, not `t`: the translator is imported under that name and a thread
+    // variable called `t` would shadow it for the whole loop body.
+    for (const th of state.threads) wrap.append(threadRowEl(th, bot));
+    return;
+  }
+  const now = Date.now();
+  // -new Date().getTimezoneOffset() is the convention thread-sections.js uses
+  // for "minutes east of UTC" (the opposite sign of JS Date's API).
+  const tzOffsetMin = -new Date().getTimezoneOffset();
+  // Cache the bucketing across repaints that would produce the same buckets.
+  // The full repaint fires on every WS frame; bucketThreads over 200 threads
+  // is wasted work if the inputs haven't moved.
+  const sig = filterSignature(state.threads, now, tzOffsetMin, state.lastMessageRole);
+  let sections;
+  if (state._lastSectionSig === sig && state._lastSections) {
+    sections = state._lastSections;
+  } else {
+    sections = bucketThreads(state.threads, now, tzOffsetMin, state.lastMessageRole);
+    state._lastSectionSig = sig;
+    state._lastSections = sections;
+  }
+  for (const section of sections) {
+    if (!section.items.length) continue;     // empty sections: no header, no list
+    wrap.append(threadSectionHeadEl(section.name, t));
+    for (const th of section.items) wrap.append(threadRowEl(th, bot));
   }
 }
 
@@ -5973,9 +6019,20 @@ function openSearch() {
   dom['search-results'].innerHTML = '';
   dom['search-results'].append(el('div', { class: 'cmdk-empty', text: t('search.prompt') }));
   searchHits = [];
+  // Suppress the Today / Older section heads while the search modal is up
+  // (the threads list is visible behind it on desktop, so a single Older-
+  // thread hit could otherwise appear under a misleading "Older" header).
+  if (dom['threads']) renderThreads();
   setTimeout(() => dom['search-input'].focus(), 30);
 }
-function closeSearch() { dom['search-backdrop'].classList.add('hidden'); }
+function closeSearch() {
+  dom['search-backdrop'].classList.add('hidden');
+  // The thread list is visible behind the search modal on wide viewports,
+  // and section heads are suppressed while the modal is open. Re-render now
+  // so the heads return the moment the user closes search — without this,
+  // the list stays flat until the next WS frame or user action repaints it.
+  if (dom['threads']) renderThreads();
+}
 let searchSeq = 0;
 async function runSearch(q) {
   q = (q || '').trim();

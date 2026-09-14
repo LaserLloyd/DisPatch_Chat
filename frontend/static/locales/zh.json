@@ -80,7 +80,11 @@
     "empty_no_threads": "还没有和 {name} 的对话",
     "empty_cta": "开始第一次对话 →",
     "preview_empty": "还没有消息",
-    "preview_thinking": "思考中…"
+    "preview_thinking": "思考中…",
+    "section": {
+      "today": "今天",
+      "older": "更早"
+    }
   },
   "chat": {
     "select": "选择一个对话",

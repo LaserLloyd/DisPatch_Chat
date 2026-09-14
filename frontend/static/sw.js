@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v97';  // v97: jobs(fix) — navigate() takes an early-branch for 'jobs' (review finding #1: the mobile Jobs tab collapsed to Bots from Chats/Messages because navigate() ran history.go(-N) on the missing 'jobs' depth; now pushState({view:'jobs'}) + setView + return — pushState not replaceState so a Back from Jobs returns to the view the user came from, not all the way to Bots). Cache bumped in lockstep with main.js?v=78→v=79.
+const CACHE = 'local-chat-v98';  // v98: threads(desktop) — Today / Older section headers in the thread list. main.js now imports thread-sections.js (pure bucketing + section-head DOM); mobile CSS hides the headers, the JS gate suppresses them while the search modal is open. Cache bumped in lockstep with main.js?v=79→v=80 (jobs(fix) bumped to v97 earlier the same day).
 const SHELL = [
   '/',
   '/static/theme.css',
@@ -19,6 +19,10 @@ const SHELL = [
   // shell or the cold offline start loads the new sidebar entry but no
   // module, and the click fails silently with a blank panel.
   '/static/js/jobs.js', '/static/js/job-thread.js',
+  // Thread list Today/Older bucketing (added 2026-09-15). Pure module —
+  // no side effects at import time — but it MUST be in SHELL so the cold
+  // offline start resolves the import that main.js now carries.
+  '/static/js/thread-sections.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

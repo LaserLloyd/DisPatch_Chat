@@ -82,7 +82,11 @@
     "empty_no_threads": "Ainda não há conversas com {name}",
     "empty_cta": "Começa a tua primeira conversa →",
     "preview_empty": "Ainda sem mensagens",
-    "preview_thinking": "a pensar…"
+    "preview_thinking": "a pensar…",
+    "section": {
+      "today": "Hoje",
+      "older": "Mais antigas"
+    }
   },
   "chat": {
     "select": "Seleciona uma conversa",
