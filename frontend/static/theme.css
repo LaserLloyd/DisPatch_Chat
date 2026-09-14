@@ -1,0 +1,191 @@
+/* ============================================================================
+   theme.css — DisPatch theme tokens
+   ----------------------------------------------------------------------------
+   This file holds every color, typography, spacing, motion and elevation
+   variable the UI uses. To re-skin the app, edit ONLY this file (token NAMES
+   must stay stable; only the values change). Component CSS in app.css /
+   dashboard.css references these tokens via var(--name) and is otherwise
+   untouched.
+
+   light-dark(LIGHT, DARK) is a CSS function: the first value is used when
+   color-scheme is "light", the second when "dark". Default theme is dark
+   (see js/theme.js). The ":root[data-theme="dark"], :root:not([data-theme])"
+   block in section 6 overrides the dark side of selected tokens with deeper,
+   cooler values — see that section for the rationale.
+
+   Sections:
+     1. Color scheme declaration + base tokens
+     2. Responsive token overrides
+     3. Component token overrides
+     4. REDESIGN 2026 — shadows, motion, radii
+     5. Default-theme overrides
+
+   Last refactor: 2026-09-13 — tokens extracted from app.css for the redesign
+   intake. See git log for prior context.
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   1. Color scheme declaration + base tokens
+   ----------------------------------------------------------------------------
+   Drives the light-dark() switch throughout the app. The default root sets
+   `light dark`, so the browser follows the OS by default. The data-theme
+   attribute (set by js/theme.js) forces the scheme to the user's explicit
+   pick so light-dark() resolves correctly. */
+
+/* Dark is the default app skin; light + system are opt-in (see theme.js).
+   Every color is light-dark(LIGHT, DARK) — the DARK side keeps the original
+   values, so with the default `data-theme="dark"` the UI is pixel-identical
+   to before. The light side is new. */
+:root {
+  color-scheme: light dark;
+
+  /* 1.1 Backgrounds */
+  --bg-primary:   light-dark(#eceae4, #0f0f1a);
+  --bg-secondary: light-dark(#f6f5f2, #16162a);
+  --bg-tertiary:  light-dark(#ffffff, #1e1e3a);
+  --bg-hover:     light-dark(#e7e4dd, #252545);
+  --bg-input:     light-dark(#ffffff, #1a1a30);
+  --bg-sidebar:   light-dark(#efece6, #14142a);
+  --tint-subtle:  light-dark(rgba(0,0,0,.035), rgba(255,255,255,.02));
+  --code-inline:  light-dark(rgba(0,0,0,.07), rgba(0,0,0,.35));
+  --code-block-text: #c9d1d9;   /* code blocks stay dark in both themes */
+
+  /* 1.2 Text */
+  --text-primary:   light-dark(#1c1c28, #e8e8f0);
+  /* dark side #8888aa → #8d8db0: it measured 4.48:1 on the progress panel
+     (--tint-subtle over a bot bubble) and 4.30:1 on --bg-hover, i.e. it missed
+     AA on the two surfaces it is used on most. A ~3% lift clears both without
+     collapsing the gap to --text-muted. */
+  --text-secondary: light-dark(#55556a, #8d8db0);
+  --text-muted:     light-dark(#5f5f74, #9a9ab8);   /* both sides bumped to pass AA (light was #73738c ≈3.8:1) */
+
+  /* 1.3 Accent */
+  --accent:       light-dark(#6d28d9, #7c3aed);
+  --accent-hover: light-dark(#7c3aed, #8b5cf6);
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        light-dark(#6d28d9, #a78bfa);
+  /* THE ACCENT AS TEXT — not as a fill. --accent / --accent-hover are tuned to
+     sit UNDER white (buttons, the send gradient, dots), and every place they
+     were used as small coloured text failed WCAG AA: 2.74–4.30:1 in dark
+     (model pill 3.69, Safe chip 3.35, bubble links 3.81, reaction names 2.83)
+     and 3.75–4.37:1 in light on the tinted chips. Both values below are
+     already in the palette — light reuses --accent's light value, dark reuses
+     --focus's — so nothing new enters the visual identity; the worst case is
+     now 4.67:1 and most sites land above 5.5:1. Fills keep using --accent /
+     --accent-hover; only TEXT uses this. */
+  --accent-text:  light-dark(#6d28d9, #a78bfa);
+
+  /* 1.4 Borders */
+  --border:       light-dark(#e0ddd6, #2a2a45);
+  --border-light: light-dark(#cfcbc4, #333355);
+
+  /* 1.5 Bubbles */
+  --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
+  --bot-bubble:  light-dark(#ffffff, #1e1e3a);
+
+  /* 1.6 Markdown */
+  /* Markdown emphasis + quotes (see `.bubble blockquote` in app.css for the why).
+     Teal is deliberately not reused anywhere else in the app. */
+  --md-quote:      light-dark(#0f766e, #5eead4);
+  --md-quote-text: light-dark(#155e57, #a5f3ea);
+  --md-em:         light-dark(#9a3412, #fcd34d);
+  --md-strong:     light-dark(#101018, #ffffff);
+  --md-mark-bg:    light-dark(#fde68a, rgba(251,191,36,.30));
+
+  /* 1.7 Status (success / error / warning) */
+  --success: #34d399;
+  --error: #f87171;
+  --warning: #fbbf24;
+  /* …and the same three AS TEXT. The values above are picked to read as dots,
+     bars and fills on the DARK skin; used as small coloured text on the light
+     skin they collapse — the reaction manager's "image host unreachable" warning
+     measured 1.53:1 on the light modal, and --error text sat at 2.18–2.77:1.
+     The dark side is unchanged (it already passes, 4.54:1 at worst); only the
+     light side is darkened. Fills, dots, bars and badge backgrounds keep the
+     originals, so nothing about the app's colour identity moves. */
+  --success-text: light-dark(#065f46, #34d399);
+  --error-text:   light-dark(#b91c1c, #f87171);
+  --warning-text: light-dark(#92400e, #fbbf24);
+
+  /* 1.8 Radii */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* 1.9 Layout widths */
+  --sidebar-width: 72px;
+  --threadlist-width: 320px;
+
+  /* 1.10 Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* 1.11 Type scale (fluid, rem-anchored, zoom-safe; max <= 2.5x min for WCAG 1.4.4) */
+  --step--1: clamp(.8125rem, .78rem + .18vw, .9rem);
+  --step-0:  clamp(1rem, .97rem + .18vw, 1.0625rem);
+  --step-1:  clamp(1.0625rem, 1rem + .35vw, 1.1875rem);
+  --step-2:  clamp(1.25rem, 1.15rem + .5vw, 1.45rem);
+}
+/* Manual theme override forces the scheme so light-dark() resolves; absence of
+   data-theme === "system" (follows the OS via color-scheme: light dark). */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+/* ----------------------------------------------------------------------------
+   2. Responsive token overrides
+   ----------------------------------------------------------------------------
+   The threadlist rail narrows to 280px on tablet widths and below. */
+@media (max-width: 1024px) {
+  :root { --threadlist-width: 280px; }
+}
+
+/* ----------------------------------------------------------------------------
+   3. Component token overrides
+   ----------------------------------------------------------------------------
+   --assistant-col caps the width of assistant message columns. The 760px
+   reading column was removed 2026-09-04: on a wide window it left agent prose
+   AND markdown tables sitting in the left half of the pane while the rest
+   stayed empty. Agent turns are working output, not an article, so they get
+   the whole reading window. Tune with --assistant-col if a measure cap is
+   ever wanted back (e.g. `min(760px, 100%)`); every assistant surface reads
+   this one var so the streamed row, the finalized row and the typing
+   placeholder cannot drift apart. */
+:root { --assistant-col: 100%; }
+
+/* ========================================================================= *
+ * 4. REDESIGN 2026 — slicker surfaces, motion, skeletons, status, recovery UI.
+ * ========================================================================= *
+ * Appended so it overrides the base by source order; the dark-purple identity
+ * and every WS/REST + Safe-Mode behaviour are unchanged. New tokens only add. */
+:root {
+  /* Elevation: soft, layered shadows give depth without heavy borders. */
+  --shadow-sm: 0 1px 2px light-dark(rgba(40,30,70,.08), rgba(0,0,0,.30));
+  --shadow-md: 0 6px 20px light-dark(rgba(40,30,70,.12), rgba(0,0,0,.40));
+  --shadow-lg: 0 18px 50px light-dark(rgba(40,30,70,.20), rgba(0,0,0,.55));
+  --ring: var(--focus);
+  /* A subtle brand gradient reused on the send button, active states, etc. */
+  --accent-grad: linear-gradient(135deg, var(--accent-hover), var(--accent));
+  --easing: cubic-bezier(.22, 1, .36, 1);   /* gentle "spring-ish" ease-out */
+  --radius-xl: 20px;
+  --bg-elevated: light-dark(#ffffff, #20203c);
+  --scrollbar-thumb: var(--border-light);
+}
+
+/* ----------------------------------------------------------------------------
+   5. Default-theme overrides
+   ----------------------------------------------------------------------------
+   Lift dark surfaces a touch + add a faint cool cast so panels read as
+   layered glass rather than flat slabs. Values stay within the original
+   navy-purple family so the app is instantly recognizable. These override
+   the DARK side of light-dark() in section 1; the LIGHT side is untouched.
+   `:root:not([data-theme])` catches the default (no explicit pick), so this
+   block is what the user actually sees before they touch the theme toggle. */
+:root[data-theme="dark"], :root:not([data-theme]) {
+  --bg-primary:   #0e0e1b;
+  --bg-secondary: #15152a;
+  --bg-tertiary:  #1d1d39;
+  --bg-elevated:  #232342;
+  --bg-hover:     #262648;
+  --border:       #292945;
+  --border-light: #38385c;
+}

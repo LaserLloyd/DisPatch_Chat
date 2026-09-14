@@ -163,6 +163,27 @@ export const api = {
   reactions: () => j('/api/reactions'),
   fireReaction: (body) => j('/api/reactions/fire', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
   reactionImageUrl: (id) => `/api/reactions/${encodeURIComponent(id)}/image`,
+
+  // Jobs board (added 2026-09-14). API surface mirrors backend/app/jobs.py.
+  // The list / get / reasons reads are open; the vote / applied / tags /
+  // archive / recompute writes require a full session cookie (the
+  // backend's _require_full() gate returns 403 to decoy callers).
+  jobs: {
+    list: (params) => {
+      const q = params && params.toString ? params.toString() : '';
+      return j(`/api/jobs${q ? `?${q}` : ''}`);
+    },
+    get: (threadId) => j(`/api/jobs/${encodeURIComponent(threadId)}`),
+    score: (body) => j('/api/jobs/score', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    create: (body) => j('/api/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    vote: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/vote`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    applied: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/applied`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    tags: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/tags`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    archive: (threadId) => j(`/api/jobs/${encodeURIComponent(threadId)}/archive`, { method: 'POST' }),
+    profile: () => j('/api/jobs/profile'),
+    reasons: () => j('/api/jobs/reasons'),
+    recompute: () => j('/api/jobs/profile/recompute', { method: 'POST' }),
+  },
   addReaction: (file, fields) => {
     const fd = new FormData();
     fd.append('file', file);

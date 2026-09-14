@@ -373,6 +373,174 @@ function subOutsideCode(text, fn) {
   return out + fn(text.slice(pos));
 }
 
+// --- LaTeX, reduced to Unicode ---------------------------------------------
+// Models write maths in LaTeX whether or not anyone asked: `$\alpha \approx
+// 0.7$`, `\(a \ne b\)`, `$$E = mc^2$$`. DisPatch rendered every one of those as
+// its own source code, dollar signs and backslashes included.
+//
+// The fix is deliberately NOT a maths typesetter. KaTeX is ~300 KB of vendored
+// library to make a family chat render an integral sign, and the things these
+// bots actually emit are a Greek letter, a comparison operator, an arrow and
+// the occasional exponent — all of which Unicode already has. So: translate
+// what translates, and leave anything else exactly as written rather than
+// half-rendering it. `\iiint` stays `\iiint`; nobody is worse off than before.
+const TEX_CHARS = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
+  zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+  lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ',
+  tau: 'τ', upsilon: 'υ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
+  Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  times: '×', div: '÷', pm: '±', mp: '∓', cdot: '·', ast: '∗', star: '⋆',
+  approx: '≈', sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝',
+  neq: '≠', ne: '≠', leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫',
+  infty: '∞', partial: '∂', nabla: '∇', sum: '∑', prod: '∏', int: '∫',
+  sqrt: '√', angle: '∠', perp: '⊥', parallel: '∥', degree: '°', deg: '°',
+  rightarrow: '→', to: '→', longrightarrow: '⟶', leftarrow: '←', gets: '←',
+  leftrightarrow: '↔', Rightarrow: '⇒', implies: '⇒', Leftarrow: '⇐',
+  Leftrightarrow: '⇔', iff: '⇔', uparrow: '↑', downarrow: '↓', mapsto: '↦',
+  in: '∈', notin: '∉', ni: '∋', subset: '⊂', subseteq: '⊆', supset: '⊃',
+  supseteq: '⊇', cup: '∪', cap: '∩', emptyset: '∅', varnothing: '∅',
+  forall: '∀', exists: '∃', nexists: '∄', neg: '¬', land: '∧', lor: '∨',
+  therefore: '∴', because: '∵', ldots: '…', dots: '…', cdots: '⋯',
+  quad: ' ', qquad: '  ', ',': ' ', ';': ' ', '%': '%', '&': '&', '_': '_',
+  '$': '$', '#': '#', '{': '{', '}': '}',
+};
+const TEX_SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷',
+  8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+  n: 'ⁿ', i: 'ⁱ' };
+const TEX_SUB = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇',
+  8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎',
+  a: 'ₐ', e: 'ₑ', o: 'ₒ', x: 'ₓ', h: 'ₕ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ',
+  p: 'ₚ', s: 'ₛ', t: 'ₜ' };
+
+// Every character of `body` must map, or the whole script is left alone —
+// a half-converted exponent (`x²ʸ?`) is worse than the source.
+function scriptOf(body, table) {
+  let out = '';
+  for (const ch of body) {
+    if (!(ch in table)) return null;
+    out += table[ch];
+  }
+  return out;
+}
+
+function texToUnicode(body) {
+  let out = body;
+  // \frac{a}{b} -> a/b, and \text{...}/\mathrm{...} -> their contents.
+  // A single atom needs no brackets: `\frac{a}{b}` is a/b, but `\frac{x+1}{2}`
+  // has to keep them or the slash binds wrongly.
+  const atom = (part) => (/^[\w.]+$/.test(part.trim()) ? part.trim() : `(${part.trim()})`);
+  out = out.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,
+    (_, a, b) => `${atom(a)}/${atom(b)}`);
+  out = out.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1');
+  // Named commands. The trailing `(?![a-zA-Z])` stops \in from eating \infty.
+  out = out.replace(/\\([a-zA-Z]+)(?![a-zA-Z])|\\([,;%&_$#{}])/g, (whole, name, punct) => {
+    const key = name || punct;
+    return key in TEX_CHARS ? TEX_CHARS[key] : whole;
+  });
+  // Sub/superscripts, braced or single-character.
+  out = out.replace(/\^\{([^{}]{1,12})\}|\^(\S)/g, (whole, braced, one) =>
+    scriptOf(braced ?? one, TEX_SUP) ?? whole);
+  out = out.replace(/_\{([^{}]{1,12})\}|_(\S)/g, (whole, braced, one) =>
+    scriptOf(braced ?? one, TEX_SUB) ?? whole);
+  // Left-over grouping braces carry no meaning once the commands are gone.
+  out = out.replace(/[{}]/g, '');
+  return out.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+// What makes a `$…$` span maths rather than money. This is the whole reason
+// the delimiter rules below are so fussy: "it costs $5 and then $10 total"
+// contains a perfectly good `$…$` match, and turning that into maths is a
+// disfigurement of an ordinary sentence about money. So a span has to LOOK
+// like maths — a backslash command, a script marker, or a relation — and it
+// may not begin or end with a space, which "$5 and then $" does.
+const MATH_ISH = /\\[a-zA-Z]+|[\^_]|[=<>≠≈]|\\\\/;
+const INLINE_MATH_RE = /\$([^\s$][^$\n]{0,118}[^\s$]|[^\s$])\$/g;
+const PAREN_MATH_RE = /\\\(([\s\S]{1,300}?)\\\)/g;
+const BLOCK_MATH_RE = /\$\$([\s\S]{1,600}?)\$\$|\\\[([\s\S]{1,600}?)\\\]/g;
+
+/** LaTeX -> Unicode across the non-code parts of a message. Code spans and
+ *  fences are untouched: a fenced block of TeX is source, and a model showing
+ *  you `$\alpha$` inside backticks means the characters, not the letter. */
+function convertMath(text) {
+  return subOutsideCode(text, (seg) => seg
+    .replace(BLOCK_MATH_RE, (whole, a, b) => {
+      const body = (a ?? b ?? '').trim();
+      if (!body) return whole;
+      const out = texToUnicode(body);
+      return out === body && !MATH_ISH.test(body) ? whole : `\n\n${out}\n\n`;
+    })
+    // `\(x\)` has no money problem — the delimiter is unambiguous — so it is
+    // converted whether or not it looks like maths. It also has to happen
+    // HERE: markdown reads `\(` as an escaped parenthesis, which is why this
+    // used to arrive as a mangled `(a \ne b)`.
+    .replace(PAREN_MATH_RE, (whole, body) => texToUnicode(body) || whole)
+    .replace(INLINE_MATH_RE, (whole, body) =>
+      (MATH_ISH.test(body) ? texToUnicode(body) || whole : whole)));
+}
+
+// --- footnotes --------------------------------------------------------------
+// `[^1]` with a `[^1]: …` line at the bottom is standard in anything that has
+// read a paper, and marked does not implement it: the marker rendered as the
+// literal text `[^1]` and the definition line rendered as a stray paragraph
+// beginning `[^1]:` — the reader saw the plumbing twice and the footnote never.
+//
+// Rendered as a superscript number plus a list at the end of the message. NOT
+// as a link to an anchor: several messages share one document, so the ids
+// would collide across bubbles, and a footnote in a chat bubble is a few lines
+// down rather than pages away. The note's text is also on the marker's own
+// tooltip, which is the fastest way to read one.
+const FOOTNOTE_DEF_RE = /^[ \t]{0,3}\[\^([^\]\s]{1,64})\]:[ \t]*([^\n]*)$/gm;
+const FOOTNOTE_REF_RE = /\[\^([^\]\s]{1,64})\]/g;
+
+/** Pull the definitions out of the source and park a superscript marker at
+ *  each reference. Returns the rewritten source and the notes, in the order
+ *  their markers appear. */
+function extractFootnotes(text, parker) {
+  const defs = new Map();
+  let src = subOutsideCode(text, (seg) =>
+    seg.replace(FOOTNOTE_DEF_RE, (whole, id, body) => {
+      if (defs.has(id)) return whole;        // a duplicate id stays as prose
+      defs.set(id, body.trim());
+      return '';
+    }));
+  if (!defs.size) return { src: text, notes: [] };
+  const notes = [];
+  const numberOf = (id) => {
+    const at = notes.findIndex((n) => n.id === id);
+    if (at !== -1) return at + 1;
+    notes.push({ id, text: defs.get(id) });
+    return notes.length;
+  };
+  src = subOutsideCode(src, (seg) => seg.replace(FOOTNOTE_REF_RE, (whole, id) => {
+    if (!defs.has(id)) return whole;         // a marker with no note is prose
+    const n = numberOf(id);
+    // toPlainPreview, not the raw note: a tooltip cannot render markdown, so
+    // the source would show the reader `[linked](https://…)` verbatim.
+    const tip = toPlainPreview(defs.get(id));
+    return parker.park(`<sup class="md-fn-ref" title="${attrEscape(tip)}">${n}</sup>`);
+  }));
+  // A note nobody referenced still beats the stray `[^x]:` paragraph it would
+  // otherwise have rendered as, so it is listed after the referenced ones.
+  for (const [id, body] of defs) {
+    if (!notes.some((n) => n.id === id)) notes.push({ id, text: body });
+  }
+  return { src, notes };
+}
+
+/** The footnote list, appended after the parsed message. `parseInline` so a
+ *  note can carry a link or emphasis; it is sanitized with everything else. */
+function footnotesHtml(notes) {
+  if (!notes.length) return '';
+  const items = notes.map((n) => {
+    let body = escapeHtml(n.text);
+    try { body = marked.parseInline(n.text); } catch { /* keep the escaped text */ }
+    return `<li>${body}</li>`;
+  }).join('');
+  return `<div class="md-footnotes"><ol>${items}</ol></div>`;
+}
+
 function expandMediaDirectives(text, parker) {
   return subOutsideCode(text, (seg) => seg.replace(/\[\[media:([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, path, caption) => {
     const url = normalizeMediaUrl(path.trim());
@@ -582,6 +750,158 @@ export function retargetLinks(container) {
     // so when the text IS the address, it moves too. A link with words for
     // text keeps its words; only the title records where it was pointed.
     if (a.textContent.trim() === was) a.textContent = now;
+  });
+}
+
+// --- quoted speech ----------------------------------------------------------
+// Text between double quotes gets its own colour. Borrowed from the ClawChat
+// pack, where it is the treatment that does the most work: in a long reply,
+// the quoted bit is almost always the part being pointed AT — a line from a
+// log, a phrase someone said, the exact wording of an error — and it used to
+// sit in the paragraph looking like every other word.
+//
+// Done on the live DOM after sanitization, never by injecting markup, for the
+// obvious reason: the text being wrapped came from a model, and the only safe
+// way to put a span around somebody else's words is to build the span as a
+// node around a Text node the parser already produced.
+//
+// Where it deliberately does nothing:
+//   * inside `code`, `pre` and `kbd` — a JSON blob is full of quotes and none
+//     of them are speech; this is the single most important exclusion.
+//   * inside a link's text, and inside a callout's own label — those already
+//     carry a colour that means something, and a second one on top reads as a
+//     rendering bug.
+//   * across a block boundary or a `<br>`. An unclosed quote at the end of a
+//     paragraph is a stray quote character, not the start of a speech that
+//     runs into the next paragraph.
+//
+// It DOES span inline markup: `"he said **run**"` is one quotation with a bold
+// word in it, and colouring only the two plain-text halves would be worse than
+// colouring nothing. That works because the treatment is colour alone — three
+// adjacent spans of the same colour are indistinguishable from one, so the
+// range can be wrapped piecewise instead of restructuring the tree.
+const SPEECH_SKIP = 'code, pre, kbd, samp, a, .md-callout__label, .md-speech';
+// Blocks that end a quotation. `div` covers our own generated cards; the
+// container itself terminates the last one.
+const SPEECH_BLOCK = 'p, li, td, th, blockquote, div, summary, h1, h2, h3, h4, h5, h6';
+// One line, both quotes present, and bounded: past a few hundred characters a
+// "quotation" is almost certainly two unrelated quote marks in a wall of prose,
+// and colouring everything between them is worse than leaving it alone.
+const SPEECH_RE = /["“]([^"“”\n]{1,500})["”]/g;
+
+/** Collect the Text nodes of `root` in document order, grouped into runs that
+ *  a quotation may not cross: a new run starts at every block element and at
+ *  every <br>. Subtrees listed in SPEECH_SKIP are not descended into. */
+function speechRuns(root, skip) {
+  const runs = [];
+  let run = [];
+  const flush = () => { if (run.length) { runs.push(run); run = []; } };
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3) {                       // Text
+        if (child.data) run.push(child);
+        continue;
+      }
+      if (child.nodeType !== 1) continue;               // comments and friends
+      if (child.matches(skip)) { flush(); continue; }
+      const isBreak = child.tagName === 'BR';
+      const isBlock = child.matches(SPEECH_BLOCK);
+      if (isBreak || isBlock) flush();
+      if (!isBreak) walk(child);
+      if (isBlock) flush();
+    }
+  };
+  walk(root);
+  flush();
+  return runs;
+}
+
+/** Wrap [from, to) of a run's concatenated text in a span, splitting Text
+ *  nodes at the edges. Applied back to front by the caller, so earlier offsets
+ *  in the same run stay valid. */
+function wrapRange(run, offsets, from, to, cls) {
+  for (let i = run.length - 1; i >= 0; i -= 1) {
+    const node = run[i];
+    const start = offsets[i];
+    const end = start + node.data.length;
+    if (end <= from || start >= to) continue;           // untouched by this quote
+    let piece = node;
+    if (end > to) piece.splitText(to - start);          // trim the tail off
+    if (start < from) piece = piece.splitText(from - start);
+    const span = node.ownerDocument.createElement('span');
+    span.className = cls;
+    piece.parentNode.insertBefore(span, piece);
+    span.appendChild(piece);
+  }
+}
+
+/** Wrap every match of `re` in `container` in a span of `cls`, skipping the
+ *  subtrees in `skip` and never crossing a block or a <br>. `accept` gets the
+ *  captured body and decides whether a match is really one. */
+function markInline(container, { re, cls, skip, accept }) {
+  if (!container) return;
+  for (const run of speechRuns(container, skip)) {
+    const offsets = [];
+    let text = '';
+    for (const node of run) { offsets.push(text.length); text += node.data; }
+    const ranges = [];
+    re.lastIndex = 0;
+    let m = re.exec(text);
+    while (m) {
+      if (accept(m[1])) ranges.push([m.index, m.index + m[0].length]);
+      m = re.exec(text);
+    }
+    // Back to front: an earlier match's offsets stay valid while a later one
+    // splits the Text nodes after it.
+    for (let i = ranges.length - 1; i >= 0; i -= 1) {
+      wrapRange(run, offsets, ranges[i][0], ranges[i][1], cls);
+    }
+  }
+}
+
+/** Colour every quotation in a rendered container. Idempotent: a marked
+ *  quotation lives inside `.md-speech`, which SPEECH_SKIP refuses to enter. */
+export function markSpeech(container) {
+  // A "quotation" of nothing but spaces is two quote marks with a gap.
+  markInline(container, {
+    re: SPEECH_RE, cls: 'md-speech', skip: SPEECH_SKIP, accept: (body) => !!body.trim(),
+  });
+}
+
+// --- parentheses ------------------------------------------------------------
+// An aside is quieter than the sentence it interrupts, and models write a LOT
+// of them — "(about 12 minutes, mostly the judge)", "(this is the part that
+// matters)". Dropping them to the secondary text colour is what a typesetter
+// would do, and it makes the main line easier to follow at a glance.
+//
+// The whole difficulty is telling an aside from the many other things
+// parentheses do, so the rule is narrow on purpose:
+//   * at least three characters, so `(1)`, `(a)`, `(i)` — list markers people
+//     write inline — are untouched;
+//   * at least one letter, so `(42)`, `(3 + 4)` and `(2026-09-10)` stay plain:
+//     a bare number in brackets is a value, not an aside;
+//   * more than one word. An aside is prose; a single token in brackets is
+//     almost always something else — `(x+1)` in a formula, `(container)` after
+//     a function name, `(v2)` after a product. This costs the odd genuine
+//     one-word aside like `(maybe)`, which is the right way round: a missed
+//     aside reads as ordinary text, a wrongly muted formula reads as a bug;
+//   * never across a line. Nested parentheses match the INNERMOST pair, which
+//     is the one that is actually an aside — and, more importantly, is the
+//     only reading that cannot produce a span straddling a mismatched pair;
+//   * bounded, because a "(" and a ")" three paragraphs apart are not a pair.
+// And, like speech, it never enters code, links, or callout labels — where a
+// parenthesis is syntax rather than prose.
+const PAREN_SKIP = `${SPEECH_SKIP}, .md-speech, .md-fn-ref, sub, sup`;
+const PAREN_RE = /\(([^()\n]{3,300})\)/g;
+const PAREN_HAS_LETTER = /\p{L}/u;
+
+/** Mute every parenthetical aside in a rendered container. */
+export function markParens(container) {
+  markInline(container, {
+    re: PAREN_RE,
+    cls: 'md-paren',
+    skip: PAREN_SKIP,
+    accept: (body) => PAREN_HAS_LETTER.test(body) && /\S\s+\S/.test(body.trim()),
   });
 }
 
@@ -994,7 +1314,34 @@ function ensureRenderer() {
     },
     renderer(token) { return `<mark>${this.parser.parseInline(token.tokens)}</mark>`; },
   };
-  marked.use({ renderer, extensions: [highlight] });
+  // `H~2~O` and `x^2^`. Not decoration — a CORRECTION: GFM reads a single
+  // tilde as strikethrough, so `H~2~O` rendered as H, a struck-through 2, and
+  // O. A chemical formula came out looking like a retracted one. Registering
+  // these as extensions puts them ahead of marked's own `del` tokenizer; the
+  // negative lookarounds hand `~~struck~~` back to it untouched.
+  const subscript = {
+    name: 'subscript',
+    level: 'inline',
+    start(src) { return src.indexOf('~'); },
+    tokenizer(src) {
+      const m = /^~(?!~)([^~\n]{1,32})~(?!~)/.exec(src);
+      if (!m) return undefined;
+      return { type: 'subscript', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+    },
+    renderer(token) { return `<sub>${this.parser.parseInline(token.tokens)}</sub>`; },
+  };
+  const superscript = {
+    name: 'superscript',
+    level: 'inline',
+    start(src) { return src.indexOf('^'); },
+    tokenizer(src) {
+      const m = /^\^(?!\^)([^\^\n]{1,32})\^/.exec(src);
+      if (!m) return undefined;
+      return { type: 'superscript', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+    },
+    renderer(token) { return `<sup>${this.parser.parseInline(token.tokens)}</sup>`; },
+  };
+  marked.use({ renderer, extensions: [highlight, subscript, superscript] });
 }
 
 function plainTextFallback(text) {
@@ -1025,20 +1372,23 @@ export function renderMarkdown(text, { noMedia = false, noLocal = false } = {}) 
   // restore the parked HTML, and a placeholder codepoint would be shown raw.
   if (!window.marked) return sanitize(plainTextFallback(src), noMedia);
   const parker = makeHtmlParker();
+  // Maths first, on the rawest source there is: `\(x\)` has to be read before
+  // markdown gets to call `\(` an escaped parenthesis.
+  const { src: noted, notes } = extractFootnotes(convertMath(src), parker);
   // Order is load-bearing: every directive is expanded (media, doc, view)
   // BEFORE bare paths are linkified, so a path that has already become a
   // picture, a document card or a viewer card is behind a placeholder and
   // cannot be rewritten a second time.
   const expanded = linkifyLocalPaths(
     expandViewDirectives(
-      expandDocDirectives(expandMediaDirectives(src, parker), parker),
+      expandDocDirectives(expandMediaDirectives(noted, parker), parker),
       parker, noLocal),
     parker, noLocal);
   ensureRenderer();
   let rawHtml;
   _noLocal = noLocal;
   try {
-    rawHtml = marked.parse(expanded);
+    rawHtml = marked.parse(expanded) + footnotesHtml(notes);
   } catch (e) {
     console.warn('[markdown] parse failed, falling back to plain text:', e && e.message);
     return sanitize(plainTextFallback(src), noMedia);
@@ -1053,7 +1403,7 @@ export function renderMarkdown(text, { noMedia = false, noLocal = false } = {}) 
 // h5/h6 were missing: DOMPurify kept the text but dropped the tag, so a deep
 // heading rendered as a bare run of words glued to the next line.
 const ALLOWED_TAGS = ('a b blockquote br button code del details div em h1 h2 h3 h4 h5 h6 hr i ' +
-  'input li ol mark p pre s span strong summary table tbody td th thead tr ul img ' +
+  'input li ol mark p pre s span strong sub sup summary table tbody td th thead tr ul img ' +
   'video source').split(' ');
 const ALLOWED_ATTR = ['checked', 'class', 'disabled', 'href', 'rel', 'target', 'title',
   'start', 'src', 'alt', 'data-code', 'data-code-encoding', 'data-file-line',
@@ -1355,6 +1705,11 @@ export function enhanceContent(container, { noLocal = false } = {}) {
     v.muted = true; v.loop = true; v.playsInline = true;
     v.play().catch(() => {});
   });
+  // LAST, and deliberately so: these split Text nodes to wrap a run, and every
+  // pass above reads whole ones. Speech before parentheses, so a parenthetical
+  // inside a quotation keeps the quotation's colour rather than fighting it.
+  markSpeech(container);
+  markParens(container);
 }
 
 // Delegated handlers for the ported chrome: code-block copy + file-path copy.

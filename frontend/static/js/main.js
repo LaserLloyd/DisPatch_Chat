@@ -546,8 +546,6 @@ function setView(view) {
 }
 
 // History-aware navigation (mobile only). The bots screen is the root of the
-
-// History-aware navigation (mobile only). The bots screen is the root of the
 // history stack, so the browser/hardware Back button walks chat → threads →
 // bots instead of exiting the app. The stack always mirrors view depth:
 // [bots, threads, chat][0..depth]. Desktop shows all panels — no history.
@@ -561,6 +559,18 @@ function navigate(view) {
   // as the view we are actually showing so the depth arithmetic stays true.
   if (history.state?.viewer && !viewerOpen()) {
     history.replaceState({ view: dom.app.dataset.view || 'bots' }, '');
+  }
+  // The Jobs view is a sibling of the chat-side tabs but not part of the
+  // history stack's depth axis — opening it from Chats/Messages must NOT
+  // collapse the back-stack to Bots via history.go(-N). Replace the stack's
+  // top with the Jobs entry and set the view directly. The popstate handler
+  // already paints whatever entry it lands on (main.js above), so a future
+  // Back from Jobs becomes the previous entry (whatever it was, which is
+  // correct UX for "tap Jobs from Chats → Back returns to Chats").
+  if (view === 'jobs') {
+    history.replaceState({ view: 'jobs' }, '');
+    setView('jobs');
+    return;
   }
   const cur = VIEW_DEPTH[history.state?.view] ?? 0;
   const target = VIEW_DEPTH[view] ?? 0;
@@ -2448,10 +2458,10 @@ async function openThread(id, { background = false, botId = null } = {}) {
   // first paint. Existing threads (Bits, etc.) are unaffected: they
   // always come through selectBot() first, so `t` is found and this branch
   // is skipped. The local `t` above shadows the imported i18n `t`, so the
-  // stub title is a hardcoded fallback — `threads.untitled` resolves to the
-  // same string in every shipped locale, so a translate() pass isn't worth
-  // the shadowing gymnastics (and the WS-fetched title below replaces this
-  // within a round-trip anyway).
+  // stub title is a hardcoded English fallback — this is NOT localised
+  // (deliberately, to keep the shadowing local): the WS-fetched title
+  // patches it within a round-trip, so non-English locales see a transient
+  // English header for one fetch then the real localised title.
   if (!t && botId) {
     state.activeThread = { id, bot_id: botId, title: 'New Chat' };
     api.jobs.get(id).then((r) => {

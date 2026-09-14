@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v96';  // v96: jobs(mobile) + jobs(unmount) — dedicated #job-board-host slot (sibling of #chatview, not child), mobile Jobs tab, mount path now uses the slot so the toolbar cannot bleed into the chat panel.
+const CACHE = 'local-chat-v97';  // v97: jobs(fix) — navigate() takes an early-branch for 'jobs' (review finding #1: the mobile Jobs tab collapsed to Bots from Chats/Messages because navigate() collapsed the stack via history.go(-N); now replaceState + setView + return). Cache bumped in lockstep with main.js?v=78→v=79.
 const SHELL = [
   '/',
   '/static/theme.css',

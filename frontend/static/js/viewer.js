@@ -26,7 +26,7 @@ import { el, railIcon, RAIL_ICONS } from './util.js?v=13';
 import { t, fileSize } from './i18n.js?v=3';
 // markdown.js is versioned in lockstep across every importer (assets.test.js
 // enforces it) — this line moves with the rest when the integration pass bumps it.
-import { renderMarkdown, enhanceContent } from './markdown.js?v=26';
+import { renderMarkdown, enhanceContent } from './markdown.js?v=28';
 import { nimEnabled } from './nim.js?v=5';
 
 // ---------------------------------------------------------------------------

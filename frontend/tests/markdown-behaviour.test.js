@@ -708,3 +708,205 @@ test('the plain-text user bubble retargets too, not just rendered markdown', () 
   assert.match(MAIN, /linkifyPlain\(text\)[\s\S]{0,120}retargetLinks\(bubble\)/,
     'main.js no longer retargets links in the plain-text (user) bubble');
 });
+
+// ---------------------------------------------------------------------------
+// 4. Quoted speech (needs a DOM — markSpeech walks and splits Text nodes)
+// ---------------------------------------------------------------------------
+// The colouring itself is one CSS rule; everything worth testing is about
+// WHERE it refuses to fire. A JSON blob in a code block is the case that
+// matters most: it is nothing but quote marks, and none of them are speech.
+
+const { markSpeech } = await import(join(STATIC, 'js', 'markdown.js'));
+
+function speechOf(html) {
+  const { JSDOM } = jsdom;
+  const d = new JSDOM(`<div id="c">${html}</div>`);
+  const c = d.window.document.getElementById('c');
+  markSpeech(c);
+  return [...c.querySelectorAll('.md-speech')].map((s) => s.textContent);
+}
+
+test('a plain quotation is marked, quote marks included', dom, () => {
+  assert.deepEqual(speechOf('<p>She said "hello there" and left.</p>'),
+    ['"hello there"']);
+});
+
+test('curly quotes count too', dom, () => {
+  assert.deepEqual(speechOf('<p>He answered “not yet”.</p>'), ['“not yet”']);
+});
+
+test('two quotations in one paragraph are two marks', dom, () => {
+  assert.deepEqual(speechOf('<p>"first" then "second"</p>'), ['"first"', '"second"']);
+});
+
+test('a quotation spans inline markup instead of giving up', dom, () => {
+  // Three pieces of one quotation. Colour-only styling makes them read as one.
+  assert.deepEqual(speechOf('<p>"he said <strong>run</strong> now"</p>').join(''),
+    '"he said run now"');
+});
+
+test('code, pre and kbd are left completely alone', dom, () => {
+  assert.deepEqual(speechOf('<p><code>{"a": "b"}</code></p>'), []);
+  assert.deepEqual(speechOf('<pre><code>x = "y"</code></pre>'), []);
+  assert.deepEqual(speechOf('<p><kbd>"q"</kbd></p>'), []);
+});
+
+test('a quote mark inside code does not pair with one in the prose', dom, () => {
+  // The dangerous shape: the code span is skipped, so the two surviving quote
+  // marks must NOT find each other across it.
+  assert.deepEqual(speechOf('<p>set <code>a="b"</code> then "real speech" ok</p>'),
+    ['"real speech"']);
+});
+
+test('link text and callout labels keep their own colour', dom, () => {
+  assert.deepEqual(speechOf('<p><a href="https://example.com">"docs"</a></p>'), []);
+  assert.deepEqual(
+    speechOf('<div class="md-callout"><p class="md-callout__label">"Warning"</p></div>'), []);
+});
+
+test('a quotation never crosses a block boundary or a <br>', dom, () => {
+  assert.deepEqual(speechOf('<p>opens "here</p><p>closes" there</p>'), []);
+  assert.deepEqual(speechOf('<p>opens "here<br>closes" there</p>'), []);
+});
+
+test('an unclosed quote is a stray character, not a quotation', dom, () => {
+  assert.deepEqual(speechOf('<p>the 6" pipe fits</p>'), []);
+});
+
+test('two quote marks with only spaces between them are not a quotation', dom, () => {
+  assert.deepEqual(speechOf('<p>a "   " b</p>'), []);
+});
+
+test('marking twice does not nest or double-wrap', dom, () => {
+  const { JSDOM } = jsdom;
+  const d = new JSDOM('<div id="c"><p>She said "hello" twice.</p></div>');
+  const c = d.window.document.getElementById('c');
+  markSpeech(c);
+  markSpeech(c);
+  assert.equal(c.querySelectorAll('.md-speech').length, 1);
+  assert.equal(c.textContent, 'She said "hello" twice.');
+});
+
+test('the text of the message is never changed, only wrapped', dom, () => {
+  const { JSDOM } = jsdom;
+  const src = 'A "quoted" bit, <strong>bold</strong>, and a 6" pipe.';
+  const d = new JSDOM(`<div id="c"><p>${src}</p></div>`);
+  const c = d.window.document.getElementById('c');
+  const before = c.textContent;
+  markSpeech(c);
+  assert.equal(c.textContent, before);
+});
+
+// ---------------------------------------------------------------------------
+// 5. The markdown models actually write
+// ---------------------------------------------------------------------------
+// Measured against the live renderer before any of this existed: `[^1]` showed
+// as literal text with the definition line as a stray paragraph, every `$…$`
+// showed its own LaTeX source, `\(a \ne b\)` arrived mangled as `(a \ne b)`
+// because markdown read `\(` as an escaped parenthesis, and `H~2~O` rendered
+// as a STRUCK-THROUGH 2 — GFM reads a single tilde as strikethrough, so a
+// chemical formula came out looking retracted.
+
+const stripTags = (html) => html.replace(/<[^>]*>/g, '');
+
+test('LaTeX commands become the Unicode they stand for', () => {
+  const html = renderMarkdown('The error is $\\pm 0.5$ and $\\alpha \\approx 0.7$, so $x \\rightarrow y$.');
+  const text = stripTags(html);
+  assert.match(text, /± 0\.5/);
+  assert.match(text, /α ≈ 0\.7/);
+  assert.match(text, /x → y/);
+  assert.doesNotMatch(text, /\\/, 'a backslash command survived');
+  assert.doesNotMatch(text, /\$/, 'a maths delimiter survived');
+});
+
+test('the \\( \\) form is read before markdown calls it an escaped paren', () => {
+  assert.match(stripTags(renderMarkdown('Also written \\(a \\ne b\\) here.')), /a ≠ b/);
+});
+
+test('scripts and fractions reduce to Unicode', () => {
+  const text = stripTags(renderMarkdown('$x^{2}$ and $H_2O$ and $\\frac{a}{b}$ and $\\frac{x+1}{2}$'));
+  assert.match(text, /x²/);
+  assert.match(text, /H₂O/);
+  assert.match(text, /a\/b/);
+  assert.match(text, /\(x\+1\)\/2/, 'a compound numerator lost its brackets');
+});
+
+test('MONEY IS NOT MATHS — the case that must never regress', () => {
+  for (const src of ['It costs $5 and then $10 total.', 'From $5 - $10 depending.',
+    'Budget: $55/mo for the plan.']) {
+    assert.equal(stripTags(renderMarkdown(src)).trim(), src,
+      `rewrote a sentence about money: ${src}`);
+  }
+});
+
+test('LaTeX with no Unicode equivalent is left exactly as written', () => {
+  assert.match(stripTags(renderMarkdown('Unsupported $\\iiint_V f$ stays put.')), /\\iiint/);
+});
+
+test('maths inside code is source, and stays source', () => {
+  assert.match(renderMarkdown('In code: `$\\alpha$` stays raw.'), /<code>\$\\alpha\$<\/code>/);
+});
+
+test('a footnote renders as a marker plus a list, not as its own plumbing', () => {
+  const html = renderMarkdown('Claim.[^1]\n\n[^1]: The source, [linked](https://example.com).');
+  assert.match(html, /<sup class="md-fn-ref"[^>]*>1<\/sup>/);
+  assert.match(html, /<div class="md-footnotes"><ol><li>/);
+  assert.doesNotMatch(stripTags(html), /\[\^1\]/, 'the raw footnote syntax is still visible');
+  // The tooltip cannot render markdown, so it carries the plain text.
+  assert.match(html, /title="The source, linked\."/);
+});
+
+test('a footnote marker with no definition stays prose', () => {
+  assert.match(stripTags(renderMarkdown('A marker with no note [^9] here.')), /\[\^9\]/);
+});
+
+test('H~2~O is a subscript, not a retraction', () => {
+  const html = renderMarkdown('H~2~O and x^2^ and ~~struck~~');
+  assert.match(html, /H<sub>2<\/sub>O/);
+  assert.match(html, /x<sup>2<\/sup>/);
+  assert.match(html, /<s>struck<\/s>/, 'double-tilde strikethrough was captured by the new rule');
+});
+
+// --- parenthetical asides ---------------------------------------------------
+
+function parensOf(html) {
+  const { JSDOM } = jsdom;
+  const d = new JSDOM(`<div id="c">${html}</div>`);
+  const c = d.window.document.getElementById('c');
+  markSpeech(c);           // speech runs first in enhanceContent
+  markParens(c);
+  return [...c.querySelectorAll('.md-paren')].map((s) => s.textContent);
+}
+
+const { markParens } = await import(join(STATIC, 'js', 'markdown.js'));
+
+test('a parenthetical aside is marked', dom, () => {
+  assert.deepEqual(parensOf('<p>The run finished (about 12 minutes) and passed.</p>'),
+    ['(about 12 minutes)']);
+});
+
+test('inline list markers and bare values are not asides', dom, () => {
+  // `(1)`, `(a)`, `(i)` are markers people write in prose; `(42)`, `(3 + 4)`
+  // and `(2026-09-10)` are values. None of them is an aside.
+  assert.deepEqual(parensOf('<p>Item (1) and option (a) and (i) and (42) and (3 + 4).</p>'), []);
+  assert.deepEqual(parensOf('<p>Shipped (2026-09-10) today.</p>'), []);
+});
+
+test('a single token in brackets is not an aside', dom, () => {
+  // `(x+1)` came out muted inside `$\\frac{x+1}{2}$` on the first cut — a
+  // formula that read as a rendering fault. An aside is prose, so it has to be
+  // more than one word.
+  assert.deepEqual(parensOf('<p>Use (x+1)/2 and call retargetLinks(container) on (v2).</p>'), []);
+});
+
+test('code, links and quotations keep parentheses to themselves', dom, () => {
+  assert.deepEqual(parensOf('<p><code>fn(some arg)</code></p>'), []);
+  assert.deepEqual(parensOf('<p><a href="https://example.com">docs (v2)</a></p>'), []);
+  // Inside a quotation the speech colour already applies; a second one on top
+  // would read as a rendering fault.
+  assert.deepEqual(parensOf('<p>She said "the run (mostly judge) was clean" today.</p>'), []);
+});
+
+test('an aside never crosses a line or a block', dom, () => {
+  assert.deepEqual(parensOf('<p>opens (here</p><p>closes) there</p>'), []);
+});
