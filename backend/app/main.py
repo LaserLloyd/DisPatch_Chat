@@ -65,6 +65,7 @@ from . import (
     gateway_ws,
     harness,
     image_jobs,
+    jobs,
     llm_api,
     localview,
     openclaw,
@@ -1537,6 +1538,19 @@ _INBOUND_AVATAR_RE = re.compile(
 _INBOUND_AVATAR_POOL_RE = re.compile(
     r"^/api/avatar-pool(?:/[A-Za-z0-9_-]+(?:/refill|/prompts)?)?$")
 
+# Jobs board (added 2026-09-14): the two routes on-box agents legitimately
+# drive. BEFORE 2026-09-14 these were NOT in the allowlist and every agent
+# following the job-board spec got a 403 — see the scar comment at
+# main.py:1541–1545 above (the thread-management trap) for why it mattered
+# to add these entries proactively with a comment that names the failure.
+# The session-only routes (vote / applied / tags / archive /
+# profile/recompute) deliberately stay on the session tier: those are the
+# surfaces the operator drives from the browser, not agents.
+_JOBS_INBOUND = (
+    ("POST", "/api/jobs"),
+    ("POST", "/api/jobs/score"),
+)
+
 
 # Thread management OPENCLAW.md has always documented as available to on-box
 # agents: list/read a thread, create/rename/pin/archive/delete one, delete a
@@ -1593,6 +1607,10 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if method in ("GET", "PUT", "POST") and _INBOUND_AVATAR_POOL_RE.match(path):
         return True
+    # Jobs board — agents post and pre-score; everything else is session
+    # tier and refuses here normally (with the route's own 403).
+    if (method, path) in _JOBS_INBOUND:
+        return True
     return bool(method == "POST" and _INBOUND_MSG_RE.match(path))
 
 
@@ -1635,6 +1653,11 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # operator only — a locked device sees the resulting
                         # message (redacted) and nothing else.
                         "/api/image-jobs",
+                        # Jobs board: write surface is gated on a full session;
+                        # reads redact to the empty shape (jobs.py handles it).
+                        # Either way a locked device must never see a job row,
+                        # so the path is blocked here as well.
+                        "/api/jobs",
                         # The harness is code execution — a headless job runs
                         # a shell agent in the operator's home directory —
                         # so this is belt-and-braces on top of
@@ -4746,52 +4769,103 @@ async def _deliver_assistant_text(
             _strip_reply_directive(_strip_no_reply(text or ""))).strip() and not has_media:
         return None
     key = _canon_msg(text) if (text or "").strip() else None
+    # -----------------------------------------------------------------------
+    #  WIPE FIX (2026-09-14). The content-based twin check used to apply to
+    #  EVERY message — including ones with a stable source_id — and that
+    #  closed on the live reply in this scenario:
+    #
+    #    1. Gateway detects a messageSeq gap (e.g. 2 -> 6), queues a backfill.
+    #    2. Live path delivers the conversational reply at seq=6 inline.
+    #    3. Backfill fires 6s later, walks history, persists items 3..5
+    #       (each has its own source_id, each is a drift-tolerant LONGER twin
+    #       of the live reply — they share >60 chars of opening).
+    #    4. The NEXT backfilled message's whole-thread scan matches the live
+    #       reply in the trailing run; "live longer → superseded" then DELETES
+    #       the live reply via db.delete_message().
+    #
+    #  Symptom: reply in the UI, then gone minutes later, row missing from
+    #  `messages`. Log shows the jump + backfill.
+    #
+    #  The comment at gateway_router._backfill says "every message carries a
+    #  stable id, so re-delivering one already stored is a no-op" — that is
+    #  the original design, and identity is enough for any source_id message.
+    #  Source-less deliveries (/api/inject, legacy transcript tail) still
+    #  need the content check (see test_double_post_fix.py).
+    #
+    #  Skipping the content-based twin check here, in-memory and DB, for
+    #  messages WITH a source_id, closes the wipe with no other change.
+    #  Reversible: a one-line revert — drop `and not source_id` from both
+    #  clauses — restores the old behaviour exactly.
+    # -----------------------------------------------------------------------
     if key:
-        # Twin-aware in-memory dedup (see _is_twin): the two transports record
-        # ONE reply with different text (the abridged copy is the complete copy
-        # with its tail dropped), so exact-key equality lets the twin through.
-        # Compare structurally and apply the AUTHORITY RULE: on a duplicate the
-        # LONGER (complete/gateway) copy wins, equal length keeps the first,
-        # and the complete copy is never suppressed.
-        claims = _delivered.get(thread_id)
-        if claims:
-            for stored in list(claims):
-                if _is_twin(key, stored):
-                    if len(key) <= len(stored):
-                        # Shorter (or equal) twin of an already-delivered
-                        # message: the abridged copy arriving after the
-                        # complete one. Suppress it.
-                        return None
-                    # The COMPLETE copy arriving after an abridged twin was
-                    # already delivered. Never suppress the complete copy:
-                    # drop the shorter claim so this message persists — the
-                    # DB check below then finds the abridged row and replaces
-                    # it with this one, leaving exactly one post.
-                    claims.pop(stored, None)
-                    break
+        if not source_id:
+            # Twin-aware in-memory dedup (see _is_twin): the two transports record
+            # ONE reply with different text (the abridged copy is the complete copy
+            # with its tail dropped), so exact-key equality lets the twin through.
+            # Compare structurally and apply the AUTHORITY RULE: on a duplicate the
+            # LONGER (complete/gateway) copy wins, equal length keeps the first,
+            # and the complete copy is never suppressed.
+            claims = _delivered.get(thread_id)
+            if claims:
+                for stored in list(claims):
+                    if _is_twin(key, stored):
+                        if len(key) <= len(stored):
+                            # Shorter (or equal) twin of an already-delivered
+                            # message: the abridged copy arriving after the
+                            # complete one. Suppress it.
+                            return None
+                        # The COMPLETE copy arriving after an abridged twin was
+                        # already delivered. Never suppress the complete copy:
+                        # drop the shorter claim so this message persists — the
+                        # DB check below then finds the abridged row and replaces
+                        # it with this one, leaving exactly one post.
+                        claims.pop(stored, None)
+                        break
         # Claim BEFORE any await: two sources delivering the same text can
         # otherwise both pass the checks below and double-post. Released on
         # failure so a transient error can't permanently drop the message.
+        # Source-id messages claim the same way so a follow-up cold-set
+        # source-less delivery in the same process still finds them.
         _mark_delivered(thread_id, key)
     try:
+        # Content-based dedup. The in-memory twin check above is already
+        # skipped for source-id'd messages (its `_is_twin` would
+        # otherwise mis-identify a fresh reply that happens to share
+        # 60+ chars with an older source-id'd one as the same message).
+        #
+        # The DB layer does the same work — except for source-id'd
+        # messages it ALSO post-filters by the existing row's source_id:
+        # the row is the SAME message (drop or supersede) only when it
+        # has no source_id (CLI / manual import of the same text) OR
+        # its source_id is the same as mine (the same gateway event
+        # arriving twice). Otherwise it is a different message with a
+        # coincidentally shared prefix — the wipe — and we persist.
         if key:
             existing = await _is_duplicate_message(
                 thread_id, text, whole_thread=dedup_whole_thread,
                 recent_window_s=(None if source_id or not dedup_recent_window
                                  else DEDUP_RECENT_WINDOW_S))
             if existing is not None:
-                if len(key) <= len(_canon_msg_cached(existing.content or "")):
-                    return None            # shorter/equal twin — keep the
-                                           # longer/earlier copy; keep the claim
-                # Upgrade: the ABRIDGED copy was persisted first; the complete
-                # copy arriving now replaces it so exactly one post remains.
-                # THE REPLACEMENT IS WRITTEN FIRST. Deleting the abridged row
-                # up here and then persisting meant every failure in between —
-                # a closed database, a thread deleted mid-flight, the persist
-                # chokepoint deciding the message was all-marker — left the
-                # thread with NEITHER copy: a reply the family had already read
-                # vanishing to repair a duplicate.
-                superseded = existing
+                if source_id:
+                    same_message = (
+                        existing.source_id is None
+                        or existing.source_id == source_id
+                    )
+                    if not same_message:
+                        existing = None
+                if existing is not None:
+                    if len(key) <= len(_canon_msg_cached(existing.content or "")):
+                        return None            # shorter/equal twin — keep the
+                                               # longer/earlier copy; keep the claim
+                    # Upgrade: the ABRIDGED copy was persisted first; the complete
+                    # copy arriving now replaces it so exactly one post remains.
+                    # THE REPLACEMENT IS WRITTEN FIRST. Deleting the abridged row
+                    # up here and then persisting meant every failure in between —
+                    # a closed database, a thread deleted mid-flight, the persist
+                    # chokepoint deciding the message was all-marker — left the
+                    # thread with NEITHER copy: a reply the family had already read
+                    # vanishing to repair a duplicate.
+                    superseded = existing
         if not await db.get_thread(thread_id):
             return None                        # thread deleted mid-flight
         if stream:
@@ -10372,6 +10446,13 @@ app.include_router(dashboard_routes.router)
 # full-access gate (localview._require_full_access), and _decoy_blocked bars
 # the prefixes one layer earlier — both, deliberately.
 app.include_router(localview.router)
+# Jobs board (added 2026-09-14). Mounted only when the feature flag is
+# set — when disabled, every /api/jobs/* route returns 404 (the router
+# itself is not registered, so a sessionless caller never sees an empty
+# 200). Plan §9 "Rollout order".
+if bool(os.environ.get("JOBS_ENABLED") == "1"):
+    jobs.JOBS_ENABLED = True
+    app.include_router(jobs.router)
 
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 # BEFORE /static, and that order is the whole trick: Starlette matches mounts in

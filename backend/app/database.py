@@ -129,6 +129,114 @@ CREATE TABLE IF NOT EXISTS image_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at);
+
+-- --------------------------------------------------------------------------- #
+--  Jobs board (added 2026-09-14 — see plan §3)
+--
+--  Additive tables only — the bot id `jobboard` owns the surface, the same
+--  `threads` + `messages` rows carry every job's chat, and these tables just
+--  pin structured metadata + feedback to the thread_id. Drop the four tables
+--  and the feature is gone.
+--
+--  Schema notes:
+--  * `jobs.seniority` lets the recommender rank against the profile's
+--    seniority preference at score time without re-parsing titles.
+--  * `jobs.tags` is a JSON-encoded list (32-tag cap, validated at the API
+--    boundary). A separate `job_events` row logs every tag mutation so the
+--    feedback loop can attribute changes (no UPDATE on `jobs.tags` in
+--    isolation — that would silently swallow history).
+--  * `job_feedback` is append-only: signals are added, never rewritten.
+--    Profile recompute is a fold over this table ordered by created_at ASC;
+--    the latest signal per thread wins (so an `undo` cleanly reverts the
+--    prior signal). Source: plan §6.
+--  * `job_profile` is a SINGLETON (id=1, CHECK). Recompute writes back into
+--    the same row — the score function reads its current value. The
+--    embedding centroids (yes_centroid, no_centroid) are NULL until ≥10
+--    yes/applied feedbacks exist; the scorer falls back to tag-only mode
+--    while the model is unavailable or the threshold isn't met.
+--  * PRAGMA foreign_keys=ON is set in connect() above (line 174), so
+--    ON DELETE CASCADE from threads will fire and tear down a job's
+--    rows when a thread is removed.
+-- --------------------------------------------------------------------------- #
+
+CREATE TABLE IF NOT EXISTS jobs (
+    thread_id        TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+    url              TEXT NOT NULL,
+    title            TEXT NOT NULL,
+    company          TEXT NOT NULL DEFAULT '',
+    location         TEXT NOT NULL DEFAULT '',
+    remote_type      TEXT NOT NULL DEFAULT 'unknown',  -- onsite|hybrid|remote|unknown
+    seniority        TEXT NOT NULL DEFAULT 'unknown', -- unknown|junior|mid|senior|staff|principal
+    salary_min       INTEGER,
+    salary_max       INTEGER,
+    salary_currency  TEXT NOT NULL DEFAULT 'USD',
+    tags             TEXT NOT NULL DEFAULT '[]',       -- JSON array
+    source_agent     TEXT NOT NULL DEFAULT '',
+    source_run_id    TEXT,
+    posted_at        TEXT,                            -- when the role was originally posted
+    first_seen       TEXT NOT NULL,                   -- immutable: when WE first saw it
+    last_seen        TEXT NOT NULL,                   -- refreshed on each repost detection
+    brief            TEXT NOT NULL DEFAULT '',        -- LLM analysis
+    state            TEXT NOT NULL DEFAULT 'pending', -- pending|yes|no|maybe|applied|archived|duplicate
+    duplicate_of     TEXT,                            -- thread_id of canonical when state=duplicate
+    expires_at       TEXT,                            -- optional auto-archive deadline (lazy, in-GET)
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
+CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS job_events (
+    id          TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL,       -- state_change|tag_added|tag_removed|comment|vote|repost|duplicate_detected|expired
+    from_state  TEXT,
+    to_state    TEXT,
+    reason_tag  TEXT,                -- e.g. 'wrong_location','too_senior','company','compensation'
+    comment     TEXT,
+    actor       TEXT NOT NULL,       -- 'user:<id>' | 'agent:<id>' | 'system'
+    payload     TEXT,                -- JSON, free-form
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_events_thread ON job_events(thread_id, created_at);
+
+CREATE TABLE IF NOT EXISTS job_feedback (
+    id          TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    signal      TEXT NOT NULL,       -- 'vote_yes'|'vote_no'|'vote_maybe'|'applied'|'undo'
+    reason_tag  TEXT,
+    comment     TEXT,
+    actor       TEXT NOT NULL,
+    -- JSON snapshot of the candidate fields the recompute fold needs
+    -- (tags, remote_type, company, location, salary_mid, seniority).
+    -- Written by ``add_job_feedback`` so the recompute is a pure fold over
+    -- this table — no joining back to ``jobs`` for the per-vote context.
+    -- Added 2026-09-14 (was missing on first cut; the blocklist stayed
+    -- empty because the recompute read ``payload=None`` for every row).
+    payload     TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_feedback_thread ON job_feedback(thread_id, created_at);
+
+CREATE TABLE IF NOT EXISTS job_profile (
+    id              INTEGER PRIMARY KEY DEFAULT 1,   -- singleton; CHECK at the end
+    tag_weights     TEXT NOT NULL DEFAULT '{}',      -- JSON: {tag: weight}
+    company_blocklist TEXT NOT NULL DEFAULT '[]',    -- JSON array (normalized lowercase)
+    location_blocklist TEXT NOT NULL DEFAULT '[]',   -- JSON array (normalized: "tokyo, jp" -> "tokyo")
+    salary_history  TEXT NOT NULL DEFAULT '{}',      -- JSON: {band_0_50k: n, band_50_100k: n, ...}
+    preferred_remote TEXT NOT NULL DEFAULT '{}',     -- JSON: {onsite: w, hybrid: w, remote: w}
+    seniority_preference TEXT NOT NULL DEFAULT '{}', -- JSON: {junior: n, mid: n, senior: n, staff: n, principal: n}
+    yes_centroid    BLOB,                            -- 384-dim float32; NULL until >=10 yes/applied
+    no_centroid     BLOB,                            -- same shape
+    duplicate_hashes TEXT NOT NULL DEFAULT '[]',     -- JSON: [{hash, thread_id, seen_at}] (rolling 500)
+    reason_counts   TEXT NOT NULL DEFAULT '{}',      -- JSON: {reason_tag: count}
+    yes_count       INTEGER NOT NULL DEFAULT 0,
+    no_count        INTEGER NOT NULL DEFAULT 0,
+    maybe_count     INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL,
+    CHECK (id = 1)
+);
 """
 
 
@@ -1166,6 +1274,203 @@ class Database:
             await self.db.commit()
         return rows
 
+    # ----------------------------------------------------------------- #
+    # Jobs board (added 2026-09-14)
+    #
+    # Storage for the additive jobs / job_events / job_feedback /
+    # job_profile tables. All four are simple — the write paths are the
+    # only complicated thing (atomic vote + event + feedback + recompute),
+    # which lives in jobs.py, not here.
+    # ----------------------------------------------------------------- #
+
+    async def get_job(self, thread_id: str) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM jobs WHERE thread_id = ?", (thread_id,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def upsert_job(self, job: dict) -> None:
+        """Insert or replace the structured job row.
+
+        Tags are stored JSON-encoded at the boundary; callers pass either a
+        list or a string (already-encoded). The caller is responsible for
+        the 32-tag cap and tag-trim rules — this is a dumb shelf.
+        """
+        tags = job.get("tags") or []
+        if isinstance(tags, list):
+            import json as _json
+            tags_json = _json.dumps(tags)
+        else:
+            tags_json = tags
+        await self.db.execute(
+            "INSERT OR REPLACE INTO jobs ("
+            "thread_id, url, title, company, location, remote_type, seniority,"
+            "salary_min, salary_max, salary_currency, tags, source_agent,"
+            "source_run_id, posted_at, first_seen, last_seen, brief, state,"
+            "duplicate_of, expires_at, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (job["thread_id"], job["url"], job["title"],
+             job.get("company", ""), job.get("location", ""),
+             job.get("remote_type", "unknown"),
+             job.get("seniority", "unknown"),
+             job.get("salary_min"), job.get("salary_max"),
+             job.get("salary_currency", "USD"), tags_json,
+             job.get("source_agent", ""), job.get("source_run_id"),
+             job.get("posted_at"), job["first_seen"], job["last_seen"],
+             job.get("brief", ""), job.get("state", "pending"),
+             job.get("duplicate_of"), job.get("expires_at"),
+             job["created_at"], job["updated_at"]),
+        )
+        await self.db.commit()
+
+    async def list_jobs(self, *, state: str | None = None,
+                        source_agent: str | None = None,
+                        tag: str | None = None,
+                        limit: int = 200) -> list[dict]:
+        """List job rows. Filtering is intentionally minimal in the storage
+        layer — the router does full-text + score-based selection on top of
+        this set."""
+        sql = "SELECT * FROM jobs WHERE 1=1"
+        params: list[Any] = []
+        if state:
+            sql += " AND state = ?"
+            params.append(state)
+        if source_agent:
+            sql += " AND source_agent = ?"
+            params.append(source_agent)
+        if tag:
+            sql += " AND tags LIKE ?"
+            params.append(f'%"{tag}"%')
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        cur = await self.db.execute(sql, params)
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def update_job_state(self, thread_id: str, state: str,
+                               duplicate_of: str | None = None) -> None:
+        await self.db.execute(
+            "UPDATE jobs SET state = ?, duplicate_of = ?, updated_at = ? "
+            "WHERE thread_id = ?",
+            (state, duplicate_of, now_iso(), thread_id),
+        )
+        await self.db.commit()
+
+    async def update_job_tags(self, thread_id: str, tags: list[str]) -> None:
+        import json as _json
+        await self.db.execute(
+            "UPDATE jobs SET tags = ?, updated_at = ? WHERE thread_id = ?",
+            (_json.dumps(tags), now_iso(), thread_id),
+        )
+        await self.db.commit()
+
+    async def touch_job_seen(self, thread_id: str) -> None:
+        await self.db.execute(
+            "UPDATE jobs SET last_seen = ? WHERE thread_id = ?",
+            (now_iso(), thread_id))
+        await self.db.commit()
+
+    async def add_job_event(self, event: dict) -> None:
+        await self.db.execute(
+            "INSERT INTO job_events (id, thread_id, type, from_state, to_state,"
+            " reason_tag, comment, actor, payload, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (event["id"], event["thread_id"], event["type"],
+             event.get("from_state"), event.get("to_state"),
+             event.get("reason_tag"), event.get("comment"),
+             event["actor"], event.get("payload"),
+             event["created_at"]),
+        )
+        await self.db.commit()
+
+    async def list_job_events(self, thread_id: str, limit: int = 50) -> list[dict]:
+        cur = await self.db.execute(
+            "SELECT * FROM job_events WHERE thread_id = ?"
+            " ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (thread_id, limit))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def add_job_feedback(self, feedback: dict) -> None:
+        await self.db.execute(
+            "INSERT INTO job_feedback (id, thread_id, signal, reason_tag, "
+            "comment, actor, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (feedback["id"], feedback["thread_id"], feedback["signal"],
+             feedback.get("reason_tag"), feedback.get("comment"),
+             feedback["actor"], feedback.get("payload"),
+             feedback["created_at"]),
+        )
+        await self.db.commit()
+
+    async def list_job_feedback(
+        self, *, thread_id: str | None = None, since: str | None = None,
+        limit: int = 10000,
+    ) -> list[dict]:
+        """Return feedback rows in created_at ASC order.
+
+        Profile recompute depends on ASC ordering — the fold iterates rows
+        oldest-first, latest per thread wins, see jobs_score.py. Limit is
+        generous so a full recompute over a long history stays single-pass.
+        """
+        sql = "SELECT * FROM job_feedback WHERE 1=1"
+        params: list[Any] = []
+        if thread_id:
+            sql += " AND thread_id = ?"
+            params.append(thread_id)
+        if since:
+            sql += " AND created_at >= ?"
+            params.append(since)
+        sql += " ORDER BY created_at ASC LIMIT ?"
+        params.append(limit)
+        cur = await self.db.execute(sql, params)
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def get_job_profile(self) -> dict | None:
+        cur = await self.db.execute(
+            "SELECT * FROM job_profile WHERE id = 1")
+        row = await cur.fetchone()
+        if row is None:
+            # Singleton may not exist yet on a fresh DB. The recompute
+            # path will write one the first time it runs; the scoring
+            # path treats absence as the empty defaults.
+            return None
+        return dict(row)
+
+    async def write_job_profile(self, profile: dict) -> None:
+        """Replace the singleton profile row."""
+        await self.db.execute(
+            "INSERT OR REPLACE INTO job_profile ("
+            "id, tag_weights, company_blocklist, location_blocklist,"
+            " salary_history, preferred_remote, seniority_preference,"
+            "yes_centroid, no_centroid, duplicate_hashes, reason_counts,"
+            "yes_count, no_count, maybe_count, updated_at)"
+            " VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (profile["tag_weights"], profile["company_blocklist"],
+             profile["location_blocklist"], profile["salary_history"],
+             profile["preferred_remote"], profile["seniority_preference"],
+             profile.get("yes_centroid"), profile.get("no_centroid"),
+             profile["duplicate_hashes"], profile["reason_counts"],
+             profile["yes_count"], profile["no_count"],
+             profile["maybe_count"], profile["updated_at"]),
+        )
+        await self.db.commit()
+
+    async def recent_job_duplicate_hashes(self, since: str) -> list[dict]:
+        """The rolling dedup window — returns {hash, thread_id, seen_at}
+        entries from the profile, filtered to those seen in the last
+        `since`. The hash list itself is parsed by jobs_dedup.py; here we
+        only return the raw row so the caller doesn't re-hit the disk.
+        """
+        profile = await self.get_job_profile()
+        if not profile:
+            return []
+        raw = profile.get("duplicate_hashes") or "[]"
+        import json as _json
+        try:
+            entries = _json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            return []
+        return [e for e in entries if isinstance(e, dict)
+                and e.get("seen_at", "") >= since]
+
     # -- row mappers -------------------------------------------------------- #
 
     @staticmethod
@@ -1206,4 +1511,5 @@ class Database:
             media_url=row["media_url"],
             created_at=row["created_at"],
             metadata=meta,
+            source_id=row["source_id"] if "source_id" in row.keys() else None,
         )
