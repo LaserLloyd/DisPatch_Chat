@@ -519,8 +519,30 @@ function setView(view) {
     t.classList.toggle('active', on);
     if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
-  // Jobs board: jobs(mobile) introduces the host slot; the routing is
-  // completed in jobs(unmount). For now the slot exists but is unused.
+  // Jobs board: when the sidebar Job Board button or the mobile Jobs tab
+  // calls setView('jobs'), mount the board into its dedicated host slot
+  // (#job-board-host is a sibling of #chatview, see index.html). The slot
+  // is mutually exclusive with the chat panel, so the toolbar cannot leak
+  // onto the chat view. The previous mount target was #chat (or its
+  // parent), which is why the toolbar stayed painted under the chat on
+  // mobile — see jobs(unmount).
+  if (view === 'jobs') {
+    const host = dom['job-board-host'];
+    if (host) {
+      host.hidden = false;
+      if (!host.querySelector('[data-jobs-root]')) {
+        mountJobs(host).catch(() => {});
+      }
+    }
+  } else {
+    // Always tear down the board when leaving — and HIDE the host so its
+    // descendants (the toolbar, the list) cannot bleed through even if a
+    // future refactor skipped unmountJobs. Both paths are belt-and-braces:
+    // the unmount removes the [data-jobs-root]; the [hidden] hides the
+    // empty shell.
+    unmountJobs();
+    if (dom['job-board-host']) dom['job-board-host'].hidden = true;
+  }
 }
 
 // History-aware navigation (mobile only). The bots screen is the root of the
@@ -6435,11 +6457,15 @@ async function init() {
   // time-boxed internally, so a hung fetch degrades to English rather than
   // holding the boot veil up.
   await i18nInit();
-  // Expose openThread + setView + unmountJobs for cross-module callers.
-  // Wired up by jobs(unmount); see that commit for the rationale.
-  // window.__openThread = openThread;
-  // window.__setView = setView;
-  // window.unmountJobs = unmountJobs;
+  // Expose openThread + setView + unmountJobs for cross-module callers
+  // (the jobs board title links dispatch into the same composer/mobile-tab
+  // flow that built-in thread rows use; without __openThread, clicking a
+  // job silently does nothing. __setView lets the board swap the chat
+  // panel back to the messages list before the thread opens, otherwise
+  // the toolbar stays painted under the job card).
+  window.__openThread = openThread;
+  window.__setView = setView;
+  window.unmountJobs = unmountJobs;
   onI18nChange(reRenderForLocale);
   applyRailLabels();
   // Privacy mode, if this device has it on: drop the offline cache, unregister
@@ -6483,7 +6509,30 @@ async function init() {
   wireAuthEvents();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
-  // jobs(unmount) backstop will live here in the next commit.
+  // jobs(unmount) backstop — see also setView(). A MutationObserver on
+  // #app watches data-view and tears the board down when it flips OFF
+  // jobs. The primary path is the else-branch in setView() and the
+  // classic click to setView('chat'); this catches the rest:
+  //   * a future refactor that mutates data-view directly,
+  //   * a boot-time data-view=jobs written by a hash router that never
+  //     existed but might, and
+  //   * any code path that forgets the explicit unmount (the symptom the
+  //     lead reported on 2026-09-15 — toolbar painted across view
+  //     changes).
+  // Cheap: one attribute, no subtree.
+  if ('MutationObserver' in window && dom.app) {
+    let lastView = dom.app.dataset.view || '';
+    new MutationObserver(() => {
+      const v = dom.app.dataset.view || '';
+      if (v === lastView) return;
+      lastView = v;
+      if (v !== 'jobs') {
+        // Same teardown as setView else branch.
+        unmountJobs();
+        if (dom['job-board-host']) dom['job-board-host'].hidden = true;
+      }
+    }).observe(dom.app, { attributes: true, attributeFilter: ['data-view'] });
+  }
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
   // list's relative timestamps ("5m") drift.
   let lastTick = '';
