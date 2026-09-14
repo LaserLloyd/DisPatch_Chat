@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v97';  // v97: jobs(fix) — navigate() takes an early-branch for 'jobs' (review finding #1: the mobile Jobs tab collapsed to Bots from Chats/Messages because navigate() collapsed the stack via history.go(-N); now replaceState + setView + return). Cache bumped in lockstep with main.js?v=78→v=79.
+const CACHE = 'local-chat-v97';  // v97: jobs(fix) — navigate() takes an early-branch for 'jobs' (review finding #1: the mobile Jobs tab collapsed to Bots from Chats/Messages because navigate() ran history.go(-N) on the missing 'jobs' depth; now pushState({view:'jobs'}) + setView + return — pushState not replaceState so a Back from Jobs returns to the view the user came from, not all the way to Bots). Cache bumped in lockstep with main.js?v=78→v=79.
 const SHELL = [
   '/',
   '/static/theme.css',

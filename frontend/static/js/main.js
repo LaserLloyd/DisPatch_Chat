@@ -31,6 +31,13 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=6';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle } from './pins.js?v=7';
+// thread-sections.js owns the Today / Older bucketing + section-header DOM.
+// See the module's top comment for the rule set; this file only decides WHEN
+// to render headers (suppressed on mobile, suppressed while search is open)
+// and WHERE the buckets go in the threads list.
+import {
+  bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
+} from './thread-sections.js?v=1';
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
 import { renderLinkRail, linksSection } from './links.js?v=4';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
@@ -562,13 +569,14 @@ function navigate(view) {
   }
   // The Jobs view is a sibling of the chat-side tabs but not part of the
   // history stack's depth axis — opening it from Chats/Messages must NOT
-  // collapse the back-stack to Bots via history.go(-N). Replace the stack's
-  // top with the Jobs entry and set the view directly. The popstate handler
-  // already paints whatever entry it lands on (main.js above), so a future
-  // Back from Jobs becomes the previous entry (whatever it was, which is
-  // correct UX for "tap Jobs from Chats → Back returns to Chats").
+  // collapse the back-stack to Bots via history.go(-N). Push a Jobs entry
+  // (do NOT replaceState — replaceState drops the intermediate entry, so a
+  // Back from Jobs lands on Bots instead of the view the user came from).
+  // pushState keeps the stack as [bots, ..., jobs] so Back returns to the
+  // previous view (correct UX for "tap Jobs from Chats → Back returns to
+  // Chats").
   if (view === 'jobs') {
-    history.replaceState({ view: 'jobs' }, '');
+    history.pushState({ view: 'jobs' }, '');
     setView('jobs');
     return;
   }
