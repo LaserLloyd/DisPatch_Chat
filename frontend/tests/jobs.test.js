@@ -182,10 +182,11 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   const sw = readFileSync(join(STATIC, 'sw.js'), 'utf8');
   const m = /const CACHE = '([^']+)'/.exec(sw);
   assert.ok(m, 'sw.js must declare CACHE');
-  // Pin against the shipped CACHE name (v98 after threads(desktop) bumped
-  // v97→v98 to install thread-sections.js). If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v98',
-    'sw.js CACHE must be local-chat-v98 so old shells drop and the new modules install');
+  // Pin against the shipped CACHE name (v99 after jobs(fix) bumped
+  // v98→v99 to install the search-modal-close + selectBot-view-swap
+  // fixes). If you bump again, bump here too.
+  assert.equal(m[1], 'local-chat-v99',
+    'sw.js CACHE must be local-chat-v99 so old shells drop and the new modules install');
 });
 
 // =============================================================================
@@ -348,4 +349,70 @@ test('navigate("jobs") is idempotent — calling it twice leaves the DOM still o
   // would behave differently from the first).
   assert.doesNotMatch(body, /history\.state/,
     'jobs early-branch must not read history.state — must be idempotent');
+});
+
+// =============================================================================
+// jobs(fix): search-modal-close on Jobs entry + selectBot exits Jobs view.
+// Two regressions caught 2026-09-15 by the E2E "comprehensive test":
+//   1. Opening the messages-search modal and then clicking Job Board left
+//      the modal painted across the board (Symptom B: "search header
+//      sticks").
+//   2. Clicking another bot while on the Jobs view did not switch view;
+//      openThread loaded the chat into a display:none #chatview (Symptom C:
+//      "header sticks AND can't view chats").
+// The fixes are pure JS — closeSearch() inside the jobs-branch of setView,
+// and a `if (dom.app.dataset.view === 'jobs') setView(...)` guard at the
+// top of selectBot. We pin both with regex checks here so a future refactor
+// can't silently drop them; the dispatch-e2e smoke covers the full UI.
+// =============================================================================
+
+test('setView("jobs") dismisses the messages-search modal (the "search header sticks" fix)', () => {
+  const src = readMainJs();
+  // Slice the setView body. There is exactly one function named `setView`
+  // in main.js.
+  const start = src.indexOf('function setView(');
+  assert.ok(start >= 0, 'main.js must define function setView');
+  // Locate the jobs-branch — the only `if (view === 'jobs')` block in setView.
+  const jobsCheck = src.indexOf("if (view === 'jobs')", start);
+  assert.ok(jobsCheck >= 0, 'setView must have a jobs branch');
+  // The slice must start with `if (view === 'jobs') {` and not extend
+  // past the next `} else {` (which marks the start of the else branch).
+  const elseStart = src.indexOf('} else {', jobsCheck);
+  assert.ok(elseStart > 0, 'setView jobs branch must end with } else {');
+  const branch = src.slice(jobsCheck, elseStart);
+  assert.match(branch, /closeSearch\(/,
+    'setView("jobs") must call closeSearch() — without it, a search modal ' +
+    'opened from a prior view stays painted across the view swap. This is ' +
+    'the symptom-B regression guard.');
+});
+
+test('selectBot() exits the Jobs view (the "view-stuck-on-bot-switch" fix)', () => {
+  const src = readMainJs();
+  const start = src.indexOf('async function selectBot(');
+  assert.ok(start >= 0, 'main.js must define async function selectBot');
+  // Slice the first 800 chars of the function body — the guard sits near the
+  // top, BEFORE state.selectedBotId = id.
+  const body = src.slice(start, start + 1200);
+  // The guard exists (a) AND (b) references the current view (so it
+  // only acts when actually on Jobs, not every bot click).
+  assert.match(body, /dataset\.view\s*===\s*['"]jobs['"]/,
+    'selectBot() must short-circuit when current view === "jobs" — that is ' +
+    'the symptom-C regression guard (clicking another bot from Jobs left the ' +
+    'view stuck on Jobs with #chatview display:none).');
+  // The guard must call setView (NOT just unlock the host) — otherwise the
+  // data-view attribute never flips back. A regression that swapped in a
+  // host.hidden = false-only fix would still leave data-view="jobs". The
+  // real call is `setView(isMobile() ? 'threads' : 'chat')` — assert
+  // BOTH that setView is the chosen mechanism AND that the new view name
+  // is one of the two legal values, even when nested in a ternary. Use a
+  // non-greedy match that ignores `)` (setView's expression can itself
+  // contain `()`, e.g. `isMobile()`).
+  assert.match(body, /setView\s*\([\s\S]*?['"](threads|chat)['"]/,
+    'the Jobs-exit guard must route through setView(...chat|threads) — a ' +
+    'host.hidden reset alone would not flip data-view, so #chatview would ' +
+    'still be hidden and the user would still see no chats.');
+  assert.match(body, /setView\s*\([\s\S]*?['"](threads|chat)['"][\s\S]*?['"](threads|chat)['"]/,
+    'the Jobs-exit guard must call setView on one of "threads" / "chat" — ' +
+    'arbitrary view names would route the user into a state with no panel ' +
+    'painted. The current implementation is `setView(isMobile() ? \'threads\' : \'chat\')`.');
 });

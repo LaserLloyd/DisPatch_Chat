@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v98';  // v98: threads(desktop) — Today / Older section headers in the thread list. main.js now imports thread-sections.js (pure bucketing + section-head DOM); mobile CSS hides the headers, the JS gate suppresses them while the search modal is open. Cache bumped in lockstep with main.js?v=79→v=80 (jobs(fix) bumped to v97 earlier the same day).
+const CACHE = 'local-chat-v99';  // v99: jobs(fix) — (1) close the messages-search modal on entering the Jobs view (the "search header sticks" bug; the overlay used to remain painted across view changes, hiding the board), (2) selectBot from the Jobs view exits to chat/threads instead of staying stuck on Jobs with #chatview display:none. main.js?v=80→v=81.
 const SHELL = [
   '/',
   '/static/theme.css',

@@ -547,6 +547,13 @@ function setView(view) {
   // parent), which is why the toolbar stayed painted under the chat on
   // mobile — see jobs(unmount).
   if (view === 'jobs') {
+    // Symptom (jobs-fix: search-sticks): entering the Jobs view from any
+    // state where the messages-search modal was open used to leave the
+    // overlay painted across the board. Search is bound to the threads /
+    // chat list surfaces, so a view change is an unambiguous "I'm done
+    // searching" — dismiss the modal here so the user lands on a clean
+    // board, not a board hidden behind the search chrome.
+    closeSearch();
     const host = dom['job-board-host'];
     if (host) {
       host.hidden = false;
@@ -2444,6 +2451,17 @@ async function selectBot(id) {
   // Leaving a tool pane for a real bot tears the view down cleanly.
   if (harnessOpen) closeHarnessView();
   if (studioforgeOpen) closeStudioForgeView();
+  // Symptom (jobs-fix: view-stuck-on-bot-switch): if we're sitting on the
+  // Jobs view when the user clicks another bot, the rest of this function
+  // still loads threads AND opens the first one — but the jobs CSS keeps
+  // #chatview hidden. The user sees the board stay put, no chats appear,
+  // and the title bar stays "Job Board" forever. Mirror what the trailing
+  // branches already do for the other views (desktop → chat, mobile →
+  // threads) so the openThread / navigate call at the bottom lands in a
+  // panel the user can actually see.
+  if (dom.app.dataset.view === 'jobs') {
+    setView(isMobile() ? 'threads' : 'chat');
+  }
   state.selectedBotId = id;
   renderSidebar();
   updateThreadListHeader();
