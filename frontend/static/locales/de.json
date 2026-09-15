@@ -37,7 +37,7 @@
   },
   "nav": {
     "theme": "Design",
-    "theme_aria": "Design und Avatar-Stil",
+    "theme_aria": "Design wählen",
     "lock_now": "Jetzt sperren",
     "unlock_title": "PIN für den Admin-Modus eingeben",
     "unlock_aria": "Entsperren — PIN eingeben",
@@ -59,8 +59,8 @@
     "tools_aria": "Betriebswerkzeuge — Coding-Harness, LLM-Rig"
   },
   "theme": {
-    "dark": "Dunkles Design — für helles klicken",
-    "light": "Helles Design — für dunkles klicken"
+    "mode_dark": "Dunkel",
+    "mode_light": "Hell"
   },
   "conn": {
     "aria": "Verbindungsstatus",
@@ -180,8 +180,10 @@
     "tab_reactions": "Reaktionen",
     "tab_health": "Zustand",
     "tab_ai": "KI-Modelle",
+    "tab_theme": "Design",
     "tab_device": "Gerät",
     "tab_security": "Sicherheit",
+    "theme_hint": "Wähle das Aussehen für dieses Gerät. Es gilt sofort und wird hier gespeichert — es gibt nichts zu speichern.",
     "device_hint": "Diese Einstellungen gelten nur für dieses Gerät und wirken sofort — hier gibt es nichts zu speichern.",
     "hint": "Tippe auf das Bild eines Bots (oder auf <strong>Foto ändern</strong>), um seinen Avatar zu setzen. Sortiere mit den ▲/▼-Buttons (am Desktop auch per Ziehen); mit dem Schalter blendest du einen Bot in der Seitenleiste ein oder aus. <strong>🛡️ Sicher</strong> — diese Figur (und ihr Avatar) ist im Sicheren Modus sichtbar, ganz ohne PIN. Reihenfolge, Sichtbarkeit und Sicher-Änderungen gelten, sobald du auf <strong>Speichern</strong> drückst.",
     "language": "Sprache",
@@ -467,7 +469,7 @@
     "group_chats": "Chats",
     "sub_chat": "Chat",
     "action_new_chat": "Neuer Chat",
-    "action_theme": "Design wechseln",
+    "action_theme": "Design ändern",
     "action_search": "Nachrichten suchen",
     "action_recovery": "Wiederherstellung & Export",
     "action_stop": "Antwort stoppen",
@@ -946,6 +948,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

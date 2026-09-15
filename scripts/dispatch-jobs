@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""dispatch-jobs — the on-box CLI for the DisPatch Jobs board.
+
+A thin wrapper around the ``/api/jobs/*`` HTTP surface, in the same family
+as ``dispatch-react`` / ``dispatch-pic`` / ``dispatch-avatar-rotate``. Used
+by OpenClaw agents (and humans on the host) to manage the Jobs board end-
+to-end without writing curl. Every subcommand resolves to a single REST
+call against the running DisPatch server.
+
+CONFIG
+======
+The base URL and (optional) PIN-derived session cookie are read from the
+environment:
+
+  DISPATCH_URL     — default ``http://127.0.0.1:8765``
+  DISPATCH_TOKEN   — bearer token, sent as ``X-API-Key``. Optional; the
+                     default install accepts loopback without one, and a
+                     PIN-protected install needs an operator's session
+                     cookie (the API key does NOT bypass full-session).
+
+EXIT CODES
+==========
+0  success
+1  user error (bad input, unknown subcommand)
+2  network error (cannot reach the server)
+3  server returned an error with a recognised code (4xx/5xx)
+4  server unreachable after the timeout — see dispatch-react for the same
+   convention; jobs.py is local-only so this should never fire in practice.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from typing import Any
+
+DEFAULT_URL = os.environ.get("DISPATCH_URL", "http://127.0.0.1:8765")
+
+
+def _request(method: str, path: str, payload: dict | None = None) -> tuple[int, Any]:
+    """Issue an HTTP request to the DisPatch Jobs API. Returns (status, body)."""
+    url = DEFAULT_URL.rstrip("/") + path
+    headers = {"Accept": "application/json"}
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    token = os.environ.get("DISPATCH_TOKEN")
+    if token:
+        headers["X-API-Key"] = token
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+            if not raw:
+                return resp.status, None
+            try:
+                return resp.status, json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                return resp.status, raw.decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            return e.code, json.loads(raw.decode("utf-8"))
+        except Exception:
+            return e.code, raw.decode("utf-8", "replace") or str(e)
+    except urllib.error.URLError as e:
+        print(f"dispatch-jobs: cannot reach {url} — {e.reason}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _print(obj: Any) -> None:
+    """Render a JSON-friendly response on stdout."""
+    if isinstance(obj, (dict, list)):
+        json.dump(obj, sys.stdout, indent=2, ensure_ascii=False)
+        sys.stdout.write("\n")
+    else:
+        print(str(obj))
+
+
+# ---- subcommands --------------------------------------------------------- #
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    """List jobs (filterable by state/source-agent/tag)."""
+    qs = []
+    if args.state:
+        qs.append(f"state={urllib.parse.quote(args.state)}")
+    if args.source_agent:
+        qs.append(f"source_agent={urllib.parse.quote(args.source_agent)}")
+    if args.tag:
+        qs.append(f"tag={urllib.parse.quote(args.tag)}")
+    if args.thread_id:
+        qs.append(f"thread_id={urllib.parse.quote(args.thread_id)}")
+    qs.append(f"limit={args.limit}")
+    status, body = _request("GET", "/api/jobs?" + "&".join(qs))
+    if status != 200:
+        print(f"dispatch-jobs list: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    jobs = body.get("jobs", [])
+    if args.short:
+        for j in jobs:
+            print(f"{j['job_id']}\t{j.get('effective_state', '?')}\t{j.get('title', '')}")
+    else:
+        _print(body)
+    return 0
+
+
+def cmd_months(args: argparse.Namespace) -> int:
+    """List monthly discussion threads (the picker data)."""
+    status, body = _request("GET", f"/api/jobs/months?bot_id={urllib.parse.quote(args.bot_id)}")
+    if status != 200:
+        print(f"dispatch-jobs months: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_current(args: argparse.Namespace) -> int:
+    """Resolve (and, by default, create) the current month's thread."""
+    status, body = _request("GET",
+        f"/api/jobs/current?bot_id={urllib.parse.quote(args.bot_id)}"
+        f"&ensure={'true' if not args.no_ensure else 'false'}")
+    if status != 200:
+        print(f"dispatch-jobs current: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_view(args: argparse.Namespace) -> int:
+    """Fetch one job (by job_id) plus its events + score."""
+    status, body = _request("GET", f"/api/jobs/{urllib.parse.quote(args.job_id)}")
+    if status != 200:
+        print(f"dispatch-jobs view: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    """Dry-run score a candidate (no DB write)."""
+    payload = {
+        "url": args.url,
+        "title": args.title,
+        "company": args.company or "",
+        "location": args.location or "",
+        "remote_type": args.remote or "unknown",
+        "salary_min": args.salary_min,
+        "salary_max": args.salary_max,
+        "salary_currency": args.currency or "USD",
+        "tags": [t.strip() for t in (args.tags or "").split(",") if t.strip()],
+        "brief": args.brief or "",
+    }
+    status, body = _request("POST", "/api/jobs/score", payload)
+    if status != 200:
+        print(f"dispatch-jobs score: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_post(args: argparse.Namespace) -> int:
+    """Post a new job. Auto-routes to the current monthly discussion thread."""
+    payload: dict[str, Any] = {
+        "bot_id": args.bot_id,
+        "url": args.url,
+        "title": args.title,
+        "company": args.company or "",
+        "location": args.location or "",
+        "remote_type": args.remote or "unknown",
+        "salary_min": args.salary_min,
+        "salary_max": args.salary_max,
+        "salary_currency": args.currency or "USD",
+        "tags": [t.strip() for t in (args.tags or "").split(",") if t.strip()],
+        "brief": args.brief or "",
+        "source_agent": args.source_agent or os.environ.get("OPENCLAW_AGENT", "cli"),
+    }
+    if args.initial_message:
+        payload["initial_message"] = args.initial_message
+    if args.posted_at:
+        payload["posted_at"] = args.posted_at
+    if args.expires_at:
+        payload["expires_at"] = args.expires_at
+    status, body = _request("POST", "/api/jobs", payload)
+    if status != 200:
+        print(f"dispatch-jobs post: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    if args.short:
+        j = body.get("job", {})
+        print(f"{j.get('job_id', '?')}\t{j.get('thread_id', '?')}\t{j.get('title', '')}")
+    else:
+        _print(body)
+    return 0
+
+
+def cmd_vote(args: argparse.Namespace) -> int:
+    """Cast a vote (yes/no/maybe/undo) on a job."""
+    if args.signal == "no" and not args.reason:
+        print("dispatch-jobs vote: --reason is required when signal is 'no'",
+              file=sys.stderr)
+        return 1
+    payload = {
+        "signal": args.signal,
+        "reason_tag": args.reason,
+        "comment": args.comment,
+    }
+    status, body = _request("POST",
+        f"/api/jobs/{urllib.parse.quote(args.job_id)}/vote", payload)
+    if status != 200:
+        print(f"dispatch-jobs vote: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_applied(args: argparse.Namespace) -> int:
+    """Mark a job as applied."""
+    payload = {"comment": args.comment or ""}
+    status, body = _request("POST",
+        f"/api/jobs/{urllib.parse.quote(args.job_id)}/applied", payload)
+    if status != 200:
+        print(f"dispatch-jobs applied: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_tags(args: argparse.Namespace) -> int:
+    """Add / remove tags on a job."""
+    payload = {
+        "add": [t.strip() for t in (args.add or "").split(",") if t.strip()],
+        "remove": [t.strip() for t in (args.remove or "").split(",") if t.strip()],
+    }
+    if not payload["add"] and not payload["remove"]:
+        print("dispatch-jobs tags: must pass --add and/or --remove", file=sys.stderr)
+        return 1
+    status, body = _request("POST",
+        f"/api/jobs/{urllib.parse.quote(args.job_id)}/tags", payload)
+    if status != 200:
+        print(f"dispatch-jobs tags: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_archive(args: argparse.Namespace) -> int:
+    """Archive a job."""
+    status, body = _request("POST",
+        f"/api/jobs/{urllib.parse.quote(args.job_id)}/archive")
+    if status != 200:
+        print(f"dispatch-jobs archive: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_profile(args: argparse.Namespace) -> int:
+    """Read the current preference profile (tag_weights, blocklists, etc.)."""
+    status, body = _request("GET", "/api/jobs/profile")
+    if status != 200:
+        print(f"dispatch-jobs profile: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_recompute(args: argparse.Namespace) -> int:
+    """Force a profile recompute (admin/operator only)."""
+    status, body = _request("POST", "/api/jobs/profile/recompute")
+    if status != 200:
+        print(f"dispatch-jobs recompute: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+def cmd_reasons(args: argparse.Namespace) -> int:
+    """List the reason-tag taxonomy (the canonical id list)."""
+    status, body = _request("GET", "/api/jobs/reasons")
+    if status != 200:
+        print(f"dispatch-jobs reasons: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    _print(body)
+    return 0
+
+
+# ---- main --------------------------------------------------------------- #
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="dispatch-jobs",
+        description="Manage the DisPatch Jobs board from the command line. "
+                    "Mirrors the /api/jobs/* HTTP surface; one subcommand per "
+                    "endpoint. Use this for agent-driven curation (post + "
+                    "vote + archive + tag) or operator review (list + view + "
+                    "profile).",
+        epilog="Exit codes: 0 ok, 1 user error, 2 network, 3 server error.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="SUBCOMMAND")
+
+    # list
+    pl = sub.add_parser("list", help="List jobs (filterable)")
+    pl.add_argument("--state", choices=["pending", "yes", "no", "maybe",
+                                        "applied", "archived", "duplicate"])
+    pl.add_argument("--source-agent", help="Filter to jobs posted by this agent")
+    pl.add_argument("--tag", help="Filter by tag (exact match)")
+    pl.add_argument("--thread-id", help="Filter to jobs in this monthly thread")
+    pl.add_argument("--limit", type=int, default=200)
+    pl.add_argument("--short", action="store_true",
+                    help="One line per job (id\\tstate\\ttitle)")
+    pl.set_defaults(func=cmd_list)
+
+    # months / current
+    pm = sub.add_parser("months", help="List monthly discussion threads")
+    pm.add_argument("--bot-id", default="jobboard")
+    pm.set_defaults(func=cmd_months)
+
+    pc = sub.add_parser("current", help="Get (and create) the current month's thread")
+    pc.add_argument("--bot-id", default="jobboard")
+    pc.add_argument("--no-ensure", action="store_true",
+                    help="Don't create the thread if it doesn't exist yet")
+    pc.set_defaults(func=cmd_current)
+
+    # view
+    pv = sub.add_parser("view", help="Fetch one job by job_id")
+    pv.add_argument("job_id")
+    pv.set_defaults(func=cmd_view)
+
+    # score (dry-run)
+    ps = sub.add_parser("score", help="Score a candidate without writing")
+    ps.add_argument("--url", required=True)
+    ps.add_argument("--title", required=True)
+    ps.add_argument("--company", default="")
+    ps.add_argument("--location", default="")
+    ps.add_argument("--remote", choices=["onsite", "hybrid", "remote", "unknown"],
+                    default="unknown")
+    ps.add_argument("--salary-min", type=int, default=None)
+    ps.add_argument("--salary-max", type=int, default=None)
+    ps.add_argument("--currency", default="USD")
+    ps.add_argument("--tags", default="", help="Comma-separated tags")
+    ps.add_argument("--brief", default="")
+    ps.set_defaults(func=cmd_score)
+
+    # post
+    pp = sub.add_parser("post", help="Post a new job (auto-routes to current month)")
+    pp.add_argument("--bot-id", default="jobboard")
+    pp.add_argument("--url", required=True)
+    pp.add_argument("--title", required=True)
+    pp.add_argument("--company", default="")
+    pp.add_argument("--location", default="")
+    pp.add_argument("--remote", choices=["onsite", "hybrid", "remote", "unknown"],
+                    default="unknown")
+    pp.add_argument("--salary-min", type=int, default=None)
+    pp.add_argument("--salary-max", type=int, default=None)
+    pp.add_argument("--currency", default="USD")
+    pp.add_argument("--tags", default="", help="Comma-separated tags")
+    pp.add_argument("--brief", default="")
+    pp.add_argument("--initial-message", default=None,
+                    help="Override the auto-generated announcement")
+    pp.add_argument("--posted-at", default=None,
+                    help="ISO-8601 timestamp the role was originally posted")
+    pp.add_argument("--expires-at", default=None,
+                    help="ISO-8601 deadline; default = posted_at + 90 days")
+    pp.add_argument("--source-agent", default=None,
+                    help="Which agent posted this (defaults to $OPENCLAW_AGENT)")
+    pp.add_argument("--short", action="store_true",
+                    help="One line per post (id\\tthread_id\\ttitle)")
+    pp.set_defaults(func=cmd_post)
+
+    # vote
+    pv2 = sub.add_parser("vote", help="Cast a vote on a job")
+    pv2.add_argument("job_id")
+    pv2.add_argument("--signal", required=True,
+                     choices=["yes", "no", "maybe", "undo"])
+    pv2.add_argument("--reason",
+                     choices=["wrong_location", "too_senior", "too_junior",
+                              "compensation", "company", "wrong_domain",
+                              "already_applied", "duplicate", "other"])
+    pv2.add_argument("--comment", default=None)
+    pv2.set_defaults(func=cmd_vote)
+
+    # applied
+    pa = sub.add_parser("applied", help="Mark a job as applied")
+    pa.add_argument("job_id")
+    pa.add_argument("--comment", default="")
+    pa.set_defaults(func=cmd_applied)
+
+    # tags
+    pt = sub.add_parser("tags", help="Add / remove tags on a job")
+    pt.add_argument("job_id")
+    pt.add_argument("--add", default="", help="Comma-separated tags to add")
+    pt.add_argument("--remove", default="", help="Comma-separated tags to remove")
+    pt.set_defaults(func=cmd_tags)
+
+    # archive
+    pa2 = sub.add_parser("archive", help="Archive a job")
+    pa2.add_argument("job_id")
+    pa2.set_defaults(func=cmd_archive)
+
+    # profile / recompute / reasons
+    sub.add_parser("profile", help="Read the current preference profile") \
+        .set_defaults(func=cmd_profile)
+    sub.add_parser("recompute", help="Force a profile recompute (admin)") \
+        .set_defaults(func=cmd_recompute)
+    sub.add_parser("reasons", help="List the reason-tag taxonomy") \
+        .set_defaults(func=cmd_reasons)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    # urllib.parse is imported lazily so the help text can be reached
+    # even if the user has no network stack.
+    global urllib  # noqa: PLW0603
+    import urllib.parse
+    urllib.parse = urllib.parse
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("dispatch-jobs: interrupted", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

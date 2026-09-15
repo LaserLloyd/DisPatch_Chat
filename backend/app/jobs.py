@@ -1,82 +1,68 @@
-"""HTTP surface for the managed-chat-room-style jobs board.
-
-MOUNTING IT (the exact change in main.py, three small bits):
-
-    1. add ``jobs`` to the existing package import near the top:
-
-           from . import (auth, config, dashboard_routes, jobs, ...)
-
-    2. THE ONE LINE, anywhere after the existing dashboards/localview
-       mounts and before the static mounts at the bottom of main.py:
-
-           if JOBS_ENABLED:
-               app.include_router(jobs.router)
-
-       The feature-flag gate is independent of `_is_inbound` — every
-       route also has its own tier checks; the gate is so a `JOBS_ENABLED=0`
-       install never sees the surface at all.
-
-    3. `_is_inbound(method, path)` allowlist — add two tuples
-       ``("POST", "/api/jobs")`` and ``("POST", "/api/jobs/score")``
-       so on-box agents stop getting 403s. The 403 scar comment at
-       main.py:1541–1545 is the reason.
-
-    4. `_decoy_blocked(method, path)` prefix list — add ``/api/jobs`` so a
-       Safe-Mode browser is refused one layer earlier than the route's
-       own check.
-
-AUTH MATRIX (per plan §4)
--------------------------
-- **Inbound-exempt**: ``POST /api/jobs``, ``POST /api/jobs/score``. These
-  are the two routes an on-box agent calls — no PIN-derived session
-  needed; the allowlist covers them.
-- **Session-only** (full PIN unlock, not Safe Mode): vote, applied, tags,
-  archive, profile/recompute. Each handler calls ``_require_full``
-  directly; a decoy caller gets 403.
-- **Read**: ``GET /api/jobs*``. No session needed on the inbound-exempt
-  layer, but ``_is_safe_mode_caller`` redacts the response to the empty
-  shape so a Safe-Mode client gets ``{"jobs": [], "next_cursor": null}``
-  — same pattern as ``/api/threads`` (main.py:7213–7225).
-- All other endpoints: feature-flag gate + route-local tier check.
+"""HTTP surface for the monthly-threading jobs board.
 
 WHAT THIS MODULE OWNS
 ---------------------
-- Routes.
-- The atomic vote-write: thread_id state + job_events + job_feedback +
-  profile recompute, in one transaction.
+- Routes (read + write).
+- The monthly-thread find-or-create helper used by ``create_job``.
+- The atomic vote-write: job state + job_events + job_feedback + profile
+  recompute, in one transaction.
 - The lazy expiry filter ``effective_state()`` — never overwrites the
   stored ``state``; the GET responses carry the effective view.
+- The friendly month-label helpers the API layer uses to render chat
+  header titles for monthly threads.
 
 WHAT THIS MODULE DOES NOT OWN
 -----------------------------
 - Scoring math (``jobs_score.py``).
 - Content hashing (``jobs_dedup.py``).
-- DB tables (``database.py``, the schema is added in ``_init_schema``).
+- DB tables and their migrations (``database.py``).
+
+MONTHLY THREAD MODEL (2026-09-15)
+---------------------------------
+Every job post lands in the bot's MONTHLY discussion thread for the
+current year+month — not its own per-job thread. The monthly thread
+title is ``Jobs — YYYY-MM``; multiple jobs share the same thread, and
+each one is announced as an assistant message inside the thread. A
+user browsing the Jobs board sees the current month's chat, can page
+back through prior months via a small picker, and can vote / apply /
+tag per-job from the chat itself.
+
+Auth matrix (unchanged):
+- Inbound-exempt: ``POST /api/jobs``, ``POST /api/jobs/score``. These
+  are the two routes an on-box agent calls — no PIN-derived session
+  needed; the allowlist covers them.
+- Session-only (full PIN unlock, not Safe Mode): vote, applied, tags,
+  archive, profile/recompute. Each handler calls ``_require_full``
+  directly; a decoy caller gets 403.
+- Read: ``GET /api/jobs*``. No session needed on the inbound-exempt
+  layer, but ``_is_safe_mode_caller`` redacts the response to the empty
+  shape so a Safe-Mode client gets ``{"jobs": [], "next_cursor": null}``
+  — same pattern as ``/api/threads`` (main.py:7213–7225).
+- All other endpoints: feature-flag gate + route-local tier check.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, config, jobs_dedup, jobs_score
+from . import auth, config, database, jobs_dedup, jobs_score
 
 log = logging.getLogger("local-chat.jobs")
 
 # Feature flag: ``main`` reads this BEFORE mounting the router. Default
-# off so a stock install never sees the surface until flipped (plan §9).
+# off so a stock install never sees the surface until flipped.
 JOBS_ENABLED: bool = False
 
 # Reason-tag enum (mirrored exactly by the UI; do NOT add new tags
-# without updating both sides). Plan §4.
+# without updating both sides).
 REASONS: tuple[str, ...] = jobs_score.REASON_TAGS
 
-# Default auto-archive window (plan §11 risk row "Stale jobs").
+# Default auto-archive window.
 EXPIRY_DEFAULT_DAYS = 90
 
 # How many distinct tags we accept on a job — bounds the JSON column.
@@ -90,7 +76,6 @@ MAX_TAGS = 32
 
 def _is_decoy(request: Request) -> bool:
     """A locked Safe-Mode session is a 'decoy' from main.py's vocabulary."""
-    # Imported lazily so the module is importable without circularity.
     from . import main
     return bool(getattr(main, "_is_decoy", lambda r: False)(request))
 
@@ -111,8 +96,8 @@ def _require_full(request: Request) -> None:
     from . import main
     sid = request.cookies.get(getattr(main, "COOKIE_NAME", "lc_session"))
     if sid is None:
-        # No PIN set up yet -> the app is wide open (this is the
-        # no-pin allow in auth.py). A bare caller is fine.
+        # No PIN set up yet -> the app is wide open (no-pin allow in
+        # auth.py). A bare caller is fine.
         return
     if auth.get_session(sid) is None:
         raise HTTPException(403, "Unlock for full access")
@@ -142,6 +127,75 @@ def _new_id() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Monthly thread helpers
+# --------------------------------------------------------------------------- #
+
+
+def _current_year_month() -> tuple[int, int]:
+    """Year+month in UTC. Stable across a single request; never read the
+    clock twice (a job posted at 23:59:59 must not flip months mid-write).
+    """
+    return database.current_year_month()
+
+
+async def _ensure_monthly_thread_async(bot_id: str, year: int, month: int):
+    """Find-or-create the per-month jobs discussion thread for ``bot_id``.
+
+    If a thread titled ``Jobs — YYYY-MM`` for this bot already exists,
+    return it. Otherwise create one. The bot's resolved avatar is
+    captured via the standard ``create_thread`` path so the chat header
+    shows the bot's current face.
+
+    This is the one place the monthly-thread title is constructed, so a
+    format change never strands older threads.
+    """
+    db = _db()
+    existing = await db.find_monthly_thread(bot_id, year, month)
+    if existing is not None:
+        return existing
+    title = database.jobs_monthly_thread_title(year, month)
+    return await db.create_thread(
+        bot_id=bot_id,
+        title=title,
+        avatar_from_pool=False,
+    )
+
+
+async def _current_month_thread(bot_id: str):
+    """The bot's monthly thread for the current year+month. Creates one
+    if missing — this is the path ``create_job`` always takes.
+
+    Reads the clock exactly once so a job posted at 23:59:59 doesn't
+    flip months mid-write.
+    """
+    year, month = _current_year_month()
+    return await _ensure_monthly_thread_async(bot_id, year, month)
+
+
+def _parse_month_title(title: str | None) -> tuple[int, int] | None:
+    """Inverse of ``database.jobs_monthly_thread_title``: parse a thread
+    title of the form ``Jobs — YYYY-MM`` into (year, month). Returns
+    None for non-monthly threads so the API can silently skip them in
+    list responses.
+
+    Tolerant of trailing whitespace and of the alternate hyphen-minus
+    form ``Jobs - YYYY-MM`` (which a copy-pasted title or a unicode
+    normalisation can produce).
+    """
+    if not title:
+        return None
+    norm = title.strip()
+    for prefix in ("Jobs — ", "Jobs - ", "Jobs— ", "Jobs- "):
+        if norm.startswith(prefix):
+            tail = norm[len(prefix):].strip()
+            try:
+                return database.parse_jobs_month_key(tail)
+            except ValueError:
+                return None
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Lazy expiry filter — the helper called on every GET that returns a job.
 # --------------------------------------------------------------------------- #
 
@@ -150,7 +204,7 @@ def effective_state(job_row: dict, now: str | None = None) -> str:
     """Return the state a caller should see, treating ``expires_at`` past
     as ``archived``. NEVER writes — the stored ``state`` column stays
     whatever it was, and a manual vote (re-pin, archive-open) is what
-    actually changes the stored value. Plan §11 "Stale jobs".
+    actually changes the stored value.
 
     Returns ``"archived"`` when expires_at is set and < now and the
     stored state isn't already ``"archived"``. Everything else passes
@@ -173,7 +227,7 @@ def effective_state(job_row: dict, now: str | None = None) -> str:
 
 
 class JobIn(BaseModel):
-    bot_id: str
+    bot_id: str = "jobboard"
     thread_title: str | None = None
     url: str
     title: str
@@ -268,11 +322,11 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 # ---- read paths ----------------------------------------------------------- #
 #
 # ROUTE ORDER MATTERS. FastAPI matches in registration order; a literal-path
-# route (``/profile``, ``/reasons``, ``/score``) MUST be declared BEFORE the
-# catch-all ``/{thread_id}`` route, otherwise ``GET /api/jobs/profile``
-# resolves with ``thread_id="profile"`` and 404s through ``get_job``. The
-# router below keeps all the static paths ahead of ``/{thread_id}`` for
-# exactly that reason.
+# route (``/profile``, ``/reasons``, ``/score``, ``/months``, ``/month/*``)
+# MUST be declared BEFORE the catch-all ``/{job_id}`` route, otherwise
+# ``GET /api/jobs/profile`` resolves with ``job_id="profile"`` and 404s
+# through ``get_job``. The router below keeps all the static paths ahead of
+# ``/{job_id}`` for exactly that reason.
 
 
 def _serialise_job(job_row: dict) -> dict:
@@ -283,6 +337,8 @@ def _serialise_job(job_row: dict) -> dict:
       * ``is_expired`` and ``effective_state`` so the UI can render the
         lazy-archived view without a re-GET.
       * ``seniority`` echoed; the UI may also override it client-side.
+      * ``message_id`` so the chat panel can scroll to / vote on the
+        announcement message directly.
 
     ``job_row`` may carry ``tags`` as either a JSON-encoded string (the
     on-disk form, returned by ``db.list_jobs`` / ``db.get_job``) or as a
@@ -304,7 +360,9 @@ def _serialise_job(job_row: dict) -> dict:
     expires = job_row.get("expires_at")
     now = _now()
     return {
+        "job_id": job_row["job_id"],
         "thread_id": job_row["thread_id"],
+        "message_id": job_row.get("message_id"),
         "url": job_row["url"],
         "title": job_row["title"],
         "company": job_row.get("company", ""),
@@ -338,31 +396,36 @@ async def list_jobs(
     state: str | None = None,
     source_agent: str | None = None,
     tag: str | None = None,
+    thread_id: str | None = None,
     limit: int = Query(default=200, ge=1, le=500),
 ):
-    """The board view. Filterable by state, source agent, tag.
+    """The board view. Filterable by state, source agent, tag, thread.
 
     A Safe-Mode caller gets the empty shape — never the row contents,
-    matching the existing redaction pattern at main.py:7213–7225.
+    matching the existing redaction pattern.
+
+    ``thread_id`` filters to one monthly discussion thread — the chat
+    panel uses this to paint the messages for a specific month.
     """
     if _is_decoy(request):
         return _safe_mode_redact({})
     db = _db()
     rows = await db.list_jobs(state=state, source_agent=source_agent,
-                             tag=tag, limit=limit)
+                             tag=tag, thread_id=thread_id, limit=limit)
     items = []
     for r in rows:
         item = _serialise_job(r)
         # Suppress `state=duplicate` rows from the default list — the
-        # system-managed duplicate marker (Plan §7).
+        # system-managed duplicate marker.
         if state is None and item["state"] == "duplicate":
             continue
         items.append(item)
     return {"jobs": items, "next_cursor": None}
 
 
-# Static read paths FIRST so the catch-all ``/{thread_id}`` below them
-# cannot eat ``GET /api/jobs/profile`` / ``/reasons`` / ``/score``.
+# Static read paths FIRST so the catch-all ``/{job_id}`` below them
+# cannot eat ``GET /api/jobs/profile`` / ``/reasons`` / ``/score`` /
+# ``/months`` / ``/month/<key>``.
 
 @router.get("/profile")
 async def get_profile(request: Request):
@@ -382,12 +445,156 @@ async def list_reasons():
     return {"reasons": list(REASONS)}
 
 
+@router.get("/months")
+async def list_months(request: Request,
+                      bot_id: str = Query(default="jobboard")):
+    """All monthly discussion threads for ``bot_id``, newest first.
+
+    Each entry carries the canonical ``{year, month, key, label}``
+    payload so the frontend month picker doesn't have to parse the
+    thread title itself. The thread is also returned so the UI can
+    navigate straight into the chat.
+
+    Safe-Mode callers get an empty list — a locked device must never
+    see job metadata, even the title of a monthly thread (the title
+    embeds the year/month).
+    """
+    if _is_decoy(request):
+        return {"months": [], "current": None}
+    db = _db()
+    rows = await db.list_monthly_threads(bot_id)
+    out: list[dict] = []
+    for thread in rows:
+        parsed = _parse_month_title(thread.title)
+        if parsed is None:
+            continue
+        year, month = parsed
+        out.append({
+            "year": year,
+            "month": month,
+            "key": database.jobs_month_key(year, month),
+            "label": database.jobs_month_label(year, month),
+            "thread_id": thread.id,
+            "created_at": thread.created_at,
+            "updated_at": thread.updated_at,
+        })
+    out.sort(key=lambda e: (e["year"], e["month"]), reverse=True)
+    year, month = _current_year_month()
+    current = {
+        "year": year,
+        "month": month,
+        "key": database.jobs_month_key(year, month),
+        "label": database.jobs_month_label(year, month),
+    }
+    return {"months": out, "current": current}
+
+
+@router.get("/current")
+async def current_month(request: Request,
+                        bot_id: str = Query(default="jobboard")):
+    """The current month + (creating if missing) the current thread.
+
+    ``ensure=true`` (default) is what the Jobs board uses on entry:
+    clicking "Job Board" lands the user on the current month's chat,
+    creating it if no job has been posted yet this month. ``ensure=false``
+    is what other surfaces use to learn the current month without
+    accidentally creating an empty thread (e.g. the dispatchctl CLI's  # scrub-ok: dispatchctl is the project's CLI tool name, not a private identifier
+    status read).
+    """
+    if _is_decoy(request):
+        return {"thread": None, "month": None}
+    year, month = _current_year_month()
+    label = database.jobs_month_label(year, month)
+    key = database.jobs_month_key(year, month)
+    ensure = (request.query_params.get("ensure", "true").lower()
+              not in ("0", "false", "no"))
+    thread = None
+    if ensure:
+        thread = await _ensure_monthly_thread_async(bot_id, year, month)
+    else:
+        db = _db()
+        thread = await db.find_monthly_thread(bot_id, year, month)
+    return {
+        "thread": thread.model_dump() if thread else None,
+        "month": {"year": year, "month": month, "key": key, "label": label},
+    }
+
+
+@router.get("/month/{key}")
+async def get_month(request: Request, key: str,
+                    bot_id: str = Query(default="jobboard")):
+    """One month's worth of jobs (the ``YYYY-MM`` key in the path).
+
+    Resolves to the thread, then runs the standard thread-messages
+    fetch so the chat panel can mount the monthly chat. The structured
+    ``jobs`` rows for the month are returned alongside so the panel can
+    pair each announcement message with its job metadata in one trip.
+    """
+    try:
+        year, month = database.parse_jobs_month_key(key)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if _is_decoy(request):
+        return {"thread": None, "messages": [], "jobs": [], "score": None}
+    db = _db()
+    thread = await db.find_monthly_thread(bot_id, year, month)
+    if thread is None:
+        # An empty month has no thread yet — return the empty shape so
+        # the UI can show "no posts in September 2026" without 404ing.
+        return {
+            "thread": None,
+            "messages": [],
+            "jobs": [],
+            "score": None,
+            "month": {
+                "year": year, "month": month, "key": key,
+                "label": database.jobs_month_label(year, month),
+            },
+        }
+    msgs, _has_more = await db.list_messages(thread.id, limit=500)
+    jobs = await db.list_jobs(thread_id=thread.id, limit=500)
+    profile = await db.get_job_profile() or jobs_score.empty_profile()
+    # Score each job once against the current profile; the chat panel
+    # only needs the score for the active message but precomputing them
+    # here is one DB hit instead of N.
+    score_by_job: dict[str, dict] = {}
+    for j in jobs:
+        try:
+            tags = json.loads(j.get("tags") or "[]")
+        except (TypeError, ValueError):
+            tags = []
+        score_by_job[j["job_id"]] = jobs_score.score_candidate(
+            {
+                "url": j["url"],
+                "title": j["title"],
+                "company": j.get("company", ""),
+                "location": j.get("location", ""),
+                "remote_type": j.get("remote_type", "unknown"),
+                "salary_min": j.get("salary_min"),
+                "salary_max": j.get("salary_max"),
+                "seniority": j.get("seniority", "unknown"),
+                "tags": tags,
+            },
+            profile,
+        )
+    return {
+        "thread": thread.model_dump(),
+        "messages": [m.model_dump() for m in msgs],
+        "jobs": [_serialise_job(j) for j in jobs],
+        "score": score_by_job,
+        "month": {
+            "year": year, "month": month, "key": key,
+            "label": database.jobs_month_label(year, month),
+        },
+    }
+
+
 @router.post("/score")
 async def score_candidate(payload: ScoreIn):
     """Score a candidate against the current profile. Does NOT write.
 
     Inbound-exempt (machine agents call this before deciding to POST).
-    Plan §6. Returns ``{score, breakdown, explanation, embedding_unavailable}``.
+    Returns ``{score, breakdown, explanation, embedding_unavailable}``.
     """
     db = _db()
     profile = await db.get_job_profile() or jobs_score.empty_profile()
@@ -408,21 +615,23 @@ async def score_candidate(payload: ScoreIn):
     )
 
 
-@router.get("/{thread_id}")
-async def get_job(request: Request, thread_id: str):
-    """One job + its last 50 events + the live score against the
-    current profile.
+@router.get("/{job_id}")
+async def get_job(request: Request, job_id: str):
+    """One job (by job_id) + its last 50 events + the live score.
+
+    The chat panel resolves a message_id → job via this endpoint when
+    the user opens the vote UI inside an existing chat.
     """
     if _is_decoy(request):
         return {"thread": None, "job": None, "events": [], "score": None}
     db = _db()
-    job = await db.get_job(thread_id)
+    job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    thread = await db.get_thread(thread_id)
+    thread = await db.get_thread(job["thread_id"])
     if not thread:
-        raise HTTPException(404, "Thread not found")
-    events = await db.list_job_events(thread_id, limit=50)
+        raise HTTPException(404, "Job thread not found")
+    events = await db.list_job_events(job_id, limit=50)
     profile = await db.get_job_profile() or jobs_score.empty_profile()
     score = jobs_score.score_candidate(
         {
@@ -451,22 +660,27 @@ async def get_job(request: Request, thread_id: str):
 
 @router.post("")
 async def create_job(payload: JobIn):
-    """Create a job + the thread + the first message.
+    """Create a job in the bot's CURRENT month's discussion thread.
 
     Inbound-exempt for machines: the dispatcher (or any on-box agent)
     posts here without holding a session. Session-bearing callers can
-    also post (the handler does not refuse them). Plan §4.
+    also post (the handler does not refuse them).
 
     Side effects, in order:
       1. ``jobs_dedup.check_duplicate`` — short-circuits to the
-         existing thread when content hash matches within 30 days.
-         Returns ``{duplicate: true, existing_thread_id, last_seen}``.
-      2. ``db.create_thread`` — the thread row (the chat lives here).
-      3. ``db.upsert_job`` — the structured row.
-      4. ``db.add_message`` — the first assistant message announcing
-         the job. The agent's ``initial_message`` overrides the
-         template; otherwise a short canned line.
-      5. ``db.add_job_event`` — the ``state_change|comment`` event row.
+         existing job when content hash matches within 30 days.
+         Returns ``{duplicate: true, existing_job_id, last_seen}``.
+      2. ``_current_month_thread`` — find-or-create the per-month
+         thread for this bot.
+      3. ``db.upsert_job`` — the structured row keyed by ``job_id``
+         (one row per job posting; multiple jobs share the thread).
+      4. ``db.add_message`` — the assistant announcement message in
+         the monthly thread. The message's metadata carries ``job_id``
+         so a future re-render can join without a separate lookup.
+      5. ``db.update_job_message_id`` — patch the message_id back into
+         the job row so voting knows which message it belongs to.
+      6. ``db.add_job_event`` — the ``comment`` event row (job creation
+         is itself an event in the immutable audit log).
 
     The body of the work runs in ``create_job_from_dict`` (which the
     test suite calls directly to avoid the FastAPI Pydantic layer for
@@ -485,16 +699,23 @@ async def create_job_from_dict(payload: dict) -> dict:
     prior = await jobs_dedup.check_duplicate(db, payload.get("url", ""),
                                               payload.get("title", ""),
                                               payload.get("company", ""))
-    if prior.get("duplicate") and prior.get("existing_thread_id"):
-        thread = await db.get_thread(prior["existing_thread_id"])
-        # Refresh last_seen so the repost is visible to the user.
-        await db.touch_job_seen(prior["existing_thread_id"])
-        return {
-            "duplicate": True,
-            "existing_thread_id": prior["existing_thread_id"],
-            "last_seen": prior.get("last_seen"),
-            "thread": thread.model_dump() if thread else None,
-        }
+    if prior.get("duplicate"):
+        existing_id = prior.get("existing_job_id") or prior.get("existing_thread_id")
+        existing = await db.get_job(existing_id) if existing_id else None
+        if existing:
+            await db.touch_job_seen(existing["job_id"])
+            existing_thread = await db.get_thread(existing["thread_id"])
+            return {
+                "duplicate": True,
+                "existing_job_id": existing["job_id"],
+                "existing_thread_id": existing["thread_id"],
+                "last_seen": prior.get("last_seen"),
+                "job": _serialise_job(existing),
+                "thread": existing_thread.model_dump() if existing_thread else None,
+            }
+        # The dedup window references a job that no longer exists
+        # (deleted via the thread cascade). Treat as fresh and fall
+        # through to the create path.
 
     ts = _now()
     # Infer seniority when the caller didn't provide one. Tiny regex
@@ -513,13 +734,17 @@ async def create_job_from_dict(payload: dict) -> dict:
             expires_at = (datetime.now(UTC) +
                           timedelta(days=EXPIRY_DEFAULT_DAYS)).isoformat()
 
-    thread = await db.create_thread(
-        bot_id=payload.get("bot_id", "jobboard"),
-        title=payload.get("thread_title") or payload.get("title", ""),
-        avatar_from_pool=False,
-    )
+    bot_id = payload.get("bot_id") or "jobboard"
+    # Resolve any prior monthly thread for this bot + the current month.
+    # ``_current_month_thread`` finds-or-creates so a brand-new install
+    # gets its first thread lazily on the very first job post.
+    thread = await _current_month_thread(bot_id)
+
+    job_id = _new_id()
     job_row = {
+        "job_id": job_id,
         "thread_id": thread.id,
+        "message_id": None,                  # back-patched below
         "url": payload.get("url", ""),
         "title": payload.get("title", ""),
         "company": payload.get("company", ""),
@@ -543,30 +768,58 @@ async def create_job_from_dict(payload: dict) -> dict:
         "updated_at": ts,
     }
     await db.upsert_job(job_row)
-    bot = config.resolve_bot(payload.get("bot_id", "jobboard"))
+    bot = config.resolve_bot(bot_id)
     body = payload.get("initial_message") or (
         f"🎯 New posting: {job_row['title']} @ {job_row['company'] or '?'} "
         f"({job_row['location'] or 'unspecified'}) — "
         f"{job_row['url']}"
     )
-    await db.add_message(thread.id, "assistant", body,
-                         metadata={"job_announce": True})
+    # The metadata carries the job_id so a chat-panel re-render can
+    # pair an assistant message with its structured job row in one
+    # round-trip without consulting the jobs table.
+    message = await db.add_message(
+        thread.id, "assistant", body,
+        metadata={
+            "job_announce": True,
+            "job_id": job_id,
+            "url": job_row["url"],
+            "company": job_row["company"],
+            "location": job_row["location"],
+            "remote_type": job_row["remote_type"],
+            "salary_min": job_row["salary_min"],
+            "salary_max": job_row["salary_max"],
+            "salary_currency": job_row["salary_currency"],
+            "tags": job_row["tags"],
+            "brief": job_row["brief"],
+            "expires_at": job_row["expires_at"],
+        },
+    )
+    await db.update_job_message_id(job_id, message.id)
     await db.add_job_event({
         "id": _new_id(),
         "thread_id": thread.id,
+        "job_id": job_id,
         "type": "comment",
         "actor": f"agent:{job_row['source_agent'] or 'unknown'}",
-        "payload": json.dumps({"bot_id": payload.get("bot_id", "jobboard"),
+        "payload": json.dumps({"bot_id": bot_id,
                                "repost_of": prior.get("repost_of")}),
         "created_at": ts,
     })
+    # Refresh the in-memory job row with the patched message_id so the
+    # broadcast below carries the complete record.
+    job_row["message_id"] = message.id
+    job_row["updated_at"] = _now()
     await _manager().broadcast({"type": "job_created",
+                                "job_id": job_id,
                                 "thread_id": thread.id,
-                                "bot_id": payload.get("bot_id", "jobboard"),
+                                "bot_id": bot_id,
+                                "message_id": message.id,
                                 "job": _serialise_job(job_row)})
     return {
         "duplicate": False,
+        "job_id": job_id,
         "thread_id": thread.id,
+        "message_id": message.id,
         "thread": thread.model_dump(),
         "job": _serialise_job(job_row),
         "repost_of": prior.get("repost_of"),
@@ -576,7 +829,7 @@ async def create_job_from_dict(payload: dict) -> dict:
 # ---- session-only writes (PIN unlock) ----------------------------------- #
 
 
-async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
+async def _record_vote(job_id: str, signal: str, reason_tag: str | None,
                        comment: str | None, actor: str) -> None:
     """Atomic vote: state column + job_events + job_feedback + profile
     recompute, in sequence.
@@ -584,14 +837,13 @@ async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
     Signals:
       yes/no/maybe -> writes to jobs.state, records an event, records a
                        feedback row tagged with the payload the recompute
-                       needs (tags, remote_type, salary_mid, company,
-                       location, seniority), then triggers the fold.
+                       needs, then triggers the fold.
       undo         -> records the feedback row with signal='undo'; the
                        recompute's two-pass latest-per-thread logic
                        removes this thread's effect entirely.
     """
     db = _db()
-    job = await db.get_job(thread_id)
+    job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     ts = _now()
@@ -599,7 +851,7 @@ async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
                   "undo": job.get("state") or "pending"}.get(signal)
                  or job.get("state") or "pending")
     if signal != "undo":
-        await db.update_job_state(thread_id, new_state)
+        await db.update_job_state(job_id, new_state)
     # Build the recompute payload from the CURRENT job row. We capture
     # this once so the recompute sees the same shape the vote saw.
     try:
@@ -624,7 +876,8 @@ async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
     fb_id = _new_id()
     await db.add_job_feedback({
         "id": fb_id,
-        "thread_id": thread_id,
+        "thread_id": job["thread_id"],
+        "job_id": job_id,
         "signal": ("vote_" + signal) if signal != "undo" else "undo",
         "reason_tag": reason_tag,
         "comment": comment,
@@ -635,7 +888,8 @@ async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
     event_type = "vote" if signal in ("yes", "no", "maybe") else "vote_undo"
     await db.add_job_event({
         "id": _new_id(),
-        "thread_id": thread_id,
+        "thread_id": job["thread_id"],
+        "job_id": job_id,
         "type": event_type,
         "from_state": job.get("state"),
         "to_state": new_state if signal != "undo" else job.get("state"),
@@ -661,27 +915,28 @@ async def _record_vote(thread_id: str, signal: str, reason_tag: str | None,
     await db.write_job_profile(profile_dict)
     # Broadcast the new state on the same channel the chat uses so the
     # UI updates without a re-GET.
-    refreshed = await db.get_job(thread_id)
+    refreshed = await db.get_job(job_id)
     if refreshed:
         await _manager().broadcast({"type": "job_updated",
-                                    "thread_id": thread_id,
+                                    "job_id": job_id,
+                                    "thread_id": refreshed["thread_id"],
                                     "job": _serialise_job(refreshed)})
 
 
-@router.post("/{thread_id}/vote")
-async def vote(thread_id: str, payload: VoteIn, request: Request):
+@router.post("/{job_id}/vote")
+async def vote(job_id: str, payload: VoteIn, request: Request):
     _require_full(request)
-    await _record_vote(thread_id, payload.signal, payload.reason_tag,
+    await _record_vote(job_id, payload.signal, payload.reason_tag,
                        payload.comment, actor="user")
     return {"ok": True}
 
 
-@router.post("/{thread_id}/applied")
-async def applied(thread_id: str, payload: CommentIn, request: Request):
+@router.post("/{job_id}/applied")
+async def applied(job_id: str, payload: CommentIn, request: Request):
     """Mark as applied. Same write pattern as vote but with signal=applied."""
     _require_full(request)
     db = _db()
-    job = await db.get_job(thread_id)
+    job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     ts = _now()
@@ -697,17 +952,19 @@ async def applied(thread_id: str, payload: CommentIn, request: Request):
                     "seniority": job.get("seniority", "unknown"),
                     "salary_mid": salary_mid}
     await db.add_job_feedback({
-        "id": _new_id(), "thread_id": thread_id, "signal": "applied",
+        "id": _new_id(), "thread_id": job["thread_id"], "job_id": job_id,
+        "signal": "applied",
         "reason_tag": None, "comment": payload.comment, "actor": "user",
         "created_at": ts, "payload": json.dumps(payload_dict),
     })
     await db.add_job_event({
-        "id": _new_id(), "thread_id": thread_id, "type": "state_change",
+        "id": _new_id(), "thread_id": job["thread_id"], "job_id": job_id,
+        "type": "state_change",
         "from_state": job.get("state"), "to_state": "applied",
         "actor": "user", "comment": payload.comment,
         "created_at": ts, "payload": json.dumps(payload_dict),
     })
-    await db.update_job_state(thread_id, "applied")
+    await db.update_job_state(job_id, "applied")
     rows = await db.list_job_feedback()
     profile = jobs_score.recompute_profile(rows)
     old = await db.get_job_profile() or {}
@@ -715,19 +972,20 @@ async def applied(thread_id: str, payload: CommentIn, request: Request):
     profile["no_centroid"] = old.get("no_centroid")
     profile["duplicate_hashes"] = old.get("duplicate_hashes") or "[]"
     await db.write_job_profile(profile)
-    refreshed = await db.get_job(thread_id)
+    refreshed = await db.get_job(job_id)
     if refreshed:
         await _manager().broadcast({"type": "job_updated",
-                                    "thread_id": thread_id,
+                                    "job_id": job_id,
+                                    "thread_id": refreshed["thread_id"],
                                     "job": _serialise_job(refreshed)})
     return {"ok": True}
 
 
-@router.post("/{thread_id}/tags")
-async def edit_tags(thread_id: str, payload: TagsIn, request: Request):
+@router.post("/{job_id}/tags")
+async def edit_tags(job_id: str, payload: TagsIn, request: Request):
     _require_full(request)
     db = _db()
-    job = await db.get_job(thread_id)
+    job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     try:
@@ -739,43 +997,48 @@ async def edit_tags(thread_id: str, payload: TagsIn, request: Request):
     new_tags = sorted((current | added) - removed)
     if len(new_tags) > MAX_TAGS:
         raise HTTPException(400, f"tags capped at {MAX_TAGS}")
-    await db.update_job_tags(thread_id, new_tags)
+    await db.update_job_tags(job_id, new_tags)
     ts = _now()
     for t in added:
         await db.add_job_event({
-            "id": _new_id(), "thread_id": thread_id, "type": "tag_added",
+            "id": _new_id(), "thread_id": job["thread_id"], "job_id": job_id,
+            "type": "tag_added",
             "comment": t, "actor": "user", "created_at": ts,
         })
     for t in removed:
         await db.add_job_event({
-            "id": _new_id(), "thread_id": thread_id, "type": "tag_removed",
+            "id": _new_id(), "thread_id": job["thread_id"], "job_id": job_id,
+            "type": "tag_removed",
             "comment": t, "actor": "user", "created_at": ts,
         })
-    refreshed = await db.get_job(thread_id)
+    refreshed = await db.get_job(job_id)
     if refreshed:
         await _manager().broadcast({"type": "job_updated",
-                                    "thread_id": thread_id,
+                                    "job_id": job_id,
+                                    "thread_id": refreshed["thread_id"],
                                     "job": _serialise_job(refreshed)})
     return {"ok": True, "tags": new_tags}
 
 
-@router.post("/{thread_id}/archive")
-async def archive(thread_id: str, request: Request):
+@router.post("/{job_id}/archive")
+async def archive(job_id: str, request: Request):
     _require_full(request)
     db = _db()
-    job = await db.get_job(thread_id)
+    job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    await db.update_job_state(thread_id, "archived")
+    await db.update_job_state(job_id, "archived")
     await db.add_job_event({
-        "id": _new_id(), "thread_id": thread_id, "type": "state_change",
+        "id": _new_id(), "thread_id": job["thread_id"], "job_id": job_id,
+        "type": "state_change",
         "from_state": job.get("state"), "to_state": "archived",
         "actor": "user", "created_at": _now(),
     })
-    refreshed = await db.get_job(thread_id)
+    refreshed = await db.get_job(job_id)
     if refreshed:
         await _manager().broadcast({"type": "job_updated",
-                                    "thread_id": thread_id,
+                                    "job_id": job_id,
+                                    "thread_id": refreshed["thread_id"],
                                     "job": _serialise_job(refreshed)})
     return {"ok": True}
 

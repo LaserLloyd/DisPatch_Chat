@@ -160,16 +160,23 @@ async def test_create_then_list_then_get(wired, sample_job_payload):
     from app.jobs import create_job_from_dict
     res = await create_job_from_dict(sample_job_payload)
     assert res["duplicate"] is False
+    job_id = res["job_id"]
     thread_id = res["thread_id"]
-    assert thread_id
+    assert job_id and thread_id
+    # The thread is the current month's discussion thread, and the job
+    # row references it. ``get_job`` is keyed by ``job_id`` in the
+    # 2026-09-15 monthly-threading model.
+    assert res["job"]["thread_id"] == thread_id
+    assert res["job"]["job_id"] == job_id
     listed = await db.list_jobs()
+    assert any(j["job_id"] == job_id for j in listed)
     assert any(j["thread_id"] == thread_id for j in listed)
 
 
 @pytest.mark.asyncio
 async def test_duplicate_within_30d_returns_existing(wired, sample_job_payload):
     """Identical hash + title within 30 days -> the second POST gets
-    ``duplicate: True`` with the existing thread_id. NO second thread
+    ``duplicate: True`` with the existing job_id. NO second job row
     is created. (Plan §7 + §10 last assertion.)
     """
     db = wired["_db"]
@@ -178,6 +185,7 @@ async def test_duplicate_within_30d_returns_existing(wired, sample_job_payload):
     res2 = await create_job_from_dict(sample_job_payload)
     assert res1["duplicate"] is False
     assert res2["duplicate"] is True
+    assert res2["existing_job_id"] == res1["job_id"]
     assert res2["existing_thread_id"] == res1["thread_id"]
     listed = await db.list_jobs()
     assert len([j for j in listed if j["url"] == sample_job_payload["url"]]) == 1
@@ -192,9 +200,9 @@ async def test_vote_appends_immortal_event(wired, sample_job_payload):
     db = wired["_db"]
     from app.jobs import create_job_from_dict, _record_vote
     res = await create_job_from_dict(sample_job_payload)
-    tid = res["thread_id"]
-    await _record_vote(tid, "yes", None, None, "user")
-    events = await db.list_job_events(tid)
+    job_id = res["job_id"]
+    await _record_vote(job_id, "yes", None, None, "user")
+    events = await db.list_job_events(job_id)
     # type=vote + a state_change or one of the two — at minimum, 1.
     types = [e["type"] for e in events]
     assert "vote" in types or "vote_undo" in types
@@ -266,8 +274,8 @@ async def test_profile_recompute_fires_after_vote_not_after_get(wired,
     # Cast a vote and re-read.
     pre_vote = await db.get_job_profile() or {}
     pre_count = int(pre_vote.get("yes_count", 0))
-    tid = (await db.list_jobs())[0]["thread_id"]
-    await _record_vote(tid, "yes", None, None, "user")
+    job_id = (await db.list_jobs())[0]["job_id"]
+    await _record_vote(job_id, "yes", None, None, "user")
     after = await get_profile(_FakeRequest(cookie="x"))
     assert int(after["yes_count"]) == pre_count + 1
 
@@ -296,7 +304,7 @@ async def test_decoy_write_is_403(wired, sample_job_payload, monkeypatch):
     from app.jobs import create_job_from_dict, vote
     await create_job_from_dict(sample_job_payload)
     db = wired["_db"]
-    tid = (await db.list_jobs())[0]["thread_id"]
+    job_id = (await db.list_jobs())[0]["job_id"]
     req = _FakeRequest(cookie=None)
     # Without a session cookie, _require_full passes (no PIN install)
     # OR raises 403 (PIN installed). The exact outcome depends on the
@@ -304,7 +312,7 @@ async def test_decoy_write_is_403(wired, sample_job_payload, monkeypatch):
     # correctly and never silently falls through.
     raised = False
     try:
-        await vote(tid, jobs.VoteIn(signal="yes"), req)
+        await vote(job_id, jobs.VoteIn(signal="yes"), req)
     except Exception as e:
         raised = True
         assert "Unlock" in str(e) or "for full access" in str(e)
@@ -327,14 +335,18 @@ def test_inbound_allowlist_includes_job_writes():
     assert main._is_inbound("POST", "/api/jobs/score") is True
 
 
-def test_inbound_allowlist_excludes_session_only_routes():
-    """Vote / applied / tags / archive stay on the session tier — a
-    sessionless machine gets a 403 from the auth gate, NOT a free pass
-    via the allowlist."""
-    assert main._is_inbound("POST", "/api/jobs/abc/vote") is False
-    assert main._is_inbound("POST", "/api/jobs/abc/applied") is False
-    assert main._is_inbound("POST", "/api/jobs/abc/tags") is False
-    assert main._is_inbound("POST", "/api/jobs/abc/archive") is False
+def test_inbound_allowlist_includes_manage_verbs():
+    """2026-09-15 — the OpenClaw audit lifts vote/applied/tags/archive
+    onto the inbound tier so an on-box agent can manage a job end-to-end
+    without first obtaining a PIN-derived session cookie. The decoy
+    block at the ``/api/jobs`` prefix still keeps Safe-Mode browsers
+    out (see test_decoy_blocked_bars_jobs_paths).
+    """
+    assert main._is_inbound("POST", "/api/jobs/abc/vote") is True
+    assert main._is_inbound("POST", "/api/jobs/abc/applied") is True
+    assert main._is_inbound("POST", "/api/jobs/abc/tags") is True
+    assert main._is_inbound("POST", "/api/jobs/abc/archive") is True
+    assert main._is_inbound("POST", "/api/jobs/profile/recompute") is True
 
 
 def test_decoy_blocked_bars_jobs_paths():

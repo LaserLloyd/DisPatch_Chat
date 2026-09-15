@@ -138,6 +138,7 @@ class Pair(NamedTuple):
     stem: str
     face: Path
     full: Path
+    thumb: Path
 
 
 def _full_for(face: Path) -> Path | None:
@@ -168,9 +169,34 @@ def _full_for(face: Path) -> Path | None:
     return None
 
 
+def _thumb_for(face: Path) -> Path | None:
+    """The thumbnail half beside a face file, or None for an incomplete triplet.
+
+    No cross-extension fallback: pool pairs are written together by the same
+    uploader and always share an extension, so a missing same-suffix thumb is
+    a legitimate "no thumb" case (caller falls back to the face).
+    """
+    stem = face.stem
+    if not stem.endswith("-face"):
+        return None
+    base = stem[: -len("-face")]
+    same = face.with_name(f"{base}-thumb{face.suffix}")
+    try:
+        if same.is_file() and same.stat().st_size > 0:
+            return same
+    except OSError:
+        pass
+    return None
+
+
 def list_pairs(d: Path) -> list[Pair]:
-    """Every COMPLETE pair in a directory. Incomplete halves are invisible —
-    a face without its full (or vice versa) must never be drawn."""
+    """Every COMPLETE triplet in a directory. Incomplete halves are invisible —
+    a face without its full (or vice versa) must never be drawn.
+
+    A missing THUMB is not fatal — older pool pairs predate the thumb format.
+    The caller (list_pairs) leaves thumb=None in that case and the rest of the
+    system falls back to the face crop on the serving route.
+    """
     out: list[Pair] = []
     for p in pool_common.image_files(d, IMAGE_EXTS):
         if not p.stem.endswith("-face"):
@@ -183,7 +209,8 @@ def list_pairs(d: Path) -> list[Pair]:
                 continue
         except OSError:
             continue
-        out.append(Pair(p.stem[: -len("-face")], p, full))
+        thumb = _thumb_for(p)  # may be None for legacy pairs
+        out.append(Pair(p.stem[: -len("-face")], p, full, thumb))
     return out
 
 
@@ -201,42 +228,52 @@ def draw_spent(bot_id: str) -> Pair | None:
 
 
 def consume(bot_id: str, pair: Pair) -> bool:
-    """Burn a pair: ready/ -> spent/, face first.
+    """Burn a triplet: ready/ -> spent/, face first.
 
     The face's atomic rename is the one-shot lock — of two racing consumers
     exactly one wins it (pool_common.retire), and only the winner moves the
-    full half. The loser reports False and redraws. Spent pairs are KEPT:
-    they back the dry-pool fallback and keep history explainable.
+    full + thumb halves. The loser reports False and redraws. Spent triplets
+    are KEPT: they back the dry-pool fallback and keep history explainable.
     """
     dst = spent_dir(bot_id)
     if pool_common.retire(pair.face, dst) is None:
         return False
     pool_common.retire(pair.full, dst)
+    # Thumb is optional — legacy pairs (pre-2026-09-15) predate the thumb
+    # format and have no thumb half. A None here just means the spent
+    # triplet is missing its smallest file; the next draw won't fix it, but
+    # the serving route's fallback to the face crop covers the gap.
+    if pair.thumb is not None:
+        pool_common.retire(pair.thumb, dst)
     return True
 
 
 def _snapshot_pair(pair: Pair) -> str | None:
-    """Land a pair in the content-addressed snapshot store; the returned id is
-    what a thread pins. None on unreadable or implausibly large halves.
+    """Land a face/full/thumb triplet in the content-addressed snapshot store;
+    the returned id is what a thread pins. None on unreadable or implausibly
+    large halves.
 
-    Both halves are STATTED before either is read — the store refuses an
+    All halves are STATTED before being read — the store refuses an
     oversized image anyway, and reading first meant a hand-dropped multi-
     gigabyte file in ready/ was pulled wholly into memory just to be rejected
     (`snapshot_id` has always checked the size first; this path did not).
     """
     try:
         for half, cap in ((pair.face, avatar_snapshots.MAX_SNAPSHOT_BYTES),
-                          (pair.full, avatar_snapshots.MAX_FULL_BYTES)):
+                           (pair.full, avatar_snapshots.MAX_FULL_BYTES),
+                           (pair.thumb, avatar_snapshots.MAX_SNAPSHOT_BYTES)):
             if half.stat().st_size > cap:
                 log.warning("pool avatar too large to snapshot: %s", half.name)
                 return None
         face_data = pair.face.read_bytes()
         full_data = pair.full.read_bytes()
+        thumb_data = pair.thumb.read_bytes()
     except OSError:
         return None
-    if not face_data or not full_data:
+    if not face_data or not full_data or not thumb_data:
         return None
     return avatar_snapshots.snapshot_pair(face_data, full_data,
+                                          thumb_data=thumb_data,
                                           suffix=pair.face.suffix.lower())
 
 

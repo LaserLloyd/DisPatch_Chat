@@ -101,7 +101,35 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rig trips a 15-second breaker so queued jobs fail fast rather than each
   waiting out a connect timeout in series.
 
+- **Appearance is a palette, not a light/dark pair.** `theme.css` now ships six
+  complete skins selected by `data-palette` on `<html>`: **Glacier** (the
+  default), Midnight Gold, Forest, Paper, Daylight and Classic Purple (today's
+  purple, frozen to the dark values it shipped). Each block redefines the full
+  thematic token set with flat values, so a palette can no longer inherit half
+  its colours from the other skin, and each declares the `color-scheme` its
+  surfaces need. The rail button and the Cmd/Ctrl-K "Change theme" action open
+  **Settings → Theme**: a grid of live miniature previews (the card carries its
+  own `data-palette`, so a preview is painted by the real token block, never by
+  a copy of the values) with radio-group arrow-key handling. The pick is per
+  device, applied by the no-FOUC `<head>` script before first paint, and stored
+  as `dispatch-palette` — on privacy mode's wipe list.
+  `frontend/tests/theme-palettes.test.js` pins the palette ids across
+  `theme.css`, `js/theme.js` and `index.html`, and fails if any palette omits a
+  token or redefines a structural one.
+
 ### Removed
+
+- **The light/dark theme switch.** `data-theme`, the `light-dark()` pairs in
+  `theme.css`, `js/theme.js`'s toggle and the `theme.dark` / `theme.light`
+  locale keys are gone — Light and Dark as *choices* are replaced by the Paper
+  and Daylight palettes above. `light-dark()` still appears in `app.css` and
+  `dashboard.css` for two narrow cases (minimal-avatar name tints, host
+  dashboard severities); those resolve per palette through each block's
+  `color-scheme`. The lock face carries `data-palette="purple"` so it stays
+  dark on a light palette, and the rail's theme shortcut is hidden in Safe Mode
+  with the rest of the admin surface (Settings is where a palette is chosen
+  now, and Settings is full-session only — the language picker was already
+  behind the same door).
 
 - **The coding-terminal pane.** The server-side PTY (`backend/app/terminal.py`,
   `/api/terminal/*`, `WS /ws/terminal`, the `terminal_state` frame), its

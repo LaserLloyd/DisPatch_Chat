@@ -34,7 +34,6 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -92,11 +91,16 @@ async def check_duplicate(db, url: str, title: str, company: str) -> dict:
     """Look for an existing job row whose content hash matches and was
     created in the last 30 days.
 
-    Returns ``{duplicate, existing_thread_id?, last_seen?, repost_of?}``.
-    The handler short-circuits to the existing thread when ``duplicate``
-    is True and tags the new post as ``repost_of=existing_thread_id``
-    when only ``repost_of`` is set (same URL, different title/company
-    → within 90 days).
+    Returns ``{duplicate, existing_job_id?, existing_thread_id?,
+    last_seen?, repost_of?}``. The handler short-circuits to the existing
+    job when ``duplicate`` is True and tags the new post as
+    ``repost_of=existing_job_id`` when only ``repost_of`` is set (same
+    URL, different title/company → within 90 days).
+
+    The monthly-threading model (2026-09-15) keys everything off
+    ``job_id``, not ``thread_id`` — multiple jobs share the same thread
+    so the dedup must hand back the per-job id, otherwise a duplicate
+    repost of job A would short-circuit to job B in the same month.
 
     The args ``url``, ``title``, ``company`` are the candidate's values.
     ``db`` is the Database instance.
@@ -113,6 +117,7 @@ async def check_duplicate(db, url: str, title: str, company: str) -> dict:
     if same_hash:
         existing = same_hash[0]
         return {"duplicate": True,
+                "existing_job_id": existing["job_id"],
                 "existing_thread_id": existing["thread_id"],
                 "last_seen": existing.get("last_seen")
                               or existing.get("created_at"),
@@ -129,60 +134,7 @@ async def check_duplicate(db, url: str, title: str, company: str) -> dict:
         if _norm_url(r.get("url", "")) != norm_u:
             continue
         # Same URL — repost of a different title/company, link them.
-        return {"duplicate": False, "repost_of": r["thread_id"], "hash": h}
+        return {"duplicate": False, "repost_of": r["job_id"], "hash": h}
 
     return {"duplicate": False, "hash": h}
 
-
-def remember_hash(profile: dict, thread_id: str, hash_str: str) -> dict:
-    """Return a NEW profile dict with the hash appended, capped at 500.
-
-    The profile's ``duplicate_hashes`` column stores a JSON array of
-    {hash, thread_id, seen_at} entries; this helper appends one and
-    trims the oldest when the list exceeds ``HASH_LIST_MAX``. Returns
-    the modified column as a JSON string so the caller can write it
-    straight back. Pure function — never mutates the input.
-    """
-    import json
-    raw = profile.get("duplicate_hashes")
-    entries = []
-    if isinstance(raw, str) and raw:
-        try:
-            entries = json.loads(raw)
-        except (TypeError, ValueError):
-            entries = []
-    elif isinstance(raw, list):
-        entries = list(raw)
-    entries.append({
-        "hash": hash_str,
-        "thread_id": thread_id,
-        "seen_at": datetime.now(UTC).isoformat(),
-    })
-    if len(entries) > HASH_LIST_MAX:
-        entries = entries[-HASH_LIST_MAX:]
-    profile = dict(profile)
-    profile["duplicate_hashes"] = json.dumps(entries)
-    return profile
-
-
-def normalized_for_log(record: dict) -> dict:
-    """Pretty-print the most useful bits of a job row for an
-    audit-log entry. Returns a NEW dict; no I/O."""
-    return {
-        "thread_id": record.get("thread_id"),
-        "title": record.get("title"),
-        "company": record.get("company"),
-        "state": record.get("state"),
-        "url": record.get("url"),
-    }
-
-
-# Alias for tests so they can patch the embedding model loader without
-# importing the heavier module surface.
-def _ensure_json_default(obj: Any) -> Any:
-    """Fallback for json.dumps when the caller forgot to parse first."""
-    try:
-        import json
-        return json.loads(obj) if isinstance(obj, str) else obj
-    except (TypeError, ValueError):
-        return obj

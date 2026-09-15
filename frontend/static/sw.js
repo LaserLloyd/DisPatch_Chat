@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v99';  // v99: jobs(fix) — (1) close the messages-search modal on entering the Jobs view (the "search header sticks" bug; the overlay used to remain painted across view changes, hiding the board), (2) selectBot from the Jobs view exits to chat/threads instead of staying stuck on Jobs with #chatview display:none. main.js?v=80→v=81.
+const CACHE = 'local-chat-v100';  // v100: appearance is a fixed palette, not a dark/light pair. theme.css?v=1→v=2 (six [data-palette] blocks; light-dark() and the data-theme selectors are gone), app.css?v=64→v=65 (the Settings → Theme gallery), theme.js?v=13→v=14 (palette persistence + picker; the rail button now opens Settings → Theme), main.js?v=81→v=82 (theme tab + rail wiring). The shell is cached by PATH, so without this bump an installed client would keep serving itself the old theme.css and paint an unstyled page.
 const SHELL = [
   '/',
   '/static/theme.css',

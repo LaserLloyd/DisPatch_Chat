@@ -87,12 +87,14 @@ def snapshot_id(bot) -> str | None:
             log.warning("could not write avatar snapshot for %s", name, exc_info=True)
             return None
 
-    # AN AVATAR IS A PAIR. Uploads save a full-resolution original next to the
-    # square face crop (<stem>-full.<ext> beside <stem>-face.<ext>), the daily
-    # rotation moves BOTH, and the lightbox serves the full one. Capturing only
-    # the face made a restored avatar show the correct thumbnail and somebody
-    # ELSE'S full-resolution image when you clicked it — the previous avatar's
-    # -full file was simply left in place. Snapshot the sibling too.
+    # AN AVATAR IS A TRIPLET. Uploads save a full-resolution original, a
+    # 512×512 face crop, AND a 128×128 thumbnail beside it
+    # (`<stem>-full.<ext>`, `<stem>-face.<ext>`, `<stem>-thumb.<ext>`).
+    # The daily rotation moves the face+full pair; the thumb rides along.
+    # Capturing only the face made a restored avatar show the correct thumbnail
+    # and somebody ELSE'S full-resolution image when you clicked it — the
+    # previous avatar's -full file was simply left in place. Snapshot the
+    # siblings too.
     #
     # This runs even when the face was ALREADY captured: an early return there
     # meant a snapshot first taken while the -full sibling was missing could
@@ -111,34 +113,76 @@ def snapshot_id(bot) -> str | None:
                 # A missing full-res is survivable — path_for_full returns None
                 # and callers fall back to the face. A WRONG one is not.
                 log.warning("could not snapshot the full-res avatar for %s", name)
+    # Thumb: a 128×128 downscale of the face. Read from disk (not from the
+    # in-memory `data` — we already validated the size against the FACE cap
+    # above, and the thumb is even smaller so it's safe to write). If the
+    # thumb sibling was never written (older install), generate one on the
+    # fly from the face bytes — better to backfill than 404 a fresh thread.
+    thumb_dest = _dir() / _thumb_name(sid)
+    if not thumb_dest.exists():
+        thumb_src = _thumb_sibling(src)
+        if thumb_src is not None:
+            try:
+                if thumb_src.stat().st_size > MAX_SNAPSHOT_BYTES:
+                    log.warning("thumb avatar too large to snapshot: %s", thumb_src.name)
+                else:
+                    _atomic_write(thumb_dest, thumb_src.read_bytes())
+            except OSError:
+                log.warning("could not snapshot the thumb avatar for %s", name)
+        else:
+            # Backfill from the face bytes. PIL isn't always installed in
+            # test envs (and the test for this module runs without it), so
+            # the resize is best-effort: failure here just leaves the thumb
+            # absent, and the route layer falls back to the face crop.
+            try:
+                from io import BytesIO
+                from PIL import Image
+                im = Image.open(BytesIO(data))
+                im = im.convert("RGBA" if im.mode in ("RGBA", "LA")
+                                or (im.mode == "P" and "transparency" in im.info)
+                                else "RGB")
+                im = im.resize((128, 128), Image.LANCZOS)
+                buf = BytesIO()
+                im.save(buf, format="PNG")
+                _atomic_write(thumb_dest, buf.getvalue())
+            except Exception:
+                log.warning("could not backfill the thumb avatar for %s", name)
     return sid
 
 
 def snapshot_pair(face_data: bytes, full_data: bytes | None,
+                  thumb_data: bytes | None = None,
                   suffix: str = ".png") -> str | None:
-    """Capture an EXPLICIT face/full pair, returning the id to pin on a thread.
+    """Capture an EXPLICIT face/full/thumb triplet, returning the id to pin
+    on a thread.
 
     This is how a single thread gets its own picture (distinct from the bot's
-    current avatar): the caller supplies both halves and the pair lands in the
-    same content-addressed store the thread-creation capture uses — a picture
-    pinned to one thread and an identical daily capture share bytes.
+    current avatar): the caller supplies the halves and the triplet lands in
+    the same content-addressed store the thread-creation capture uses — a
+    picture pinned to one thread and an identical daily capture share bytes.
 
-    Keyed by hash(face + full), NOT the face alone: an explicit re-pin can send
-    an identical face crop with a DIFFERENT full-resolution image (two threads,
-    same headshot, different scene behind it). Keying on the face only made the
-    second pin resolve to the FIRST full — the little/big mismatch this whole
-    system exists to prevent, reappearing by construction. Hashing both halves
-    gives distinct pairs distinct ids while still deduplicating identical pairs.
+    Keyed by hash(face + full + thumb), NOT the face alone: an explicit re-pin
+    can send an identical face crop with a DIFFERENT full-resolution image
+    (two threads, same headshot, different scene behind it). Keying on the
+    face only made the second pin resolve to the FIRST full — the
+    little/big mismatch this whole system exists to prevent, reappearing by
+    construction. Hashing all three gives distinct pairs distinct ids while
+    still deduplicating identical pairs.
     """
     sfx = suffix.lower()
     if sfx not in _ALLOWED_SUFFIXES or not face_data:
         return None
     if len(face_data) > MAX_SNAPSHOT_BYTES or (full_data and len(full_data) > MAX_FULL_BYTES):
         return None
+    if thumb_data and len(thumb_data) > MAX_SNAPSHOT_BYTES:
+        return None
     h = hashlib.sha256(face_data)
-    h.update(b"\x00")                    # domain separator: face || full
+    h.update(b"\x00")                    # domain separator: face || full || thumb
     if full_data:
         h.update(full_data)
+    h.update(b"\x01")
+    if thumb_data:
+        h.update(thumb_data)
     digest = h.hexdigest()[:_HASH_CHARS]
     sid = f"{digest}{sfx}"
     try:
@@ -150,6 +194,9 @@ def snapshot_pair(face_data: bytes, full_data: bytes | None,
         full_dest = d / _full_name(sid)
         if full_data and not full_dest.exists():
             _atomic_write(full_dest, full_data)
+        thumb_dest = d / _thumb_name(sid)
+        if thumb_data and not thumb_dest.exists():
+            _atomic_write(thumb_dest, thumb_data)
     except OSError:
         log.warning("could not write explicit avatar snapshot", exc_info=True)
         return None
@@ -166,6 +213,13 @@ def _full_name(sid: str) -> str:
     """`<hash>.png` -> `<hash>-full.png`. Derived, so one column still keys both."""
     p = Path(sid)
     return f"{p.stem}-full{p.suffix}"
+
+
+def _thumb_name(sid: str) -> str:
+    """`<hash>.png` -> `<hash>-thumb.png`. Sibling of the face/full pair, used
+    by the Jobs board list and any other dense thumbnail surface."""
+    p = Path(sid)
+    return f"{p.stem}-thumb{p.suffix}"
 
 
 def _full_sibling(face: Path) -> Path | None:
@@ -194,6 +248,21 @@ def _full_sibling(face: Path) -> Path | None:
     return max(others, key=lambda c: c.stat().st_mtime)
 
 
+def _thumb_sibling(face: Path) -> Path | None:
+    """The 128×128 thumbnail beside a face crop, if there is one. Mirrors
+    ``_full_sibling`` so the upload and the route agree on what counts as
+    "the thumb for this face". A pair missing the thumb but present on disk
+    is gracefully ignored — the route falls back to the face crop.
+    """
+    stem = face.stem
+    if stem.endswith("-face"):
+        stem = stem[: -len("-face")]
+    same = face.with_name(f"{stem}-thumb{face.suffix}")
+    if same.is_file():
+        return same
+    return None
+
+
 def path_for_full(sid: str) -> Path | None:
     """The full-resolution half of a snapshot, or None when it has none."""
     if not sid:
@@ -202,6 +271,17 @@ def path_for_full(sid: str) -> Path | None:
     if face is None:
         return None                     # validates sid before we build from it
     cand = _dir() / _full_name(Path(sid).name)
+    return cand if cand.is_file() else None
+
+
+def path_for_thumb(sid: str) -> Path | None:
+    """The thumbnail half of a snapshot, or None when it has none."""
+    if not sid:
+        return None
+    face = path_for(sid)
+    if face is None:
+        return None
+    cand = _dir() / _thumb_name(Path(sid).name)
     return cand if cand.is_file() else None
 
 

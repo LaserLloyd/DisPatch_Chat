@@ -173,14 +173,6 @@ def recompute_profile(feedback_rows: Iterable[dict]) -> dict:
         thread_id = row["thread_id"]
         signal = row["signal"]
 
-        def _apply_payload(sig: str, fb: dict) -> None:
-            """Apply one signal as if it were the only signal for the
-            thread. Called twice per row in the two-pass algorithm below:
-            once with the empty payload (to mark "this thread's signal
-            is sig") and once with the real payload (to actually update
-            counters)."""
-            pass  # body filled by the two-pass loop below
-
         # Two-pass: first compute which signal each thread CLAIMS today,
         # then apply ONLY the latest one. The first pass is local and
         # O(N); the second pass is local too. The DB query already

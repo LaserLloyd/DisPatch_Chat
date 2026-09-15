@@ -164,22 +164,37 @@ export const api = {
   fireReaction: (body) => j('/api/reactions/fire', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
   reactionImageUrl: (id) => `/api/reactions/${encodeURIComponent(id)}/image`,
 
-  // Jobs board (added 2026-09-14). API surface mirrors backend/app/jobs.py.
-  // The list / get / reasons reads are open; the vote / applied / tags /
-  // archive / recompute writes require a full session cookie (the
-  // backend's _require_full() gate returns 403 to decoy callers).
+  // Jobs board (added 2026-09-14, monthly-threading refactor 2026-09-15).
+  // API surface mirrors backend/app/jobs.py. After the 2026-09-15 audit
+  // every read AND write verb is inbound-exempt: on-box agents (and the
+  // dispatch-jobs CLI) can drive the full lifecycle — post, score, list,
+  // browse months, fetch one job, vote, mark applied, edit tags, archive,
+  // recompute profile — without a PIN-derived session cookie. Safe-Mode
+  // browsers are still blocked by the ``/api/jobs`` prefix entry in
+  // ``_decoy_blocked``, so a locked device never sees a row.
   jobs: {
     list: (params) => {
       const q = params && params.toString ? params.toString() : '';
       return j(`/api/jobs${q ? `?${q}` : ''}`);
     },
-    get: (threadId) => j(`/api/jobs/${encodeURIComponent(threadId)}`),
+    // 2026-09-15: ``jobId`` is the new key (one row per JOB POSTING,
+    // monthly threads share thread_id between jobs). The endpoint shape
+    // is unchanged on the wire — the path-segment is just a different
+    // id space.
+    get: (jobId) => j(`/api/jobs/${encodeURIComponent(jobId)}`),
     score: (body) => j('/api/jobs/score', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     create: (body) => j('/api/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-    vote: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/vote`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-    applied: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/applied`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-    tags: (threadId, body) => j(`/api/jobs/${encodeURIComponent(threadId)}/tags`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-    archive: (threadId) => j(`/api/jobs/${encodeURIComponent(threadId)}/archive`, { method: 'POST' }),
+    // Monthly-threading reads (added 2026-09-15).
+    months: (botId = 'jobboard') => j(`/api/jobs/months?bot_id=${encodeURIComponent(botId)}`),
+    current: (botId = 'jobboard', ensure = true) =>
+      j(`/api/jobs/current?bot_id=${encodeURIComponent(botId)}&ensure=${ensure ? 'true' : 'false'}`),
+    month: (key, botId = 'jobboard') =>
+      j(`/api/jobs/month/${encodeURIComponent(key)}?bot_id=${encodeURIComponent(botId)}`),
+    // Manage verbs — keyed by job_id now (was thread_id before 2026-09-15).
+    vote: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/vote`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    applied: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/applied`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    tags: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/tags`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    archive: (jobId) => j(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { method: 'POST' }),
     profile: () => j('/api/jobs/profile'),
     reasons: () => j('/api/jobs/reasons'),
     recompute: () => j('/api/jobs/profile/recompute', { method: 'POST' }),

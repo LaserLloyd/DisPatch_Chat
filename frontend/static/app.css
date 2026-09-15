@@ -564,6 +564,75 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 /* Busy = a manager request in flight. Same treatment its backdrop used to get. */
 .settings-pane.busy { pointer-events: none; opacity: .7; }
 
+/* ---- Theme gallery (Settings → Theme; the cards are built by js/theme.js) ----
+   A conventional picker: a grid of miniature app windows. Each CARD carries
+   data-palette="<id>", so the miniature is painted by that theme's own token
+   block in theme.css — no colour is named in this file, which is what keeps a
+   swatch from drifting away from the skin it advertises. The card's own border,
+   text and selection ring come from the same block, so a card reads in the
+   theme it is selling. */
+.theme-grid {
+  display: grid; gap: 12px; padding: 12px 18px 18px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+.theme-card {
+  position: relative; display: block; width: 100%; padding: 8px;
+  text-align: start; cursor: pointer;
+  background: var(--bg-secondary); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.theme-card:hover { border-color: var(--accent); }
+/* Two signals, not one: the ring is the visual state, aria-checked is what a
+   screen reader announces. --accent-muted is a wash of the card's own accent,
+   so the ring can never be invisible against the card it surrounds. */
+.theme-card[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted), inset 0 0 0 1px var(--accent);
+}
+.theme-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.theme-snip {
+  display: grid; grid-template-columns: 16px 44px 1fr;
+  height: 98px; overflow: hidden;
+  border: 1px solid var(--border-light); border-radius: var(--radius-md);
+  background: var(--bg-primary);
+}
+.snip-rail {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 7px 0; background: var(--bg-sidebar);
+}
+.snip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.snip-dot-accent { background: var(--accent); }
+.snip-list {
+  display: flex; flex-direction: column; gap: 7px; padding: 9px 7px;
+  background: var(--bg-secondary); border-inline-end: 1px solid var(--border);
+}
+.snip-line { display: block; height: 4px; border-radius: 2px; background: var(--text-secondary); opacity: .5; }
+.snip-line-w { width: 86%; }
+.snip-line-m { width: 62%; }
+.snip-line-s { width: 40%; }
+.snip-chat { display: flex; flex-direction: column; gap: 6px; padding: 9px 8px; background: var(--bg-primary); }
+.snip-bubble { display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 7px; }
+/* The bubbles lift the same line colour, so the bot/user lightness separation
+   the real chat relies on is what the miniature actually shows. */
+.snip-bubble .snip-line { opacity: .75; }
+.snip-bot { align-self: flex-start; width: 78%; background: var(--bot-bubble); border: 1px solid var(--border-light); }
+.snip-user { align-self: flex-end; width: 64%; background: var(--user-bubble); }
+.snip-send { align-self: flex-end; width: 16px; height: 16px; border-radius: 50%; background: var(--accent-grad); margin-top: auto; }
+.theme-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 3px 1px; }
+.theme-card-name { font-size: 13px; font-weight: 600; }
+.theme-card-mode {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  background: var(--tint-subtle); border: 1px solid var(--border-light);
+  border-radius: 999px; padding: 1px 7px;
+}
+.theme-check {
+  position: absolute; top: 14px; inset-inline-end: 14px; display: none;
+  place-items: center; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; line-height: 1;
+}
+.theme-card[aria-checked="true"] .theme-check { display: grid; }
+
 /* Contextual footer: one group per tab, and the whole bar hides when the
    active tab has no actions of its own. */
 .settings-actions { display: flex; flex: 1; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
@@ -3167,16 +3236,60 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   border-radius: 8px; background: var(--bg-elevated, #fff);
   color: var(--text-primary, #111); font: inherit;
 }
-.jobs-list { list-style: none; padding: 12px 16px; margin: 0; }
+.jobs-list { list-style: none; padding: 0; margin: 0; }
 .jobs-empty { padding: 24px; color: var(--text-muted, #888); text-align: center; }
 .jobs-empty--error { color: var(--danger, #c0392b); }
+
+/* 2026-09-15 — the board is now a structured list grouped by month.
+ * Each section header is a "month" (Jobs — YYYY-MM). The header
+ * reads like a thread title and acts as a section divider; below it
+ * the per-job cards stack. Newest month first. */
+.jobs-month {
+  padding: 12px 16px 16px;
+  border-bottom: 1px solid var(--border-light, #ececec);
+}
+.jobs-month:last-child { border-bottom: 0; }
+.jobs-month__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; padding: 4px 0 8px;
+}
+.jobs-month__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #111);
+  letter-spacing: 0.01em;
+}
+.jobs-month__count {
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+
 .job-row {
   padding: 14px 16px; margin-bottom: 8px;
   border: 1px solid var(--border, #e3e3e3);
   border-radius: 10px; background: var(--bg-elevated, #fff);
   color: var(--text-primary, #111);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.job-row__thumb {
+  flex: 0 0 auto;
+  width: 48px; height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg-hover, #f1f1f4);
+}
+.job-row__body {
+  flex: 1 1 auto; min-width: 0;
 }
 .job-row:hover { border-color: var(--accent, #6e56cf); }
+.job-row:focus-visible {
+  outline: 2px solid var(--accent, #6e56cf);
+  outline-offset: 2px;
+}
+.job-row:active { transform: translateY(1px); }
 .job-row--archived { opacity: 0.6; }
 .job-row__head {
   display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
@@ -3184,13 +3297,17 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 }
 .job-row__title {
   font-weight: 600; font-size: 16px; color: var(--text-primary, #111);
-  text-decoration: none;
 }
-.job-row__title:hover { text-decoration: underline; }
 .job-row__meta { color: var(--text-muted, #888); font-size: 13px; margin: 4px 0; }
 .job-row__salary { font-size: 14px; color: var(--text-primary, #111); margin: 4px 0; }
 .job-row__tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
-.job-row__foot { font-size: 12px; color: var(--text-muted, #888); margin-top: 4px; }
+.job-row__foot {
+  font-size: 12px; color: var(--text-muted, #888); margin-top: 4px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.job-row__open {
+  font-size: 18px; line-height: 1; color: var(--text-muted, #888);
+}
 
 /* Generic chip class — used by both list and card */
 .job-chip {
@@ -3245,7 +3362,12 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .job-vote__btn--maybe { background: #fff5d4; border-color: #8a6a1f; color: #8a6a1f; }
 .job-vote__btn--applied { background: #d4e6f8; border-color: #1f4d8a; color: #1f4d8a; }
 .job-vote__btn--undo { color: var(--text-muted, #888); }
-
+/* Selected state — the user has voted this signal on this job. */
+.job-vote__btn--active {
+  outline: 2px solid var(--accent, #6e56cf);
+  outline-offset: 1px;
+  font-weight: 600;
+}
 .job-reason-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center; z-index: 9999;
@@ -3269,3 +3391,51 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   padding: 6px 12px; border-radius: 8px; border: 0;
   background: transparent; color: var(--text-muted, #888); cursor: pointer;
 }
+
+/* ===================== Job detail modal (2026-09-15) =====================
+ * The board list is no longer a chat; clicking a job card opens this
+ * overlay instead. It carries the same metadata + voting controls the
+ * old chat-header card carried, but as a single focused panel rather
+ * than prepended to a chat timeline. The reason-picker (.job-reason-*)
+ * sits ABOVE this in z-index because it's spawned from inside the modal.
+ */
+.job-modal-open { overflow: hidden; }
+.job-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9000;
+  padding: 16px;
+}
+.job-modal {
+  position: relative;
+  background: var(--bg-elevated, #fff);
+  color: var(--text-primary, #111);
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+}
+.job-modal__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.job-modal__close:hover {
+  background: var(--bg-hover, #f1f1f4);
+  color: var(--text-primary, #111);
+}
+.job-modal .job-card__head { padding-right: 32px; }

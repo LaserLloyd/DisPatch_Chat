@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS image_jobs (
 CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at);
 
 -- --------------------------------------------------------------------------- #
---  Jobs board (added 2026-09-14 — see plan §3)
+--  Jobs board (added 2026-09-14 — see plan §3; reshaped 2026-09-15 for the
+--  monthly-threading board: jobs live inside per-month discussion threads).
 --
 --  Additive tables only — the bot id `jobboard` owns the surface, the same
 --  `threads` + `messages` rows carry every job's chat, and these tables just
@@ -139,6 +140,16 @@ CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at)
 --  and the feature is gone.
 --
 --  Schema notes:
+--  * `jobs.job_id` is the row's primary key — one row per JOB POSTING, NOT
+--    one row per thread. Multiple jobs share the same monthly thread. The
+--    row's `thread_id` points at the MONTHLY thread the job was posted into,
+--    so a single chat shows every job posted in a given month and the
+--    `messages` table holds the per-job announcement messages referenced by
+--    `jobs.message_id`. (Initial 2026-09-14 design keyed `jobs` by
+--    `thread_id`, which forced a per-job thread and made a "monthly
+--    discussion" surface impossible without a schema change. Migration in
+--    `_migrate_jobs_to_monthly_thread()` rebuilds the table for installs
+--    that pre-date this change.)
 --  * `jobs.seniority` lets the recommender rank against the profile's
 --    seniority preference at score time without re-parsing titles.
 --  * `jobs.tags` is a JSON-encoded list (32-tag cap, validated at the API
@@ -147,7 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at)
 --    isolation — that would silently swallow history).
 --  * `job_feedback` is append-only: signals are added, never rewritten.
 --    Profile recompute is a fold over this table ordered by created_at ASC;
---    the latest signal per thread wins (so an `undo` cleanly reverts the
+--    the latest signal per `thread_id` wins (so an `undo` cleanly reverts the
 --    prior signal). Source: plan §6.
 --  * `job_profile` is a SINGLETON (id=1, CHECK). Recompute writes back into
 --    the same row — the score function reads its current value. The
@@ -160,7 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_image_jobs_state ON image_jobs(state, created_at)
 -- --------------------------------------------------------------------------- #
 
 CREATE TABLE IF NOT EXISTS jobs (
-    thread_id        TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+    job_id           TEXT PRIMARY KEY,
+    thread_id        TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    message_id       TEXT,                            -- the announcement message in the monthly thread
     url              TEXT NOT NULL,
     title            TEXT NOT NULL,
     company          TEXT NOT NULL DEFAULT '',
@@ -178,11 +191,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_seen        TEXT NOT NULL,                   -- refreshed on each repost detection
     brief            TEXT NOT NULL DEFAULT '',        -- LLM analysis
     state            TEXT NOT NULL DEFAULT 'pending', -- pending|yes|no|maybe|applied|archived|duplicate
-    duplicate_of     TEXT,                            -- thread_id of canonical when state=duplicate
+    duplicate_of     TEXT,                            -- job_id of canonical when state=duplicate
     expires_at       TEXT,                            -- optional auto-archive deadline (lazy, in-GET)
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_jobs_thread ON jobs(thread_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_message ON jobs(message_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
 CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC);
@@ -190,6 +205,11 @@ CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC);
 CREATE TABLE IF NOT EXISTS job_events (
     id          TEXT PRIMARY KEY,
     thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    job_id      TEXT,                -- jobs.job_id (added 2026-09-15; the
+                                     -- monthly-thread model keeps both
+                                     -- the monthly thread and the per-job
+                                     -- row, so the event has to be
+                                     -- indexed on both)
     type        TEXT NOT NULL,       -- state_change|tag_added|tag_removed|comment|vote|repost|duplicate_detected|expired
     from_state  TEXT,
     to_state    TEXT,
@@ -200,10 +220,12 @@ CREATE TABLE IF NOT EXISTS job_events (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_job_events_thread ON job_events(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id, created_at);
 
 CREATE TABLE IF NOT EXISTS job_feedback (
     id          TEXT PRIMARY KEY,
     thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    job_id      TEXT,                -- jobs.job_id (added 2026-09-15)
     signal      TEXT NOT NULL,       -- 'vote_yes'|'vote_no'|'vote_maybe'|'applied'|'undo'
     reason_tag  TEXT,
     comment     TEXT,
@@ -218,6 +240,7 @@ CREATE TABLE IF NOT EXISTS job_feedback (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_job_feedback_thread ON job_feedback(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_job_feedback_job ON job_feedback(job_id, created_at);
 
 CREATE TABLE IF NOT EXISTS job_profile (
     id              INTEGER PRIMARY KEY DEFAULT 1,   -- singleton; CHECK at the end
@@ -252,6 +275,83 @@ def local_date() -> str:
 
 def new_id() -> str:
     return str(uuid.uuid4())
+
+
+# Canonical English month names for the monthly-threading scheme. The
+# thread title always uses the form ``Jobs — YYYY-MM`` (a structured
+# suffix that survives localisation), but the friendly display name on
+# the API layer is built from this list. We deliberately keep this list
+# here (and not in jobs.py) so the storage layer never has to reach
+# across modules to format a title.
+_MONTH_NAMES: tuple[str, ...] = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def jobs_monthly_thread_title(year: int, month: int) -> str:
+    """The canonical title for a (year, month) jobs discussion thread.
+
+    Format: ``Jobs — YYYY-MM``. The structured suffix means a thread's
+    year/month can be derived from its title without consulting the
+    locale — the API layer adds a friendly ``September 2026`` display
+    label derived from this string.
+    """
+    if not 1 <= month <= 12:
+        raise ValueError(f"month must be 1..12, got {month}")
+    return f"Jobs — {year:04d}-{month:02d}"
+
+
+def jobs_month_key(year: int, month: int) -> str:
+    """``YYYY-MM`` canonical key for a (year, month) pair.
+
+    Used as the URL-friendly identifier in ``/api/jobs/month/<key>``
+    and as the discriminator for the storage layer's monthly threads.
+    """
+    if not 1 <= month <= 12:
+        raise ValueError(f"month must be 1..12, got {month}")
+    return f"{year:04d}-{month:02d}"
+
+
+def parse_jobs_month_key(key: str) -> tuple[int, int]:
+    """Parse ``YYYY-MM`` into (year, month). Raises ValueError on a
+    malformed key.
+
+    The monthly-thread title format is ``Jobs — YYYY-MM``; this parser
+    is the inverse that the API layer uses when it receives a thread
+    title (to filter ``list_monthly_threads`` into chronological order)
+    or a path component (in ``/api/jobs/month/{key}``).
+    """
+    parts = (key or "").strip().split("-")
+    if len(parts) != 2:
+        raise ValueError(f"month key must be YYYY-MM, got {key!r}")
+    try:
+        year = int(parts[0])
+        month = int(parts[1])
+    except (TypeError, ValueError):
+        raise ValueError(f"month key must be YYYY-MM, got {key!r}")
+    if not 1 <= month <= 12:
+        raise ValueError(f"month must be 1..12, got {month}")
+    return year, month
+
+
+def jobs_month_label(year: int, month: int) -> str:
+    """Friendly English label, e.g. ``September 2026``.
+
+    Used by the API layer to build the chat header title for the
+    monthly thread (the storage layer never sees this — the on-disk
+    title stays structured). The frontend i18n layer may further
+    translate this to the user's locale.
+    """
+    return f"{_MONTH_NAMES[month - 1]} {year}"
+
+
+def current_year_month(now: datetime | None = None) -> tuple[int, int]:
+    """The (year, month) tuple for ``now`` (UTC). The default arg is
+    useful for tests; the API layer always calls with no argument.
+    """
+    n = now or datetime.now(UTC)
+    return n.year, n.month
 
 
 # Delimiters SQLite's snippet() wraps around each full-text match. The frontend
@@ -327,6 +427,11 @@ class Database:
             "ALTER TABLE image_jobs ADD COLUMN callback_token TEXT",
             "ALTER TABLE image_jobs ADD COLUMN progress TEXT",
             "ALTER TABLE image_jobs ADD COLUMN seed INTEGER",
+            # Jobs board: monthly-thread migration (2026-09-15). Both
+            # tables gain a `job_id` column; rows predating the migration
+            # backfill from the old PK column (which was thread_id).
+            "ALTER TABLE job_events ADD COLUMN job_id TEXT",
+            "ALTER TABLE job_feedback ADD COLUMN job_id TEXT",
         ):
             try:
                 await self._db.execute(ddl)
@@ -343,7 +448,149 @@ class Database:
             # belt here, not the braces — the insert path also checks — so a
             # database with historic duplicates still starts.
             log.warning("could not create the source_id unique index", exc_info=True)
+        # Jobs board: migrate from the per-job-thread model to the
+        # monthly-thread model if needed. Idempotent; runs once on the
+        # first boot after the schema change.
+        await self._migrate_jobs_to_monthly_thread()
         await self._setup_fts()
+
+    async def _migrate_jobs_to_monthly_thread(self) -> None:
+        """Migrate the ``jobs`` table to the monthly-thread model (2026-09-15).
+
+        PRE-CHANGE SHAPE: ``jobs.thread_id`` was the primary key, so every job
+        was its own thread. That made a "monthly discussion thread" surface
+        impossible without forcing jobs to live as messages inside an
+        aggregator thread (which the per-job model couldn't represent).
+
+        POST-CHANGE SHAPE: ``jobs.job_id`` is the primary key — one row per
+        JOB POSTING. Multiple jobs share the same monthly thread; the
+        announcement lives in the ``messages`` table and is referenced by
+        ``jobs.message_id``.
+
+        The migration is the standard SQLite recipe — rename, rebuild,
+        copy, drop, re-index. ``thread_id`` is preserved on every row, and
+        ``message_id`` is backfilled from the existing assistant message in
+        each per-job thread (the one with ``role='assistant'`` and
+        ``metadata.job_announce=True`` — fallback to the first assistant
+        message of the thread). Each pre-existing per-job thread becomes
+        effectively a single-job monthly thread, which is exactly the right
+        shape going forward.
+        """
+        # Detect old schema: ``thread_id`` was the PK; new schema has
+        # ``job_id``. ``PRAGMA table_info`` is the only reliable shape check
+        # because ``CREATE TABLE IF NOT EXISTS`` already rebuilt the table
+        # for fresh installs.
+        cur = await self.db.execute("PRAGMA table_info(jobs)")
+        cols = [row["name"] for row in await cur.fetchall()]
+        if not cols:
+            return  # table does not exist yet — nothing to migrate
+        if "job_id" in cols:
+            return  # already on the new schema
+        log.info("jobs(monthly): migrating jobs table to job_id PK + "
+                 "thread_id FK shape")
+        # Rename the old table, rebuild with the new schema, copy data,
+        # drop the old. SQLite has no ALTER COLUMN; this is the supported
+        # recipe and is idempotent because the schema check above already
+        # proves the old shape is what's there.
+        await self.db.execute("ALTER TABLE jobs RENAME TO jobs_old")
+        await self.db.execute("""
+            CREATE TABLE jobs (
+                job_id           TEXT PRIMARY KEY,
+                thread_id        TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+                message_id       TEXT,
+                url              TEXT NOT NULL,
+                title            TEXT NOT NULL,
+                company          TEXT NOT NULL DEFAULT '',
+                location         TEXT NOT NULL DEFAULT '',
+                remote_type      TEXT NOT NULL DEFAULT 'unknown',
+                seniority        TEXT NOT NULL DEFAULT 'unknown',
+                salary_min       INTEGER,
+                salary_max       INTEGER,
+                salary_currency  TEXT NOT NULL DEFAULT 'USD',
+                tags             TEXT NOT NULL DEFAULT '[]',
+                source_agent     TEXT NOT NULL DEFAULT '',
+                source_run_id    TEXT,
+                posted_at        TEXT,
+                first_seen       TEXT NOT NULL,
+                last_seen        TEXT NOT NULL,
+                brief            TEXT NOT NULL DEFAULT '',
+                state            TEXT NOT NULL DEFAULT 'pending',
+                duplicate_of     TEXT,
+                expires_at       TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL
+            )
+        """)
+        # Copy with backfill: ``job_id`` mirrors the old PK; ``message_id``
+        # is the announcement message in the same thread (the one with
+        # metadata.job_announce=True; fallback to the first assistant
+        # message). If neither exists the message_id is NULL — that's the
+        # pre-2026-09-15 fallback for installs that never went through the
+        # new create_job path.
+        await self.db.execute("""
+            INSERT INTO jobs (job_id, thread_id, message_id, url, title,
+                              company, location, remote_type, seniority,
+                              salary_min, salary_max, salary_currency, tags,
+                              source_agent, source_run_id, posted_at,
+                              first_seen, last_seen, brief, state,
+                              duplicate_of, expires_at, created_at, updated_at)
+            SELECT
+                old.thread_id                                            AS job_id,
+                old.thread_id                                            AS thread_id,
+                (SELECT m.id FROM messages m
+                  WHERE m.thread_id = old.thread_id
+                    AND m.role = 'assistant'
+                    AND (json_extract(m.metadata, '$.job_announce') = 1
+                         OR json_extract(m.metadata, '$.job_announce') = 'true'
+                         OR json_extract(m.metadata, '$.job_announce') = 'True')
+                  ORDER BY m.created_at ASC LIMIT 1)                    AS message_id,
+                old.url, old.title, old.company, old.location,
+                old.remote_type, old.seniority,
+                old.salary_min, old.salary_max, old.salary_currency,
+                old.tags, old.source_agent, old.source_run_id,
+                old.posted_at, old.first_seen, old.last_seen,
+                old.brief, old.state, old.duplicate_of, old.expires_at,
+                old.created_at, old.updated_at
+            FROM jobs_old old
+        """)
+        # The above lookup may miss rows whose announcement message has no
+        # metadata.job_announce key (defensive). Second pass: any row whose
+        # message_id is still NULL gets the earliest assistant message in
+        # its thread.
+        await self.db.execute("""
+            UPDATE jobs SET message_id = (
+                SELECT m.id FROM messages m
+                WHERE m.thread_id = jobs.thread_id AND m.role = 'assistant'
+                ORDER BY m.created_at ASC LIMIT 1
+            )
+            WHERE message_id IS NULL
+        """)
+        await self.db.execute("DROP TABLE jobs_old")
+        # Backfill job_id on the dependent tables so a vote recorded under
+        # the per-job-thread model is queryable under the new model. The
+        # old row's ``thread_id`` is now the jobs.job_id (per the COPY
+        # above), so we mirror that into the dependent columns.
+        await self.db.execute(
+            "UPDATE job_events SET job_id = thread_id WHERE job_id IS NULL")
+        await self.db.execute(
+            "UPDATE job_feedback SET job_id = thread_id WHERE job_id IS NULL")
+        # Indices on the new shape (the CREATE TABLE in SCHEMA built them
+        # for fresh installs; this branch is the existing-install case).
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_jobs_thread ON jobs(thread_id)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_message ON jobs(message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state, updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_job_feedback_job ON job_feedback(job_id, created_at)",
+        ):
+            try:
+                await self.db.execute(ddl)
+            except Exception:
+                pass
+        await self.db.commit()
+        log.info("jobs(monthly): migration complete")
 
     async def close(self) -> None:
         if self._db is not None:
@@ -1293,9 +1540,27 @@ class Database:
     # which lives in jobs.py, not here.
     # ----------------------------------------------------------------- #
 
-    async def get_job(self, thread_id: str) -> dict | None:
+    async def get_job(self, job_id: str) -> dict | None:
+        """Look up a job by its ``job_id`` (the row PK).
+
+        Older code called this with a ``thread_id``; the migration to the
+        monthly-thread model changed the PK, so the public method is keyed
+        by ``job_id`` now. ``get_job_by_message`` is the bridge for the
+        chat panel that knows the announcement message id, not the job id.
+        """
         cur = await self.db.execute(
-            "SELECT * FROM jobs WHERE thread_id = ?", (thread_id,))
+            "SELECT * FROM jobs WHERE job_id = ?", (job_id,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_job_by_message(self, message_id: str) -> dict | None:
+        """Look up the job whose announcement message id matches.
+
+        The chat panel knows the message id; the voting flow needs the job
+        row in one hop. ``idx_jobs_message`` keeps this O(1).
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM jobs WHERE message_id = ?", (message_id,))
         row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -1305,6 +1570,12 @@ class Database:
         Tags are stored JSON-encoded at the boundary; callers pass either a
         list or a string (already-encoded). The caller is responsible for
         the 32-tag cap and tag-trim rules — this is a dumb shelf.
+
+        The PK is ``job_id`` (one row per JOB POSTING). ``thread_id`` is
+        the monthly thread the job was posted into; multiple jobs share
+        the same thread_id. ``message_id`` is the announcement message in
+        that thread, written by ``create_job_from_dict`` and patched in
+        via ``update_job_message_id`` after the message insert.
         """
         tags = job.get("tags") or []
         if isinstance(tags, list):
@@ -1314,12 +1585,15 @@ class Database:
             tags_json = tags
         await self.db.execute(
             "INSERT OR REPLACE INTO jobs ("
-            "thread_id, url, title, company, location, remote_type, seniority,"
-            "salary_min, salary_max, salary_currency, tags, source_agent,"
-            "source_run_id, posted_at, first_seen, last_seen, brief, state,"
-            "duplicate_of, expires_at, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (job["thread_id"], job["url"], job["title"],
+            "job_id, thread_id, message_id, url, title, company, location,"
+            "remote_type, seniority, salary_min, salary_max, salary_currency,"
+            "tags, source_agent, source_run_id, posted_at, first_seen,"
+            "last_seen, brief, state, duplicate_of, expires_at, created_at,"
+            "updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?)",
+            (job["job_id"], job["thread_id"], job.get("message_id"),
+             job["url"], job["title"],
              job.get("company", ""), job.get("location", ""),
              job.get("remote_type", "unknown"),
              job.get("seniority", "unknown"),
@@ -1333,13 +1607,59 @@ class Database:
         )
         await self.db.commit()
 
+    async def find_monthly_thread(self, bot_id: str, year: int,
+                                   month: int) -> ThreadOut | None:
+        """Find the per-month jobs discussion thread for (bot_id, year,
+        month).
+
+        Thread title format is ``Jobs — YYYY-MM`` (e.g. ``Jobs — 2026-09``).
+        The structured ``YYYY-MM`` suffix makes the lookup deterministic
+        regardless of locale — the API layer renders a friendly
+        ``September 2026`` display label from this canonical key.
+        """
+        title = jobs_monthly_thread_title(year, month)
+        cur = await self.db.execute(
+            "SELECT * FROM threads WHERE bot_id = ? AND title = ?"
+            "  AND is_archived = 0"
+            "  ORDER BY created_at ASC LIMIT 1",
+            (bot_id, title))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return self._thread_from_row(row)
+
+    async def list_monthly_threads(self, bot_id: str) -> list[ThreadOut]:
+        """Return every monthly-thread row for ``bot_id``, newest first.
+
+        Matches the canonical title prefix ``Jobs — `` and returns the
+        full ThreadOut. The API layer parses the ``YYYY-MM`` suffix off
+        each title to compute a friendly month label and a chronological
+        sort key.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM threads WHERE bot_id = ? AND is_archived = 0"
+            "  AND (title LIKE 'Jobs — %' OR title LIKE 'Jobs - %')"
+            "  ORDER BY created_at DESC",
+            (bot_id,))
+        rows = await cur.fetchall()
+        out: list[ThreadOut] = []
+        for row in rows:
+            out.append(self._thread_from_row(row))
+        return out
+
     async def list_jobs(self, *, state: str | None = None,
                         source_agent: str | None = None,
                         tag: str | None = None,
+                        thread_id: str | None = None,
                         limit: int = 200) -> list[dict]:
         """List job rows. Filtering is intentionally minimal in the storage
         layer — the router does full-text + score-based selection on top of
-        this set."""
+        this set.
+
+        ``thread_id`` filters to the jobs that live in a given monthly
+        thread. ``state``, ``source_agent``, and ``tag`` keep their prior
+        meaning and combine with AND.
+        """
         sql = "SELECT * FROM jobs WHERE 1=1"
         params: list[Any] = []
         if state:
@@ -1351,40 +1671,61 @@ class Database:
         if tag:
             sql += " AND tags LIKE ?"
             params.append(f'%"{tag}"%')
+        if thread_id:
+            sql += " AND thread_id = ?"
+            params.append(thread_id)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(limit)
         cur = await self.db.execute(sql, params)
         return [dict(r) for r in await cur.fetchall()]
 
-    async def update_job_state(self, thread_id: str, state: str,
+    async def update_job_state(self, job_id: str, state: str,
                                duplicate_of: str | None = None) -> None:
         await self.db.execute(
             "UPDATE jobs SET state = ?, duplicate_of = ?, updated_at = ? "
-            "WHERE thread_id = ?",
-            (state, duplicate_of, now_iso(), thread_id),
+            "WHERE job_id = ?",
+            (state, duplicate_of, now_iso(), job_id),
         )
         await self.db.commit()
 
-    async def update_job_tags(self, thread_id: str, tags: list[str]) -> None:
+    async def update_job_message_id(self, job_id: str,
+                                    message_id: str) -> None:
+        """Patch the message_id after a deferred announcement write.
+
+        The chat-publish step in ``create_job_from_dict`` runs AFTER the
+        job row is written — the row needs the message id in its
+        ``updated_at`` ordering but the message needs the job id to be
+        able to attribute the vote. The split is unavoidable, so this
+        helper makes the second UPDATE atomic and idempotent.
+        """
+        await self.db.execute(
+            "UPDATE jobs SET message_id = ?, updated_at = ? "
+            "WHERE job_id = ?",
+            (message_id, now_iso(), job_id))
+        await self.db.commit()
+
+    async def update_job_tags(self, job_id: str, tags: list[str]) -> None:
         import json as _json
         await self.db.execute(
-            "UPDATE jobs SET tags = ?, updated_at = ? WHERE thread_id = ?",
-            (_json.dumps(tags), now_iso(), thread_id),
+            "UPDATE jobs SET tags = ?, updated_at = ? WHERE job_id = ?",
+            (_json.dumps(tags), now_iso(), job_id),
         )
         await self.db.commit()
 
-    async def touch_job_seen(self, thread_id: str) -> None:
+    async def touch_job_seen(self, job_id: str) -> None:
         await self.db.execute(
-            "UPDATE jobs SET last_seen = ? WHERE thread_id = ?",
-            (now_iso(), thread_id))
+            "UPDATE jobs SET last_seen = ? WHERE job_id = ?",
+            (now_iso(), job_id))
         await self.db.commit()
 
     async def add_job_event(self, event: dict) -> None:
         await self.db.execute(
-            "INSERT INTO job_events (id, thread_id, type, from_state, to_state,"
-            " reason_tag, comment, actor, payload, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (event["id"], event["thread_id"], event["type"],
+            "INSERT INTO job_events (id, thread_id, job_id, type, from_state,"
+            " to_state, reason_tag, comment, actor, payload, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (event["id"], event["thread_id"],
+             event.get("job_id") or event["thread_id"],
+             event["type"],
              event.get("from_state"), event.get("to_state"),
              event.get("reason_tag"), event.get("comment"),
              event["actor"], event.get("payload"),
@@ -1392,18 +1733,24 @@ class Database:
         )
         await self.db.commit()
 
-    async def list_job_events(self, thread_id: str, limit: int = 50) -> list[dict]:
+    async def list_job_events(self, job_id: str, limit: int = 50) -> list[dict]:
+        """Return events for one job. ``job_id`` is the new key; the
+        column stored in ``job_events.job_id`` (added with the migration)
+        is indexed for this query.
+        """
         cur = await self.db.execute(
-            "SELECT * FROM job_events WHERE thread_id = ?"
+            "SELECT * FROM job_events WHERE job_id = ?"
             " ORDER BY created_at DESC, rowid DESC LIMIT ?",
-            (thread_id, limit))
+            (job_id, limit))
         return [dict(r) for r in await cur.fetchall()]
 
     async def add_job_feedback(self, feedback: dict) -> None:
         await self.db.execute(
-            "INSERT INTO job_feedback (id, thread_id, signal, reason_tag, "
-            "comment, actor, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (feedback["id"], feedback["thread_id"], feedback["signal"],
+            "INSERT INTO job_feedback (id, thread_id, job_id, signal, reason_tag, "
+            "comment, actor, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (feedback["id"], feedback["thread_id"],
+             feedback.get("job_id") or feedback["thread_id"],
+             feedback["signal"],
              feedback.get("reason_tag"), feedback.get("comment"),
              feedback["actor"], feedback.get("payload"),
              feedback["created_at"]),
@@ -1419,6 +1766,11 @@ class Database:
         Profile recompute depends on ASC ordering — the fold iterates rows
         oldest-first, latest per thread wins, see jobs_score.py. Limit is
         generous so a full recompute over a long history stays single-pass.
+
+        Filter note: ``thread_id`` here means the MONTHLY thread (so the
+        "latest per thread" semantics in jobs_score still applies —
+        votes are unique per monthly thread, since a user typically
+        doesn't vote twice on the same job in the same month).
         """
         sql = "SELECT * FROM job_feedback WHERE 1=1"
         params: list[Any] = []
@@ -1480,7 +1832,6 @@ class Database:
             return []
         return [e for e in entries if isinstance(e, dict)
                 and e.get("seen_at", "") >= since]
-
     # -- row mappers -------------------------------------------------------- #
 
     @staticmethod

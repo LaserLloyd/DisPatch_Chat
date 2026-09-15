@@ -36,7 +36,7 @@
   },
   "nav": {
     "theme": "主题",
-    "theme_aria": "主题与头像样式",
+    "theme_aria": "选择主题",
     "lock_now": "立即锁定",
     "unlock_title": "输入 PIN 进入管理模式",
     "unlock_aria": "解锁 — 输入 PIN",
@@ -58,8 +58,8 @@
     "tools_aria": "运维工具 — 编码工具、LLM 机架"
   },
   "theme": {
-    "dark": "深色主题 — 点击切换浅色",
-    "light": "浅色主题 — 点击切换深色"
+    "mode_dark": "深色",
+    "mode_light": "浅色"
   },
   "conn": {
     "aria": "连接状态",
@@ -178,8 +178,10 @@
     "tab_reactions": "反应图片",
     "tab_health": "运行状况",
     "tab_ai": "AI 模型",
+    "tab_theme": "主题",
     "tab_device": "本设备",
     "tab_security": "安全",
+    "theme_hint": "选择此设备的外观。立即生效并保存在此处 — 无需保存。",
     "device_hint": "这些设置仅适用于本设备，并且立即生效——无需保存。",
     "hint": "点一下机器人的图片（或<strong>更换照片</strong>）就能设置头像。用 ▲/▼ 按钮调整顺序（在电脑上也可以直接拖动整行）；用开关控制机器人在侧边栏里显示还是隐藏。<strong>🛡️ 安全</strong> — 这个角色（连同它的头像）在安全模式下可见，不需要 PIN。顺序、显示和安全这三项改动会在你按下<strong>保存</strong>后生效。",
     "language": "语言",
@@ -460,7 +462,7 @@
     "group_chats": "对话",
     "sub_chat": "对话",
     "action_new_chat": "新建对话",
-    "action_theme": "切换主题",
+    "action_theme": "更改主题",
     "action_search": "搜索消息",
     "action_recovery": "恢复与导出",
     "action_stop": "停止回复",
@@ -921,6 +923,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

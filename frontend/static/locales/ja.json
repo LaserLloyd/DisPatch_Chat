@@ -36,7 +36,7 @@
   },
   "nav": {
     "theme": "テーマ",
-    "theme_aria": "テーマとアバターのスタイル",
+    "theme_aria": "テーマを選択",
     "lock_now": "今すぐロック",
     "unlock_title": "管理モードの PIN を入力",
     "unlock_aria": "ロック解除 — PIN を入力",
@@ -58,8 +58,8 @@
     "tools_aria": "運用ツール — コーディングハーネス、LLMリグ"
   },
   "theme": {
-    "dark": "ダークテーマ — クリックでライトに",
-    "light": "ライトテーマ — クリックでダークに"
+    "mode_dark": "ダーク",
+    "mode_light": "ライト"
   },
   "conn": {
     "aria": "接続状態",
@@ -178,8 +178,10 @@
     "tab_reactions": "リアクション",
     "tab_health": "状態",
     "tab_ai": "AI モデル",
+    "tab_theme": "テーマ",
     "tab_device": "この端末",
     "tab_security": "セキュリティ",
+    "theme_hint": "この端末の見た目を選びます。すぐに反映され、ここに記憶されます — 保存は不要です。",
     "device_hint": "これらはこの端末だけに適用され、すぐに反映されます。保存は不要です。",
     "hint": "ボットの画像（または <strong>写真を変更</strong>）をタップするとアバターを設定できます。並び替えは ▲/▼ ボタンで（デスクトップでは行をドラッグしてもできます）。スイッチでサイドバーへの表示・非表示を切り替えます。<strong>🛡️ セーフ</strong> — このキャラクター（とそのアバター）は PIN なしのセーフモードでも表示されます。並び順・表示・セーフの変更は <strong>保存</strong> を押すと反映されます。",
     "language": "言語",
@@ -460,7 +462,7 @@
     "group_chats": "チャット",
     "sub_chat": "チャット",
     "action_new_chat": "新しいチャット",
-    "action_theme": "テーマを切り替え",
+    "action_theme": "テーマを変更",
     "action_search": "メッセージを検索",
     "action_recovery": "復元とエクスポート",
     "action_stop": "返信を停止",
@@ -921,6 +923,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

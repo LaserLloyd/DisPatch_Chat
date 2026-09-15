@@ -41,7 +41,7 @@
   },
   "nav": {
     "theme": "المظهر",
-    "theme_aria": "المظهر ونمط الصور الرمزية",
+    "theme_aria": "اختيار مظهر",
     "lock_now": "قفل الآن",
     "unlock_title": "أدخل رمز PIN لوضع المسؤول",
     "unlock_aria": "فتح القفل — أدخل رمز PIN",
@@ -63,8 +63,8 @@
     "tools_aria": "أدوات المشغّل — أداة البرمجة، منصة LLM"
   },
   "theme": {
-    "dark": "المظهر الداكن — انقر للفاتح",
-    "light": "المظهر الفاتح — انقر للداكن"
+    "mode_dark": "داكن",
+    "mode_light": "فاتح"
   },
   "conn": {
     "aria": "حالة الاتصال",
@@ -188,8 +188,10 @@
     "tab_reactions": "التفاعلات",
     "tab_health": "الحالة",
     "tab_ai": "نماذج الذكاء الاصطناعي",
+    "tab_theme": "المظهر",
     "tab_device": "الجهاز",
     "tab_security": "الأمان",
+    "theme_hint": "اختر مظهر هذا الجهاز. يُطبَّق فورًا ويُحفظ هنا — لا حاجة إلى أي حفظ.",
     "device_hint": "تنطبق هذه الإعدادات على هذا الجهاز فقط وتُطبَّق فورًا — لا شيء لحفظه هنا.",
     "hint": "انقر على صورة البوت (أو <strong>تغيير الصورة</strong>) لتعيين صورته الرمزية. رتّبها بزرَّي ▲/▼ (أو اسحب الصفوف على سطح المكتب)؛ واستخدم المفتاح لإظهار بوت في الشريط الجانبي أو إخفائه منه. <strong>🛡️ آمن</strong> — هذه الشخصية (وصورتها) تظهر في الوضع الآمن دون الحاجة إلى رمز PIN. تُطبَّق تغييرات الترتيب والظهور والوضع الآمن عند الضغط على <strong>حفظ</strong>.",
     "language": "اللغة",
@@ -495,7 +497,7 @@
     "group_chats": "المحادثات",
     "sub_chat": "محادثة",
     "action_new_chat": "محادثة جديدة",
-    "action_theme": "تبديل المظهر",
+    "action_theme": "تغيير المظهر",
     "action_search": "البحث في الرسائل",
     "action_recovery": "الاسترداد والتصدير",
     "action_stop": "إيقاف الرد",
@@ -1046,6 +1048,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

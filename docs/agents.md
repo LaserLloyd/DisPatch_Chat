@@ -199,6 +199,115 @@ MCP endpoint), `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff that
 URL is set) and the optional `DISPATCH_CALLBACK_BASE`, which only makes a
 finished render appear sooner. See [configuration.md](configuration.md).
 
+## Managing the Jobs board (post + vote + archive + tag)
+
+The Jobs board is a curated feed of job postings, surfaced in the chat app
+as a **structured list grouped by month** — not a chat. The bot id
+`jobboard` owns the surface; every post lands in the **current month's
+discussion thread** (title `Jobs — YYYY-MM`), so all jobs from a given
+month are visible in one place and the dedup hash short-circuits reposts
+to the existing job row.
+
+Every route is **inbound-exempt** (machine-callable without a PIN-derived
+session) since the 2026-09-15 OpenClaw audit. Safe-Mode browsers are still
+blocked at the `/api/jobs` prefix in `_decoy_blocked`, so a locked device
+never sees a row.
+
+The full lifecycle from one call:
+
+```bash
+# 1. (Optional) dry-run a candidate score against the current profile.
+curl -X POST http://127.0.0.1:8765/api/jobs/score \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://anthropic.com/careers/staff-swe",
+    "title": "Staff Software Engineer",
+    "company": "Anthropic",
+    "location": "Tokyo, JP",
+    "remote_type": "onsite",
+    "salary_min": 220000, "salary_max": 320000,
+    "tags": ["python", "ml"]
+  }'
+# -> {"score": 0.83, "breakdown": {...}, "explanation": [...], "embedding_unavailable": false}
+
+# 2. Post the job. Auto-routes to the current month's discussion thread;
+#    creates the thread if missing. Returns the new job_id + message_id.
+curl -X POST http://127.0.0.1:8765/api/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "bot_id": "jobboard",
+    "url": "https://anthropic.com/careers/staff-swe",
+    "title": "Staff Software Engineer",
+    "company": "Anthropic",
+    "location": "Tokyo, JP",
+    "remote_type": "onsite",
+    "salary_min": 220000, "salary_max": 320000,
+    "tags": ["python", "ml"],
+    "brief": "Inference team; LLM serving.",
+    "source_agent": "scout"
+  }'
+# -> {"duplicate": false, "job_id": "...", "thread_id": "...",
+#      "message_id": "...", "thread": {...}, "job": {...}}
+
+# 3. List months (for the picker).
+curl http://127.0.0.1:8765/api/jobs/months
+# -> {"months": [{year, month, key, label, thread_id, ...}, ...], "current": {...}}
+
+# 4. Fetch one job (with its events + score against the live profile).
+curl http://127.0.0.1:8765/api/jobs/<job_id>
+# -> {"thread": {...}, "job": {...}, "events": [...], "score": {...}}
+
+# 5. Vote (yes/no/maybe/undo) on a job.
+curl -X POST http://127.0.0.1:8765/api/jobs/<job_id>/vote \
+  -H 'Content-Type: application/json' \
+  -d '{"signal": "yes"}'
+# -> {"ok": true}
+# A "no" vote requires a reason_tag from /api/jobs/reasons.
+
+# 6. Edit tags.
+curl -X POST http://127.0.0.1:8765/api/jobs/<job_id>/tags \
+  -H 'Content-Type: application/json' \
+  -d '{"add": ["staff", "remote-ok"], "remove": ["junior"]}'
+
+# 7. Archive.
+curl -X POST http://127.0.0.1:8765/api/jobs/<job_id>/archive
+```
+
+**CLI wrapper.** Every verb has a subcommand under `dispatch-jobs` (see
+`scripts/dispatch-jobs` in this repo, or install via `install-tools.sh`).
+Pattern:
+
+```bash
+dispatch-jobs post --url https://... --title "Staff SWE" --company Anthropic \
+                   --salary-min 220000 --salary-max 320000 --tags python,ml
+dispatch-jobs vote <job_id> --signal yes
+dispatch-jobs list --state pending --source-agent scout
+dispatch-jobs months           # the picker data
+dispatch-jobs view <job_id>    # full record + score
+dispatch-jobs profile          # tag_weights, blocklists, counts
+dispatch-jobs recompute        # rebuild profile from feedback
+```
+
+**Dedup.** A repost with the same `(url, title, company)` within 30 days
+returns `{duplicate: true, existing_job_id, existing_thread_id, last_seen}` —
+no second row is written. A repost with the same URL but a changed title
+or company (90-day window) returns `{duplicate: false, repost_of:
+<existing_job_id>, hash}` so callers can link the new and old jobs.
+
+**Auth matrix.** The 14 routes split cleanly:
+
+- **Inbound-exempt** (no session needed): `POST /api/jobs`,
+  `POST /api/jobs/score`, every `GET /api/jobs*` read, and the manage
+  verbs `vote / applied / tags / archive / recompute` on individual
+  jobs.
+- **Locked browser** (`_decoy_blocked` prefix match on `/api/jobs`):
+  every route refuses a Safe-Mode caller with 403, so a locked device
+  never sees a row.
+- **No-PIN install**: `_require_full` is no-op (passes when no cookie is
+  present), so a freshly-installed box lets any caller reach every verb.
+  A PIN-protected install requires a full session for the manage verbs
+  via the inbound allowlist bypass.
+
 ## Pointing at a file on the host
 
 An agent that has just written a report, a log or a generated HTML page can hand

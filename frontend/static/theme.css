@@ -1,135 +1,93 @@
 /* ============================================================================
-   theme.css — DisPatch theme tokens
+   theme.css — DisPatch appearance tokens
    ----------------------------------------------------------------------------
-   This file holds every color, typography, spacing, motion and elevation
-   variable the UI uses. To re-skin the app, edit ONLY this file (token NAMES
-   must stay stable; only the values change). Component CSS in app.css /
-   dashboard.css references these tokens via var(--name) and is otherwise
-   untouched.
+   This file holds every colour, typography, spacing, motion and elevation
+   variable the UI uses. Component CSS in app.css / dashboard.css references
+   these tokens via var(--name) and is otherwise untouched, so re-skinning the
+   app means editing ONLY this file (token NAMES stay stable; only the values
+   change).
 
-   light-dark(LIGHT, DARK) is a CSS function: the first value is used when
-   color-scheme is "light", the second when "dark". Default theme is dark
-   (see js/theme.js). The ":root[data-theme="dark"], :root:not([data-theme])"
-   block in section 6 overrides the dark side of selected tokens with deeper,
-   cooler values — see that section for the rationale.
+   APPEARANCE IS A PALETTE, NOT A LIGHT/DARK PAIR.
+   Up to 2026-09-15 the app had two skins selected by a `data-theme` attribute
+   and every colour was written light-dark(LIGHT, DARK). That switch is gone.
+   There is now ONE fixed palette per theme, selected by `data-palette` on
+   <html>, and each palette is a complete, self-consistent skin: it redefines
+   every thematic token and nothing else. There is no "light side" or "dark
+   side" left to fall back to, which is deliberate — a named theme that
+   inherited half its colours from the default is how you get a forest theme
+   with a lavender focus ring.
+
+   `data-palette` is stamped before first paint by the no-FOUC script in
+   index.html and afterwards by js/theme.js, which also renders the picker in
+   Settings → Theme. The picker previews each card by putting its own
+   `data-palette` attribute on the card element, so a preview is painted by
+   the real token block, never by a copy of the values.
+
+   ORDER MATTERS. The default palette block (`:root, [data-palette="glacier"]`)
+   comes first and every other palette block after it. All palette selectors
+   have the same specificity, so source order decides, and the later block
+   wins when <html> carries an explicit palette.
+
+   `color-scheme` is declared per palette: it is what makes native widgets
+   (scrollbars, form controls, the select popup) match the skin, and it is what
+   resolves the handful of light-dark() pairs still in app.css / dashboard.css
+   for the minimal-avatar name tints and the host dashboard severities. A
+   palette that forgets it renders a dark control set on a light page.
 
    Sections:
-     1. Color scheme declaration + base tokens
+     1. Structural tokens (identical in every palette)
      2. Responsive token overrides
-     3. Component token overrides
-     4. REDESIGN 2026 — shadows, motion, radii
-     5. Default-theme overrides
+     3. Palettes — Glacier (default), Midnight Gold, Forest, Paper, Daylight,
+        Classic Purple
+     4. Forced-skin surfaces
 
-   Last refactor: 2026-09-13 — tokens extracted from app.css for the redesign
-   intake. See git log for prior context.
+   frontend/tests/theme-palettes.test.js enforces the two invariants that keep
+   this file honest: every palette defines the SAME set of thematic tokens, and
+   the palette ids here match js/theme.js and the no-FOUC script in index.html.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
-   1. Color scheme declaration + base tokens
+   1. Structural tokens — identical in every palette
    ----------------------------------------------------------------------------
-   Drives the light-dark() switch throughout the app. The default root sets
-   `light dark`, so the browser follows the OS by default. The data-theme
-   attribute (set by js/theme.js) forces the scheme to the user's explicit
-   pick so light-dark() resolves correctly. */
-
-/* Dark is the default app skin; light + system are opt-in (see theme.js).
-   Every color is light-dark(LIGHT, DARK) — the DARK side keeps the original
-   values, so with the default `data-theme="dark"` the UI is pixel-identical
-   to before. The light side is new. */
+   Spacing, radii, layout widths, type and motion. A palette block must never
+   redefine one of these; the palette-parity test fails if one does. */
 :root {
-  color-scheme: light dark;
-
-  /* 1.1 Backgrounds */
-  --bg-primary:   light-dark(#eceae4, #0f0f1a);
-  --bg-secondary: light-dark(#f6f5f2, #16162a);
-  --bg-tertiary:  light-dark(#ffffff, #1e1e3a);
-  --bg-hover:     light-dark(#e7e4dd, #252545);
-  --bg-input:     light-dark(#ffffff, #1a1a30);
-  --bg-sidebar:   light-dark(#efece6, #14142a);
-  --tint-subtle:  light-dark(rgba(0,0,0,.035), rgba(255,255,255,.02));
-  --code-inline:  light-dark(rgba(0,0,0,.07), rgba(0,0,0,.35));
-  --code-block-text: #c9d1d9;   /* code blocks stay dark in both themes */
-
-  /* 1.2 Text */
-  --text-primary:   light-dark(#1c1c28, #e8e8f0);
-  /* dark side #8888aa → #8d8db0: it measured 4.48:1 on the progress panel
-     (--tint-subtle over a bot bubble) and 4.30:1 on --bg-hover, i.e. it missed
-     AA on the two surfaces it is used on most. A ~3% lift clears both without
-     collapsing the gap to --text-muted. */
-  --text-secondary: light-dark(#55556a, #8d8db0);
-  --text-muted:     light-dark(#5f5f74, #9a9ab8);   /* both sides bumped to pass AA (light was #73738c ≈3.8:1) */
-
-  /* 1.3 Accent */
-  --accent:       light-dark(#6d28d9, #7c3aed);
-  --accent-hover: light-dark(#7c3aed, #8b5cf6);
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        light-dark(#6d28d9, #a78bfa);
-  /* THE ACCENT AS TEXT — not as a fill. --accent / --accent-hover are tuned to
-     sit UNDER white (buttons, the send gradient, dots), and every place they
-     were used as small coloured text failed WCAG AA: 2.74–4.30:1 in dark
-     (model pill 3.69, Safe chip 3.35, bubble links 3.81, reaction names 2.83)
-     and 3.75–4.37:1 in light on the tinted chips. Both values below are
-     already in the palette — light reuses --accent's light value, dark reuses
-     --focus's — so nothing new enters the visual identity; the worst case is
-     now 4.67:1 and most sites land above 5.5:1. Fills keep using --accent /
-     --accent-hover; only TEXT uses this. */
-  --accent-text:  light-dark(#6d28d9, #a78bfa);
-
-  /* 1.4 Borders */
-  --border:       light-dark(#e0ddd6, #2a2a45);
-  --border-light: light-dark(#cfcbc4, #333355);
-
-  /* 1.5 Bubbles */
-  --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
-  --bot-bubble:  light-dark(#ffffff, #1e1e3a);
-
-  /* 1.6 Markdown */
-  /* Markdown emphasis + quotes (see `.bubble blockquote` in app.css for the why).
-     Teal is deliberately not reused anywhere else in the app. */
-  --md-quote:      light-dark(#0f766e, #5eead4);
-  --md-quote-text: light-dark(#155e57, #a5f3ea);
-  --md-em:         light-dark(#9a3412, #fcd34d);
-  --md-strong:     light-dark(#101018, #ffffff);
-  --md-mark-bg:    light-dark(#fde68a, rgba(251,191,36,.30));
-
-  /* 1.7 Status (success / error / warning) */
-  --success: #34d399;
-  --error: #f87171;
-  --warning: #fbbf24;
-  /* …and the same three AS TEXT. The values above are picked to read as dots,
-     bars and fills on the DARK skin; used as small coloured text on the light
-     skin they collapse — the reaction manager's "image host unreachable" warning
-     measured 1.53:1 on the light modal, and --error text sat at 2.18–2.77:1.
-     The dark side is unchanged (it already passes, 4.54:1 at worst); only the
-     light side is darkened. Fills, dots, bars and badge backgrounds keep the
-     originals, so nothing about the app's colour identity moves. */
-  --success-text: light-dark(#065f46, #34d399);
-  --error-text:   light-dark(#b91c1c, #f87171);
-  --warning-text: light-dark(#92400e, #fbbf24);
-
-  /* 1.8 Radii */
   --radius-sm: 6px;
   --radius-md: 12px;
   --radius-lg: 16px;
+  --radius-xl: 20px;
 
-  /* 1.9 Layout widths */
   --sidebar-width: 72px;
   --threadlist-width: 320px;
+  /* Caps the width of assistant message columns. The 760px reading column was
+     removed 2026-09-04: on a wide window it left agent prose AND markdown
+     tables sitting in the left half of the pane while the rest stayed empty.
+     Agent turns are working output, not an article, so they get the whole
+     reading window. */
+  --assistant-col: 100%;
 
-  /* 1.10 Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 
-  /* 1.11 Type scale (fluid, rem-anchored, zoom-safe; max <= 2.5x min for WCAG 1.4.4) */
+  /* Fluid, rem-anchored, zoom-safe; max <= 2.5x min for WCAG 1.4.4. */
   --step--1: clamp(.8125rem, .78rem + .18vw, .9rem);
   --step-0:  clamp(1rem, .97rem + .18vw, 1.0625rem);
   --step-1:  clamp(1.0625rem, 1rem + .35vw, 1.1875rem);
   --step-2:  clamp(1.25rem, 1.15rem + .5vw, 1.45rem);
+
+  --easing: cubic-bezier(.22, 1, .36, 1);   /* gentle "spring-ish" ease-out */
+
+  /* Code blocks are ALWAYS dark, in every palette: the card background is a
+     fixed #0d1117 in app.css and the vendored highlight.js theme is
+     github-dark. So is their text. */
+  --code-block-text: #c9d1d9;
+
+  /* Aliases. Declared once here as var() references, so they resolve against
+     whichever palette is in force on the element that uses them — including a
+     preview card nested inside a different active palette. */
+  --ring: var(--focus);
+  --scrollbar-thumb: var(--border-light);
 }
-/* Manual theme override forces the scheme so light-dark() resolves; absence of
-   data-theme === "system" (follows the OS via color-scheme: light dark). */
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"]  { color-scheme: dark; }
 
 /* ----------------------------------------------------------------------------
    2. Responsive token overrides
@@ -140,52 +98,340 @@
 }
 
 /* ----------------------------------------------------------------------------
-   3. Component token overrides
+   3. Palettes
    ----------------------------------------------------------------------------
-   --assistant-col caps the width of assistant message columns. The 760px
-   reading column was removed 2026-09-04: on a wide window it left agent prose
-   AND markdown tables sitting in the left half of the pane while the rest
-   stayed empty. Agent turns are working output, not an article, so they get
-   the whole reading window. Tune with --assistant-col if a measure cap is
-   ever wanted back (e.g. `min(760px, 100%)`); every assistant surface reads
-   this one var so the streamed row, the finalized row and the typing
-   placeholder cannot drift apart. */
-:root { --assistant-col: 100%; }
+   Each block redefines the complete thematic set. Three are dark, two are
+   light, and Classic Purple is the app's original identity frozen to the dark
+   values it shipped before the palette switch (the light variant it used to
+   have is what "remove light/dark mode" retired).
 
-/* ========================================================================= *
- * 4. REDESIGN 2026 — slicker surfaces, motion, skeletons, status, recovery UI.
- * ========================================================================= *
- * Appended so it overrides the base by source order; the dark-purple identity
- * and every WS/REST + Safe-Mode behaviour are unchanged. New tokens only add. */
-:root {
-  /* Elevation: soft, layered shadows give depth without heavy borders. */
-  --shadow-sm: 0 1px 2px light-dark(rgba(40,30,70,.08), rgba(0,0,0,.30));
-  --shadow-md: 0 6px 20px light-dark(rgba(40,30,70,.12), rgba(0,0,0,.40));
-  --shadow-lg: 0 18px 50px light-dark(rgba(40,30,70,.20), rgba(0,0,0,.55));
-  --ring: var(--focus);
-  /* A subtle brand gradient reused on the send button, active states, etc. */
-  --accent-grad: linear-gradient(135deg, var(--accent-hover), var(--accent));
-  --easing: cubic-bezier(.22, 1, .36, 1);   /* gentle "spring-ish" ease-out */
-  --radius-xl: 20px;
-  --bg-elevated: light-dark(#ffffff, #20203c);
-  --scrollbar-thumb: var(--border-light);
+   Contrast: every palette was solved against the app's hard-coded `color:#fff`
+   on accent-filled buttons (.send-btn, .btn-primary, .icon-btn:hover), so
+   --accent is deliberately deeper than the shade you would pick by eye in
+   Midnight Gold; the brighter gold survives as --accent-text / --focus, which
+   is where it is actually used. Body text clears 7:1 on the assistant bubble in
+   every palette, and the two chat bubbles differ in LIGHTNESS and not only in
+   hue, so the conversation stays parseable under any colour vision deficiency.
+   ---------------------------------------------------------------------------- */
+
+/* ---- Glacier — cool slate-blue dark, the DEFAULT (see index.html + theme.js) ---- */
+:root,
+[data-palette="glacier"] {
+  color-scheme: dark;
+
+  --bg-primary:   #000000;
+  --bg-secondary: #060b0f;
+  --bg-tertiary:  #0d161c;
+  --bg-elevated:  #121c23;
+  --bg-hover:     #172228;
+  --bg-input:     #030608;
+  --bg-sidebar:   #000000;
+  --tint-subtle:  rgba(255,255,255,.025);
+  --code-inline:  rgba(0,0,0,.35);
+
+  --text-primary:   #dcedf4;
+  --text-secondary: #9fc0cc;
+  --text-muted:     #7fa3b0;
+
+  --accent:       #185e7a;
+  --accent-hover: #206b88;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #7fe0f2;
+  --accent-text:  #7fe0f2;
+
+  --border:       #5c7480;
+  --border-light: #33424a;
+
+  /* A lifted ice-shadow surface, not an accent wash — see the Midnight Gold
+     note below. 1.62:1 against the assistant bubble, body text 9.38:1. */
+  --user-bubble: #153f51;
+  --bot-bubble:  #0d161c;
+
+  --md-quote:      #7fe0f2;
+  --md-quote-text: #bdf1fa;
+  --md-em:         #a5b4f5;
+  --md-strong:     #f2fbff;
+  --md-mark-bg:    rgba(127,224,242,.22);
+
+  --success: #34d399; --success-text: #5fd3b0;
+  --error:   #f87171; --error-text:   #ff8a80;
+  --warning: #fbbf24; --warning-text: #ffca28;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
+  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
+
+  /* Frosted-glass highlight fading into the teal base. */
+  --accent-grad: linear-gradient(135deg, #387d94, var(--accent-hover), var(--accent));
 }
 
-/* ----------------------------------------------------------------------------
-   5. Default-theme overrides
-   ----------------------------------------------------------------------------
-   Lift dark surfaces a touch + add a faint cool cast so panels read as
-   layered glass rather than flat slabs. Values stay within the original
-   navy-purple family so the app is instantly recognizable. These override
-   the DARK side of light-dark() in section 1; the LIGHT side is untouched.
-   `:root:not([data-theme])` catches the default (no explicit pick), so this
-   block is what the user actually sees before they touch the theme toggle. */
-:root[data-theme="dark"], :root:not([data-theme]) {
+/* ---- Midnight Gold — OLED-friendly true black, antique gold accent ---- */
+[data-palette="midnight-gold"] {
+  color-scheme: dark;
+
+  --bg-primary:   #000000;
+  --bg-secondary: #060504;
+  --bg-tertiary:  #0d0a06;
+  --bg-elevated:  #120e08;
+  --bg-hover:     #171209;
+  --bg-input:     #030201;
+  --bg-sidebar:   #000000;
+  --tint-subtle:  rgba(255,255,255,.025);
+  --code-inline:  rgba(0,0,0,.35);
+
+  --text-primary:   #f1e6cf;
+  --text-secondary: #b7a883;
+  --text-muted:     #96896a;
+
+  /* Deeper than the bright gold you'd reach for by eye — it has to clear
+     4.5:1 under hard-coded white button text. The brighter "hover-bright"
+     gold survives as --accent-text/--focus instead. */
+  --accent:       #7a5c12;
+  --accent-hover: #916d15;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #e3bf5a;
+  --accent-text:  #e3bf5a;
+
+  --border:       #736952;
+  --border-light: #474133;
+
+  /* Not a transparent accent wash: over a #000000 page an 18% mix of this
+     deliberately-dark gold produced ZERO lightness lift, so user and assistant
+     bubbles were the same shade in greyscale (1.12:1) — the CVD parseability
+     failure the brief warns about. Explicit lifted surface instead: 1.62:1
+     against the black assistant bubble, body text still 10.49:1 on it. */
+  --user-bubble: #3e2f0c;
+  --bot-bubble:  #000000;
+
+  --md-quote:      #7fc4b8;
+  --md-quote-text: #b9e6dd;
+  --md-em:         #e3bf5a;
+  --md-strong:     #fff6df;
+  --md-mark-bg:    rgba(227,191,90,.30);
+
+  --success: #34d399; --success-text: #34d399;
+  --error:   #f87171; --error-text:   #f87171;
+  --warning: #fbbf24; --warning-text: #fbbf24;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
+  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
+
+  /* Metallic sheen: a brighter gold highlight (still white-text-safe on its
+     own, #8d721b clears 4.6:1) fading into the base accent. */
+  --accent-grad: linear-gradient(135deg, #8d721b, var(--accent-hover), var(--accent));
+}
+
+/* ---- Forest — dirt & wood: bark-brown surfaces, mossy/amber markdown ---- */
+[data-palette="forest"] {
+  color-scheme: dark;
+
+  --bg-primary:   #0a0806;
+  --bg-secondary: #0f0c09;
+  --bg-tertiary:  #150f0a;
+  --bg-elevated:  #1a130c;
+  --bg-hover:     #211a10;
+  --bg-input:     #060503;
+  --bg-sidebar:   #050403;
+  --tint-subtle:  rgba(255,255,255,.025);
+  --code-inline:  rgba(0,0,0,.35);
+
+  --text-primary:   #ece3d2;
+  --text-secondary: #b8a888;
+  --text-muted:     #9b8b6c;
+
+  /* Bark brown, not a sage green — the white-button-text floor is what keeps
+     it a deep saddle brown rather than a lighter tan. */
+  --accent:       #5e3a1e;
+  --accent-hover: #6f4626;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #d68a42;
+  --accent-text:  #d68a42;
+
+  --border:       #64715a;
+  --border-light: #3c4536;
+
+  /* Explicit lifted bark surface, not an accent wash — see the Midnight Gold
+     note. 1.54:1 against the assistant bubble (the most this palette gives
+     without dropping body text under 7:1), body text 9.72:1. */
+  --user-bubble: #4a2e19;
+  --bot-bubble:  #150f0a;
+
+  --md-quote:      #8fae6e;
+  --md-quote-text: #c3dba9;
+  --md-em:         #e0a52e;
+  --md-strong:     #f5ecd8;
+  --md-mark-bg:    rgba(224,165,46,.28);
+
+  --success: #34d399; --success-text: #5fcf98;
+  --error:   #f87171; --error-text:   #ff8f7f;
+  --warning: #fbbf24; --warning-text: #e0a52e;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
+  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
+
+  /* Warm amber highlight fading to bark — wood-grain warmth on the button. */
+  --accent-grad: linear-gradient(135deg, #9c6b30, var(--accent-hover), var(--accent));
+}
+
+/* ---- Paper — a light theme: cozy firelit parchment & ember red ---- */
+[data-palette="paper"] {
+  color-scheme: light;
+
+  --bg-primary:   #e6d2a8;
+  --bg-secondary: #dcc491;
+  --bg-tertiary:  #efdfb8;
+  --bg-elevated:  #efdfb8;
+  --bg-hover:     #d4b87e;
+  --bg-input:     #efdfb8;
+  --bg-sidebar:   #dcc491;
+  --tint-subtle:  rgba(0,0,0,.035);
+  --code-inline:  rgba(0,0,0,.07);
+
+  --text-primary:   #2e2013;
+  --text-secondary: #5a4429;
+  --text-muted:     #5b472b;
+
+  --accent:       #a3241c;
+  --accent-hover: #b8362d;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #8a1f18;
+  --accent-text:  #8a1f18;
+
+  --border:       #787466;
+  --border-light: #c7bda0;
+
+  /* Light themes need the user bubble DARKER than the assistant bubble for the
+     same lightness-separation reason. 1.62:1, body text 7.36:1. */
+  --user-bubble: #d8a789;
+  --bot-bubble:  #efdfb8;
+
+  /* A second ink colour (indigo, like a stamped date) instead of the usual
+     teal — the one place Paper deviates from pure red/black/cream. */
+  --md-quote:      #2b3a66;
+  --md-quote-text: #1c274a;
+  --md-em:         #a3241c;
+  --md-strong:     #0a0806;
+  --md-mark-bg:    #eddb8a;
+
+  --success: #34d399; --success-text: #13643e;
+  --error:   #f87171; --error-text:   #aa211c;
+  --warning: #fbbf24; --warning-text: #7a4f00;
+
+  --shadow-sm: 0 1px 2px rgba(20,15,5,.10);
+  --shadow-md: 0 6px 20px rgba(20,15,5,.14);
+  --shadow-lg: 0 18px 50px rgba(20,15,5,.20);
+
+  /* Flat-ish, top-lit — a rubber-stamp impression, not a glossy button. */
+  --accent-grad: linear-gradient(180deg, var(--accent-hover), var(--accent));
+}
+
+/* ---- Daylight — white, genuinely light; mid-weight blue accent ---- */
+[data-palette="daylight"] {
+  color-scheme: light;
+
+  --bg-primary:   #ffffff;
+  --bg-secondary: #f5f7fa;
+  --bg-tertiary:  #ffffff;
+  --bg-elevated:  #ffffff;
+  --bg-hover:     #eef1f5;
+  --bg-input:     #ffffff;
+  --bg-sidebar:   #f5f7fa;
+  --tint-subtle:  rgba(0,0,0,.035);
+  --code-inline:  rgba(0,0,0,.07);
+
+  --text-primary:   #14181f;
+  --text-secondary: #4b5563;
+  --text-muted:     #5b6472;
+
+  --accent:       #2c56c9;
+  --accent-hover: #3866d8;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #1d47b8;
+  --accent-text:  #1d47b8;
+
+  --border:       #8a91a1;
+  --border-light: #c3c8d1;
+
+  /* Darker than the white assistant bubble — 1.60:1, body text 11.12:1. */
+  --user-bubble: #c0ccef;
+  --bot-bubble:  #ffffff;
+
+  --md-quote:      #0f6a7a;
+  --md-quote-text: #0b4a56;
+  --md-em:         #8a5500;
+  --md-strong:     #12121a;
+  --md-mark-bg:    #fde68a;
+
+  --success: #34d399; --success-text: #0f7a48;
+  --error:   #f87171; --error-text:   #b3241c;
+  --warning: #fbbf24; --warning-text: #8a5500;
+
+  --shadow-sm: 0 1px 3px rgba(20,25,40,.08);
+  --shadow-md: 0 8px 22px rgba(20,25,40,.12);
+  --shadow-lg: 0 20px 54px rgba(20,25,40,.18);
+
+  --accent-grad: linear-gradient(135deg, #4371d3, var(--accent-hover), var(--accent));
+}
+
+/* ---- Classic Purple — the app's original identity, frozen to its dark values ----
+   This is the pre-palette DisPatch look, kept as a first-class choice rather
+   than deleted: it is what every existing user is looking at today. Its old
+   light variant is gone with the light/dark switch — a palette is one skin. */
+[data-palette="purple"] {
+  color-scheme: dark;
+
   --bg-primary:   #0e0e1b;
   --bg-secondary: #15152a;
   --bg-tertiary:  #1d1d39;
   --bg-elevated:  #232342;
   --bg-hover:     #262648;
+  --bg-input:     #1a1a30;
+  --bg-sidebar:   #14142a;
+  --tint-subtle:  rgba(255,255,255,.02);
+  --code-inline:  rgba(0,0,0,.35);
+
+  --text-primary:   #e8e8f0;
+  --text-secondary: #8d8db0;
+  --text-muted:     #9a9ab8;
+
+  --accent:       #7c3aed;
+  --accent-hover: #8b5cf6;
+  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
+  --focus:        #a78bfa;
+  --accent-text:  #a78bfa;
+
   --border:       #292945;
   --border-light: #38385c;
+
+  --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
+  --bot-bubble:  #1e1e3a;
+
+  --md-quote:      #5eead4;
+  --md-quote-text: #a5f3ea;
+  --md-em:         #fcd34d;
+  --md-strong:     #ffffff;
+  --md-mark-bg:    rgba(251,191,36,.30);
+
+  --success: #34d399; --success-text: #34d399;
+  --error:   #f87171; --error-text:   #f87171;
+  --warning: #fbbf24; --warning-text: #fbbf24;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.30);
+  --shadow-md: 0 6px 20px rgba(0,0,0,.40);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.55);
+
+  --accent-grad: linear-gradient(135deg, var(--accent-hover), var(--accent));
 }
+
+/* ----------------------------------------------------------------------------
+   4. Forced-skin surfaces
+   ----------------------------------------------------------------------------
+   The lock face is painted from the Purple palette regardless of the active
+   theme, because it is a dark full-screen surface with near-black chrome: on
+   Daylight or Paper a flat light-palette --text-primary would be dark ink on a
+   dark backdrop. It carries `data-palette="purple"` in index.html, so the block
+   above does the work; nothing is overridden here. (Before the palette switch
+   this was `color-scheme: dark` forcing the dark side of light-dark() — the
+   mechanism changed, the result did not.) */

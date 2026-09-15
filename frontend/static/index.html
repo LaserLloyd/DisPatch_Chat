@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f0f1a" />
+  <meta name="theme-color" content="#000000" />
   <!-- Content-Security-Policy. Delivered as a meta tag rather than a header so
        it travels with the file: DisPatch is deployed behind whatever the
        operator already runs (bare uvicorn, nginx, a Pi, Docker), and a policy
@@ -47,7 +47,7 @@
          the viewer, and the server 403s its routes for a decoy session. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-737X6nvcta4AdRTK/iBev34616mDyUYtk/vNSDWHzsI=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
+    script-src 'self' 'sha256-qwsyz9DUNHbxI7u5HOAyB3StcFMGSJev6sz7UYc73b4=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -61,13 +61,17 @@
        installed PWA can read the choice back without waiting for the app. -->
   <meta name="i18n-lang" content="en" />
   <title data-i18n="app.title">DisPatch Chat</title>
-  <!-- No-FOUC: apply the stored theme before the stylesheet paints. Default is
-       dark (preserves prior behaviour); "system" = no attribute (follows OS). -->
+  <!-- No-FOUC: stamp the chosen palette before the stylesheet paints. P is the
+       shipped palette set (same list as js/theme.js PALETTES); an unknown or
+       missing value falls back to Glacier, which is the default in theme.css
+       too. Keep the three in step — frontend/tests/theme-palettes.test.js
+       fails when they drift. -->
   <script>
     (function () {
       try {
-        var t = localStorage.getItem('dispatch-theme') || 'dark';
-        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        var P = ['glacier', 'midnight-gold', 'forest', 'paper', 'daylight', 'purple'];
+        var p = localStorage.getItem('dispatch-palette');
+        document.documentElement.setAttribute('data-palette', P.indexOf(p) >= 0 ? p : 'glacier');
         var a = localStorage.getItem('dispatch-avatar-style');
         if (a === 'minimal') document.documentElement.setAttribute('data-avatar-style', a);
         // No-Image Mode, same no-FOUC reason one step further: this one hides
@@ -125,10 +129,10 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/theme.css?v=1" />
-  <link rel="stylesheet" href="/static/app.css?v=64" />
+  <link rel="stylesheet" href="/static/theme.css?v=2" />
+  <link rel="stylesheet" href="/static/app.css?v=65" />
   <link rel="stylesheet" href="/static/dashboard.css?v=5" />
-  <script type="module" src="/static/js/theme.js?v=13"></script>
+  <script type="module" src="/static/js/theme.js?v=14"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -195,10 +199,10 @@
            direct flex children of .sidebar and the vertical rail is byte-for-
            byte the layout it always was. -->
       <div class="gear-row" id="gear-row">
-      <!-- theme.js rewrites this button's data-i18n-attr to theme.dark/theme.light
-           as soon as it knows the active theme — the pair below is the pre-script
-           state, not the one a user normally sees. -->
-      <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme &amp; avatars" aria-label="Theme and avatar style" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">☾</button>
+      <!-- theme.js only supplies the swatch icon; the click is wired in
+           main.js to open Settings → Theme, which is the one place a palette
+           can be changed. The old Dark ☾ ↔ Light ☀ cycle is gone. -->
+      <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme" aria-label="Choose a theme" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">🎨</button>
       <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
       <button class="gear-btn unlock-btn hidden" id="unlock-btn" title="Enter PIN for admin mode" aria-label="Unlock — enter PIN" data-i18n-attr="title=nav.unlock_title;aria-label=nav.unlock_aria">🔓</button>
       <!-- Locked-side upload. Safe Mode only: unlocked sessions have the full
@@ -506,7 +510,8 @@
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
-        <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
+        <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
+        <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
       </div>
 
@@ -570,6 +575,14 @@
             </div>
           </details>
         </div>
+      </section>
+
+      <!-- ---- Theme: the palette picker (js/theme.js builds the grid) ----
+           A palette is one fixed skin, so there is no dark/light pair left to
+           choose between — picking a card here is the whole control. -->
+      <section class="settings-pane hidden" id="spane-theme" role="tabpanel" aria-labelledby="stab-theme" tabindex="0">
+        <p class="muted modal-hint" data-i18n="settings.theme_hint">Pick this device's look. It applies straight away and is remembered here — there is nothing to save.</p>
+        <div class="theme-grid" id="theme-grid" role="radiogroup" aria-label="Theme" data-i18n-attr="aria-label=settings.tab_theme"></div>
       </section>
 
       <!-- ---- Device: per-device preferences (all instant, nothing to Save) ---- -->
@@ -742,7 +755,12 @@
   </div>
 
   <!-- Lock screen (shown when a PIN is set and the app is locked) -->
-  <div class="lock-screen hidden" id="lock-screen">
+  <!-- The lock face carries data-palette="purple" on purpose: it is a dark
+       full-screen surface with near-black chrome, so on a light palette (Paper,
+       Daylight) its text would be dark ink on a dark backdrop. Pinning the face
+       to the classic dark skin keeps it legible without any per-token
+       override — see theme.css section 4. -->
+  <div class="lock-screen hidden" id="lock-screen" data-palette="purple">
     <div class="lock-card">
       <div class="lock-emoji">🔒</div>
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
@@ -940,6 +958,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=81"></script>
+  <script type="module" src="/static/js/main.js?v=82"></script>
 </body>
 </html>

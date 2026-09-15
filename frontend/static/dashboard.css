@@ -1,15 +1,16 @@
 /* ===================== Host dashboard =====================
    Styles for js/dashboard.js. Self-contained: every colour comes from the
-   custom properties app.css defines in :root, so this file inherits both
-   themes for free (app.css sets `color-scheme: light dark` and the theme
-   toggle stamps data-theme, which is what makes light-dark() resolve).
+   custom properties theme.css defines, so this file inherits all six palettes
+   for free — including the light-dark() pairs below, which resolve through the
+   `color-scheme` each palette block declares (dark palettes give the dark ink,
+   Paper and Daylight give the darker one).
 
    The only new colours are the three severity tints. --success/--warning/
    --error are tuned for dark backgrounds and don't carry enough contrast as
-   TEXT on the light skin, so each level gets a light-dark() pair: a darker
-   ink for the light theme, the existing accent for dark. Backgrounds and
-   borders are derived from those with color-mix, so a level always reads as
-   one colour.                                                              */
+   TEXT on a light palette, so each level gets a light-dark() pair: a darker
+   ink for the light skins, the existing accent for the dark ones. Backgrounds
+   and borders are derived from those with color-mix, so a level always reads
+   as one colour.                                                           */
 
 /* The level tints hang off .dash-body because that IS the dashboard's root
    now — it used to be .dash-modal, back when this panel had a dialog of its

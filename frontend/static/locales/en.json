@@ -37,7 +37,7 @@
   },
   "nav": {
     "theme": "Theme",
-    "theme_aria": "Theme and avatar style",
+    "theme_aria": "Choose a theme",
     "lock_now": "Lock now",
     "unlock_title": "Enter PIN for admin mode",
     "unlock_aria": "Unlock — enter PIN",
@@ -59,8 +59,8 @@
     "tools_aria": "Operator tools — coding harness, LLM rig"
   },
   "theme": {
-    "dark": "Dark theme — click for light",
-    "light": "Light theme — click for dark"
+    "mode_dark": "Dark",
+    "mode_light": "Light"
   },
   "conn": {
     "aria": "Connection status",
@@ -180,8 +180,10 @@
     "tab_reactions": "Reactions",
     "tab_health": "Health",
     "tab_ai": "AI models",
+    "tab_theme": "Theme",
     "tab_device": "Device",
     "tab_security": "Security",
+    "theme_hint": "Pick this device's look. It applies straight away and is remembered here — there is nothing to save.",
     "device_hint": "These apply to this device only, and take effect straight away — there is nothing to save here.",
     "hint": "Tap a bot’s picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar. <strong>🛡️ Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed. Order, visibility and Safe changes apply when you press <strong>Save</strong>.",
     "language": "Language",
@@ -467,7 +469,7 @@
     "group_chats": "Chats",
     "sub_chat": "chat",
     "action_new_chat": "New chat",
-    "action_theme": "Toggle theme",
+    "action_theme": "Change theme",
     "action_search": "Search messages",
     "action_recovery": "Recovery & Export",
     "action_stop": "Stop reply",
@@ -921,6 +923,14 @@
       "today": "today",
       "yesterday": "yesterday",
       "days_ago": "{n}d ago"
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     },
     "vote": {
       "yes": "👍 Yes",

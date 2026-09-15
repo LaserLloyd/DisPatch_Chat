@@ -33,7 +33,7 @@ const FLAG_KEY = 'dispatch-privacy';
 // pins.js shipped 'dispatch-pinned-settings' and nobody added it here, so a
 // wiped device still advertised which settings the last user had pinned.
 export const APP_KEYS = [
-  'dispatch-theme',           // theme.js
+  'dispatch-palette',         // theme.js (Settings → Theme)
   'dispatch-avatar-style',    // main.js (Settings → minimal avatars)
   'dispatch-lang',            // i18n.js
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)

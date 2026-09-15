@@ -1547,9 +1547,51 @@ _INBOUND_AVATAR_POOL_RE = re.compile(
 # profile/recompute) deliberately stay on the session tier: those are the
 # surfaces the operator drives from the browser, not agents.
 _JOBS_INBOUND = (
+    # POST /api/jobs            — create a job (auto-routes to current month's thread)
     ("POST", "/api/jobs"),
+    # POST /api/jobs/score      — score a candidate (read-only side-effect)
     ("POST", "/api/jobs/score"),
+    # GET  /api/jobs            — list jobs (machine-readable, no session)
+    ("GET",  "/api/jobs"),
+    # GET  /api/jobs/current    — current month's thread info (machine)
+    ("GET",  "/api/jobs/current"),
+    # GET  /api/jobs/months     — list monthly threads (machine)
+    ("GET",  "/api/jobs/months"),
+    # GET  /api/jobs/reasons    — reason-tag taxonomy (machine)
+    ("GET",  "/api/jobs/reasons"),
+    # GET  /api/jobs/profile    — current preference profile (machine)
+    ("GET",  "/api/jobs/profile"),
 )
+# Agent-driven write paths. The 2026-09-15 OpenClaw audit lifts
+# vote/applied/tags/archive/recompute onto the inbound tier so an on-box
+# agent can manage a job end-to-end without first obtaining a PIN-derived
+# session cookie. The handlers still refuse decoy callers via the prefix
+# block in _decoy_blocked (`/api/jobs` returns True there), so Safe Mode
+# is still shut out — only on-box agents gain the new verbs.
+_JOBS_INBOUND_RE = (
+    # GET  /api/jobs/{job_id}                                  — single job
+    # GET  /api/jobs/month/{key}                               — one month
+    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}$"),
+    re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
+    # POST /api/jobs/{job_id}/(vote|applied|tags|archive)      — manage verbs
+    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive)$"),
+    # POST /api/jobs/profile/recompute                          — rebuild profile
+    re.compile(r"^/api/jobs/profile/recompute$"),
+)
+# Methods allowed for each inbound regex. GET on a write-pattern path
+# returns 405 by FastAPI's routing — the regex doesn't change that.
+# A POST on a read-pattern path is also rejected by the router. The
+# allowlist is a session-tier bypass, NOT a method override.
+_JOBS_INBOUND_RE_METHODS = {
+    "GET": (
+        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}$"),
+        re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
+    ),
+    "POST": (
+        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive)$"),
+        re.compile(r"^/api/jobs/profile/recompute$"),
+    ),
+}
 
 
 # Thread management OPENCLAW.md has always documented as available to on-box
@@ -1607,9 +1649,16 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if method in ("GET", "PUT", "POST") and _INBOUND_AVATAR_POOL_RE.match(path):
         return True
-    # Jobs board — agents post and pre-score; everything else is session
-    # tier and refuses here normally (with the route's own 403).
+    # Jobs board — agents post, score, list, browse months, fetch one job,
+    # AND manage it end-to-end (vote / applied / tags / archive / recompute).
+    # The literal tuple covers the static paths; the per-method regex map
+    # covers the dynamic ones (job_id, month key, manage verbs). 2026-09-15
+    # added the manage verbs so agents can drive the full lifecycle without
+    # first obtaining a PIN-derived session cookie.
     if (method, path) in _JOBS_INBOUND:
+        return True
+    methods = _JOBS_INBOUND_RE_METHODS.get(method, ())
+    if any(rx.match(path) for rx in methods):
         return True
     return bool(method == "POST" and _INBOUND_MSG_RE.match(path))
 
@@ -7068,6 +7117,42 @@ async def get_bot_avatar_full(request: Request, bot_id: str):
     raise HTTPException(404, "Avatar not found")
 
 
+@app.get("/api/bots/{bot_id}/avatar/thumb")
+async def get_bot_avatar_thumb(request: Request, bot_id: str):
+    """The 128×128 thumbnail: `<stem>-thumb.<ext>` if present, else the face
+    downscaled on the fly.
+
+    Safe Mode may see a SAFE bot's thumbnail by design — same rule as the
+    main `/avatar` route. Thumbnail is a small image (≤6 KB), so unlike the
+    full-res the cost of leaking one is negligible and the PIN gate would
+    be more friction than protection.
+
+    Falls back to the face crop when no thumb file was ever written (the
+    pre-thumb deploys have only `<stem>-face.<ext>`). Browser-side scaling
+    is wasteful but not broken, and the upload path will create a real
+    thumb on the next avatar change.
+    """
+    _is_safe_mode_caller(request)
+    bot = config.resolve_bot(bot_id)
+    if not bot:
+        raise HTTPException(404, "Unknown bot")
+    bot_id = bot.id
+    base = config.AVATAR_DIR.resolve()
+    face_path = (config.AVATAR_DIR / bot.avatar).resolve()
+    if not (face_path == base or base in face_path.parents):
+        raise HTTPException(404, "Avatar not found")
+    thumb = avatar_snapshots._thumb_sibling(face_path)
+    if thumb is not None and base in thumb.resolve().parents:
+        # Same mutability argument as /avatar/full — the rotation overwrites
+        # this file in place, so no-cache is required.
+        return FileResponse(thumb, headers={"Cache-Control": "no-cache"})
+    # Fallback: serve the face crop. The browser will paint it at thumb
+    # size; it's still cheaper than re-encoding on the server.
+    if face_path.is_file():
+        return FileResponse(face_path, headers={"Cache-Control": "no-cache"})
+    raise HTTPException(404, "Avatar not found")
+
+
 def _decode_avatar_image(raw: bytes):
     """Open + bomb-guard + orient one uploaded image. Shared by full and face."""
     from io import BytesIO
@@ -7099,13 +7184,19 @@ def _avatar_pair_images(
     crop_x: float | None, crop_y: float | None, crop_size: float | None,
     face_raw: bytes | None = None,
 ):
-    """Build the (face, full) PIL pair for an avatar from ONE original image.
+    """Build the (face, full, thumb) PIL triplet for an avatar from ONE original image.
 
     The FULL half is always the uploaded original. The FACE half is, in order
     of preference: the separately-uploaded pre-cropped face (this is how a
     image CLI `crop_to_face` result arrives — a real detector's crop, not a
     blind square), else the crop_x/crop_y/crop_size fractional crop, else a
     centered square. The face is capped at 512×512; the full is left alone.
+
+    The THUMB is a 128×128 downscale of the face — small enough for the Jobs
+    board list (which can hold many cards) and the bot sidebar, big enough to
+    stay sharp on a retina display. Saved as its own file (rather than the
+    browser resizing the face at paint time) so the bandwidth on a list of
+    100 jobs is 100 × ~6KB instead of 100 × ~50KB.
     """
     from PIL import Image
 
@@ -7145,15 +7236,30 @@ def _avatar_pair_images(
 
     if side > 512:
         face = face.resize((512, 512), Image.LANCZOS)
-    return face, im.convert(target_mode)
+    # Thumb: a 128×128 downscale of the face. We resize the FACE (the
+    # already-cropped square) rather than the original, so the thumb stays
+    # centered on the head the way the face does — resizing the original
+    # would re-center on its own bounding box, which can shift the head off
+    # the canvas for non-square inputs.
+    thumb = face.copy()
+    if thumb.size[0] != 128:
+        thumb = thumb.resize((128, 128), Image.LANCZOS)
+    return face, im.convert(target_mode), thumb
+
+
+# Standard thumb edge (px). Single source of truth so the upload pipeline and
+# the snapshot pipeline can't drift out of sync — both save at exactly this
+# size and the route layer never has to know.
+THUMB_EDGE = 128
 
 
 def _clean_stale_avatar_siblings(stem_prefix: str, keep: set[str]) -> None:
-    """Delete `<bot>-face.*` / `<bot>-full.*` variants other than the pair just
-    written. A leftover `main-full.png` beside a new `main-full.jpg` would win
-    the extension probe and serve the PREVIOUS avatar as this one's full
-    resolution — the pair on disk must be exactly the pair that was saved."""
-    for role in ("face", "full"):
+    """Delete `<bot>-face.*` / `<bot>-full.*` / `<bot>-thumb.*` variants other
+    than the triplet just written. A leftover `main-full.png` beside a new
+    `main-full.jpg` would win the extension probe and serve the PREVIOUS
+    avatar as this one's full resolution — the pair on disk must be exactly
+    the pair that was saved."""
+    for role in ("face", "full", "thumb"):
         for ext in (".png", ".jpg", ".jpeg", ".webp"):
             name = f"{stem_prefix}-{role}{ext}"
             if name in keep:
@@ -7171,21 +7277,24 @@ def _process_avatar_upload(
     crop_x: float | None, crop_y: float | None, crop_size: float | None,
     face_raw: bytes | None = None,
 ) -> str:
-    """Decode, crop, resize and save an avatar pair. Returns the face filename.
+    """Decode, crop, resize and save the avatar triplet. Returns the face filename.
 
     Deliberately a plain sync function: decoding + LANCZOS-resizing a 25MB /
     64MP source takes real CPU time, so the route runs it via asyncio.to_thread
     instead of on the event loop. Raises the same HTTPExceptions the route
     always returned (they propagate cleanly out of the worker thread).
     """
-    face, full = _avatar_pair_images(raw, crop_x, crop_y, crop_size, face_raw)
+    face, full, thumb = _avatar_pair_images(raw, crop_x, crop_y, crop_size, face_raw)
 
     config.AVATAR_DIR.mkdir(parents=True, exist_ok=True)
-    # Save full-res original (normalised to png) and the face crop atomically —
-    # a thread created mid-write must never snapshot half of one avatar and
-    # half of another.
+    # Save the full-res original, the face crop, AND the thumb — atomically.
+    # A thread created mid-write must never snapshot half of one avatar and
+    # half of another. The thumb is what the Jobs board list (and the bot
+    # sidebar) load; serving the 512×512 face there is ~8× the bandwidth for
+    # no visible quality gain.
     full_name = f"{bot_id}-full.png"
     face_name = f"{bot_id}-face.png"
+    thumb_name = f"{bot_id}-thumb.png"
 
     def _atomic_save(img, name: str) -> None:
         tmp = config.AVATAR_DIR / f".{name}.partial"
@@ -7194,7 +7303,8 @@ def _process_avatar_upload(
 
     _atomic_save(full, full_name)
     _atomic_save(face, face_name)
-    _clean_stale_avatar_siblings(bot_id, {face_name, full_name})
+    _atomic_save(thumb, thumb_name)
+    _clean_stale_avatar_siblings(bot_id, {face_name, full_name, thumb_name})
     return face_name
 
 
@@ -7258,7 +7368,8 @@ async def upload_bot_avatar(
     await manager.broadcast({"type": "bots", "bots": [b for b in data if b["visible"]]})
     await _after_avatar_change(bot_id)
     return {"ok": True, "avatar_url": updated.avatar_url,
-            "full_url": f"/api/bots/{bot_id}/avatar/full"}
+            "full_url": f"/api/bots/{bot_id}/avatar/full",
+            "thumb_url": f"/api/bots/{bot_id}/avatar/thumb"}
 
 
 async def _after_avatar_change(bot_id: str) -> None:

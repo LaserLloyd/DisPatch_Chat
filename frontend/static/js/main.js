@@ -23,7 +23,7 @@ import {
 } from './reactions.js?v=15';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=6';
 import { mountJobs, unmountJobs } from './jobs.js?v=3';
-import { mountJobCard, unmountJobCard } from './job-thread.js?v=2';
+import { openJobDetail } from './job-thread.js?v=2';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -168,7 +168,7 @@ async function refreshUnread() {
 
 const $ = (id) => document.getElementById(id);
 const dom = {};
-['app', 'bot-list', 'manage-bots',
+['app', 'bot-list', 'manage-bots', 'theme-toggle',
  'tools-menu', 'tools-harness', 'tools-studioforge',
  'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
@@ -184,7 +184,7 @@ const dom = {};
  // Settings tab container. The panes for Reactions and Health are empty mount
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
- 'spane-ai', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ 'spane-ai', 'spane-theme', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
  // Locked-side one-way drop
  'drop-btn', 'drop-backdrop', 'drop-close', 'drop-list', 'drop-input',
  'drop-more', 'drop-done',
@@ -1494,19 +1494,14 @@ function renderSkeleton() {
 function renderMessages(stick = true) {
   const box = dom['messages'];
   box.innerHTML = '';
-  // Job header card — only when the active thread's bot is `jobboard`,
-  // a no-op for every other bot (the brief mirrors the dashboard mount
-  // pattern). The card prepends above the messages and pushes everything
-  // down; the composer and the existing message renderer are untouched.
-  if (state.activeThread && state.activeThread.bot_id === 'jobboard') {
-    const cardHost = document.createElement('div');
-    cardHost.id = 'job-card-host';
-    cardHost.dataset.threadId = state.activeThread.id;
-    box.append(cardHost);
-    mountJobCard(cardHost).catch(() => {});
-  } else {
-    unmountJobCard();
-  }
+  // NOTE: the 2026-09-15 redesign dropped the in-chat job-card header
+  // in favour of the modal-based detail panel (openJobDetail in
+  // job-thread.js, surfaced by the Jobs board list). The board list
+  // is the single entry point for browsing jobs; clicking a row opens
+  // the detail modal, which carries the structured metadata + voting
+  // controls. There is no in-chat card to mount any more — keeping the
+  // placeholder-mountJobCard() path would render an empty <div id="job-card-host">
+  // into every jobboard chat thread for no reason.
   if (!state.messages.length) {
     const wbot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
     const welcome = el('div', { class: 'empty-state welcome' }, [
@@ -2986,7 +2981,7 @@ function syncLockNimRow() {
 // leave path has to fire on every way out of the modal, which is why
 // deactivation hangs off a MutationObserver on the backdrop rather than being
 // sprinkled through the seven places that hide it.
-const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'device', 'security'];
+const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'theme', 'device', 'security'];
 // The three that live behind the PIN. `admin-only` in the markup is the class;
 // this is the list applyAuthChrome() walks.
 const ADMIN_TABS = ['reactions', 'health', 'ai'];
@@ -5086,6 +5081,12 @@ function wireEvents() {
     if (state.decoy) openCompanions();
     else openBotManager();
   });
+  // The rail's theme button is a shortcut straight to Settings → Theme, the
+  // ONE place a palette can be changed. It used to cycle Dark/Light itself;
+  // that switch is gone (a theme is now a single fixed palette, not a pair).
+  // Wired here rather than in theme.js because opening Settings is main.js's
+  // job — theme.js stays a self-contained appearance module.
+  dom['theme-toggle'].addEventListener('click', () => openSettingsTab('theme'));
   dom['comp-close'].addEventListener('click', hideCompanions);
   dom['companions-backdrop'].addEventListener('click', (e) => {
     if (e.target === dom['companions-backdrop']) hideCompanions();
@@ -5323,6 +5324,15 @@ function applyAuthChrome() {
   // has both 📁 and the composer ＋. Server-side /api/drop is deliberately
   // reachable without a session — this is just where you press it.
   dom['drop-btn'].classList.toggle('hidden', !state.decoy);
+  // The palette picker is a Settings tab now, and Settings is a full-session
+  // surface (the gear routes the locked side to Companions), so the rail
+  // shortcut goes with it. The language picker — the other purely cosmetic
+  // device preference — sits behind the same door for the same reason. Left
+  // visible, this would be a button whose only effect is a modal that never
+  // opens. The previously-shipped Dark/Light toggle DID work in Safe Mode; a
+  // palette is a bigger choice than a one-bit toggle, so it moved behind the
+  // same gate as every other device preference rather than getting its own.
+  dom['theme-toggle'].classList.toggle('hidden', state.decoy);
   // The three admin Settings tabs — pack curation (upload/edit/delete), the
   // host dashboard, and provider setup that writes an API key to disk. All
   // three are full-session only server-side, so a locked device would collect
@@ -5878,8 +5888,10 @@ function wireAuthEvents() {
 // The rail's static buttons ship emoji/text glyphs in the markup (a readable
 // no-JS fallback); swap them for the shared line-icon set so the whole rail —
 // built-ins, pins and links alike — speaks one visual language. The theme
-// button is theme.js's (it repaints on every toggle), and the buttons carry
-// only data-i18n-attr, so no translation pass ever writes text over the SVG.
+// button is theme.js's (it sets the swatch icon once at boot; it no longer
+// repaints, because there is no per-theme state left to draw), and the buttons
+// carry only data-i18n-attr, so no translation pass ever writes text over the
+// SVG.
 function iconifyRail() {
   for (const [id, icon] of [
     ['lock-now', RAIL_ICONS.lock],
@@ -6408,7 +6420,7 @@ async function openLocalPath(path) {
 function cmdkActions() {
   const a = [
     { icon: '＋', label: t('cmdk.action_new_chat'), run: () => newChat() },
-    { icon: '◐', label: t('cmdk.action_theme'), run: () => document.getElementById('theme-toggle')?.click() },
+    { icon: '🎨', label: t('cmdk.action_theme'), run: () => openSettingsTab('theme') },
   ];
   if (!state.decoy) {
     a.push({ icon: '🔍', label: t('cmdk.action_search'), run: () => openSearch() });
@@ -6559,6 +6571,9 @@ async function init() {
   window.__openThread = openThread;
   window.__setView = setView;
   window.unmountJobs = unmountJobs;
+  // Open the job detail modal from anywhere — the Jobs board list uses
+  // this to surface each card's full metadata + voting controls.
+  window.__openJobDetail = openJobDetail;
   onI18nChange(reRenderForLocale);
   applyRailLabels();
   // Privacy mode, if this device has it on: drop the offline cache, unregister
@@ -6600,6 +6615,8 @@ async function init() {
     openSettingsTab(tab);
   });
   wireAuthEvents();
+  wireHarnessView();          // harness pane buttons (start/stop/restart/model/jobs) — orphaned by the 2026-09-10 terminal-pane removal
+  wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
   // jobs(unmount) backstop — see also setView(). A MutationObserver on

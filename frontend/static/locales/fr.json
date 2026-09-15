@@ -38,7 +38,7 @@
   },
   "nav": {
     "theme": "Thème",
-    "theme_aria": "Thème et style d’avatar",
+    "theme_aria": "Choisir un thème",
     "lock_now": "Verrouiller",
     "unlock_title": "Saisis ton PIN pour le mode admin",
     "unlock_aria": "Déverrouiller — saisis ton PIN",
@@ -60,8 +60,8 @@
     "tools_aria": "Outils d'opérateur — harnais de code, rig LLM"
   },
   "theme": {
-    "dark": "Thème sombre — clic pour clair",
-    "light": "Thème clair — clic pour sombre"
+    "mode_dark": "Sombre",
+    "mode_light": "Clair"
   },
   "conn": {
     "aria": "État de la connexion",
@@ -182,8 +182,10 @@
     "tab_reactions": "Réactions",
     "tab_health": "État",
     "tab_ai": "Modèles d’IA",
+    "tab_theme": "Thème",
     "tab_device": "Appareil",
     "tab_security": "Sécurité",
+    "theme_hint": "Choisissez l’apparence de cet appareil. Elle s’applique immédiatement et est mémorisée ici — il n’y a rien à enregistrer.",
     "device_hint": "Ces réglages ne concernent que cet appareil et s’appliquent aussitôt — il n’y a rien à enregistrer ici.",
     "hint": "Touche la photo d’un bot (ou <strong>Changer la photo</strong>) pour définir son avatar. Réordonne avec les boutons ▲/▼ (ou fais glisser les lignes sur ordinateur) ; utilise l’interrupteur pour afficher ou masquer un bot dans la barre latérale. <strong>🛡️ Sûr</strong> — ce personnage (et son avatar) est visible en mode sécurisé, sans PIN. Les changements d’ordre, de visibilité et de statut Sûr s’appliquent quand tu appuies sur <strong>Enregistrer</strong>.",
     "language": "Langue",
@@ -971,6 +973,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

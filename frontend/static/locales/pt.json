@@ -38,7 +38,7 @@
   },
   "nav": {
     "theme": "Tema",
-    "theme_aria": "Tema e estilo dos avatares",
+    "theme_aria": "Escolher um tema",
     "lock_now": "Bloquear agora",
     "unlock_title": "Introduz o PIN para o modo de administração",
     "unlock_aria": "Desbloquear — introduz o PIN",
@@ -60,8 +60,8 @@
     "tools_aria": "Ferramentas do operador — harness de código, rig LLM"
   },
   "theme": {
-    "dark": "Tema escuro — clica para claro",
-    "light": "Tema claro — clica para escuro"
+    "mode_dark": "Escuro",
+    "mode_light": "Claro"
   },
   "conn": {
     "aria": "Estado da ligação",
@@ -182,8 +182,10 @@
     "tab_reactions": "Reações",
     "tab_health": "Estado",
     "tab_ai": "Modelos de IA",
+    "tab_theme": "Tema",
     "tab_device": "Dispositivo",
     "tab_security": "Segurança",
+    "theme_hint": "Escolhe o aspeto deste dispositivo. Aplica-se de imediato e fica guardado aqui — não há nada para guardar.",
     "device_hint": "Aplicam-se só a este dispositivo e têm efeito de imediato — aqui não há nada para guardar.",
     "hint": "Toca na foto de um bot (ou em <strong>Mudar a foto</strong>) para definir o avatar. Reordena com os botões ▲/▼ (ou arrasta as linhas no computador); usa o interruptor para mostrar ou esconder um bot na barra lateral. <strong>🛡️ Seguro</strong> — esta personagem (e o seu avatar) fica visível no Modo seguro, sem precisar de PIN. As alterações de ordem, visibilidade e Seguro aplicam-se quando carregas em <strong>Guardar</strong>.",
     "language": "Idioma",
@@ -474,7 +476,7 @@
     "group_chats": "Conversas",
     "sub_chat": "conversa",
     "action_new_chat": "Nova conversa",
-    "action_theme": "Alternar o tema",
+    "action_theme": "Alterar o tema",
     "action_search": "Procurar mensagens",
     "action_recovery": "Recuperar e exportar",
     "action_stop": "Parar resposta",
@@ -971,6 +973,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }

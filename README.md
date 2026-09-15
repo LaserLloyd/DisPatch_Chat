@@ -130,8 +130,11 @@ on a phone, in both themes.
 **Interface**
 - Eight languages — English, العربية, Deutsch, Español, Français, 日本語,
   Português, 中文 — including full right-to-left layout
-- Light and dark themes, respects system preference
-- Keyboard-navigable, screen-reader labelled, WCAG AA contrast
+- Six built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
+  Daylight and Classic Purple — picked per device from Settings → Theme, each
+  with a live preview. A theme is one fixed skin; there is no separate
+  light/dark switch
+- Keyboard-navigable, screen-reader labelled, WCAG AA contrast in every theme
 
 **AI (optional)**
 - **Bring your own model provider**: point a bot at OpenAI, Anthropic, LM

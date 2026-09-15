@@ -38,7 +38,7 @@
   },
   "nav": {
     "theme": "Tema",
-    "theme_aria": "Tema y estilo de avatar",
+    "theme_aria": "Elegir un tema",
     "lock_now": "Bloquear ahora",
     "unlock_title": "Introduce el PIN para el modo administrador",
     "unlock_aria": "Desbloquear — introduce el PIN",
@@ -60,8 +60,8 @@
     "tools_aria": "Herramientas de operador — harness de código, rig LLM"
   },
   "theme": {
-    "dark": "Tema oscuro — pulsa para el claro",
-    "light": "Tema claro — pulsa para el oscuro"
+    "mode_dark": "Oscuro",
+    "mode_light": "Claro"
   },
   "conn": {
     "aria": "Estado de la conexión",
@@ -182,8 +182,10 @@
     "tab_reactions": "Reacciones",
     "tab_health": "Estado",
     "tab_ai": "Modelos de IA",
+    "tab_theme": "Tema",
     "tab_device": "Dispositivo",
     "tab_security": "Seguridad",
+    "theme_hint": "Elige el aspecto de este dispositivo. Se aplica al momento y se recuerda aquí — no hay nada que guardar.",
     "device_hint": "Solo se aplican a este dispositivo y tienen efecto de inmediato: aquí no hay nada que guardar.",
     "hint": "Toca la foto de un bot (o <strong>Cambiar foto</strong>) para poner su avatar. Reordena con los botones ▲/▼ (o arrastra las filas en el escritorio); usa el interruptor para mostrar u ocultar un bot en la barra lateral. <strong>🛡️ Seguro</strong> — este personaje (y su avatar) se ve en el modo seguro, sin PIN. Los cambios de orden, visibilidad y modo seguro se aplican al pulsar <strong>Guardar</strong>.",
     "language": "Idioma",
@@ -971,6 +973,14 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "month": {
+      "count": "{n} job",
+      "count_plural": "{n} jobs"
+    },
+    "detail": {
+      "close": "Close",
+      "not_found": "That job could not be found."
     }
   }
 }
