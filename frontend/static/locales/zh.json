@@ -278,6 +278,17 @@
     "saved": "头像已更新"
   },
   "harness": {
+    "tab_sessions": "Sessions",
+    "session_new_label": "Task for a live session (runs alongside others)",
+    "session_new_placeholder": "e.g. Fix the failing test in backend/ and run the suite.",
+    "session_empty": "No sessions running.",
+    "session_waiting": "Waiting for the first event…",
+    "session_launched": "Session launched",
+    "session_stopped": "Session stopped",
+    "session_cleared": "Session cleared",
+    "session_busy": "Too many sessions running — stop one first",
+    "session_open": "Open",
+    "session_model_default": "Default model",
     "name": "DeepSeek Harness",
     "subtitle": "dsh web · 127.0.0.1:{port}",
     "sidebar_aria": "DeepSeek Harness（dsh）— 编程智能体，仅解锁后可用",

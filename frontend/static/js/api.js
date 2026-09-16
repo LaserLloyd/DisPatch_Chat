@@ -233,6 +233,12 @@ export const api = {
   harnessJobs: () => j('/api/harness/jobs'),
   harnessSubmitJob: (task, cwd) => j('/api/harness/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ task, cwd }) }),
   harnessCancelJob: () => j('/api/harness/jobs/cancel', { method: 'POST' }),
+  // Live sessions: several at once, readable while they run, gone when stopped.
+  harnessSessions: () => j('/api/harness/sessions'),
+  harnessSessionLaunch: (task, cwd, model) => j('/api/harness/sessions', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ task, cwd, model }) }),
+  harnessSession: (id, after) => j(`/api/harness/sessions/${encodeURIComponent(id)}?after=${Number(after) || 0}`),
+  harnessSessionStop: (id) => j(`/api/harness/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+  harnessSessionDismiss: (id) => j(`/api/harness/sessions/${encodeURIComponent(id)}/dismiss`, { method: 'POST' }),
 
   // StudioForge control panel (full-session only). Read-only: the address of
   // the rig's panel plus whether the SERVER could reach it. There is no other

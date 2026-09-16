@@ -64,6 +64,7 @@ from . import (
     gateway_router,
     gateway_ws,
     harness,
+    harness_sessions,
     image_jobs,
     jobs,
     llm_api,
@@ -333,6 +334,10 @@ async def lifespan(app: FastAPI):
     # DeepSeek Harness: broadcast headless-job start/end flips to open tabs.
     # add_state_hook is idempotent, so repeated lifespans (tests) don't stack.
     harness.runner.add_state_hook(_harness_state_changed)
+    # …and the same for the live session list (launch/stop/finish). Events are
+    # NOT broadcast: the session view polls its own endpoint, which keeps a
+    # token-per-second stream off every other open tab.
+    harness_sessions.runner.add_state_hook(_harness_sessions_changed)
     purge_task = asyncio.create_task(_session_purge_loop())
     _track(purge_task)
     backup_task = asyncio.create_task(_backup_loop())
@@ -367,6 +372,10 @@ async def lifespan(app: FastAPI):
         harness.runner.remove_state_hook(_harness_state_changed)
         with contextlib.suppress(Exception):
             await harness.runner.shutdown()
+        # Live sessions are child processes: they do not outlive the server.
+        harness_sessions.runner.remove_state_hook(_harness_sessions_changed)
+        with contextlib.suppress(Exception):
+            await harness_sessions.runner.shutdown()
         await _gateway_ws_stop()
         # Only OUR loop's tasks: a second app instance (tests open several
         # clients) parks its tasks in this same module-level set, and cancelling
@@ -9903,6 +9912,15 @@ def _harness_state_changed(status: dict) -> None:
     _track(asyncio.create_task(manager.broadcast(_harness_state_frame(status))))
 
 
+def _harness_sessions_changed(status: dict) -> None:
+    """Push the live-session LIST to open tabs. Deliberately not the events —
+    the session view polls its own endpoint for those."""
+    if _shutting_down:
+        return
+    _track(asyncio.create_task(
+        manager.broadcast({"type": "harness_sessions", "sessions": status})))
+
+
 async def _harness_service_status() -> dict:
     unit = await harness.unit_state(SETTINGS.harness_unit)
     healthy = await harness.health(SETTINGS.harness_port)
@@ -9923,6 +9941,7 @@ async def harness_status(request: Request):
     st = await _harness_service_status()
     st["models"] = await asyncio.to_thread(harness.discover_models)
     st["jobs"] = harness.runner.status()
+    st["sessions"] = harness_sessions.runner.status()
     return st
 
 
@@ -10024,6 +10043,86 @@ async def harness_cancel_job(request: Request):
     _require_harness(request)
     try:
         return await harness.runner.cancel()
+    except harness.HarnessError as e:
+        _raise_for_harness_error(e)
+
+
+# --------------------------------------------------------------------------- #
+# DeepSeek Harness — live sessions
+#
+# The Jobs routes above run ONE task at a time and report it only when it ends.
+# These run several at once and are readable while they go: dsh writes its
+# session log incrementally, and that log is the only live signal it produces
+# (stdout stays silent until the turn finishes). dsh has no resume, so a
+# session is one process — stopping it is the only correction there is, and a
+# stopped session is dropped from the list rather than kept as history.
+#
+# Full-session only, exactly like the rest of the pane: a session is arbitrary
+# code execution with workspace-write.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/api/harness/sessions")
+async def harness_sessions_list(request: Request):
+    _require_harness(request)
+    return harness_sessions.runner.status()
+
+
+@app.post("/api/harness/sessions")
+async def harness_session_launch(request: Request):
+    """Launch a live session. Body: {task, cwd?, model?}.
+
+    `model` is 'provider/model' and is applied through a per-session scratch
+    DSH_HOME, never by editing the shared settings.yaml — that file belongs to
+    the human-facing Model select. Omit it to use whatever the select says.
+    """
+    _require_harness(request)
+    body = {}
+    with contextlib.suppress(Exception):
+        body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(422, "body must be an object")
+    try:
+        task = harness.validate_task(body.get("task"))
+        cwd = harness.validate_cwd(body.get("cwd"))
+        return await harness_sessions.runner.launch(task, cwd, body.get("model"))
+    except harness.HarnessError as e:
+        _raise_for_harness_error(e)
+
+
+@app.get("/api/harness/sessions/{sid}")
+async def harness_session_detail(sid: str, request: Request, after: int = 0):
+    """One session plus its projected events. `after=<n>` returns only what is
+    newer than the last event the caller saw, which is how the live view
+    streams without re-shipping the whole run every second."""
+    _require_harness(request)
+    s = harness_sessions.runner.session(sid, after=max(0, after))
+    if s is None:
+        raise HTTPException(404, "no such session")
+    return s
+
+
+@app.post("/api/harness/sessions/{sid}/stop")
+async def harness_session_stop(sid: str, request: Request):
+    """Stop a session. It leaves the list immediately."""
+    _require_harness(request)
+    try:
+        return await harness_sessions.runner.stop(sid)
+    except harness_sessions.SessionNotFound as e:
+        raise HTTPException(404, str(e)) from e
+    except harness.HarnessError as e:
+        _raise_for_harness_error(e)
+
+
+@app.post("/api/harness/sessions/{sid}/dismiss")
+async def harness_session_dismiss(sid: str, request: Request):
+    """Drop a FINISHED session from the list (its scratch home goes with it).
+    409 while it is still running — stop it instead."""
+    _require_harness(request)
+    try:
+        return await harness_sessions.runner.dismiss(sid)
+    except harness_sessions.SessionNotFound as e:
+        raise HTTPException(404, str(e)) from e
     except harness.HarnessError as e:
         _raise_for_harness_error(e)
 

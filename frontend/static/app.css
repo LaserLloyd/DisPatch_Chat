@@ -1725,6 +1725,23 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .harness-job-err { margin: 0 12px 10px; }
 .harness-job-err summary { cursor: pointer; font-size: 12px; color: var(--text-muted); }
 .harness-job-err pre { margin: 6px 0 0; padding: 8px; font-size: 11.5px; overflow: auto; max-height: 200px; background: var(--bg-tertiary); border-radius: 8px; white-space: pre-wrap; }
+/* Live sessions: the same card grammar as a job, plus an action row and the
+   streaming event log. The log is monospace-ish and dense on purpose — it is a
+   trace of what the agent is doing, not prose. */
+.harness-session-actions { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-light); flex-wrap: wrap; }
+.harness-session-actions .btn-secondary { padding: 5px 10px; font-size: 12px; }
+.harness-session-log { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; max-height: 46vh; overflow-y: auto; font-size: 12.5px; background: var(--bg-tertiary); }
+.hs-ev { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border-light); }
+.hs-ev:last-child { border-bottom: 0; }
+.hs-ev-tag { flex: 0 0 auto; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+.hs-ev-text { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.hs-ev.hs-tool .hs-ev-tag { color: var(--accent-text); }
+.hs-ev.hs-tool .hs-ev-text { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary); }
+.hs-ev.hs-ok .hs-ev-tag { color: var(--success); }
+.hs-ev.hs-err .hs-ev-tag { color: var(--error); }
+.hs-ev.hs-err .hs-ev-text { color: var(--error); }
+.hs-ev.hs-say { display: block; padding: 6px 0; }
+.hs-ev.hs-step, .hs-ev.hs-end, .hs-ev.hs-model { color: var(--text-muted); font-size: 11.5px; font-family: var(--font-mono); }
 .terminal-dot.harness-running { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
 .terminal-dot.harness-failed { background: var(--error); }
 .terminal-dot.harness-starting { background: var(--warning, #f59e0b); }

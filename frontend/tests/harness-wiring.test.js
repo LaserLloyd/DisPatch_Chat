@@ -84,3 +84,44 @@ test('main.js init block calls wireHarnessView and wireStudioForgeView near wire
   assert.ok(studioAt > 0 && studioAt < authAt + 400,
     'wireStudioForgeView() must be called shortly after wireAuthEvents()');
 });
+
+// ---------------------------------------------------------------------------
+// Live sessions pane (2026-09-16).
+//
+// The third harness tab runs SEVERAL dsh sessions at once and shows each one
+// while it works. Three things have to stay true or the feature silently
+// degrades into the jobs pane it replaced:
+//
+//   1. the tab and its pane exist in the markup and are wired,
+//   2. the live view asks for INCREMENTAL events (`after=`), not the whole log
+//      every second,
+//   3. Stop goes to the stop endpoint — the row is supposed to disappear, and
+//      a session that lingers after Stop would look like a failure.
+// ---------------------------------------------------------------------------
+
+test('the live-sessions tab, pane and wiring all exist', () => {
+  const src = readMain();
+  const html = readFileSync(join(STATIC, 'index.html'), 'utf8');
+  assert.match(html, /id="harness-tab-sessions"/, 'markup must carry the Sessions tab');
+  assert.match(html, /id="harness-pane-sessions"/, 'markup must carry the Sessions pane');
+  assert.match(html, /id="harness-session-form"/, 'the pane needs its launch form');
+  assert.match(src, /function\s+renderHarnessSessions\s*\(/,
+    'main.js must render the session list');
+  assert.match(src, /harness-tab-sessions'\]\.addEventListener/,
+    'the Sessions tab must be clickable');
+  assert.match(src, /setHarnessTab\('sessions'\)/,
+    'clicking it must select the sessions tab');
+});
+
+test('the live view polls incrementally and Stop calls the stop endpoint', () => {
+  const src = readMain();
+  const api = readFileSync(join(STATIC, 'js', 'api.js'), 'utf8');
+  assert.match(src, /api\.harnessSession\(id,\s*harnessSessionNext\)/,
+    'polling must pass the last-seen index so only new events ship');
+  assert.match(api, /after=\$\{Number\(after\) \|\| 0\}/,
+    'the client must build the ?after= query');
+  assert.match(src, /api\.harnessSessionStop\(id\)/,
+    'Stop must hit the stop endpoint — that is what removes the row');
+  assert.match(src, /stopHarnessSessionPoll\(\)/,
+    'closing the pane must stop the poll (no forever-timer)');
+});

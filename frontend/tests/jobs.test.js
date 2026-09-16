@@ -182,14 +182,15 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   const sw = readFileSync(join(STATIC, 'sw.js'), 'utf8');
   const m = /const CACHE = '([^']+)'/.exec(sw);
   assert.ok(m, 'sw.js must declare CACHE');
-  // Pin against the shipped CACHE name. v99 was jobs(fix) (v98→v99, the
-  // search-modal-close + selectBot-view-swap fixes); v100 is the palette
-  // switch, which replaced theme.css's whole token block and swapped
-  // theme.js/main.js/app.css under it — the shell is cached by PATH, so
-  // without the bump an installed client keeps the old theme.css and paints
-  // an unstyled page. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v100',
-    'sw.js CACHE must be local-chat-v100 so old shells drop and the new modules install');
+  // Pin against the shipped CACHE name. v100 was the palette switch, which
+  // replaced theme.css's whole token block and swapped theme.js/main.js/app.css
+  // under it; v101 is the DeepSeek Harness live-sessions pane, which changed
+  // index.html (a third tab + its pane), main.js, api.js, app.css and every
+  // locale. The shell is cached by PATH, so without the bump an installed
+  // client keeps the old markup and the new tab simply is not there. If you
+  // bump again, bump here too.
+  assert.equal(m[1], 'local-chat-v101',
+    'sw.js CACHE must be local-chat-v101 so old shells drop and the new modules install');
 });
 
 // =============================================================================

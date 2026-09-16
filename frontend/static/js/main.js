@@ -78,9 +78,14 @@ const state = {
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
   started: false,      // app has booted (bots loaded, socket connected)
   harnessEnabled: false, // server-side feature flag (DISPATCH_HARNESS); full-session only
-  // DeepSeek Harness pane: last /api/harness/status payload (service + models)
-  // and the headless-job ledger the server broadcasts.
-  harness: { status: null, jobs: { running: false, current: null, history: [] } },
+  // DeepSeek Harness pane: last /api/harness/status payload (service + models),
+  // the headless-job ledger the server broadcasts, and the LIVE SESSION list
+  // (launched sessions; one leaves the list when it is stopped).
+  harness: {
+    status: null,
+    jobs: { running: false, current: null, history: [] },
+    sessions: { sessions: [], running: 0, limit: 4 },
+  },
   studioforgeEnabled: false, // server-side feature flag (DISPATCH_STUDIOFORGE + a URL); full-session only
   // StudioForge pane: last /api/studioforge/status payload, plus whether THIS
   // browser could reach the panel (a separate question from whether the server
@@ -216,6 +221,9 @@ const dom = {};
  'harness-open', 'harness-pane-ui', 'harness-pane-jobs', 'harness-frame', 'harness-note',
  'harness-note-text', 'harness-note-hint', 'harness-job-form', 'harness-task', 'harness-cwd',
  'harness-run', 'harness-cancel', 'harness-jobs', 'harness-dot', 'harness-status-label',
+ 'harness-tab-sessions', 'harness-pane-sessions', 'harness-session-form',
+ 'harness-session-task', 'harness-session-cwd', 'harness-session-model',
+ 'harness-session-run', 'harness-sessions',
  'harness-model', 'harness-sf-link', 'harness-start', 'harness-restart', 'harness-stop',
  // StudioForge panel pane
  'studioforge-view', 'studioforge-back', 'studioforge-subtitle', 'studioforge-open',
@@ -3989,11 +3997,13 @@ function applyHarnessStatus(st) {
   if (!st || typeof st !== 'object') return;
   state.harness.status = st;
   if (st.jobs) state.harness.jobs = st.jobs;
+  if (st.sessions) state.harness.sessions = st.sessions;
   renderHarness();
 }
 
 function applyHarnessFrame(data) {
   if (data.jobs) state.harness.jobs = data.jobs;
+  if (data.sessions) state.harness.sessions = data.sessions;
   if (data.service) state.harness.status = Object.assign({}, state.harness.status || {}, data.service);
   if (data.models && state.harness.status) state.harness.status.models = data.models;
   renderHarness();
@@ -4033,19 +4043,25 @@ function closeHarnessView() {
   // Unload the frame: a hidden iframe keeps dsh's websocket + HMR stream alive.
   if (dom['harness-frame']) { dom['harness-frame'].classList.add('hidden'); dom['harness-frame'].removeAttribute('src'); }
   if (harnessTick) { clearInterval(harnessTick); harnessTick = null; }
+  stopHarnessSessionPoll();
 }
 
 function setHarnessTab(tab) {
-  harnessTab = tab === 'jobs' ? 'jobs' : 'ui';
-  const ui = harnessTab === 'ui';
-  dom['harness-tab-ui'].classList.toggle('active', ui);
-  dom['harness-tab-ui'].setAttribute('aria-selected', ui ? 'true' : 'false');
-  dom['harness-tab-jobs'].classList.toggle('active', !ui);
-  dom['harness-tab-jobs'].setAttribute('aria-selected', ui ? 'false' : 'true');
-  dom['harness-pane-ui'].classList.toggle('hidden', !ui);
-  dom['harness-pane-jobs'].classList.toggle('hidden', ui);
+  harnessTab = (tab === 'jobs' || tab === 'sessions') ? tab : 'ui';
+  const tabs = [['ui', 'harness-tab-ui', 'harness-pane-ui'],
+                ['jobs', 'harness-tab-jobs', 'harness-pane-jobs'],
+                ['sessions', 'harness-tab-sessions', 'harness-pane-sessions']];
+  for (const [name, tabId, paneId] of tabs) {
+    if (!dom[tabId] || !dom[paneId]) continue;
+    const on = harnessTab === name;
+    dom[tabId].classList.toggle('active', on);
+    dom[tabId].setAttribute('aria-selected', on ? 'true' : 'false');
+    dom[paneId].classList.toggle('hidden', !on);
+  }
+  if (harnessTab !== 'sessions') stopHarnessSessionPoll();
   renderHarness();
-  if (!ui && dom['harness-task']) dom['harness-task'].focus();
+  if (harnessTab === 'jobs' && dom['harness-task']) dom['harness-task'].focus();
+  if (harnessTab === 'sessions' && dom['harness-session-task']) dom['harness-session-task'].focus();
 }
 
 // Paints everything from state: bar (dot/label/buttons/model select), the
@@ -4094,6 +4110,7 @@ function renderHarness() {
     }
   }
   renderHarnessJobs();
+  renderHarnessSessions();
 }
 
 function renderHarnessModelSelect() {
@@ -4287,11 +4304,273 @@ async function harnessCancelJob() {
   catch (e) { toast(cleanErr(e), true); }
 }
 
+// ===================== DeepSeek Harness — live sessions =====================
+// The Jobs tab runs ONE task and only shows the answer once it has ended. This
+// tab runs several at once and shows them WHILE they work: dsh writes its
+// session log incrementally and the server projects that into a small event
+// stream (tool calls, tool results, assistant text, step boundaries), which
+// this pane polls for whichever session you have open. Polling with `after=<n>`
+// ships only what is new, so an open session costs a few hundred bytes a second.
+//
+// Stopping is the only correction dsh offers — there is no resume and no
+// mid-flight steering — so Stop kills the process and the row leaves the list.
+// A session that finishes on its own stays until Clear, so the last thing it
+// said is still readable.
+let harnessSessionId = null;      // the session whose live log is expanded
+let harnessSessionEvents = [];
+let harnessSessionNext = 0;
+let harnessSessionTimer = null;   // in-flight poll (setTimeout chain)
+let harnessSessionTick = null;    // 1s elapsed-time repaint while any is live
+let harnessSessionBusy = false;   // a launch is in flight
+
+function stopHarnessSessionPoll() {
+  if (harnessSessionTimer) { clearTimeout(harnessSessionTimer); harnessSessionTimer = null; }
+  if (harnessSessionTick) { clearInterval(harnessSessionTick); harnessSessionTick = null; }
+}
+
+// State labels reuse the service-state and job keys — 'running' and 'finished'
+// already have translated strings, and inventing a parallel set would be eight
+// more keys per language for no new meaning.
+function harnessSessionLabel(s) {
+  const secs = s.duration_s != null ? Math.round(s.duration_s) : 0;
+  switch (s.state) {
+    case 'starting': return t('harness.state_starting');
+    case 'running': return t('harness.job_running', { secs });
+    case 'stopping': return t('harness.state_stopped');
+    case 'exited': return t('harness.job_done', { secs });
+    case 'failed': return t('harness.job_failed', { code: s.exit_code, secs });
+    case 'stopped': return t('harness.state_stopped');
+    default: return t('harness.state_unknown');
+  }
+}
+
+// The optional per-session model. Empty means "whatever the Model select says".
+// The server applies a chosen one through a per-session scratch DSH_HOME, so it
+// never rewrites the shared settings.yaml.
+function renderHarnessSessionModelSelect() {
+  const sel = dom['harness-session-model'];
+  if (!sel) return;
+  const keep = sel.value;
+  const models = state.harness.status && state.harness.status.models;
+  sel.innerHTML = '';
+  sel.append(el('option', { value: '', text: t('harness.session_model_default') }));
+  if (models && Array.isArray(models.providers)) {
+    for (const pr of models.providers) {
+      if (!pr || !Array.isArray(pr.models) || !pr.models.length) continue;
+      const grp = el('optgroup', { label: pr.name || pr.id });
+      for (const m of pr.models) {
+        grp.append(el('option', {
+          value: `${pr.id}/${m.id}`,
+          text: (m.name && m.name !== m.id) ? m.name : m.id,
+        }));
+      }
+      sel.append(grp);
+    }
+  }
+  if (keep) sel.value = keep;
+}
+
+function sessionEventEl(ev) {
+  switch (ev.k) {
+    case 'tool':
+      return el('div', { class: 'hs-ev hs-tool' }, [
+        el('span', { class: 'hs-ev-tag', text: '⚙ ' + ev.name }),
+        el('span', { class: 'hs-ev-text', text: ev.args || '' }),
+      ]);
+    case 'result':
+      return el('div', { class: 'hs-ev ' + (ev.ok ? 'hs-ok' : 'hs-err') }, [
+        el('span', { class: 'hs-ev-tag', text: ev.ok ? '↳ ok' : '↳ error' }),
+        el('span', { class: 'hs-ev-text', text: ev.text || '' }),
+      ]);
+    case 'say':
+      return el('div', { class: 'hs-ev hs-say', text: ev.text });
+    case 'step':
+      return el('div', { class: 'hs-ev hs-step', text: `▸ step ${ev.step}` });
+    case 'end':
+      return el('div', { class: 'hs-ev hs-end', text: `— ${ev.reason}` });
+    case 'model':
+      return el('div', { class: 'hs-ev hs-model', text: `${ev.provider} / ${ev.model}` });
+    default:
+      return null;      // title/user are already on the card
+  }
+}
+
+function harnessSessionCard(s) {
+  const live = s.state === 'running' || s.state === 'starting';
+  const dotCls = live ? 'harness-running'
+    : s.state === 'failed' ? 'harness-failed' : 'stopped';
+  const card = el('div', { class: 'harness-job harness-session harness-session-' + s.state });
+  card.append(el('div', { class: 'harness-job-head' }, [
+    el('span', { class: 'terminal-dot ' + dotCls }),
+    el('span', { class: 'harness-job-state', text: harnessSessionLabel(s) }),
+    el('span', { class: 'harness-job-cwd', text: t('harness.job_cwd', { cwd: shortHome(s.cwd) }) }),
+    el('span', { class: 'harness-job-when', text: fmtHarnessWhen(s.started_at) }),
+  ]));
+  card.append(el('div', { class: 'harness-job-task', text: s.title || s.task }));
+  const actions = el('div', { class: 'harness-session-actions' });
+  if (s.active) {
+    const stop = el('button', { class: 'btn-secondary danger-text', type: 'button', text: t('harness.stop') });
+    stop.addEventListener('click', () => harnessStopSession(s.id));
+    actions.append(stop);
+  } else {
+    const clear = el('button', { class: 'btn-secondary', type: 'button', text: t('common.close') });
+    clear.addEventListener('click', () => harnessClearSession(s.id));
+    actions.append(clear);
+  }
+  const open = el('button', { class: 'btn-secondary', type: 'button', text: t('harness.session_open') });
+  open.addEventListener('click', () => harnessOpenSession(s.id));
+  actions.append(open);
+  card.append(actions);
+  if (harnessSessionId === s.id) {
+    const log = el('div', { class: 'harness-job-out harness-session-log' });
+    if (!harnessSessionEvents.length) {
+      log.append(el('div', { class: 'muted', text: t('harness.session_waiting') }));
+    } else {
+      for (const ev of harnessSessionEvents) {
+        const row = sessionEventEl(ev);
+        if (row) log.append(row);
+      }
+    }
+    card.append(log);
+  }
+  return card;
+}
+
+function renderHarnessSessions() {
+  const wrap = dom['harness-sessions'];
+  if (!wrap || harnessTab !== 'sessions') return;
+  renderHarnessSessionModelSelect();
+  const box = state.harness.sessions || { sessions: [], running: 0, limit: 4 };
+  const list = box.sessions || [];
+  const full = box.running >= box.limit;
+  if (dom['harness-session-run']) dom['harness-session-run'].disabled = harnessSessionBusy || full;
+  for (const id of ['harness-session-task', 'harness-session-cwd', 'harness-session-model']) {
+    if (dom[id]) dom[id].disabled = harnessSessionBusy;
+  }
+  // Elapsed seconds tick while anything is live; the timer also dies with the
+  // pane so a closed tab is not polling forever.
+  const anyLive = list.some((s) => s.active);
+  if (anyLive && !harnessSessionTick) {
+    harnessSessionTick = setInterval(() => {
+      if (harnessOpen && harnessTab === 'sessions') renderHarnessSessions();
+      else stopHarnessSessionPoll();
+    }, 1000);
+  }
+  if (!anyLive && harnessSessionTick) { clearInterval(harnessSessionTick); harnessSessionTick = null; }
+  wrap.innerHTML = '';
+  if (!list.length) {
+    wrap.append(el('div', { class: 'empty-list' }, [
+      el('p', { class: 'muted', text: t('harness.session_empty') }),
+    ]));
+    return;
+  }
+  for (const s of list) wrap.append(harnessSessionCard(s));
+}
+
+function harnessOpenSession(id) {
+  if (harnessSessionId === id) {          // clicking Open again collapses it
+    harnessSessionId = null;
+    stopHarnessSessionPoll();
+    renderHarnessSessions();
+    return;
+  }
+  harnessSessionId = id;
+  harnessSessionEvents = [];
+  harnessSessionNext = 0;
+  stopHarnessSessionPoll();
+  renderHarnessSessions();
+  harnessSessionPoll();
+}
+
+function harnessSessionPoll() {
+  const id = harnessSessionId;
+  if (!id) return;
+  api.harnessSession(id, harnessSessionNext).then((d) => {
+    if (harnessSessionId !== id) return;
+    if (Array.isArray(d.events) && d.events.length) {
+      harnessSessionEvents = harnessSessionEvents.concat(d.events).slice(-500);
+      harnessSessionNext = d.next || harnessSessionNext;
+    }
+    renderHarnessSessions();
+    harnessSessionTimer = d.active ? setTimeout(harnessSessionPoll, 1000) : null;
+  }).catch((e) => {
+    if (harnessSessionId !== id) return;
+    if (e && e.status === 404) {          // stopped or cleared elsewhere
+      harnessSessionId = null;
+      harnessSessionTimer = null;
+      renderHarnessSessions();
+      return;
+    }
+    harnessSessionTimer = setTimeout(harnessSessionPoll, 2000);
+  });
+}
+
+async function harnessLaunchSession(ev) {
+  if (ev) ev.preventDefault();
+  if (harnessSessionBusy) return;
+  const task = (dom['harness-session-task'].value || '').trim();
+  if (!task) { dom['harness-session-task'].focus(); return; }
+  const cwd = (dom['harness-session-cwd'].value || '').trim();
+  const model = (dom['harness-session-model'].value || '').trim();
+  harnessSessionBusy = true;
+  renderHarnessSessions();
+  try {
+    const s = await api.harnessSessionLaunch(task, cwd || null, model || null);
+    dom['harness-session-task'].value = '';
+    harnessSessionBusy = false;
+    toast(t('harness.session_launched'));
+    if (s && s.id) harnessOpenSession(s.id);
+  } catch (e) {
+    harnessSessionBusy = false;
+    toast(e.status === 409 ? t('harness.session_busy') : cleanErr(e), true);
+  }
+  refreshHarnessSessions();
+  renderHarnessSessions();
+}
+
+// The server broadcasts on every launch/stop/finish, but a socket mid-reconnect
+// would miss it — so an action always pulls the list once too.
+function refreshHarnessSessions() {
+  api.harnessSessions().then((d) => {
+    state.harness.sessions = d;
+    renderHarness();
+  }).catch(() => {});
+}
+
+async function harnessStopSession(id) {
+  if (harnessSessionBusy) return;
+  harnessSessionBusy = true;
+  renderHarnessSessions();
+  try {
+    await api.harnessSessionStop(id);
+    if (harnessSessionId === id) { harnessSessionId = null; stopHarnessSessionPoll(); }
+    toast(t('harness.session_stopped'));
+  } catch (e) {
+    toast(cleanErr(e), true);
+  }
+  harnessSessionBusy = false;
+  refreshHarnessSessions();
+  renderHarnessSessions();
+}
+
+async function harnessClearSession(id) {
+  try {
+    await api.harnessSessionDismiss(id);
+    if (harnessSessionId === id) { harnessSessionId = null; stopHarnessSessionPoll(); }
+    toast(t('harness.session_cleared'));
+  } catch (e) {
+    toast(cleanErr(e), true);
+  }
+  refreshHarnessSessions();
+  renderHarnessSessions();
+}
+
 function wireHarnessView() {
   if (!dom['harness-view']) return;
   dom['harness-back'].addEventListener('click', () => navigate('bots'));
   dom['harness-tab-ui'].addEventListener('click', () => setHarnessTab('ui'));
   dom['harness-tab-jobs'].addEventListener('click', () => setHarnessTab('jobs'));
+  dom['harness-tab-sessions'].addEventListener('click', () => setHarnessTab('sessions'));
   dom['harness-start'].addEventListener('click', () => harnessServiceAction('start'));
   dom['harness-stop'].addEventListener('click', () => harnessServiceAction('stop'));
   dom['harness-restart'].addEventListener('click', () => harnessServiceAction('restart'));
@@ -4301,6 +4580,10 @@ function wireHarnessView() {
   // Ctrl/Cmd+Enter submits from the textarea.
   dom['harness-task'].addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); harnessSubmitJob(); }
+  });
+  dom['harness-session-form'].addEventListener('submit', harnessLaunchSession);
+  dom['harness-session-task'].addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); harnessLaunchSession(); }
   });
 }
 
@@ -4963,6 +5246,12 @@ function handleWs(data) {
       // Full-session only — Safe-Mode clients never receive this frame (the
       // server redactor drops it). Carries whichever slice changed: jobs /
       // service / models.
+      applyHarnessFrame(data);
+      break;
+    }
+    case 'harness_sessions': {
+      // The live-session LIST (launch / stop / finish). Events are not
+      // broadcast: the open session polls its own endpoint for those.
       applyHarnessFrame(data);
       break;
     }
