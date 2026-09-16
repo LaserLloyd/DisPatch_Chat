@@ -362,11 +362,29 @@ What it does:
   `dsh --profile headless "<task>"` (fixed argv, no shell; `cwd` must be an
   existing directory under `$HOME`), one at a time, and keeps a short in-memory
   history with the final answer. `harness_state` WS frames announce start/end.
+* **Live sessions** — `GET|POST /api/harness/sessions` runs several
+  `dsh --profile headless` jobs at once (cap 4) and lets an operator watch each
+  one while it goes. Every session gets its own scratch `DSH_HOME` under
+  `<data-dir>/harness-sessions/<id>`: the shared `settings.yaml` copied with only
+  `agent-default-model` replaced (so an optional per-session
+  `{model: "provider/model"}` never rewrites the shared file) and the credentials
+  **symlinked**, never copied. dsh writes its session log incrementally, so
+  `GET /api/harness/sessions/{id}?after=N` streams a projected event view (turn,
+  step, tool call, tool result, assistant text, model, end reason) from a
+  still-running process; the list is broadcast to open tabs as a
+  `harness_sessions` WS frame. `POST .../{id}/stop` SIGTERMs the process and
+  **removes the session from the list** — there is no resume, and the scratch home
+  goes with it. `POST .../{id}/dismiss` clears a finished one and is refused
+  (409) while it is still running. Source: `backend/app/harness_sessions.py`.
 
 Routes: `GET /api/harness/status`, `POST /api/harness/{start,stop,restart}`,
 `GET /api/harness/models`, `POST /api/harness/model`, `GET|POST
 /api/harness/jobs`, `POST /api/harness/jobs/cancel`, `GET
-/api/harness/jobs/<id>`. All 403 in Safe Mode; 404 when disabled.
+/api/harness/jobs/<id>`, `GET|POST /api/harness/sessions`, `GET
+/api/harness/sessions/<id>`, `POST
+/api/harness/sessions/<id>/{stop,dismiss}`. All 403 in Safe Mode; 404 when
+disabled. None is on the machine-inbound surface, so an on-box agent without an
+unlocked session is refused too — the session API is operator-browser-only.
 
 ### StudioForge control panel
 
