@@ -29,7 +29,7 @@ dest="${DISPATCH_TOOLS_DIR:-$HOME/.local/bin}"
 go=0
 check=0
 
-TOOLS="dispatch-avatar-rotate local-chat-daily.sh"
+TOOLS="dispatch-avatar-rotate local-chat-daily.sh dispatch-jobs"
 
 usage() {
     sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'

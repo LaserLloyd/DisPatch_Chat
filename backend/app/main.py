@@ -7694,16 +7694,23 @@ async def pin_thread_avatar(
             if len(face_raw) > UPLOAD_MAX_IMAGE:
                 raise HTTPException(413, "Face crop too large (max 25MB)")
 
-        def _pair_bytes() -> tuple[bytes, bytes]:
+        def _pair_bytes() -> tuple[bytes, bytes, bytes]:
             from io import BytesIO
-            face_im, full_im = _avatar_pair_images(raw, crop_x, crop_y, crop_size, face_raw)
-            fb, gb = BytesIO(), BytesIO()
+            # _avatar_pair_images returns a TRIPLET (face, full, thumb) since
+            # the thumbnail round; unpacking two raised
+            # "ValueError: too many values to unpack" on every explicit
+            # thread-avatar pin (the Jobs-board/daily-thread pin path).
+            face_im, full_im, thumb_im = _avatar_pair_images(
+                raw, crop_x, crop_y, crop_size, face_raw)
+            fb, gb, tb = BytesIO(), BytesIO(), BytesIO()
             face_im.save(fb, "PNG")
             full_im.save(gb, "PNG")
-            return fb.getvalue(), gb.getvalue()
+            thumb_im.save(tb, "PNG")
+            return fb.getvalue(), gb.getvalue(), tb.getvalue()
 
-        face_bytes, full_bytes = await asyncio.to_thread(_pair_bytes)
-        snap = avatar_snapshots.snapshot_pair(face_bytes, full_bytes)
+        face_bytes, full_bytes, thumb_bytes = await asyncio.to_thread(_pair_bytes)
+        snap = avatar_snapshots.snapshot_pair(face_bytes, full_bytes,
+                                              thumb_data=thumb_bytes)
         if not snap:
             raise HTTPException(500, "Could not store the avatar snapshot")
     elif source == "current":

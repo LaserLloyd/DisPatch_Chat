@@ -197,7 +197,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_thread ON jobs(thread_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_message ON jobs(message_id);
+-- NOTE: idx_jobs_message is deliberately NOT created here. On a pre-2026-09-15
+-- database `jobs` still has `thread_id` as its PK and no `message_id` column,
+-- and CREATE TABLE IF NOT EXISTS leaves that old table in place — so an index
+-- on `message_id` here aborts startup before the migration below can run.
+-- It is created in Database.connect() after _migrate_jobs_to_monthly_thread().
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
 CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC);
@@ -220,7 +224,8 @@ CREATE TABLE IF NOT EXISTS job_events (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_job_events_thread ON job_events(thread_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id, created_at);
+-- Same trap as idx_jobs_message above: `job_id` only exists on `job_events`
+-- after the ALTER in connect(), so this index lives there. See connect().
 
 CREATE TABLE IF NOT EXISTS job_feedback (
     id          TEXT PRIMARY KEY,
@@ -240,7 +245,8 @@ CREATE TABLE IF NOT EXISTS job_feedback (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_job_feedback_thread ON job_feedback(thread_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_job_feedback_job ON job_feedback(job_id, created_at);
+-- Same trap as idx_jobs_message above: `job_id` only exists on `job_feedback`
+-- after the ALTER in connect(), so this index lives there. See connect().
 
 CREATE TABLE IF NOT EXISTS job_profile (
     id              INTEGER PRIMARY KEY DEFAULT 1,   -- singleton; CHECK at the end
@@ -452,6 +458,26 @@ class Database:
         # monthly-thread model if needed. Idempotent; runs once on the
         # first boot after the schema change.
         await self._migrate_jobs_to_monthly_thread()
+        # Indexes on columns that only exist AFTER the ALTER loop and the
+        # migration above — `jobs.message_id`, `job_events.job_id`,
+        # `job_feedback.job_id`. They cannot live in SCHEMA: on a
+        # pre-2026-09-15 database `jobs` still has `thread_id` as its primary
+        # key and the two dependent tables have no `job_id`, and because
+        # CREATE TABLE IF NOT EXISTS leaves those old tables untouched, a
+        # `CREATE INDEX ... ON jobs(message_id)` in SCHEMA raised
+        # "no such column: message_id" and aborted the lifespan BEFORE uvicorn
+        # bound the port. Safe for both shapes: a fresh install has the columns
+        # from SCHEMA, an upgraded one gets them here (IF NOT EXISTS, and the
+        # migration creates its own copies on the rebuild path).
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_jobs_message ON jobs(message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_events_job "
+            "ON job_events(job_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_job_feedback_job "
+            "ON job_feedback(job_id, created_at)",
+        ):
+            await self._db.execute(ddl)
+        await self._db.commit()
         await self._setup_fts()
 
     async def _migrate_jobs_to_monthly_thread(self) -> None:

@@ -673,16 +673,24 @@ def test_every_ported_pattern_still_exists_in_the_installed_gateway(name, anchor
 
     A failure here is not "the test is wrong" — it means an `openclaw update`
     moved something and that stage must be re-derived from the new dist.
+
+    The search covers `.js` AND `.mjs`, recursively. OpenClaw 2026.9.x ships
+    most of its modules as `.mjs`, and a few live in subdirectories
+    (`dist/worker/`, `dist/config-doctor/`, `dist/control-ui/`); a top-level
+    `*.js`-only glob therefore reported all 27 anchors as missing purely
+    because of the file extension, burying the real drift signal under
+    false failures.
     """
     if not DIST.is_dir():
         pytest.skip(
             f"no OpenClaw dist at {DIST} — this box's gateway is the ground "
             "truth for these ports and it is not installed here, so drift "
             "cannot be checked (expected on CI; NOT expected on the DisPatch host)")
-    sources = sorted(DIST.glob("*.js"))
-    assert sources, f"{DIST} exists but holds no *.js — is the install broken?"
+    sources = sorted([*DIST.rglob("*.js"), *DIST.rglob("*.mjs")])
+    assert sources, f"{DIST} exists but holds no *.js/*.mjs — is the install broken?"
     hits = [p.name for p in sources if anchor in p.read_text(errors="replace")]
     assert hits, (
-        f"{name}: the fragment {anchor!r} is no longer anywhere in {DIST}/*.js. "
-        "Our port of that stage now matches text the gateway has stopped "
-        "emitting, which fails OPEN — re-derive the stage from the new dist.")
+        f"{name}: the fragment {anchor!r} is no longer anywhere in {DIST} "
+        "(searched **/*.js and **/*.mjs). Our port of that stage now matches "
+        "text the gateway has stopped emitting, which fails OPEN — re-derive "
+        "the stage from the new dist.")

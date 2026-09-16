@@ -138,7 +138,11 @@ class Pair(NamedTuple):
     stem: str
     face: Path
     full: Path
-    thumb: Path
+    # Optional by contract: the hand-drop format is a face+full PAIR, and
+    # list_pairs leaves this None for a pair that predates the thumbnail
+    # format (`_thumb_for` returns Path | None). Consumers must handle None
+    # by falling back to the face crop.
+    thumb: Path | None
 
 
 def _full_for(face: Path) -> Path | None:
@@ -262,15 +266,25 @@ def _snapshot_pair(pair: Pair) -> str | None:
         for half, cap in ((pair.face, avatar_snapshots.MAX_SNAPSHOT_BYTES),
                            (pair.full, avatar_snapshots.MAX_FULL_BYTES),
                            (pair.thumb, avatar_snapshots.MAX_SNAPSHOT_BYTES)):
+            if half is None:
+                # `thumb` is optional — a hand-dropped (or legacy) pair is a
+                # face+full pair with no thumbnail sibling. Calling .stat() on
+                # None raised AttributeError, which the OSError guard below
+                # never caught, so every thumbless draw crashed the thread
+                # creation path instead of falling back to the face crop.
+                continue
             if half.stat().st_size > cap:
                 log.warning("pool avatar too large to snapshot: %s", half.name)
                 return None
         face_data = pair.face.read_bytes()
         full_data = pair.full.read_bytes()
-        thumb_data = pair.thumb.read_bytes()
+        thumb_data = pair.thumb.read_bytes() if pair.thumb is not None else None
     except OSError:
         return None
-    if not face_data or not full_data or not thumb_data:
+    # face+full are mandatory; a missing thumb is not (snapshot_pair stores the
+    # triplet without it and path_for_thumb() then answers None, which the
+    # serving route resolves to the face crop).
+    if not face_data or not full_data:
         return None
     return avatar_snapshots.snapshot_pair(face_data, full_data,
                                           thumb_data=thumb_data,
