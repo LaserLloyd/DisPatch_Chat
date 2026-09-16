@@ -48,7 +48,6 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-
 # --------------------------------------------------------------------------- #
 # Reason-taxonomy enum (the canonical list; UI maps this verbatim).
 # --------------------------------------------------------------------------- #
@@ -160,9 +159,7 @@ def recompute_profile(feedback_rows: Iterable[dict]) -> dict:
     salary_history: dict[str, int] = {b[2]: 0 for b in SALARY_BANDS}
     preferred_remote: dict[str, float] = {"onsite": 0.0, "hybrid": 0.0,
                                           "remote": 0.0}
-    seniority_preference: dict[str, float] = {
-        s: 0.0 for s in ("junior", "mid", "senior", "staff", "principal")
-    }
+    seniority_preference: dict[str, float] = dict.fromkeys(("junior", "mid", "senior", "staff", "principal"), 0.0)
     duplicate_hashes: dict[str, dict] = {}
     reason_counts: dict[str, int] = {}
     yes_count = no_count = maybe_count = 0
@@ -550,7 +547,7 @@ def _cosine(a, b) -> float:
         lb = list(b)
         if not la or not lb or len(la) != len(lb):
             return 0.0
-        dot = sum(x * y for x, y in zip(la, lb))
+        dot = sum(x * y for x, y in zip(la, lb, strict=True))
         ma = math.sqrt(sum(x * x for x in la))
         mb = math.sqrt(sum(y * y for y in lb))
         denom = ma * mb or 1.0
@@ -608,9 +605,7 @@ def empty_profile() -> dict:
         "salary_history": "{" + ",".join(f'"{b[2]}":0' for b in SALARY_BANDS) + "}",
         "preferred_remote": json.dumps({"onsite": 0.0, "hybrid": 0.0,
                                         "remote": 0.0}),
-        "seniority_preference": json.dumps({
-            s: 0.0 for s in ("junior", "mid", "senior", "staff", "principal")
-        }),
+        "seniority_preference": json.dumps(dict.fromkeys(("junior", "mid", "senior", "staff", "principal"), 0.0)),
         "duplicate_hashes": "[]",
         "reason_counts": "{}",
         "yes_count": 0, "no_count": 0, "maybe_count": 0,

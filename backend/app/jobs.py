@@ -45,12 +45,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, config, database, jobs_dedup, jobs_score
+from . import auth, database, jobs_dedup, jobs_score
 
 log = logging.getLogger("local-chat.jobs")
 
@@ -768,7 +767,6 @@ async def create_job_from_dict(payload: dict) -> dict:
         "updated_at": ts,
     }
     await db.upsert_job(job_row)
-    bot = config.resolve_bot(bot_id)
     body = payload.get("initial_message") or (
         f"🎯 New posting: {job_row['title']} @ {job_row['company'] or '?'} "
         f"({job_row['location'] or 'unspecified'}) — "
@@ -944,7 +942,8 @@ async def applied(job_id: str, payload: CommentIn, request: Request):
         tags = json.loads(job.get("tags") or "[]")
     except (TypeError, ValueError):
         tags = []
-    smin = job.get("salary_min"); smax = job.get("salary_max")
+    smin = job.get("salary_min")
+    smax = job.get("salary_max")
     salary_mid = ((smin + smax) / 2.0) if smin and smax else (smax or smin)
     payload_dict = {"tags": tags, "remote_type": job.get("remote_type"),
                     "company": job.get("company", ""),

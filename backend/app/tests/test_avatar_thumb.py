@@ -22,20 +22,16 @@ suite (`tests/.../test_avatar_*.py`) covers the route-level happy path.
 """
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
+import importlib.util
 import zlib
-from pathlib import Path
 
 import pytest
 
 # Make PIL optional — the test environment for jobs may not have it.
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:                       # pragma: no cover
-    HAS_PIL = False
+# A `find_spec` probe, not a try/except import: the import existed only to
+# answer "is Pillow here?", so the name it bound was never used and ruff
+# rightly flagged it. `HAS_PIL` is what the skipif below actually needs.
+HAS_PIL = importlib.util.find_spec("PIL") is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -119,7 +115,7 @@ def test_path_for_thumb_returns_path_when_file_exists(tmp_path, monkeypatch):
     store.mkdir()
     sid = "0123456789abcdef.png"
     (store / sid).write_bytes(_make_png(128, 128))
-    (store / f"0123456789abcdef-thumb.png").write_bytes(_make_png(128, 128))
+    (store / "0123456789abcdef-thumb.png").write_bytes(_make_png(128, 128))
 
     monkeypatch.setattr(avatar_snapshots, "_dir", lambda: store)
     out = avatar_snapshots.path_for_thumb(sid)
@@ -163,6 +159,7 @@ def test_snapshot_pair_signature_has_thumb_kwarg():
     argument would break pool snapshots silently — pin the surface here.
     """
     import inspect
+
     from app import avatar_snapshots
     sig = inspect.signature(avatar_snapshots.snapshot_pair)
     assert "thumb_data" in sig.parameters
@@ -174,4 +171,4 @@ def test_snapshot_pair_signature_has_thumb_kwarg():
 # --------------------------------------------------------------------------- #
 
 
-import struct   # noqa: E402  (after the helpers above)
+import struct  # noqa: E402  (after the helpers above)

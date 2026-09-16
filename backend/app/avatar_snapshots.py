@@ -136,6 +136,7 @@ def snapshot_id(bot) -> str | None:
             # absent, and the route layer falls back to the face crop.
             try:
                 from io import BytesIO
+
                 from PIL import Image
                 im = Image.open(BytesIO(data))
                 im = im.convert("RGBA" if im.mode in ("RGBA", "LA")

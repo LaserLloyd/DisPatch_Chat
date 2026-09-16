@@ -36,7 +36,6 @@ import re
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit, urlunsplit
 
-
 # Window lengths (days). The two are deliberately different: 30-day dedup,
 # 90-day repost. Plan §7.
 DEDUP_WINDOW_DAYS = 30

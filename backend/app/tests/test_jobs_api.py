@@ -21,12 +21,9 @@ agent-facing API is built on.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from app import auth, config, jobs, main
-
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -198,7 +195,7 @@ async def test_vote_appends_immortal_event(wired, sample_job_payload):
     is that the vote handler only inserts.
     """
     db = wired["_db"]
-    from app.jobs import create_job_from_dict, _record_vote
+    from app.jobs import _record_vote, create_job_from_dict
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
     await _record_vote(job_id, "yes", None, None, "user")
@@ -262,7 +259,7 @@ def test_require_full_rejects_when_session_missing(monkeypatch):
 async def test_profile_recompute_fires_after_vote_not_after_get(wired,
                                                                  sample_job_payload):
     db = wired["_db"]
-    from app.jobs import create_job_from_dict, _record_vote, get_profile
+    from app.jobs import _record_vote, create_job_from_dict, get_profile
     await create_job_from_dict(sample_job_payload)
     # Before any vote, the profile is empty (no recompute yet).
     pre = await get_profile(_FakeRequest(cookie="x"))
@@ -287,7 +284,6 @@ async def test_profile_recompute_fires_after_vote_not_after_get(wired,
 
 @pytest.mark.asyncio
 async def test_decoy_get_returns_empty_shape(wired, sample_job_payload, monkeypatch):
-    db = wired["_db"]
     from app.jobs import create_job_from_dict, list_jobs
     await create_job_from_dict(sample_job_payload)
     # Patch _is_decoy to True for this request.

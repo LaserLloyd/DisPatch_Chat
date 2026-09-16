@@ -28,12 +28,7 @@ the integration stack.
 """
 from __future__ import annotations
 
-import hashlib
-
-import pytest
-
 from app import jobs_dedup, jobs_score
-
 
 # --------------------------------------------------------------------------- #
 # Pure scoring — purity, breakdown, blocklist, embedding fallback
@@ -173,7 +168,7 @@ def test_reason_taxonomy_is_known_only():
                    '"salary_mid": null, "seniority": "unknown"}',
     }]
     profile = jobs_score.recompute_profile(feedback)
-    counts = jobs_score._parse_json(profile["reason_counts"], {})   # noqa
+    counts = jobs_score._parse_json(profile["reason_counts"], {})
     assert "not-a-real-reason" not in counts
 
 
@@ -190,9 +185,9 @@ def test_no_vote_without_reason_falls_back_conservative():
     }]
     profile = jobs_score.recompute_profile(feedback)
     assert "tokyo" not in (jobs_score._parse_json(
-        profile["location_blocklist"], []) or [])   # noqa
+        profile["location_blocklist"], []) or [])
     assert "anthropic" not in (jobs_score._parse_json(
-        profile["company_blocklist"], []) or [])   # noqa
+        profile["company_blocklist"], []) or [])
 
 
 # --------------------------------------------------------------------------- #
@@ -233,7 +228,7 @@ def test_recompute_is_byte_deterministic():
     # The final signal for t1 is `vote_no`, so the previous `vote_yes`
     # contribution to salary history must NOT survive — only yes+applied
     # count toward that.
-    salary = jobs_score._parse_json(p1["salary_history"], {})   # noqa
+    salary = jobs_score._parse_json(p1["salary_history"], {})
     assert int(salary.get("band_200_300k", 0)) == 0
 
 

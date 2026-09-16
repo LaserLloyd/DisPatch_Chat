@@ -23,12 +23,10 @@ unit suite already covers the score / dedup modules in isolation.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
+from fastapi import HTTPException
 
 from app import config, database, jobs
-
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -240,9 +238,13 @@ async def test_get_month_unknown_returns_empty_shape(wired):
 async def test_get_month_rejects_malformed_key(wired):
     """A bad YYYY-MM key must 400, not silently route."""
     req = _FakeRequest(cookie=None)
-    with pytest.raises(Exception):
+    # Assert the specific failure, not a blind Exception: the route's contract
+    # is "400", and a bare raises(Exception) would pass on an AttributeError
+    # from a typo just as happily as on the rejection it is testing.
+    with pytest.raises(HTTPException) as exc:
         await jobs.get_month(request=req, key="not-a-month",
-                              bot_id="jobboard")
+                             bot_id="jobboard")
+    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
