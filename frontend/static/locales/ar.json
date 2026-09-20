@@ -139,7 +139,9 @@
     },
     "not_delivered": "لم تُسلَّم الرسالة",
     "remove_attachment": "إزالة {name}",
-    "attachment": "مرفق"
+    "attachment": "مرفق",
+    "reply_label": "الرد على {name}",
+    "reply_cancel": "إلغاء الرد"
   },
   "msg": {
     "copy": "نسخ",
@@ -183,7 +185,23 @@
     "callout_important": "مهم",
     "callout_warning": "تحذير",
     "callout_caution": "تنبيه",
-    "link_retargeted": "يُفتح عبر شبكة هذا الجهاز — مكتوب بصيغة {url}"
+    "link_retargeted": "يُفتح عبر شبكة هذا الجهاز — مكتوب بصيغة {url}",
+    "reply_action": "↪ رد",
+    "reply_action_title": "الرد على هذه الرسالة",
+    "reply_jump_title": "الانتقال إلى الرسالة المقتبسة",
+    "feedback_up": "👍",
+    "feedback_up_title": "كان هذا الرد مفيدًا",
+    "feedback_down": "👎",
+    "feedback_down_title": "لم يكن هذا الرد مفيدًا",
+    "feedback_sent": "شكرًا على ملاحظاتك",
+    "feedback_failed": "تعذر إرسال الملاحظات",
+    "feedback_reason_skip": "تخطي",
+    "feedback_reason_inaccurate": "غير دقيق",
+    "feedback_reason_unhelpful": "غير مفيد",
+    "feedback_reason_too_long": "طويل جدًا",
+    "feedback_reason_off_topic": "خارج الموضوع",
+    "feedback_reason_tone": "النبرة",
+    "feedback_reason_other": "آخر"
   },
   "progress": {
     "hint_show": "إظهار العمل ◂",

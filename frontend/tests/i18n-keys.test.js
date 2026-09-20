@@ -105,6 +105,11 @@ const DYNAMIC = [
   // js/markdown.js  blockquote():  t(`md.callout_${kind}`), kind from CALLOUT_RE
   { re: /^msg\.callout_(note|tip|important|warning|caution)$/,
     built: 'markdown.js  t(`msg.callout_${kind}`)' },
+  // js/main.js  feedbackReasonRow():  t(`msg.feedback_reason_${reason}`), set
+  // matches FEEDBACK_REASONS — mirrors the backend's MessageFeedbackIn.reason
+  // Literal enum exactly (models.py).
+  { re: /^msg\.feedback_reason_(inaccurate|unhelpful|too_long|off_topic|tone|other)$/,
+    built: 'main.js  t(`msg.feedback_reason_${reason}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {

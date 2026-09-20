@@ -331,6 +331,15 @@
           <span class="icn" data-icon="alert" aria-hidden="true"></span><span data-i18n="composer.not_delivered">Message not delivered</span>
           <button type="button" id="retry-chip-btn" data-i18n="common.retry">Retry</button>
         </div>
+        <!-- Feature 5 (quote/reply): what the next send will quote, staged by
+             tapping "Reply" on a message. Hidden while nothing is staged. -->
+        <div class="reply-chip hidden" id="reply-chip" role="status">
+          <div class="reply-chip-body">
+            <span class="reply-chip-label" id="reply-chip-label"></span>
+            <span class="reply-chip-excerpt" id="reply-chip-excerpt"></span>
+          </div>
+          <button type="button" class="reply-chip-cancel" id="reply-chip-cancel" aria-label="Cancel reply" data-i18n-attr="aria-label=composer.reply_cancel">×</button>
+        </div>
         <div class="attach-preview hidden" id="attach-preview"></div>
         <div class="composer-row">
           <button class="icon-btn ghost attach-btn" id="attach-btn" title="Attach file" aria-label="Attach file" data-i18n-attr="title=composer.attach;aria-label=composer.attach">＋</button>

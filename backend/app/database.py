@@ -1528,6 +1528,27 @@ class Database:
         row = await cur.fetchone()
         return self._message_from_row(row) if row else None
 
+    async def pending_feedback_messages(self, thread_id: str,
+                                        limit: int = 3) -> list[MessageOut]:
+        """Assistant replies in this thread carrying a vote the agent has not
+        been told about yet (``metadata.feedback.pending``), oldest first.
+
+        Paired with :func:`merge_message_metadata`: the caller (see
+        main._pending_feedback_lines) appends a fixed-template note per row
+        returned here, then writes ``pending: False`` back onto that same
+        row so a later turn does not repeat it. Booleans round-trip through
+        this column as JSON `true`/`1` depending on how they were written
+        (see the `job_announce` check above), so all three spellings are
+        matched the same defensive way.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM messages WHERE thread_id = ? AND role = 'assistant' "
+            "AND json_extract(metadata, '$.feedback.pending') IN (1, 'true', 'True') "
+            "ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            (thread_id, limit),
+        )
+        return [self._message_from_row(r) for r in await cur.fetchall()]
+
     async def has_assistant_message(self, thread_id: str) -> bool:
         """Whether the thread already holds any assistant reply (cheap probe —
         the reaction autopilot uses it to spot a day-thread's opening reply)."""

@@ -129,7 +129,9 @@
     },
     "not_delivered": "消息未送达",
     "remove_attachment": "移除 {name}",
-    "attachment": "附件"
+    "attachment": "附件",
+    "reply_label": "回复 {name}",
+    "reply_cancel": "取消回复"
   },
   "msg": {
     "copy": "复制",
@@ -173,7 +175,23 @@
     "callout_important": "重要",
     "callout_warning": "警告",
     "callout_caution": "小心",
-    "link_retargeted": "通过本设备所在网络打开 — 原文为 {url}"
+    "link_retargeted": "通过本设备所在网络打开 — 原文为 {url}",
+    "reply_action": "↩ 回复",
+    "reply_action_title": "回复此消息",
+    "reply_jump_title": "跳转到被引用的消息",
+    "feedback_up": "👍",
+    "feedback_up_title": "这条回复有帮助",
+    "feedback_down": "👎",
+    "feedback_down_title": "这条回复没有帮助",
+    "feedback_sent": "感谢你的反馈",
+    "feedback_failed": "无法发送反馈",
+    "feedback_reason_skip": "跳过",
+    "feedback_reason_inaccurate": "不准确",
+    "feedback_reason_unhelpful": "没有帮助",
+    "feedback_reason_too_long": "太长",
+    "feedback_reason_off_topic": "偏离主题",
+    "feedback_reason_tone": "语气",
+    "feedback_reason_other": "其他"
   },
   "progress": {
     "hint_show": "显示过程 ▸",

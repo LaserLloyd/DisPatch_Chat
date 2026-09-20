@@ -129,7 +129,9 @@
     },
     "not_delivered": "メッセージを送信できませんでした",
     "remove_attachment": "{name} を削除",
-    "attachment": "添付ファイル"
+    "attachment": "添付ファイル",
+    "reply_label": "{name}への返信",
+    "reply_cancel": "返信をキャンセル"
   },
   "msg": {
     "copy": "コピー",
@@ -173,7 +175,23 @@
     "callout_important": "重要",
     "callout_warning": "警告",
     "callout_caution": "注意",
-    "link_retargeted": "この端末のネットワーク上で開きます — 元の記述は {url}"
+    "link_retargeted": "この端末のネットワーク上で開きます — 元の記述は {url}",
+    "reply_action": "↩ 返信",
+    "reply_action_title": "このメッセージに返信",
+    "reply_jump_title": "引用元のメッセージにジャンプ",
+    "feedback_up": "👍",
+    "feedback_up_title": "この返信は役に立った",
+    "feedback_down": "👎",
+    "feedback_down_title": "この返信は役に立たなかった",
+    "feedback_sent": "フィードバックありがとうございます",
+    "feedback_failed": "フィードバックを送信できませんでした",
+    "feedback_reason_skip": "スキップ",
+    "feedback_reason_inaccurate": "不正確",
+    "feedback_reason_unhelpful": "役に立たない",
+    "feedback_reason_too_long": "長すぎる",
+    "feedback_reason_off_topic": "話題がずれている",
+    "feedback_reason_tone": "口調",
+    "feedback_reason_other": "その他"
   },
   "progress": {
     "hint_show": "途中経過を表示 ▸",

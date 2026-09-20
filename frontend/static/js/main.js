@@ -107,6 +107,13 @@ const state = {
   // turned on by populating it from the WS message frames. See the open issue
   // in the report.
   lastMessageRole: new Map(),
+  // The message a "Reply" tap has staged for the NEXT send, or null. Cleared
+  // on send and on a real thread switch (see openThread) — a quote must not
+  // silently follow the composer into a different conversation.
+  // {id, role, text} — `text` is a client-side PREVIEW (see quotePreview);
+  // the canonical reply_excerpt is computed server-side once the message
+  // that quotes it actually exists.
+  replyTarget: null,
 };
 
 // The DeepSeek Harness (dsh) pane is rendered as a pseudo-bot in the sidebar
@@ -188,6 +195,7 @@ const dom = {};
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
  'job-board-host', 'tab-jobs',
  'retry-chip', 'retry-chip-btn',
+ 'reply-chip', 'reply-chip-label', 'reply-chip-excerpt', 'reply-chip-cancel',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
  'collapse-threads', 'expand-threads', 'crop-backdrop', 'crop-img', 'crop-box',
  'crop-stage', 'crop-size', 'crop-save', 'crop-close', 'crop-title',
@@ -1411,6 +1419,155 @@ function editUserMessage(msg) {
   try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch { /* ignore */ }
 }
 
+// ===================== Reply / quote (Feature 5) =====================
+// A client-side PREVIEW only — a rough echo of the server's own media/doc
+// strip (_strip_media_text / _quote_excerpt in main.py), used solely to show
+// something sensible in the chip BEFORE the quoting message exists. The
+// canonical reply_excerpt the server stores (and every OTHER device renders)
+// is computed once, server-side, when the reply is actually sent — the two
+// never need to match byte-for-byte.
+const QUOTE_PREVIEW_MAX = 160;
+function quotePreview(content) {
+  let s = (content || '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[\[media:[^\]|]+(\|[^\]]*)?\]\]/g, '')
+    .replace(/\[\[doc:[^\]|]+(\|[^\]]*)?\]\]/g, '')
+    .trim();
+  if (s.length > QUOTE_PREVIEW_MAX) s = `${s.slice(0, QUOTE_PREVIEW_MAX).trimEnd()}…`;
+  return s;
+}
+
+function replyWhoLabel(role) {
+  if (role === 'user') return t('common.you');
+  const bot = botById(state.threadBot[state.activeThreadId])
+    || botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
+  return (bot && bot.name) || t('common.assistant');
+}
+
+function renderReplyChip() {
+  const chip = dom['reply-chip'];
+  if (!chip) return;
+  const target = state.replyTarget;
+  chip.classList.toggle('hidden', !target);
+  if (!target) return;
+  dom['reply-chip-label'].textContent = t('composer.reply_label', { name: replyWhoLabel(target.role) });
+  dom['reply-chip-excerpt'].textContent = target.text;
+}
+
+// Nothing worth quoting (a media-only message, say) silently declines rather
+// than staging an empty chip nobody could make sense of.
+function setReplyTarget(msg) {
+  if (!msg || !msg.id) return;
+  const preview = quotePreview(msg.content);
+  if (!preview) return;
+  state.replyTarget = { id: msg.id, role: msg.role, text: preview };
+  renderReplyChip();
+  dom['input'].focus();
+}
+
+function clearReplyTarget() {
+  if (!state.replyTarget) return;
+  state.replyTarget = null;
+  renderReplyChip();
+}
+
+// A quoted row that is not currently painted (an older page not yet loaded,
+// or the quote survives a delete) simply cannot be jumped to — silent no-op,
+// same tolerance the rest of this feature gives a quote that no longer
+// resolves to anything.
+function jumpToMessage(id) {
+  const target = dom['messages'].querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 1000);
+}
+
+function quoteBlockEl(meta) {
+  const targetId = meta.reply_to;
+  return el('div', {
+    class: 'quote-block', role: 'button', tabindex: '0',
+    title: t('msg.reply_jump_title'),
+    onclick: () => jumpToMessage(targetId),
+    onkeydown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jumpToMessage(targetId); }
+    },
+  }, [
+    el('div', { class: 'quote-block-label', text: replyWhoLabel(meta.reply_role) }),
+    el('div', { class: 'quote-block-excerpt', text: meta.reply_excerpt }),
+  ]);
+}
+
+// ===================== Feedback (Feature 28) =====================
+// Fixed vocabulary, matching MessageFeedbackIn.reason server-side exactly —
+// there is no free-text path from this UI to the prompt.
+const FEEDBACK_REASONS = ['inaccurate', 'unhelpful', 'too_long', 'off_topic', 'tone', 'other'];
+
+async function sendFeedback(msg, vote, reason) {
+  try {
+    const body = reason ? { vote, reason } : { vote };
+    const r = await api.messageFeedback(msg.id, body);
+    if (!r || !r.feedback) return;
+    const idx = state.messages.findIndex((m) => m.id === msg.id);
+    const nextMsg = idx >= 0
+      ? { ...state.messages[idx], metadata: { ...(state.messages[idx].metadata || {}), feedback: r.feedback } }
+      : { ...msg, metadata: { ...(msg.metadata || {}), feedback: r.feedback } };
+    if (idx >= 0) state.messages[idx] = nextMsg;
+    const oldEl = dom['messages'].querySelector(`[data-id="${CSS.escape(msg.id)}"]`);
+    if (oldEl) {
+      const nextEl = messageEl(nextMsg);
+      if (nextEl) {
+        if (oldEl.classList.contains('grouped')) nextEl.classList.add('grouped');
+        oldEl.replaceWith(nextEl);
+      }
+    }
+    toast(t('msg.feedback_sent'));
+  } catch {
+    toast(t('msg.feedback_failed'), true);
+  }
+}
+
+function feedbackReasonRow(msg) {
+  const row = el('div', { class: 'feedback-reasons' });
+  for (const reason of FEEDBACK_REASONS) {
+    row.append(el('button', {
+      class: 'feedback-reason-btn', type: 'button',
+      text: t(`msg.feedback_reason_${reason}`),
+      onclick: () => { row.remove(); sendFeedback(msg, 'down', reason); },
+    }));
+  }
+  row.append(el('button', {
+    class: 'feedback-reason-btn skip', type: 'button', text: t('msg.feedback_reason_skip'),
+    onclick: () => { row.remove(); sendFeedback(msg, 'down'); },
+  }));
+  return row;
+}
+
+// Hoisted out of messageEl() (it used to be a local const there) so the
+// feedback helpers above, which build their own action-row buttons, can
+// share the exact same shape rather than re-implementing it.
+function actBtn(label, title, fn) {
+  const b = el('button', { class: 'msg-act-btn', title });
+  b.textContent = label;
+  b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
+  return b;
+}
+
+function appendFeedbackActions(actions, msg, col) {
+  const current = ((msg.metadata || {}).feedback || {}).vote || null;
+  const up = actBtn(t('msg.feedback_up'), t('msg.feedback_up_title'),
+    () => sendFeedback(msg, 'up'));
+  if (current === 'up') up.classList.add('feedback-active');
+  actions.append(up);
+  const down = actBtn(t('msg.feedback_down'), t('msg.feedback_down_title'), () => {
+    const existing = col.querySelector('.feedback-reasons');
+    if (existing) { existing.remove(); return; }
+    col.append(feedbackReasonRow(msg));
+  });
+  if (current === 'down') down.classList.add('feedback-active');
+  actions.append(down);
+}
+
 // The ONE place that decides whether pictures render. Two reasons to hide
 // them, one answer: Safe Mode (server-enforced, per-session) and No-Image Mode
 // (device preference). Everything downstream — markdown's noMedia strip, the
@@ -1458,6 +1615,14 @@ function messageEl(msg) {
     col.append(el('div', { class: 'msg-head' }, [
       nameSpan('msg-name', (hbot && hbot.name) ? hbot.name : t('common.assistant'), hbot),
     ]));
+  }
+  // Feature 5 (quote/reply): a message that quotes another renders a small
+  // tappable block above its own bubble. reply_excerpt is ALREADY computed
+  // and stored server-side (composer send or the gateway's own directive —
+  // see main.py's _quote_excerpt), so this is a pure read, no client-side
+  // lookup of the (possibly unloaded, possibly unsafe-bot) original.
+  if (msg.metadata && msg.metadata.reply_to && msg.metadata.reply_excerpt) {
+    col.append(quoteBlockEl(msg.metadata));
   }
   // dir="auto" on the bubble, not on the app: message text is CONTENT and picks
   // its own direction. In an Arabic session English prose was being reordered by
@@ -1583,12 +1748,6 @@ function messageEl(msg) {
 
   // Action row — revealed on hover (desktop), always tap-reachable (mobile).
   const actions = el('div', { class: 'msg-actions' });
-  const actBtn = (label, title, fn) => {
-    const b = el('button', { class: 'msg-act-btn', title });
-    b.textContent = label;
-    b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
-    return b;
-  };
   if (role !== 'system') {
     actions.append(actBtn(t('msg.copy'), t('msg.copy_title'), async (b) => {
       try {
@@ -1598,9 +1757,21 @@ function messageEl(msg) {
       } catch { /* clipboard unavailable */ }
     }));
   }
-  // Safe Mode: Copy only. Regenerate/Delete are decoy-blocked server-side and
-  // the "copy to composer" affordance would just advertise the lock — showing
-  // dead buttons defeats the deniability model.
+  // Reply/quote (Feature 5) and thumbs feedback (Feature 28) are BOTH allowed
+  // in Safe Mode — quoting is send-shaped (a locked device may already send)
+  // and rating is exactly what the family exists to do — so neither sits
+  // inside the `!state.decoy` block below, unlike regenerate/to-composer/
+  // delete, which stay full-session (mutations on history, not conversation).
+  if (!isSub) {
+    if (role !== 'system' && quotePreview(msg.content)) {
+      actions.append(actBtn(t('msg.reply_action'), t('msg.reply_action_title'),
+        () => setReplyTarget(msg)));
+    }
+    if (role === 'assistant') appendFeedbackActions(actions, msg, col);
+  }
+  // Safe Mode: Copy/Reply/Feedback only. Regenerate/Delete are decoy-blocked
+  // server-side and the "copy to composer" affordance would just advertise
+  // the lock — showing dead buttons defeats the deniability model.
   if (!state.decoy) {
     if (role === 'assistant' && !isSub && state.messages[state.messages.length - 1]?.id === msg.id) {
       actions.append(actBtn(t('msg.regenerate'), t('msg.regenerate_title'), () => regenerateLast()));
@@ -2150,6 +2321,9 @@ function sendMessage() {
   }
   if (full.length > 65536) { toast(t('toast.too_long'), true); return; }
   const frame = { type: 'send', thread_id: state.activeThreadId, text: full, client_msg_id: newClientMsgId() };
+  // Included in the frame itself (not a separate call) so a reconnect replay
+  // — which resends this exact object unchanged — carries the quote too.
+  if (state.replyTarget) frame.reply_to = state.replyTarget.id;
   const ok = !!(socket && socket.send(frame));
   if (!ok) { toast(t('toast.offline'), true); return; }
   trackPendingSend(frame);
@@ -2161,6 +2335,7 @@ function sendMessage() {
 
   dom['input'].value = '';
   clearAttachments();
+  clearReplyTarget();
   autosize();
   // Optimistic "thinking" — shows the typing bubble + waiting label right away
   // (the composer itself stays usable for queued follow-up messages).
@@ -2737,7 +2912,7 @@ async function openThread(id, { background = false, botId = null } = {}) {
   // server); clears come from thinking/stopped events and server-fetched
   // reconciliation in selectBot()/resync().
   if (t && t.status === 'thinking') state.thinking[id] = true;
-  if (switching && !background) clearAttachments();
+  if (switching && !background) { clearAttachments(); clearReplyTarget(); }
   renderThreads();
   renderChatHeader();
   // Paint shimmer placeholders while the history request is in flight (only on a
@@ -5691,6 +5866,30 @@ function handleWs(data) {
       }
       break;
     }
+    case 'message_feedback': {
+      // Feature 28: another device (or this one's own request — the sender
+      // already updated its local state in sendFeedback, so this is a no-op
+      // there beyond a harmless re-render) rated a reply. Same
+      // update-state-then-repaint shape as checklist_update above.
+      const mid = data.message_id;
+      if (!mid || !data.feedback) break;
+      const idx = state.messages.findIndex((x) => x.id === mid);
+      if (idx >= 0) {
+        state.messages[idx] = { ...state.messages[idx],
+          metadata: { ...(state.messages[idx].metadata || {}), feedback: data.feedback } };
+      }
+      if (data.thread_id === state.activeThreadId && idx >= 0) {
+        const oldEl = dom['messages'].querySelector(`[data-id="${CSS.escape(mid)}"]`);
+        if (oldEl) {
+          const nextEl = messageEl(state.messages[idx]);
+          if (nextEl) {
+            if (oldEl.classList.contains('grouped')) nextEl.classList.add('grouped');
+            oldEl.replaceWith(nextEl);
+          }
+        }
+      }
+      break;
+    }
     case 'locked':
       // The full session expired server-side → fall back to Safe Mode.
       handleLocked();
@@ -5808,6 +6007,7 @@ function wireEvents() {
   dom['send'].addEventListener('click', sendMessage);
   dom['stop'].addEventListener('click', stopReply);
   dom['retry-chip-btn'].addEventListener('click', retryPendingSends);
+  dom['reply-chip-cancel'].addEventListener('click', clearReplyTarget);
   dom['input'].addEventListener('input', () => { autosize(); updateSendEnabled(); });
   dom['input'].addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;

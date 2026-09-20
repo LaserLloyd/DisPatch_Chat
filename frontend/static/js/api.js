@@ -160,6 +160,10 @@ export const api = {
   // op is what the widget sends: the server merges it, so a request cannot
   // carry a stale view of rows it does not mention.
   updateChecklist: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}/checklist`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(Array.isArray(body) ? { checked: body } : body) }),
+  // Thumbs feedback on one of the bot's own replies. `body` is {vote} or
+  // {vote, reason} — both closed enums server-side (Pydantic Literal), so a
+  // caller can never smuggle free text through this call.
+  messageFeedback: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}/feedback`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
 
   upload: (file, onProgress) => xhrUpload('/api/upload', file, onProgress),
 

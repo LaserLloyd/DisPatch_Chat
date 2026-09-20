@@ -133,7 +133,9 @@
     },
     "not_delivered": "Mensagem não entregue",
     "remove_attachment": "Remover {name}",
-    "attachment": "anexo"
+    "attachment": "anexo",
+    "reply_label": "Respondendo a {name}",
+    "reply_cancel": "Cancelar resposta"
   },
   "msg": {
     "copy": "Copiar",
@@ -177,7 +179,23 @@
     "callout_important": "Importante",
     "callout_warning": "Aviso",
     "callout_caution": "Cuidado",
-    "link_retargeted": "Abre na rede deste dispositivo — escrito como {url}"
+    "link_retargeted": "Abre na rede deste dispositivo — escrito como {url}",
+    "reply_action": "↩ Responder",
+    "reply_action_title": "Responder a esta mensagem",
+    "reply_jump_title": "Ir para a mensagem citada",
+    "feedback_up": "👍",
+    "feedback_up_title": "Esta resposta foi útil",
+    "feedback_down": "👎",
+    "feedback_down_title": "Esta resposta não foi útil",
+    "feedback_sent": "Obrigado pelo feedback",
+    "feedback_failed": "Não foi possível enviar o feedback",
+    "feedback_reason_skip": "Pular",
+    "feedback_reason_inaccurate": "Imprecisa",
+    "feedback_reason_unhelpful": "Pouco útil",
+    "feedback_reason_too_long": "Muito longa",
+    "feedback_reason_off_topic": "Fora do tópico",
+    "feedback_reason_tone": "Tom",
+    "feedback_reason_other": "Outro"
   },
   "progress": {
     "hint_show": "ver o trabalho ▸",

@@ -131,7 +131,9 @@
     },
     "not_delivered": "Nachricht nicht zugestellt",
     "remove_attachment": "{name} entfernen",
-    "attachment": "Anhang"
+    "attachment": "Anhang",
+    "reply_label": "Antwort an {name}",
+    "reply_cancel": "Antwort abbrechen"
   },
   "msg": {
     "copy": "Kopieren",
@@ -175,7 +177,23 @@
     "callout_important": "Wichtig",
     "callout_warning": "Warnung",
     "callout_caution": "Achtung",
-    "link_retargeted": "Wird über das Netzwerk dieses Geräts geöffnet — geschrieben als {url}"
+    "link_retargeted": "Wird über das Netzwerk dieses Geräts geöffnet — geschrieben als {url}",
+    "reply_action": "↩ Antworten",
+    "reply_action_title": "Auf diese Nachricht antworten",
+    "reply_jump_title": "Zur zitierten Nachricht springen",
+    "feedback_up": "👍",
+    "feedback_up_title": "Diese Antwort war hilfreich",
+    "feedback_down": "👎",
+    "feedback_down_title": "Diese Antwort war nicht hilfreich",
+    "feedback_sent": "Danke für dein Feedback",
+    "feedback_failed": "Feedback konnte nicht gesendet werden",
+    "feedback_reason_skip": "Überspringen",
+    "feedback_reason_inaccurate": "Ungenau",
+    "feedback_reason_unhelpful": "Nicht hilfreich",
+    "feedback_reason_too_long": "Zu lang",
+    "feedback_reason_off_topic": "Nicht zum Thema",
+    "feedback_reason_tone": "Tonfall",
+    "feedback_reason_other": "Sonstiges"
   },
   "progress": {
     "hint_show": "Arbeit zeigen ▸",
