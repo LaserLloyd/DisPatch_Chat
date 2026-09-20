@@ -169,6 +169,11 @@ const SHELL = [
   // no side effects at import time — but it MUST be in SHELL so the cold
   // offline start resolves the import that main.js now carries.
   '/static/js/thread-sections.js',
+  // Per-thread model/thinking override chip (Feature 7, added 2026-09-20).
+  // Pure module, no side effects at import time — same reasoning as
+  // thread-sections.js just above: it MUST be in SHELL or a cold offline
+  // start has the import main.js carries but not the file behind it.
+  '/static/js/modelchip.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

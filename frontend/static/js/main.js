@@ -47,6 +47,9 @@ import { renderLinkRail, linksSection } from './links.js?v=5';
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=3';
 import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=3';
+import {
+  THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
+} from './modelchip.js?v=1';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with
@@ -74,6 +77,12 @@ const state = {
   unread: {},          // thread_id -> ISO time of oldest unread bot message
   progress: {},        // thread_id -> live working items (thinking/tool calls)
   turnPhase: {},       // thread_id -> gateway phase string ('starting_model', 'tool:brave_search', …)
+  // thread_id -> the gateway's own refusal sentence (AgentRefused), while it
+  // stands. Set when an 'error' frame carries `refused: true`; cleared when a
+  // new turn starts on that thread (a resend/correction is underway) or when
+  // the operator applies a change from the picker. The preference itself is
+  // never touched by this — see run_agent_turn's AgentRefused handling.
+  modelChipWarn: {},
   scrollPositions: {}, // thread_id -> last scrollTop when user navigated away
   auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
@@ -192,6 +201,9 @@ const dom = {};
  'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
+ // Per-thread model/thinking override chip + its picker (Feature 7).
+ 'ch-modelchip', 'ch-modelchip-label', 'model-picker', 'mp-model', 'mp-thinking-row',
+ 'mp-thinking', 'mp-context', 'mp-warning', 'mp-reset', 'mp-apply',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
  'job-board-host', 'tab-jobs',
  'retry-chip', 'retry-chip-btn',
@@ -1137,6 +1149,8 @@ function clearChatView() {
   // No thread → the header's thread actions are dead weight; hide them.
   dom['popout-btn'].hidden = true;
   dom['thread-menu-btn'].hidden = true;
+  dom['ch-modelchip'].hidden = true;
+  toggleModelPicker(false);
   // In Safe Mode the header avatar is a letter <div>; clear whichever it is.
   // The full-res pointer goes too — leaving it made the empty header open the
   // PREVIOUS thread's picture on a click.
@@ -1193,6 +1207,7 @@ function renderChatHeader() {
   // which would just spawn windows from windows.
   dom['popout-btn'].hidden = POPOUT || !th;
   dom['thread-menu-btn'].hidden = false;
+  renderModelChip();
   // A popout window titles itself after its conversation, so several of them
   // are tellable apart in the task bar / window switcher.
   if (POPOUT) document.title = `${threadTitle(th)} — ${bot ? bot.name : 'DisPatch Chat'}`;
@@ -3062,6 +3077,152 @@ async function threadAction(act) {
       if (await uiConfirm(t('chat.delete_confirm'), { danger: true })) await api.remove(id);
     }
   } catch (e) { toast(e.message, true); }
+}
+
+// ===================== Model / thinking chip (Feature 7) =====================
+// A thread's per-bot model+thinking override, plus a context-used meter, both
+// read from data the app already has (state.activeThread.prefs arrives on
+// every thread_update; the meter comes off the latest assistant message's
+// metadata — see modelchip.js's latestContextBudget). Opening the picker is
+// the only time this fetches anything, and that fetch (the allowed model
+// list) is answered from the SERVER's own short cache, not re-issued here.
+
+function toggleModelPicker(show) {
+  const menu = dom['model-picker'];
+  if (!menu) return;
+  menu.hidden = show === undefined ? !menu.hidden : !show;
+  const btn = dom['ch-modelchip'];
+  if (btn) btn.setAttribute('aria-expanded', String(!menu.hidden));
+}
+
+// Rebuilds the chip label + warning state from state alone — no request.
+// Called from renderChatHeader() (thread open, thread_update) and from the
+// WS 'error'/'thinking' handlers that flip state.modelChipWarn.
+function renderModelChip() {
+  const btn = dom['ch-modelchip'];
+  if (!btn) return;
+  const th = state.activeThread;
+  const bot = th && (botById(th.bot_id) || botById(state.selectedBotId));
+  if (!th || !bot || state.decoy) {
+    btn.hidden = true;
+    toggleModelPicker(false);
+    return;
+  }
+  btn.hidden = false;
+  const prefs = th.prefs || {};
+  const meter = meterText(latestContextBudget(state.messages));
+  // No override at all — the chip stays icon-only rather than announcing
+  // "Bot default" on every thread that has never touched this feature.
+  const parts = [prefs.model, prefs.thinking, meter].filter(Boolean);
+  dom['ch-modelchip-label'].textContent = parts.join(' · ');
+  const warn = state.modelChipWarn[th.id];
+  btn.classList.toggle('warning', !!warn);
+  btn.title = warn || t('chat.model_chip');
+}
+
+// Fills the two <select>s from the bot's allowed-model list + the thread's
+// current prefs, and the warning box from any standing refusal. Runs every
+// open — the model list is server-cached briefly (see main.py's
+// _BOT_MODELS_CACHE), so this is cheap on the common "open it again" path.
+async function openModelPicker() {
+  const th = state.activeThread;
+  const bot = th && (botById(th.bot_id) || botById(state.selectedBotId));
+  if (!th || !bot) return;
+  toggleThreadMenu(false);
+  toggleModelPicker(true);
+
+  const prefs = th.prefs || {};
+  const modelSel = dom['mp-model'];
+  const thinkingSel = dom['mp-thinking'];
+  modelSel.disabled = true;
+  modelSel.replaceChildren(el('option', { value: '', text: t('common.loading') }));
+
+  // An API bot (Connect an AI) has no reasoning-effort concept — the OpenClaw
+  // gateway is what "thinking" means, and a direct-provider bot never talks
+  // to it. Hiding the row rather than disabling it: an option nothing will
+  // ever read is worse than one that is not offered.
+  const isApiBot = !!bot.api_provider;
+  dom['mp-thinking-row'].hidden = isApiBot;
+
+  thinkingSel.replaceChildren(
+    el('option', { value: '', text: t('chat.thinking_default') }),
+    ...THINKING_LEVELS.map((lvl) => el('option', { value: lvl, text: t(`chat.thinking_${lvl}`) })));
+  thinkingSel.value = prefs.thinking || '';
+
+  const warn = state.modelChipWarn[th.id];
+  dom['mp-warning'].hidden = !warn;
+  dom['mp-warning'].textContent = warn || '';
+
+  const meter = meterText(latestContextBudget(state.messages));
+  dom['mp-context'].hidden = !meter;
+  dom['mp-context'].textContent = meter ? t('chat.model_picker_context', { used: meter }) : '';
+
+  try {
+    const { models } = await api.botModels(bot.id);
+    // The thread may have navigated away (or the picker closed) while this
+    // was in flight — a stale response must not repaint a picker for the
+    // WRONG thread, or fill in a model that got applied to nobody sees.
+    if (state.activeThreadId !== th.id || dom['model-picker'].hidden) return;
+    const options = normalizeModelOptions(models);
+    modelSel.replaceChildren(
+      el('option', { value: '', text: t('chat.model_picker_bot_default') }),
+      ...options.map((m) => el('option', { value: m.id, text: m.label })));
+    // The saved model might not be in the (possibly since-narrowed) allowed
+    // list — offer it anyway rather than silently dropping the operator's
+    // choice back to blank, which would look like Apply had cleared it.
+    if (prefs.model && !options.some((m) => m.id === prefs.model)) {
+      modelSel.append(el('option', { value: prefs.model, text: prefs.model }));
+    }
+    modelSel.value = prefs.model || '';
+  } catch (e) {
+    if (state.activeThreadId !== th.id || dom['model-picker'].hidden) return;
+    modelSel.replaceChildren(el('option', { value: prefs.model || '', text: prefs.model || t('chat.model_picker_bot_default') }));
+    toast(e.message, true);
+  } finally {
+    if (state.activeThreadId === th.id) modelSel.disabled = false;
+  }
+}
+
+async function applyModelPicker() {
+  const th = state.activeThread;
+  if (!th) return;
+  const patch = prefsPatchFrom(dom['mp-model'].value, dom['mp-thinking'].value);
+  try {
+    await api.setThreadPrefs(th.id, patch);
+    // Optimistic — the WS thread_update confirms and repaints the chip for
+    // real, but the picker should not sit on stale values until it arrives.
+    state.activeThread.prefs = { ...(state.activeThread.prefs || {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null) delete state.activeThread.prefs[k];
+      else state.activeThread.prefs[k] = v;
+    }
+    // Applying is how a refusal gets "corrected" — clear the warning now
+    // rather than waiting for the next turn to prove the new choice works,
+    // so the chip does not keep showing a sentence about the OLD choice.
+    delete state.modelChipWarn[th.id];
+    renderModelChip();
+    toggleModelPicker(false);
+  } catch (e) { toast(e.message, true); }
+}
+
+function wireModelChip() {
+  dom['ch-modelchip'].addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (dom['model-picker'].hidden) openModelPicker(); else toggleModelPicker(false);
+  });
+  // Clicks inside the panel (the <select>s especially) must not bubble to the
+  // document-level "close any open menu" listener below — that listener is
+  // what makes clicking elsewhere close it, and without this guard the SAME
+  // click that opens a native <select> dropdown would also hide the panel
+  // it belongs to.
+  dom['model-picker'].addEventListener('click', (e) => e.stopPropagation());
+  dom['mp-apply'].addEventListener('click', () => { applyModelPicker(); });
+  dom['mp-reset'].addEventListener('click', () => {
+    dom['mp-model'].value = '';
+    dom['mp-thinking'].value = '';
+    applyModelPicker();
+  });
+  document.addEventListener('click', () => toggleModelPicker(false));
 }
 
 // ===================== Bot Manager =====================
@@ -5638,6 +5799,13 @@ function handleWs(data) {
       const on = data.status === 'started';
       state.thinking[data.thread_id] = on;
       if (on) state.progress[data.thread_id] = [];   // fresh turn, fresh log
+      // A fresh turn is a fresh attempt — drop any standing warning from a
+      // PREVIOUS refusal on this thread now rather than let the chip keep
+      // showing a sentence about a choice that may no longer even be active.
+      if (on && state.modelChipWarn[data.thread_id]) {
+        delete state.modelChipWarn[data.thread_id];
+        if (data.thread_id === state.activeThreadId) renderModelChip();
+      }
       // A finished turn has no phase; a starting one has not reported its
       // first phase yet, and the previous turn's must not be left standing.
       setTurnPhase(data.thread_id, null);
@@ -5680,6 +5848,14 @@ function handleWs(data) {
     case 'error':
       toast(data.message + (data.detail ? ` (${data.detail})` : ''), true);
       announce(data.message, true);
+      // AgentRefused — a verdict on the thread's model/thinking choice, not
+      // an outage (see main.py's err_frame['refused']). The preference is
+      // untouched server-side; this just puts the chip in its warning state
+      // so the operator notices and can open the picker to correct it.
+      if (data.thread_id && data.refused) {
+        state.modelChipWarn[data.thread_id] = data.message;
+        if (data.thread_id === state.activeThreadId) renderModelChip();
+      }
       // Freeze any half-streamed bubble for this thread: keep the partial text,
       // drop the blinking cursor so it doesn't sit "alive" above the error.
       if (data.thread_id === state.activeThreadId) {
@@ -6134,6 +6310,7 @@ function wireEvents() {
   dom['thread-menu'].querySelectorAll('button').forEach((b) =>
     b.addEventListener('click', () => threadAction(b.dataset.act)));
   document.addEventListener('click', () => toggleThreadMenu(false));
+  wireModelChip();
 
   dom['attach-btn'].addEventListener('click', () => dom['file-input'].click());
   // ⚡ pack curation, 🩺 host dashboard and 🔌 Connect an AI are Settings tabs

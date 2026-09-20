@@ -110,6 +110,12 @@ const DYNAMIC = [
   // Literal enum exactly (models.py).
   { re: /^msg\.feedback_reason_(inaccurate|unhelpful|too_long|off_topic|tone|other)$/,
     built: 'main.js  t(`msg.feedback_reason_${reason}`)' },
+  // js/main.js  openModelPicker():  t(`chat.thinking_${lvl}`), lvl drawn from
+  // modelchip.js's THINKING_LEVELS (chat.thinking_default is a separate,
+  // literal t() call for the picker's "bot default" option and needs no
+  // entry here).
+  { re: /^chat\.thinking_(off|low|medium|high|max|adaptive)$/,
+    built: "main.js  t(`chat.thinking_${lvl}`)" },
 ];
 
 test('every key in en.json is used by the app', () => {

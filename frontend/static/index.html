@@ -305,8 +305,34 @@
         </div>
         <span class="conn-dot reconnecting" id="conn-dot" title="Connecting…" aria-label="Connection status" data-i18n-attr="title=conn.connecting;aria-label=conn.aria"></span>
         <span class="model-pill" id="ch-model" hidden></span>
+        <!-- Per-thread model/thinking override chip (operator-only — CSS
+             hides it in Safe Mode, same rule as #thread-menu-btn below).
+             The label shows "model · used/window"; a refusal from the
+             gateway (AgentRefused) adds .warning without clearing the
+             underlying preference, so the operator can open the picker and
+             see exactly what was refused. -->
+        <button class="icon-btn ghost model-chip-btn" id="ch-modelchip" title="Model &amp; thinking" aria-label="Model &amp; thinking" data-i18n-attr="title=chat.model_chip;aria-label=chat.model_chip" aria-haspopup="dialog" aria-expanded="false" hidden>
+          <span class="icn" data-icon="chip" aria-hidden="true"></span>
+          <span class="model-chip-label" id="ch-modelchip-label"></span>
+        </button>
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
+        <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking">
+          <div class="mp-row">
+            <label for="mp-model" data-i18n="chat.model_picker_model">Model</label>
+            <select id="mp-model"></select>
+          </div>
+          <div class="mp-row" id="mp-thinking-row">
+            <label for="mp-thinking" data-i18n="chat.model_picker_thinking">Thinking</label>
+            <select id="mp-thinking"></select>
+          </div>
+          <div class="mp-meter" id="mp-context" hidden></div>
+          <div class="mp-warning" id="mp-warning" hidden role="alert"></div>
+          <div class="mp-actions">
+            <button class="btn-secondary" id="mp-reset" data-i18n="chat.model_picker_reset">Use bot default</button>
+            <button class="btn-primary" id="mp-apply" data-i18n="chat.model_picker_apply">Apply</button>
+          </div>
+        </div>
         <div class="menu" id="thread-menu" hidden>
           <button data-act="pin" id="thread-menu-pin"><span class="icn" data-icon="pin" aria-hidden="true"></span><span data-i18n="chat.pin">Pin</span></button>
           <button data-act="rename"><span class="icn" data-icon="rename" aria-hidden="true"></span><span data-i18n="chat.rename">Rename</span></button>

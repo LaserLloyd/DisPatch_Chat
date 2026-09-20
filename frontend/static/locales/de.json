@@ -105,7 +105,21 @@
     "archive_confirm": "Diesen Chat archivieren? Er verschwindet aus deiner Chatliste.",
     "archived": "Chat archiviert",
     "delete_confirm": "Diesen Chat endgültig löschen?",
-    "delete_thread": "Löschen"
+    "delete_thread": "Löschen",
+    "model_chip": "Modell & Denkaufwand",
+    "model_picker_model": "Modell",
+    "model_picker_thinking": "Denkaufwand",
+    "model_picker_bot_default": "Bot-Standard",
+    "model_picker_context": "Kontext genutzt: {used}",
+    "model_picker_reset": "Bot-Standard verwenden",
+    "model_picker_apply": "Übernehmen",
+    "thinking_default": "Bot-Standard",
+    "thinking_off": "Aus",
+    "thinking_low": "Niedrig",
+    "thinking_medium": "Mittel",
+    "thinking_high": "Hoch",
+    "thinking_max": "Maximal",
+    "thinking_adaptive": "Adaptiv"
   },
   "welcome": {
     "with_bot": "Chat mit {name}",

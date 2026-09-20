@@ -104,7 +104,21 @@
     "archive_confirm": "このチャットをアーカイブしますか？チャット一覧には表示されなくなります。",
     "archived": "チャットをアーカイブしました",
     "delete_confirm": "このチャットを完全に削除しますか？",
-    "delete_thread": "削除"
+    "delete_thread": "削除",
+    "model_chip": "モデルと思考",
+    "model_picker_model": "モデル",
+    "model_picker_thinking": "思考レベル",
+    "model_picker_bot_default": "ボットの既定値",
+    "model_picker_context": "使用コンテキスト: {used}",
+    "model_picker_reset": "ボットの既定値に戻す",
+    "model_picker_apply": "適用",
+    "thinking_default": "ボットの既定値",
+    "thinking_off": "オフ",
+    "thinking_low": "低",
+    "thinking_medium": "中",
+    "thinking_high": "高",
+    "thinking_max": "最大",
+    "thinking_adaptive": "アダプティブ"
   },
   "welcome": {
     "with_bot": "{name} とチャット",

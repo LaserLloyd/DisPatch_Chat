@@ -21,7 +21,8 @@ The JSON contract (observed on OpenClaw 2026.6.1, re-verified on 2026.6.6):
             "provider": "deepseek",
             "model": "deepseek-v4-flash",
             "sessionId": "...",
-            "usage": { "total": 15934, ... }
+            "usage": { "total": 15934, "input": 15000, "output": 934 },
+            "contextBudgetStatus": { "estimatedPromptTokens": 15000, ... }
           }
         }
       }
@@ -791,10 +792,24 @@ def _parse_reply(parsed: dict, bot_id: str, stderr: str) -> AgentReply:
             raise _friendly_gateway_down(bot_id, detail)
         raise AgentError(f"{bot_id} reported an error.", detail=detail)
 
+    # contextBudgetStatus is the gateway's own estimate of this session's
+    # prompt weight (verified present in agentMeta on this gateway) — kept
+    # verbatim, not reshaped, because the header context meter and any future
+    # reader both want the real field names rather than a guess at them.
+    context_budget = agent_meta.get("contextBudgetStatus")
+    if not isinstance(context_budget, dict):
+        context_budget = None
+
     metadata = {
         "model": agent_meta.get("model"),
         "provider": agent_meta.get("provider"),
         "tokens": usage.get("total"),
+        # Split in and out counts alongside the existing total — the total
+        # alone cannot tell a context meter how much of the window a long
+        # reply just consumed versus what the prompt itself cost.
+        "tokens_in": usage.get("input"),
+        "tokens_out": usage.get("output"),
+        "context_budget": context_budget,
         "duration_ms": meta.get("durationMs"),
         "session_id": agent_meta.get("sessionId"),
         "run_id": parsed.get("runId"),

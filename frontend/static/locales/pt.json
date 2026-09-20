@@ -106,7 +106,21 @@
     "archive_confirm": "Arquivar esta conversa? Fica escondida da tua lista.",
     "archived": "Conversa arquivada",
     "delete_confirm": "Eliminar esta conversa definitivamente?",
-    "delete_thread": "Eliminar"
+    "delete_thread": "Eliminar",
+    "model_chip": "Modelo e raciocínio",
+    "model_picker_model": "Modelo",
+    "model_picker_thinking": "Raciocínio",
+    "model_picker_bot_default": "Padrão do bot",
+    "model_picker_context": "Contexto usado: {used}",
+    "model_picker_reset": "Usar padrão do bot",
+    "model_picker_apply": "Aplicar",
+    "thinking_default": "Padrão do bot",
+    "thinking_off": "Desativado",
+    "thinking_low": "Baixo",
+    "thinking_medium": "Médio",
+    "thinking_high": "Alto",
+    "thinking_max": "Máximo",
+    "thinking_adaptive": "Adaptativo"
   },
   "welcome": {
     "with_bot": "Conversar com {name}",

@@ -104,7 +104,21 @@
     "archive_confirm": "归档这个对话？它会从对话列表里隐藏起来。",
     "archived": "对话已归档",
     "delete_confirm": "永久删除这个对话？",
-    "delete_thread": "删除"
+    "delete_thread": "删除",
+    "model_chip": "模型与思考",
+    "model_picker_model": "模型",
+    "model_picker_thinking": "思考程度",
+    "model_picker_bot_default": "机器人默认",
+    "model_picker_context": "已用上下文：{used}",
+    "model_picker_reset": "使用机器人默认值",
+    "model_picker_apply": "应用",
+    "thinking_default": "机器人默认",
+    "thinking_off": "关闭",
+    "thinking_low": "低",
+    "thinking_medium": "中",
+    "thinking_high": "高",
+    "thinking_max": "最大",
+    "thinking_adaptive": "自适应"
   },
   "welcome": {
     "with_bot": "和 {name} 聊天",
