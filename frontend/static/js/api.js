@@ -152,6 +152,10 @@ export const api = {
   remove: (tid) => j(`/api/threads/${encodeURIComponent(tid)}?hard=true`, { method: 'DELETE' }),
 
   deleteMessage: (mid) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'DELETE' }),
+  // {content} rewrites the text, {hidden} takes the row out of an API
+  // bot's context without removing it from the transcript. Either may be
+  // sent alone; the server merges, so one never clears the other.
+  editMessage: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }),
   // Takes either a row op ({index, checked, list}) or a whole array. The row
   // op is what the widget sends: the server merges it, so a request cannot
   // carry a stale view of rows it does not mention.

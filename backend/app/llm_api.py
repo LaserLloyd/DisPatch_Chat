@@ -654,9 +654,12 @@ def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS) -> list[d
 
     Rules, in the order they matter:
 
-    * ``system`` rows and "sub" rows (the collapsed working-output the agent
-      path emits between tool calls) are not conversation — they are dropped.
-      Sending them would teach an API bot to imitate an agent it is not.
+    * ``system`` rows, "sub" rows (the collapsed working-output the agent
+      path emits between tool calls) and rows the operator has HIDDEN are not
+      conversation — they are dropped. Sending a sub row would teach an API
+      bot to imitate an agent it is not; sending a hidden one would make the
+      hide button a lie — the row stays in the chat by design, so if it also
+      stayed in the request the button would change nothing at all.
     * Newest wins. The window is filled from the END until `budget` characters
       are used, because the last thing said is always the most relevant and a
       long thread must not push the actual question out of context.
@@ -673,7 +676,7 @@ def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS) -> list[d
         if role not in ("user", "assistant"):
             continue
         meta = getattr(m, "metadata", None) or {}
-        if isinstance(meta, dict) and meta.get("sub"):
+        if isinstance(meta, dict) and (meta.get("sub") or meta.get("hidden")):
             continue
         content = (getattr(m, "content", None) or "").strip()
         if not content:

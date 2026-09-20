@@ -7995,6 +7995,87 @@ async def delete_message_endpoint(request: Request, message_id: str):
     return {"ok": True}
 
 
+# --------------------------------------------------------------------------- #
+# Editing a message
+#
+# A transcript that can be rewritten in place and shows no sign of it is a
+# transcript that lies, so the FIRST edit keeps the original text under
+# `metadata.original` and every edit stamps `edited_at` and bumps `edit_count`.
+# The bubble renders an "edited" marker off those.
+#
+# `hidden` is a metadata flag rather than a column because it is a CONTEXT
+# rule, not a display one: llm_api.build_history skips a hidden row exactly the
+# way it skips a sub row, so the message stays visible in the chat and stops
+# being sent to the model.
+# --------------------------------------------------------------------------- #
+
+
+async def _apply_message_edit(msg: MessageOut, *, content: str | None = None,
+                              hidden: bool | None = None) -> MessageOut:
+    """Rewrite a stored message, and record that it was rewritten."""
+    meta = dict(msg.metadata or {})
+    patch: dict = {}
+    if content is not None and content != msg.content:
+        # Once. A second edit must not overwrite the ORIGINAL with the first
+        # edit's text — then "show original" would show a draft nobody wrote.
+        if not meta.get("original"):
+            patch["original"] = msg.content
+        patch["edited_at"] = now_iso()
+        patch["edit_count"] = int(meta.get("edit_count") or 0) + 1
+        await db.update_message_content(msg.id, content)
+    if hidden is not None:
+        # None REMOVES the key (see merge_message_metadata): "not hidden" is
+        # the ABSENCE of the flag, not a stored False, so an un-hidden row
+        # reads identically to one that was never hidden.
+        patch["hidden"] = True if hidden else None
+    if not patch:
+        return msg
+    fresh = await db.merge_message_metadata(msg.id, patch)
+    return fresh or msg
+
+
+@app.patch("/api/messages/{message_id}", responses=problem.MACHINE)
+async def edit_message_endpoint(request: Request, message_id: str,
+                                payload: dict = Body(...)):
+    """Rewrite a message's text, or take it out of the model's context.
+
+    Full session only. Safe Mode is VIEW + SEND, and editing the transcript is
+    neither — `_deny_decoy_mutation` is the same gate the sibling delete and
+    checklist routes carry, stated here because a locked tablet rewriting what
+    somebody said is the worst version of this feature.
+    """
+    _is_safe_mode_caller(request)
+    _deny_decoy_mutation(request)
+    msg = await db.get_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    await _deny_decoy_thread(request, msg.thread_id)
+    thread = await db.get_thread(msg.thread_id)
+    if thread and thread.status == "thinking":
+        # Same rule as delete: the turn in flight is reading these rows.
+        raise HTTPException(409, "Cannot edit messages while a reply is in progress")
+
+    content = payload.get("content")
+    hidden = payload.get("hidden")
+    if content is None and hidden is None:
+        raise HTTPException(400, "Nothing to change")
+    if content is not None:
+        if not isinstance(content, str):
+            raise HTTPException(400, "content must be a string")
+        content = content.strip()
+        if not content:
+            raise HTTPException(400, "content must not be empty")
+        if len(content) > MESSAGE_MAX_CHARS:
+            raise HTTPException(400, "content is too long")
+    if hidden is not None and not isinstance(hidden, bool):
+        raise HTTPException(400, "hidden must be a boolean")
+
+    fresh = await _apply_message_edit(msg, content=content, hidden=hidden)
+    await _broadcast_message_update(fresh, fresh.thread_id)
+    await _broadcast_thread_update(fresh.thread_id)
+    return fresh.model_dump()
+
+
 # Checklist rows are authored indices (0-based) into the ```checklist table.
 # `checked` is their CHECK ORDER — the first index in the list is the row that
 # was completed first, so the array alone reconstructs both the checkbox state
@@ -10706,6 +10787,317 @@ async def _handle_archive(ws: WebSocket, data: dict) -> None:
                              "bot_id": bot_id, "hard": False})
 
 
+# --------------------------------------------------------------------------- #
+# Regenerate: a real second attempt
+#
+# `retry` re-sends the last user message into the SAME gateway session, so the
+# agent answers a second time with its own previous reply still in front of it.
+# That is "ask again while looking at your old answer", not "try again", and it
+# is why a regenerate so often came back with the same reply in different
+# words.
+#
+# A real regenerate cuts the session back to before the user's turn and re-runs
+# it. On the gateway that is `sessions.rewind`. For an API bot there is nothing
+# to rewind: llm_api.build_history rebuilds the request from DisPatch's own
+# rows on every turn, so DELETING the trailing assistant rows IS the rewind.
+#
+# The superseded reply is not thrown away. It is folded into
+# `metadata.alternates` on the new one so the family can page back to the
+# answer they preferred, and it is put back verbatim if the second attempt
+# produces nothing — losing the old answer AND failing to get a new one is the
+# worst outcome available, and it is the one the naive implementation gives.
+# --------------------------------------------------------------------------- #
+
+ALTERNATES_CAP = 8
+
+
+class _RewindError(Exception):
+    """The session could not be cut back, so nothing may be deleted."""
+
+
+def _alternate_record(msg: MessageOut) -> dict:
+    """The parts of a superseded reply the pager needs.
+
+    Deliberately not the whole row: `alternates` would otherwise nest a
+    previous generation's alternates inside each entry and the blob would
+    double in size on every regenerate.
+    """
+    meta = dict(msg.metadata or {})
+    rec: dict = {"id": msg.id, "content": msg.content or "",
+                 "created_at": msg.created_at}
+    if meta.get("model"):
+        rec["model"] = meta["model"]
+    return rec
+
+
+def _is_reply_row(msg: MessageOut) -> bool:
+    """An assistant row the family reads as THE answer (not working output)."""
+    return msg.role == "assistant" and not (msg.metadata or {}).get("sub")
+
+
+async def _session_leaf_entry(client, session_key: str) -> str | None:
+    """The id of the newest entry in a session — the branch we are leaving.
+
+    Read BEFORE the rewind, so a failed regenerate can put the GATEWAY's view
+    back where it was and not just DisPatch's rows. A rewind leaves the old
+    entries on a branch; `sessions.branches.switch` is how you walk back onto
+    it.
+    """
+    with contextlib.suppress(Exception):
+        res = await client.history_tail(session_key, limit=1)
+        for m in reversed(res.get("messages") or []):
+            eid = (m.get("__openclaw") or {}).get("id")
+            if eid:
+                return str(eid)
+    return None
+
+
+async def _rewind_gateway_session(bot_id: str, thread_id: str,
+                                  expect_text: str) -> tuple[str, str | None]:
+    """Cut this thread's gateway session back to before its last user turn.
+
+    Returns `(entry_id, leaf_entry_id)`, and raises `_RewindError` when the
+    session cannot be rewound. The caller must then delete NOTHING: a
+    regenerate that drops the old reply without rewinding is exactly the bug
+    this exists to fix, with data loss added on top.
+    """
+    client = _gateway_client
+    if client is None or not client.connected.is_set():
+        raise _RewindError("Regenerate needs the gateway connection, and it is down.")
+    # supports(), not a hello-frame requirement: an older gateway must still
+    # serve chat. It just cannot do this one thing, and saying so is better
+    # than quietly doing the old broken thing under the new button.
+    if not client.supports("sessions.rewind"):
+        raise _RewindError("This gateway cannot rewind a session — "
+                           "use Retry to ask again.")
+    bot = config.get_bot(bot_id)
+    agent_id = bot.agent_id if bot is not None else bot_id
+    session_key = openclaw.session_key_for(agent_id, thread_id)
+    leaf = await _session_leaf_entry(client, session_key)
+    try:
+        found = await client.last_user_entry(session_key)
+    except Exception as e:
+        raise _RewindError("Could not read the session history.") from e
+    if not found:
+        raise _RewindError("The gateway has no user turn to rewind to.")
+    entry_id, editor_text = found
+    if (editor_text or "").strip() != (expect_text or "").strip():
+        # A warning, not a refusal. The gateway's copy legitimately differs
+        # from the stored row — `_compose_agent_text` may have prepended a
+        # quote, `_resolve_doc_refs` may have expanded a file — and refusing
+        # on every composed prompt would make regenerate useless. It is worth
+        # a journal line because the OTHER reason the two differ is that we
+        # are about to rewind the wrong turn.
+        log.warning("regenerate: gateway entry %s reads %r but the stored "
+                    "message is %r — rewinding to the gateway's entry",
+                    entry_id, (editor_text or "")[:120], (expect_text or "")[:120])
+    try:
+        await client.rewind(session_key, entry_id, agent_id=agent_id)
+    except Exception as e:
+        raise _RewindError(f"The gateway refused to rewind: {e}") from e
+    return entry_id, leaf
+
+
+async def _snapshot_rows(rows: list[MessageOut]) -> list[dict]:
+    """Everything needed to write a row back byte for byte.
+
+    `source_id` is in here on purpose: it is the gateway dedup identity, it is
+    deliberately absent from MessageOut, and restoring a row without it would
+    let the same gateway message be delivered a second time.
+    """
+    out: list[dict] = []
+    for m in rows:
+        out.append({
+            "id": m.id, "role": m.role, "content": m.content,
+            "media_url": m.media_url, "metadata": m.metadata,
+            "created_at": m.created_at,
+            "source_id": await db.get_message_source_id(m.id),
+        })
+    return out
+
+
+async def _restore_rows(thread_id: str, snapshot: list[dict]) -> None:
+    """Put superseded rows back exactly as they were, and say so on the wire."""
+    bot_id = await _bot_of_thread(thread_id)
+    for row in snapshot:
+        try:
+            msg = await db.add_message(
+                thread_id, row["role"], row["content"],
+                media_url=row["media_url"], metadata=row["metadata"],
+                msg_id=row["id"], created_at=row["created_at"],
+                source_id=row["source_id"])
+        except Exception:
+            log.exception("could not restore message %s after a failed "
+                          "regenerate", row["id"])
+            continue
+        await manager.broadcast({"type": "message", "thread_id": thread_id,
+                                 "bot_id": bot_id, "message": msg.model_dump()})
+
+
+async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
+                           *, text: str | None = None,
+                           expect_text: str | None = None) -> None:
+    """Rewind, drop the superseded rows, ask again, and keep the old answer.
+
+    The order is load-bearing. The rewind happens FIRST and nothing is deleted
+    until it has succeeded, so a gateway that refuses leaves the thread exactly
+    as it was.
+
+    `text` is what to send (an edit sends its new wording); `expect_text` is
+    what the gateway's own copy of that turn should read, which after an edit
+    is the text BEFORE it — passing the new wording would make the sanity
+    check warn on every single edit-and-rerun and teach everyone to ignore it.
+    """
+    bot = config.get_bot(bot_id)
+    is_api = bool(bot is not None and bot.api)
+    agent_id = bot.agent_id if bot is not None else bot_id
+    session_key = openclaw.session_key_for(agent_id, thread_id)
+    entry_id: str | None = None
+    leaf: str | None = None
+    if not is_api:
+        try:
+            entry_id, leaf = await _rewind_gateway_session(
+                bot_id, thread_id,
+                user_msg.content if expect_text is None else expect_text)
+        except _RewindError as e:
+            await manager.broadcast({"type": "error", "thread_id": thread_id,
+                                     "bot_id": bot_id, "message": str(e)})
+            return
+
+    superseded = await db.messages_after(thread_id, user_msg.id)
+    snapshot = await _snapshot_rows(superseded)
+    for m in superseded:
+        # An image job cascades away with its placeholder, so stop the render
+        # before the row it would rewrite is gone (same rule as delete).
+        orphaned = await db.open_image_jobs_for_message(m.id)
+        await db.delete_message(m.id)
+        await _cancel_open_image_jobs(orphaned, "regenerated")
+        await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
+                                 "bot_id": bot_id, "message_id": m.id})
+
+    opts = TurnOptions(user_msg_id=user_msg.id, rewind_entry=entry_id,
+                       replaces=tuple(m.id for m in superseded))
+    try:
+        await run_agent_turn(thread_id, bot_id,
+                             user_msg.content if text is None else text, opts)
+    except Exception:
+        log.exception("regenerate turn failed (%s/%s)", bot_id, thread_id)
+
+    fresh = await db.messages_after(thread_id, user_msg.id)
+    replies = [m for m in fresh if _is_reply_row(m)]
+    if not replies:
+        # Nothing came back. Put the thread back the way it was — BOTH sides
+        # of it: the rows the family could read, and the gateway branch they
+        # were written from.
+        await _restore_rows(thread_id, snapshot)
+        if leaf and not is_api:
+            client = _gateway_client
+            if client is not None and client.supports("sessions.branches.switch"):
+                with contextlib.suppress(Exception):
+                    await client.switch_branch(session_key, leaf)
+        await manager.broadcast(
+            {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+             "message": "Regenerate failed — the previous reply is back."})
+        return
+
+    old_replies = [m for m in superseded if _is_reply_row(m)]
+    if not old_replies:
+        return
+    prev = old_replies[-1]
+    alts = list((prev.metadata or {}).get("alternates") or [])
+    alts.append(_alternate_record(prev))
+    # Oldest evicted. A thread regenerated forty times must not carry forty
+    # copies of its own history inside one metadata blob.
+    alts = alts[-ALTERNATES_CAP:]
+    updated = await db.merge_message_metadata(replies[-1].id, {"alternates": alts})
+    if updated:
+        await _broadcast_message_update(updated, thread_id)
+
+
+async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
+    """Rewind the session and ask the last question again. Unlocked only.
+
+    Safe Mode deliberately does NOT reach this, and `retry` deliberately still
+    does. Regenerate deletes rows and rewrites an agent's session, and a locked
+    tablet must not be able to do either — but asking again is something the
+    family has been able to do all along, so nothing is taken away from them.
+    """
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return
+    if manager.conn_decoy(ws):
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Unlock for full access"})
+        return
+    thread = await db.get_thread(thread_id)
+    if not thread:
+        return
+    if thread.status == "thinking":
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "A reply is already in progress"})
+        return
+    if not await _ws_bot_allowed(ws, thread.bot_id):
+        return
+    last_user = await db.get_last_user_message(thread_id)
+    if not last_user:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "No message to regenerate"})
+        return
+    _track(asyncio.create_task(
+        _regenerate_turn(thread_id, thread.bot_id, last_user)))
+
+
+async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
+    """Save a new version of the LAST user message and run it again.
+
+    Last message only, in v1, and the limit is not timidity: a rewind addresses
+    a session by the entry id of a user turn, and the newest one is the only
+    turn DisPatch can identify unambiguously (`last_user_entry` walks the tail
+    backwards and takes the first user role). Offering it on an older message
+    would mean rewinding to a turn we had guessed at.
+    """
+    thread_id = data.get("thread_id")
+    message_id = data.get("message_id")
+    content = data.get("content")
+    if not thread_id or not message_id or not isinstance(content, str):
+        return
+    if manager.conn_decoy(ws):
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Unlock for full access"})
+        return
+    content = content.strip()
+    if not content or len(content) > MESSAGE_MAX_CHARS:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Message must not be empty"})
+        return
+    thread = await db.get_thread(thread_id)
+    if not thread:
+        return
+    if thread.status == "thinking":
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "A reply is already in progress"})
+        return
+    if not await _ws_bot_allowed(ws, thread.bot_id):
+        return
+    msg = await db.get_message(message_id)
+    if not msg or msg.thread_id != thread_id or msg.role != "user":
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "That message cannot be re-run"})
+        return
+    last_user = await db.get_last_user_message(thread_id)
+    if not last_user or last_user.id != msg.id:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Only the newest message can be "
+                                           "edited and re-run"})
+        return
+    was = msg.content or ""
+    fresh = await _apply_message_edit(msg, content=content)
+    await _broadcast_message_update(fresh, thread_id)
+    _track(asyncio.create_task(
+        _regenerate_turn(thread_id, thread.bot_id, fresh, text=content,
+                         expect_text=was)))
+
+
 async def _handle_retry(ws: WebSocket, data: dict) -> None:
     """Re-run the agent on the last user message without creating a duplicate."""
     thread_id = data.get("thread_id")
@@ -10765,6 +11157,11 @@ WS_HANDLERS = {
     "get_messages": _handle_get_messages,
     "archive_thread": _handle_archive,
     "retry": _handle_retry,
+    # `retry` and `regenerate` are two different things and both are kept.
+    # retry re-asks inside the session the family already has (Safe Mode can
+    # do it, quota-charged); regenerate rewinds and replaces (unlocked only).
+    "regenerate": _handle_regenerate,
+    "edit_rerun": _handle_edit_rerun,
 }
 
 

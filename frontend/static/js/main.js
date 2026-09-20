@@ -2,7 +2,7 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=27';
+import { api, setOnLocked } from './api.js?v=28';
 import { ChatSocket } from './ws.js?v=8';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=31';
 import { installChecklists, applyChecklistState } from './checklist.js?v=3';
@@ -1277,10 +1277,132 @@ function uiDialog({ title, message, defaultValue, danger, okText, cancelText, pr
 function uiConfirm(message, opts = {}) { return uiDialog({ message, danger: opts.danger, okText: opts.okText || t('common.confirm'), cancelText: t('common.cancel'), title: opts.title }); }
 function uiPrompt(title, defaultValue = '') { return uiDialog({ title, defaultValue, prompt: true, okText: t('common.save'), cancelText: t('common.cancel') }); }
 
+// `regenerate`, not `retry`. They are two different things and both exist:
+// retry re-asks inside the session the family already has (Safe Mode can do
+// it, and the button under a failed reply still sends it); regenerate rewinds
+// the session past the previous answer first, so the model is not writing a
+// variation on the text it just wrote. Rewinding deletes rows, so it is
+// unlocked-only — which is why this affordance lives behind `!state.decoy`.
 function regenerateLast() {
   const tid = state.activeThreadId;
-  if (tid && socket && socket.send) socket.send({ type: 'retry', thread_id: tid });
+  if (tid && socket && socket.send) socket.send({ type: 'regenerate', thread_id: tid });
 }
+
+// The newest USER row, which is the only one the gateway can be rewound to:
+// rewind addresses a session by the entry id of a user turn, and that is the
+// one turn DisPatch can identify without guessing. Mirrors the server's
+// get_last_user_message gate so the button is not offered where it 403s.
+function isLastUserMessage(msg) {
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    if (state.messages[i].role === 'user') return state.messages[i].id === msg.id;
+  }
+  return false;
+}
+
+// Is this thread's bot a direct-provider ("Connect an AI") bot? Hide-from-
+// context is offered for those ONLY. For a gateway bot the transcript lives
+// in the gateway and DisPatch cannot edit it, so the button would hide a row
+// from view while the agent still remembered it — a control that reports
+// success and does nothing, which is the exact defect class this app keeps
+// getting burned by.
+function threadIsApiBot(threadId) {
+  const bot = botById(state.threadBot[threadId] || state.activeThread?.bot_id);
+  return !!(bot && bot.api_provider);
+}
+
+async function toggleMessageHidden(msg, hidden) {
+  try {
+    await api.editMessage(msg.id, { hidden });
+  } catch (e) { toast(e.message, true); }
+}
+
+/** Edit a message in place, optionally re-running the turn it started.
+ *
+ *  Save alone rewrites the row (and stamps the "edited" marker server-side).
+ *  Save and rerun goes over the socket instead, because it is a turn: the
+ *  server rewinds the session, drops the superseded reply and asks again.
+ */
+function openMessageEditor(msg, node) {
+  const col = node.querySelector('.msg-col');
+  const bubble = node.querySelector('.bubble');
+  if (!col || !bubble || col.querySelector('.msg-editor')) return;
+  const ta = el('textarea', { class: 'msg-editor-input', rows: '3' });
+  ta.value = msg.content || '';
+  const close = () => { box.remove(); bubble.hidden = false; };
+  const save = el('button', { class: 'msg-act-btn', text: t('common.save') });
+  const rerun = isLastUserMessage(msg)
+    ? el('button', { class: 'msg-act-btn', text: t('msg.save_rerun'),
+                     title: t('msg.save_rerun_title') })
+    : null;
+  const cancel = el('button', { class: 'msg-act-btn', text: t('common.cancel') });
+  save.addEventListener('click', async () => {
+    const text = ta.value.trim();
+    if (!text) return;
+    try {
+      await api.editMessage(msg.id, { content: text });
+      // The message_update broadcast repaints the row; close explicitly too,
+      // so a dropped socket does not leave the editor standing over a message
+      // that was already saved.
+      close();
+    } catch (e) { toast(e.message, true); }
+  });
+  if (rerun) {
+    rerun.addEventListener('click', () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      const ok = !!(socket && socket.send({
+        type: 'edit_rerun', thread_id: msg.thread_id,
+        message_id: msg.id, content: text,
+      }));
+      if (!ok) { toast(t('msg.edit_offline'), true); return; }
+      close();
+    });
+  }
+  cancel.addEventListener('click', close);
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  const box = el('div', { class: 'msg-editor' }, [
+    ta,
+    el('div', { class: 'msg-editor-row' }, [save, rerun, cancel].filter(Boolean)),
+  ]);
+  bubble.hidden = true;
+  bubble.after(box);
+  ta.focus();
+  try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch { /* ignore */ }
+}
+
+/** The ‹ n/m › pager over a reply's superseded generations.
+ *
+ *  The LIVE reply is the last page — the one on screen when nothing has been
+ *  clicked — and the alternates are the older answers in the order they were
+ *  generated. Paging is a view, not a write: nothing is persisted, so a
+ *  reload lands back on the live answer.
+ */
+function altPagerEl(msg, bubble, mdOpts) {
+  const alts = (msg.metadata && Array.isArray(msg.metadata.alternates))
+    ? msg.metadata.alternates : [];
+  if (!alts.length) return null;
+  const pages = alts.concat([{ content: msg.content || '' }]);
+  let idx = pages.length - 1;
+  const label = el('span', { class: 'alt-pos' });
+  const prev = el('button', { class: 'alt-btn', title: t('msg.alt_prev'), text: '‹' });
+  const next = el('button', { class: 'alt-btn', title: t('msg.alt_next'), text: '›' });
+  const paint = () => {
+    bubble.innerHTML = renderMarkdown(pages[idx].content || '', mdOpts);
+    enhanceContent(bubble, { noLocal: state.decoy });
+    label.textContent = t('msg.alt_pos', { n: idx + 1, total: pages.length });
+    prev.disabled = idx === 0;
+    next.disabled = idx === pages.length - 1;
+  };
+  prev.addEventListener('click', (e) => {
+    e.stopPropagation(); if (idx > 0) { idx -= 1; paint(); }
+  });
+  next.addEventListener('click', (e) => {
+    e.stopPropagation(); if (idx < pages.length - 1) { idx += 1; paint(); }
+  });
+  paint();
+  return el('div', { class: 'alt-pager' }, [prev, label, next]);
+}
+
 function editUserMessage(msg) {
   const inp = dom['input'];
   if (!inp) return;
@@ -1430,7 +1552,34 @@ function messageEl(msg) {
 
   const meta = msg.metadata || {};
   const timeText = clockTime(msg.created_at) + (meta.model ? ` · ${meta.model}` : '');
-  col.append(el('div', { class: 'msg-time', text: timeText }));
+  const timeLine = el('div', { class: 'msg-time', text: timeText });
+  // A transcript that can be rewritten in place and shows no sign of it is a
+  // transcript that lies. The marker is the feature, not decoration — and the
+  // pre-edit text is what it shows on hover, which is the only thing
+  // `metadata.original` is kept for.
+  if (meta.edited_at) {
+    timeLine.append(el('span', {
+      class: 'msg-edited',
+      title: meta.original
+        ? t('msg.edited_was', { text: String(meta.original).slice(0, 200) })
+        : t('msg.edited_title'),
+      text: ` · ${t('msg.edited')}`,
+    }));
+  }
+  if (meta.hidden) {
+    wrap.classList.add('ctx-hidden');
+    timeLine.append(el('span', {
+      class: 'msg-ctx-hidden', title: t('msg.hidden_title'),
+      text: ` · ${t('msg.hidden_marker')}`,
+    }));
+  }
+  col.append(timeLine);
+
+  // Superseded generations, if this reply replaced one.
+  if (role === 'assistant' && !isSub && !bubble.classList.contains('image-job-bubble')) {
+    const pager = altPagerEl(msg, bubble, mdOpts);
+    if (pager) col.append(pager);
+  }
 
   // Action row — revealed on hover (desktop), always tap-reachable (mobile).
   const actions = el('div', { class: 'msg-actions' });
@@ -1457,9 +1606,20 @@ function messageEl(msg) {
       actions.append(actBtn(t('msg.regenerate'), t('msg.regenerate_title'), () => regenerateLast()));
     }
     if (role === 'user') {
-      // Honest label: this only prefills the composer — sending creates a NEW
-      // message, the original stays untouched.
+      // Edit rewrites the stored row; the newest user message can also be
+      // re-run from inside the editor. Distinct from the button below it,
+      // whose honest label says it only prefills the composer — sending that
+      // creates a NEW message and the original stays untouched.
+      actions.append(actBtn(t('msg.edit'), t('msg.edit_title'), () => openMessageEditor(msg, wrap)));
       actions.append(actBtn(t('msg.to_composer'), t('msg.to_composer_title'), () => editUserMessage(msg)));
+    }
+    // API bots only — see threadIsApiBot.
+    if (role !== 'system' && threadIsApiBot(msg.thread_id)) {
+      const hidden = !!meta.hidden;
+      actions.append(actBtn(
+        hidden ? t('msg.show_context') : t('msg.hide_context'),
+        hidden ? t('msg.show_context_title') : t('msg.hide_context_title'),
+        () => toggleMessageHidden(msg, !hidden)));
     }
     actions.append(actBtn(t('msg.delete'), t('msg.delete_title'), () => deleteMessage(msg.id, msg.thread_id)));
   }

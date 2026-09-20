@@ -4033,3 +4033,32 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 }
 .mail-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--accent-text); }
 .mail-note p { max-width: 46ch; margin: 0; }
+
+
+/* ===== Editing a message, and paging its earlier answers ===== */
+.msg-editor { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+.msg-editor-input {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px;
+  font: inherit; font-size: 14px; line-height: 1.45; color: var(--text-primary);
+  background: var(--bg-input, var(--bg-hover)); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.msg-editor-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.msg.user .msg-editor-row { justify-content: flex-end; }
+
+/* The markers are the feature: an edited or context-dropped row that looks
+   like every other row is a transcript that lies about itself. */
+.msg-edited, .msg-ctx-hidden { color: var(--text-muted); font-style: italic; }
+.msg.ctx-hidden .bubble { opacity: .66; border-style: dashed; }
+
+.alt-pager {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  font-size: 11.5px; color: var(--text-muted); padding: 0 4px;
+}
+.msg.user .alt-pager { justify-content: flex-end; }
+.alt-btn {
+  font: inherit; line-height: 1; color: var(--text-muted); background: none;
+  border: 1px solid transparent; border-radius: 6px; padding: 1px 7px; cursor: pointer;
+}
+.alt-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
+.alt-btn:disabled { opacity: .35; cursor: default; }
