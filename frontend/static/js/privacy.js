@@ -14,6 +14,19 @@
 
 const FLAG_KEY = 'dispatch-privacy';
 
+// Databases wiped alongside the keys. localStorage is no longer the only thing
+// this app keeps: js/store.js holds drafts, a queued outbox and the tail of
+// recently-opened threads in IndexedDB, and a privacy mode that cleared the
+// preferences while leaving the actual message text behind would be the
+// dishonest version of this feature twice over.
+//
+// DERIVE THIS LIST TOO. frontend/tests/privacy-keys.test.js reads every
+// `export const DB_NAME = '...'` in js/ and every literal passed to
+// indexedDB.open / deleteDatabase, and fails on anything missing here.
+export const APP_DATABASES = [
+  'dispatch-store',           // store.js (drafts, outbox, cached messages)
+];
+
 // App keys wiped when the tab goes away. Anything the app persists belongs
 // here; a key not listed simply survives, which is the failure this list
 // exists to prevent.
@@ -82,6 +95,23 @@ function wipeAppKeys() {
   } catch { /* storage disabled entirely — nothing to wipe */ }
 }
 
+/** Drop the IndexedDB databases the app keeps.
+ *
+ *  Best-effort and asynchronous, which is a real limitation on the `pagehide`
+ *  path: a browser tearing a backgrounded tab down may not run the delete to
+ *  completion. It is still worth issuing — the request survives into the next
+ *  load in every browser that honours it — and the setPrivacy() path, where
+ *  the user is sitting there with the tab open, completes normally.
+ */
+function wipeAppDatabases() {
+  try {
+    if (!globalThis.indexedDB) return;
+    for (const name of APP_DATABASES) {
+      try { indexedDB.deleteDatabase(name); } catch { /* one refusal is not the rest */ }
+    }
+  } catch { /* no IndexedDB at all — nothing to wipe */ }
+}
+
 /** Wipe on the way out.
  *
  *  `pagehide` rather than `beforeunload`: it is the only event that reliably
@@ -92,7 +122,7 @@ function wipeAppKeys() {
 function armWipe() {
   if (armWipe._armed) return;
   armWipe._armed = true;
-  window.addEventListener('pagehide', wipeAppKeys);
+  window.addEventListener('pagehide', () => { wipeAppKeys(); wipeAppDatabases(); });
 }
 
 /** Call once at boot, before anything reads a preference. */
@@ -111,6 +141,7 @@ export async function setPrivacy(on) {
     await purgeServiceWorker();
     armWipe();
     wipeAppKeys();          // don't wait for the tab to close to clear history
+    wipeAppDatabases();     // ...including the drafts/outbox/message store
     document.documentElement.setAttribute('data-privacy', 'on');
     return false;
   }

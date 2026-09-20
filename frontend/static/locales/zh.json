@@ -77,6 +77,7 @@
     "collapse": "收起对话列表",
     "expand": "显示对话列表",
     "untitled": "新对话",
+    "draft": "草稿",
     "empty_no_bot": "选一个机器人查看你的对话",
     "empty_no_threads": "还没有和 {name} 的对话",
     "empty_cta": "开始第一次对话 →",

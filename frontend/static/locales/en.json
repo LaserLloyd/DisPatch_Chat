@@ -78,6 +78,7 @@
     "collapse": "Collapse chat list",
     "expand": "Show chat list",
     "untitled": "New Chat",
+    "draft": "Draft",
     "empty_no_bot": "Pick a bot to see your chats",
     "empty_no_threads": "No chats with {name} yet",
     "empty_cta": "Start your first chat →",

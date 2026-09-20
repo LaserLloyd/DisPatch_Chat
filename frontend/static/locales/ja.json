@@ -77,6 +77,7 @@
     "collapse": "チャット一覧を隠す",
     "expand": "チャット一覧を表示",
     "untitled": "新しいチャット",
+    "draft": "下書き",
     "empty_no_bot": "ボットを選ぶとチャットが表示されます",
     "empty_no_threads": "{name} とのチャットはまだありません",
     "empty_cta": "最初のチャットを始める →",

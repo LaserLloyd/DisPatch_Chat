@@ -79,6 +79,7 @@
     "collapse": "Réduire la liste des chats",
     "expand": "Afficher la liste des chats",
     "untitled": "Nouveau chat",
+    "draft": "Brouillon",
     "empty_no_bot": "Choisis un bot pour voir tes chats",
     "empty_no_threads": "Aucun chat avec {name}",
     "empty_cta": "Démarre ton premier chat →",

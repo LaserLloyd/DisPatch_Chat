@@ -2,7 +2,20 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v116';  // v116: the cold-start flash, and a resume
+const CACHE = 'local-chat-v117';  // v117: the feature wave — regenerate with
+  //   alternates, edit-and-rerun, quote/reply, a per-thread model and thinking
+  //   override with a context meter, the mood-driven header face, scene
+  //   backdrops, drafts with a persisted outbox and offline reading, and thumbs
+  //   feedback that reaches the agent. Built as five parallel groups and merged
+  //   here, which is why this one bump covers them all.
+  //   Cache-correctness note, the same trap v114 documents: six modules had
+  //   their CONTENT changed by a later group while keeping the ?v= an earlier
+  //   group had already assigned — a warm client would have loaded new main.js
+  //   beside its stale copy of them. checklist 3→4, clients 3→4, job-thread
+  //   6→7, jobs 6→7, privacy 7→8, reactions 16→17. Also in this wave:
+  //   api 27→28, app.css 79→80, main 94→95, ws 8→9, and two new modules,
+  //   modelchip.js and store.js, at v=1.
+  // v116: the cold-start flash, and a resume
   //   that left the last session on screen. The flash was THIS FILE: every
   //   deploy bumps CACHE, so the first reopen of the installed PWA installed a
   //   new worker, clients.claim() fired controllerchange on an already-painted

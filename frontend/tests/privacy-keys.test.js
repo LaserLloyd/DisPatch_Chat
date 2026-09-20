@@ -16,6 +16,13 @@
 // A key that is NOT wiped is a deliberate decision, and there are exactly two.
 // They live in EXEMPT below with the reason, so declining to wipe something is
 // a line of code somebody has to write rather than a line nobody wrote.
+//
+// localStorage is no longer the only thing this app keeps. js/store.js holds
+// drafts, a queued outbox and the tail of recently-opened threads in
+// IndexedDB — actual message text, not a preference — so the same derive-it
+// rule now covers database names too (APP_DATABASES, checked at the bottom of
+// this file). A privacy wipe that cleared the theme and left the conversation
+// would be the promise broken in the loudest possible way.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +30,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { APP_KEYS } from '../static/js/privacy.js';
+import { APP_KEYS, APP_DATABASES } from '../static/js/privacy.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
@@ -121,4 +128,58 @@ test('the two documented exemptions are still the only ones', () => {
   // wipe promise gets hollowed out one "just this key" at a time, so adding an
   // entry should require deliberately editing this expectation too.
   assert.deepEqual([...EXEMPT.keys()].sort(), ['dispatch-nim', 'dispatch-privacy']);
+});
+
+// ===========================================================================
+// Databases. Same rule, different storage: derive the list, do not guess at it.
+//
+// store.js does not call indexedDB.open directly — it takes its factory as an
+// argument so the tests can hand it an in-memory one — so the name is read off
+// the `export const DB_NAME` it declares. Any future module that opens a
+// database by literal is caught by the second pattern.
+// ===========================================================================
+
+/** Every database name this file can be shown to open. */
+function databasesNamedBy(src) {
+  const found = new Set();
+  // 1. `export const DB_NAME = 'dispatch-store';` — a module that declares the
+  //    name it hands to an injected factory.
+  for (const m of src.matchAll(/\bconst\s+[\w$]*DB_NAME[\w$]*\s*=\s*(['"`])([^'"`]*)\1\s*;/g)) {
+    found.add(m[2]);
+  }
+  // 2. a literal passed straight to the real thing.
+  for (const m of src.matchAll(/indexedDB\.(?:open|deleteDatabase)\(\s*(['"`])([^'"`]*)\1/g)) {
+    found.add(m[2]);
+  }
+  return found;
+}
+
+test('every IndexedDB database the app opens is wiped', () => {
+  const wiped = new Set(APP_DATABASES);
+  const orphans = [];
+  for (const [file, src] of sources()) {
+    // privacy.js itself names them in order to delete them.
+    if (file === 'js/privacy.js') continue;
+    for (const name of databasesNamedBy(src)) {
+      if (wiped.has(name)) continue;
+      orphans.push(`${name}  (opened by ${file})`);
+    }
+  }
+  assert.deepEqual(orphans.sort(), [],
+    '\nThese IndexedDB databases survive privacy mode\'s wipe. They hold real\n'
+    + 'content — drafts, queued sends, cached messages — not preferences, so a\n'
+    + 'device that kept them kept the conversation. Add each to APP_DATABASES in\n'
+    + 'privacy.js:\n\n' + orphans.join('\n'));
+});
+
+test('APP_DATABASES names no database that nothing opens', () => {
+  const opened = new Set();
+  for (const [file, src] of sources()) {
+    if (file === 'js/privacy.js') continue;
+    for (const name of databasesNamedBy(src)) opened.add(name);
+  }
+  const phantom = APP_DATABASES.filter((n) => !opened.has(n));
+  assert.deepEqual(phantom, [],
+    '\nAPP_DATABASES lists databases no code opens. Remove them — a padded list\n'
+    + 'reads as a maintained one:\n' + phantom.join('\n'));
 });

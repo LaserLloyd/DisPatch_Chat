@@ -211,9 +211,17 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // cache holding both would run two copies of RAIL_ICONS. The shell is
   // cached by PATH, so without the bump an installed client keeps the old
   // markup and the fixes simply are not there. If you bump again, bump here
-  // too.
-  assert.equal(m[1], 'local-chat-v116',
-    'sw.js CACHE must be local-chat-v116 so old shells drop and the new board/viewport/theme/markdown fixes install');
+  // too. v116 fixed the cold-start flash (the installed PWA reloaded itself on
+  // every first reopen) and the resume path. v117 is the feature wave —
+  // regenerate/edit-and-rerun/quote-reply/per-thread model/mood face/scene
+  // backdrops/drafts+outbox/feedback — merged from five parallel groups under
+  // ONE bump, and the reason that bump is load-bearing here: six modules had
+  // their content rewritten by a later group while still carrying an earlier
+  // group's ?v=, so a warm client would have run new main.js beside stale
+  // copies of them. The shell is cached by PATH; without this name change an
+  // installed client keeps all of it.
+  assert.equal(m[1], 'local-chat-v117',
+    'sw.js CACHE must be local-chat-v117 so old shells drop and the feature wave installs');
 });
 
 // =============================================================================

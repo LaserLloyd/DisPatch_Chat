@@ -79,6 +79,7 @@
     "collapse": "Ocultar la lista de chats",
     "expand": "Mostrar la lista de chats",
     "untitled": "Nuevo chat",
+    "draft": "Borrador",
     "empty_no_bot": "Elige un bot para ver tus chats",
     "empty_no_threads": "Aún no hay chats con {name}",
     "empty_cta": "Empieza tu primer chat →",

@@ -4,10 +4,17 @@
 const HEARTBEAT_MS = 30000;
 
 export class ChatSocket {
-  constructor({ onMessage, onStatus, onReconnect }) {
+  constructor({ onMessage, onStatus, onReconnect, onOpen }) {
     this.onMessage = onMessage;
     this.onStatus = onStatus || (() => {});
     this.onReconnect = onReconnect || (() => {});
+    // Fires on EVERY open, first connect included. onReconnect deliberately
+    // does not: it means "you lost the link and got it back", and resyncing
+    // state the app has only just loaded would be noise. The persisted outbox
+    // needs the other question answered — "is there a socket to replay onto" —
+    // and at boot the answer arrives on the first open, which onReconnect
+    // never sees.
+    this.onOpen = onOpen || (() => {});
     this.ws = null;
     this.backoff = 500;
     this.maxBackoff = 8000;
@@ -64,6 +71,7 @@ export class ChatSocket {
         }
         this.send({ type: 'ping' });
       }, HEARTBEAT_MS);
+      this.onOpen(reconnected);             // replay anything queued (incl. first connect)
       if (reconnected) this.onReconnect();  // re-sync state after a drop
     });
 

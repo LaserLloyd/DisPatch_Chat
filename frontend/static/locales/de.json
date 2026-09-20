@@ -78,6 +78,7 @@
     "collapse": "Chatliste einklappen",
     "expand": "Chatliste anzeigen",
     "untitled": "Neuer Chat",
+    "draft": "Entwurf",
     "empty_no_bot": "Wähle einen Bot, um deine Chats zu sehen",
     "empty_no_threads": "Noch keine Chats mit {name}",
     "empty_cta": "Ersten Chat starten →",

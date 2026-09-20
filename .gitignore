@@ -97,3 +97,6 @@ scripts/scrub-rules.local.txt
 # carry absolute home paths, so they trip the privacy scan -- and without
 # this rule one `git add -A` would publish one.
 *.log
+
+# Agent scaffolding: parallel worktrees and session state, never part of the app.
+.claude/

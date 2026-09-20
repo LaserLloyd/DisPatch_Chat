@@ -19,7 +19,7 @@
 
 import { railIcon, RAIL_ICONS } from './util.js?v=18';
 import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=7';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=8';
 
 const KEY = 'dispatch-pinned-settings';
 // Defaults are stored as OPT-OUTS, not by seeding KEY. A device that already

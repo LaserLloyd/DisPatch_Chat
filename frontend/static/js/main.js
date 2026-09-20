@@ -3,9 +3,9 @@
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
 import { api, setOnLocked } from './api.js?v=28';
-import { ChatSocket } from './ws.js?v=8';
+import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=31';
-import { installChecklists, applyChecklistState } from './checklist.js?v=3';
+import { installChecklists, applyChecklistState } from './checklist.js?v=4';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=18';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -20,16 +20,16 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=16';
+} from './reactions.js?v=17';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=7';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=3';
-import { mountJobs, unmountJobs } from './jobs.js?v=6';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=6';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=4';
+import { mountJobs, unmountJobs } from './jobs.js?v=7';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=7';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=5';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=7';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=8';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=9';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
@@ -50,6 +50,9 @@ import { imageJobMessageEl } from './imagejobs.js?v=3';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=1';
+import {
+  createStore, createCachePainter, tierFor, TIER_FULL, MESSAGE_CACHE_ROWS,
+} from './store.js?v=1';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with
@@ -84,6 +87,7 @@ const state = {
   // never touched by this — see run_agent_turn's AgentRefused handling.
   modelChipWarn: {},
   scrollPositions: {}, // thread_id -> last scrollTop when user navigated away
+  drafts: new Set(),   // thread ids with unsent composer text (the "Draft" label)
   auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
   decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
   started: false,      // app has booted (bots loaded, socket connected)
@@ -1142,6 +1146,15 @@ function threadRowEl(th, bot) {
     const unreadCls = unreadDotClass(state.unread[th.id]);
     if (unreadCls) titleEl.append(el('span', { class: 'thread-unread-dot' + unreadCls }));
 
+    // "Draft" sits in front of the preview rather than replacing it: which
+    // conversation the unsent words belong to is the useful half, and the last
+    // message is what identifies the conversation.
+    const previewEl = el('div', { class: 'thread-preview' + (thinking ? ' thinking' : ''), dir: 'auto' });
+    if (!thinking && state.drafts.has(th.id)) {
+      previewEl.append(el('span', { class: 'thread-draft', text: t('threads.draft') }));
+    }
+    previewEl.append(document.createTextNode(preview));
+
     const row = el('div', {
       class: 'thread-item' + (th.id === state.activeThreadId ? ' active' : '') + (th.is_pinned ? ' pinned' : ''),
       dataset: { id: th.id },    // lets repaintPreserving restore keyboard focus
@@ -1155,7 +1168,7 @@ function threadRowEl(th, bot) {
           titleEl,
           el('div', { class: 'thread-time', text: relTime(th.updated_at) }),
         ]),
-        el('div', { class: 'thread-preview' + (thinking ? ' thinking' : ''), dir: 'auto', text: preview }),
+        previewEl,
       ]),
     ]);
     return row;
@@ -1982,7 +1995,8 @@ function renderSkeleton() {
 
 function renderMessages(stick = true) {
   const box = dom['messages'];
-  box.innerHTML = '';
+  box.innerHTML = '';   // takes any cached-tail rows with it
+  cachedPainted.delete(state.activeThreadId);
   // NOTE: the 2026-09-15 redesign dropped the in-chat job-card header
   // in favour of the modal-based detail panel (openJobDetail in
   // job-thread.js, surfaced by the Jobs board list). The board list
@@ -2438,6 +2452,7 @@ function autosize() {
 function sendMessage() {
   const text = dom['input'].value.trim();
   if ((!text && !state.attachments.length) || !state.activeThreadId) return;
+  const draftThread = state.activeThreadId;   // the thread this text belongs to
   // Note: intentionally NOT blocked while a reply is pending — queued sends are
   // serialised server-side, so the user can fire off several in a row.
 
@@ -2466,6 +2481,10 @@ function sendMessage() {
   showOptimisticSend(frame.client_msg_id, state.activeThreadId, full);
 
   dom['input'].value = '';
+  // The words are in the outbox now, so the draft copy of them is no longer a
+  // safety net — it is a second copy that would reappear in the composer the
+  // next time this thread is opened.
+  clearDraftFor(draftThread);
   clearAttachments();
   clearReplyTarget();
   autosize();
@@ -2473,6 +2492,198 @@ function sendMessage() {
   // (the composer itself stays usable for queued follow-up messages).
   state.thinking[state.activeThreadId] = true;
   reflectComposerState();
+}
+
+// ===================== Local store (drafts / outbox / offline reading) ======
+// js/store.js keeps three things in IndexedDB: the composer text you never
+// sent, the sends the server has not acked, and the tail of the threads you
+// opened. All three are conveniences; none of them is authoritative.
+//
+// TIER. The store is scoped to the tier this session is running in, and the
+// instance is REBUILT whenever that changes. A locked session gets a store
+// that can only compose safe-tier keys, so the unlocked tier's cache is not
+// something it is trusted not to read — it is something it cannot address.
+// Dropping to Safe Mode then deletes the unlocked tier outright (goSafe).
+let localStore = null;
+let cachePainter = null;
+// Thread ids whose cached tail actually reached the screen. Only used to
+// decide whether a FAILED fetch may leave those rows up instead of replacing a
+// readable history with an empty state.
+const cachedPainted = new Set();
+
+function ensureLocalStore() {
+  const tier = tierFor(state.decoy);
+  if (localStore && localStore.tier === tier) return localStore;
+  if (localStore) localStore.close();
+  localStore = createStore({ tier });
+  cachePainter = createCachePainter({
+    store: localStore,
+    // "Nothing real is on screen" — state.messages is reassigned per thread, so
+    // an empty one means the fetch has not landed and no live frame has been
+    // appended.
+    isEmpty: (tid) => tid === state.activeThreadId && !state.messages.length,
+    paint: paintCachedMessages,
+  });
+  cachedPainted.clear();
+  return localStore;
+}
+
+/** Load what this tier persisted. Called at boot BEFORE the socket connects, so
+ *  restored outbox frames are in pendingSends by the time the first 'open'
+ *  fires and the normal replay path carries them — no second send mechanism,
+ *  and no window where a queued message is neither on screen nor in flight. */
+async function restoreLocalState() {
+  const store = ensureLocalStore();
+  state.drafts = new Set();
+  try {
+    for (const id of await store.draftThreadIds()) state.drafts.add(id);
+  } catch { /* storage refused — the app works, the drafts are gone */ }
+  try {
+    for (const row of await store.listOutbox()) {
+      const cmid = row.frame && row.frame.client_msg_id;
+      if (!cmid || pendingSends.has(cmid)) continue;
+      // sentAt is stamped NOW, not when it was typed: it measures how long this
+      // has been waiting on THIS socket, and a frame queued yesterday would
+      // otherwise raise the Retry chip before a socket had even opened.
+      pendingSends.set(cmid, {
+        frame: row.frame, thread_id: row.thread_id, text: row.text, sentAt: Date.now(),
+      });
+    }
+  } catch { /* same */ }
+  if (pendingSends.size && !pendingSweepTimer) {
+    pendingSweepTimer = setInterval(updateRetryChip, 5000);
+  }
+  updateRetryChip();
+  renderThreads();
+}
+
+// -- drafts ------------------------------------------------------------------
+const DRAFT_DEBOUNCE_MS = 400;
+let draftTimer = null;
+let draftPending = null;   // {tid, text} — the thread it was TYPED in
+
+function scheduleDraftSave() {
+  const tid = state.activeThreadId;
+  if (!tid) return;
+  // The thread id is captured here rather than read inside the timeout: a
+  // switch during the debounce window would otherwise file one thread's words
+  // under another thread's name.
+  draftPending = { tid, text: dom['input'].value };
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(flushDraft, DRAFT_DEBOUNCE_MS);
+}
+
+function flushDraft() {
+  clearTimeout(draftTimer); draftTimer = null;
+  const p = draftPending; draftPending = null;
+  if (p) saveDraft(p.tid, p.text);
+}
+
+function saveDraft(tid, text) {
+  if (!tid) return;
+  const has = !!(text && text.trim());
+  const changed = has !== state.drafts.has(tid);
+  if (has) state.drafts.add(tid); else state.drafts.delete(tid);
+  if (changed) touchThreadRow(tid);
+  ensureLocalStore().setDraft(tid, has ? text : '').catch(() => {});
+}
+
+function clearDraftFor(tid) {
+  if (!tid) return;
+  clearTimeout(draftTimer); draftTimer = null; draftPending = null;
+  const had = state.drafts.delete(tid);
+  if (had) touchThreadRow(tid);
+  ensureLocalStore().clearDraft(tid).catch(() => {});
+}
+
+/** Put a thread's saved draft back in the composer, unless the user has already
+ *  started typing into it while the read was in flight. */
+async function restoreDraft(threadId) {
+  let text = '';
+  try { text = await ensureLocalStore().getDraft(threadId); } catch { return; }
+  if (!text) return;
+  if (state.activeThreadId !== threadId) return;   // switched away mid-read
+  if (dom['input'].value) return;                  // already typing — never clobber
+  dom['input'].value = text;
+  autosize(); updateSendEnabled();
+}
+
+// -- offline reading ---------------------------------------------------------
+
+/** Paint cached rows. DOM ONLY — nothing here enters state.messages.
+ *
+ *  Same reasoning as the optimistic send bubbles: a row in state.messages needs
+ *  a real message id (Delete, Regenerate and the "is this the last message"
+ *  check all key off it), and a cached row may since have been deleted on the
+ *  server. So the id is stripped, the action row is removed, and the next
+ *  renderMessages() clears the box out from under all of it.
+ */
+function paintCachedMessages(threadId, rows) {
+  if (threadId !== state.activeThreadId) return;
+  const box = dom['messages'];
+  if (!box) return;
+  const frag = document.createDocumentFragment();
+  let painted = 0;
+  for (const m of rows) {
+    const node = messageEl(m);
+    if (!node) continue;              // NIM dropped a picture-only row
+    delete node.dataset.id;           // never addressable as a live message
+    node.dataset.cached = '1';
+    const acts = node.querySelector('.msg-actions');
+    if (acts) acts.remove();
+    frag.append(node);
+    painted += 1;
+  }
+  if (!painted) return;
+  box.innerHTML = '';                 // replaces the shimmer
+  box.append(frag);
+  cachedPainted.add(threadId);
+  scrollToBottom();
+}
+
+/** Ask the cache to paint, if the network has not already spoken. Never
+ *  awaited by its caller: a slow disk must not hold up the fetch. */
+function paintCachedIfUseful(threadId) {
+  ensureLocalStore();
+  return cachePainter.paintCached(threadId).catch(() => false);
+}
+
+// The cached tail is refreshed on a short timer rather than on every frame:
+// a thread being read live can take a burst of messages, and the useful thing
+// to keep is where the conversation GOT to, not each step on the way.
+const CACHE_REFRESH_MS = 1200;
+let cacheRefreshTimer = null;
+
+/** Re-cache the active thread's tail after it changes.
+ *
+ *  Without this the cache only ever holds what a thread looked like when it
+ *  was OPENED, so the messages you just read — the ones you would most want to
+ *  see again on a dead connection — are exactly the ones missing from it.
+ */
+function scheduleCacheRefresh(threadId) {
+  if (!threadId || threadId !== state.activeThreadId) return;
+  clearTimeout(cacheRefreshTimer);
+  cacheRefreshTimer = setTimeout(() => {
+    cacheRefreshTimer = null;
+    const tid = state.activeThreadId;
+    if (!tid || tid !== threadId) return;
+    const rows = state.messages.filter((m) => m.thread_id === tid);
+    ensureLocalStore().cacheMessages(tid, rows.slice(-MESSAGE_CACHE_ROWS)).catch(() => {});
+  }, CACHE_REFRESH_MS);
+}
+
+/** The network answered for this thread — well or badly — so the cache is now
+ *  behind and must never paint for it again.
+ *
+ *  Goes through ensureLocalStore() rather than touching cachePainter directly:
+ *  openThread() is reachable from the jobs board before the first startApp()
+ *  has built either, and a bare `cachePainter.markFresh(...)` would throw on
+ *  exactly the path that has no cache to worry about.
+ */
+function markThreadFresh(threadId) {
+  if (!threadId) return;
+  ensureLocalStore();
+  cachePainter.markFresh(threadId);
 }
 
 // ===================== WS send-ack (guaranteed delivery) =====================
@@ -2595,9 +2806,14 @@ function sweepOptimistic() {
 }
 
 function trackPendingSend(frame) {
-  pendingSends.set(frame.client_msg_id, {
+  const entry = {
     frame, thread_id: frame.thread_id, text: frame.text, sentAt: Date.now(),
-  });
+  };
+  pendingSends.set(frame.client_msg_id, entry);
+  // ...and on disk, so a reload does not lose it. Keyed by the SAME
+  // client_msg_id the server dedups on, which is what lets the restored frame
+  // be replayed unchanged: a duplicate is re-acked, never stored twice.
+  ensureLocalStore().queueSend(entry).catch(() => {});
   if (!pendingSweepTimer) pendingSweepTimer = setInterval(updateRetryChip, 5000);
   updateRetryChip();
 }
@@ -2609,6 +2825,7 @@ function clearPendingSend(clientMsgId) {
   const p = pendingSends.get(clientMsgId);
   if (!p) return null;
   pendingSends.delete(clientMsgId);
+  ensureLocalStore().dropSend(clientMsgId).catch(() => {});
   if (!pendingSends.size) {
     clearInterval(pendingSweepTimer); pendingSweepTimer = null;
     // Everything delivered: if the Retry chip restored this text and the user
@@ -2624,6 +2841,13 @@ function clearPendingSend(clientMsgId) {
 
 // Mode change / lock: a full-mode frame must never be replayed on a Safe-Mode
 // socket, and restored text must not linger into a locked composer.
+//
+// IN MEMORY ONLY, on purpose. The persisted outbox is partitioned by tier, so
+// the frames this drops are not reachable from the session that replaces this
+// one anyway; and on a LOCK they are deleted outright a moment earlier by
+// goSafe's wipe. Clearing the store here as well would mean an UNLOCK — which
+// is not a privacy event — silently threw away a Safe-Mode device's queued
+// messages.
 function dropAllPendingSends() {
   pendingSends.clear();
   clearOptimisticSends();
@@ -2999,6 +3223,9 @@ function releaseScrollSave() {
 }
 async function openThread(id, { background = false, botId = null } = {}) {
   const switching = state.activeThreadId !== id;
+  // Whatever is half-typed belongs to the thread being LEFT. Flush it before
+  // the active id moves, or the debounce timer files it under the new one.
+  if (switching && !background) flushDraft();
   suppressScrollSave = true;
   // The jump-to-new counter is per-view: a real switch starts it fresh so it
   // never carries thread A's count into thread B (which restores above-bottom).
@@ -3044,20 +3271,40 @@ async function openThread(id, { background = false, botId = null } = {}) {
   // server); clears come from thinking/stopped events and server-fetched
   // reconciliation in selectBot()/resync().
   if (t && t.status === 'thinking') state.thinking[id] = true;
-  if (switching && !background) { clearAttachments(); clearReplyTarget(); }
+  if (switching && !background) {
+    clearAttachments();
+    clearReplyTarget();
+    // The composer belongs to a thread now. Empty it and put this thread's own
+    // draft back (asynchronously — a slow disk must not delay the first paint,
+    // and restoreDraft re-checks that we are still here and still empty).
+    dom['input'].value = '';
+    autosize(); updateSendEnabled();
+    void restoreDraft(id);
+  }
   renderThreads();
   renderChatHeader();
   // Paint shimmer placeholders while the history request is in flight (only on a
   // real switch — a background re-sync must not blow away the current view).
-  if (switching && !background) renderSkeleton();
+  if (switching && !background) {
+    renderSkeleton();
+    // ...and, if we have read this thread before, put the cached tail up in
+    // place of the shimmer. Not awaited: the fetch below is the real answer and
+    // must not wait on a disk read. The painter refuses to paint once that
+    // fetch has resolved, including when it resolves mid-read.
+    void paintCachedIfUseful(id);
+  }
 
   const box = dom['messages'];
   const wasNearBottom = isNearBottom();
   const savedTop = box.scrollTop;
 
+  let keptCachedView = false;
   try {
     const r = await api.messages(id);
     if (state.activeThreadId !== id) { releaseScrollSave(); return; }   // switched away
+    // The network has spoken: from here the cache is behind by definition and
+    // must never paint for this thread again.
+    markThreadFresh(id);
     const fetched = r.messages || [];
     // Merge, don't replace: keep any live WS messages that landed while the
     // fetch was in flight (they may post-date the HTTP snapshot).
@@ -3066,14 +3313,30 @@ async function openThread(id, { background = false, botId = null } = {}) {
     state.messages = fetched.concat(extras)
       .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     state.hasMoreOlder = !!r.has_more;
+    // Keep the tail for the next cold open. These are the rows THE SERVER SENT
+    // TO THIS TIER — in Safe Mode that is the redacted view, already redacted
+    // upstream. Nothing here un-redacts anything.
+    ensureLocalStore().cacheMessages(id, fetched.slice(-MESSAGE_CACHE_ROWS)).catch(() => {});
   } catch (e) {
     if (state.activeThreadId !== id) { releaseScrollSave(); return; }
-    state.messages = []; state.hasMoreOlder = false; toast(e.message, true);
+    toast(e.message, true);
+    // The thread's state is emptied either way: leaving the PREVIOUS thread's
+    // messages in state.messages while showing this one is how a cached row
+    // and a live row end up disagreeing about which conversation you are in.
+    state.messages = []; state.hasMoreOlder = false;
+    // A failed fetch is NOT fresh data — it is NO data, which is the one
+    // moment the cache is allowed to be the answer rather than a preview. So
+    // markThreadFresh is deliberately NOT called here: the door stays open for
+    // the cache now, and for the first live frame or a later retry to close it
+    // properly. Awaited, unlike the optimistic paint above, because nothing is
+    // waiting on us any more and an offline open should land on a readable
+    // thread rather than an empty state.
+    if (cachedPainted.has(id) || await paintCachedIfUseful(id)) keptCachedView = true;
   }
   // Bug 1: Don't scroll to bottom if we have a saved position for the target
   // thread — restore that instead.
   const hasSavedPos = state.scrollPositions[id] !== undefined;
-  renderMessages((!background || wasNearBottom) && !hasSavedPos);
+  if (!keptCachedView) renderMessages((!background || wasNearBottom) && !hasSavedPos);
   if (background && !wasNearBottom) box.scrollTop = savedTop;
   // Let the swap-induced scroll events (clamp + restore/stick) flush before
   // re-enabling position saving.
@@ -5877,6 +6140,9 @@ function handleWs(data) {
     }
     case 'message': {
       if (!data.message) break;
+      // A live frame is fresher than anything on disk, so the cache must not
+      // paint over it — including a cache read that is in flight right now.
+      markThreadFresh(data.thread_id);
       // Secondary ack: our own send echoed back as the persisted broadcast.
       clearPendingSend(data.client_msg_id || data.message.client_msg_id);
       // …and take down the optimistic bubble BEFORE appendMessageToView runs,
@@ -5894,6 +6160,7 @@ function handleWs(data) {
       }
       if (data.thread_id === state.activeThreadId) {
         appendMessageToView(data.message);
+        scheduleCacheRefresh(data.thread_id);
         if (isFinalReply) {
           reflectComposerState();
           const rowEl = dom['messages'].querySelector(`[data-id="${CSS.escape(data.message.id)}"]`);
@@ -6312,7 +6579,9 @@ function wireEvents() {
   dom['stop'].addEventListener('click', stopReply);
   dom['retry-chip-btn'].addEventListener('click', retryPendingSends);
   dom['reply-chip-cancel'].addEventListener('click', clearReplyTarget);
-  dom['input'].addEventListener('input', () => { autosize(); updateSendEnabled(); });
+  dom['input'].addEventListener('input', () => {
+    autosize(); updateSendEnabled(); scheduleDraftSave();
+  });
   dom['input'].addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     // Enter sends (always). Ctrl/Cmd+Enter inserts newline.
@@ -6541,9 +6810,11 @@ function getSocket() {
     socket = new ChatSocket({
       onMessage: handleWs,
       onStatus: (ok) => setConnected(ok),
+      // Every open, first connect included — that is what carries the outbox
+      // restored from disk at boot, which onReconnect would never see.
+      onOpen: () => resendPendingSends(),
       onReconnect: () => {
         toast(t('toast.reconnected')); resync(); refreshUnread();
-        resendPendingSends();   // WS send-ack protocol: replay unacked sends
       },
     });
   }
@@ -6880,6 +7151,11 @@ async function reboot() {
   // A mode/session change invalidates unacked sends — never replay them on
   // the new (possibly Safe-Mode) socket.
   dropAllPendingSends();
+  // The tier may have changed under us; drop the store and the paint gate so
+  // the next startApp() rebuilds both against the tier it is actually in.
+  if (localStore) { localStore.close(); localStore = null; cachePainter = null; }
+  cachedPainted.clear();
+  state.drafts = new Set();
   state.messages = []; state.threads = [];
   state.activeThreadId = null; state.activeThread = null;
   state.unread = {}; state.thinking = {}; state.progress = {};
@@ -6903,6 +7179,14 @@ async function goSafe(announce) {
   state.auth.decoy = true;
   state.auth.remembered = false;   // server-side, locking also forgets the device
   state.decoy = true;
+  // The unlocked tier's local cache goes with the session. Not being able to
+  // READ it is the weaker half of the promise; on a device somebody has just
+  // handed over, the drafts, the queued sends and the cached messages have to
+  // stop existing. ensureLocalStore() has already flipped to the safe tier by
+  // the time this runs (state.decoy is set above), so this is the locked
+  // session deleting what the unlocked one left — the one thing wipeTier is
+  // allowed to reach across for.
+  try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   closeAllOverlays();
   try { await api.lock(); } catch { /* best-effort: clears the cookie/session */ }
@@ -7369,6 +7653,11 @@ async function startApp() {
   // picks a bot.
   clearChatView();
   renderThreads();
+
+  // BEFORE the socket: restored outbox frames have to be in pendingSends by the
+  // time the first 'open' fires, so the ordinary replay path sends them and
+  // nothing needs a second delivery mechanism.
+  await restoreLocalState();
 
   getSocket().connect();
 

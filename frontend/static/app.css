@@ -164,6 +164,26 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .thread-preview { font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .thread-preview.thinking { color: var(--warning-text); }
 
+/* "Draft" — a thread row with composer text that was never sent. In front of
+   the preview, not instead of it: which conversation the unsent words belong to
+   is the useful half, and the last message is what identifies the conversation.
+   The row clips with an ellipsis, so this has to stay short in all eight
+   locales. */
+.thread-draft {
+  color: var(--warning-text);
+  font-weight: 600;
+  margin-inline-end: 6px;
+}
+
+/* A message row painted from the local cache while the real fetch is in
+   flight, or left up because that fetch failed. Dimmed because it is NOT
+   necessarily current — it is the last thing this device was shown, which is a
+   different claim from "this is the conversation". Rows carry no message id and
+   no action row, so nothing here is actionable either. */
+#messages [data-cached="1"] {
+  opacity: 0.62;
+}
+
 .empty-list {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; color: var(--text-secondary); gap: 12px; padding: 40px 20px; height: 100%;
