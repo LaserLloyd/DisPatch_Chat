@@ -155,7 +155,10 @@ test('Stop is unlocked-only, and one gate serves the composer and the palette', 
     'nothing to stop unless this thread is working');
   // Both surfaces ask the same question. Two copies of the rule is how one of
   // them ends up showing in Safe Mode.
-  assert.match(MAIN, /if \(canStopReply\(\)\) a\.push\(\{ icon: '⏹'/,
+  // icon: '⏹' became icon: RAIL_ICONS.stop in the 2026-09-18 icon sweep — the
+  // gate this test cares about (canStopReply(), not a re-derived condition)
+  // is unchanged, so match on that rather than the retired emoji literal.
+  assert.match(MAIN, /if \(canStopReply\(\)\) a\.push\(\{ icon: RAIL_ICONS\.stop/,
     'the command palette must reuse canStopReply(), not re-derive it');
   assert.match(MAIN, /const show = canStopReply\(\);/,
     'the composer button must reuse canStopReply(), not re-derive it');

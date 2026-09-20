@@ -67,6 +67,51 @@ Built in, so every fork gets them:
   generated reaction images, and uploaded avatars (which are photographs of
   real people, and which no content rule could ever catch).
 
+### The one thing the scanner cannot read: pictures
+
+Everything above is a text rule, and `SKIP_SUFFIXES` stops the content scan at
+`.png`. A screenshot of a running instance — bot names, avatars, message
+previews, mailbox addresses — is opaque to every rule in the file. Two
+committed screenshots were found carrying three real mailbox addresses in plain
+pixels, and an end-to-end script once wrote twenty captures of a populated
+instance straight into `docs/screenshots/`.
+
+So that directory is **allowlisted by hand**. Every image in it must be named in
+[`docs/screenshots/ALLOWED.txt`](docs/screenshots/ALLOWED.txt), and the check
+you perform before adding a line is to **open the file and look at it**:
+
+* no real person's name, handle or email address
+* no uploaded or generated avatar from a real install
+* no real message text, thread titles or client records
+* no hostnames, tailnet names, LAN addresses or filesystem paths
+
+Shipped screenshots are deliberately **synthetic** — a fictional roster,
+invented household chatter. Capture new ones against a seeded staging instance,
+never against a live app. The e2e scripts write to a git-ignored
+`.screenshots-local/` by default so a capture cannot land in a tracked path by
+accident; pass `--shot-dir` when you actually want one committed.
+
+### One app, and everything personal lives outside it
+
+There is **one** DisPatch, not a public build and a private fork. The split is
+not in the code, it is between the code and the data directory:
+
+* **The repository** is public, SFW and secret-free. It holds code, tests,
+  docs and the synthetic screenshots above — nothing that belongs to an
+  install.
+* **`DISPATCH_DATA_DIR`** (`~/.local/share/local-chat` by default — see
+  [docs/configuration.md](docs/configuration.md#where-your-data-lives)) holds
+  everything that does: the database, media, file blobs, avatars, generated
+  reaction and avatar pools, `config.yaml`, `security.yaml`, backups. Personal
+  content, including anything an operator would not want in a public repo,
+  lives here and only here.
+
+`.gitignore` bars the runtime directories, `FORBIDDEN_PATHS` and
+`FORBIDDEN_IF_COMMITTED` in the scanner bar them again if git ever gets hold of
+one, and the allowlist above covers the case neither can see. A new feature that
+needs to persist something belongs in the data directory; if you find yourself
+adding a `.gitignore` rule to hide user data, add it to the scanner too.
+
 Plus **local rules**: `scripts/scrub-rules.local.txt`, one regex per line, for
 your own name, hostnames and handles. That file is **git-ignored on purpose** —
 publishing the list of words that must never be published is its own small

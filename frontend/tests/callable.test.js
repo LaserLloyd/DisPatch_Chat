@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { blankNonCode } from './_source-scan.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const JS_DIR = join(HERE, '..', 'static', 'js');
@@ -80,22 +81,12 @@ const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return',
   'typeof', 'await', 'new', 'of', 'in', 'do', 'else', 'function', 'async',
   'case', 'yield', 'delete', 'void', 'instanceof', 'throw', 'with', 'try']);
 
+// The scanner lives in tests/_source-scan.js because i18n-keys.test.js needs
+// exactly the same thing, and two copies of a lexer is one copy that drifts.
+// It walks the source ONCE instead of running ordered regex passes — the
+// nested-template and `'image/*'` holes were both order bugs, not pattern bugs.
 function stripNoise(src) {
-  // Block comments FIRST — prose inside them is full of words like "tab()"
-  // and "progress()", and every one was reported as a missing function on the
-  // first run of this test. Newlines are preserved so line numbers survive.
-  let out = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
-  out = out.replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length));
-  // Strings, including multi-line template literals — they carry CSS like
-  // rgba(...) and HTML that would otherwise read as calls.
-  out = out.replace(/`(?:\\.|[^`\\])*`/gs, (m) => m.replace(/[^\n]/g, ' '));
-  out = out.replace(/'(?:\\.|[^'\\\n])*'/g, '""').replace(/"(?:\\.|[^"\\\n])*"/g, '""');
-  // Regex literals. A pattern like /[ \t]*\u{E200}cite(?:...)/g contains
-  // "cite(" and was reported as a call to a missing cite(). Only strip where a
-  // regex can legally START, so the `/` of a division is left alone.
-  out = out.replace(/([=(,:[!&|?{;]|\breturn)(\s*)\/(?![*/])(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\n])+\/[gimsuy]*/g,
-                    (m, pre, ws) => pre + ws + '/RE/');
-  return out;
+  return blankNonCode(src);
 }
 
 function calledNames(src) {
@@ -127,3 +118,54 @@ for (const file of files) {
     assert.deepEqual(missing, [], '\n' + missing.join('\n'));
   });
 }
+
+// --- the scanner's own fixtures ------------------------------------------
+//
+// Each of these is a hole that actually shipped. They are asserted here rather
+// than in a file of their own because this suite is the scanner's main
+// consumer and the failure they cause is silent: the guard keeps passing while
+// reading less and less of the source.
+
+test('the source scanner survives the three holes that shipped', () => {
+  const cases = [
+    // 1. A string containing `/*` must not open a comment. main.js:
+    //    `accept: 'image/*'` blanked 23+ consecutive lines of live code.
+    ["const a = 'image/*'; brokenOne();", 'brokenOne'],
+    // 2. A nested template literal. clients.js builds markup this way, and the
+    //    old pattern paired the outer backtick with the inner one.
+    ['const s = `x ${c ? `${y} check(s) here` : ""} z`; brokenTwo();', 'brokenTwo'],
+    // 3. A regex or string that looks like the start of a comment.
+    ['const q = /"/g; brokenThree();', 'brokenThree'],
+    ["const sep = '//'; brokenFour();", 'brokenFour'],
+    // And a block comment still IS a block comment.
+    ['/* hidden() */ brokenFive();', 'brokenFive'],
+  ];
+  for (const [src, expected] of cases) {
+    const names = [...calledNames(src).keys()];
+    assert.ok(names.includes(expected),
+      `scanner lost sight of ${expected}() in: ${src}`);
+  }
+  // The inverse: things inside a comment or a string are NOT calls.
+  const hidden = calledNames([
+    '// notACall()',
+    '/* alsoNot() */',
+    "const t = 'stillNot()';",
+    'const u = `norThis()`;',
+  ].join('\n'));
+  assert.deepEqual([...hidden.keys()], [],
+    'the scanner reported a call that is inside a comment or a literal');
+});
+
+test('the scanner reads the whole of main.js, not a prefix of it', () => {
+  // The `'image/*'` hole blanked everything from that literal to the next
+  // `*/`. A cheap invariant that would have caught it: the scanner must leave
+  // roughly as many non-blank code lines as the file has non-comment lines.
+  const src = readFileSync(join(JS_DIR, 'main.js'), 'utf8');
+  const stripped = stripNoise(src);
+  const codeLines = src.split('\n')
+    .filter((l) => l.trim() && !l.trim().startsWith('//') && !l.trim().startsWith('*'));
+  const survived = stripped.split('\n').filter((l) => l.trim()).length;
+  assert.ok(survived > codeLines.length * 0.85,
+    `only ${survived} lines survived stripping against ~${codeLines.length} code lines — `
+    + 'the scanner is blanking live code');
+});

@@ -14,10 +14,18 @@ import stat
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, config, main
+from app import auth, avatar_snapshots, config, main
 from app.database import Database
 
 SAFE_BOTS = {"alpha", "beta", "Atlas"}     # finalized two-tier roster
+
+# The smallest valid PNG. snapshot_pair() checks the magic bytes, so a
+# placeholder string will not do.
+_ONE_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae"
+    "426082"
+)
 
 
 @pytest.fixture
@@ -533,10 +541,21 @@ def test_history_full_res_refuses_a_locked_browser_even_for_a_safe_bot(gate_env)
     main_bot = config.load_bots()[0].id
     # Register a safe bot with an avatar + a thread so history has an entry.
     # (Reuse the machine path: loopback, no browser headers = agent.)
-    client.post("/api/threads", json={"bot_id": main_bot})
+    tid = client.post("/api/threads", json={"bot_id": main_bot}).json()["id"]
+
+    # Seed the snapshot EXPLICITLY rather than hoping thread creation captured
+    # one. In this hermetic environment the bot has no avatar file on disk, so
+    # it never did — and the test used to `return` at that point, which made it
+    # pass without ever exercising the gate it exists for. A test that skips
+    # itself when the fixture is empty is a test that never runs.
+    face = _ONE_PIXEL_PNG
+    sid = avatar_snapshots.snapshot_pair(face, face + b"full")
+    assert sid, "could not seed an avatar snapshot"
+    assert asyncio.run(main.db.set_thread_avatar(tid, sid, explicit=True)), \
+        "could not pin the seeded snapshot to a thread"
+
     hist = client.get(f"/api/bots/{main_bot}/avatar/history").json()
-    if not hist.get("avatars"):
-        return                                    # no snapshot captured; nothing to gate
+    assert hist.get("avatars"), "the seeded snapshot did not reach the history"
     sid = hist["avatars"][0]["id"]
     r = client.get(f"/api/bots/{main_bot}/avatar/history/{sid}?full=1", headers=headers)
     assert r.status_code == 403, f"locked browser pulled full-res history: {r.status_code}"

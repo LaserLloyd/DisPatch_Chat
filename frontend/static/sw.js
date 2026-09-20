@@ -2,7 +2,123 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v101';  // v101: DeepSeek Harness live sessions pane (third tab: launch several dsh
+const CACHE = 'local-chat-v114';  // v114: the hardening round, and a
+  //   cache-correctness fix that is the reason this bump matters more than
+  //   most. Nine modules had their IMPORT lines rewritten by the previous
+  //   round (api.js?v and util.js?v moved) without their OWN ?v= changing, so
+  //   a warm client could load new main.js beside stale reactions.js and end
+  //   up running two api.js/util.js instances — the split-brain assets.test.js
+  //   documents. Every module that differs from the deployed copy is now
+  //   bumped: api 26, checklist 3, clients 3, dashboard 7, imagejobs 3,
+  //   job-thread 6, jobs 6, links 5, llm 5, main 92, markdown 31, pins 9,
+  //   reactions 16, theme.js 15, util 18, viewer 3, app.css 77, theme.css 5.
+  //   Behaviour in this round: the job detail modal and the Clients confirm
+  //   dialog close on a drop to Safe Mode; tool panes no longer stack; the
+  //   Harness session poll stops with its pane; `inert` is ref-counted so
+  //   overlapping overlays cannot lift each other's focus trap; job-board
+  //   failures keep the rows and a vote never re-fetches; status dots use the
+  //   per-palette *-text tokens so they are visible on Paper and Daylight.
+  // v113: the Clients job poll now stops when
+  //   the pane closes (it rescheduled itself and kept talking to the practice
+  //   box for the rest of the session, including after a drop to Safe Mode),
+  //   the lock screen is a real labelled dialog that takes and traps focus
+  //   through the app's ONE inert owner, the file-drop tick uses --success
+  //   instead of an --ok token that has never existed, and the three
+  //   admin-only settings tabs are marked as a group. main.js?v=90→91 +
+  //   app.css?v=75→76 + clients.js?v=1→2 + index.html changed.
+  // v112: the review's second round — the
+  //   Emails and Clients panes now close on a drop to Safe Mode (they were
+  //   missing from closeAllOverlays and stayed painted on a locked device),
+  //   the thinking dot moved to --warning-text (the raw --warning measured
+  //   1.02:1 on Paper — a yellow dot on cream), the job detail modal makes the
+  //   page behind it inert so Tab cannot walk out of an aria-modal dialog, the
+  //   composer's attachment-remove button and the two PIN error lines are no
+  //   longer silent to a screen reader, markdown degrades instead of throwing
+  //   without a DOM, and the StudioForge "insecure" state got the dot colour
+  //   it was missing. main.js?v=89→90 + app.css?v=74→75 + markdown.js?v=29→30
+  //   + job-thread.js?v=4→5 + all eight locales changed.
+  // v111: the Job Board stopped re-fetching
+  //   and rebuilding itself. Filtering and sorting were already happening
+  //   client-side in render(), and the toolbar ALSO sent them to the server
+  //   and refetched, then replaced the whole board — including the <select>
+  //   you had just used — with a "Loading" line. The toolbar is now built once
+  //   and never destroyed, filters are pure operations on the list already in
+  //   memory, a superseded request cannot win (AbortController), and a
+  //   job_updated frame patches one row using the job the server already sent
+  //   instead of re-fetching the board on every connected tab.
+  //   jobs.js?v=4→5 + job-thread.js?v=3→4 + api.js?v=24→25 + main.js?v=88→89
+  //   + app.css?v=73→74 changed; api.js moved, so every module importing it
+  //   moved with it.
+  // v110: Android-PWA viewport contract
+  //   (interactive-widget=resizes-content, so the on-screen keyboard shrinks
+  //   the layout viewport instead of hiding the composer under the keys),
+  //   the notification-contrast pair (--notify / --dot-idle in every palette,
+  //   replacing an unread dot that was DARKER than the resting one), the
+  //   markdown sub/superscript whitespace guard (`2^10 = 1024 and x^n` no
+  //   longer superscripts the middle of the sentence), and the StudioForge
+  //   "insecure" state that finally explains the blank pane over Tailscale.
+  //   index.html + main.js?v=87→88 + util.js?v=15→16 + markdown.js?v=28→29 +
+  //   app.css?v=72→73 + theme.css?v=3→4 changed, and every module that
+  //   imports util.js moved with it — a warm cache holding BOTH util.js
+  //   versions would run two copies of RAIL_ICONS.
+  // v109: Emails tab (MailForge dashboard,
+  //   embedded via its own launch URL — /api/mail/status) and Clients tab
+  //   ("WebBuilder": Overview/Active/Completed/12-step detail against the
+  //   practice box's client-pipeline API via /api/practice/* — new module
+  //   js/clients.js, ported from practice/gui/static/app.js). Both
+  //   unlocked-session only, gated the same way as Harness/StudioForge.
+  //   index.html + main.js?v=86→87 + api.js?v=23→24 + app.css?v=71→72 +
+  //   en.json + ja.json changed, and clients.js is new — an installed
+  //   client MUST pick up a new cache or the new rail buttons 404 on their
+  //   module import.
+  // v108: the mark's second pass — the
+  //   first one read as an ordinary fish (shallow bumps, big tail fan).
+  //   Seven real spines on one contour, a small tail, and a simplified
+  //   5-spine drawing for the 16px layer of the .ico, where the detailed
+  //   one mushes. All five icon files plus the inline .boot-logo.
+  // v107: the mark is a pufferfish drawn in
+  //   the app's own icon language — white line art on a black tile, no fill
+  //   and no colour, replacing the cartoon orange fish. favicon.svg,
+  //   favicon.ico, favicon-32/icon-192/icon-512.png and index.html's inline
+  //   .boot-logo all carry the same paths. The shell caches the icons by
+  //   PATH, so without this bump an installed client keeps the old fish.
+  // v106: one icon language, everywhere. The
+  //   mobile tab bar, the settings tab strip, the chat header, the composer,
+  //   the Bot Manager badges and the lock face were still colour emoji (the
+  //   platform's own palette, not this app's) — they're line-icon <svg> now,
+  //   in currentColor, like the rail. util.js gained iconLabel()+more
+  //   RAIL_ICONS entries; main.js's iconifyChrome() does the swap at start
+  //   and locale strings keep their emoji only as the no-JS fallback (stripped
+  //   at render via glyphless()). util.js?v=14→15, main.js?v=85→86, llm.js
+  //   ?v=3→4, app.css?v=70→71, index.html (all 11 util.js importers moved
+  //   together). The shell is cached by PATH, so
+  //   without this bump an installed client keeps painting the old emoji.
+  // v105: the two big empty-state emoji (no bot picked, no chat picked) plus
+  //   the "no threads yet", file-server-empty and "connect an AI" glyphs are
+  //   line-icon <svg>, not colour emoji — they take the panel's own
+  //   --text-secondary, so they theme like the rest of the app. util.js
+  //   ?v=13→14 (all eleven importers), llm.js?v=2→3, main.js?v=84→85,
+  //   app.css?v=69→70.
+  // v104: the PIN screen follows the theme.
+  //   The lock face was pinned to the purple palette (data-palette in
+  //   index.html + color-scheme: dark in app.css); its backdrop now derives
+  //   from --bg-primary so it wears the active palette like every other
+  //   surface. index.html + app.css?v=68→69 + theme.css?v=2→3.
+  // v103: tablet rail overflow — the rail's
+  //   button group (pins, custom links, ⚙) is a scrolling column above the
+  //   phone breakpoint and a WRAPPING row below it, so buttons no longer fall
+  //   off the bottom of a landscape tablet or off both edges of the Bots page.
+  //   app.css?v=67→v=68 + index.html. Shell is cached by PATH, so without this
+  //   bump an installed tablet keeps painting the broken layout.
+  // v102: Job Board detail-panel rewrite —
+  //   real modal CSS (scroll fix, dark/light token colours, full-screen
+  //   sheet ≤640px, corrected z-index stack), single-render job-thread.js
+  //   (feedback-for-Scout, activity log, server-truth vote state), the
+  //   applied-endpoint fix, thumbnail emoji fallback, and board auto-
+  //   refresh after a vote. index.html + main.js + api.js + jobs.js +
+  //   job-thread.js + app.css + every locale changed, so an installed
+  //   client MUST pick up a new cache.
+  // v101: DeepSeek Harness live sessions pane (third tab: launch several dsh
   //   runs at once, watch each one's live event stream, Stop to make it
   //   disappear). index.html + main.js + api.js + app.css + every locale
   //   changed, so an installed client MUST pick up a new cache.
@@ -23,6 +139,12 @@ const SHELL = [
   // shell or the cold offline start loads the new sidebar entry but no
   // module, and the click fails silently with a blank panel.
   '/static/js/jobs.js', '/static/js/job-thread.js',
+  // Emails + Clients tabs (added 2026-09-19). clients.js is a pure module —
+  // no side effects at import time — but it MUST be in SHELL so the cold
+  // offline start resolves the import main.js now carries. The Emails pane
+  // has no module of its own (its logic lives in main.js next to Harness/
+  // StudioForge), so there is nothing else to add here for it.
+  '/static/js/clients.js',
   // Thread list Today/Older bucketing (added 2026-09-15). Pure module —
   // no side effects at import time — but it MUST be in SHELL so the cold
   // offline start resolves the import that main.js now carries.

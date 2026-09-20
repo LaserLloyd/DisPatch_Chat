@@ -1811,6 +1811,88 @@ class Database:
         cur = await self.db.execute(sql, params)
         return [dict(r) for r in await cur.fetchall()]
 
+    async def list_job_feedback_for_job(self, job_id: str,
+                                        limit: int = 200) -> list[dict]:
+        """Feedback rows for ONE job, ASC order.
+
+        ``list_job_feedback`` above is scoped to a MONTHLY thread (many jobs
+        share one) for the profile fold's "latest per thread" semantics;
+        computing a job's own ``last_vote`` needs the narrower, per-job
+        view instead. ASC so the caller can fold forward and let a later
+        `undo` cancel the vote before it, the same shape jobs.py already
+        uses for the profile recompute.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM job_feedback WHERE job_id = ?"
+            " ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            (job_id, limit))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def list_job_feedback_for_jobs(
+        self, job_ids: list[str],
+    ) -> dict[str, list[dict]]:
+        """Same as ``list_job_feedback_for_job``, batched for a job LIST.
+
+        One query instead of N — used by ``GET /api/jobs`` to attach
+        ``last_vote`` to every row without an N+1 round trip per page.
+        """
+        if not job_ids:
+            return {}
+        placeholders = ",".join("?" for _ in job_ids)
+        cur = await self.db.execute(
+            f"SELECT * FROM job_feedback WHERE job_id IN ({placeholders})"
+            " ORDER BY created_at ASC, rowid ASC",
+            job_ids)
+        out: dict[str, list[dict]] = {jid: [] for jid in job_ids}
+        for row in await cur.fetchall():
+            r = dict(row)
+            out.setdefault(r["job_id"], []).append(r)
+        return out
+
+    async def list_recent_feedback(self, *, since: str | None = None,
+                                   limit: int = 100) -> list[dict]:
+        """Merged, newest-first feed for ``GET /api/jobs/feedback``: every
+        vote/applied/undo signal (``job_feedback``) plus every free-text
+        comment (``job_events`` rows of type ``comment`` that actually carry
+        a comment — a job-creation event is also type ``comment`` but has
+        none, and is excluded so the feed isn't noise).
+
+        LEFT JOINs ``jobs`` for title/company/url so a caller never has to
+        look a job up separately; a cascade-deleted job (thread removed)
+        surfaces as empty strings rather than dropping the row, since the
+        feedback itself is still real history.
+        """
+        limit = max(1, min(int(limit), 500))
+        # Qualified per branch: both sides join `jobs`, which also has created_at.
+        params: list[Any] = []
+        fb_sql = (
+            "SELECT jf.job_id AS job_id, j.title AS title,"
+            " j.company AS company, j.url AS url, 'vote' AS kind,"
+            " jf.signal AS signal, jf.reason_tag AS reason_tag,"
+            " jf.comment AS comment, jf.actor AS actor,"
+            " jf.created_at AS created_at"
+            " FROM job_feedback jf LEFT JOIN jobs j ON j.job_id = jf.job_id"
+            " WHERE 1=1" + (" AND jf.created_at >= ?" if since else "")
+        )
+        if since:
+            params.append(since)
+        ev_sql = (
+            "SELECT je.job_id AS job_id, j.title AS title,"
+            " j.company AS company, j.url AS url, 'comment' AS kind,"
+            " NULL AS signal, je.reason_tag AS reason_tag,"
+            " je.comment AS comment, je.actor AS actor,"
+            " je.created_at AS created_at"
+            " FROM job_events je LEFT JOIN jobs j ON j.job_id = je.job_id"
+            " WHERE je.type = 'comment' AND je.comment IS NOT NULL"
+            + (" AND je.created_at >= ?" if since else "")
+        )
+        if since:
+            params.append(since)
+        sql = f"{fb_sql} UNION ALL {ev_sql} ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cur = await self.db.execute(sql, params)
+        return [dict(r) for r in await cur.fetchall()]
+
     async def get_job_profile(self) -> dict | None:
         cur = await self.db.execute(
             "SELECT * FROM job_profile WHERE id = 1")

@@ -37,6 +37,10 @@ export const APP_KEYS = [
   'dispatch-avatar-style',    // main.js (Settings → minimal avatars)
   'dispatch-lang',            // i18n.js
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)
+  // pins.js (default-on pins the user turned OFF — e.g. the 🎨 theme button).
+  // Wiping it restores the shipped rail, which is what "keep nothing" means
+  // here: it is a display preference, with no gate behind it to reopen.
+  'dispatch-unpinned-defaults',
   'dispatch-custom-links',    // links.js (custom link buttons on the rail)
   'dispatch-menu-bots',       // menubots.js (which bots were parked in the ⌥ menu)
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)

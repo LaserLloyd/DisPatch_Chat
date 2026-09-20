@@ -32,7 +32,8 @@
     "chat": "对话",
     "file": "文件",
     "image": "图片",
-    "video": "视频"
+    "video": "视频",
+    "dismiss": "关闭"
   },
   "nav": {
     "theme": "主题",
@@ -93,17 +94,17 @@
     "menu": "对话操作",
     "popout": "在独立窗口中打开",
     "popout_gone": "该对话已不存在 — 显示最新对话。",
-    "pin": "📌 置顶",
-    "unpin": "📌 取消置顶",
-    "rename": "✏️ 重命名",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "rename": "重命名",
     "rename_title": "重命名对话",
     "sync": "⤓ 找回丢失的消息",
-    "transcript": "📜 查看会话记录",
-    "archive": "🗄️ 归档",
+    "transcript": "查看会话记录",
+    "archive": "归档",
     "archive_confirm": "归档这个对话？它会从对话列表里隐藏起来。",
     "archived": "对话已归档",
     "delete_confirm": "永久删除这个对话？",
-    "delete_thread": "🗑️ 删除"
+    "delete_thread": "删除"
   },
   "welcome": {
     "with_bot": "和 {name} 聊天",
@@ -126,7 +127,9 @@
     "chars": {
       "other": "{count} 个字符"
     },
-    "not_delivered": "⚠ 消息未送达"
+    "not_delivered": "消息未送达",
+    "remove_attachment": "移除 {name}",
+    "attachment": "附件"
   },
   "msg": {
     "copy": "复制",
@@ -183,7 +186,7 @@
     "tab_security": "安全",
     "theme_hint": "选择此设备的外观。立即生效并保存在此处 — 无需保存。",
     "device_hint": "这些设置仅适用于本设备，并且立即生效——无需保存。",
-    "hint": "点一下机器人的图片（或<strong>更换照片</strong>）就能设置头像。用 ▲/▼ 按钮调整顺序（在电脑上也可以直接拖动整行）；用开关控制机器人在侧边栏里显示还是隐藏。<strong>🛡️ 安全</strong> — 这个角色（连同它的头像）在安全模式下可见，不需要 PIN。顺序、显示和安全这三项改动会在你按下<strong>保存</strong>后生效。",
+    "hint": "点一下机器人的图片（或<strong>更换照片</strong>）就能设置头像。用 ▲/▼ 按钮调整顺序（在电脑上也可以直接拖动整行）；用开关控制机器人在侧边栏里显示还是隐藏。<strong>安全</strong> — 这个角色（连同它的头像）在安全模式下可见，不需要 PIN。顺序、显示和安全这三项改动会在你按下<strong>保存</strong>后生效。",
     "language": "语言",
     "language_hint": "改动会立即生效。",
     "minimal_avatars": "极简头像",
@@ -213,8 +216,8 @@
     "move_up_aria": "把 {name} 上移",
     "move_down_aria": "把 {name} 下移",
     "show_in_sidebar": "在侧边栏显示机器人",
-    "recovery": "🛟 恢复与导出",
-    "lock_now": "🔒 立即锁定",
+    "recovery": "恢复与导出",
+    "lock_now": "立即锁定",
     "discard_confirm": "放弃更改？",
     "menu_badge": "⌥",
     "menu_title": "将此机器人移入 ⌥ 工具菜单（仅此设备）"
@@ -226,16 +229,16 @@
     "reacts": "会发反应图片"
   },
   "files": {
-    "title": "📁 文件服务器",
+    "title": "文件服务器",
     "aria": "文件服务器",
     "hint": "把文件放到这里，分享给你的助手。直接拖进来也可以。",
-    "upload": "⬆ 上传",
+    "upload": "上传",
     "empty": "还没有文件 — 上传一个，或者直接拖进来。",
     "view": "查看",
     "download": "下载",
     "delete": "删除这个文件",
     "wipe_button": {
-      "other": "🗑 删除这个及更早的（{count}）"
+      "other": "删除这个及更早的（{count}）"
     },
     "wipe_title": "删除这一天以及之前每一天的所有文件",
     "wipe_confirm": {
@@ -257,7 +260,7 @@
     "kind_files": "文件"
   },
   "drop": {
-    "title": "⬆ 发送文件",
+    "title": "发送文件",
     "hint": "文件会直接送到你的助手那里，对话里会出现一条提示。发送是单向的 — 文件没法再从这台设备打开。",
     "empty": "选择要发送的文件。",
     "choose": "选择文件",
@@ -366,7 +369,10 @@
     "unreachable_hint": "面板位于主机所在的网络中，只有该网络里的设备才能加载。请在已接入该网络的设备上使用 ↗ 链接。",
     "state_blocked": "拒绝嵌入",
     "blocked_text": "StudioForge 面板拒绝被嵌入。",
-    "blocked_hint": "该面板返回 X-Frame-Options: DENY，任何浏览器都不会在其他页面内渲染它。请点击 ↗ 链接，在独立标签页中打开即可正常使用。"
+    "blocked_hint": "该面板返回 X-Frame-Options: DENY，任何浏览器都不会在其他页面内渲染它。请点击 ↗ 链接，在独立标签页中打开即可正常使用。",
+    "state_insecure": "已阻止：地址不安全",
+    "insecure_text": "本页面通过 HTTPS 提供，而面板地址是普通 HTTP。",
+    "insecure_hint": "安全页面不能嵌入不安全页面，因此任何浏览器都不会在此处绘制该面板——通过 Tailscale 访问 DisPatch 时就会这样。↗ 链接仍然可用：在独立标签页中打开属于正常跳转，而非嵌入。要彻底解决，请用 HTTPS 提供该面板，并将 DISPATCH_STUDIOFORGE_URL 指向该地址。"
   },
   "llm": {
     "hint": "把 DisPatch 指向一个模型提供方，它就会变成侧边栏里的一个机器人 — 不需要任何智能体框架。",
@@ -455,7 +461,7 @@
   },
   "search": {
     "aria": "搜索消息",
-    "title": "🔍 搜索消息",
+    "title": "搜索消息",
     "placeholder": "搜索所有对话…",
     "prompt": "输入关键词搜索所有对话",
     "no_results": "没有找到「{query}」的结果",
@@ -487,14 +493,14 @@
   },
   "recovery": {
     "aria": "恢复与导出",
-    "title": "🛟 恢复与导出",
+    "title": "恢复与导出",
     "export_hint": "把每一条消息导出成开放、随时能再读的文件 — 全部在本地生成。",
-    "export_json": "⬇ JSON",
-    "export_md": "⬇ Markdown",
-    "export_html": "⬇ HTML",
+    "export_json": "JSON",
+    "export_md": "Markdown",
+    "export_html": "HTML",
     "restore_hint": "从备份副本（OpenClaw 会话记录）里恢复没能存进 DisPatch 的消息。可以反复运行 — 它只会补上缺失的部分。",
     "restore_all": "⤓ 恢复所有缺失的消息",
-    "browse_sessions": "📜 浏览智能体会话",
+    "browse_sessions": "浏览智能体会话",
     "scanning": "正在扫描 OpenClaw 会话记录…",
     "recovered_summary": {
       "other": "已从 {threads} 个对话中恢复 {count} 条消息。"
@@ -507,7 +513,7 @@
   },
   "transcript": {
     "aria": "会话记录",
-    "title": "📜 会话记录",
+    "title": "会话记录",
     "loading": "正在加载会话记录…",
     "none": "这个会话没有找到记录",
     "summary": "{items} 项 · {missing} 项不在 DisPatch 里",
@@ -530,7 +536,7 @@
     "saved_title": "已保存在 DisPatch 里"
   },
   "sessions": {
-    "title": "📜 {name} — 智能体会话",
+    "title": "{name} — 智能体会话",
     "summary": "包含 DisPatch 从未创建过的定时任务 / 子智能体 / 面板会话",
     "loading": "正在加载会话…",
     "empty": "没有找到会话",
@@ -810,7 +816,8 @@
   },
   "pins": {
     "pin": "固定到侧栏",
-    "unpin": "从侧栏取消固定"
+    "unpin": "从侧栏取消固定",
+    "theme_hint": "在栏中保留主题按钮。"
   },
   "checklist": {
     "done": "已完成",
@@ -941,7 +948,136 @@
     },
     "detail": {
       "close": "Close",
-      "not_found": "That job could not be found."
+      "not_found": "That job could not be found.",
+      "posted": "Posted",
+      "first_seen": "First seen",
+      "source": "Source",
+      "offline": "无法连接 DisPatch，请检查网络。",
+      "locked": "解锁后才能查看此职位。"
+    },
+    "seniority": {
+      "junior": "Junior",
+      "senior": "Senior",
+      "staff": "Staff",
+      "principal": "Principal"
+    },
+    "note": {
+      "placeholder": "Add a note (optional)…"
+    },
+    "feedback": {
+      "title": "Feedback for Scout",
+      "placeholder": "Tell Scout what to look for or avoid…",
+      "reason_label": "Reason (optional)",
+      "reason_none": "No specific reason",
+      "send": "Send to Scout",
+      "sent": "Sent — Scout will reply in the job thread",
+      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
+      "open_thread": "Open thread",
+      "error": "Could not send feedback: {msg}",
+      "need_comment": "Write a note before sending.",
+      "not_available": "Feedback isn't available yet."
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "No activity yet.",
+      "actor": {
+        "system": "System",
+        "you": "You"
+      },
+      "type": {
+        "comment": "Comment",
+        "vote": "Voted",
+        "vote_undo": "Vote undone",
+        "state_change": "State change",
+        "tag_added": "Tag added",
+        "tag_removed": "Tag removed",
+        "repost": "Reposted",
+        "duplicate_detected": "Duplicate detected",
+        "expired": "Expired",
+        "feedback": "Feedback",
+        "applied": "Applied"
+      }
+    },
+    "find": {
+      "button": "🔍 查找职位",
+      "placeholder": "希望 Scout 查找什么？（可选）",
+      "send": "让 Scout 查找",
+      "sent": "Scout 正在搜索。新职位会显示在这里，摘要会发送到本月的 Jobs 线程。",
+      "not_sent": "请求已保存，但无法联系 Scout。请稍后再试。"
     }
+  },
+  "mail": {
+    "name": "邮件",
+    "subtitle": "MailForge 控制台",
+    "sidebar_aria": "邮件 — MailForge 控制台，仅解锁后可用",
+    "session_panel_title": "邮件",
+    "session_panel_heading": "MailForge 在此运行。",
+    "session_panel_body": "DisPatch 原样嵌入 MailForge 自身的控制台。仅完整会话可用，安全模式下永不显示。",
+    "open_title": "在新标签页中打开 MailForge 控制台",
+    "frame_title": "MailForge 控制台",
+    "checking": "检查中…",
+    "state_running": "运行中",
+    "state_down": "无响应",
+    "state_not_installed": "未安装",
+    "state_unreachable": "无法连接",
+    "state_unknown": "检查中…",
+    "not_installed_text": "此机器上从未运行过 MailForge 控制台。",
+    "not_installed_hint": "启动：systemctl --user start mailforge",
+    "down_text": "MailForge 控制台无响应。",
+    "down_hint": "检查：systemctl --user status mailforge",
+    "unreachable_text": "DisPatch 无法连接到 MailForge 控制台。",
+    "unreachable_hint": "检查：systemctl --user status mailforge"
+  },
+  "clients": {
+    "name": "客户",
+    "subtitle": "客户流程",
+    "sidebar_aria": "客户 — 客户流程，仅解锁后可用",
+    "session_panel_title": "客户流程",
+    "session_panel_heading": "客户流程在此运行。",
+    "session_panel_body": "概览、进行中与已完成的客户，以及每个客户的12步流程。仅完整会话可用，安全模式下永不显示。",
+    "tab_overview": "概览",
+    "tab_active": "进行中",
+    "tab_completed": "已完成",
+    "load_error": "无法加载此视图。",
+    "last_checked": "最近检查",
+    "waiting_on_you": "等待您处理",
+    "waiting_empty": "目前没有等待您处理的事项。",
+    "holds": "安全暂停",
+    "holds_empty": "没有被暂停的客户。",
+    "stalled": "停滞",
+    "stalled_empty": "没有停滞的客户。",
+    "no_active": "没有进行中的客户。",
+    "no_completed": "尚无已完成的客户。",
+    "no_matches": "没有与该搜索匹配的客户。",
+    "col_name": "名称",
+    "col_branch": "分支",
+    "col_state": "状态",
+    "col_next": "下一步",
+    "recent_activity": "最近活动",
+    "no_activity": "尚未发生任何事情。",
+    "jump": "跳转 ›",
+    "search_placeholder": "按名称搜索…",
+    "open_thread": "打开对话",
+    "security_hold": "安全暂停",
+    "hold_generic": "该客户已被暂停。",
+    "hold_note_placeholder": "您检查了什么，为什么继续是安全的？",
+    "clear_hold": "解除暂停",
+    "hold_clear_failed": "无法解除暂停，请重试。",
+    "no_steps": "该客户尚无步骤。",
+    "needs": "需要",
+    "do": "操作",
+    "nothing_to_do": "这里暂时没有可执行的操作。",
+    "log": "日志",
+    "nothing_logged": "尚无记录。",
+    "if_it_fails": "如果失败",
+    "save": "保存",
+    "save_failed": "无法保存。",
+    "action_failed": "该操作未能启动。",
+    "confirm_before": "执行前请确认：",
+    "are_you_sure": "确定吗？",
+    "approve": "批准",
+    "working": "处理中…",
+    "timed_out": "已超时",
+    "console_output": "控制台输出"
   }
 }

@@ -1,7 +1,7 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=13';
+import { loadScript, loadStyle, escapeHtml } from './util.js?v=18';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
@@ -552,27 +552,25 @@ function expandMediaDirectives(text, parker) {
   }));
 }
 
-// Doc icon map — kept in sync with main.js FILE_ICONS.
-const _DOC_ICONS = [
-  [/\.(zip|tar|gz|tgz|bz2|xz|7z|rar)$/i, '📦'],
-  [/\.(pdf)$/i, '📕'],
-  [/\.(txt|md|log|csv|json|ya?ml|xml)$/i, '📝'],
-  [/\.(mp3|flac|wav|ogg|m4a|opus)$/i, '🎵'],
-  [/\.(py|js|ts|sh|bash|zsh|c|cpp|h|hpp|rs|go|java|kt|swift|rb|php)$/i, '💻'],
-  [/\.(html|css|scss|less)$/i, '🌐'],
-  [/\.(toml|ini|cfg|conf)$/i, '⚙️'],
-  [/\.(rst|tex|org|adoc)$/i, '📄'],
-];
-function _docIcon(name) {
-  for (const [re, icon] of _DOC_ICONS) if (re.test(name)) return icon;
-  return '📄';
-}
-
+// A single generic file glyph, in currentColor — replaced the per-extension
+// colour-emoji map (📦📕📝🎵💻🌐⚙️📄, kept in sync with main.js's old
+// FILE_ICONS) on 2026-09-18: eight platform-drawn pictures that couldn't
+// theme, for a distinction (the file's TYPE) the filename right next to the
+// icon already states.
+//
+// NOT railIcon()/railIconHtml() here: this markup is agent/message content
+// and goes through sanitize()'s DOMPurify pass below, whose ALLOWED_TAGS has
+// no `svg`/`path` (deliberately — an inline SVG is a bigger attack surface
+// than this app wants in chat content, and DOMPurify's HTML parser lower-
+// cases `viewBox` to `viewbox` and breaks it besides). The icon is drawn by
+// CSS instead: `.doc-icon`/`.doc-preview-link` in app.css `mask-image` the
+// same path data as an inline data: URI, so the icon is real app chrome
+// (never touches the sanitizer, themes via `background-color: currentColor`)
+// while the spans it fills stay empty, sanitizer-safe markup.
 function expandDocDirectives(text, parker) {
   return subOutsideCode(text, (seg) => seg.replace(/\[\[doc:([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, id, name) => {
     const fid = id.trim();
     const fname = (name || fid).trim();
-    const icon = _docIcon(fname);
     // encodeURIComponent, not just attrEscape: attrEscape makes the id safe to
     // sit INSIDE an attribute, it does not stop the id from being read as PATH.
     // A crafted `[[doc:../../api/export?format=json]]` rendered a document card
@@ -581,7 +579,7 @@ function expandDocDirectives(text, parker) {
     const eid = attrEscape(encodeURIComponent(fid));
     const dlUrl = `/api/files/${eid}/download`;
     const rawUrl = `/api/files/${eid}/raw`;
-    return `\n\n${parker.park(`<div class="doc-card"><span class="doc-icon">${icon}</span><a href="${dlUrl}" download="${attrEscape(fname)}" target="_blank" class="doc-link">${attrEscape(fname)}</a><a href="${rawUrl}" target="_blank" class="doc-preview-link" title="${attrEscape(t('msg.view_raw'))}">👁</a></div>`)}\n\n`;
+    return `\n\n${parker.park(`<div class="doc-card"><span class="md-doc-icon" aria-hidden="true"></span><a href="${dlUrl}" download="${attrEscape(fname)}" target="_blank" class="doc-link">${attrEscape(fname)}</a><a href="${rawUrl}" target="_blank" class="doc-preview-link" title="${attrEscape(t('msg.view_raw'))}"><span class="md-doc-icon eye-icon" aria-hidden="true"></span></a></div>`)}\n\n`;
   }));
 }
 
@@ -975,7 +973,7 @@ function expandViewDirectives(text, parker, noLocal) {
     // Safe Mode: the directive degrades to its label as plain text. Leaving
     // the raw `[[view:…]]` would show the reader syntax instead of words.
     if (noLocal) return shown;
-    const card = `<div class="doc-card view-card"><span class="doc-icon">👁</span>` +
+    const card = `<div class="doc-card view-card"><span class="md-doc-icon eye-icon" aria-hidden="true"></span>` +
       `${fileLinkHtml(path, null, escapeHtml(shown), 'doc-link')}</div>`;
     return `\n\n${parker.park(card)}\n\n`;
   }));
@@ -1319,12 +1317,27 @@ function ensureRenderer() {
   // O. A chemical formula came out looking like a retracted one. Registering
   // these as extensions puts them ahead of marked's own `del` tokenizer; the
   // negative lookarounds hand `~~struck~~` back to it untouched.
+  //
+  // The content class forbids WHITESPACE, and that is load-bearing. Without
+  // it the delimiters are not delimiters at all — they pair with the next one
+  // anywhere on the line and swallow everything between:
+  //
+  //     2^10 = 1024 and x^n   ->  2<sup>10 = 1024 and x</sup>n
+  //     a~1 and b~2 differ    ->  a<sub>1 and b</sub>2 differ
+  //     hash = a ^ b ^ c      ->  hash = a <sup> b </sup> c
+  //
+  // Agents write exponents, XOR and pointer notation constantly, so that was
+  // mangling ordinary technical prose. A real subscript or superscript is one
+  // short run with no spaces in it (`H~2~O`, `x^2^`, `E=mc^2^`); anything
+  // needing a space belongs in braces or code. The `highlight` extension just
+  // above already guards itself this way with `(?=[^\s=])` — this is the same
+  // rule, applied to the two that were missing it.
   const subscript = {
     name: 'subscript',
     level: 'inline',
     start(src) { return src.indexOf('~'); },
     tokenizer(src) {
-      const m = /^~(?!~)([^~\n]{1,32})~(?!~)/.exec(src);
+      const m = /^~(?!~)([^~\s\n]{1,32})~(?!~)/.exec(src);
       if (!m) return undefined;
       return { type: 'subscript', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
     },
@@ -1335,7 +1348,7 @@ function ensureRenderer() {
     level: 'inline',
     start(src) { return src.indexOf('^'); },
     tokenizer(src) {
-      const m = /^\^(?!\^)([^\^\n]{1,32})\^/.exec(src);
+      const m = /^\^(?!\^)([^\^\s\n]{1,32})\^/.exec(src);
       if (!m) return undefined;
       return { type: 'superscript', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
     },
@@ -1370,7 +1383,16 @@ export function renderMarkdown(text, { noMedia = false, noLocal = false } = {}) 
 
   // Checked before anything is expanded: without the parser there is nothing to
   // restore the parked HTML, and a placeholder codepoint would be shown raw.
-  if (!window.marked) return sanitize(plainTextFallback(src), noMedia);
+  //
+  // `typeof window` first, matching the module-scope guard at the top of this
+  // file. A bare `window.marked` is a ReferenceError — not a falsy read — in a
+  // plain node process, so this line THREW instead of degrading whenever the
+  // module was imported without a DOM. That is how the test suite imports it
+  // to exercise toPlainPreview(), so the crash showed up as a failing test
+  // rather than as the graceful plain-text fallback the line is written to be.
+  if (typeof window === 'undefined' || !window.marked) {
+    return sanitize(plainTextFallback(src), noMedia);
+  }
   const parker = makeHtmlParker();
   // Maths first, on the rawest source there is: `\(x\)` has to be read before
   // markdown gets to call `\(` an escaped parenthesis.
@@ -1429,7 +1451,14 @@ const URI_SAFE_ATTR = ['type', 'start', 'controls', 'muted', 'loop', 'playsinlin
   'aria-label', 'data-code-encoding', 'align', 'aria-pressed', 'aria-hidden', 'role'];
 
 function sanitize(html, noMedia) {
-  if (window.DOMPurify) {
+  // `typeof window` for the same reason as renderMarkdown's parser check: a
+  // bare `window.DOMPurify` is a ReferenceError, not a falsy read, when this
+  // module is imported without a DOM. The fallback below already handles "no
+  // sanitizer available"; it just never got the chance to run.
+  //
+  // Fails CLOSED. Without DOMPurify there is no safe way to emit markup, so
+  // the escaped-text path is the only correct answer — never the raw html.
+  if (typeof window !== 'undefined' && window.DOMPurify) {
     ensureHooks();
     return DOMPurify.sanitize(html, {
       ALLOWED_TAGS: noMedia
@@ -1450,6 +1479,16 @@ function sanitize(html, noMedia) {
   }
   // Fail CLOSED: if the sanitizer somehow failed to load, never inject raw
   // model/tool/web HTML (stored-XSS sink) — render it as escaped text instead.
+  //
+  // Unless it is already exactly that. Several callers pass
+  // plainTextFallback()'s output straight in, which is this same wrapper with
+  // its contents already escaped; wrapping it twice shows the reader the
+  // markup of the fallback instead of their message. Recognising our own
+  // output is safe because escapeHtml() cannot produce this opening tag —
+  // anything a message contained is already `&lt;div…`.
+  if (/^<div class="markdown-plain-text-fallback">[\s\S]*<\/div>$/.test(html)) {
+    return html;
+  }
   return `<div class="markdown-plain-text-fallback">${escapeHtml(html)}</div>`;
 }
 

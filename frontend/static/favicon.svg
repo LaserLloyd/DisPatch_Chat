@@ -1,52 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Dark rounded background -->
-  <rect width="64" height="64" rx="14" fill="#0f0f1a"/>
-  
-  <!-- Body - round pufferfish -->
-  <circle cx="32" cy="33" r="18" fill="#f59e0b" stroke="#d97706" stroke-width="1"/>
-  
-  <!-- Belly (lighter) -->
-  <ellipse cx="32" cy="37" rx="12" ry="10" fill="#fbbf24"/>
-  
-  <!-- Spines on top -->
-  <line x1="20" y1="18" x2="18" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="26" y1="16" x2="25" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="32" y1="15" x2="32" y2="9" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="38" y1="16" x2="39" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="44" y1="18" x2="46" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  
-  <!-- Spines on sides -->
-  <line x1="14" y1="26" x2="9" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="14" y1="33" x2="8" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="50" y1="26" x2="55" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="50" y1="33" x2="56" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  
-  <!-- Spines on bottom -->
-  <line x1="20" y1="49" x2="18" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="28" y1="50" x2="27" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="36" y1="50" x2="37" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="44" y1="49" x2="46" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-  
-  <!-- Eyes (big, cute) -->
-  <circle cx="26" cy="29" r="4.5" fill="white"/>
-  <circle cx="38" cy="29" r="4.5" fill="white"/>
-  <circle cx="27" cy="29" r="2.5" fill="#1e293b"/>
-  <circle cx="39" cy="29" r="2.5" fill="#1e293b"/>
-  <!-- Eye shine -->
-  <circle cx="28" cy="27.5" r="1" fill="white"/>
-  <circle cx="40" cy="27.5" r="1" fill="white"/>
-  
-  <!-- Mouth (tiny "o" mouth) -->
-  <circle cx="32" cy="36" r="2" fill="#b45309"/>
-  
-  <!-- Cheek blush -->
-  <ellipse cx="22" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
-  <ellipse cx="42" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
-  
-  <!-- Tail -->
-  <path d="M48 33 L54 28 L53 33 L54 38 Z" fill="#d97706"/>
-  
-  <!-- Tiny pectoral fins -->
-  <ellipse cx="16" cy="36" rx="3" ry="1.5" fill="#d97706" transform="rotate(-15 16 36)"/>
-  <ellipse cx="16" cy="29" rx="3" ry="1.5" fill="#d97706" transform="rotate(15 16 29)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DisPatch">
+  <!-- DisPatch's mark: a pufferfish, drawn in the same language as the app's
+       chrome icons — line art, round caps and joins, one stroke weight, no
+       fill and no colour. White on black so the tile reads the same whatever
+       theme the app (or the browser tab strip) is wearing.
+       Keep index.html's inline .boot-logo in step with this file. -->
+  <rect width="64" height="64" rx="14" fill="#000000"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Body: ONE contour — seven pointed spines with the puffed belly arcing
+         between them. Spines added around a circle draw every edge twice and
+         fill in as a sun at any real size; a scalloped ring reads as a bumpy
+         ball, not a spiked one. The bare arc on the right is where the tail
+         meets the body, which is what keeps this a pufferfish and not a
+         sea urchin. -->
+    <path d="M30.8 19.9 L30.0 12.7 L26.7 19.2 A13.3 13.3 0 0 0 22.8 19.7 L18.0 14.3 L19.1 21.5 A13.3 13.3 0 0 0 16.2 24.1 L9.1 22.5 L14.1 27.7 A13.3 13.3 0 0 0 13.2 31.6 L6.5 34.3 L13.6 35.7 A13.3 13.3 0 0 0 15.1 39.4 L11.1 45.4 L17.8 42.5 A13.3 13.3 0 0 0 21.1 44.7 L21.3 51.9 L25.1 45.7 A13.3 13.3 0 0 0 29.0 45.6 L33.4 51.4 L32.9 44.1 A13.3 13.3 0 0 0 30.8 19.9 Z"/>
+    <!-- Tail: deliberately small. A big fan is the single thing that makes a
+         round fish read as an ordinary one. -->
+    <path d="M40.5 26.5 q6.5 -2.5 8.5 -4.5 q-1.5 5.5 -1.5 10.5 q0 5 1.5 10.5 q-2 -2 -8.5 -4.5"/>
+    <!-- Mouth: an arc, not a dot — a dot this size reads as a second eye. -->
+    <path d="M14.2 36.8 q3.2 2.8 5.8 0.4" stroke-width="2.5"/>
+    <!-- The one solid shape in the mark, so the eye survives a 32px favicon. -->
+    <circle cx="21" cy="28" r="2.5" fill="#ffffff" stroke="none"/>
+  </g>
 </svg>

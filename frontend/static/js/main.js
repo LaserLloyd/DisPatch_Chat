@@ -2,11 +2,11 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=22';
+import { api, setOnLocked } from './api.js?v=26';
 import { ChatSocket } from './ws.js?v=8';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=28';
-import { installChecklists, applyChecklistState } from './checklist.js?v=2';
-import { el, escapeHtml, loadScript, loadStyle, railIcon, RAIL_ICONS } from './util.js?v=13';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=31';
+import { installChecklists, applyChecklistState } from './checklist.js?v=3';
+import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=18';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -20,17 +20,18 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=15';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=6';
-import { mountJobs, unmountJobs } from './jobs.js?v=3';
-import { openJobDetail } from './job-thread.js?v=2';
+} from './reactions.js?v=16';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=7';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=3';
+import { mountJobs, unmountJobs } from './jobs.js?v=6';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=6';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=2';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=6';
+} from './llm.js?v=5';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle } from './pins.js?v=7';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=9';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -39,13 +40,13 @@ import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=1';
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
-import { renderLinkRail, linksSection } from './links.js?v=4';
+import { renderLinkRail, linksSection } from './links.js?v=5';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=2';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=3';
 import { aboutRow } from './about.js?v=2';
-import { imageJobMessageEl } from './imagejobs.js?v=2';
+import { imageJobMessageEl } from './imagejobs.js?v=3';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with
@@ -86,6 +87,8 @@ const state = {
     jobs: { running: false, current: null, history: [] },
     sessions: { sessions: [], running: 0, limit: 4 },
   },
+  mailEnabled: false, // server-side feature flag (mail_available()); full-session only
+  clientsEnabled: false, // server-side feature flag (practice_available()); full-session only
   studioforgeEnabled: false, // server-side feature flag (DISPATCH_STUDIOFORGE + a URL); full-session only
   // StudioForge pane: last /api/studioforge/status payload, plus whether THIS
   // browser could reach the panel (a separate question from whether the server
@@ -111,6 +114,10 @@ const state = {
 const HARNESS_ID = 'deepseek-harness';
 // And for the StudioForge control panel (the LLM rig's own web UI, embedded).
 const STUDIOFORGE_ID = 'studioforge-panel';
+// Emails tab (MailForge dashboard, embedded via its own launch URL).
+const MAIL_ID = 'mail-panel';
+// Clients tab ("WebBuilder" — the practice box's client pipeline, native UI).
+const CLIENTS_ID = 'clients-panel';
 // Which bots appear in Safe Mode is a SERVER-side per-bot setting ("safe" in
 // the Bot Manager, full mode only) — the server filters /api/bots and the WS
 // hello for Safe-Mode sessions, so state.bots is already the right list.
@@ -174,7 +181,7 @@ async function refreshUnread() {
 const $ = (id) => document.getElementById(id);
 const dom = {};
 ['app', 'bot-list', 'manage-bots', 'theme-toggle',
- 'tools-menu', 'tools-harness', 'tools-studioforge',
+ 'tools-menu', 'tools-harness', 'tools-studioforge', 'tools-mail', 'tools-clients',
  'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
@@ -229,6 +236,12 @@ const dom = {};
  'studioforge-view', 'studioforge-back', 'studioforge-subtitle', 'studioforge-open',
  'studioforge-pane', 'studioforge-frame', 'studioforge-note', 'studioforge-note-text',
  'studioforge-note-hint', 'studioforge-dot', 'studioforge-status-label', 'studioforge-url',
+ // Emails tab pane
+ 'mail-view', 'mail-back', 'mail-subtitle', 'mail-open', 'mail-pane', 'mail-frame',
+ 'mail-note', 'mail-note-text', 'mail-note-hint', 'mail-dot', 'mail-status-label',
+ // Clients tab pane
+ 'clients-view', 'clients-back', 'clients-subtitle', 'clients-tabnav', 'clients-root',
+ 'clients-job-strip',
  // Locked-mode dedicated unlock button
  'unlock-btn',
 ].forEach((id) => { dom[id] = $(id); });
@@ -756,11 +769,14 @@ function renderSidebarInner() {
   // for why they must NOT be built here.
   const toolsAvailable = !state.decoy && (
     state.harnessEnabled || state.studioforgeEnabled
+    || state.mailEnabled || state.clientsEnabled
     || menuBots.length > 0);
   if (toolsAvailable) {
     const toolsName = t('nav.tools');
     const selected = state.selectedBotId === HARNESS_ID
-      || state.selectedBotId === STUDIOFORGE_ID;
+      || state.selectedBotId === STUDIOFORGE_ID
+      || state.selectedBotId === MAIL_ID
+      || state.selectedBotId === CLIENTS_ID;
     const btn = el('button', {
       class: 'bot-btn terminal-btn tools-btn' + (selected ? ' active' : ''),
       id: 'tools-btn',
@@ -822,6 +838,8 @@ function toolsMenuEntries() {
   return [
     { id: 'tools-harness', botId: HARNESS_ID, on: !!state.harnessEnabled },
     { id: 'tools-studioforge', botId: STUDIOFORGE_ID, on: !!state.studioforgeEnabled },
+    { id: 'tools-mail', botId: MAIL_ID, on: !!state.mailEnabled },
+    { id: 'tools-clients', botId: CLIENTS_ID, on: !!state.clientsEnabled },
   ];
 }
 
@@ -896,14 +914,14 @@ function renderThreadsInner() {
   const bot = botById(state.selectedBotId);
   if (!bot) {
     wrap.append(el('div', { class: 'empty-list' }, [
-      el('div', { class: 'empty-emoji', text: '🤖' }),
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.bots)]),
       el('p', { text: t('threads.empty_no_bot') }),
     ]));
     return;
   }
   if (!state.threads.length) {
     wrap.append(el('div', { class: 'empty-list' }, [
-      el('div', { class: 'empty-emoji', text: '🗨️' }),
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.messages)]),
       el('p', { text: t('threads.empty_no_threads', { name: bot.name }) }),
       el('button', { class: 'btn-primary', text: t('threads.empty_cta'), onclick: newChat }),
     ]));
@@ -977,7 +995,7 @@ function threadRowEl(th, bot) {
                          : t('threads.preview_empty'));
     const titleEl = el('div', { class: 'thread-title' });
     if (th.is_pinned) {
-      titleEl.append(el('span', { class: 'thread-pin-icon', text: '📌' }));
+      titleEl.append(el('span', { class: 'thread-pin-icon' }, [railIcon(RAIL_ICONS.pin)]));
     }
     // Own span so ONLY the text ellipsizes — a long title must not push the
     // unread dot outside the clipped title box.
@@ -1122,7 +1140,7 @@ function clearChatView() {
   dom['messages'].append(el('div', { class: 'empty-state', id: 'chat-empty' },
     offerFirstRun()
       ? [firstRunCard(() => openLlm())]
-      : [el('div', { class: 'empty-emoji', text: '💬' }),
+      : [el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.messages)]),
          el('p', { text: t('chat.empty') })]));
   reflectComposerState();
 }
@@ -1342,7 +1360,7 @@ function messageEl(msg) {
     // Intermediate / working output: collapsed by default, click to expand.
     wrap.classList.add('sub-msg');
     const details = el('details', { class: 'sub-details' });
-    details.append(el('summary', { text: t('msg.working') }));
+    details.append(el('summary', { text: glyphless(t('msg.working')) }));
     const inner = el('div', { class: 'sub-content' });
     inner.innerHTML = renderMarkdown(msg.content || '', mdOpts);
     enhanceContent(inner, { noLocal: state.decoy });
@@ -1384,9 +1402,9 @@ function messageEl(msg) {
         // chat export instead. Same fix as markdown.js's expandDocDirectives.
         const did = encodeURIComponent(doc.id);
         const card = el('div', { class: 'doc-card' }, [
-          el('span', { class: 'doc-icon', text: fileIcon(name) }),
+          el('span', { class: 'doc-icon' }, [fileIcon()]),
           el('a', { class: 'doc-link', href: `/api/files/${did}/download`, text: name, download: name, target: '_blank' }),
-          el('a', { class: 'doc-preview-link', href: `/api/files/${did}/raw`, text: '👁', target: '_blank', title: t('msg.view_raw') }),
+          el('a', { class: 'doc-preview-link', href: `/api/files/${did}/raw`, target: '_blank', title: t('msg.view_raw') }, [railIcon(RAIL_ICONS.eye)]),
         ]);
         col.append(card);
       }
@@ -1645,9 +1663,9 @@ function renderProgressPanel() {
   if (from === items.length) return;
   const frag = document.createDocumentFragment();
   for (const it of items.slice(from)) {
-    const icon = it.kind === 'tool' ? '🔧' : (it.kind === 'thinking' ? '🧠' : '💬');
+    const icon = it.kind === 'tool' ? RAIL_ICONS.tools : (it.kind === 'thinking' ? RAIL_ICONS.brain : RAIL_ICONS.messages);
     const label = it.kind === 'tool' ? `${it.name}  ${it.text}` : it.text;
-    frag.append(el('div', { class: `progress-item ${it.kind}`, text: `${icon} ${label}` }));
+    frag.append(el('div', { class: `progress-item ${it.kind}` }, [railIcon(icon), document.createTextNode(` ${label}`)]));
   }
   panel.append(frag);
   panel._painted = items.length;
@@ -1758,7 +1776,7 @@ function announceResponding() {
 function appendErrorBubble(text, threadId) {
   const box = dom['messages'];
   const bubble = el('div', { class: 'bubble', dir: 'auto' });   // see renderMessage: content picks its own direction
-  bubble.append(el('span', { text: `⚠ ${text}` }));
+  bubble.append(el('span', { class: 'bubble-error-text' }, iconLabel(RAIL_ICONS.alert, text)));
 
   // Retry button only if there's a last user message to replay
   const tid = threadId || state.activeThreadId;
@@ -2230,7 +2248,7 @@ function renderAttachments() {
     // plus the filename, which still tells you what is queued to send.
     const asFile = a.kind === 'document' || nimEnabled();
     if (asFile) {
-      thumb = el('span', { class: 'chip-doc-icon', text: fileIcon(a.name) });
+      thumb = el('span', { class: 'chip-doc-icon' }, [fileIcon()]);
     } else if (a.kind === 'video') {
       thumb = el('video', { src: previewSrc, muted: '', loop: '', playsinline: '' });
       thumb.muted = true; thumb.play().catch(() => {});
@@ -2242,7 +2260,16 @@ function renderAttachments() {
       : null;
     const children = [thumb];
     if (label) children.push(label);
-    children.push(el('button', { class: 'rm', text: '✕', onclick: () => { const [rm] = state.attachments.splice(i, 1); if (rm && rm.previewUrl) URL.revokeObjectURL(rm.previewUrl); renderAttachments(); updateSendEnabled(); } }));
+    // The glyph is aria-hidden (railIcon marks it so), which left this button
+    // with no accessible name at all — a screen reader announced "button" and
+    // nothing else, and with several files queued there was no way to tell
+    // which one it removed. The file name goes in the label for that reason.
+    children.push(el('button', {
+      class: 'rm',
+      'aria-label': t('composer.remove_attachment', { name: a.name || t('composer.attachment') }),
+      title: t('composer.remove_attachment', { name: a.name || t('composer.attachment') }),
+      onclick: () => { const [rm] = state.attachments.splice(i, 1); if (rm && rm.previewUrl) URL.revokeObjectURL(rm.previewUrl); renderAttachments(); updateSendEnabled(); },
+    }, [railIcon(RAIL_ICONS.close)]));
     const chip = el('div', { class: 'chip' + (asFile ? ' doc-chip' : '') }, children);
     p.append(chip);
   });
@@ -2299,7 +2326,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   const media = video
     ? el('video', { src, controls: '', autoplay: '', loop: '', playsinline: '' })
     : el('img', { src, draggable: 'false', alt: downloadName || t('msg.fullsize_alt') });
-  const closeBtn = el('button', { class: 'lightbox-close', text: '✕', 'aria-label': t('common.close') });
+  const closeBtn = el('button', { class: 'lightbox-close', 'aria-label': t('common.close') }, [railIcon(RAIL_ICONS.close)]);
   // A modal dialog, declared as one: without role/aria-modal a screen reader
   // keeps reading the chat behind it, and without `inert` on #app a Tab walks
   // straight out of the picture into the composer underneath.
@@ -2311,7 +2338,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     tabindex: '-1',
   }, [media, closeBtn]);
   if (downloadUrl) {
-    const dl = el('a', { class: 'lightbox-download', href: downloadUrl, text: '⬇ ' + t('common.download') });
+    const dl = el('a', { class: 'lightbox-download', href: downloadUrl }, iconLabel(RAIL_ICONS['viewer-download'], t('common.download')));
     if (downloadName) dl.setAttribute('download', downloadName);
     dl.addEventListener('click', (e) => e.stopPropagation());
     lb.append(dl);
@@ -2385,11 +2412,10 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
       apply();
     }, { passive: false });
   }
-  const app = dom['app'] || document.getElementById('app');
-  if (app) {
-    app.inert = true;
-    cleanups.push(() => { app.inert = false; });
-  }
+  // Ref-counted: a lightbox opened OVER another modal (an avatar from the Bot
+  // Manager) must not re-enable that modal's page when it closes.
+  const inertToken = acquireInert();
+  cleanups.push(() => releaseInert(inertToken));
   document.body.append(lb);
   closeBtn.focus();
 }
@@ -2451,9 +2477,10 @@ async function selectBot(id) {
   if (!id) return;
   if (id === HARNESS_ID) { openHarnessView(); return; }
   if (id === STUDIOFORGE_ID) { openStudioForgeView(); return; }
+  if (id === MAIL_ID) { openMailView(); return; }
+  if (id === CLIENTS_ID) { openClientsPanel(); return; }
   // Leaving a tool pane for a real bot tears the view down cleanly.
-  if (harnessOpen) closeHarnessView();
-  if (studioforgeOpen) closeStudioForgeView();
+  closeToolPanes();
   // Symptom (jobs-fix: view-stuck-on-bot-switch): if we're sitting on the
   // Jobs view when the user clicks another bot, the rest of this function
   // still loads threads AND opens the first one — but the jobs CSS keeps
@@ -2746,6 +2773,27 @@ function mountLanguagePicker() {
     const avPin = pinToggle('avatars', { t, onChange: renderPins });
     if (avPin) avRow.append(avPin);
   }
+  // The 🎨 rail button, as a row whose ONLY control is its 📌. It ships pinned
+  // (pins.js `pinnedByDefault`), so unlike the rows above there is no switch to
+  // pin — the pin IS the setting. A <div>, not a <label>: there is no checkbox
+  // for a label to belong to. Unlocked only, matching the button itself, which
+  // Safe Mode hides because the palette picker is a full-session surface.
+  document.getElementById('theme-pin-row')?.remove();
+  if (!state.decoy) {
+    const tRow = document.createElement('div');
+    tRow.id = 'theme-pin-row';
+    tRow.className = 'bm-avatar-style';
+    const txt = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = t ? t('nav.theme') : 'Theme';
+    txt.append(strong, document.createTextNode(
+      t ? ` — ${t('pins.theme_hint')}` : ' — keep the theme button on the bar.',
+    ));
+    tRow.append(txt);
+    const tPin = pinToggle('theme', { t, onChange: renderPins });
+    if (tPin) tRow.append(tPin);
+    (avRow || nr).after(tRow);
+  }
   // Custom link buttons: fourth device preference, same instant-apply rules —
   // add a link here and it is on the rail before the modal closes (renderPins
   // is the onChange). Unlocked sessions only: the editor is simply not built
@@ -2825,9 +2873,8 @@ function viewerSection() {
           class: 'bm-links-remove',
           title: t('viewer.remove_root'),
           'aria-label': `${t('viewer.remove_root')}: ${root.path}`,
-          text: '✕',
           onclick: () => save({ roots: cfg.roots.filter((r) => r.path !== root.path).map((r) => r.path) }),
-        }),
+        }, [railIcon(RAIL_ICONS.close)]),
       ]));
     }
     hidden.checked = !!cfg.show_hidden;
@@ -3217,7 +3264,6 @@ function renderBotManager() {
     // only when unlocked), so what Safe Mode can see is decided in full mode.
     const safeBtn = el('button', {
       class: 'bm-safe-btn' + (bot.safe ? ' on' : ''),
-      text: t('settings.safe_badge'),
       title: t('settings.safe_title'),
       onclick: (e) => {
         e.stopPropagation();
@@ -3225,7 +3271,7 @@ function renderBotManager() {
         safeBtn.classList.toggle('on', bmBots[idx].safe);
         bmDirty = true;
       },
-    });
+    }, iconLabel(RAIL_ICONS.shield, t('settings.safe_badge')));
     // ▲/▼ move buttons: HTML5 DnD never fires on touch, so these are the
     // reorder affordance that works everywhere (drag still works on desktop).
     const moveBtn = (dir) => {
@@ -3250,7 +3296,6 @@ function renderBotManager() {
     // reaction interrupts every screen in the house, so it's opt-in per bot.
     const rxBtn = el('button', {
       class: 'bm-safe-btn' + (bot.reactions ? ' on' : ''),
-      text: t('settings.react_badge'),
       title: t('settings.react_title'),
       onclick: (e) => {
         e.stopPropagation();
@@ -3258,12 +3303,11 @@ function renderBotManager() {
         rxBtn.classList.toggle('on', bmBots[idx].reactions);
         bmDirty = true;
       },
-    });
+    }, iconLabel(RAIL_ICONS.bolt, t('settings.react_badge')));
     // Per-bot avatar pool: new chats draw a one-shot face of their own. Also
     // opt-in — a pool only makes sense for a companion with a curated look.
     const apBtn = el('button', {
       class: 'bm-safe-btn' + (bot.avatar_pool ? ' on' : ''),
-      text: t('settings.pool_badge'),
       title: t('settings.pool_title'),
       onclick: (e) => {
         e.stopPropagation();
@@ -3271,7 +3315,7 @@ function renderBotManager() {
         apBtn.classList.toggle('on', bmBots[idx].avatar_pool);
         bmDirty = true;
       },
-    });
+    }, iconLabel(RAIL_ICONS.images, t('settings.pool_badge')));
     // Placement badge. DEVICE-local, unlike its neighbours: it writes straight
     // to localStorage and repaints, rather than joining bmDirty and waiting for
     // Save, because there is nothing server-side to save. Off in Safe Mode —
@@ -3302,9 +3346,9 @@ function renderBotManager() {
       // dropping it keeps the whole photo flow unreachable rather than
       // half-reachable. el() ignores a null child, so this composes cleanly.
       nimEnabled() ? null : el('button', {
-        class: 'bm-avatar-btn', text: t('settings.change_photo'), title: t('settings.change_photo_title'),
+        class: 'bm-avatar-btn', title: t('settings.change_photo_title'),
         onclick: (e) => { e.stopPropagation(); pickAvatarFile(bot.id); },
-      }),
+      }, iconLabel(RAIL_ICONS.camera, t('settings.change_photo'))),
       (() => {
         const lbl = el('label', { class: 'switch', title: t('settings.show_in_sidebar') });
         const cb = el('input', { type: 'checkbox', 'aria-label': t('settings.show_in_sidebar') });
@@ -3556,20 +3600,11 @@ function pickAvatarFile(botId) {
 }
 
 // ===================== File Server =====================
-const FILE_ICONS = [
-  [/\.(zip|tar|gz|tgz|bz2|xz|7z|rar)$/i, '📦'],
-  [/\.(pdf)$/i, '📕'],
-  [/\.(txt|md|log|csv|json|ya?ml|xml)$/i, '📝'],
-  [/\.(mp3|flac|wav|ogg|m4a|opus)$/i, '🎵'],
-  [/\.(py|js|ts|sh|c|cpp|rs|go|java|html|css)$/i, '💻'],
-  [/\.(iso|img|qcow2)$/i, '💿'],
-  [/\.(apk)$/i, '🤖'],
-  [/\.(exe|msi|appimage|deb|rpm|flatpak)$/i, '⚙️'],
-];
-function fileIcon(name) {
-  for (const [re, icon] of FILE_ICONS) if (re.test(name)) return icon;
-  return '📄';
-}
+// A single generic file glyph in currentColor — replaced the per-extension
+// colour-emoji map (📦📕📝🎵💻💿🤖⚙️📄, once kept in sync with markdown.js's
+// old _DOC_ICONS) on 2026-09-18. See markdown.js's expandDocDirectives for
+// the fuller reasoning: the filename next to it already says the type.
+function fileIcon() { return railIcon(RAIL_ICONS['viewer-file']); }
 
 function openFileServer() {
   dom['botmanager-backdrop'].classList.add('hidden');
@@ -3586,7 +3621,7 @@ async function renderFileServer() {
 
   if (!files.length) {
     list.append(el('div', { class: 'empty-list' }, [
-      el('div', { class: 'empty-emoji', text: '📂' }),
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.folder)]),
       el('p', { text: t('files.empty') }),
     ]));
     return;
@@ -3608,7 +3643,6 @@ async function renderFileServer() {
     const cutoff = g.files[0].created_at;
     const wipe = el('button', {
       class: 'fs-wipe-btn',
-      text: t('files.wipe_button', { count: olderCount }),
       title: t('files.wipe_title'),
       onclick: async () => {
         if (!await uiConfirm(t('files.wipe_confirm', { count: olderCount, day: g.label }), { danger: true })) return;
@@ -3618,7 +3652,7 @@ async function renderFileServer() {
           renderFileServer();
         } catch (e) { toast(e.message, true); }
       },
-    });
+    }, iconLabel(RAIL_ICONS.trash, t('files.wipe_button', { count: olderCount })));
     list.append(el('div', { class: 'fs-day' }, [
       el('span', { class: 'fs-day-label', text: g.label }),
       wipe,
@@ -3650,22 +3684,22 @@ async function renderFileServer() {
         thumb.style.cursor = 'zoom-in';
         thumb.onclick = () => openLightbox(rawUrl, { video: true, downloadUrl: dlUrl, downloadName: f.name });
       } else {
-        thumb = el('div', { class: 'fs-thumb fs-thumb-icon', text: fileIcon(f.name) });
+        thumb = el('div', { class: 'fs-thumb fs-thumb-icon' }, [fileIcon()]);
       }
 
       const actions = [];
       if (canPreview && !isImage && !isVideo) {
         // Text/doc preview opens the raw endpoint in a new tab.
-        actions.push(el('a', { class: 'fs-act-btn', text: '👁', title: t('files.view'), href: rawUrl, target: '_blank', rel: 'noopener' }));
+        actions.push(el('a', { class: 'fs-act-btn', title: t('files.view'), href: rawUrl, target: '_blank', rel: 'noopener' }, [railIcon(RAIL_ICONS.eye)]));
       }
-      actions.push(el('a', { class: 'fs-act-btn', text: '⬇', title: t('files.download'), href: dlUrl, download: f.name }));
+      actions.push(el('a', { class: 'fs-act-btn', title: t('files.download'), href: dlUrl, download: f.name }, [railIcon(RAIL_ICONS['viewer-download'])]));
       actions.push(el('button', {
-        class: 'fs-del-btn', text: '✕', title: t('files.delete'),
+        class: 'fs-del-btn', title: t('files.delete'),
         onclick: async () => {
           try { await api.deleteFile(f.id); renderFileServer(); }
           catch (e) { toast(e.message, true); }
         },
-      }));
+      }, [railIcon(RAIL_ICONS.trash)]));
 
       const row = el('div', { class: 'fs-row' }, [
         thumb,
@@ -3692,7 +3726,7 @@ function dropRow(file) {
   const bar = el('i');
   const detail = el('div', { class: 'drop-detail', text: t('drop.waiting') });
   const row = el('div', { class: 'drop-row' }, [
-    el('div', { class: 'drop-icon', text: fileIcon(file.name) }),
+    el('div', { class: 'drop-icon' }, [fileIcon()]),
     el('div', { class: 'drop-info' }, [
       el('div', { class: 'drop-name', text: file.name, title: file.name }),
       detail,
@@ -3704,13 +3738,13 @@ function dropRow(file) {
     progress(pct) { bar.style.width = `${pct}%`; detail.textContent = t('drop.sending', { percent: fmtPercent(pct) }); },
     ok(res) {
       row.classList.add('done');
-      row.querySelector('.drop-icon').textContent = '✅';
+      row.querySelector('.drop-icon').replaceChildren(railIcon(RAIL_ICONS.check));
       detail.textContent = t(res && res.notice === false ? 'drop.sent_no_thread' : 'drop.sent',
                              { size: fileSize(file.size) });
     },
     fail(msg) {
       row.classList.add('failed');
-      row.querySelector('.drop-icon').textContent = '⚠️';
+      row.querySelector('.drop-icon').replaceChildren(railIcon(RAIL_ICONS.alert));
       // Strip the leading "413: " status the API client prefixes — the sender
       // needs the sentence, not the status code.
       detail.textContent = String(msg || t('drop.failed')).replace(/^\d{3}:\s*/, '');
@@ -4021,9 +4055,28 @@ function renderHarnessSessionPanel() {
   ]));
 }
 
+/** Close whichever tool pane is open, whoever is about to open one.
+ *
+ *  The four panes are mutually exclusive — they share the same slot and the
+ *  same z-index, so two painted at once means the later sibling wins and the
+ *  other is invisible but still "open": its flag stays true, its polling keeps
+ *  running, and state.selectedBotId names a pane you cannot see. Harness and
+ *  StudioForge each closed only ONE of the other three, so Clients -> Harness
+ *  and Mail -> Harness both stacked.
+ *
+ *  `except` keeps an opener from closing itself when it is already open, which
+ *  is the re-entrant case (selectBot on the pane you are looking at).
+ */
+function closeToolPanes(except) {
+  if (harnessOpen && except !== 'harness') closeHarnessView();
+  if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
+  if (mailOpen && except !== 'mail') closeMailView();
+  if (clientsOpen && except !== 'clients') closeClientsView();
+}
+
 function openHarnessView() {
   if (state.decoy || !state.harnessEnabled) return;
-  if (studioforgeOpen) closeStudioForgeView();
+  closeToolPanes('harness');
   state.selectedBotId = HARNESS_ID;
   harnessOpen = true;
   renderSidebar();
@@ -4326,6 +4379,10 @@ let harnessSessionBusy = false;   // a launch is in flight
 function stopHarnessSessionPoll() {
   if (harnessSessionTimer) { clearTimeout(harnessSessionTimer); harnessSessionTimer = null; }
   if (harnessSessionTick) { clearInterval(harnessSessionTick); harnessSessionTick = null; }
+  // Clearing the timers is not enough: a request already in flight re-arms
+  // from its own callback, and the only thing those callbacks check is whether
+  // harnessSessionId still matches. Nulling it is what makes the stop stick.
+  harnessSessionId = null;
 }
 
 // State labels reuse the service-state and job keys — 'running' and 'finished'
@@ -4374,7 +4431,7 @@ function sessionEventEl(ev) {
   switch (ev.k) {
     case 'tool':
       return el('div', { class: 'hs-ev hs-tool' }, [
-        el('span', { class: 'hs-ev-tag', text: '⚙ ' + ev.name }),
+        el('span', { class: 'hs-ev-tag' }, [railIcon(RAIL_ICONS.tools), document.createTextNode(` ${ev.name}`)]),
         el('span', { class: 'hs-ev-text', text: ev.args || '' }),
       ]);
     case 'result':
@@ -4487,6 +4544,7 @@ function harnessSessionPoll() {
   if (!id) return;
   api.harnessSession(id, harnessSessionNext).then((d) => {
     if (harnessSessionId !== id) return;
+    if (!harnessOpen) return;          // pane closed while this was in flight
     if (Array.isArray(d.events) && d.events.length) {
       harnessSessionEvents = harnessSessionEvents.concat(d.events).slice(-500);
       harnessSessionNext = d.next || harnessSessionNext;
@@ -4495,7 +4553,13 @@ function harnessSessionPoll() {
     harnessSessionTimer = d.active ? setTimeout(harnessSessionPoll, 1000) : null;
   }).catch((e) => {
     if (harnessSessionId !== id) return;
-    if (e && e.status === 404) {          // stopped or cleared elsewhere
+    if (!harnessOpen) return;          // pane closed while this was in flight
+    // 403 alongside 404: a drop to Safe Mode makes every harness route refuse,
+    // and retrying it every 2s for the rest of the session — from a device
+    // somebody has just locked — is exactly the loop the Clients poll had.
+    // Both are terminal for this session, and both are worth SHOWING rather
+    // than leaving the card spinning on a request that will never succeed.
+    if (e && (e.status === 404 || e.status === 403)) {
       harnessSessionId = null;
       harnessSessionTimer = null;
       renderHarnessSessions();
@@ -4608,9 +4672,30 @@ function wireHarnessView() {
 let studioforgeOpen = false;
 let studioforgeProbing = false;
 
+/** Would the browser refuse this URL purely because of how DisPatch itself was
+ *  loaded? An HTTPS document may not embed — or even fetch — an http:// origin.
+ *
+ *  This is THE failure mode over Tailscale and it used to be invisible.
+ *  Tailscale Serve fronts DisPatch over HTTPS on a tailnet name while the rig is
+ *  configured as a bare http:// address, so the iframe is blocked as mixed
+ *  content and the pane drew an empty rectangle. Reached over plain http on
+ *  the LAN the very same build works, which is exactly why it reads as
+ *  "typically does not load over Tailscale".
+ *
+ *  Checked BEFORE the network probe because no probe can see it: the browser
+ *  blocks mixed content at the fetch layer and a no-cors fetch still resolves
+ *  (see probeStudioForgeFromClient), so the request "succeeds" having fetched
+ *  nothing. */
+function studioforgeInsecure(url) {
+  return isMixedContent(window.location.href, url);
+}
+
 function studioforgeState() {
   const st = state.studioforge.status;
   if (!st) return 'unknown';
+  // Ahead of `checking`: a scheme mismatch is a certainty, not a measurement,
+  // so there is nothing to wait for and no point spinning.
+  if (st.url && studioforgeInsecure(st.url)) return 'insecure';
   if (studioforgeProbing) return 'checking';
   if (st.reachable === false) return 'down';
   if (state.studioforge.clientReachable === false) return 'unreachable';
@@ -4659,7 +4744,7 @@ function renderStudioForgeSessionPanel() {
 
 function openStudioForgeView() {
   if (state.decoy || !state.studioforgeEnabled) return;
-  if (harnessOpen) closeHarnessView();
+  closeToolPanes('studioforge');
   state.selectedBotId = STUDIOFORGE_ID;
   studioforgeOpen = true;
   renderSidebar();
@@ -4685,13 +4770,25 @@ function closeStudioForgeView() {
 }
 
 // Can THIS browser reach the panel? A no-cors GET tells us nothing about the
-// response — that is fine, we only need "did the request complete or did the
-// network refuse it". Short timeout so a black-holed address does not leave the
-// pane spinning.
+// response body — that is fine, we only want "did the request go out, or did
+// the network refuse it". Short timeout so a black-holed address does not
+// leave the pane spinning.
+//
+// KNOWN LIMIT, and the reason for the guard below: a no-cors fetch yields an
+// OPAQUE response, and an opaque response RESOLVES in cases where nothing was
+// actually retrieved. Measured on this build: from an https:// origin, a
+// no-cors fetch of the http:// rig resolves while DevTools logs the request as
+// blocked mixed content (net::ERR_ABORTED). Trusting it set clientReachable =
+// true, every note branch was skipped, and the blocked iframe painted an empty
+// box. So the scheme case is decided before we get here and the probe is not
+// run at all; what remains is a genuine network question.
 async function probeStudioForgeFromClient() {
   const st = state.studioforge.status;
   const url = st && st.url;
   if (!url) return;
+  // Nothing to measure: the browser will refuse this URL whatever the network
+  // says, and a probe would answer "fine" (see above).
+  if (studioforgeInsecure(url)) { state.studioforge.clientReachable = null; renderStudioForge(); return; }
   studioforgeProbing = true;
   renderStudioForge();
   let ok = false;
@@ -4727,6 +4824,12 @@ function renderStudioForge() {
   if (!frame || !note) return;
   let noteKey = null;
   if (!url) noteKey = 'unconfigured';
+  // First, because it is the only one that is certain rather than measured,
+  // and because every other branch below would misdiagnose it: the server can
+  // reach the rig (it is on the same tailnet over plain http), the client
+  // probe resolves, `framable` may well be true — and the frame is still
+  // refused, by this page's own origin.
+  else if (sv === 'insecure') noteKey = 'insecure';
   else if (sv === 'checking') noteKey = 'checking';
   // Server first: if DisPatch's own host cannot reach the panel either, the rig
   // is down — a stronger and more useful signal than "this device can't". The
@@ -4753,6 +4856,186 @@ function renderStudioForge() {
 function wireStudioForgeView() {
   if (!dom['studioforge-view']) return;
   dom['studioforge-back'].addEventListener('click', () => navigate('bots'));
+}
+
+// ===================== Emails tab (MailForge dashboard) =====================
+// See backend/app/mailforge_bridge.py for why this is an iframe pointed at
+// MailForge's own launch URL rather than a same-origin reverse proxy.
+let mailOpen = false;
+
+async function refreshMailFeature() {
+  if (state.decoy) { state.mailEnabled = false; return; }
+  if (state.auth.features && state.auth.features.mail === false) {
+    state.mailEnabled = false; return;
+  }
+  try {
+    await api.mailStatus();
+    state.mailEnabled = true;
+  } catch (e) {
+    if (e.status === 404 || e.status === 403) state.mailEnabled = false;
+  }
+  renderSidebar();
+}
+
+function renderMailSessionPanel() {
+  dom['tl-botname'].textContent = t('mail.name');
+  dom['tl-model'].textContent = t('mail.session_panel_title');
+  const wrap = dom['threads'];
+  wrap.innerHTML = '';
+  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
+    el('div', { class: 'empty-emoji', text: '✉' }),
+    el('p', { text: t('mail.session_panel_heading') }),
+    el('p', { class: 'muted', text: t('mail.session_panel_body') }),
+  ]));
+}
+
+function openMailView() {
+  if (state.decoy || !state.mailEnabled) return;
+  closeToolPanes('mail');
+  state.selectedBotId = MAIL_ID;
+  mailOpen = true;
+  renderSidebar();
+  renderMailSessionPanel();
+  dom['mail-view'].classList.remove('hidden');
+  document.body.classList.add('terminal-active');
+  if (isMobile()) navigate('chat');
+  renderMail();
+}
+
+function closeMailView() {
+  mailOpen = false;
+  document.body.classList.remove('terminal-active');
+  dom['mail-view'].classList.add('hidden');
+  const f = dom['mail-frame'];
+  if (f) { f.classList.add('hidden'); f.removeAttribute('src'); }
+}
+
+async function renderMail() {
+  const note = dom['mail-note'];
+  const frame = dom['mail-frame'];
+  const dot = dom['mail-dot'];
+  const label = dom['mail-status-label'];
+  if (!note || !frame) return;
+  dot.className = 'terminal-dot';
+  label.textContent = t('mail.checking');
+  let st;
+  try {
+    st = await api.mailStatus();
+  } catch (e) {
+    dot.classList.add('stopped');
+    label.textContent = t('mail.state_unreachable');
+    note.classList.remove('hidden');
+    frame.classList.add('hidden');
+    frame.removeAttribute('src');
+    dom['mail-note-text'].textContent = t('mail.unreachable_text');
+    dom['mail-note-hint'].textContent = t('mail.unreachable_hint');
+    return;
+  }
+  if (!st.installed) {
+    dot.classList.add('stopped');
+    label.textContent = t('mail.state_not_installed');
+    note.classList.remove('hidden');
+    frame.classList.add('hidden');
+    frame.removeAttribute('src');
+    dom['mail-note-text'].textContent = t('mail.not_installed_text');
+    dom['mail-note-hint'].textContent = t('mail.not_installed_hint');
+    return;
+  }
+  if (!st.reachable || !st.launch_url) {
+    dot.classList.add('stopped');
+    label.textContent = t('mail.state_down');
+    note.classList.remove('hidden');
+    frame.classList.add('hidden');
+    frame.removeAttribute('src');
+    dom['mail-note-text'].textContent = t('mail.down_text');
+    dom['mail-note-hint'].textContent = t('mail.down_hint');
+    return;
+  }
+  dot.classList.add('running');
+  label.textContent = t('mail.state_running');
+  note.classList.add('hidden');
+  // Hidden without a URL, the way the StudioForge pane's own link is. The
+  // markup ships href="#" target="_blank", so when MailForge answers without a
+  // launch_url the arrow opened a second, blank copy of DisPatch in a new tab
+  // — an affordance that looks like it works and does something unrelated.
+  if (st.launch_url) dom['mail-open'].href = st.launch_url;
+  else dom['mail-open'].removeAttribute('href');
+  dom['mail-open'].classList.toggle('hidden', !st.launch_url);
+  if (st.launch_url && frame.getAttribute('src') !== st.launch_url) frame.setAttribute('src', st.launch_url);
+  frame.classList.remove('hidden');
+}
+
+function wireMailView() {
+  if (!dom['mail-view']) return;
+  dom['mail-back'].addEventListener('click', () => navigate('bots'));
+}
+
+// ===================== Clients tab ("WebBuilder") =====================
+// Native DisPatch UI against the practice box's client-pipeline API, proxied
+// through /api/practice/*. All rendering lives in js/clients.js.
+let clientsOpen = false;
+
+async function refreshClientsFeature() {
+  if (state.decoy) { state.clientsEnabled = false; return; }
+  if (state.auth.features && state.auth.features.practice === false) {
+    state.clientsEnabled = false; return;
+  }
+  try {
+    await api.practiceGet('board');
+    state.clientsEnabled = true;
+  } catch (e) {
+    if (e.status === 404 || e.status === 403 || e.status === 502) state.clientsEnabled = false;
+  }
+  renderSidebar();
+}
+
+function renderClientsSessionPanel() {
+  dom['tl-botname'].textContent = t('clients.name');
+  dom['tl-model'].textContent = t('clients.session_panel_title');
+  const wrap = dom['threads'];
+  wrap.innerHTML = '';
+  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
+    el('div', { class: 'empty-emoji', text: '👥' }),
+    el('p', { text: t('clients.session_panel_heading') }),
+    el('p', { class: 'muted', text: t('clients.session_panel_body') }),
+  ]));
+}
+
+function openClientsPanel() {
+  if (state.decoy || !state.clientsEnabled) return;
+  closeToolPanes('clients');
+  state.selectedBotId = CLIENTS_ID;
+  clientsOpen = true;
+  renderSidebar();
+  renderClientsSessionPanel();
+  dom['clients-view'].classList.remove('hidden');
+  document.body.classList.add('terminal-active');
+  if (isMobile()) navigate('chat');
+  initClients(dom['clients-root'], dom['clients-job-strip']);
+  showClientsTab('overview');
+}
+
+function closeClientsView() {
+  clientsOpen = false;
+  document.body.classList.remove('terminal-active');
+  dom['clients-view'].classList.add('hidden');
+  // Hiding the view is not stopping it: the job poll reschedules itself, so
+  // without this it kept polling the practice box for the rest of the session
+  // — including after a drop to Safe Mode, where the pane it would report into
+  // no longer exists.
+  stopClientsPolling();
+}
+
+function wireClientsView() {
+  if (!dom['clients-view']) return;
+  dom['clients-back'].addEventListener('click', () => navigate('bots'));
+  clientsTabNav(dom['clients-tabnav']);
+  window.addEventListener('clients:open-thread', (ev) => {
+    const threadId = ev && ev.detail && ev.detail.threadId;
+    if (!threadId) return;
+    closeClientsView();
+    openThread(threadId);
+  });
 }
 
 // ===================== Live streaming render =====================
@@ -4870,6 +5153,16 @@ function renderStreamMarkdown(id) {
 // ===================== WebSocket dispatch =====================
 function handleWs(data) {
   switch (data.type) {
+    // An agent posted or someone voted on a job. The server already put the
+    // whole serialised job in this frame, so pass it along: the board patches
+    // that one row instead of re-fetching the entire list, which is what it
+    // used to do on every vote.
+    case 'job_created':
+    case 'job_updated':
+      document.dispatchEvent(new CustomEvent('dispatch:jobs-changed', {
+        detail: { type: data.type, job_id: data.job_id, job: data.job || null },
+      }));
+      return;
     case 'hello':
     case 'bots':
       if (typeof data.decoy === 'boolean') {
@@ -5303,16 +5596,31 @@ function focusIntoModal(backdrop) {
   try { modal.focus(); } catch { /* ignore */ }
 }
 function initModalFocusGuard() {
-  const backdrops = Array.from(document.querySelectorAll('.modal-backdrop'));
+  // The lock screen belongs in this set, not in a second implementation of it.
+  // It is a role="dialog" aria-modal="true" surface shown by toggling .hidden,
+  // exactly like the backdrops — and aria-modal is a promise the markup cannot
+  // keep: without inert, Tab walks out of the PIN card into the roster and the
+  // gear behind it, on an app that has not been unlocked.
+  //
+  // It has to be the SAME owner because the only route to it is
+  // `hideCompanions(); showUnlock()` — two class changes in one task. A
+  // separate owner set inert in showUnlock and then this observer, firing
+  // afterwards and seeing the companions backdrop closed, lifted it again.
+  const backdrops = Array.from(document.querySelectorAll('.modal-backdrop, .lock-screen'));
   if (!backdrops.length) return;
   const isOpen = (b) => !b.classList.contains('hidden');
   const anyOpen = () => backdrops.some(isOpen);
   const shown = new WeakMap();
   backdrops.forEach((b) => shown.set(b, isOpen(b)));
-  const setInert = (on) => [dom.app, dom['mobile-tabs']].forEach((elm) => {
-    if (!elm) return;
-    if (on) elm.setAttribute('inert', ''); else elm.removeAttribute('inert');
-  });
+  // One hold for "some watched surface is open", taken and released through
+  // the shared counter so the lightbox and the job overlay can hold their own
+  // at the same time. Writing the attribute directly here is what let a
+  // backdrop closing anywhere strip another surface's trap.
+  let guardToken = null;
+  const setInert = (on) => {
+    if (on && !guardToken) guardToken = acquireInert();
+    else if (!on && guardToken) { releaseInert(guardToken); guardToken = null; }
+  };
   const obs = new MutationObserver((records) => {
     let opened = null, changed = false;
     for (const r of records) {
@@ -5455,10 +5763,12 @@ function wireEvents() {
 
   dom['thread-menu-btn'].addEventListener('click', (e) => {
     e.stopPropagation();
-    const pinBtn = document.getElementById('thread-menu-pin');
+    // The label is a child <span> now (the icon span next to it is not
+    // i18n-controlled and must survive a language switch untouched).
+    const pinLabel = document.querySelector('#thread-menu-pin [data-i18n]');
     // Re-point the key rather than writing bare text: the next language switch
     // re-runs the DOM pass, which would otherwise reset this to "Pin".
-    if (pinBtn) setI18nText(pinBtn, (state.activeThread && state.activeThread.is_pinned) ? 'chat.unpin' : 'chat.pin');
+    if (pinLabel) setI18nText(pinLabel, (state.activeThread && state.activeThread.is_pinned) ? 'chat.unpin' : 'chat.pin');
     toggleThreadMenu();
   });
   dom['thread-menu'].querySelectorAll('button').forEach((b) =>
@@ -5486,7 +5796,7 @@ function wireEvents() {
     // The unlock overlay owns the keyboard while it's open (handled elsewhere).
     if (!dom['lock-screen'].classList.contains('hidden')) return;
     if (e.key === 'Escape') {
-      const lb = document.querySelector('.lightbox');
+      const lb = [...document.querySelectorAll('.lightbox')].at(-1);
       // Route through the ✕ button so the lightbox's own close() runs
       // (pauses video, detaches its window pan listeners).
       if (lb) { const x = lb.querySelector('.lightbox-close'); if (x) x.click(); else lb.remove(); return; }
@@ -5621,7 +5931,11 @@ function applyAuthChrome() {
   // opens. The previously-shipped Dark/Light toggle DID work in Safe Mode; a
   // palette is a bigger choice than a one-bit toggle, so it moved behind the
   // same gate as every other device preference rather than getting its own.
-  dom['theme-toggle'].classList.toggle('hidden', state.decoy);
+  // 🎨 is a pin like any other, just one that ships pinned and keeps its own
+  // markup (pins.js `kind: 'rail'`). Unpinning it in Settings → Device hides
+  // the button; the Theme tab itself is untouched, so nothing becomes
+  // unreachable — it is a rail shortcut, not the only door.
+  dom['theme-toggle'].classList.toggle('hidden', state.decoy || !isPinned('theme'));
   // The three admin Settings tabs — pack curation (upload/edit/delete), the
   // host dashboard, and provider setup that writes an API key to disk. All
   // three are full-session only server-side, so a locked device would collect
@@ -5655,6 +5969,12 @@ function applyAuthChrome() {
 // path that changes a pinned setting, pins one, or crosses the lock boundary
 // repaints the same way.
 function renderPins() {
+  // 🎨 is drawn by the markup, not by renderPinnedRail, so its pin has to be
+  // applied here too — otherwise unpinning it in Settings leaves the button on
+  // the rail until the next tier change repaints the chrome.
+  if (dom['theme-toggle']) {
+    dom['theme-toggle'].classList.toggle('hidden', state.decoy || !isPinned('theme'));
+  }
   renderPinnedRail(document.getElementById('gear-row'), {
     decoy: state.decoy,
     t,
@@ -5761,7 +6081,7 @@ function renderCompanions() {
     // VIEW + SEND, and /api/bots/order is decoy-blocked server-side — the flag
     // is set in the Bot Manager, this just shows the family what's on.
     if (botHasReactions(bot.id)) {
-      row.append(el('span', { class: 'comp-react', text: '⚡', title: t('companions.reacts') }));
+      row.append(el('span', { class: 'comp-react', title: t('companions.reacts') }, [railIcon(RAIL_ICONS.bolt)]));
     }
     list.append(row);
   });
@@ -5800,6 +6120,12 @@ function showUnlock() {
   }
   syncLockNimRow();
   dom['lock-screen'].classList.remove('hidden');
+  // Focus and inert are NOT set here. initModalFocusGuard watches this element
+  // alongside the .modal-backdrop set and owns both, which matters because the
+  // only route to this screen is `hideCompanions(); showUnlock()` — two class
+  // changes in one task. With a second owner here, the guard's observer fired
+  // afterwards, saw the companions backdrop closed, and lifted the inert this
+  // function had just set.
 }
 function hideUnlock() {
   dom['lock-screen'].classList.add('hidden');
@@ -5822,8 +6148,22 @@ function closeAllOverlays() {
     .forEach((k) => dom[k] && dom[k].classList.add('hidden'));
   // The tool panes are full-session only — never leave a view alive across
   // a drop to Safe Mode.
-  if (harnessOpen) closeHarnessView();
-  if (studioforgeOpen) closeStudioForgeView();
+  //
+  // All FOUR of them. Mail and Clients were missing here while selectBot()
+  // (which closes the same set on an ordinary view change) already listed
+  // them, so a session that dropped to Safe Mode with the Emails or Clients
+  // tab open kept that pane painted — an iframe of the MailForge dashboard,
+  // or the client pipeline, still on screen on a device that has just been
+  // locked. The panes' own APIs refuse in Safe Mode, so nothing new could be
+  // fetched, but the last frame stayed visible, which is exactly what Safe
+  // Mode exists to prevent.
+  closeToolPanes();
+  // The job detail overlay is none of the three shapes swept below: it is a
+  // body-level sibling built at click time, not a .modal-backdrop, not a
+  // .lightbox and not a <dialog>. So it survived a drop to Safe Mode with the
+  // full job detail and its vote controls on screen, and kept #app inert until
+  // somebody closed it by hand. Same leak class as the two panes above.
+  closeJobDetail();
   // Never n.remove() a lightbox directly: that skips pausing the video and
   // unbinding its window-level pan listeners.
   document.querySelectorAll('.lightbox').forEach((n) => {
@@ -6194,10 +6534,96 @@ function iconifyRail() {
   }
 }
 
+// The same swap, for the chrome outside the rail (2026-09). The tab bar, the
+// settings tab strip, the chat header and the composer shipped colour emoji,
+// which the platform draws in its own palette: they cannot theme, and beside
+// the rail's line art they read as another app's furniture. Everything here
+// keeps its emoji in the markup as the no-JS fallback, exactly like the rail.
+//
+// Two rules this function must not break:
+//  1. NEVER replace the whole button when it also holds a text label. The
+//     tabs and the settings tabs carry a translated <span> that i18n rewrites
+//     on every language change; only the GLYPH span is swapped, or the label
+//     disappears the first time someone switches language.
+//  2. Only touch a glyph that is still the shipped emoji. Re-running this (a
+//     re-render, a tier change) must be a no-op rather than nesting an <svg>
+//     inside the last one.
+function iconifyChrome() {
+  // [element, icon, glyphSelector] — glyphSelector picks the span to replace
+  // when the control is more than its glyph; null means the whole element is
+  // the glyph.
+  const swaps = [
+    // Mobile tabs: the glyph is the first <span>, the label is the second.
+    ['.mobile-tabs .tab[data-view="bots"]', RAIL_ICONS.bots, 'span:not(.tab-label)'],
+    ['.mobile-tabs .tab[data-view="threads"]', RAIL_ICONS.chats, 'span:not(.tab-label)'],
+    ['.mobile-tabs .tab[data-view="chat"]', RAIL_ICONS.messages, 'span:not(.tab-label)'],
+    ['#tab-jobs', RAIL_ICONS.jobs, 'span:not(.tab-label)'],
+    // Settings tab strip.
+    ['#stab-bots', RAIL_ICONS.bots, '.stab-glyph'],
+    ['#stab-reactions', RAIL_ICONS.bolt, '.stab-glyph'],
+    ['#stab-health', RAIL_ICONS.pulse, '.stab-glyph'],
+    ['#stab-ai', RAIL_ICONS.chip, '.stab-glyph'],
+    ['#stab-theme', RAIL_ICONS.palette, '.stab-glyph'],
+    ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
+    ['#stab-security', RAIL_ICONS.shield, '.stab-glyph'],
+    // Chat header + thread list.
+    ['#back-btn', RAIL_ICONS.back, null],
+    ['#expand-threads', RAIL_ICONS.forward, null],
+    ['#collapse-threads', RAIL_ICONS.back, null],
+    ['#popout-btn', RAIL_ICONS.popout, null],
+    ['#thread-menu-btn', RAIL_ICONS.menu, null],
+    ['#search-btn', RAIL_ICONS.search, null],
+    ['#new-chat', RAIL_ICONS.plus, null],
+    ['#scroll-bottom', RAIL_ICONS['chevron-down'], null],
+    // Composer.
+    ['#attach-btn', RAIL_ICONS.attach, null],
+    ['#send', RAIL_ICONS.send, null],
+    ['#stop', RAIL_ICONS.stop, null],
+    // The two big decorative glyphs: the empty chat and the lock face. Scoped
+    // to #chat-empty on purpose — the harness and StudioForge panes reuse
+    // .empty-emoji for their "dsh" and "SF" wordmarks, which are text, not
+    // emoji, and must stay as they are.
+    ['#chat-empty .empty-emoji', RAIL_ICONS.messages, null],
+    ['.lock-emoji', RAIL_ICONS.lock, null],
+  ];
+  for (const [sel, icon, glyphSel] of swaps) {
+    const host = document.querySelector(sel);
+    if (!host || !icon) continue;
+    const target = glyphSel ? host.querySelector(glyphSel) : host;
+    if (!target || target.querySelector('svg')) continue;   // already iconified
+    target.replaceChildren(railIcon(icon));
+  }
+  // Every modal in the app closes with the same ✕, on eight different ids.
+  // Matching the GLYPH rather than listing the ids is both shorter and harder
+  // to forget to extend: a ninth modal gets the icon for free. textContent is
+  // compared trimmed and exactly, so a button that merely contains a ✕ inside
+  // a longer label is left alone.
+  for (const b of document.querySelectorAll('.icon-btn')) {
+    if (b.textContent.trim() === '✕') b.replaceChildren(railIcon(RAIL_ICONS.close));
+  }
+}
+
+// The generic form of the two swaps above, for markup written AFTER them
+// (2026-09-18 sweep: the thread menu, the recovery/File-Server/search panel
+// titles, the settings recovery+lock rows). A `<span data-icon="pin">`
+// anywhere in `root` gets that RAIL_ICONS entry — no id list to keep in sync,
+// so a new menu item just needs the attribute. Safe to call again on freshly
+// inserted DOM (a modal's contents, say): already-filled spans are skipped
+// the same way iconifyChrome skips an already-swapped glyph.
+function iconifyDataIcons(root = document) {
+  for (const host of root.querySelectorAll('[data-icon]')) {
+    const icon = RAIL_ICONS[host.dataset.icon];
+    if (!icon || host.querySelector('svg')) continue;
+    host.replaceChildren(railIcon(icon));
+  }
+}
+
 async function startApp() {
   if (state.started) return;
   state.started = true;
   iconifyRail();
+  iconifyChrome();
+  iconifyDataIcons();
   // Delegated code-block / file-path copy handlers (idempotent, survives
   // re-render + streaming since it binds on document, not per message).
   // A plain click on a file path opens it in the local viewer; Shift/Alt-click
@@ -6245,10 +6671,14 @@ async function startApp() {
     ensureFeatures().finally(() => {
       refreshHarnessFeature();
       refreshStudioForgeFeature();
+      refreshMailFeature();
+      refreshClientsFeature();
     });
   } else {
     state.harnessEnabled = false;
     state.studioforgeEnabled = false;
+    state.mailEnabled = false;
+    state.clientsEnabled = false;
   }
   applyAuthChrome();
   renderSidebar();
@@ -6430,9 +6860,10 @@ async function doRecoverAll() {
 // ===================== Transcript bridge (raw viewer + session browser) =====================
 // [kind, translation key] — the chip labels are resolved at render time so a
 // language switch repaints them without rebuilding this table.
-const TX_KINDS = [['text', 'transcript.filter_text'], ['note', 'transcript.filter_note'],
-  ['user', 'transcript.filter_user'], ['tool', 'transcript.filter_tool'],
-  ['tool_result', 'transcript.filter_tool_result'], ['thinking', 'transcript.filter_thinking']];
+const TX_KINDS = [['text', 'transcript.filter_text', RAIL_ICONS.messages], ['note', 'transcript.filter_note', RAIL_ICONS.rename],
+  ['user', 'transcript.filter_user', RAIL_ICONS.user], ['tool', 'transcript.filter_tool', RAIL_ICONS.tools],
+  ['tool_result', 'transcript.filter_tool_result', RAIL_ICONS['viewer-download']],
+  ['thinking', 'transcript.filter_thinking', RAIL_ICONS.brain]];
 let txState = { items: [], filter: null, threadId: null, sessionKey: null, botId: null, missing: 0 };
 function txDefaultFilter() { return new Set(TX_KINDS.map(([k]) => k)); }
 
@@ -6440,7 +6871,7 @@ async function openThreadTranscript(threadId) {
   if (state.decoy) { toast(t('toast.not_available'), true); return; }  // neutral: no lock hint in Safe Mode
   const th = state.threads.find((x) => x.id === threadId) || state.activeThread;
   const botId = (th && th.bot_id) || state.selectedBotId;
-  setI18nText(dom['tx-title'], 'transcript.title');
+  setI18nText(dom['tx-title'].querySelector('[data-i18n]') || dom['tx-title'], 'transcript.title');
   dom['tx-import'].hidden = true;
   dom['tx-filter'].innerHTML = '';
   dom['tx-list'].innerHTML = '';
@@ -6461,8 +6892,8 @@ function renderTranscript(meta) {
     ? t('transcript.summary', { items: txState.items.length, missing: meta.missing_from_dispatch || 0 })
     : t('transcript.none');
   const fwrap = dom['tx-filter']; fwrap.innerHTML = '';
-  for (const [k, labelKey] of TX_KINDS) {
-    const chip = el('button', { class: 'tx-chip' + (txState.filter.has(k) ? ' on' : ''), text: t(labelKey) });
+  for (const [k, labelKey, icon] of TX_KINDS) {
+    const chip = el('button', { class: 'tx-chip' + (txState.filter.has(k) ? ' on' : '') }, iconLabel(icon, t(labelKey)));
     chip.addEventListener('click', () => {
       if (txState.filter.has(k)) txState.filter.delete(k); else txState.filter.add(k);
       chip.classList.toggle('on'); renderTxList();
@@ -6526,7 +6957,7 @@ async function openSessionBrowser() {
   if (!botId) { toast(t('sessions.pick_bot_first'), true); return; }
   dom['recover-backdrop'].classList.add('hidden');
   const bot = botById(botId);
-  setI18nText(dom['tx-title'], 'sessions.title', { name: (bot && bot.name) || botId });
+  setI18nText(dom['tx-title'].querySelector('[data-i18n]') || dom['tx-title'], 'sessions.title', { name: (bot && bot.name) || botId });
   dom['tx-summary'].textContent = t('sessions.summary');
   dom['tx-filter'].innerHTML = '';
   dom['tx-import'].hidden = true;
@@ -6708,33 +7139,33 @@ async function openLocalPath(path) {
 }
 function cmdkActions() {
   const a = [
-    { icon: '＋', label: t('cmdk.action_new_chat'), run: () => newChat() },
-    { icon: '🎨', label: t('cmdk.action_theme'), run: () => openSettingsTab('theme') },
+    { icon: RAIL_ICONS.plus, label: t('cmdk.action_new_chat'), run: () => newChat() },
+    { icon: RAIL_ICONS.palette, label: t('cmdk.action_theme'), run: () => openSettingsTab('theme') },
   ];
   if (!state.decoy) {
-    a.push({ icon: '🔍', label: t('cmdk.action_search'), run: () => openSearch() });
-    a.push({ icon: '🛟', label: t('cmdk.action_recovery'), run: () => openRecovery() });
+    a.push({ icon: RAIL_ICONS.search, label: t('cmdk.action_search'), run: () => openSearch() });
+    a.push({ icon: RAIL_ICONS.lifering, label: t('cmdk.action_recovery'), run: () => openRecovery() });
   }
   if (!state.decoy) {
     // The Settings tabs and the File Server are unlocked-only surfaces, so
     // the palette offers them only where the rail would — a locked device
     // must get no hint that they exist.
-    a.push({ icon: '⚙️', label: t('cmdk.action_settings'), run: () => openSettingsTab('device') });
-    a.push({ icon: '🩺', label: t('cmdk.action_health'), run: () => openSettingsTab('health') });
-    a.push({ icon: '📁', label: t('cmdk.action_files'), run: () => openFileServer() });
+    a.push({ icon: RAIL_ICONS.gear, label: t('cmdk.action_settings'), run: () => openSettingsTab('device') });
+    a.push({ icon: RAIL_ICONS.pulse, label: t('cmdk.action_health'), run: () => openSettingsTab('health') });
+    a.push({ icon: RAIL_ICONS.folder, label: t('cmdk.action_files'), run: () => openFileServer() });
     // Open a path on the DisPatch host in the viewer. Unlocked only, with the
     // rest of the admin surface: Safe Mode gets no hint the feature exists.
-    a.push({ icon: '👁', label: t('cmdk.open_local'), run: () => openLocalPath() });
+    a.push({ icon: RAIL_ICONS.eye, label: t('cmdk.open_local'), run: () => openLocalPath() });
     for (const p of viewerRecent()) {
-      a.push({ icon: '👁', label: p, sub: t('cmdk.open_local'), run: () => openLocalPath(p) });
+      a.push({ icon: RAIL_ICONS.eye, label: p, sub: t('cmdk.open_local'), run: () => openLocalPath(p) });
     }
   } else {
-    a.push({ icon: '📤', label: t('cmdk.action_send_file'), run: () => openDrop() });
+    a.push({ icon: RAIL_ICONS.upload, label: t('cmdk.action_send_file'), run: () => openDrop() });
   }
   // canStopReply() already carries the Safe-Mode rule and the "is anything
   // running" one, so the palette cannot offer a Stop the composer would not.
-  if (canStopReply()) a.push({ icon: '⏹', label: t('cmdk.action_stop'), run: () => stopReply() });
-  if (state.auth && state.auth.pinSet && !state.decoy) a.push({ icon: '🔒', label: t('cmdk.action_lock'), run: () => lockNow() });
+  if (canStopReply()) a.push({ icon: RAIL_ICONS.stop, label: t('cmdk.action_stop'), run: () => stopReply() });
+  if (state.auth && state.auth.pinSet && !state.decoy) a.push({ icon: RAIL_ICONS.lock, label: t('cmdk.action_lock'), run: () => lockNow() });
   return a;
 }
 function cmdkBuild(q) {
@@ -6745,7 +7176,7 @@ function cmdkBuild(q) {
   for (const b of state.bots) if (m(b.name)) items.push({ icon: b.emoji || '🤖', label: b.name, sub: b.model_hint || '', group: t('cmdk.group_bots'), run: () => selectBot(b.id) });
   // threadTitle() so untitled threads read 'New Chat' here too — the palette
   // must name a thread exactly like the thread list does.
-  for (const th of state.threads) { const title = threadTitle(th); if (m(title)) items.push({ icon: '💬', label: title, sub: t('cmdk.sub_chat'), group: t('cmdk.group_chats'), run: () => openThread(th.id) }); }
+  for (const th of state.threads) { const title = threadTitle(th); if (m(title)) items.push({ icon: RAIL_ICONS.messages, label: title, sub: t('cmdk.sub_chat'), group: t('cmdk.group_chats'), run: () => openThread(th.id) }); }
   return items.slice(0, 40);
 }
 function cmdkRender() {
@@ -6756,7 +7187,7 @@ function cmdkRender() {
   cmdkItems.forEach((it, i) => {
     if (it.group !== group) { group = it.group; list.append(el('div', { class: 'cmdk-group', text: group })); }
     const row = el('div', { class: 'cmdk-item' + (i === cmdkSel ? ' sel' : '') }, [
-      el('span', { class: 'ic', text: it.icon || '' }),
+      el('span', { class: 'ic' }, [Array.isArray(it.icon) ? railIcon(it.icon) : document.createTextNode(it.icon || '')]),
       el('span', { class: 'lbl', text: it.label }),
       it.sub ? el('span', { class: 'sub', text: it.sub }) : null,
     ].filter(Boolean));
@@ -6863,6 +7294,12 @@ async function init() {
   // Open the job detail modal from anywhere — the Jobs board list uses
   // this to surface each card's full metadata + voting controls.
   window.__openJobDetail = openJobDetail;
+  // job-thread.js reports vote/feedback errors through window.toast rather
+  // than importing main.js (which would pull in the entire app graph for a
+  // one-line call) — without this assignment those toasts were silently
+  // dropped (window.toast was never set, so `typeof window.toast ===
+  // 'function'` was always false and every job-panel error vanished).
+  window.toast = toast;
   onI18nChange(reRenderForLocale);
   applyRailLabels();
   // Privacy mode, if this device has it on: drop the offline cache, unregister
@@ -6906,6 +7343,8 @@ async function init() {
   wireAuthEvents();
   wireHarnessView();          // harness pane buttons (start/stop/restart/model/jobs) — orphaned by the 2026-09-10 terminal-pane removal
   wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
+  wireMailView();
+  wireClientsView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
   // jobs(unmount) backstop — see also setView(). A MutationObserver on

@@ -80,6 +80,27 @@ def _harness_default(flag: str) -> bool:
 
 
 
+def _mail_default(flag: str, data_dir: Path) -> bool:
+    """DISPATCH_MAIL: "auto" (default) = on iff MailForge's runtime files
+    exist under data_dir; truthy = on; anything else = off."""
+    f = (flag or "").strip().lower()
+    if f in ("0", "false", "no", "off", ""):
+        return False
+    if f != "auto":
+        return True
+    return (data_dir / "ui_port").exists() and (data_dir / "ui_launcher_key").exists()
+
+
+def _practice_default(flag: str, pin_file: Path) -> bool:
+    """DISPATCH_PRACTICE: "auto" (default) = on iff the PIN file exists."""
+    f = (flag or "").strip().lower()
+    if f in ("0", "false", "no", "off", ""):
+        return False
+    if f != "auto":
+        return True
+    return pin_file.exists()
+
+
 def _studioforge_url(raw: str) -> str:
     """Validate DISPATCH_STUDIOFORGE_URL at load; return "" (feature off) if it
     is not something we are willing to put in an iframe src.
@@ -385,6 +406,24 @@ class Settings:
     # Which session kinds to mirror (see openclaw.mirror_kind). "other" adds
     # scripted/watchdog sessions; daily/cron/subagent/dashboard are never mirrored.
     mirror_kinds: str = env("MIRROR_KINDS", "webchat,main")
+    # Emails tab: embeds MailForge's own NiceGUI dashboard for the local
+    # mailboxes. "auto" (default) = on iff MailForge's runtime files
+    # (ui_port + ui_launcher_key under ~/.local/share/mailforge) exist —
+    # an install with no MailForge never grows a stray tab. DISPATCH_MAIL=1
+    # forces it on (the pane then reports "not running"), =0 disables +
+    # 404s the routes. Full-session only: unlocked-tier feature, never Safe
+    # Mode (see _require_mail).
+    mail_data_dir: Path = Path(env("MAIL_DATA_DIR",
+                                   str(Path.home() / ".local" / "share" / "mailforge")))
+    mail_enabled: bool = _mail_default(env("MAIL", "auto"), mail_data_dir)
+    # Clients tab ("WebBuilder"): proxies the practice box's client-pipeline
+    # GUI API (127.0.0.1:8793, PIN-gated) so DisPatch can offer a native
+    # Overview/Active/Completed/detail view against the same backend. "auto"
+    # = on iff the PIN file exists. Full-session only (see _require_practice).
+    practice_url: str = env("PRACTICE_URL", "http://127.0.0.1:8793").rstrip("/")
+    practice_pin_file: Path = Path(env("PRACTICE_PIN_FILE",
+                                        str(Path.home() / "practice" / "keys" / "gui-pin")))
+    practice_enabled: bool = _practice_default(env("PRACTICE", "auto"), practice_pin_file)
 
 
 SETTINGS = Settings()
@@ -476,6 +515,26 @@ class Bot:
     #
     # None (not {}) means "no API backend" — the OpenClaw path stays in charge.
     api: dict | None = None
+    # Which OpenClaw agent this bot's turns actually run on. Empty (every
+    # shipped bot's default) means "the bot id IS the agent id" — the
+    # historical, still-normal case. Set this when a bot's chat identity in
+    # DisPatch (avatar, name, thread history) needs to stay stable while the
+    # OpenClaw seat answering it is a real agent with its own model/tools —
+    # e.g. bot `jobboard` routed to agent `scout`, which has no DisPatch
+    # persona of its own. Used for BOTH the `--agent`/`agentId` the turn is
+    # sent to and the agent-half of the gateway session key
+    # (`agent:<agent_id>:<thread_id>`) — see Bot.agent_id and
+    # main.run_agent_turn.
+    agent: str = ""
+
+    @property
+    def agent_id(self) -> str:
+        """The OpenClaw agent id this bot's turns route to.
+
+        Falls back to the bot's own id when `agent` is unset, which is
+        every bot on the box except an explicit override like jobboard.
+        """
+        return (self.agent or "").strip() or self.id
 
     @property
     def avatar_url(self) -> str:
@@ -520,6 +579,7 @@ class Bot:
             "image_identity_source": self.image_identity_source,
             "image_ratio": self.image_ratio,
             "api_provider": str((self.api or {}).get("provider") or ""),
+            "agent": self.agent,
         }
 
     def api_public(self) -> dict | None:
@@ -619,6 +679,7 @@ def _bot_entry(b: Bot) -> dict:
         "image_workflow": b.image_workflow,
         "image_identity_source": b.image_identity_source,
         "image_ratio": b.image_ratio,
+        "agent": b.agent,
     }
     if b.api:
         entry["api"] = dict(b.api)
@@ -749,6 +810,7 @@ def load_bots() -> list[Bot]:
                     base.image_identity_source if base else "")),
                 image_ratio=str(e.get("image_ratio",
                                       base.image_ratio if base else "")),
+                agent=str(e.get("agent", base.agent if base else "")).strip(),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,

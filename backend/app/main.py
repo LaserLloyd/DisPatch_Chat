@@ -51,7 +51,7 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -69,9 +69,11 @@ from . import (
     jobs,
     llm_api,
     localview,
+    mailforge_bridge,
     openclaw,
     openclaw_text,
     pool_guard,
+    practice_bridge,
     problem,
     reactions,
 )
@@ -1570,20 +1572,24 @@ _JOBS_INBOUND = (
     ("GET",  "/api/jobs/reasons"),
     # GET  /api/jobs/profile    — current preference profile (machine)
     ("GET",  "/api/jobs/profile"),
+    # GET  /api/jobs/feedback   — merged vote+comment feed (machine; 2026-09-16)
+    ("GET",  "/api/jobs/feedback"),
 )
 # Agent-driven write paths. The 2026-09-15 OpenClaw audit lifts
 # vote/applied/tags/archive/recompute onto the inbound tier so an on-box
 # agent can manage a job end-to-end without first obtaining a PIN-derived
 # session cookie. The handlers still refuse decoy callers via the prefix
 # block in _decoy_blocked (`/api/jobs` returns True there), so Safe Mode
-# is still shut out — only on-box agents gain the new verbs.
+# is still shut out — only on-box agents gain the new verbs. 2026-09-16
+# adds `feedback` (free-text comment -> job_events + a dispatched turn) to
+# the same manage-verb tier as vote/applied/tags/archive.
 _JOBS_INBOUND_RE = (
     # GET  /api/jobs/{job_id}                                  — single job
     # GET  /api/jobs/month/{key}                               — one month
     re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}$"),
     re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
-    # POST /api/jobs/{job_id}/(vote|applied|tags|archive)      — manage verbs
-    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive)$"),
+    # POST /api/jobs/{job_id}/(vote|applied|tags|archive|feedback) — manage verbs
+    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive|feedback)$"),
     # POST /api/jobs/profile/recompute                          — rebuild profile
     re.compile(r"^/api/jobs/profile/recompute$"),
 )
@@ -1597,7 +1603,7 @@ _JOBS_INBOUND_RE_METHODS = {
         re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
     ),
     "POST": (
-        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive)$"),
+        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive|feedback)$"),
         re.compile(r"^/api/jobs/profile/recompute$"),
     ),
 }
@@ -1727,6 +1733,12 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # discloses that address, so it is operator-only too --
                         # belt-and-braces on top of _require_studioforge.
                         "/api/harness", "/api/studioforge",
+                        # Emails tab: launch_url carries MailForge's one-time
+                        # launcher key. Clients tab: a same-origin proxy onto
+                        # the practice box's client-pipeline API. Both are
+                        # unlocked-operator-only features — belt-and-braces on
+                        # top of _require_mail / _require_practice.
+                        "/api/mail", "/api/practice",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
@@ -5167,9 +5179,21 @@ async def _gateway_resolve_thread(session_key: str) -> tuple[str, str] | None:
     # tag happens to equal one of our thread ids routes into that thread — and
     # that is not hypothetical: a live gateway session was routable into the
     # staging database on the day this was written.
-    if (getattr(thread, "bot_id", "") or "").lower() != bot_id.lower():
+    #
+    # `bot_id` here is the SESSION KEY's agent segment — the OpenClaw agent id
+    # the turn actually ran on — which is only the same string as the
+    # thread's own DisPatch bot id when that bot has no `agent:` override
+    # (config.Bot.agent_id). A bot like jobboard (agent: scout) dispatches as
+    # `agent:scout:<thread_id>`, so comparing the raw thread.bot_id ("jobboard")
+    # against the session's "scout" would always mismatch and silently drop
+    # every reply in that thread. Resolve the thread's bot's effective agent
+    # id and compare against THAT instead.
+    thread_bot_id = getattr(thread, "bot_id", "") or ""
+    thread_bot_cfg = config.get_bot(thread_bot_id)
+    thread_agent_id = thread_bot_cfg.agent_id if thread_bot_cfg else thread_bot_id
+    if thread_agent_id.lower() != bot_id.lower():
         return None
-    return real_tid, (getattr(thread, "bot_id", None) or bot_id)
+    return real_tid, (thread_bot_id or bot_id)
 
 
 async def _gateway_shadow_deliver(thread_id: str, text: str, *,
@@ -6315,8 +6339,16 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             await llm_api.run_api_turn(thread_id, bot_id, text)
         return
 
+    # `agent_id` is the OpenClaw seat this turn actually runs on — normally
+    # identical to `bot_id`, except for a bot configured with `agent:` (e.g.
+    # jobboard -> scout), which has its own DisPatch identity (avatar, name,
+    # thread history) but no OpenClaw seat of its own. Every call below that
+    # names an OpenClaw session/transcript uses `agent_id`; everything that
+    # names DisPatch's own bookkeeping (attribution, broadcasts, thread
+    # status) keeps `bot_id` — see config.Bot.agent_id.
+    agent_id = bot.agent_id if bot is not None else bot_id
     lock = _thread_locks[thread_id]
-    session_key = openclaw.session_key_for(bot_id, thread_id)
+    session_key = openclaw.session_key_for(agent_id, thread_id)
     _thread_bot[thread_id] = bot_id   # authoritative attribution for redaction
     _mirror_nudge()                   # someone is chatting → mirror polls fast
     async with lock:
@@ -6342,12 +6374,12 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
         # reply already reached the family before they call the turn a failure.
         persisted: list[MessageOut] = []
         watcher = asyncio.create_task(
-            _watch_progress(thread_id, bot_id, session_key, handoff)
+            _watch_progress(thread_id, agent_id, session_key, handoff)
         )
         try:
             agent_text = await _resolve_doc_refs(text)
             reply = await _send_with_gateway_retry(
-                bot_id, session_key, agent_text, thread_id)
+                agent_id, session_key, agent_text, thread_id)
             # The authoritative transcript path is built from this exact id (the
             # index can lag), so the reconciler/follower below never miss a reply.
             session_id = reply.metadata.get("session_id")
@@ -6433,7 +6465,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             # it raise put the thread in `error` — a red banner over a
             # conversation that went perfectly.
             try:
-                await _media_second_look(thread_id, bot_id, session_key, persisted)
+                await _media_second_look(thread_id, agent_id, session_key, persisted)
             except Exception:
                 log.exception("media second look failed after a delivered turn "
                               "(%s/%s)", bot_id, thread_id)
@@ -6445,7 +6477,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             recovered: list[MessageOut] = []
             with contextlib.suppress(Exception):
                 recovered = await _reconcile_transcript(
-                    thread_id, bot_id, session_key, handoff, session_id)
+                    thread_id, agent_id, session_key, handoff, session_id)
             if recovered:
                 log.info("recovered %d message(s) from transcript despite CLI error (%s/%s)",
                          len(recovered), bot_id, thread_id)
@@ -6483,7 +6515,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             # anything the live watcher missed (e.g. it resolved the session file
             # late). Deduped by the shared funnel — harmless if nothing's missing.
             with contextlib.suppress(Exception):
-                await _reconcile_transcript(thread_id, bot_id, session_key, handoff, session_id)
+                await _reconcile_transcript(thread_id, agent_id, session_key, handoff, session_id)
             # Keep listening for OpenClaw-side follow-ups (subagent announces
             # that arrive after the CLI turn has already returned). Resume at
             # the watcher's exact transcript position — zero gap.
@@ -6493,7 +6525,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             # outlive the DB ("Task was destroyed but it is pending").
             if not _shutting_down:
                 task = asyncio.create_task(_follow_session(
-                    thread_id, bot_id, session_key,
+                    thread_id, agent_id, session_key,
                     path=handoff.get("path"), offset=handoff.get("offset"),
                     session_id=session_id,
                 ))
@@ -6815,6 +6847,8 @@ async def auth_status(request: Request):
         # show, and every other state is exactly where it is not.
         "features": ({"harness": harness_available(),
                       "studioforge": studioforge_available(),
+                      "mail": mail_available(),
+                      "practice": practice_available(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not cfg.pin_set) else {}),
@@ -8079,6 +8113,19 @@ async def _stream_upload(
     charged = 0
     published = False
     try:
+        # Every blocking call below goes through a thread. The reads were
+        # already awaited, but the WRITES were not, and this function accepts
+        # files up to FILES_MAX (200MB): a slow or busy disk meant hundreds of
+        # synchronous 1MB writes plus an fsync of the whole blob, all on the
+        # event loop. While that ran, nothing else on this process moved — no
+        # other request, no WebSocket frame, no agent reply. The fsync is the
+        # worst of them, because it waits for the device and can take hundreds
+        # of milliseconds on its own.
+        #
+        # Per-chunk to_thread costs a thread hop against a 1MB write, which is
+        # the right trade; keeping the loop's shape matters more, because the
+        # size ceiling and the decoy byte budget are enforced INSIDE it and
+        # must still be able to abort mid-file.
         with part.open("wb") as f:
             while chunk := await file.read(1 << 20):
                 n = len(chunk)
@@ -8092,10 +8139,16 @@ async def _stream_upload(
                     charged += n
                     if _decoy_over_quota(request):
                         raise HTTPException(429, "Daily upload limit reached — try again tomorrow or unlock")
-                f.write(chunk)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(part, dest)          # atomic publish of the completed blob
+                await asyncio.to_thread(f.write, chunk)
+
+            def _sync_to_disk() -> None:
+                f.flush()
+                os.fsync(f.fileno())
+
+            await asyncio.to_thread(_sync_to_disk)
+        # Atomic publish of the completed blob. Also a filesystem call, and on
+        # a loaded disk it is not free either.
+        await asyncio.to_thread(os.replace, part, dest)
         published = True
     except OSError:
         raise HTTPException(507, "Disk write failed")
@@ -9877,6 +9930,14 @@ def studioforge_available() -> bool:
             and auth.load().pin_set)
 
 
+def mail_available() -> bool:
+    return SETTINGS.mail_enabled and auth.load().pin_set
+
+
+def practice_available() -> bool:
+    return SETTINGS.practice_enabled and auth.load().pin_set
+
+
 # --------------------------------------------------------------------------- #
 # DeepSeek Harness (dsh): `dsh web` service control + default model + headless
 # jobs. A headless job is code execution, so
@@ -10244,6 +10305,77 @@ async def studioforge_status(request: Request):
 
 
 # --------------------------------------------------------------------------- #
+# Emails tab: MailForge dashboard embed (see mailforge_bridge.py for why this
+# is a launch-URL iframe rather than a reverse proxy).
+# --------------------------------------------------------------------------- #
+
+
+def _require_mail(request: Request) -> None:
+    """404 when the feature is off (no MailForge UI runtime files found and
+    not forced on), 403 with no PIN, 403 for a Safe-Mode session. Mirrors
+    _require_harness/_require_studioforge."""
+    if not SETTINGS.mail_enabled:
+        raise HTTPException(404, "Emails panel disabled")
+    if not auth.load().pin_set:
+        raise HTTPException(403, _NO_PIN_MSG)
+    _deny_decoy_mutation(request)
+
+
+@app.get("/api/mail/status")
+async def mail_status(request: Request):
+    _require_mail(request)
+    installed = mailforge_bridge.installed(SETTINGS)
+    reach = await mailforge_bridge.reachable(SETTINGS) if installed else False
+    return {
+        "installed": installed,
+        "reachable": reach,
+        # Only present once MailForge's UI has actually run at least once
+        # (persisted its port + launcher key) AND is reachable right now —
+        # never hand the browser a launch URL for a dead service.
+        "launch_url": mailforge_bridge.launch_url(SETTINGS) if (installed and reach) else None,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Clients tab ("WebBuilder"): proxy onto the practice box's client-pipeline
+# GUI API. See practice_bridge.py.
+# --------------------------------------------------------------------------- #
+
+
+def _require_practice(request: Request) -> None:
+    """404 when the feature is off (no PIN file found and not forced on), 403
+    with no PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    if not SETTINGS.practice_enabled:
+        raise HTTPException(404, "Clients panel disabled")
+    if not auth.load().pin_set:
+        raise HTTPException(403, _NO_PIN_MSG)
+    _deny_decoy_mutation(request)
+
+
+_PRACTICE_PATH_RE = re.compile(r"\A[A-Za-z0-9._/-]{0,256}\Z")
+
+
+@app.get("/api/practice/{path:path}", operation_id="practice_proxy_get")
+@app.post("/api/practice/{path:path}", operation_id="practice_proxy_post")
+async def practice_proxy(path: str, request: Request):
+    _require_practice(request)
+    if not _PRACTICE_PATH_RE.match(path):
+        raise HTTPException(400, "invalid path")
+    body = await request.body()
+    try:
+        resp = await practice_bridge.proxy(
+            SETTINGS, request.method, path,
+            query=request.url.query,
+            body=body or None,
+            content_type=request.headers.get("content-type"),
+        )
+    except practice_bridge.UpstreamError:
+        raise HTTPException(502, "Clients backend (practice box) is unreachable")
+    return Response(content=resp.content, status_code=resp.status_code,
+                     media_type=resp.content_type)
+
+
+# --------------------------------------------------------------------------- #
 # WebSocket
 # --------------------------------------------------------------------------- #
 
@@ -10380,10 +10512,44 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # Ack BEFORE the broadcast: the message is durable at this point, and the
     # broadcast can stall up to 5s per half-dead client.
     await _ack(ws, cmid, "ok")
-    await manager.broadcast(msg_frame)
-    await _broadcast_thread_update(thread_id)
 
-    _track(asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, text)))
+    # Off the reader loop, entirely.
+    #
+    # This function runs on the socket's receive loop, so anything awaited here
+    # is time that THIS sender's next frame cannot be read. The ack above
+    # already told them the message is durable, but the broadcast underneath it
+    # still blocked the loop for as long as the slowest connected client took —
+    # documented above as up to 5s per half-dead device. One phone that walked
+    # out of range therefore added latency to the person typing.
+    #
+    # The publish and the agent turn go into ONE task rather than two, because
+    # their ORDER is load-bearing: the reply frame must never reach a client
+    # before the message it is replying to. Awaiting them in sequence inside a
+    # single task preserves exactly the ordering the previous straight-line
+    # code had, while giving the reader loop back immediately.
+    async def _publish_then_run() -> None:
+        # The publish must not be able to cancel the turn.
+        #
+        # `_ack_mark(scheduled=True)` runs as soon as this task is CREATED, so
+        # the reconnect-resend recovery treats the turn as dispatched from that
+        # moment. If a broadcast then raised, run_agent_turn would never be
+        # reached, the exception would only reach _task_done's logger, and the
+        # resend path would re-ack without ever running the turn — a reply
+        # silently lost. Before the publish moved off the reader loop the same
+        # failure propagated before `scheduled` was set, so the resend DID
+        # recover it; keeping that property is what this try/except is for.
+        #
+        # Both broadcasts are best-effort notifications of state that is
+        # already durable in the database. The turn is not.
+        try:
+            await manager.broadcast(msg_frame)
+            await _broadcast_thread_update(thread_id)
+        except Exception:
+            log.exception("publish failed for thread %s; running the turn anyway",
+                          thread_id)
+        await run_agent_turn(thread_id, thread.bot_id, text)
+
+    _track(asyncio.create_task(_publish_then_run()))
     if cmid:
         # AFTER the dispatch, so "seen" can never mean "acked but never run".
         _ack_mark(cmid, scheduled=True)

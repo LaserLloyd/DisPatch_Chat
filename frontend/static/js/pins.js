@@ -17,11 +17,17 @@
 // convenience, not an account preference, and the family tablet wanting a
 // different rail from the phone is the normal case, not an edge one.
 
-import { railIcon, RAIL_ICONS } from './util.js?v=13';
+import { railIcon, RAIL_ICONS } from './util.js?v=18';
 import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=6';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=7';
 
 const KEY = 'dispatch-pinned-settings';
+// Defaults are stored as OPT-OUTS, not by seeding KEY. A device that already
+// has pins saved has a non-empty KEY, so "empty means defaults" would never
+// reach it, and seeding KEY on first read would make a default indistinguish-
+// able from a deliberate pin the moment the default changed. An explicit
+// unpin list says exactly what it means: the user turned this one off.
+const OFF_KEY = 'dispatch-unpinned-defaults';
 
 /** The pinnable registry.
  *
@@ -68,6 +74,23 @@ export const PINNABLE = [
     // same rule syncMinimalAvatarRow enforces on the Settings checkbox.
     blocked: () => (nimEnabled() ? 'nim.controls_avatars' : null),
   },
+  // The theme button is the one pin that ships ON. It is also the one whose
+  // button this module does not draw: 🎨 is markup in index.html (its own rail
+  // slot, its own click into Settings → Theme), so the pin only decides
+  // whether that button is shown — `kind: 'rail'`, skipped by visiblePins.
+  // Unpinning it is a device preference like any other; nothing else changes.
+  {
+    id: 'theme',
+    kind: 'rail',
+    icon: null,
+    titleKey: 'nav.theme',
+    titleEn: 'Theme',
+    safe: false,               // the palette picker is a full-session surface
+    pinnedByDefault: true,
+    enabled: () => false,      // not a switch: there is no on/off state to show
+    toggle: () => {},
+    blocked: () => null,
+  },
 ];
 
 export function pinnableById(id) {
@@ -88,13 +111,36 @@ export function pinnedIds() {
   }
 }
 
+/** Ids of default pins the user has explicitly turned off. */
+function unpinnedDefaults() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(OFF_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((id) => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function isPinned(id) {
+  const entry = pinnableById(id);
+  if (entry && entry.pinnedByDefault) return !unpinnedDefaults().includes(id);
   return pinnedIds().includes(id);
 }
 
-/** Pin or unpin. Returns the new pinned list. */
+/** Pin or unpin. Returns the new pinned list.
+ *
+ *  A default-on pin is written to the opt-out list instead of KEY, so KEY keeps
+ *  meaning "pins the user added" and the two can never disagree about one id.
+ */
 export function setPinned(id, on) {
-  if (!pinnableById(id)) return pinnedIds();
+  const entry = pinnableById(id);
+  if (!entry) return pinnedIds();
+  if (entry.pinnedByDefault) {
+    const next = unpinnedDefaults().filter((x) => x !== id);
+    if (!on) next.push(id);
+    try { localStorage.setItem(OFF_KEY, JSON.stringify(next)); } catch { /* storage off */ }
+    return pinnedIds();
+  }
   const next = pinnedIds().filter((x) => x !== id);
   if (on) next.push(id);
   try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* storage off */ }
@@ -110,7 +156,9 @@ export function setPinned(id, on) {
 export function visiblePins(decoy) {
   return pinnedIds()
     .map(pinnableById)
-    .filter((entry) => entry && (entry.safe || !decoy));
+    // `kind: 'rail'` entries own a button in the markup already (🎨). Drawing
+    // one here too would put the same shortcut on the rail twice.
+    .filter((entry) => entry && entry.kind !== 'rail' && (entry.safe || !decoy));
 }
 
 /** Render the pinned buttons into the rail.
@@ -169,7 +217,7 @@ export function pinToggle(id, { t = null, onChange = null } = {}) {
   btn.dataset.pinToggle = id;
   const paint = () => {
     const on = isPinned(id);
-    btn.textContent = '📌';
+    btn.replaceChildren(railIcon(RAIL_ICONS.pin));
     btn.classList.toggle('pinned', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     const key = on ? 'pins.unpin' : 'pins.pin';

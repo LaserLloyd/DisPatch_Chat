@@ -485,10 +485,28 @@ class SessionRunner:
     async def _supervise(self, s: DshSession,
                          proc: asyncio.subprocess.Process) -> None:
         tail = asyncio.get_running_loop().create_task(self._tail(s))
+
+        # A REAL on_overflow, not `lambda: None`.
+        #
+        # _drain's own docstring states the contract: crossing
+        # JOB_OUTPUT_HARD_MAX calls on_overflow, "which kills the process
+        # group", and stops reading — "the other pipe then reaches EOF instead
+        # of deadlocking behind a full buffer". Passing a no-op kept the first
+        # half (this drain stops reading) and discarded the second, so a
+        # session that floods one pipe left the process alive, its other pipe
+        # unread and filling, and this gather awaiting an EOF that could never
+        # arrive. The session wedged until something else killed it.
+        #
+        # Mirrors JobRunner._collect's own `_overflow`, which is where the
+        # working version of this already lives.
+        def _overflow() -> None:
+            with contextlib.suppress(Exception):
+                self._signal(proc, signal.SIGKILL)
+
         try:
             _, err = await asyncio.gather(
-                harness.JobRunner._drain(proc.stdout, lambda: None),
-                harness.JobRunner._drain(proc.stderr, lambda: None),
+                harness.JobRunner._drain(proc.stdout, _overflow),
+                harness.JobRunner._drain(proc.stderr, _overflow),
             )
             self._signal(proc, signal.SIGKILL)   # sweep any orphaned children
             await proc.wait()

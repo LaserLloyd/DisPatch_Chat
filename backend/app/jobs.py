@@ -42,14 +42,16 @@ Auth matrix (unchanged):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, database, jobs_dedup, jobs_score
+from . import auth, config, database, jobs_dedup, jobs_score
 
 log = logging.getLogger("local-chat.jobs")
 
@@ -221,6 +223,52 @@ def effective_state(job_row: dict, now: str | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# URL validation (P0 XSS fix, 2026-09-16).
+#
+# A job's `url` round-trips into the chat as plain, unescaped href text — the
+# announcement message and, historically, the frontend's job card. An
+# agent-supplied `javascript:`/`data:` URL there is a stored-XSS payload that
+# fires the moment a human opens the thread. Both the write-time validator
+# (below) and the read-time defence-in-depth in `_serialise_job` reject
+# anything that isn't an absolute http(s) URL.
+# --------------------------------------------------------------------------- #
+
+
+def _validate_http_url(v: str) -> str:
+    """Pydantic validator body: require an absolute http(s) URL.
+
+    Shared by every model field that accepts a job URL so the rule cannot
+    drift between them. Whitespace is stripped first so a URL with leading/
+    trailing padding (a common copy-paste artifact) isn't rejected on a
+    technicality.
+    """
+    v = (v or "").strip()
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError(
+            "url must be an absolute http:// or https:// URL "
+            f"(got {v[:80]!r})")
+    return v
+
+
+def _safe_url(url: str | None) -> str:
+    """Read-time belt-and-braces: never emit a URL that isn't http(s).
+
+    Covers rows written before the validator existed (or by any future
+    write path that forgets to use it) — the response layer is the last
+    place this can be caught before it reaches a browser as an href.
+    """
+    u = (url or "").strip()
+    try:
+        parsed = urlparse(u)
+    except ValueError:
+        return ""
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return u
+    return ""
+
+
+# --------------------------------------------------------------------------- #
 # Pydantic models — the API surface, validated at the boundary.
 # --------------------------------------------------------------------------- #
 
@@ -243,6 +291,11 @@ class JobIn(BaseModel):
     source_run_id: str | None = None
     posted_at: str | None = None
     expires_at: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _v_url(cls, v: str) -> str:
+        return _validate_http_url(v)
 
     @field_validator("remote_type")
     @classmethod
@@ -270,6 +323,11 @@ class ScoreIn(BaseModel):
     salary_currency: str = "USD"
     tags: list[str] = Field(default_factory=list)
     brief: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _v_url(cls, v: str) -> str:
+        return _validate_http_url(v)
 
     @field_validator("remote_type")
     @classmethod
@@ -302,7 +360,35 @@ class VoteIn(BaseModel):
 
 
 class CommentIn(BaseModel):
+    # Optional: the board's Applied button sends null when the note box is empty.
+    comment: str | None = None
+
+
+class FeedbackIn(BaseModel):
+    """Free-text feedback on a job — posted into the monthly thread as a
+    user message and dispatched to the bot like any other chat message.
+    """
     comment: str
+    reason_tag: str | None = None
+
+    @field_validator("comment")
+    @classmethod
+    def _v_comment(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("comment is required")
+        if len(v) > 2000:
+            raise ValueError("comment capped at 2000 chars")
+        return v
+
+    @field_validator("reason_tag")
+    @classmethod
+    def _v_reason(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if v not in REASONS:
+            raise ValueError(f"reason_tag must be one of {REASONS}")
+        return v
 
 
 class TagsIn(BaseModel):
@@ -328,7 +414,35 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 # ``/{job_id}`` for exactly that reason.
 
 
-def _serialise_job(job_row: dict) -> dict:
+def _last_vote_from_feedback(rows: list[dict]) -> dict | None:
+    """Fold per-job feedback rows (ASC order) into the current vote state.
+
+    The latest yes/no/maybe/applied signal wins, UNLESS a later ``undo``
+    cancels it — in which case there is no current vote until another
+    signal is cast. Because ``rows`` is ASC, a single forward pass that
+    resets on ``undo`` and otherwise remembers the last real signal gives
+    exactly that.
+    """
+    last: dict | None = None
+    for row in rows:
+        sig = row.get("signal")
+        if sig == "undo":
+            last = None
+            continue
+        if sig in ("vote_yes", "vote_no", "vote_maybe", "applied"):
+            last = row
+    if last is None:
+        return None
+    return {
+        "signal": last.get("signal"),
+        "reason_tag": last.get("reason_tag"),
+        "comment": last.get("comment"),
+        "actor": last.get("actor"),
+        "created_at": last.get("created_at"),
+    }
+
+
+def _serialise_job(job_row: dict, last_vote: dict | None = None) -> dict:
     """Turn a stored job row into the JSON shape the API returns.
 
     Includes:
@@ -338,6 +452,11 @@ def _serialise_job(job_row: dict) -> dict:
       * ``seniority`` echoed; the UI may also override it client-side.
       * ``message_id`` so the chat panel can scroll to / vote on the
         announcement message directly.
+      * ``last_vote`` (2026-09-16) — the current yes/no/maybe/applied signal
+        (or None), computed by the caller via ``_last_vote_from_feedback``
+        and passed in; callers that don't have feedback in hand (e.g. the
+        just-created job broadcast) leave it None rather than paying for a
+        query they don't need.
 
     ``job_row`` may carry ``tags`` as either a JSON-encoded string (the
     on-disk form, returned by ``db.list_jobs`` / ``db.get_job``) or as a
@@ -362,7 +481,7 @@ def _serialise_job(job_row: dict) -> dict:
         "job_id": job_row["job_id"],
         "thread_id": job_row["thread_id"],
         "message_id": job_row.get("message_id"),
-        "url": job_row["url"],
+        "url": _safe_url(job_row.get("url")),
         "title": job_row["title"],
         "company": job_row.get("company", ""),
         "location": job_row.get("location", ""),
@@ -386,6 +505,7 @@ def _serialise_job(job_row: dict) -> dict:
         "expires_at": expires,
         "created_at": job_row.get("created_at"),
         "updated_at": job_row.get("updated_at"),
+        "last_vote": last_vote,
     }
 
 
@@ -411,9 +531,13 @@ async def list_jobs(
     db = _db()
     rows = await db.list_jobs(state=state, source_agent=source_agent,
                              tag=tag, thread_id=thread_id, limit=limit)
+    # One batched query for every row's vote history instead of N+1 — cheap
+    # even at the max page size, since it's a single indexed IN() read.
+    fb_by_job = await db.list_job_feedback_for_jobs([r["job_id"] for r in rows])
     items = []
     for r in rows:
-        item = _serialise_job(r)
+        item = _serialise_job(
+            r, last_vote=_last_vote_from_feedback(fb_by_job.get(r["job_id"], [])))
         # Suppress `state=duplicate` rows from the default list — the
         # system-managed duplicate marker.
         if state is None and item["state"] == "duplicate":
@@ -614,6 +738,47 @@ async def score_candidate(payload: ScoreIn):
     )
 
 
+@router.get("/feedback")
+async def list_feedback(
+    request: Request,
+    since: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Merged vote + free-text feedback feed, newest first — the read side
+    of the ``POST .../feedback`` endpoint below, for an agent to catch up
+    on what the humans said without re-reading every monthly thread.
+
+    Machine-readable without a session from loopback, exactly like
+    ``GET /api/jobs`` (see ``_JOBS_INBOUND`` in main.py). Safe-Mode/decoy
+    callers get the empty shape.
+
+    MUST stay registered before ``/{job_id}`` — see the route-order note
+    at the top of the read-paths section, "feedback" would otherwise be
+    swallowed as a job_id.
+    """
+    if _is_decoy(request):
+        return {"feedback": []}
+    db = _db()
+    rows = await db.list_recent_feedback(since=since, limit=limit)
+    return {
+        "feedback": [
+            {
+                "job_id": r.get("job_id"),
+                "title": r.get("title") or "",
+                "company": r.get("company") or "",
+                "url": _safe_url(r.get("url")),
+                "kind": r.get("kind"),
+                "signal": r.get("signal"),
+                "reason_tag": r.get("reason_tag"),
+                "comment": r.get("comment"),
+                "actor": r.get("actor"),
+                "created_at": r.get("created_at"),
+            }
+            for r in rows
+        ]
+    }
+
+
 @router.get("/{job_id}")
 async def get_job(request: Request, job_id: str):
     """One job (by job_id) + its last 50 events + the live score.
@@ -631,6 +796,7 @@ async def get_job(request: Request, job_id: str):
     if not thread:
         raise HTTPException(404, "Job thread not found")
     events = await db.list_job_events(job_id, limit=50)
+    feedback_rows = await db.list_job_feedback_for_job(job_id)
     profile = await db.get_job_profile() or jobs_score.empty_profile()
     score = jobs_score.score_candidate(
         {
@@ -648,7 +814,7 @@ async def get_job(request: Request, job_id: str):
     )
     return {
         "thread": thread.model_dump(),
-        "job": _serialise_job(job),
+        "job": _serialise_job(job, last_vote=_last_vote_from_feedback(feedback_rows)),
         "events": events,
         "score": score,
     }
@@ -978,6 +1144,135 @@ async def applied(job_id: str, payload: CommentIn, request: Request):
                                     "thread_id": refreshed["thread_id"],
                                     "job": _serialise_job(refreshed)})
     return {"ok": True}
+
+
+def _try_dispatch_feedback_turn(thread_id: str, bot_id: str, text: str) -> bool:
+    """Kick off a real agent turn for freshly-posted feedback, the same
+    fire-and-forget way ``main._handle_send`` dispatches a normal typed
+    message — the caller never awaits the turn's outcome, only whether it
+    could be SCHEDULED.
+
+    Returns False (feedback still recorded by the caller either way) when
+    there is nothing to dispatch to: the thread's bot has no config, or
+    (for the OpenClaw-CLI backend) the ``openclaw`` binary isn't reachable.
+    A bot with a direct-provider ``api`` block skips that second check —
+    it never shells out.
+    """
+    from . import main, openclaw
+    bot = config.get_bot(bot_id)
+    if bot is None:
+        return False
+    if not bot.api and not openclaw.cli_available():
+        return False
+    task = asyncio.create_task(main.run_agent_turn(thread_id, bot_id, text))
+    main._track(task)
+    return True
+
+
+class FindIn(BaseModel):
+    """Optional steer for a "find me jobs" request from the board."""
+    query: str | None = None
+
+    @field_validator("query")
+    @classmethod
+    def _v_query(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if len(v) > 1000:
+            raise ValueError("query must be at most 1000 characters")
+        return v or None
+
+
+FIND_PROMPT = (
+    "Find new job postings for the Job Board. Search the web for current, "
+    "live roles that fit my career profile, open each posting to confirm it "
+    "is real and still accepting applications, then post every good match "
+    "with `dispatch-jobs post` (real https URL, title, company, location, "
+    "remote type, salary if listed, tags, and a two-line brief on why it "
+    "fits). Check `dispatch-jobs feedback` first and respect my past "
+    "no-reasons. Reply here with a short summary of what you posted."
+)
+
+
+@router.post("/find")
+async def find_jobs(payload: FindIn, request: Request,
+                    bot_id: str = Query("jobboard", max_length=64)):
+    """Ask the board's agent (Scout, via the bot's ``agent`` override) to go
+    find postings. Posts the request into the current month's thread as a
+    user message and dispatches a turn, like ``/feedback`` does. Browser
+    only: this is deliberately NOT on the inbound tier — an agent that wants
+    to search just searches.
+    """
+    _require_full(request)
+    if config.get_bot(bot_id) is None:
+        raise HTTPException(404, "Unknown board bot")
+    thread = await _current_month_thread(bot_id)
+    body = FIND_PROMPT
+    if payload.query:
+        body += f"\n\nFocus: {payload.query}"
+    db = _db()
+    message = await db.add_message(thread.id, "user", body)
+    await _manager().broadcast({
+        "type": "message", "thread_id": thread.id,
+        "bot_id": bot_id, "message": message.model_dump(),
+    })
+    dispatched = _try_dispatch_feedback_turn(thread.id, bot_id, body)
+    return {"ok": True, "thread_id": thread.id, "message_id": message.id,
+            "dispatched": dispatched}
+
+
+@router.post("/{job_id}/feedback")
+async def feedback(job_id: str, payload: FeedbackIn, request: Request):
+    """Free-text feedback on a job: recorded as an immutable ``comment``
+    event AND posted into the job's monthly thread as a user message, with
+    a real agent turn dispatched for it — exactly as if a human had typed
+    it into the chat themselves, so the bot can act on it (re-score, note
+    a pattern, follow up) without anyone copy-pasting.
+
+    Gate: same tier as ``/vote`` — ``_require_full`` (a full PIN session,
+    or a no-PIN install; an on-box machine caller with no cookie at all
+    also passes, and IS the expected caller per ``_JOBS_INBOUND_RE``).
+
+    The turn is fire-and-forget: this handler does not wait for the bot to
+    answer, only for the feedback to be durably recorded and the message
+    to be persisted. ``dispatched: false`` means the turn could not even
+    be scheduled (e.g. the OpenClaw CLI isn't on PATH) — the feedback
+    itself is still saved and still visible in the thread either way.
+    """
+    _require_full(request)
+    db = _db()
+    job = await db.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    thread = await db.get_thread(job["thread_id"])
+    if not thread:
+        raise HTTPException(404, "Job thread not found")
+    ts = _now()
+    event_id = _new_id()
+    await db.add_job_event({
+        "id": event_id, "thread_id": job["thread_id"], "job_id": job_id,
+        "type": "comment",
+        "actor": "user", "comment": payload.comment,
+        "reason_tag": payload.reason_tag,
+        "created_at": ts,
+    })
+    body = (f'Feedback on "{job["title"]}" @ {job.get("company") or "?"} '
+           f'({job["url"]}): {payload.comment}')
+    if payload.reason_tag:
+        body += f" [reason: {payload.reason_tag}]"
+    message = await db.add_message(job["thread_id"], "user", body)
+    await _manager().broadcast({
+        "type": "message", "thread_id": job["thread_id"],
+        "bot_id": thread.bot_id, "message": message.model_dump(),
+    })
+    await db.set_title_if_empty(job["thread_id"], body[:50])
+    dispatched = _try_dispatch_feedback_turn(job["thread_id"], thread.bot_id, body)
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "message_id": message.id,
+        "thread_id": job["thread_id"],
+        "dispatched": dispatched,
+    }
 
 
 @router.post("/{job_id}/tags")

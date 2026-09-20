@@ -2,7 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- `interactive-widget=resizes-content` is what makes the app usable as an
+       installed Android PWA. In `display: standalone` Chrome does NOT shrink
+       the visual viewport when the on-screen keyboard opens; the default
+       (`resizes-visual`) leaves the layout viewport at its full height, so
+       every `100dvh` pane keeps its full size and the fixed composer and tab
+       bar are left sitting UNDERNEATH the keys. Asking for `resizes-content`
+       makes the keyboard shrink the layout viewport instead, so `dvh` and the
+       fixed chrome follow it up. iOS ignores the key and keeps its own
+       behaviour, which is already correct there.
+       `viewport-fit=cover` is the other half: without it every
+       env(safe-area-inset-*) resolves to 0 and the bottom chrome is clipped by
+       the Android gesture bar. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#000000" />
   <!-- Content-Security-Policy. Delivered as a meta tag rather than a header so
        it travels with the file: DisPatch is deployed behind whatever the
@@ -129,10 +141,10 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/theme.css?v=2" />
-  <link rel="stylesheet" href="/static/app.css?v=66" />
+  <link rel="stylesheet" href="/static/theme.css?v=5" />
+  <link rel="stylesheet" href="/static/app.css?v=77" />
   <link rel="stylesheet" href="/static/dashboard.css?v=5" />
-  <script type="module" src="/static/js/theme.js?v=14"></script>
+  <script type="module" src="/static/js/theme.js?v=15"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -148,34 +160,13 @@
            zero network by construction. Keep it in step with favicon.svg. -->
       <svg class="boot-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
            width="72" height="72" role="img" aria-hidden="true" focusable="false">
-        <rect width="64" height="64" rx="14" fill="#0f0f1a"/>
-        <circle cx="32" cy="33" r="18" fill="#f59e0b" stroke="#d97706" stroke-width="1"/>
-        <ellipse cx="32" cy="37" rx="12" ry="10" fill="#fbbf24"/>
-        <line x1="20" y1="18" x2="18" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="26" y1="16" x2="25" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="32" y1="15" x2="32" y2="9" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="38" y1="16" x2="39" y2="10" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="44" y1="18" x2="46" y2="13" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="14" y1="26" x2="9" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="14" y1="33" x2="8" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="50" y1="26" x2="55" y2="24" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="50" y1="33" x2="56" y2="32" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="20" y1="49" x2="18" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="28" y1="50" x2="27" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="36" y1="50" x2="37" y2="56" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="44" y1="49" x2="46" y2="54" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        <circle cx="26" cy="29" r="4.5" fill="white"/>
-        <circle cx="38" cy="29" r="4.5" fill="white"/>
-        <circle cx="27" cy="29" r="2.5" fill="#1e293b"/>
-        <circle cx="39" cy="29" r="2.5" fill="#1e293b"/>
-        <circle cx="28" cy="27.5" r="1" fill="white"/>
-        <circle cx="40" cy="27.5" r="1" fill="white"/>
-        <circle cx="32" cy="36" r="2" fill="#b45309"/>
-        <ellipse cx="22" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
-        <ellipse cx="42" cy="34" rx="2.5" ry="1.5" fill="#fca5a5" opacity="0.5"/>
-        <path d="M48 33 L54 28 L53 33 L54 38 Z" fill="#d97706"/>
-        <ellipse cx="16" cy="36" rx="3" ry="1.5" fill="#d97706" transform="rotate(-15 16 36)"/>
-        <ellipse cx="16" cy="29" rx="3" ry="1.5" fill="#d97706" transform="rotate(15 16 29)"/>
+        <rect width="64" height="64" rx="14" fill="#000000"/>
+        <g fill="none" stroke="#ffffff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M30.8 19.9 L30.0 12.7 L26.7 19.2 A13.3 13.3 0 0 0 22.8 19.7 L18.0 14.3 L19.1 21.5 A13.3 13.3 0 0 0 16.2 24.1 L9.1 22.5 L14.1 27.7 A13.3 13.3 0 0 0 13.2 31.6 L6.5 34.3 L13.6 35.7 A13.3 13.3 0 0 0 15.1 39.4 L11.1 45.4 L17.8 42.5 A13.3 13.3 0 0 0 21.1 44.7 L21.3 51.9 L25.1 45.7 A13.3 13.3 0 0 0 29.0 45.6 L33.4 51.4 L32.9 44.1 A13.3 13.3 0 0 0 30.8 19.9 Z"/>
+          <path d="M40.5 26.5 q6.5 -2.5 8.5 -4.5 q-1.5 5.5 -1.5 10.5 q0 5 1.5 10.5 q-2 -2 -8.5 -4.5"/>
+          <path d="M14.2 36.8 q3.2 2.8 5.8 0.4" stroke-width="2.5"/>
+          <circle cx="21" cy="28" r="2.5" fill="#ffffff" stroke="none"/>
+        </g>
       </svg>
       <div class="boot-name" data-i18n="app.name">DisPatch Chat</div>
       <div class="boot-spin"></div>
@@ -195,9 +186,10 @@
       <div class="bot-list" id="bot-list"></div>
       <!-- The rail buttons, grouped so a phone can lay them out as ONE ROW of
            icons instead of a stack of full-width bars. The wrapper is
-           `display: contents` everywhere else, so on desktop these remain
-           direct flex children of .sidebar and the vertical rail is byte-for-
-           byte the layout it always was. -->
+           `display: contents` only where neither layout needs it; above the
+           phone breakpoint it is a scrolling column (the rail can hold more
+           buttons than a landscape tablet is tall once pins and custom links
+           are added), and below it, one WRAPPING row of icons. -->
       <div class="gear-row" id="gear-row">
       <!-- theme.js only supplies the swatch icon; the click is wired in
            main.js to open Settings → Theme, which is the one place a palette
@@ -239,6 +231,16 @@
         <span class="bot-avatar terminal-avatar studioforge-avatar" aria-hidden="true">SF</span>
         <span class="tools-item-label" data-i18n="studioforge.name">StudioForge</span>
         <span class="bot-status-dot terminal-sidedot studioforge-sidedot"></span>
+      </button>
+      <button class="tools-item" id="tools-mail" role="menuitem" type="button" data-i18n-attr="aria-label=mail.sidebar_aria" hidden>
+        <span class="bot-avatar terminal-avatar mail-avatar" aria-hidden="true">✉</span>
+        <span class="tools-item-label" data-i18n="mail.name">Emails</span>
+        <span class="bot-status-dot terminal-sidedot mail-sidedot"></span>
+      </button>
+      <button class="tools-item" id="tools-clients" role="menuitem" type="button" data-i18n-attr="aria-label=clients.sidebar_aria" hidden>
+        <span class="bot-avatar terminal-avatar clients-avatar" aria-hidden="true">👥</span>
+        <span class="tools-item-label" data-i18n="clients.name">Clients</span>
+        <span class="bot-status-dot terminal-sidedot clients-sidedot"></span>
       </button>
       <!-- Bots parked here from Settings → Bots (the ⌥ badge). Unlike the
            rows above these are rebuilt on every sidebar repaint by
@@ -285,12 +287,12 @@
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div class="menu" id="thread-menu" hidden>
-          <button data-act="pin" id="thread-menu-pin" data-i18n="chat.pin">📌 Pin</button>
-          <button data-act="rename" data-i18n="chat.rename">✏️ Rename</button>
-          <button data-act="sync" data-i18n="chat.sync">⤓ Recover missing messages</button>
-          <button data-act="transcript" data-i18n="chat.transcript">📜 View transcript</button>
-          <button data-act="archive" data-i18n="chat.archive">🗄️ Archive</button>
-          <button data-act="delete" class="danger" data-i18n="chat.delete_thread">🗑️ Delete</button>
+          <button data-act="pin" id="thread-menu-pin"><span class="icn" data-icon="pin" aria-hidden="true"></span><span data-i18n="chat.pin">Pin</span></button>
+          <button data-act="rename"><span class="icn" data-icon="rename" aria-hidden="true"></span><span data-i18n="chat.rename">Rename</span></button>
+          <button data-act="sync"><span class="icn" aria-hidden="true">⤓</span><span data-i18n="chat.sync">Recover missing messages</span></button>
+          <button data-act="transcript"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="chat.transcript">View transcript</span></button>
+          <button data-act="archive"><span class="icn" data-icon="archive" aria-hidden="true"></span><span data-i18n="chat.archive">Archive</span></button>
+          <button data-act="delete" class="danger"><span class="icn" data-icon="trash" aria-hidden="true"></span><span data-i18n="chat.delete_thread">Delete</span></button>
         </div>
       </header>
 
@@ -305,7 +307,7 @@
 
       <div class="composer" id="composer">
         <div class="retry-chip hidden" id="retry-chip" role="status">
-          <span data-i18n="composer.not_delivered">⚠ Message not delivered</span>
+          <span class="icn" data-icon="alert" aria-hidden="true"></span><span data-i18n="composer.not_delivered">Message not delivered</span>
           <button type="button" id="retry-chip-btn" data-i18n="common.retry">Retry</button>
         </div>
         <div class="attach-preview hidden" id="attach-preview"></div>
@@ -477,6 +479,67 @@
           </div>
         </div>
       </div>
+
+      <!-- Emails tab: MailForge's own dashboard, iframed at its own launch URL
+           (see backend/app/mailforge_bridge.py for why this is not a
+           same-origin reverse proxy). Unlocked-session only, same gate as the
+           two panels above. -->
+      <div class="terminal-view mail-view hidden" id="mail-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="mail-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini mail-avatar-mini" aria-hidden="true">✉</span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" data-i18n="mail.name">Emails</div>
+            <div class="muted terminal-subtitle" id="mail-subtitle" data-i18n="mail.subtitle">MailForge dashboard</div>
+          </div>
+          <a class="icon-btn ghost" id="mail-open" href="#" target="_blank" rel="noopener" title="Open the MailForge dashboard in a new tab" aria-label="Open in new tab" data-i18n-attr="title=mail.open_title;aria-label=mail.open_title">↗</a>
+        </header>
+        <div class="terminal-body mail-body">
+          <div class="mail-pane" id="mail-pane">
+            <!-- src is assigned from /api/mail/status's launch_url, never
+                 written here — MailForge's own one-time launcher key must
+                 never sit in repo content or in DisPatch's own page markup. -->
+            <iframe class="mail-frame hidden" id="mail-frame" title="MailForge dashboard" data-i18n-attr="title=mail.frame_title" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" allow=""></iframe>
+            <div class="mail-note hidden" id="mail-note">
+              <div class="empty-emoji" aria-hidden="true">✉</div>
+              <p id="mail-note-text"></p>
+              <p class="muted" id="mail-note-hint"></p>
+            </div>
+          </div>
+        </div>
+        <div class="terminal-bar mail-bar">
+          <span class="terminal-status">
+            <span class="terminal-dot stopped" id="mail-dot"></span>
+            <span id="mail-status-label" data-i18n="mail.state_unknown">Checking…</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Clients tab ("WebBuilder"): DisPatch's own native UI against the
+           practice box's client-pipeline API (see backend/app/practice_bridge.py).
+           Overview / Active / Completed / client-detail stepper, styled with
+           DisPatch's own tokens — ported from practice/gui/static/app.js.
+           All rendering lives in js/clients.js; this is just the mount point
+           + the same terminal-view chrome as the panels above. -->
+      <div class="terminal-view clients-view hidden" id="clients-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="clients-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini clients-avatar-mini" aria-hidden="true">👥</span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" data-i18n="clients.name">Clients</div>
+            <div class="muted terminal-subtitle" id="clients-subtitle" data-i18n="clients.subtitle">Client pipeline</div>
+          </div>
+        </header>
+        <nav class="clients-tabnav" id="clients-tabnav" aria-label="Clients sections">
+          <button type="button" class="clients-tab-btn active" data-clients-tab="overview" data-i18n="clients.tab_overview">Overview</button>
+          <button type="button" class="clients-tab-btn" data-clients-tab="active" data-i18n="clients.tab_active">Active</button>
+          <button type="button" class="clients-tab-btn" data-clients-tab="completed" data-i18n="clients.tab_completed">Completed</button>
+        </nav>
+        <div class="terminal-body clients-body">
+          <div class="clients-root" id="clients-root" aria-live="polite"></div>
+        </div>
+        <div class="clients-job-strip hidden" id="clients-job-strip" aria-live="polite"></div>
+      </div>
     </section>
 
     <!-- Job board host. A SIBLING of #chatview (not a child), so the board has
@@ -538,7 +601,7 @@
       <!-- ---- Bots ---- -->
       <section class="settings-pane" id="spane-bots" role="tabpanel" aria-labelledby="stab-bots" tabindex="0">
         <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar.
-          <strong>🛡️ Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed.
+          <strong>Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed.
           Order, visibility and Safe changes apply when you press <strong>Save</strong>.</p>
         <div class="bm-list" id="bm-list"></div>
         <!-- Avatar pools: status + prompt banks for pool-enabled bots
@@ -627,7 +690,7 @@
              right (an export/restore flow), and nesting it inside a settings
              pane would bury a footer of actions under a second footer. -->
         <div class="bm-actions">
-          <button class="btn-secondary" id="open-recovery" data-i18n="settings.recovery">🛟 Recovery &amp; Export</button>
+          <button class="btn-secondary" id="open-recovery"><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="settings.recovery">Recovery &amp; Export</span></button>
         </div>
       </section>
 
@@ -647,7 +710,7 @@
             <label for="sec-confirm" data-i18n="security.confirm_pin">Confirm PIN</label>
             <input type="password" inputmode="numeric" id="sec-confirm" autocomplete="off" />
           </div>
-          <div class="lock-error" id="sec-error" hidden></div>
+          <div class="lock-error" id="sec-error" role="alert" aria-live="assertive" hidden></div>
           <!-- The day count and the device count are interpolated, not wrapped in
                their own <span>: a translation is free to move the number anywhere
                in its sentence, which a fixed inner element cannot follow.
@@ -662,7 +725,7 @@
               Forget remembered devices (0)</button>
           </div>
           <div class="bm-actions sec-lock-row">
-            <button class="btn-secondary danger-text hidden" id="bm-lock" data-i18n="settings.lock_now">🔒 Lock now</button>
+            <button class="btn-secondary danger-text hidden" id="bm-lock"><span class="icn" data-icon="lock" aria-hidden="true"></span><span data-i18n="settings.lock_now">Lock now</span></button>
           </div>
           <!-- security.note carries markup we own (a <br> and the two <code id=…>
                path elements the recovery instructions point at), so it is rendered
@@ -705,9 +768,9 @@
   <div class="modal-backdrop hidden" id="fileserver-backdrop">
     <div class="modal fs-modal" role="dialog" aria-modal="true" aria-label="File Server" data-i18n-attr="aria-label=files.aria">
       <header class="modal-header">
-        <h2 data-i18n="files.title">📁 File Server</h2>
+        <h2><span class="icn" data-icon="folder" aria-hidden="true"></span><span data-i18n="files.title">File Server</span></h2>
         <div class="fs-header-actions">
-          <button class="btn-primary" id="fs-upload-btn" data-i18n="files.upload">⬆ Upload</button>
+          <button class="btn-primary" id="fs-upload-btn"><span class="icn" data-icon="upload" aria-hidden="true"></span><span data-i18n="files.upload">Upload</span></button>
           <button class="icon-btn ghost" id="fs-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
         </div>
       </header>
@@ -722,7 +785,7 @@
   <div class="modal-backdrop hidden" id="drop-backdrop">
     <div class="modal drop-modal" role="dialog" aria-modal="true" aria-labelledby="drop-title">
       <header class="modal-header">
-        <h2 id="drop-title" data-i18n="drop.title">⬆ Send a file</h2>
+        <h2 id="drop-title"><span class="icn" data-icon="upload" aria-hidden="true"></span><span data-i18n="drop.title">Send a file</span></h2>
         <button class="icon-btn ghost" id="drop-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
       <p class="muted modal-hint" data-i18n="drop.hint">Files go straight to your assistants, and a note
@@ -775,18 +838,22 @@
   </div>
 
   <!-- Lock screen (shown when a PIN is set and the app is locked) -->
-  <!-- The lock face carries data-palette="purple" on purpose: it is a dark
-       full-screen surface with near-black chrome, so on a light palette (Paper,
-       Daylight) its text would be dark ink on a dark backdrop. Pinning the face
-       to the classic dark skin keeps it legible without any per-token
-       override — see theme.css section 4. -->
-  <div class="lock-screen hidden" id="lock-screen" data-palette="purple">
+  <!-- The lock face follows the active palette like every other surface. It
+       used to carry data-palette="purple", pinning it to the classic dark skin,
+       because its backdrop was a hard-coded near-black — which on Paper or
+       Daylight would have put that palette's dark ink on a dark sheet. The
+       backdrop is derived from --bg-primary now (see .lock-screen in app.css),
+       so the whole face moves with the theme and stays legible: every palette
+       clears AA on its own tokens (10.6:1 at worst for text, 5.1:1 at worst
+       for the keypad). -->
+  <div class="lock-screen hidden" id="lock-screen" role="dialog" aria-modal="true"
+       aria-labelledby="lock-title" aria-describedby="lock-sub">
     <div class="lock-card">
       <div class="lock-emoji">🔒</div>
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
       <p class="lock-sub" id="lock-sub" data-i18n="lock.enter_pin">Enter your PIN</p>
       <div class="lock-dots" id="lock-dots" aria-hidden="true"></div>
-      <div class="lock-error" id="lock-error" hidden></div>
+      <div class="lock-error" id="lock-error" role="alert" aria-live="assertive" hidden></div>
       <div class="keypad" id="keypad">
         <button type="button" data-k="1">1</button>
         <button type="button" data-k="2">2</button>
@@ -856,7 +923,7 @@
   <div class="modal-backdrop hidden" id="search-backdrop">
     <div class="modal search-modal" role="dialog" aria-modal="true" aria-label="Search messages" data-i18n-attr="aria-label=search.aria">
       <header class="modal-header">
-        <h2 data-i18n="search.title">🔍 Search messages</h2>
+        <h2><span class="icn" data-icon="search" aria-hidden="true"></span><span data-i18n="search.title">Search messages</span></h2>
         <button class="icon-btn ghost" id="search-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
       <div class="search-box">
@@ -870,21 +937,21 @@
   <div class="modal-backdrop hidden" id="recover-backdrop">
     <div class="modal" role="dialog" aria-modal="true" aria-label="Recovery and export" data-i18n-attr="aria-label=recovery.aria">
       <header class="modal-header">
-        <h2 data-i18n="recovery.title">🛟 Recovery &amp; Export</h2>
+        <h2><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="recovery.title">Recovery &amp; Export</span></h2>
         <button class="icon-btn ghost" id="recover-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
       <div class="recover-section">
         <p class="recover-hint" data-i18n="recovery.export_hint">Export every message to an open, re-readable file — generated locally.</p>
         <div class="recover-row">
-          <button class="btn-secondary" data-export="json" data-i18n="recovery.export_json">⬇ JSON</button>
-          <button class="btn-secondary" data-export="md" data-i18n="recovery.export_md">⬇ Markdown</button>
-          <button class="btn-secondary" data-export="html" data-i18n="recovery.export_html">⬇ HTML</button>
+          <button class="btn-secondary" data-export="json"><span class="icn" data-icon="viewer-download" aria-hidden="true"></span><span data-i18n="recovery.export_json">JSON</span></button>
+          <button class="btn-secondary" data-export="md"><span class="icn" data-icon="viewer-download" aria-hidden="true"></span><span data-i18n="recovery.export_md">Markdown</span></button>
+          <button class="btn-secondary" data-export="html"><span class="icn" data-icon="viewer-download" aria-hidden="true"></span><span data-i18n="recovery.export_html">HTML</span></button>
         </div>
         <hr class="rule" />
         <p class="recover-hint" data-i18n="recovery.restore_hint">Restore any messages that didn’t save to DisPatch from the backup copy (the OpenClaw transcripts). Safe to run repeatedly — it only adds what’s missing.</p>
         <div class="recover-row">
           <button class="btn-primary" id="recover-all" data-i18n="recovery.restore_all">⤓ Restore all missing messages</button>
-          <button class="btn-secondary" id="browse-sessions" data-i18n="recovery.browse_sessions">📜 Browse agent sessions</button>
+          <button class="btn-secondary" id="browse-sessions"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="recovery.browse_sessions">Browse agent sessions</span></button>
         </div>
         <div class="recover-result" id="recover-result"></div>
       </div>
@@ -896,7 +963,7 @@
   <div class="modal-backdrop hidden" id="tx-backdrop">
     <div class="modal tx-modal" role="dialog" aria-modal="true" aria-label="Transcript" data-i18n-attr="aria-label=transcript.aria">
       <header class="modal-header">
-        <h2 id="tx-title" data-i18n="transcript.title">📜 Transcript</h2>
+        <h2 id="tx-title"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="transcript.title">Transcript</span></h2>
         <button class="icon-btn ghost" id="tx-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
       <div class="tx-toolbar">
@@ -978,6 +1045,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=83"></script>
+  <script type="module" src="/static/js/main.js?v=92"></script>
 </body>
 </html>

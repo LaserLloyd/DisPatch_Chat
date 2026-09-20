@@ -173,9 +173,12 @@ export const api = {
   // browsers are still blocked by the ``/api/jobs`` prefix entry in
   // ``_decoy_blocked``, so a locked device never sees a row.
   jobs: {
-    list: (params) => {
+    // `opts` reaches fetch, which is how the board passes an AbortSignal: two
+    // refreshes in quick succession must not resolve in arrival order, or a
+    // slow earlier response overwrites a newer one.
+    list: (params, opts) => {
       const q = params && params.toString ? params.toString() : '';
-      return j(`/api/jobs${q ? `?${q}` : ''}`);
+      return j(`/api/jobs${q ? `?${q}` : ''}`, opts);
     },
     // 2026-09-15: ``jobId`` is the new key (one row per JOB POSTING,
     // monthly threads share thread_id between jobs). The endpoint shape
@@ -185,7 +188,15 @@ export const api = {
     score: (body) => j('/api/jobs/score', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     create: (body) => j('/api/jobs', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     // Monthly-threading reads (added 2026-09-15).
-    months: (botId = 'jobboard') => j(`/api/jobs/months?bot_id=${encodeURIComponent(botId)}`),
+    // Called both as months() and as months({signal}); the bot id has never
+    // been passed by anything, so an options object in the first slot is
+    // unambiguous and keeps the old call sites working.
+    months: (botIdOrOpts = 'jobboard', maybeOpts) => {
+      const isOpts = botIdOrOpts && typeof botIdOrOpts === 'object';
+      const botId = isOpts ? 'jobboard' : botIdOrOpts;
+      const opts = isOpts ? botIdOrOpts : maybeOpts;
+      return j(`/api/jobs/months?bot_id=${encodeURIComponent(botId)}`, opts);
+    },
     current: (botId = 'jobboard', ensure = true) =>
       j(`/api/jobs/current?bot_id=${encodeURIComponent(botId)}&ensure=${ensure ? 'true' : 'false'}`),
     month: (key, botId = 'jobboard') =>
@@ -193,6 +204,15 @@ export const api = {
     // Manage verbs — keyed by job_id now (was thread_id before 2026-09-15).
     vote: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/vote`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     applied: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/applied`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    // Free-text feedback to the job-hunting agent (Scout) — added 2026-09-16.
+    // Posts into the job's monthly thread as a user message and gives Scout
+    // a turn to reply there; {ok, event_id, message_id, thread_id, dispatched}.
+    // `dispatched:false` means the message was saved but Scout could not be
+    // woken immediately (still picked up later) — the caller shows different
+    // copy for the two cases, never treats a non-2xx as anything but a real
+    // failure (e.g. a 404 while the backend hasn't shipped this route yet).
+    find: (body, botId = 'jobboard') => j(`/api/jobs/find?bot_id=${encodeURIComponent(botId)}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+    feedback: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/feedback`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     tags: (jobId, body) => j(`/api/jobs/${encodeURIComponent(jobId)}/tags`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
     archive: (jobId) => j(`/api/jobs/${encodeURIComponent(jobId)}/archive`, { method: 'POST' }),
     profile: () => j('/api/jobs/profile'),
@@ -244,4 +264,16 @@ export const api = {
   // the rig's panel plus whether the SERVER could reach it. There is no other
   // route — DisPatch never manages the rig.
   studioforgeStatus: () => j('/api/studioforge/status'),
+
+  // Emails tab (full-session only): MailForge dashboard reachability + the
+  // one-time launch URL, when the service is actually up. See
+  // backend/app/mailforge_bridge.py.
+  mailStatus: () => j('/api/mail/status'),
+
+  // Clients tab (full-session only): thin passthrough onto the practice box's
+  // client-pipeline API (docs/GUI-PLAN.md §2), proxied server-side. `path` is
+  // the practice-side path with no leading slash, e.g. "board",
+  // "clients/c1/actions/build". See backend/app/practice_bridge.py.
+  practiceGet: (path) => j(`/api/practice/${path}`),
+  practicePost: (path, body) => j(`/api/practice/${path}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
 };

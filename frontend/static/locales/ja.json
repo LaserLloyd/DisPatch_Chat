@@ -32,7 +32,8 @@
     "chat": "チャット",
     "file": "ファイル",
     "image": "画像",
-    "video": "動画"
+    "video": "動画",
+    "dismiss": "閉じる"
   },
   "nav": {
     "theme": "テーマ",
@@ -93,17 +94,17 @@
     "menu": "チャットの操作",
     "popout": "別ウィンドウで開く",
     "popout_gone": "そのチャットは利用できません — 最新のチャットを表示します。",
-    "pin": "📌 ピン留め",
-    "unpin": "📌 ピン留めを解除",
-    "rename": "✏️ 名前を変更",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "rename": "名前を変更",
     "rename_title": "チャットの名前を変更",
     "sync": "⤓ 抜けているメッセージを復元",
-    "transcript": "📜 トランスクリプトを表示",
-    "archive": "🗄️ アーカイブ",
+    "transcript": "トランスクリプトを表示",
+    "archive": "アーカイブ",
     "archive_confirm": "このチャットをアーカイブしますか？チャット一覧には表示されなくなります。",
     "archived": "チャットをアーカイブしました",
     "delete_confirm": "このチャットを完全に削除しますか？",
-    "delete_thread": "🗑️ 削除"
+    "delete_thread": "削除"
   },
   "welcome": {
     "with_bot": "{name} とチャット",
@@ -126,7 +127,9 @@
     "chars": {
       "other": "{count} 文字"
     },
-    "not_delivered": "⚠ メッセージを送信できませんでした"
+    "not_delivered": "メッセージを送信できませんでした",
+    "remove_attachment": "{name} を削除",
+    "attachment": "添付ファイル"
   },
   "msg": {
     "copy": "コピー",
@@ -183,7 +186,7 @@
     "tab_security": "セキュリティ",
     "theme_hint": "この端末の見た目を選びます。すぐに反映され、ここに記憶されます — 保存は不要です。",
     "device_hint": "これらはこの端末だけに適用され、すぐに反映されます。保存は不要です。",
-    "hint": "ボットの画像（または <strong>写真を変更</strong>）をタップするとアバターを設定できます。並び替えは ▲/▼ ボタンで（デスクトップでは行をドラッグしてもできます）。スイッチでサイドバーへの表示・非表示を切り替えます。<strong>🛡️ セーフ</strong> — このキャラクター（とそのアバター）は PIN なしのセーフモードでも表示されます。並び順・表示・セーフの変更は <strong>保存</strong> を押すと反映されます。",
+    "hint": "ボットの画像（または <strong>写真を変更</strong>）をタップするとアバターを設定できます。並び替えは ▲/▼ ボタンで（デスクトップでは行をドラッグしてもできます）。スイッチでサイドバーへの表示・非表示を切り替えます。<strong>セーフ</strong> — このキャラクター（とそのアバター）は PIN なしのセーフモードでも表示されます。並び順・表示・セーフの変更は <strong>保存</strong> を押すと反映されます。",
     "language": "言語",
     "language_hint": "変更はすぐに反映されます。",
     "minimal_avatars": "ミニマルアバター",
@@ -213,8 +216,8 @@
     "move_up_aria": "{name} を上へ移動",
     "move_down_aria": "{name} を下へ移動",
     "show_in_sidebar": "サイドバーにボットを表示",
-    "recovery": "🛟 復元とエクスポート",
-    "lock_now": "🔒 今すぐロック",
+    "recovery": "復元とエクスポート",
+    "lock_now": "今すぐロック",
     "discard_confirm": "変更を破棄しますか？",
     "menu_badge": "⌥",
     "menu_title": "このボットを ⌥ ツールメニューへ移動（この端末のみ）"
@@ -226,16 +229,16 @@
     "reacts": "リアクション画像を送ります"
   },
   "files": {
-    "title": "📁 ファイルサーバー",
+    "title": "ファイルサーバー",
     "aria": "ファイルサーバー",
     "hint": "ここにファイルを置くとアシスタントと共有できます。ドラッグ＆ドロップも使えます。",
-    "upload": "⬆ アップロード",
+    "upload": "アップロード",
     "empty": "ファイルはまだありません — アップロードするか、ここにドロップしてください。",
     "view": "表示",
     "download": "ダウンロード",
     "delete": "このファイルを削除",
     "wipe_button": {
-      "other": "🗑 これ以前をまとめて削除（{count}）"
+      "other": "これ以前をまとめて削除（{count}）"
     },
     "wipe_title": "この日とそれ以前のファイルをすべて削除します",
     "wipe_confirm": {
@@ -257,7 +260,7 @@
     "kind_files": "ファイル"
   },
   "drop": {
-    "title": "⬆ ファイルを送る",
+    "title": "ファイルを送る",
     "hint": "ファイルはアシスタントに直接届き、チャットにはメモが残ります。送信は一方通行で、この端末から開き直すことはできません。",
     "empty": "送るファイルを選んでください。",
     "choose": "ファイルを選ぶ",
@@ -342,6 +345,80 @@
     "model_loading": "サーバーで読み込み中…",
     "sf_link_title": "StudioForge について — laserlloyd.com"
   },
+  "mail": {
+    "name": "メール",
+    "subtitle": "MailForge ダッシュボード",
+    "sidebar_aria": "メール — MailForge ダッシュボード（アンロック時のみ）",
+    "session_panel_title": "メール",
+    "session_panel_heading": "MailForge はここで動作します。",
+    "session_panel_body": "DisPatch は MailForge 自身のダッシュボードをそのまま埋め込みます。フルセッションのみ、セーフモードでは表示されません。",
+    "open_title": "MailForge ダッシュボードを新しいタブで開く",
+    "frame_title": "MailForge ダッシュボード",
+    "checking": "確認中…",
+    "state_running": "稼働中",
+    "state_down": "応答なし",
+    "state_not_installed": "未インストール",
+    "state_unreachable": "到達不能",
+    "not_installed_text": "この機体では MailForge のダッシュボードがまだ一度も起動していません。",
+    "not_installed_hint": "起動: systemctl --user start mailforge",
+    "down_text": "MailForge のダッシュボードが応答していません。",
+    "down_hint": "確認: systemctl --user status mailforge",
+    "unreachable_text": "DisPatch のバックエンドから MailForge のダッシュボードに到達できませんでした。",
+    "unreachable_hint": "確認: systemctl --user status mailforge",
+    "state_unknown": "確認中…"
+  },
+  "clients": {
+    "name": "クライアント",
+    "subtitle": "クライアント・パイプライン",
+    "sidebar_aria": "クライアント — クライアント・パイプライン（アンロック時のみ）",
+    "session_panel_title": "クライアント・パイプライン",
+    "session_panel_heading": "クライアント・パイプラインはここで動作します。",
+    "session_panel_body": "概要、進行中・完了したクライアント、各クライアントの12ステップのパイプライン。フルセッションのみ、セーフモードでは表示されません。",
+    "tab_overview": "概要",
+    "tab_active": "進行中",
+    "tab_completed": "完了",
+    "load_error": "この画面を読み込めませんでした。",
+    "last_checked": "最終確認",
+    "waiting_on_you": "あなたの対応待ち",
+    "waiting_empty": "現在、対応待ちのクライアントはいません。",
+    "holds": "セキュリティ保留",
+    "holds_empty": "保留中のクライアントはいません。",
+    "stalled": "停滞中",
+    "stalled_empty": "停滞中のクライアントはいません。",
+    "no_active": "進行中のクライアントはいません。",
+    "no_completed": "完了したクライアントはまだいません。",
+    "no_matches": "検索条件に一致するクライアントはいません。",
+    "col_name": "名前",
+    "col_branch": "拠点",
+    "col_state": "状態",
+    "col_next": "次のステップ",
+    "recent_activity": "最近のアクティビティ",
+    "no_activity": "まだ何も起きていません。",
+    "jump": "移動 ›",
+    "search_placeholder": "名前で検索…",
+    "open_thread": "スレッドを開く",
+    "security_hold": "セキュリティ保留",
+    "hold_generic": "このクライアントは保留中です。",
+    "hold_note_placeholder": "何を確認し、なぜ続行しても安全なのか",
+    "clear_hold": "保留を解除",
+    "hold_clear_failed": "保留を解除できませんでした。もう一度お試しください。",
+    "no_steps": "このクライアントにはまだステップがありません。",
+    "needs": "必要なもの",
+    "do": "実行",
+    "nothing_to_do": "ここではまだ何もすることがありません。",
+    "log": "ログ",
+    "nothing_logged": "まだ記録がありません。",
+    "if_it_fails": "失敗した場合",
+    "save": "保存",
+    "save_failed": "保存できませんでした。",
+    "action_failed": "操作を開始できませんでした。",
+    "confirm_before": "実行前に確認してください:",
+    "are_you_sure": "よろしいですか?",
+    "approve": "承認",
+    "working": "処理中…",
+    "timed_out": "タイムアウト",
+    "console_output": "コンソール出力"
+  },
   "studioforge": {
     "name": "StudioForge",
     "subtitle": "LLM リグ コントロールパネル",
@@ -366,7 +443,10 @@
     "unreachable_hint": "パネルはリグ側のネットワーク上にあるため、そのネットワークに接続している端末からのみ開けます。接続済みの端末で ↗ リンクを使ってください。",
     "state_blocked": "埋め込み不可",
     "blocked_text": "StudioForge パネルは埋め込みを拒否しています。",
-    "blocked_hint": "パネルが X-Frame-Options: DENY を返すため、どのブラウザーも他ページ内に表示できません。↗ リンクから新しいタブで開いてください。"
+    "blocked_hint": "パネルが X-Frame-Options: DENY を返すため、どのブラウザーも他ページ内に表示できません。↗ リンクから新しいタブで開いてください。",
+    "state_insecure": "ブロック: 安全でないアドレス",
+    "insecure_text": "このページは HTTPS で配信されていますが、パネルのアドレスは平文の HTTP です。",
+    "insecure_hint": "安全なページは安全でないページを埋め込めないため、どのブラウザーでもここにパネルは表示されません。Tailscale 経由で DisPatch に接続したときに起きるのがこれです。↗ リンクは使えます。別タブで開くのは埋め込みではなく通常の遷移だからです。根本的に直すには、パネルを HTTPS で配信し、DISPATCH_STUDIOFORGE_URL をそのアドレスに向けてください。"
   },
   "llm": {
     "hint": "DisPatch をモデルプロバイダーに向けるだけです。サイドバーのボットになり、エージェント基盤は要りません。",
@@ -455,7 +535,7 @@
   },
   "search": {
     "aria": "メッセージを検索",
-    "title": "🔍 メッセージを検索",
+    "title": "メッセージを検索",
     "placeholder": "すべての会話から検索…",
     "prompt": "入力するとすべての会話を検索します",
     "no_results": "「{query}」に一致する結果はありません",
@@ -487,14 +567,14 @@
   },
   "recovery": {
     "aria": "復元とエクスポート",
-    "title": "🛟 復元とエクスポート",
+    "title": "復元とエクスポート",
     "export_hint": "すべてのメッセージを、あとから読み返せる形式で書き出します — 生成はこの端末の中だけで行われます。",
-    "export_json": "⬇ JSON",
-    "export_md": "⬇ Markdown",
-    "export_html": "⬇ HTML",
+    "export_json": "JSON",
+    "export_md": "Markdown",
+    "export_html": "HTML",
     "restore_hint": "DisPatch に保存されなかったメッセージを、バックアップ（OpenClaw のトランスクリプト）から復元します。何度実行しても安全です — 足りないものだけを追加します。",
     "restore_all": "⤓ 抜けているメッセージをすべて復元",
-    "browse_sessions": "📜 エージェントのセッションを見る",
+    "browse_sessions": "エージェントのセッションを見る",
     "scanning": "OpenClaw のトランスクリプトを調べています…",
     "recovered_summary": {
       "other": "{threads} 件のスレッドから {count} 件のメッセージを復元しました。"
@@ -507,7 +587,7 @@
   },
   "transcript": {
     "aria": "トランスクリプト",
-    "title": "📜 トランスクリプト",
+    "title": "トランスクリプト",
     "loading": "トランスクリプトを読み込み中…",
     "none": "このセッションのトランスクリプトは見つかりません",
     "summary": "{items} 件 · うち {missing} 件が DisPatch に未保存",
@@ -530,7 +610,7 @@
     "saved_title": "DisPatch に保存済み"
   },
   "sessions": {
-    "title": "📜 {name} — エージェントのセッション",
+    "title": "{name} — エージェントのセッション",
     "summary": "DisPatch が作成していない cron / サブエージェント / ダッシュボードのセッションも含みます",
     "loading": "セッションを読み込み中…",
     "empty": "セッションが見つかりません",
@@ -810,7 +890,8 @@
   },
   "pins": {
     "pin": "バーに固定",
-    "unpin": "バーから外す"
+    "unpin": "バーから外す",
+    "theme_hint": "テーマボタンをバーに表示したままにします。"
   },
   "checklist": {
     "done": "完了",
@@ -941,7 +1022,62 @@
     },
     "detail": {
       "close": "Close",
-      "not_found": "That job could not be found."
+      "not_found": "That job could not be found.",
+      "posted": "掲載日",
+      "first_seen": "初出",
+      "source": "情報源",
+      "offline": "DisPatch に接続できません。接続を確認してください。",
+      "locked": "この求人を見るにはロックを解除してください。"
+    },
+    "seniority": {
+      "junior": "ジュニア",
+      "senior": "シニア",
+      "staff": "スタッフ",
+      "principal": "プリンシパル"
+    },
+    "note": {
+      "placeholder": "メモを追加(任意)…"
+    },
+    "feedback": {
+      "title": "Scoutへのフィードバック",
+      "placeholder": "Scoutに探してほしいこと・避けてほしいことを伝えてください…",
+      "reason_label": "理由(任意)",
+      "reason_none": "特に理由なし",
+      "send": "Scoutに送信",
+      "sent": "送信しました — Scoutがこのジョブのスレッドで返信します",
+      "sent_no_agent": "保存しました。Scoutに今すぐ届きませんでしたが、後で処理されます",
+      "open_thread": "スレッドを開く",
+      "error": "フィードバックを送信できませんでした: {msg}",
+      "need_comment": "送信する前にメモを入力してください。",
+      "not_available": "フィードバック機能はまだ利用できません。"
+    },
+    "activity": {
+      "title": "アクティビティ",
+      "empty": "まだアクティビティはありません。",
+      "actor": {
+        "system": "システム",
+        "you": "あなた"
+      },
+      "type": {
+        "comment": "コメント",
+        "vote": "投票",
+        "vote_undo": "投票取り消し",
+        "state_change": "状態変更",
+        "tag_added": "タグ追加",
+        "tag_removed": "タグ削除",
+        "repost": "再投稿",
+        "duplicate_detected": "重複を検出",
+        "expired": "期限切れ",
+        "feedback": "フィードバック",
+        "applied": "応募済み"
+      }
+    },
+    "find": {
+      "button": "🔍 求人を探す",
+      "placeholder": "Scoutに探してほしい条件（任意）",
+      "send": "Scoutに依頼",
+      "sent": "Scoutが検索中です。新しい求人はここに表示され、概要は今月のJobsスレッドに届きます。",
+      "not_sent": "依頼は保存されましたが、Scoutに接続できませんでした。後でもう一度お試しください。"
     }
   }
 }

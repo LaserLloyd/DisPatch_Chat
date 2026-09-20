@@ -33,7 +33,8 @@
     "chat": "Chat",
     "file": "file",
     "image": "image",
-    "video": "video"
+    "video": "video",
+    "dismiss": "Dismiss"
   },
   "nav": {
     "theme": "Theme",
@@ -94,17 +95,17 @@
     "menu": "Thread actions",
     "popout": "Open in its own window",
     "popout_gone": "That chat isn't available anymore — showing the latest instead.",
-    "pin": "📌 Pin",
-    "unpin": "📌 Unpin",
-    "rename": "✏️ Rename",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
     "rename_title": "Rename chat",
     "sync": "⤓ Recover missing messages",
-    "transcript": "📜 View transcript",
-    "archive": "🗄️ Archive",
+    "transcript": "View transcript",
+    "archive": "Archive",
     "archive_confirm": "Archive this chat? It’ll be hidden from your chat list.",
     "archived": "Chat archived",
     "delete_confirm": "Delete this chat permanently?",
-    "delete_thread": "🗑️ Delete"
+    "delete_thread": "Delete"
   },
   "welcome": {
     "with_bot": "Chat with {name}",
@@ -128,7 +129,9 @@
       "one": "{count} char",
       "other": "{count} chars"
     },
-    "not_delivered": "⚠ Message not delivered"
+    "not_delivered": "Message not delivered",
+    "remove_attachment": "Remove {name}",
+    "attachment": "attachment"
   },
   "msg": {
     "copy": "Copy",
@@ -185,7 +188,7 @@
     "tab_security": "Security",
     "theme_hint": "Pick this device's look. It applies straight away and is remembered here — there is nothing to save.",
     "device_hint": "These apply to this device only, and take effect straight away — there is nothing to save here.",
-    "hint": "Tap a bot’s picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar. <strong>🛡️ Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed. Order, visibility and Safe changes apply when you press <strong>Save</strong>.",
+    "hint": "Tap a bot’s picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar. <strong>Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed. Order, visibility and Safe changes apply when you press <strong>Save</strong>.",
     "language": "Language",
     "language_hint": "Changes apply straight away.",
     "minimal_avatars": "Minimal avatars",
@@ -215,8 +218,8 @@
     "move_up_aria": "Move {name} up",
     "move_down_aria": "Move {name} down",
     "show_in_sidebar": "Show bot in sidebar",
-    "recovery": "🛟 Recovery & Export",
-    "lock_now": "🔒 Lock now",
+    "recovery": "Recovery & Export",
+    "lock_now": "Lock now",
     "discard_confirm": "Discard changes?",
     "menu_badge": "⌥",
     "menu_title": "Move this bot into the ⌥ Tools menu (this device only)"
@@ -228,17 +231,17 @@
     "reacts": "Sends reaction images"
   },
   "files": {
-    "title": "📁 File Server",
+    "title": "File Server",
     "aria": "File Server",
     "hint": "Drop files here to share them with your assistants. Drag & drop works too.",
-    "upload": "⬆ Upload",
+    "upload": "Upload",
     "empty": "No files yet — upload something or drop it here.",
     "view": "View",
     "download": "Download",
     "delete": "Delete this file",
     "wipe_button": {
-      "one": "🗑 Delete this & older ({count})",
-      "other": "🗑 Delete this & older ({count})"
+      "one": "Delete this & older ({count})",
+      "other": "Delete this & older ({count})"
     },
     "wipe_title": "Delete all files from this day and every day before it",
     "wipe_confirm": {
@@ -263,7 +266,7 @@
     "kind_files": "files"
   },
   "drop": {
-    "title": "⬆ Send a file",
+    "title": "Send a file",
     "hint": "Files go straight to your assistants, and a note appears in the chat. Sending is one-way — a file can’t be opened again from this device.",
     "empty": "Choose a file to send.",
     "choose": "Choose files",
@@ -348,6 +351,80 @@
     "model_loading": "loading on the server…",
     "sf_link_title": "About StudioForge — laserlloyd.com"
   },
+  "mail": {
+    "name": "Emails",
+    "subtitle": "MailForge dashboard",
+    "sidebar_aria": "Emails — MailForge dashboard, unlocked only",
+    "session_panel_title": "Mail",
+    "session_panel_heading": "MailForge runs here.",
+    "session_panel_body": "DisPatch embeds MailForge's own dashboard, unmodified. Full-session only; never visible in Safe Mode.",
+    "open_title": "Open the MailForge dashboard in a new tab",
+    "frame_title": "MailForge dashboard",
+    "checking": "Checking…",
+    "state_running": "Running",
+    "state_down": "Not responding",
+    "state_not_installed": "Not installed",
+    "state_unreachable": "Not reachable",
+    "not_installed_text": "MailForge's dashboard has never run on this machine.",
+    "not_installed_hint": "Start it with: systemctl --user start mailforge",
+    "down_text": "MailForge's dashboard is not answering.",
+    "down_hint": "Check: systemctl --user status mailforge",
+    "unreachable_text": "Could not reach MailForge's dashboard from DisPatch's backend.",
+    "unreachable_hint": "Check: systemctl --user status mailforge",
+    "state_unknown": "Checking…"
+  },
+  "clients": {
+    "name": "Clients",
+    "subtitle": "Client pipeline",
+    "sidebar_aria": "Clients — client pipeline, unlocked only",
+    "session_panel_title": "Client pipeline",
+    "session_panel_heading": "The client pipeline runs here.",
+    "session_panel_body": "Overview, Active and Completed clients, and each client's 12-step pipeline. Full-session only; never visible in Safe Mode.",
+    "tab_overview": "Overview",
+    "tab_active": "Active",
+    "tab_completed": "Completed",
+    "load_error": "Could not load this view.",
+    "last_checked": "Last checked",
+    "waiting_on_you": "Waiting on you",
+    "waiting_empty": "Nothing is waiting on you right now.",
+    "holds": "Security holds",
+    "holds_empty": "No clients on hold.",
+    "stalled": "Stalled",
+    "stalled_empty": "No stalled clients.",
+    "no_active": "No active clients.",
+    "no_completed": "No completed clients yet.",
+    "no_matches": "No clients match that search.",
+    "col_name": "Name",
+    "col_branch": "Branch",
+    "col_state": "State",
+    "col_next": "Next",
+    "recent_activity": "Recent activity",
+    "no_activity": "Nothing has happened yet.",
+    "jump": "Jump ›",
+    "search_placeholder": "Search by name…",
+    "open_thread": "Open thread",
+    "security_hold": "Security hold",
+    "hold_generic": "This client is on hold.",
+    "hold_note_placeholder": "What did you check, and why is it safe to continue?",
+    "clear_hold": "Clear hold",
+    "hold_clear_failed": "Could not clear the hold. Try again.",
+    "no_steps": "This client has no steps yet.",
+    "needs": "Needs",
+    "do": "Do",
+    "nothing_to_do": "Nothing to do here yet.",
+    "log": "Log",
+    "nothing_logged": "Nothing logged yet.",
+    "if_it_fails": "If it fails",
+    "save": "Save",
+    "save_failed": "Could not save.",
+    "action_failed": "That action failed to start.",
+    "confirm_before": "Confirm this before it runs:",
+    "are_you_sure": "Are you sure?",
+    "approve": "Approve",
+    "working": "Working…",
+    "timed_out": "TIMED OUT",
+    "console_output": "Console output"
+  },
   "studioforge": {
     "name": "StudioForge",
     "subtitle": "LLM rig control panel",
@@ -372,7 +449,10 @@
     "unreachable_hint": "The panel lives on the rig's own network, so only a device on that network can load it. Use the ↗ link from a device that is on it.",
     "state_blocked": "Refuses embedding",
     "blocked_text": "The StudioForge panel refuses to be embedded.",
-    "blocked_hint": "The panel sends X-Frame-Options: DENY, so no browser will draw it inside another page. Use the ↗ link — it opens in a tab, where it works normally."
+    "blocked_hint": "The panel sends X-Frame-Options: DENY, so no browser will draw it inside another page. Use the ↗ link — it opens in a tab, where it works normally.",
+    "state_insecure": "Blocked: insecure address",
+    "insecure_text": "This page is served over HTTPS, and the panel address is plain HTTP.",
+    "insecure_hint": "A secure page may not embed an insecure one, so no browser will draw the panel here — this is what happens when you reach DisPatch over Tailscale. The ↗ link still works: opening it in its own tab is a normal navigation, not an embed. To fix it properly, serve the panel over HTTPS and point DISPATCH_STUDIOFORGE_URL at that address."
   },
   "llm": {
     "hint": "Point DisPatch at a model provider. It becomes a bot in your sidebar — no agent stack needed.",
@@ -462,7 +542,7 @@
   },
   "search": {
     "aria": "Search messages",
-    "title": "🔍 Search messages",
+    "title": "Search messages",
     "placeholder": "Search all conversations…",
     "prompt": "Type to search every conversation",
     "no_results": "No results for “{query}”",
@@ -494,14 +574,14 @@
   },
   "recovery": {
     "aria": "Recovery and export",
-    "title": "🛟 Recovery & Export",
+    "title": "Recovery & Export",
     "export_hint": "Export every message to an open, re-readable file — generated locally.",
-    "export_json": "⬇ JSON",
-    "export_md": "⬇ Markdown",
-    "export_html": "⬇ HTML",
+    "export_json": "JSON",
+    "export_md": "Markdown",
+    "export_html": "HTML",
     "restore_hint": "Restore any messages that didn’t save to DisPatch from the backup copy (the OpenClaw transcripts). Safe to run repeatedly — it only adds what’s missing.",
     "restore_all": "⤓ Restore all missing messages",
-    "browse_sessions": "📜 Browse agent sessions",
+    "browse_sessions": "Browse agent sessions",
     "scanning": "Scanning OpenClaw transcripts…",
     "recovered_summary": {
       "one": "Recovered {count} message across {threads} thread(s).",
@@ -516,7 +596,7 @@
   },
   "transcript": {
     "aria": "Transcript",
-    "title": "📜 Transcript",
+    "title": "Transcript",
     "loading": "Loading transcript…",
     "none": "No transcript found for this session",
     "summary": "{items} items · {missing} not in DisPatch",
@@ -540,7 +620,7 @@
     "saved_title": "Saved in DisPatch"
   },
   "sessions": {
-    "title": "📜 {name} — agent sessions",
+    "title": "{name} — agent sessions",
     "summary": "Includes cron / subagent / dashboard sessions DisPatch never created",
     "loading": "Loading sessions…",
     "empty": "No sessions found",
@@ -814,7 +894,7 @@
     "answering": "answering",
     "not_answering": "not answering",
     "note_agent_providers": "Optional — and these bots do not need one: they call an LLM provider directly.",
-    "note_agent_none": "Optional — chat history, uploads and this page all work without one. Use Connect an AI (🔌) to give a bot a provider instead.",
+    "note_agent_none": "Optional — chat history, uploads and this page all work without one. Use Connect an AI to give a bot a provider instead.",
     "card_transport": "Live transport",
     "reply_socket": "Reply socket",
     "socket_connected": "connected",
@@ -833,7 +913,8 @@
   },
   "pins": {
     "pin": "Pin to the bar",
-    "unpin": "Unpin from the bar"
+    "unpin": "Unpin from the bar",
+    "theme_hint": "keep the theme button on the bar."
   },
   "checklist": {
     "done": "Completed",
@@ -941,7 +1022,12 @@
     },
     "detail": {
       "close": "Close",
-      "not_found": "That job could not be found."
+      "not_found": "That job could not be found.",
+      "posted": "Posted",
+      "first_seen": "First seen",
+      "source": "Source",
+      "offline": "Could not reach DisPatch — check your connection.",
+      "locked": "Unlock to see this job."
     },
     "vote": {
       "yes": "👍 Yes",
@@ -967,6 +1053,56 @@
       "why": "Score {score}",
       "embed_unavailable": "Score {score} (embedding unavailable)",
       "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
+    },
+    "seniority": {
+      "junior": "Junior",
+      "senior": "Senior",
+      "staff": "Staff",
+      "principal": "Principal"
+    },
+    "note": {
+      "placeholder": "Add a note (optional)…"
+    },
+    "feedback": {
+      "title": "Feedback for Scout",
+      "placeholder": "Tell Scout what to look for or avoid…",
+      "reason_label": "Reason (optional)",
+      "reason_none": "No specific reason",
+      "send": "Send to Scout",
+      "sent": "Sent — Scout will reply in the job thread",
+      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
+      "open_thread": "Open thread",
+      "error": "Could not send feedback: {msg}",
+      "need_comment": "Write a note before sending.",
+      "not_available": "Feedback isn't available yet."
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "No activity yet.",
+      "actor": {
+        "system": "System",
+        "you": "You"
+      },
+      "type": {
+        "comment": "Comment",
+        "vote": "Voted",
+        "vote_undo": "Vote undone",
+        "state_change": "State change",
+        "tag_added": "Tag added",
+        "tag_removed": "Tag removed",
+        "repost": "Reposted",
+        "duplicate_detected": "Duplicate detected",
+        "expired": "Expired",
+        "feedback": "Feedback",
+        "applied": "Applied"
+      }
+    },
+    "find": {
+      "button": "🔍 Find jobs",
+      "placeholder": "What should Scout look for? (optional)",
+      "send": "Ask Scout",
+      "sent": "Scout is searching. New postings will show up here, and a summary lands in this month's Jobs thread.",
+      "not_sent": "Request saved, but Scout couldn't be reached. Try again later."
     }
   }
 }

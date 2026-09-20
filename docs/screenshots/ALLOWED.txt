@@ -1,0 +1,34 @@
+# Screenshots cleared for the public repo — one filename per line.
+#
+# scripts/scrub_check.py refuses any image under docs/screenshots/ that is not
+# named here. This list exists because a picture is the one thing in this repo
+# no scanner can read: SKIP_SUFFIXES stops the content scan at `.png`, so a
+# capture of a running instance — bot names, avatars, message previews, mailbox
+# addresses, all rendered as pixels — passes every other rule in that file.
+#
+# So the check is a human one. Before adding a line here, OPEN the file and
+# confirm it shows none of:
+#   * a real person's name, handle or email address
+#   * an uploaded or generated avatar belonging to a real install
+#   * real message text, thread titles or client records
+#   * hostnames, tailnet names, LAN addresses or filesystem paths
+#
+# The screenshots below are deliberately SYNTHETIC: a fictional roster (Nova,
+# and letter-block avatars), invented household chatter, and no address of any
+# kind. That is the standard for anything that ships here. Capture new ones
+# against a seeded staging instance, never against the live app.
+#
+# Removed 2026-09-20 rather than listed, because they were captures of the real
+# instance: staging-emails-{1280,390}.png carried three live mailbox addresses
+# in plain pixels, and staging-clients-*.png carried the operator's own avatar
+# and a real first name. Re-shoot them from synthetic data if the Emails and
+# Clients tabs need documenting.
+
+bot-manager.png
+desktop-dark.png
+desktop-light.png
+mobile-chats.png
+mobile-thread.png
+
+# Safe Mode with an empty roster: no threads, no names, no message text.
+live-locked-1280.png

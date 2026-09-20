@@ -83,6 +83,17 @@ jobs:
             node --check /tmp/check.mjs || { echo "::error file=$f::syntax error"; exit 1; }
           done
           echo "All frontend modules parse."
+      - name: Install test dependencies
+        # jsdom, and nothing else. The app itself has no dependencies and no
+        # build step; this is purely so the DOM half of the suite RUNS.
+        #
+        # Without it a third of the suite reported as SKIPPED inside a green
+        # run — every Job Board render-path assertion, both modal focus traps
+        # and the whole sanitizer suite — so CI was green over 243 of 339
+        # tests and nobody could tell from the summary.
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
       - name: Frontend tests
         # node --check only PARSES. It cannot see that a function being called
         # does not exist — which is exactly the bug that shipped: two calls to
@@ -90,11 +101,11 @@ jobs:
         # test ever exercised. tests/callable.test.js is the guard for that
         # class; the rest cover No-Image Mode's decision logic.
         #
-        # Explicit file args, NOT `node --test tests/`: node resolves a bare
-        # directory as a MODULE and dies with MODULE_NOT_FOUND, which reads
-        # exactly like a failing suite.
+        # `test:ci` sets CI_REQUIRE_DOM=1, so if the install above ever stops
+        # providing jsdom the suite FAILS instead of quietly skipping back to
+        # 243. A skipped test is not a passing one.
         working-directory: frontend
-        run: node --test tests/*.js
+        run: npm run test:ci
 
   locales:
     name: Translations

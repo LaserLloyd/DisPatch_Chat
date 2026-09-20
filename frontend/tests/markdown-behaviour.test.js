@@ -25,6 +25,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { domSkip } from './_require-dom.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
@@ -92,7 +93,7 @@ const require = createRequire(import.meta.url);
 let jsdom = null;
 try { jsdom = require('jsdom'); } catch { /* not installed — tests skip */ }
 
-const dom = { skip: jsdom ? false : 'jsdom is not installed (see the header of this file)' };
+const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed (see the header of this file)') };
 
 // ONE window for the whole file, memoised. markdown.js registers its DOMPurify
 // hooks once per module (ensureHooks), so a second window would get a
@@ -542,7 +543,11 @@ test('[[view:path|label]] renders a viewer card', { skip: dom.skip }, async () =
   await withDom();
   const out = renderMarkdown('[[view:/var/home/user/report.html|The report]]');
   assert.match(out, /class="doc-card view-card"/, out);
-  assert.match(out, /class="doc-icon">👁</, out);
+  // The eye glyph is a CSS `mask-image` icon now (2026-09-18 sweep), not the
+  // 👁 emoji — an inline <svg> would just be stripped by DOMPurify's
+  // ALLOWED_TAGS (deliberately no svg/path there), so the span stays empty
+  // sanitizer-safe markup and app.css draws the icon.
+  assert.match(out, /class="md-doc-icon eye-icon" aria-hidden="true"><\/span>/, out);
   assert.match(out, /class="markdown-file-link doc-link" data-file-path="\/var\/home\/user\/report\.html"/, out);
   assert.match(out, />The report</, out);
   // no href at all — a viewer card is not navigable markup
@@ -809,7 +814,15 @@ test('the text of the message is never changed, only wrapped', dom, () => {
 
 const stripTags = (html) => html.replace(/<[^>]*>/g, '');
 
-test('LaTeX commands become the Unicode they stand for', () => {
+// These six call renderMarkdown(), which needs marked and DOMPurify — so they
+// need the DOM the rest of this file's section 2 declares. They never said so,
+// and without jsdom they did not SKIP, they FAILED: renderMarkdown used to
+// throw a bare ReferenceError on `window`, and once that was fixed to degrade
+// gracefully it returned escaped plain text that these assertions then
+// rejected. Either way they were red on any machine without the dev
+// dependency, including CI. Same gate as their neighbours.
+
+test('LaTeX commands become the Unicode they stand for', { skip: dom.skip }, () => {
   const html = renderMarkdown('The error is $\\pm 0.5$ and $\\alpha \\approx 0.7$, so $x \\rightarrow y$.');
   const text = stripTags(html);
   assert.match(text, /± 0\.5/);
@@ -819,11 +832,11 @@ test('LaTeX commands become the Unicode they stand for', () => {
   assert.doesNotMatch(text, /\$/, 'a maths delimiter survived');
 });
 
-test('the \\( \\) form is read before markdown calls it an escaped paren', () => {
+test('the \\( \\) form is read before markdown calls it an escaped paren', { skip: dom.skip }, () => {
   assert.match(stripTags(renderMarkdown('Also written \\(a \\ne b\\) here.')), /a ≠ b/);
 });
 
-test('scripts and fractions reduce to Unicode', () => {
+test('scripts and fractions reduce to Unicode', { skip: dom.skip }, () => {
   const text = stripTags(renderMarkdown('$x^{2}$ and $H_2O$ and $\\frac{a}{b}$ and $\\frac{x+1}{2}$'));
   assert.match(text, /x²/);
   assert.match(text, /H₂O/);
@@ -843,11 +856,11 @@ test('LaTeX with no Unicode equivalent is left exactly as written', () => {
   assert.match(stripTags(renderMarkdown('Unsupported $\\iiint_V f$ stays put.')), /\\iiint/);
 });
 
-test('maths inside code is source, and stays source', () => {
+test('maths inside code is source, and stays source', { skip: dom.skip }, () => {
   assert.match(renderMarkdown('In code: `$\\alpha$` stays raw.'), /<code>\$\\alpha\$<\/code>/);
 });
 
-test('a footnote renders as a marker plus a list, not as its own plumbing', () => {
+test('a footnote renders as a marker plus a list, not as its own plumbing', { skip: dom.skip }, () => {
   const html = renderMarkdown('Claim.[^1]\n\n[^1]: The source, [linked](https://example.com).');
   assert.match(html, /<sup class="md-fn-ref"[^>]*>1<\/sup>/);
   assert.match(html, /<div class="md-footnotes"><ol><li>/);
@@ -860,7 +873,7 @@ test('a footnote marker with no definition stays prose', () => {
   assert.match(stripTags(renderMarkdown('A marker with no note [^9] here.')), /\[\^9\]/);
 });
 
-test('H~2~O is a subscript, not a retraction', () => {
+test('H~2~O is a subscript, not a retraction', { skip: dom.skip }, () => {
   const html = renderMarkdown('H~2~O and x^2^ and ~~struck~~');
   assert.match(html, /H<sub>2<\/sub>O/);
   assert.match(html, /x<sup>2<\/sup>/);

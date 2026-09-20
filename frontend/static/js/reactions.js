@@ -20,8 +20,8 @@
 // and 403s the image of anything else. The `safe` re-check here is the same
 // belt-and-suspenders layer the message renderer uses for media.
 
-import { api } from './api.js?v=22';
-import { el } from './util.js?v=13';
+import { api } from './api.js?v=26';
+import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=18';
 import { t } from './i18n.js?v=3';
 import { nimEnabled } from './nim.js?v=5';
 
@@ -469,7 +469,7 @@ function renderManager() {
     class: 'rx-input', type: 'text', placeholder: t('reactions.generate_placeholder'),
     autocomplete: 'off',
   });
-  const genBtn = el('button', { class: 'btn-primary', text: t('reactions.generate') });
+  const genBtn = el('button', { class: 'btn-primary' }, iconLabel(RAIL_ICONS.sparkle, t('reactions.generate')));
   genBtn.disabled = !R.canGenerate;
   if (!R.canGenerate) genBtn.title = t('reactions.generate_unavailable');
   const runGen = async () => {
@@ -529,7 +529,7 @@ function renderManager() {
                  text: t(pool.available ? 'reactions.pool_reachable' : 'reactions.pool_unreachable') }),
   ]);
   if (lowMoods.length) {
-    stat.append(el('span', { class: 'rx-pool-warn', text: t('reactions.pool_low', { moods: lowMoods.join(', ') }) }));
+    stat.append(el('span', { class: 'rx-pool-warn' }, iconLabel(RAIL_ICONS.alert, t('reactions.pool_low', { moods: lowMoods.join(', ') }))));
   }
   if (pool.last_error) stat.append(el('span', { class: 'rx-pool-warn', text: pool.last_error }));
   poolSec.append(stat);
@@ -704,7 +704,7 @@ function managerRow(r) {
   // App-wide test pop, fired as the enabled reaction bot (agents-only API).
   test.addEventListener('click', () => fireReaction(r.id, { thread_id: null, trace: false }));
 
-  const del = el('button', { class: 'icon-btn ghost danger-text rx-row-del', text: '🗑' });
+  const del = el('button', { class: 'icon-btn ghost danger-text rx-row-del' }, [railIcon(RAIL_ICONS.trash)]);
   del.setAttribute('aria-label', t('reactions.delete_aria', { name: r.name }));
   del.addEventListener('click', async () => {
     if (!await ctx.confirm(t('reactions.delete_confirm', { name: r.name }))) return;
@@ -774,7 +774,7 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
     class: 'reaction-trace-text',
     // msg.content is the server-rendered trace line and wins when present; the
     // key is the fallback for a row that never carried one.
-    text: msg.content || t('reactions.trace', { name: meta.actor || t('common.someone') }),
+    text: msg.content || glyphless(t('reactions.trace', { name: meta.actor || t('common.someone') })),
   }));
   row.append(chip);
 

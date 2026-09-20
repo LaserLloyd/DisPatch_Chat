@@ -131,6 +131,58 @@ FORBIDDEN_IF_COMMITTED = [
      "a reaction image from a real install"),
 ]
 
+# --- Screenshots: allowlisted one by one, by a human ------------------------
+#
+# A screenshot is the one artefact in this repo that NOTHING above can inspect.
+# SKIP_SUFFIXES stops the content scan at `.png`, so a capture of a running
+# instance — bot names, avatars, message previews, mailbox addresses rendered
+# as pixels — passes every rule in this file. That is not hypothetical: two
+# committed `staging-emails-*.png` were found carrying three real mailbox
+# addresses, and an e2e run wrote twenty more captures of a populated instance
+# straight into docs/screenshots/, where one `git add -A` would have published
+# them.
+#
+# There is no regex for "this picture shows something private", so the control
+# is procedural instead of textual: every image under docs/screenshots/ must be
+# named in docs/screenshots/ALLOWED.txt. Adding one is then a deliberate act by
+# somebody who opened the file and looked at it, which is the only check that
+# actually works on an image.
+SCREENSHOT_DIR = "docs/screenshots/"
+SCREENSHOT_ALLOWLIST = "docs/screenshots/ALLOWED.txt"
+SCREENSHOT_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"}
+
+
+def _screenshot_allowlist(root: Path) -> set[str]:
+    """Basenames a human has signed off on. Missing file = nothing allowed."""
+    try:
+        text = (root / SCREENSHOT_ALLOWLIST).read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    out = set()
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.add(line)
+    return out
+
+
+def _unlisted_screenshot(name: str, allowed: set[str]) -> str | None:
+    """Why this path is a problem, or None if it is fine."""
+    if not name.startswith(SCREENSHOT_DIR):
+        return None
+    base = name[len(SCREENSHOT_DIR):]
+    if "/" in base:
+        return ("a screenshot in a subdirectory — keep captures flat in "
+                "docs/screenshots/ so the allowlist can name them")
+    if Path(base).suffix.lower() not in SCREENSHOT_SUFFIXES:
+        return None
+    if base in allowed:
+        return None
+    return (f"a screenshot not listed in {SCREENSHOT_ALLOWLIST} — no scan can "
+            f"read a picture, so add '{base}' to that file only after opening "
+            f"it and confirming it shows no real names, addresses, avatars or "
+            f"message text")
+
 # Content patterns. Each is (regex, human explanation).
 CONTENT_RULES: list[tuple[re.Pattern, str]] = [
     # --- Credentials -------------------------------------------------------
@@ -330,7 +382,10 @@ def staged_files(repo_root: Path) -> list[str]:
     from. Joining them onto an arbitrary --path was how `--staged --path
     backend` ended up scanning `backend/backend/app/…`, i.e. nothing.
     """
-    r = _git(repo_root, "diff", "--cached", "--name-only", "--diff-filter=ACM")
+    # ACMRT, not ACM. `git mv a b` plus an edit stages as R<score>, and a
+    # rename is exactly when a file's contents move somewhere the author is
+    # not re-reading. T (typechange) is the symlink-to-regular-file case.
+    r = _git(repo_root, "diff", "--cached", "--name-only", "--diff-filter=ACMRT")
     return [p for p in r.stdout.split("\n") if p.strip()]
 
 
@@ -525,7 +580,29 @@ def scan_archive(blob: bytes | None, rel: str, rules) -> list[str]:
     return problems
 
 
-def scan_text(text: str, label: str) -> list[str]:
+def _git_strips_comments(root: Path | None) -> bool:
+    """Would git itself have removed `#` lines from this message?
+
+    Only under `cleanup=strip`, which is the default for the EDITOR path. With
+    `-m` or `-F` the default is `whitespace`, and a `#` line is stored verbatim
+    — so skipping them unconditionally left a hole exactly one character wide
+    in the rule that commit messages are published as loudly as code. A path
+    or a hostname pasted into a `#` line went straight through.
+    """
+    if root is None:
+        return False
+    r = _git(root, "config", "--get", "commit.cleanup")
+    # Unset (exit 1) means git's own default, which is `default` — and
+    # `default` behaves as `strip` when an editor was used. The commit-msg hook
+    # only ever sees the editor path with that setting, so treating an unset
+    # value as stripping is correct there; -m/-F reaches us through
+    # --commit-range instead, which never strips.
+    if r.returncode != 0:
+        return True
+    return r.stdout.strip() in ("strip", "default")
+
+
+def scan_text(text: str, label: str, *, strip_comments: bool = False) -> list[str]:
     """Run the CONTENT rules over free text (a commit message, not a file).
 
     Path rules make no sense here; everything else does, and sharing the list
@@ -535,9 +612,10 @@ def scan_text(text: str, label: str) -> list[str]:
     problems: list[str] = []
     rules = CONTENT_RULES + load_local_rules()
     for lineno, line in enumerate(text.splitlines(), 1):
-        # git strips its own comment lines before the message is stored, so
-        # scanning them would reject commits over the template's own text.
-        if line.startswith("#"):
+        # Skip git's own comment lines ONLY when git would have removed them.
+        # See _git_strips_comments: with `-m`/`-F` they are stored verbatim and
+        # are as public as any other line.
+        if strip_comments and line.startswith("#"):
             continue
         if OK_MARKER.search(line):
             continue
@@ -605,6 +683,11 @@ def scan(root: Path, staged: bool = False, rev: str | None = None) -> list[str]:
     if not staged and not rev and repo_root is not None:
         carried = tracked_files(repo_root)
 
+    # Read from the working tree even when scanning the index or a commit: the
+    # allowlist is a maintainer's standing decision about which pictures have
+    # been looked at, not part of the content under review.
+    screenshot_allowed = _screenshot_allowlist(repo_root or root)
+
     if rev:
         assert repo_root is not None
         # Everything in a commit is, by definition, published by the push.
@@ -651,6 +734,15 @@ def scan(root: Path, staged: bool = False, rev: str | None = None) -> list[str]:
                     problems.append(
                         f"{rel}: {where}, and must not be — {why}")
                     break
+            # Screenshots: same "only when git is carrying it" rule. A capture
+            # sitting in a working tree is somebody's scratch file; one that
+            # git has hold of is on its way to a public repo.
+            why = _unlisted_screenshot(rel, screenshot_allowed)
+            if why:
+                where = ("staged for commit" if staged
+                         else f"committed in {rev}" if rev
+                         else "tracked by git")
+                problems.append(f"{rel}: {where}, and must not be — {why}")
 
         if Path(rel).suffix.lower() in ARCHIVE_SUFFIXES:
             if rev:
@@ -891,14 +983,20 @@ def selftest() -> int:
                 failures.append(f"commit-message scan false-positived on {name!r}")
         if scan_text("feat(scrub): add the pre-push hook\n\nNo secrets here.\n", "msg"):
             failures.append("a plain conventional commit message was rejected")
-        # git strips its own comment lines, so scanning them would reject a
-        # commit over the text of the template git itself wrote.
+        # Two halves of one rule. Under `cleanup=strip` (the editor path) git
+        # removes its own comment block before storing, so scanning it would
+        # reject a commit over git's own template text. Under `-m`/`-F` the
+        # default is `whitespace` and those lines are stored VERBATIM — as
+        # public as any other line, and previously skipped unconditionally.
         git_comment_block = ("feat: x\n"
                              "# On branch main\n"
                              "# Author: someone@corp.example.net\n")  # scrub-ok: fixture
-        if scan_text(git_comment_block, "msg"):
-            failures.append("the git comment block was scanned (it is stripped "
-                            "before the message is stored)")
+        if scan_text(git_comment_block, "msg", strip_comments=True):
+            failures.append("the git comment block was scanned even though git "
+                            "would have stripped it")
+        if not scan_text(git_comment_block, "msg"):
+            failures.append("a `#` line was skipped although git stores it "
+                            "verbatim for -m/-F commits")
         if scan_commit_range(root, "HEAD~0..HEAD") != []:
             failures.append("an empty commit range should be clean, not an error")
 
@@ -981,7 +1079,10 @@ def main() -> int:
                 text = Path(args.message).read_text(encoding="utf-8",
                                                     errors="replace")
                 label = args.message
-            problems += scan_text(text, label)
+            problems += scan_text(
+                text, label,
+                strip_comments=_git_strips_comments(git_root(root)),
+            )
             scanned_desc.append("commit message")
         if args.commit_range:
             repo_root = git_root(root)

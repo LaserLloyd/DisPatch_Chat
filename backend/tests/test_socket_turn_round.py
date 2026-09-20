@@ -646,3 +646,249 @@ def test_health_reports_the_things_that_only_fail_silently(app_client,
     assert stats["dropped_local"] == 4
     assert stats["tick_closes"] == 2
     assert stats["transcript_backstop"] in ("available", "unavailable", "unprobed")
+
+
+# --------------------------------------------------------------------------- #
+# Bot -> OpenClaw agent override (2026-09-16): jobboard runs on `scout`.
+#
+# A bot's DisPatch identity (avatar, name, thread history) and the OpenClaw
+# seat answering it are two different things once `Bot.agent` is set. Every
+# call that names an OpenClaw session/transcript must use the resolved
+# agent id, not the DisPatch bot id — and the reverse mapping the gateway
+# router uses to route a reply back to its thread must resolve the SAME
+# way, or an overridden bot's replies silently vanish (see the comment at
+# `_gateway_resolve_thread` in main.py).
+# --------------------------------------------------------------------------- #
+
+
+def test_bot_agent_id_defaults_to_the_bot_id():
+    """No override -> the historical, still-normal case."""
+    bot = config.Bot(id="jobboard", name="Jobs")
+    assert bot.agent_id == "jobboard"
+
+
+def test_bot_agent_id_honours_an_override():
+    bot = config.Bot(id="jobboard", name="Jobs", agent="scout")
+    assert bot.agent_id == "scout"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_turn_dispatches_to_the_overridden_agent(
+    wired, monkeypatch,
+):
+    """A bot configured with `agent: scout` must send its turn's
+    `--agent`/`agentId` as `scout`, not the DisPatch bot id `jobboard` —
+    this is the argv-level contract `openclaw.send_to_agent` builds
+    `--agent <bot_id>` from, so whatever we pass IS the flag it emits.
+    """
+    db, _frames = wired
+    await db.connect()
+    try:
+        config._write_bots([config._bot_entry(
+            config.Bot(id="jobboard", name="Jobs", agent="scout"))])
+        thread = await db.create_thread(bot_id="jobboard")
+
+        calls = []
+
+        async def _fake_send_to_agent(*, bot_id, session_key, message, timeout=None):
+            calls.append({"bot_id": bot_id, "session_key": session_key})
+            from app import openclaw as oc
+            return oc.AgentReply(payloads=[oc.AgentPayload(text="ok")],
+                                 metadata={})
+
+        monkeypatch.setattr(main.openclaw, "send_to_agent", _fake_send_to_agent)
+        monkeypatch.setattr(main, "SETTINGS", replace(main.SETTINGS,
+                                                       turn_transport="0"))
+        monkeypatch.setattr(main, "_gateway_client", None, raising=False)
+        await main.run_agent_turn(thread.id, "jobboard", "hi")
+    finally:
+        await db.close()
+
+    assert calls, "the turn was never dispatched"
+    assert calls[0]["bot_id"] == "scout", (
+        "an overridden bot must dispatch as its OpenClaw agent id, not its "
+        "DisPatch bot id — this is what becomes `--agent scout` on argv")
+    assert calls[0]["session_key"] == "agent:scout:" + thread.id
+
+
+def test_gateway_resolve_thread_honours_the_agent_override(tmp_path,
+                                                            monkeypatch):
+    """The reverse mapping: a gateway session `agent:scout:<thread>` must
+    resolve back to the `jobboard` thread when jobboard's config carries
+    `agent: scout` — otherwise every one of Scout's replies in that thread
+    is silently dropped (thread.bot_id "jobboard" != session bot "scout").
+    """
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "AVATAR_DIR", tmp_path / "avatars")
+    config._invalidate_bots_cache()
+    main._mirror_state_cache.update({"path": None, "mtime": None, "data": None})
+    config._write_bots([config._bot_entry(
+        config.Bot(id="jobboard", name="Jobs", agent="scout"))])
+
+    db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", db)
+
+    async def _run():
+        await db.connect()
+        try:
+            thread = await db.create_thread(bot_id="jobboard")
+            resolved = await main._gateway_resolve_thread(
+                f"agent:scout:{thread.id}")
+            assert resolved == (thread.id, "jobboard")
+            # The un-overridden bot id is no longer what the session speaks
+            # as, so it must NOT also resolve (that would let an unrelated
+            # session named literally "jobboard" — which nothing sends
+            # today, but the router must not assume that forever — collide
+            # with this thread).
+            mismatched = await main._gateway_resolve_thread(
+                f"agent:jobboard:{thread.id}")
+            assert mismatched is None
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
+
+
+def test_gateway_resolve_thread_still_works_with_no_override(tmp_path,
+                                                              monkeypatch):
+    """Every bot without `agent:` set — i.e. everything on the box except
+    jobboard — must resolve exactly as before."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "AVATAR_DIR", tmp_path / "avatars")
+    config._invalidate_bots_cache()
+    main._mirror_state_cache.update({"path": None, "mtime": None, "data": None})
+
+    db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", db)
+
+    async def _run():
+        await db.connect()
+        try:
+            thread = await db.create_thread(bot_id="main")
+            resolved = await main._gateway_resolve_thread(
+                f"agent:main:{thread.id}")
+            assert resolved == (thread.id, "main")
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
+
+
+# --------------------------------------------------------------------------- #
+# The reader loop must not wait for the broadcast
+# --------------------------------------------------------------------------- #
+
+def test_a_slow_client_does_not_hold_up_the_sender(app_client, monkeypatch):
+    """_handle_send runs ON the socket's receive loop.
+
+    Anything it awaits is time the sender's NEXT frame cannot be read, so a
+    single half-dead device — one phone that walked out of range, which
+    manager.broadcast waits up to 5s per client for — used to add that latency
+    to the person typing. The ack already says the message is durable; the
+    publish belongs behind it, not in front of the loop.
+
+    Measured rather than asserted structurally: a deliberately slow broadcast
+    must not delay the ack or the next round-trip.
+    """
+    tid = app_client.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    app_client.agent_turns.clear()
+
+    slow = 0.6
+    real = main.manager.broadcast
+
+    async def _slow_broadcast(frame):
+        await asyncio.sleep(slow)
+        return await real(frame)
+
+    monkeypatch.setattr(main.manager, "broadcast", _slow_broadcast)
+
+    with app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()                      # hello
+        started = time.monotonic()
+        ws.send_json({"type": "send", "thread_id": tid, "text": "hi",
+                      "client_msg_id": "cm-slow"})
+        # Round-trip something the reader must handle to answer. If the loop
+        # were still inside the broadcast, this could not come back yet.
+        ws.send_json({"type": "ping"})
+        while ws.receive_json().get("type") != "pong":
+            pass
+        elapsed = time.monotonic() - started
+
+    assert elapsed < slow, (
+        f"the reader loop was blocked for {elapsed:.2f}s by a slow broadcast "
+        f"(one slow client stalls every sender)")
+
+
+def test_the_message_is_published_before_the_agent_turn_runs(app_client, monkeypatch):
+    """Ordering is load-bearing and survives moving the publish off the loop.
+
+    The publish and the turn share ONE task rather than two precisely so the
+    reply frame can never reach a client before the message it replies to.
+    """
+    tid = app_client.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    app_client.agent_turns.clear()
+    order: list[str] = []
+
+    real = main.manager.broadcast
+
+    async def _note(frame):
+        if frame.get("type") == "message":
+            order.append("broadcast")
+        return await real(frame)
+
+    async def _turn(thread_id, bot_id, text):
+        order.append("turn")
+        app_client.agent_turns.append((thread_id, bot_id, text))
+
+    monkeypatch.setattr(main.manager, "broadcast", _note)
+    monkeypatch.setattr(main, "run_agent_turn", _turn)
+
+    with app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "send", "thread_id": tid, "text": "hi",
+                      "client_msg_id": "cm-order"})
+        for _ in range(20):
+            if "turn" in order:
+                break
+            ws.send_json({"type": "ping"})
+            while ws.receive_json().get("type") != "pong":
+                pass
+
+    assert order[:2] == ["broadcast", "turn"], (
+        f"the user's message must be published before the turn that answers it; got {order}")
+
+
+def test_a_failed_publish_does_not_swallow_the_agent_turn(app_client, monkeypatch):
+    """The turn is the durable work; the broadcast is a notification.
+
+    `_ack_mark(cmid, scheduled=True)` runs as soon as the publish task is
+    CREATED, so from that moment the reconnect-resend recovery believes the
+    turn was dispatched. If a broadcast raised inside the task, run_agent_turn
+    was never reached and the exception only reached the background-task
+    logger — a reply lost with an ack already recorded, and a resend that
+    re-acks without running anything.
+    """
+    tid = app_client.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    app_client.agent_turns.clear()
+
+    async def _boom(_frame):
+        raise RuntimeError("broadcast exploded")
+
+    monkeypatch.setattr(main.manager, "broadcast", _boom)
+
+    with app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "send", "thread_id": tid, "text": "hi",
+                      "client_msg_id": "cm-boom"})
+        for _ in range(20):
+            if app_client.agent_turns:
+                break
+            ws.send_json({"type": "ping"})
+            while ws.receive_json().get("type") != "pong":
+                pass
+
+    assert app_client.agent_turns == [(tid, "main", "hi")], (
+        "a failed publish must not cost the reply — the message is already "
+        "durable and the turn is the part that cannot be re-derived")

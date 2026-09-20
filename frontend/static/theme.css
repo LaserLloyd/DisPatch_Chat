@@ -154,6 +154,19 @@
   --md-mark-bg:    rgba(127,224,242,.22);
 
   --success: #34d399; --success-text: #5fd3b0;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #7fe0f2; --dot-idle: #33424a;
   --error:   #f87171; --error-text:   #ff8a80;
   --warning: #fbbf24; --warning-text: #ffca28;
 
@@ -210,6 +223,19 @@
   --md-mark-bg:    rgba(227,191,90,.30);
 
   --success: #34d399; --success-text: #34d399;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #ffca28; --dot-idle: #474133;
   --error:   #f87171; --error-text:   #f87171;
   --warning: #fbbf24; --warning-text: #fbbf24;
 
@@ -264,6 +290,19 @@
   --md-mark-bg:    rgba(224,165,46,.28);
 
   --success: #34d399; --success-text: #5fcf98;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #ff9d4d; --dot-idle: #3c4536;
   --error:   #f87171; --error-text:   #ff8f7f;
   --warning: #fbbf24; --warning-text: #e0a52e;
 
@@ -316,6 +355,19 @@
   --md-mark-bg:    #eddb8a;
 
   --success: #34d399; --success-text: #13643e;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #8f1d16; --dot-idle: #c7bda0;
   --error:   #f87171; --error-text:   #aa211c;
   --warning: #fbbf24; --warning-text: #7a4f00;
 
@@ -365,6 +417,19 @@
   --md-mark-bg:    #fde68a;
 
   --success: #34d399; --success-text: #0f7a48;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #1d47b8; --dot-idle: #c3c8d1;
   --error:   #f87171; --error-text:   #b3241c;
   --warning: #fbbf24; --warning-text: #8a5500;
 
@@ -415,6 +480,19 @@
   --md-mark-bg:    rgba(251,191,36,.30);
 
   --success: #34d399; --success-text: #34d399;
+  /* Notification state. --notify is the ONLY thing in the palette whose job is
+     to be noticed; --dot-idle is the only thing whose job is not to be. The
+     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
+     white button text and is therefore deliberately deep: in four of the six
+     palettes the "you have a message" dot came out DARKER and quieter than the
+     "nothing here" dot it had to be told apart from, and no palette reached
+     3:1 between the two states. Solved as a pair, per palette, so the contract
+     below holds in light and dark alike:
+       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+       --notify vs --dot-idle    >= 3:1     (the two states never blur)
+     frontend/tests/theme-palettes.test.js asserts all three. */
+  --notify: #a78bfa; --dot-idle: #38385c;
   --error:   #f87171; --error-text:   #f87171;
   --warning: #fbbf24; --warning-text: #fbbf24;
 
@@ -428,10 +506,19 @@
 /* ----------------------------------------------------------------------------
    4. Forced-skin surfaces
    ----------------------------------------------------------------------------
-   The lock face is painted from the Purple palette regardless of the active
-   theme, because it is a dark full-screen surface with near-black chrome: on
-   Daylight or Paper a flat light-palette --text-primary would be dark ink on a
-   dark backdrop. It carries `data-palette="purple"` in index.html, so the block
-   above does the work; nothing is overridden here. (Before the palette switch
-   this was `color-scheme: dark` forcing the dark side of light-dark() — the
-   mechanism changed, the result did not.) */
+   The lock face is NO LONGER one of these (2026-09-18). It used to carry
+   `data-palette="purple"` in index.html, painting the PIN screen in the classic
+   dark skin whatever theme the device was set to — which is exactly what it
+   looked like from the outside: the one page that ignored your theme. The pin
+   existed because .lock-screen's backdrop was a hard-coded near-black, so a
+   light palette's dark --text-primary would have been ink on a dark sheet.
+   That backdrop is derived from --bg-primary now, so the face follows the
+   palette and its tokens always match the surface they sit on. Checked before
+   removing it: text on its own bg-primary is 10.6:1 at worst (Paper) and the
+   keypad's #eef4fa on --accent is 5.1:1 at worst (Purple) — every palette
+   clears AA, because every --accent is a dark colour in this set.
+
+   Code blocks remain deliberately fixed-dark in every palette (see
+   --code-block-text in section 1 and .bubble pre / .code-block-* in app.css):
+   the vendored highlight.js theme is github-dark and re-skinning it per palette
+   is a different job from theming the chrome. Nothing else is force-skinned. */

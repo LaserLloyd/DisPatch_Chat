@@ -37,7 +37,8 @@
     "chat": "محادثة",
     "file": "ملف",
     "image": "صورة",
-    "video": "فيديو"
+    "video": "فيديو",
+    "dismiss": "تجاهل"
   },
   "nav": {
     "theme": "المظهر",
@@ -98,17 +99,17 @@
     "menu": "إجراءات المحادثة",
     "popout": "فتح في نافذة مستقلة",
     "popout_gone": "هذه المحادثة لم تعد متاحة — يتم عرض الأحدث.",
-    "pin": "📌 تثبيت",
-    "unpin": "📌 إلغاء التثبيت",
-    "rename": "✏️ إعادة تسمية",
+    "pin": "تثبيت",
+    "unpin": "إلغاء التثبيت",
+    "rename": "إعادة تسمية",
     "rename_title": "إعادة تسمية المحادثة",
     "sync": "⤓ استرداد الرسائل المفقودة",
-    "transcript": "📜 عرض سجل الجلسة",
-    "archive": "🗄️ أرشفة",
+    "transcript": "عرض سجل الجلسة",
+    "archive": "أرشفة",
     "archive_confirm": "أرشفة هذه المحادثة؟ ستُخفى من قائمة محادثاتك.",
     "archived": "تمت أرشفة المحادثة",
     "delete_confirm": "حذف هذه المحادثة نهائيًا؟",
-    "delete_thread": "🗑️ حذف"
+    "delete_thread": "حذف"
   },
   "welcome": {
     "with_bot": "محادثة مع {name}",
@@ -136,7 +137,9 @@
       "many": "{count} حرفًا",
       "other": "{count} حرف"
     },
-    "not_delivered": "⚠ لم تُسلَّم الرسالة"
+    "not_delivered": "لم تُسلَّم الرسالة",
+    "remove_attachment": "إزالة {name}",
+    "attachment": "مرفق"
   },
   "msg": {
     "copy": "نسخ",
@@ -193,7 +196,7 @@
     "tab_security": "الأمان",
     "theme_hint": "اختر مظهر هذا الجهاز. يُطبَّق فورًا ويُحفظ هنا — لا حاجة إلى أي حفظ.",
     "device_hint": "تنطبق هذه الإعدادات على هذا الجهاز فقط وتُطبَّق فورًا — لا شيء لحفظه هنا.",
-    "hint": "انقر على صورة البوت (أو <strong>تغيير الصورة</strong>) لتعيين صورته الرمزية. رتّبها بزرَّي ▲/▼ (أو اسحب الصفوف على سطح المكتب)؛ واستخدم المفتاح لإظهار بوت في الشريط الجانبي أو إخفائه منه. <strong>🛡️ آمن</strong> — هذه الشخصية (وصورتها) تظهر في الوضع الآمن دون الحاجة إلى رمز PIN. تُطبَّق تغييرات الترتيب والظهور والوضع الآمن عند الضغط على <strong>حفظ</strong>.",
+    "hint": "انقر على صورة البوت (أو <strong>تغيير الصورة</strong>) لتعيين صورته الرمزية. رتّبها بزرَّي ▲/▼ (أو اسحب الصفوف على سطح المكتب)؛ واستخدم المفتاح لإظهار بوت في الشريط الجانبي أو إخفائه منه. <strong>آمن</strong> — هذه الشخصية (وصورتها) تظهر في الوضع الآمن دون الحاجة إلى رمز PIN. تُطبَّق تغييرات الترتيب والظهور والوضع الآمن عند الضغط على <strong>حفظ</strong>.",
     "language": "اللغة",
     "language_hint": "تُطبَّق التغييرات فورًا.",
     "minimal_avatars": "صور رمزية مبسّطة",
@@ -223,8 +226,8 @@
     "move_up_aria": "تحريك {name} لأعلى",
     "move_down_aria": "تحريك {name} لأسفل",
     "show_in_sidebar": "إظهار البوت في الشريط الجانبي",
-    "recovery": "🛟 الاسترداد والتصدير",
-    "lock_now": "🔒 قفل الآن",
+    "recovery": "الاسترداد والتصدير",
+    "lock_now": "قفل الآن",
     "discard_confirm": "تجاهل التغييرات؟",
     "menu_badge": "⌥",
     "menu_title": "نقل هذا البوت إلى قائمة ⌥ الأدوات (هذا الجهاز فقط)"
@@ -236,21 +239,21 @@
     "reacts": "يرسل صور تفاعل"
   },
   "files": {
-    "title": "📁 خادم الملفات",
+    "title": "خادم الملفات",
     "aria": "خادم الملفات",
     "hint": "أفلِت الملفات هنا لمشاركتها مع مساعديك. السحب والإفلات يعمل أيضًا.",
-    "upload": "⬆ رفع",
+    "upload": "رفع",
     "empty": "لا ملفات بعد — ارفع شيئًا أو أفلته هنا.",
     "view": "عرض",
     "download": "تنزيل",
     "delete": "حذف هذا الملف",
     "wipe_button": {
       "zero": "🗑 حذف هذا وما قبله",
-      "one": "🗑 حذف هذا وما قبله (ملف واحد)",
+      "one": "حذف هذا وما قبله (ملف واحد)",
       "two": "🗑 حذف هذا وما قبله (ملفان)",
       "few": "🗑 حذف هذا وما قبله ({count} ملفات)",
       "many": "🗑 حذف هذا وما قبله ({count} ملفًا)",
-      "other": "🗑 حذف هذا وما قبله ({count} ملف)"
+      "other": "حذف هذا وما قبله ({count} ملف)"
     },
     "wipe_title": "حذف كل الملفات من هذا اليوم ومن كل يوم قبله",
     "wipe_confirm": {
@@ -287,7 +290,7 @@
     "kind_files": "الملفات"
   },
   "drop": {
-    "title": "⬆ إرسال ملف",
+    "title": "إرسال ملف",
     "hint": "تذهب الملفات مباشرة إلى مساعديك، وتظهر ملاحظة في المحادثة. الإرسال باتجاه واحد — لا يمكن فتح الملف مرة أخرى من هذا الجهاز.",
     "empty": "اختر ملفًا لإرساله.",
     "choose": "اختيار الملفات",
@@ -396,7 +399,10 @@
     "unreachable_hint": "اللوحة موجودة على شبكة المنصة نفسها، لذا لا يمكن فتحها إلا من جهاز على تلك الشبكة. استخدم رابط ↗ من جهاز متصل بها.",
     "state_blocked": "يرفض التضمين",
     "blocked_text": "لوحة StudioForge ترفض التضمين.",
-    "blocked_hint": "ترسل اللوحة الترويسة X-Frame-Options: DENY، فلا يعرضها أي متصفّح داخل صفحة أخرى. استخدم رابط ↗ لفتحها في تبويب مستقل حيث تعمل بشكل طبيعي."
+    "blocked_hint": "ترسل اللوحة الترويسة X-Frame-Options: DENY، فلا يعرضها أي متصفّح داخل صفحة أخرى. استخدم رابط ↗ لفتحها في تبويب مستقل حيث تعمل بشكل طبيعي.",
+    "state_insecure": "محظور: عنوان غير آمن",
+    "insecure_text": "تُقدَّم هذه الصفحة عبر HTTPS بينما عنوان اللوحة هو HTTP عادي.",
+    "insecure_hint": "لا يمكن لصفحة آمنة أن تضمّن صفحة غير آمنة، لذا لن يرسم أي متصفح اللوحة هنا — وهذا ما يحدث عند الوصول إلى DisPatch عبر Tailscale. رابط ↗ ما زال يعمل: فتحه في تبويب خاص به تنقّل عادي وليس تضمينًا. ولإصلاح ذلك جذريًا، قدِّم اللوحة عبر HTTPS ووجِّه DISPATCH_STUDIOFORGE_URL إلى ذلك العنوان."
   },
   "llm": {
     "hint": "وجّه DisPatch إلى مزوّد نماذج، فيصبح بوتًا في شريطك الجانبي — دون الحاجة إلى منظومة وكلاء.",
@@ -490,7 +496,7 @@
   },
   "search": {
     "aria": "البحث في الرسائل",
-    "title": "🔍 البحث في الرسائل",
+    "title": "البحث في الرسائل",
     "placeholder": "ابحث في كل المحادثات…",
     "prompt": "اكتب للبحث في كل المحادثات",
     "no_results": "لا نتائج للبحث عن “{query}”",
@@ -522,14 +528,14 @@
   },
   "recovery": {
     "aria": "الاسترداد والتصدير",
-    "title": "🛟 الاسترداد والتصدير",
+    "title": "الاسترداد والتصدير",
     "export_hint": "صدّر كل رسالة إلى ملف مفتوح يمكن قراءته لاحقًا — يُنشأ محليًا.",
-    "export_json": "⬇ JSON",
-    "export_md": "⬇ Markdown",
-    "export_html": "⬇ HTML",
+    "export_json": "JSON",
+    "export_md": "Markdown",
+    "export_html": "HTML",
     "restore_hint": "استرجع أي رسائل لم تُحفظ في DisPatch من النسخة الاحتياطية (سجلات جلسات OpenClaw). يمكن تشغيله مرارًا بأمان — فهو يضيف الناقص فقط.",
     "restore_all": "⤓ استرداد كل الرسائل المفقودة",
-    "browse_sessions": "📜 تصفّح جلسات الوكيل",
+    "browse_sessions": "تصفّح جلسات الوكيل",
     "scanning": "جارٍ فحص سجلات جلسات OpenClaw…",
     "recovered_summary": {
       "zero": "لم تُسترد أي رسالة.",
@@ -552,7 +558,7 @@
   },
   "transcript": {
     "aria": "سجل الجلسة",
-    "title": "📜 سجل الجلسة",
+    "title": "سجل الجلسة",
     "loading": "جارٍ تحميل سجل الجلسة…",
     "none": "لم يُعثر على سجل لهذه الجلسة",
     "summary": "{items} عنصر · {missing} غير موجود في DisPatch",
@@ -580,7 +586,7 @@
     "saved_title": "محفوظة في DisPatch"
   },
   "sessions": {
-    "title": "📜 {name} — جلسات الوكيل",
+    "title": "{name} — جلسات الوكيل",
     "summary": "يشمل جلسات cron والوكلاء الفرعيين ولوحة التحكم التي لم يُنشئها DisPatch",
     "loading": "جارٍ تحميل الجلسات…",
     "empty": "لم يُعثر على جلسات",
@@ -906,7 +912,7 @@
     "answering": "يستجيب",
     "not_answering": "لا يستجيب",
     "note_agent_providers": "اختياري — وهذه البوتات لا تحتاجه: فهي تتصل بمزوّد نموذج لغوي مباشرة.",
-    "note_agent_none": "اختياري — سجل المحادثات والرفع وهذه الصفحة تعمل كلها بدونه. استخدم ربط ذكاء اصطناعي (🔌) لمنح البوت مزوّدًا بدلًا من ذلك.",
+    "note_agent_none": "اختياري — سجل المحادثات والرفع وهذه الصفحة تعمل كلها بدونه. استخدم ربط ذكاء اصطناعي لمنح البوت مزوّدًا بدلًا من ذلك.",
     "card_transport": "النقل المباشر",
     "reply_socket": "مقبس الردود",
     "socket_connected": "متصل",
@@ -925,7 +931,8 @@
   },
   "pins": {
     "pin": "تثبيت في الشريط",
-    "unpin": "إزالة من الشريط"
+    "unpin": "إزالة من الشريط",
+    "theme_hint": "إبقاء زر السمة في الشريط."
   },
   "checklist": {
     "done": "مكتمل",
@@ -1066,7 +1073,136 @@
     },
     "detail": {
       "close": "Close",
-      "not_found": "That job could not be found."
+      "not_found": "That job could not be found.",
+      "posted": "Posted",
+      "first_seen": "First seen",
+      "source": "Source",
+      "offline": "تعذّر الوصول إلى DisPatch — تحقّق من الاتصال.",
+      "locked": "ألغِ القفل لعرض هذه الوظيفة."
+    },
+    "seniority": {
+      "junior": "Junior",
+      "senior": "Senior",
+      "staff": "Staff",
+      "principal": "Principal"
+    },
+    "note": {
+      "placeholder": "Add a note (optional)…"
+    },
+    "feedback": {
+      "title": "Feedback for Scout",
+      "placeholder": "Tell Scout what to look for or avoid…",
+      "reason_label": "Reason (optional)",
+      "reason_none": "No specific reason",
+      "send": "Send to Scout",
+      "sent": "Sent — Scout will reply in the job thread",
+      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
+      "open_thread": "Open thread",
+      "error": "Could not send feedback: {msg}",
+      "need_comment": "Write a note before sending.",
+      "not_available": "Feedback isn't available yet."
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "No activity yet.",
+      "actor": {
+        "system": "System",
+        "you": "You"
+      },
+      "type": {
+        "comment": "Comment",
+        "vote": "Voted",
+        "vote_undo": "Vote undone",
+        "state_change": "State change",
+        "tag_added": "Tag added",
+        "tag_removed": "Tag removed",
+        "repost": "Reposted",
+        "duplicate_detected": "Duplicate detected",
+        "expired": "Expired",
+        "feedback": "Feedback",
+        "applied": "Applied"
+      }
+    },
+    "find": {
+      "button": "🔍 ابحث عن وظائف",
+      "placeholder": "ما الذي يجب أن يبحث عنه Scout؟ (اختياري)",
+      "send": "اطلب من Scout",
+      "sent": "Scout يبحث الآن. ستظهر الوظائف الجديدة هنا، وسيصل ملخص إلى سلسلة وظائف هذا الشهر.",
+      "not_sent": "تم حفظ الطلب، لكن تعذّر الوصول إلى Scout. حاول لاحقًا."
     }
+  },
+  "mail": {
+    "name": "البريد",
+    "subtitle": "لوحة MailForge",
+    "sidebar_aria": "البريد — لوحة MailForge، عند إلغاء القفل فقط",
+    "session_panel_title": "البريد",
+    "session_panel_heading": "يعمل MailForge هنا.",
+    "session_panel_body": "يضمّن DisPatch لوحة MailForge نفسها دون تعديل. لجلسة كاملة فقط؛ لا تظهر أبدًا في الوضع الآمن.",
+    "open_title": "افتح لوحة MailForge في علامة تبويب جديدة",
+    "frame_title": "لوحة MailForge",
+    "checking": "جارٍ التحقق…",
+    "state_running": "قيد التشغيل",
+    "state_down": "لا يستجيب",
+    "state_not_installed": "غير مثبَّت",
+    "state_unreachable": "لا يمكن الوصول",
+    "state_unknown": "جارٍ التحقق…",
+    "not_installed_text": "لم تُشغَّل لوحة MailForge على هذا الجهاز من قبل.",
+    "not_installed_hint": "ابدأ بـ: systemctl --user start mailforge",
+    "down_text": "لوحة MailForge لا تستجيب.",
+    "down_hint": "تحقّق: systemctl --user status mailforge",
+    "unreachable_text": "تعذّر على DisPatch الوصول إلى لوحة MailForge.",
+    "unreachable_hint": "تحقّق: systemctl --user status mailforge"
+  },
+  "clients": {
+    "name": "العملاء",
+    "subtitle": "مسار العملاء",
+    "sidebar_aria": "العملاء — مسار العملاء، عند إلغاء القفل فقط",
+    "session_panel_title": "مسار العملاء",
+    "session_panel_heading": "يعمل مسار العملاء هنا.",
+    "session_panel_body": "نظرة عامة، العملاء النشطون والمكتملون، ومسار الـ12 خطوة لكل عميل. لجلسة كاملة فقط؛ لا يظهر أبدًا في الوضع الآمن.",
+    "tab_overview": "نظرة عامة",
+    "tab_active": "نشِط",
+    "tab_completed": "مكتمل",
+    "load_error": "تعذّر تحميل هذا العرض.",
+    "last_checked": "آخر فحص",
+    "waiting_on_you": "بانتظارك",
+    "waiting_empty": "لا شيء ينتظر إجراءك الآن.",
+    "holds": "تعليقات أمنية",
+    "holds_empty": "لا يوجد عملاء معلّقون.",
+    "stalled": "متوقف",
+    "stalled_empty": "لا يوجد عملاء متوقفون.",
+    "no_active": "لا يوجد عملاء نشِطون.",
+    "no_completed": "لا يوجد عملاء مكتملون بعد.",
+    "no_matches": "لا يوجد عملاء مطابقون لهذا البحث.",
+    "col_name": "الاسم",
+    "col_branch": "الفرع",
+    "col_state": "الحالة",
+    "col_next": "التالي",
+    "recent_activity": "النشاط الأخير",
+    "no_activity": "لم يحدث شيء بعد.",
+    "jump": "انتقال ›",
+    "search_placeholder": "ابحث بالاسم…",
+    "open_thread": "فتح المحادثة",
+    "security_hold": "تعليق أمني",
+    "hold_generic": "هذا العميل معلَّق.",
+    "hold_note_placeholder": "ما الذي تحققت منه، ولماذا يُعد المتابعة آمنة؟",
+    "clear_hold": "إلغاء التعليق",
+    "hold_clear_failed": "تعذّر إلغاء التعليق. حاول مرة أخرى.",
+    "no_steps": "لا توجد خطوات لهذا العميل بعد.",
+    "needs": "يتطلب",
+    "do": "إجراء",
+    "nothing_to_do": "لا يوجد ما يمكن فعله هنا بعد.",
+    "log": "السجل",
+    "nothing_logged": "لم يُسجَّل شيء بعد.",
+    "if_it_fails": "في حال الفشل",
+    "save": "حفظ",
+    "save_failed": "تعذّر الحفظ.",
+    "action_failed": "تعذّر بدء هذا الإجراء.",
+    "confirm_before": "أكّد هذا قبل التنفيذ:",
+    "are_you_sure": "هل أنت متأكد؟",
+    "approve": "موافقة",
+    "working": "جارٍ التنفيذ…",
+    "timed_out": "انتهت المهلة",
+    "console_output": "مخرجات وحدة التحكم"
   }
 }

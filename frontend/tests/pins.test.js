@@ -74,16 +74,64 @@ test('Safe Mode sees only pins marked safe', () => {
   for (const entry of PINNABLE) {
     if (!entry.safe) assert.equal(locked.includes(entry.id), false);
   }
-  // Unlocked sees everything that is pinned.
-  assert.equal(unlocked.length, PINNABLE.length);
+  // Unlocked sees everything that is pinned AND drawn here. `kind: 'rail'`
+  // entries (🎨) own a button in the markup, so the renderer must skip them.
+  assert.equal(unlocked.length, PINNABLE.filter((e) => e.kind !== 'rail').length);
+  for (const entry of PINNABLE) {
+    if (entry.kind === 'rail') assert.equal(unlocked.includes(entry.id), false);
+  }
+});
+
+// --- default-on pins ------------------------------------------------------
+// The theme button ships pinned. "Default" has to survive a device that
+// already has other pins saved, and an unpin has to STICK — those are the two
+// ways a default-on preference usually goes wrong.
+
+test('a default pin reads as pinned on a fresh device', () => {
+  reset();
+  assert.equal(isPinned('theme'), true);
+});
+
+test('a default pin stays on for a device that already pinned something else', () => {
+  reset();
+  setPinned('nim', true);
+  assert.equal(isPinned('theme'), true);
+});
+
+test('unpinning a default is remembered, and re-pinning clears it', () => {
+  reset();
+  setPinned('theme', false);
+  assert.equal(isPinned('theme'), false);
+  // It is stored as an opt-out, not by absence from the pinned list.
+  assert.deepEqual(JSON.parse(store.get('dispatch-unpinned-defaults')), ['theme']);
+  assert.deepEqual(pinnedIds(), []);
+  setPinned('theme', true);
+  assert.equal(isPinned('theme'), true);
+  assert.deepEqual(JSON.parse(store.get('dispatch-unpinned-defaults')), []);
+});
+
+test('an unpinned default does not leak into the drawn pin list', () => {
+  reset();
+  setPinned('theme', false);
+  assert.equal(visiblePins(false).some((e) => e.id === 'theme'), false);
+});
+
+test('corrupt opt-out storage falls back to the default rather than throwing', () => {
+  reset();
+  store.set('dispatch-unpinned-defaults', '{not json');
+  assert.equal(isPinned('theme'), true);
 });
 
 test('every registry entry declares the fields the rail relies on', () => {
   for (const entry of PINNABLE) {
     assert.equal(typeof entry.id, 'string');
     // The rail draws a line icon, not an emoji: an array of SVG path strings.
-    assert.ok(Array.isArray(entry.icon) && entry.icon.length > 0);
-    for (const d of entry.icon) assert.equal(typeof d, 'string');
+    // A `kind: 'rail'` entry is drawn from the markup instead, so it has no
+    // icon of its own to declare.
+    if (entry.kind !== 'rail') {
+      assert.ok(Array.isArray(entry.icon) && entry.icon.length > 0);
+      for (const d of entry.icon) assert.equal(typeof d, 'string');
+    }
     assert.equal(typeof entry.enabled, 'function');
     assert.equal(typeof entry.toggle, 'function');
     assert.equal(typeof entry.safe, 'boolean');

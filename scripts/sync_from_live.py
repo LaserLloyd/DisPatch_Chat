@@ -42,6 +42,15 @@ ALLOW: list[tuple[str, str, str]] = [
     ("frontend/static",             "frontend/static",             "index.html"),
     ("frontend/static",             "frontend/static",             "app.css"),
     ("frontend/static",             "frontend/static",             "sw.js"),
+    # The mark: one SVG, its raster fallbacks, and the .ico. Brand assets,
+    # not user data — they were outside every list here until 2026-09-18,
+    # which is how a redrawn logo could sit in the repo and never reach a
+    # browser tab.
+    ("frontend/static",             "frontend/static",             "favicon.svg"),
+    ("frontend/static",             "frontend/static",             "favicon.ico"),
+    ("frontend/static",             "frontend/static",             "favicon-32.png"),
+    ("frontend/static",             "frontend/static",             "icon-192.png"),
+    ("frontend/static",             "frontend/static",             "icon-512.png"),
     ("frontend/static",             "frontend/static",             "manifest.webmanifest"),
     ("frontend/static/js",          "frontend/static/js",          "*.js"),
     ("frontend/static/vendor",      "frontend/static/vendor",      "*"),

@@ -14,7 +14,7 @@
 // pair, so there is no second state to toggle to and no per-theme label.
 // Palette names are proper nouns and are deliberately NOT translated.
 import { applyDom, hasDictionary } from './i18n.js?v=3';
-import { el, railIcon } from './util.js?v=13';
+import { el, railIcon } from './util.js?v=18';
 
 const PALETTE_KEY = 'dispatch-palette';
 const DEFAULT_PALETTE = 'glacier';

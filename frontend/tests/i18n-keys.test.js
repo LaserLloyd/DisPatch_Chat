@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { blankNonCode } from './_source-scan.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
@@ -28,12 +29,20 @@ const SOURCE = [readFileSync(join(STATIC, 'index.html'), 'utf8')]
 // The same source with comments removed. i18n.js documents its own API in a
 // JSDoc block — `t('chat.with_bot')`, `data-i18n-attr="title=nav.lock"` — and a
 // scan that reads documentation as code reports keys that do not exist.
-// (The `//` rule deliberately refuses to fire after a `:` so it cannot eat the
-// scheme out of an https:// URL.)
-const CODE = SOURCE
-  .replace(/<!--[\s\S]*?-->/g, '')
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+//
+// Comments go through tests/_source-scan.js rather than a sequence of regexes,
+// with `keepStrings` so `t('some.key')` is still readable. Ordered passes had
+// the same hole here as in callable.test.js: `accept: 'image/*'` in main.js
+// opened a pseudo block comment that ran to the next real `*/`, taking dozens
+// of live t() calls out of this scan — so the "every key in en.json is used"
+// check was reporting clean on keys it could no longer see.
+//
+// HTML comments are stripped first and separately: the scanner is a JS lexer
+// and index.html is part of SOURCE.
+const CODE = blankNonCode(
+  SOURCE.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' ')),
+  { keepStrings: true },
+);
 
 const EN = JSON.parse(readFileSync(join(STATIC, 'locales', 'en.json'), 'utf8'));
 
@@ -65,10 +74,10 @@ const DYNAMIC = [
   { re: /^harness\.toast_(started|stopped|restarted)$/,
     built: "main.js  t('harness.toast_' + …)" },
   // js/main.js  renderStudioForge():  t('studioforge.state_' + sv)
-  { re: /^studioforge\.state_(up|down|unreachable|blocked|checking|unknown)$/,
+  { re: /^studioforge\.state_(up|down|unreachable|blocked|insecure|checking|unknown)$/,
     built: "main.js  t('studioforge.state_' + sv)" },
   // js/main.js  renderStudioForge():  t(`studioforge.${noteKey}_text` / `_hint`)
-  { re: /^studioforge\.(unconfigured|checking|down|unreachable|blocked)_(text|hint)$/,
+  { re: /^studioforge\.(unconfigured|checking|down|unreachable|blocked|insecure)_(text|hint)$/,
     built: 'main.js  t(`studioforge.${noteKey}_text|_hint`)' },
   // js/i18n.js  fileSize():  t(`unit.${u}`)
   { re: /^unit\.(b|kb|mb|gb|tb|pb)$/, built: 'i18n.js  t(`unit.${u}`)' },
@@ -82,6 +91,17 @@ const DYNAMIC = [
     built: 'jobs.js  t(`jobs.state.${...}`)' },
   { re: /^jobs\.remote\.(remote|hybrid|onsite)$/,
     built: 'jobs.js  t(`jobs.remote.${r}`)' },
+  // js/job-thread.js  _meta():  t(`jobs.seniority.${job.seniority}`), gated
+  // on SENIORITY_KNOWN — set matches jobs_score.infer_seniority's buckets
+  // ('unknown' is deliberately excluded from the UI, per the brief).
+  { re: /^jobs\.seniority\.(junior|senior|staff|principal)$/,
+    built: 'job-thread.js  t(`jobs.seniority.${...}`)' },
+  // js/job-thread.js  _eventLine():  t(`jobs.activity.type.${type}`), type
+  // drawn from EVENT_TYPES — matches database.py's job_events.type comment
+  // plus the 'vote_undo'/'feedback'/'applied' types jobs.py derives at
+  // write time.
+  { re: /^jobs\.activity\.type\.(comment|vote|vote_undo|state_change|tag_added|tag_removed|repost|duplicate_detected|expired|feedback|applied)$/,
+    built: 'job-thread.js  t(`jobs.activity.type.${type}`)' },
   // js/markdown.js  blockquote():  t(`md.callout_${kind}`), kind from CALLOUT_RE
   { re: /^msg\.callout_(note|tip|important|warning|caution)$/,
     built: 'markdown.js  t(`msg.callout_${kind}`)' },

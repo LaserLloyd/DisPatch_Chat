@@ -34,7 +34,8 @@
     "chat": "Chat",
     "file": "archivo",
     "image": "imagen",
-    "video": "video"
+    "video": "video",
+    "dismiss": "Descartar"
   },
   "nav": {
     "theme": "Tema",
@@ -95,17 +96,17 @@
     "menu": "Acciones del chat",
     "popout": "Abrir en su propia ventana",
     "popout_gone": "Ese chat ya no está disponible — se muestra el más reciente.",
-    "pin": "📌 Fijar",
-    "unpin": "📌 Dejar de fijar",
-    "rename": "✏️ Renombrar",
+    "pin": "Fijar",
+    "unpin": "Dejar de fijar",
+    "rename": "Renombrar",
     "rename_title": "Renombrar el chat",
     "sync": "⤓ Recuperar mensajes perdidos",
-    "transcript": "📜 Ver la transcripción",
-    "archive": "🗄️ Archivar",
+    "transcript": "Ver la transcripción",
+    "archive": "Archivar",
     "archive_confirm": "¿Archivar este chat? Se ocultará de tu lista de chats.",
     "archived": "Chat archivado",
     "delete_confirm": "¿Eliminar este chat de forma permanente?",
-    "delete_thread": "🗑️ Eliminar"
+    "delete_thread": "Eliminar"
   },
   "welcome": {
     "with_bot": "Chatea con {name}",
@@ -130,7 +131,9 @@
       "many": "{count} caracteres",
       "other": "{count} caracteres"
     },
-    "not_delivered": "⚠ Mensaje no entregado"
+    "not_delivered": "Mensaje no entregado",
+    "remove_attachment": "Quitar {name}",
+    "attachment": "adjunto"
   },
   "msg": {
     "copy": "Copiar",
@@ -187,7 +190,7 @@
     "tab_security": "Seguridad",
     "theme_hint": "Elige el aspecto de este dispositivo. Se aplica al momento y se recuerda aquí — no hay nada que guardar.",
     "device_hint": "Solo se aplican a este dispositivo y tienen efecto de inmediato: aquí no hay nada que guardar.",
-    "hint": "Toca la foto de un bot (o <strong>Cambiar foto</strong>) para poner su avatar. Reordena con los botones ▲/▼ (o arrastra las filas en el escritorio); usa el interruptor para mostrar u ocultar un bot en la barra lateral. <strong>🛡️ Seguro</strong> — este personaje (y su avatar) se ve en el modo seguro, sin PIN. Los cambios de orden, visibilidad y modo seguro se aplican al pulsar <strong>Guardar</strong>.",
+    "hint": "Toca la foto de un bot (o <strong>Cambiar foto</strong>) para poner su avatar. Reordena con los botones ▲/▼ (o arrastra las filas en el escritorio); usa el interruptor para mostrar u ocultar un bot en la barra lateral. <strong>Seguro</strong> — este personaje (y su avatar) se ve en el modo seguro, sin PIN. Los cambios de orden, visibilidad y modo seguro se aplican al pulsar <strong>Guardar</strong>.",
     "language": "Idioma",
     "language_hint": "Los cambios se aplican al instante.",
     "minimal_avatars": "Avatares mínimos",
@@ -217,8 +220,8 @@
     "move_up_aria": "Subir a {name}",
     "move_down_aria": "Bajar a {name}",
     "show_in_sidebar": "Mostrar el bot en la barra lateral",
-    "recovery": "🛟 Recuperación y exportación",
-    "lock_now": "🔒 Bloquear ahora",
+    "recovery": "Recuperación y exportación",
+    "lock_now": "Bloquear ahora",
     "discard_confirm": "¿Descartar los cambios?",
     "menu_badge": "⌥",
     "menu_title": "Mover este bot al menú ⌥ Herramientas (solo este dispositivo)"
@@ -230,18 +233,18 @@
     "reacts": "Envía imágenes de reacción"
   },
   "files": {
-    "title": "📁 Servidor de archivos",
+    "title": "Servidor de archivos",
     "aria": "Servidor de archivos",
     "hint": "Suelta archivos aquí para compartirlos con tus asistentes. También puedes arrastrarlos y soltarlos.",
-    "upload": "⬆ Subir",
+    "upload": "Subir",
     "empty": "Aún no hay archivos — sube algo o suéltalo aquí.",
     "view": "Ver",
     "download": "Descargar",
     "delete": "Eliminar este archivo",
     "wipe_button": {
-      "one": "🗑 Eliminar este y anteriores ({count})",
+      "one": "Eliminar este y anteriores ({count})",
       "many": "🗑 Eliminar este y anteriores ({count})",
-      "other": "🗑 Eliminar este y anteriores ({count})"
+      "other": "Eliminar este y anteriores ({count})"
     },
     "wipe_title": "Eliminar todos los archivos de este día y de los anteriores",
     "wipe_confirm": {
@@ -269,7 +272,7 @@
     "kind_files": "archivos"
   },
   "drop": {
-    "title": "⬆ Enviar un archivo",
+    "title": "Enviar un archivo",
     "hint": "Los archivos van directos a tus asistentes y aparece un aviso en el chat. El envío es de una sola dirección: el archivo no se puede volver a abrir desde este dispositivo.",
     "empty": "Elige un archivo para enviar.",
     "choose": "Elegir archivos",
@@ -378,7 +381,10 @@
     "unreachable_hint": "El panel está en la red del propio equipo, así que solo puede cargarlo un dispositivo de esa red. Usa el enlace ↗ desde un dispositivo que sí lo esté.",
     "state_blocked": "No permite incrustarse",
     "blocked_text": "El panel de StudioForge no permite incrustarse.",
-    "blocked_hint": "El panel envía X-Frame-Options: DENY, así que ningún navegador lo dibujará dentro de otra página. Usa el enlace ↗: en su propia pestaña funciona con normalidad."
+    "blocked_hint": "El panel envía X-Frame-Options: DENY, así que ningún navegador lo dibujará dentro de otra página. Usa el enlace ↗: en su propia pestaña funciona con normalidad.",
+    "state_insecure": "Bloqueado: dirección no segura",
+    "insecure_text": "Esta página se sirve por HTTPS y la dirección del panel es HTTP simple.",
+    "insecure_hint": "Una página segura no puede incrustar una insegura, así que ningún navegador dibujará el panel aquí — esto es lo que ocurre al acceder a DisPatch por Tailscale. El enlace ↗ sigue funcionando: abrirlo en su propia pestaña es una navegación normal, no una incrustación. Para resolverlo, sirve el panel por HTTPS y apunta DISPATCH_STUDIOFORGE_URL a esa dirección."
   },
   "llm": {
     "hint": "Apunta DisPatch a un proveedor de modelos. Se convierte en un bot de tu barra lateral — sin necesidad de un stack de agentes.",
@@ -469,7 +475,7 @@
   },
   "search": {
     "aria": "Buscar mensajes",
-    "title": "🔍 Buscar mensajes",
+    "title": "Buscar mensajes",
     "placeholder": "Busca en todas las conversaciones…",
     "prompt": "Escribe para buscar en todas las conversaciones",
     "no_results": "Sin resultados para “{query}”",
@@ -501,14 +507,14 @@
   },
   "recovery": {
     "aria": "Recuperación y exportación",
-    "title": "🛟 Recuperación y exportación",
+    "title": "Recuperación y exportación",
     "export_hint": "Exporta todos los mensajes a un archivo abierto y legible — se genera en local.",
-    "export_json": "⬇ JSON",
-    "export_md": "⬇ Markdown",
-    "export_html": "⬇ HTML",
+    "export_json": "JSON",
+    "export_md": "Markdown",
+    "export_html": "HTML",
     "restore_hint": "Recupera desde la copia de seguridad (las transcripciones de OpenClaw) los mensajes que no se guardaron en DisPatch. Puedes repetirlo sin riesgo — solo añade lo que falta.",
     "restore_all": "⤓ Recuperar todos los mensajes que faltan",
-    "browse_sessions": "📜 Ver las sesiones del agente",
+    "browse_sessions": "Ver las sesiones del agente",
     "scanning": "Revisando las transcripciones de OpenClaw…",
     "recovered_summary": {
       "one": "Se recuperó {count} mensaje en {threads} chat(s).",
@@ -525,7 +531,7 @@
   },
   "transcript": {
     "aria": "Transcripción",
-    "title": "📜 Transcripción",
+    "title": "Transcripción",
     "loading": "Cargando la transcripción…",
     "none": "No hay transcripción para esta sesión",
     "summary": "{items} elementos · {missing} fuera de DisPatch",
@@ -550,7 +556,7 @@
     "saved_title": "Guardado en DisPatch"
   },
   "sessions": {
-    "title": "📜 {name} — sesiones del agente",
+    "title": "{name} — sesiones del agente",
     "summary": "Incluye sesiones de cron, subagentes y panel que DisPatch nunca creó",
     "loading": "Cargando las sesiones…",
     "empty": "No hay sesiones",
@@ -837,7 +843,7 @@
     "answering": "responde",
     "not_answering": "no responde",
     "note_agent_providers": "Opcional, y estos bots no lo necesitan: llaman directamente a un proveedor de LLM.",
-    "note_agent_none": "Opcional: el historial de chats, las subidas y esta página funcionan sin él. Usa Conectar una IA (🔌) para darle un proveedor a un bot.",
+    "note_agent_none": "Opcional: el historial de chats, las subidas y esta página funcionan sin él. Usa Conectar una IA para darle un proveedor a un bot.",
     "card_transport": "Transporte en vivo",
     "reply_socket": "Socket de respuestas",
     "socket_connected": "conectado",
@@ -856,7 +862,8 @@
   },
   "pins": {
     "pin": "Fijar a la barra",
-    "unpin": "Quitar de la barra"
+    "unpin": "Quitar de la barra",
+    "theme_hint": "mantener el botón de tema en la barra."
   },
   "checklist": {
     "done": "Completado",
@@ -991,7 +998,136 @@
     },
     "detail": {
       "close": "Close",
-      "not_found": "That job could not be found."
+      "not_found": "That job could not be found.",
+      "posted": "Posted",
+      "first_seen": "First seen",
+      "source": "Source",
+      "offline": "No se pudo contactar con DisPatch — comprueba la conexión.",
+      "locked": "Desbloquea para ver este empleo."
+    },
+    "seniority": {
+      "junior": "Junior",
+      "senior": "Senior",
+      "staff": "Staff",
+      "principal": "Principal"
+    },
+    "note": {
+      "placeholder": "Add a note (optional)…"
+    },
+    "feedback": {
+      "title": "Feedback for Scout",
+      "placeholder": "Tell Scout what to look for or avoid…",
+      "reason_label": "Reason (optional)",
+      "reason_none": "No specific reason",
+      "send": "Send to Scout",
+      "sent": "Sent — Scout will reply in the job thread",
+      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
+      "open_thread": "Open thread",
+      "error": "Could not send feedback: {msg}",
+      "need_comment": "Write a note before sending.",
+      "not_available": "Feedback isn't available yet."
+    },
+    "activity": {
+      "title": "Activity",
+      "empty": "No activity yet.",
+      "actor": {
+        "system": "System",
+        "you": "You"
+      },
+      "type": {
+        "comment": "Comment",
+        "vote": "Voted",
+        "vote_undo": "Vote undone",
+        "state_change": "State change",
+        "tag_added": "Tag added",
+        "tag_removed": "Tag removed",
+        "repost": "Reposted",
+        "duplicate_detected": "Duplicate detected",
+        "expired": "Expired",
+        "feedback": "Feedback",
+        "applied": "Applied"
+      }
+    },
+    "find": {
+      "button": "🔍 Buscar empleos",
+      "placeholder": "¿Qué debe buscar Scout? (opcional)",
+      "send": "Pedir a Scout",
+      "sent": "Scout está buscando. Las nuevas ofertas aparecerán aquí y un resumen llegará al hilo de empleos de este mes.",
+      "not_sent": "Solicitud guardada, pero no se pudo contactar con Scout. Inténtalo más tarde."
     }
+  },
+  "mail": {
+    "name": "Correo",
+    "subtitle": "Panel de MailForge",
+    "sidebar_aria": "Correo — panel de MailForge, solo desbloqueado",
+    "session_panel_title": "Correo",
+    "session_panel_heading": "MailForge se ejecuta aquí.",
+    "session_panel_body": "DisPatch integra el propio panel de MailForge, sin modificar. Solo con sesión completa; nunca visible en modo seguro.",
+    "open_title": "Abrir el panel de MailForge en una pestaña nueva",
+    "frame_title": "Panel de MailForge",
+    "checking": "Comprobando…",
+    "state_running": "Activo",
+    "state_down": "No responde",
+    "state_not_installed": "No instalado",
+    "state_unreachable": "No accesible",
+    "state_unknown": "Comprobando…",
+    "not_installed_text": "El panel de MailForge nunca se ha ejecutado en este equipo.",
+    "not_installed_hint": "Iniciar con: systemctl --user start mailforge",
+    "down_text": "El panel de MailForge no responde.",
+    "down_hint": "Comprobar: systemctl --user status mailforge",
+    "unreachable_text": "DisPatch no pudo contactar con el panel de MailForge.",
+    "unreachable_hint": "Comprobar: systemctl --user status mailforge"
+  },
+  "clients": {
+    "name": "Clientes",
+    "subtitle": "Flujo de clientes",
+    "sidebar_aria": "Clientes — flujo de clientes, solo desbloqueado",
+    "session_panel_title": "Flujo de clientes",
+    "session_panel_heading": "El flujo de clientes se ejecuta aquí.",
+    "session_panel_body": "Resumen, clientes activos y completados, y el flujo de 12 pasos de cada cliente. Solo con sesión completa; nunca visible en modo seguro.",
+    "tab_overview": "Resumen",
+    "tab_active": "Activos",
+    "tab_completed": "Completados",
+    "load_error": "No se pudo cargar esta vista.",
+    "last_checked": "Última comprobación",
+    "waiting_on_you": "Esperando su acción",
+    "waiting_empty": "Nada espera su acción en este momento.",
+    "holds": "Retenciones de seguridad",
+    "holds_empty": "Ningún cliente en retención.",
+    "stalled": "Estancados",
+    "stalled_empty": "Ningún cliente estancado.",
+    "no_active": "No hay clientes activos.",
+    "no_completed": "Aún no hay clientes completados.",
+    "no_matches": "Ningún cliente coincide con esa búsqueda.",
+    "col_name": "Nombre",
+    "col_branch": "Sucursal",
+    "col_state": "Estado",
+    "col_next": "Siguiente",
+    "recent_activity": "Actividad reciente",
+    "no_activity": "Aún no ha pasado nada.",
+    "jump": "Ir ›",
+    "search_placeholder": "Buscar por nombre…",
+    "open_thread": "Abrir conversación",
+    "security_hold": "Retención de seguridad",
+    "hold_generic": "Este cliente está en retención.",
+    "hold_note_placeholder": "¿Qué comprobó y por qué es seguro continuar?",
+    "clear_hold": "Levantar retención",
+    "hold_clear_failed": "No se pudo levantar la retención. Inténtelo de nuevo.",
+    "no_steps": "Este cliente aún no tiene pasos.",
+    "needs": "Necesita",
+    "do": "Acción",
+    "nothing_to_do": "Aquí aún no hay nada que hacer.",
+    "log": "Registro",
+    "nothing_logged": "Aún no hay nada registrado.",
+    "if_it_fails": "Si falla",
+    "save": "Guardar",
+    "save_failed": "No se pudo guardar.",
+    "action_failed": "Esa acción no pudo iniciarse.",
+    "confirm_before": "Confirme esto antes de ejecutarlo:",
+    "are_you_sure": "¿Está seguro?",
+    "approve": "Aprobar",
+    "working": "Procesando…",
+    "timed_out": "TIEMPO AGOTADO",
+    "console_output": "Salida de consola"
   }
 }

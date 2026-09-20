@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { domSkip } from './_require-dom.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
@@ -63,7 +64,7 @@ const require = createRequire(import.meta.url);
 let jsdom = null;
 try { jsdom = require('jsdom'); } catch { /* not installed — tests skip */ }
 
-const dom = { skip: jsdom ? false : 'jsdom is not installed (see markdown-behaviour.test.js)' };
+const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed (see markdown-behaviour.test.js)') };
 
 let _win = null;
 async function withDom() {

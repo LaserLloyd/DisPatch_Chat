@@ -16,7 +16,7 @@
 // press Save. The saved provider becomes a real bot in config.yaml and chats
 // through the normal thread machinery; nothing here is a scratch playground.
 
-import { el } from './util.js?v=13';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=18';
 import { t, applyDom } from './i18n.js?v=3';
 
 // ===================== State =====================
@@ -359,7 +359,7 @@ async function save() {
 // full control of when and where it appears.
 export function firstRunCard(onOpen) {
   return el('div', { class: 'llm-firstrun' }, [
-    el('div', { class: 'empty-emoji', text: '🔌' }),
+    el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.plug)]),
     el('p', { class: 'llm-firstrun-title', 'data-i18n': 'llm.card_title',
       text: t('llm.card_title') }),
     el('p', { class: 'llm-firstrun-body', 'data-i18n': 'llm.card_body',

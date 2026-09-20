@@ -81,13 +81,34 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   opacity: 1; border: 2px solid var(--accent);
   box-shadow: 0 0 0 2px var(--accent-muted), 0 0 14px color-mix(in oklab, var(--accent) 50%, transparent);
 }
+/* Resting: --dot-idle, not --text-muted. The resting dot carries no
+   information — it means "nothing has happened" — so it is the quietest mark
+   in the row (<=3:1 against the sidebar). It used to be --text-muted, which is
+   body-adjacent text colour and therefore LOUD (7.8:1 in Glacier), and that is
+   half of why the unread dot did not read as a change of state. */
 .bot-status-dot {
   position: absolute; bottom: -2px; inset-inline-end: -2px; width: 13px; height: 13px;
-  border-radius: 50%; border: 2px solid var(--bg-sidebar); background: var(--text-muted);
+  border-radius: 50%; border: 2px solid var(--bg-sidebar); background: var(--dot-idle);
+  transition: background-color .12s ease, width .12s ease, height .12s ease;
 }
-.bot-status-dot.thinking { background: var(--warning); animation: pulse 1s infinite; }
-/* Unread: accent dot. Auto-dismisses after 24h (handled in JS — no dot past then). */
-.bot-status-dot.unread { background: var(--accent-hover); box-shadow: 0 0 8px color-mix(in oklab, var(--accent-hover) 80%, transparent); }
+/* --warning-text, not --warning. The raw --warning is the same amber (#fbbf24)
+   in every palette because it is authored for a dark surface; on the two light
+   ones it measures 1.02:1 (Paper) and 1.56:1 (Daylight) against the sidebar,
+   which is a yellow dot on cream — invisible. --warning-text is the
+   per-palette adaptation that already exists for exactly this, and it takes
+   the same dot to 4.19:1 and 5.79:1 while leaving the dark palettes alone. */
+.bot-status-dot.thinking { background: var(--warning-text); animation: pulse 1s infinite; }
+/* Unread. Three channels, not one, because colour alone fails WCAG 1.4.1 and
+   fails anyone with a colour vision deficiency: --notify is the palette's
+   loudest colour (>=4.5:1 on the sidebar, >=3:1 against the resting dot), the
+   dot GROWS, and it carries a ring. Greyscale the screen and the state is
+   still obvious from the size. Auto-dismisses after 24h (handled in JS). */
+.bot-status-dot.unread {
+  background: var(--notify);
+  width: 15px; height: 15px; bottom: -3px; inset-inline-end: -3px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--notify) 55%, transparent),
+              0 0 9px color-mix(in oklab, var(--notify) 70%, transparent);
+}
 /* Sidebar drag-to-reorder */
 .bot-btn.dragging { opacity: 0.4; }
 .bot-btn.drop-above::before, .bot-btn.drop-below::after {
@@ -156,6 +177,17 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   text-align: center; color: var(--text-secondary); gap: 12px; padding: 40px 20px;
 }
 .empty-emoji { font-size: 38px; }
+/* Line-icon empty states (2026-09): the bot/thread/chat/file-server panels
+   and the "connect an AI" card used to show a colour emoji here — an emoji
+   can't take a theme, so it stayed the platform's own six colours across
+   every palette. A rail-style <svg> is a plain child now (the `text:` glyph
+   is gone), sized independent of font metrics and coloured via currentColor,
+   which is already --text-secondary from .empty-list/.empty-state above — so
+   it reads correctly, muted, in every theme for free. Opacity backs off the
+   weight a touch further so a big outline glyph doesn't compete with the
+   sentence under it. */
+.empty-emoji .rail-icon { width: 60px; height: 60px; display: block; margin: 0 auto; opacity: .55; }
+.empty-emoji:has(.rail-icon) { font-size: 0; line-height: 0; }
 .btn-primary {
   background: var(--accent); color: #fff; border: none; padding: 9px 16px;
   border-radius: var(--radius-md); font-weight: 600; font-size: 14px;
@@ -218,10 +250,38 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
 /* Document cards (in messages and markdown) */
 .doc-card { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; max-width: 100%; }
-.doc-card .doc-icon { font-size: 18px; flex-shrink: 0; }
+/* Doc-icon spans main.js builds directly as DOM (a real <svg class="rail-icon">
+   child — see fileIcon()/RAIL_ICONS.eye in main.js) size like any other icon. */
+.doc-card .doc-icon { flex-shrink: 0; display: inline-flex; }
+.doc-card .doc-icon .rail-icon { width: 18px; height: 18px; display: block; }
+/* The MARKDOWN-rendered generic file glyph and preview eye (2026-09-18:
+   replaced 📦📕📝🎵💻🌐⚙️📄/👁) are a DIFFERENT class, `.md-doc-icon`, drawn
+   by CSS `mask-image` rather than an inline <svg> — this markup is agent/
+   message content and goes through DOMPurify (markdown.js's sanitize()),
+   whose ALLOWED_TAGS has no svg/path on purpose. A `mask-image` icon never
+   touches the sanitizer and still themes for free: the mask is just alpha
+   coverage, `background-color: currentColor` supplies the actual colour, so
+   it dims with the card and follows the palette like every other icon in the
+   app. Same path data as util.js's `viewer-file`/`eye` RAIL_ICONS entries,
+   baked into a data: URI (see util.js's `railIcon()` doc for the source of
+   truth on the paths — keep the two in sync by hand). */
+.doc-card .md-doc-icon {
+  flex-shrink: 0; display: inline-block; width: 18px; height: 18px;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%203H7a2%202%200%200%200-2%202v14a2%202%200%200%200%202%202h10a2%202%200%200%200%202-2V8Z%22%2F%3E%3Cpath%20d%3D%22M14%203v5h5%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%203H7a2%202%200%200%200-2%202v14a2%202%200%200%200%202%202h10a2%202%200%200%200%202-2V8Z%22%2F%3E%3Cpath%20d%3D%22M14%203v5h5%22%2F%3E%3C%2Fsvg%3E");
+}
+.doc-card .md-doc-icon.eye-icon {
+  width: 16px; height: 16px;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2.5%2012S6%205.5%2012%205.5%2021.5%2012%2021.5%2012%2018%2018.5%2012%2018.5%202.5%2012%202.5%2012Z%22%2F%3E%3Cpath%20d%3D%22M12%2014.7a2.7%202.7%200%201%200%200-5.4%202.7%202.7%200%200%200%200%205.4Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2.5%2012S6%205.5%2012%205.5%2021.5%2012%2021.5%2012%2018%2018.5%2012%2018.5%202.5%2012%202.5%2012Z%22%2F%3E%3Cpath%20d%3D%22M12%2014.7a2.7%202.7%200%201%200%200-5.4%202.7%202.7%200%200%200%200%205.4Z%22%2F%3E%3C%2Fsvg%3E");
+}
 .doc-card .doc-link { color: var(--accent-text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .doc-card .doc-link:hover { text-decoration: underline; }
-.doc-card .doc-preview-link { color: var(--text-muted); text-decoration: none; font-size: 15px; flex-shrink: 0; padding: 0 2px; }
+.doc-card .doc-preview-link { color: var(--text-muted); text-decoration: none; flex-shrink: 0; padding: 0 2px; display: inline-flex; align-items: center; }
 .doc-card .doc-preview-link:hover { color: var(--text-primary); }
 
 /* Markdown content */
@@ -386,7 +446,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   max-height: 240px; overflow-y: auto; font-size: 12px;
   font-family: var(--font-mono); display: flex; flex-direction: column; gap: 5px;
 }
-.progress-item { color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+.progress-item { color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; line-height: 1.4; display: flex; gap: 6px; align-items: flex-start; }
+.progress-item .rail-icon { width: 13px; height: 13px; flex: none; margin-top: 3px; }
 .progress-item.thinking { color: var(--text-muted); font-style: italic; }
 .progress-item.tool { color: var(--accent-text); }
 .progress-item.idle { color: var(--text-muted); font-style: italic; }
@@ -454,9 +515,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .attach-preview { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 4px 8px; }
 .attach-preview .chip { position: relative; }
 .attach-preview img, .attach-preview video { height: 56px; border-radius: 8px; border: 1px solid var(--border); }
-.attach-preview .rm { position: absolute; top: -6px; inset-inline-end: -6px; background: var(--error); color: #fff; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; }
+.attach-preview .rm { position: absolute; top: -6px; inset-inline-end: -6px; background: var(--error); color: #fff; border: none; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
+.rm .rail-icon { width: 11px; height: 11px; }
 .attach-preview .doc-chip { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 8px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.attach-preview .chip-doc-icon { font-size: 20px; }
+.attach-preview .chip-doc-icon { display: inline-flex; }
+.attach-preview .chip-doc-icon .rail-icon { width: 20px; height: 20px; display: block; }
 .attach-preview .chip-label { font-size: 12px; color: var(--text-secondary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ===================== Modal (Bot Manager) ===================== */
@@ -547,6 +610,21 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .settings-tab:hover { color: var(--text-primary); }
 /* --accent-text, not --accent: this is small text on the panel background, and
    the raw accent does not clear AA at 13.5px on the light skin. */
+/* The three admin-only tabs (Reactions, Health, AI models) are operator
+   surfaces that a Safe-Mode device never sees. They used to look exactly like
+   the four general ones, so the strip read as seven peers and gave no hint
+   that more than half of it appears and disappears with the session. A leading
+   hairline and slightly quieter label mark them as a group without turning
+   them into a second row. */
+.settings-tab.admin-only { position: relative; }
+.settings-tab.admin-only .stab-label { color: var(--text-secondary); }
+.settings-tab.admin-only.active .stab-label { color: inherit; }
+.settings-tab.admin-only::before {
+  content: ""; position: absolute; inset-block: 22%; inset-inline-start: 0;
+  width: 1px; background: var(--border-light);
+}
+.settings-tab.admin-only + .settings-tab.admin-only::before { display: none; }
+
 .settings-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
 .settings-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 6px 6px 0 0; }
 .stab-glyph { font-size: 15px; line-height: 1; }
@@ -712,7 +790,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .retry-btn:hover { background: rgba(248,113,113,.3); }
 
 /* ===================== Thread pinning ===================== */
-.thread-pin-icon { font-size: 11px; margin-inline-end: 3px; opacity: 0.8; flex-shrink: 0; }
+.thread-pin-icon { margin-inline-end: 3px; opacity: 0.8; flex-shrink: 0; display: inline-flex; }
+.thread-pin-icon .rail-icon { width: 12px; height: 12px; display: block; }
 .thread-item.pinned { border-inline-start: 2px solid var(--accent); padding-inline-start: 8px; }
 
 /* ===================== Thread list — Today / Older section headers =====================
@@ -776,10 +855,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .sub-content pre { font-size: 12px; }
 
 /* ===================== Thread unread dot ===================== */
+/* Same contract as the roster dot above: --notify, and big enough to read as a
+   change rather than a tint. There is no resting twin here — the dot is either
+   present or absent — so size is about legibility at arm's length, not about
+   telling two states apart. */
 .thread-unread-dot {
-  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
-  background: var(--accent-hover); margin-inline-start: 6px; vertical-align: middle;
-  box-shadow: 0 0 6px color-mix(in oklab, var(--accent-hover) 80%, transparent); flex-shrink: 0;
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--notify); margin-inline-start: 6px; vertical-align: middle;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--notify) 50%, transparent),
+              0 0 7px color-mix(in oklab, var(--notify) 70%, transparent); flex-shrink: 0;
 }
 
 /* ===================== Inline video ===================== */
@@ -799,8 +883,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .lightbox-close {
   position: absolute; top: 14px; inset-inline-end: 16px; width: 42px; height: 42px;
   border-radius: 50%; border: 1px solid var(--border-light); background: rgba(20,20,40,.8);
-  color: #fff; font-size: 18px; z-index: 5;
+  color: #fff; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
 }
+.lightbox-close .rail-icon { width: 18px; height: 18px; }
 .lightbox-close:hover { background: var(--accent); }
 
 /* ===================== Thread list collapse (desktop) ===================== */
@@ -829,7 +915,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 }
 .drop-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 22px 0; }
 .drop-row { display: flex; align-items: center; gap: 11px; }
-.drop-icon { font-size: 22px; flex-shrink: 0; width: 26px; text-align: center; }
+.drop-icon { flex-shrink: 0; width: 26px; display: flex; align-items: center; justify-content: center; }
+.drop-icon .rail-icon { width: 22px; height: 22px; display: block; }
 .drop-info { flex: 1; min-width: 0; }
 .drop-name {
   font-size: 13.5px; font-weight: 600;
@@ -837,7 +924,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 }
 .drop-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .drop-row.failed .drop-detail { color: var(--error-text); }
-.drop-row.done .drop-icon { color: var(--ok, #4ade80); }
+/* --success, not --ok. There has never been an --ok custom property in this
+   codebase, so this rule always fell through to its literal #4ade80 — a fixed
+   green that ignores the palette and, on the two light skins, sits on a pale
+   surface at well under 3:1. --success is the token that actually exists and
+   is tuned per palette. */
+.drop-row.done .drop-icon { color: var(--success-text); }
+.drop-row.failed .drop-icon { color: var(--error-text); }
 /* Determinate bar; hidden once the row settles so finished rows stay compact. */
 .drop-bar {
   height: 4px; margin-top: 6px; border-radius: 2px;
@@ -859,7 +952,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .fs-wipe-btn {
   background: none; border: 1px solid rgba(248,113,113,.35); color: var(--error-text);
   font-size: 11.5px; padding: 4px 9px; border-radius: var(--radius-sm); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.fs-wipe-btn .rail-icon { width: 12px; height: 12px; flex: none; }
 .fs-wipe-btn:hover { background: rgba(248,113,113,.15); }
 .fs-row {
   display: flex; align-items: center; gap: 12px; padding: 8px;
@@ -871,15 +966,18 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   background: var(--bg-tertiary); border: 1px solid var(--border); cursor: zoom-in;
 }
 .fs-thumb-icon {
-  display: flex; align-items: center; justify-content: center; font-size: 26px; cursor: default;
+  display: flex; align-items: center; justify-content: center; cursor: default;
 }
+.fs-thumb-icon .rail-icon { width: 24px; height: 24px; display: block; }
 .fs-info { flex: 1; min-width: 0; }
 .fs-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .fs-del-btn {
   width: 34px; height: 34px; border-radius: 9px; background: none; border: 1px solid transparent;
-  color: var(--text-muted); font-size: 14px; flex-shrink: 0;
+  color: var(--text-muted); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
 }
+.fs-del-btn .rail-icon { width: 16px; height: 16px; }
 .fs-del-btn:hover { color: var(--error-text); border-color: rgba(248,113,113,.35); }
 .fs-thumb img, .fs-thumb video {
   width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block;
@@ -887,17 +985,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .fs-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .fs-act-btn {
   width: 34px; height: 34px; border-radius: 9px; background: var(--bg-tertiary);
-  border: 1px solid var(--border); color: var(--text-secondary); font-size: 16px;
+  border: 1px solid var(--border); color: var(--text-secondary);
   display: flex; align-items: center; justify-content: center;
   text-decoration: none; cursor: pointer; flex-shrink: 0;
 }
+.fs-act-btn .rail-icon { width: 16px; height: 16px; }
 .fs-act-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 .lightbox-download {
   position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
   padding: 10px 22px; border-radius: 999px; font-size: 14px; z-index: 5;
   box-shadow: 0 6px 20px rgba(0,0,0,.5);
+  display: inline-flex; align-items: center; gap: 6px;
 }
+.lightbox-download .rail-icon { width: 15px; height: 15px; flex: none; }
 .lightbox-download:hover { background: var(--accent-hover); }
 
 /* ===================== Avatar crop modal ===================== */
@@ -1019,7 +1120,12 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
     display: flex; flex-direction: row; justify-content: center; align-items: stretch;
     gap: 8px; margin-top: auto; padding: 10px 8px max(10px, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
-    flex-wrap: nowrap;
+    /* WRAP, not nowrap: with pins and link buttons the row is wider than a
+       small tablet, and a centred nowrap row overflows BOTH edges — the left
+       half is unreachable even by scrolling. Capped + scrollable so a very
+       long rail still leaves the roster its space. */
+    flex-wrap: wrap; flex-shrink: 0;
+    max-height: 40dvh; overflow-y: auto;
   }
   /* The locked side's only upload entry point — it earns a primary-ish
      treatment here because on a family phone this IS the Bots page's action. */
@@ -1103,24 +1209,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   /* --- Jobs board (mobile) ---
    * The host lives at #job-board-host and is mutually exclusive with
    * #chatview. We give it a full-viewport panel sized to clear the tab
-   * bar (56px + safe-area), with the toolbar pinned at the top and the
-   * list scrolling underneath. No composers, no chat-header, no scroll
+   * bar (56px + safe-area); the scrolling itself (and the sticky toolbar)
+   * is handled by the shared [data-jobs-root] rule near the Jobs board
+   * CSS block further down — this block only sizes the host for the
+   * tab bar / safe area. No composers, no chat-header, no scroll
    * residue — the panel is its own screen. */
   .app[data-view="jobs"] #job-board-host {
     width: 100vw;
     height: calc(100dvh - 56px - env(safe-area-inset-bottom));
     padding-top: max(0px, env(safe-area-inset-top));
-  }
-  .app[data-view="jobs"] #job-board-host .jobs-toolbar {
-    /* The toolbar stays pinned so the dropdowns are always reachable above
-       the fold; the list scrolls beneath it. */
-    position: sticky; top: 0; z-index: 2;
-    background: var(--bg-primary);
-  }
-  .app[data-view="jobs"] #job-board-host .jobs-list {
-    /* Only the list scrolls; the toolbar is the chrome. */
-    flex: 1 1 auto; min-height: 0; overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -1180,13 +1277,17 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 
 .lock-screen {
   position: fixed; inset: 0; z-index: 400;
-  /* The lock face is always dark; force the dark side of every light-dark()
-     token so text stays legible when the app theme is light. color must be
-     re-declared HERE (not just inherited from body) — inherited colors are
-     resolved against body's scheme, ignoring this element's color-scheme. */
-  color-scheme: dark;
+  /* The lock face wears the ACTIVE palette. It used to be pinned to the dark
+     purple skin (data-palette on the element, plus color-scheme: dark here)
+     because this backdrop was a hard-coded rgba(8,8,18,.97) — near-black, so a
+     light palette's dark --text-primary would have been ink on a dark sheet.
+     Deriving the sheet from --bg-primary removes the reason for the pin: the
+     face is dark on a dark palette and light on a light one, and the tokens
+     always match the surface they sit on. Kept near-opaque (97%) rather than
+     solid so the blurred app behind it still reads as "covered", not "gone". */
   color: var(--text-primary);
-  background: rgba(8,8,18,.97); backdrop-filter: blur(6px);
+  background: color-mix(in oklab, var(--bg-primary) 97%, transparent);
+  backdrop-filter: blur(6px);
   /* `safe` centring + scroll: the card is ~550px tall, so on a landscape phone
      (~390px) plain centring clipped it at BOTH ends — the title and the Unlock
      button went off-screen with no way to reach them, i.e. the device could not
@@ -1301,7 +1402,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   background: none; color: var(--text-muted); flex-shrink: 0;
 }
 .bm-safe-btn:hover { border-color: var(--accent); }
-.bm-safe-btn.on { background: var(--accent-muted); color: var(--accent-text); border-color: rgba(124,58,237,.5); }
+.bm-safe-btn.on { background: var(--accent-muted); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
 
 /* ===================== Modern message surface ===================== */
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT
@@ -1355,7 +1456,11 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   display: flex; align-items: center; gap: 12px; padding: 10px 12px;
   border-radius: var(--radius-md); cursor: pointer;
 }
-.cmdk-item .ic { width: 22px; text-align: center; font-size: 15px; flex-shrink: 0; }
+.cmdk-item .ic {
+  width: 22px; text-align: center; font-size: 15px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cmdk-item .ic .rail-icon { width: 16px; height: 16px; }
 .cmdk-item .lbl { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdk-item .sub { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; }
 .cmdk-item.sel, .cmdk-item:hover { background: var(--bg-hover); }
@@ -1409,6 +1514,40 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
    the desktop rail is untouched. Only the phone's bots view turns it into a
    real row (see the max-width: 768px block). */
 .gear-row { display: contents; }
+
+/* Rail overflow (tablets, 2026-09-18). With pinned settings and custom link
+   buttons the rail can hold a dozen 44px buttons — more than a landscape
+   tablet's height. `display: contents` left them as unshrinkable children of
+   the rail, the rail stretched its grid row past 100dvh, and pins, links and
+   ⚙ fell off the bottom of the screen. So above the phone breakpoint the group
+   is a real column: it scrolls on its own (capped so the roster always keeps
+   room), the roster scrolls on its own, and ⚙ stays pinned at the foot of the
+   group so Settings is never the button that scrolls away. The halo is the
+   rail colour, so a button scrolling under ⚙ is masked, not see-through. */
+.app { grid-template-rows: minmax(0, 1fr); }
+@media (min-width: 769px) {
+  .sidebar { min-height: 0; overflow: hidden; }
+  .bot-list { flex: 1 1 0; min-height: 56px; }
+  .gear-row {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    flex: 0 1 auto; min-height: 0; max-height: 55%; width: 100%;
+    padding: 2px 0; overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain; scrollbar-width: thin;
+  }
+  /* Scroll room BELOW ⚙, as a flex item rather than padding on the container.
+     A sticky `bottom: 0` is resolved against the content box, so container
+     padding lifts ⚙ off the floor by that much and it lands exactly on the
+     last link — measured: both at y 486..530. A trailing spacer instead keeps
+     ⚙ on the real bottom edge while still letting every button scroll clear
+     of it. `scroll-margin` covers keyboard focus, which otherwise parks a
+     button at the floor, i.e. under ⚙. */
+  .gear-row::after { content: ""; flex: 0 0 44px; }
+  .gear-row > .gear-btn { scroll-margin-bottom: 56px; }
+  .gear-row > #manage-bots {
+    position: sticky; bottom: 0; z-index: 1;
+    box-shadow: 0 0 0 6px var(--bg-sidebar);
+  }
+}
 
 /* Theme toggle reuses .gear-btn; show its glyph centered. */
 .theme-toggle-btn { font-size: 17px; }
@@ -1482,10 +1621,10 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* ---- Connection status dot in the chat header (F4) ---- */
 .conn-dot {
   width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; margin-inline-start: 2px;
-  background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 22%, transparent);
+  background: var(--success-text); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success-text) 22%, transparent);
   transition: background .2s, box-shadow .2s;
 }
-.conn-dot.reconnecting { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning) 22%, transparent); animation: pulse 1.2s infinite; }
+.conn-dot.reconnecting { background: var(--warning-text); box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning-text) 22%, transparent); animation: pulse 1.2s infinite; }
 .conn-dot.offline { background: var(--text-muted); box-shadow: none; }
 .composer-foot .offline-note { color: var(--warning-text); }
 
@@ -1621,8 +1760,13 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .tx-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tx-toolbar .muted { font-size: 12px; }
 .tx-filter { display: flex; gap: 6px; flex-wrap: wrap; }
-.tx-chip { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-light); background: none; color: var(--text-muted); }
-.tx-chip.on { background: var(--accent-muted); color: var(--accent-text); border-color: rgba(124,58,237,.5); }
+.tx-chip {
+  font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-light);
+  background: none; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.tx-chip .rail-icon { width: 13px; height: 13px; flex: none; }
+.tx-chip.on { background: var(--accent-muted); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
 .tx-list { overflow-y: auto; max-height: 64vh; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
 .tx-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 11px; background: var(--bg-tertiary); }
 .tx-item .tx-head { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
@@ -1668,18 +1812,18 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
      takes it to 5.70:1 / 7.10:1; the hover scale still marks the interaction. */
   opacity: 1;
 }
-.terminal-sidedot.running { background: var(--success); }
+.terminal-sidedot.running { background: var(--success-text); }
 .terminal-sidedot.stopped { background: var(--text-muted); }
-.terminal-sidedot.exited  { background: var(--error); }
+.terminal-sidedot.exited  { background: var(--error-text); }
 
 /* ===================== DeepSeek Harness (dsh) ===================== */
 /* Sidebar pseudo-bot: shares the tool tile shape, but a distinct hue so the
    two engines never get confused at a glance. */
 .bot-avatar.harness-avatar { background: #1d4ed8; font-size: 11px; letter-spacing: 0; }
 .terminal-avatar-mini.harness-avatar-mini { background: #1d4ed8; font-size: 11px; }
-.terminal-sidedot.harness-running { background: var(--success); }
+.terminal-sidedot.harness-running { background: var(--success-text); }
 .terminal-sidedot.harness-stopped { background: var(--text-muted); }
-.terminal-sidedot.harness-failed  { background: var(--error); }
+.terminal-sidedot.harness-failed  { background: var(--error-text); }
 .terminal-sidedot.harness-unknown { background: var(--text-muted); }
 /* Header tabs: Web UI | Headless jobs. */
 .harness-tabs { display: flex; gap: 4px; flex: 0 0 auto; }
@@ -1693,7 +1837,12 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* Body: one pane visible at a time; the frame fills the pane. */
 .harness-body { flex-direction: column; }
 .harness-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.harness-frame { flex: 1 1 auto; width: 100%; height: 100%; border: 0; background: #fff; }
+/* Only the flex sizing lives here. width/height/border/background are set for
+   all three frames together further down (.mail-frame, .studioforge-frame,
+   .harness-frame) — and that rule WINS, being later at equal specificity, so
+   the `background: #fff` this line used to carry was dead and misleading: it
+   read as "frames are white" while every frame actually painted --bg-primary. */
+.harness-frame { flex: 1 1 auto; }
 .harness-note {
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 24px; text-align: center; color: var(--text-secondary);
@@ -1733,7 +1882,11 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .harness-session-log { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; max-height: 46vh; overflow-y: auto; font-size: 12.5px; background: var(--bg-tertiary); }
 .hs-ev { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border-light); }
 .hs-ev:last-child { border-bottom: 0; }
-.hs-ev-tag { flex: 0 0 auto; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+.hs-ev-tag {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.hs-ev-tag .rail-icon { width: 12px; height: 12px; flex: none; }
 .hs-ev-text { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .hs-ev.hs-tool .hs-ev-tag { color: var(--accent-text); }
 .hs-ev.hs-tool .hs-ev-text { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary); }
@@ -1742,11 +1895,16 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .hs-ev.hs-err .hs-ev-text { color: var(--error); }
 .hs-ev.hs-say { display: block; padding: 6px 0; }
 .hs-ev.hs-step, .hs-ev.hs-end, .hs-ev.hs-model { color: var(--text-muted); font-size: 11.5px; font-family: var(--font-mono); }
-.terminal-dot.harness-running { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
-.terminal-dot.harness-failed { background: var(--error); }
-.terminal-dot.harness-starting { background: var(--warning, #f59e0b); }
+.terminal-dot.harness-running { background: var(--success-text); box-shadow: 0 0 8px color-mix(in oklab, var(--success-text) 60%, transparent); }
+.terminal-dot.harness-failed { background: var(--error-text); }
+.terminal-dot.harness-starting { background: var(--warning-text); }
 /* Model picker in the bar: a compact native select. */
-.harness-model-wrap { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--text-secondary); }
+/* flex: 0 0 auto, not 0 1 auto. The toolbar row this sits in is `nowrap` and
+   scrolls on purpose, so nothing in it needs to shrink — and this was the only
+   item that could, which collapsed the model <select> to about 18px at 360px
+   wide. */
+.harness-model-wrap { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; font-size: 12.5px; color: var(--text-secondary); }
+#harness-model { min-width: 120px; }
 .harness-model-lbl { white-space: nowrap; }
 .harness-model-select {
   max-width: 220px; min-width: 0; background: var(--bg-input); color: var(--text-primary);
@@ -1764,18 +1922,22 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
    harness at a glance. */
 .bot-avatar.studioforge-avatar { background: #b45309; font-size: 11px; letter-spacing: 0; }
 .terminal-avatar-mini.studioforge-avatar-mini { background: #b45309; font-size: 11px; }
-.terminal-sidedot.studioforge-up { background: var(--success); }
-.terminal-sidedot.studioforge-down { background: var(--error); }
-.terminal-sidedot.studioforge-unreachable { background: var(--warning, #f59e0b); }
+.terminal-sidedot.studioforge-up { background: var(--success-text); }
+.terminal-sidedot.studioforge-down { background: var(--error-text); }
+.terminal-sidedot.studioforge-unreachable { background: var(--warning-text); }
 /* Reachable, but the panel refuses to be framed — a green dot would be a lie
    (nothing loads here) and a red one would be too: the ↗ link works. */
-.terminal-sidedot.studioforge-blocked { background: var(--success); opacity: .55; }
-.terminal-sidedot.studioforge-checking { background: var(--warning, #f59e0b); }
+.terminal-sidedot.studioforge-blocked { background: var(--success-text); opacity: .55; }
+.terminal-sidedot.studioforge-checking { background: var(--warning-text); }
+/* Blocked by this page's own origin, not by the network: amber like the other
+   "it is up, you just cannot see it here" states, and deliberately NOT the red
+   error colour — nothing is broken, the rig is fine, and the ↗ link works. */
+.terminal-sidedot.studioforge-insecure { background: var(--warning-text); }
 .terminal-sidedot.studioforge-unknown { background: var(--text-muted); }
 #studioforge-open { text-decoration: none; }
 .studioforge-body { flex-direction: column; }
 .studioforge-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.studioforge-frame { flex: 1 1 auto; width: 100%; height: 100%; border: 0; background: #fff; }
+.studioforge-frame { flex: 1 1 auto; }   /* see .harness-frame above */
 .studioforge-note {
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 10px; padding: 24px; text-align: center;
@@ -1783,11 +1945,12 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #b45309; }
 .studioforge-note p { max-width: 46ch; margin: 0; }
-.terminal-dot.studioforge-up { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
-.terminal-dot.studioforge-down { background: var(--error); }
-.terminal-dot.studioforge-unreachable { background: var(--warning, #f59e0b); }
-.terminal-dot.studioforge-blocked { background: var(--success); opacity: .55; }
-.terminal-dot.studioforge-checking { background: var(--warning, #f59e0b); }
+.terminal-dot.studioforge-up { background: var(--success-text); box-shadow: 0 0 8px color-mix(in oklab, var(--success-text) 60%, transparent); }
+.terminal-dot.studioforge-down { background: var(--error-text); }
+.terminal-dot.studioforge-unreachable { background: var(--warning-text); }
+.terminal-dot.studioforge-blocked { background: var(--success-text); opacity: .55; }
+.terminal-dot.studioforge-checking { background: var(--warning-text); }
+.terminal-dot.studioforge-insecure { background: var(--warning-text); }
 .studioforge-url {
   font-family: var(--font-mono); font-size: 11.5px; max-width: 40ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1845,9 +2008,9 @@ body.terminal-active #collapse-threads { display: none; }
 .terminal-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); flex: 0 0 auto; }
 .terminal-status [id$="-status-label"] { white-space: nowrap; }
 .terminal-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex: 0 0 auto; }
-.terminal-dot.running { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,.6); }
+.terminal-dot.running { background: var(--success-text); box-shadow: 0 0 8px color-mix(in oklab, var(--success-text) 60%, transparent); }
 .terminal-dot.stopped { background: var(--text-muted); }
-.terminal-dot.exited  { background: var(--error); }
+.terminal-dot.exited  { background: var(--error-text); }
 /* Actions shrink to the remaining bar width and scroll horizontally rather than
    wrap onto a second row (keeps the bar a constant height). */
 .terminal-actions {
@@ -2532,7 +2695,8 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 }
 
 /* Companions panel: which safe bots carry reaction images (read-only there). */
-.comp-react { margin-inline-start: auto; font-size: 14px; opacity: .85; }
+.comp-react { margin-inline-start: auto; opacity: .85; display: inline-flex; }
+.comp-react .rail-icon { width: 14px; height: 14px; }
 /* Reaction traces are centred dividers, not bubbles — no avatar column. */
 .msg.reaction-trace-row { justify-content: center; padding: 2px 0; }
 
@@ -2552,7 +2716,8 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   /* Only way to drop a mis-attached file before sending. */
   /* Same edge as the base rule (F12): a physical `right` here would override the
      logical property and land the badge in the wrong corner under RTL. */
-  .attach-preview .rm { width: 28px; height: 28px; font-size: 14px; top: -8px; inset-inline-end: -8px; }
+  .attach-preview .rm { width: 28px; height: 28px; top: -8px; inset-inline-end: -8px; }
+.rm .rail-icon { width: 14px; height: 14px; }
   /* Transcript filter chips. */
   .tx-chip { padding: 9px 13px; font-size: 12.5px; }
 
@@ -2832,7 +2997,7 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
    than a colour change alone: the rail is monochrome glyphs, and colour by
    itself would not survive a theme that inverts it. */
 .gear-btn.pin-on {
-  background: var(--accent-soft, rgba(46, 168, 255, .12));
+  background: var(--accent-muted);   /* --accent-soft has never existed */
   box-shadow: inset 0 0 0 1px var(--accent, #2ea8ff);
 }
 .gear-btn.pin-btn[disabled] { opacity: .45; cursor: not-allowed; }
@@ -2847,6 +3012,66 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
    like the emoji glyphs around them; colour comes from the button, so theme
    and .pin-on accent both just work. */
 .gear-btn .rail-icon { width: 18px; height: 18px; display: block; margin: auto; }
+
+/* ---- Line icons outside the rail (2026-09) -------------------------------
+   The tab bar, the settings tabs, the header, the composer and the two big
+   empty-state glyphs were colour emoji until main.js iconifyChrome() swapped
+   them (the emoji stay in the markup as the no-JS fallback). An emoji is sized
+   with font-size; an <svg> is not, so every rule that used to set a glyph size
+   needs a matching size here or the icon falls back to its 100%-of-line-box
+   default and blows up.
+
+   One size per CONTEXT, not per icon: 19px in the tab bar (matching the emoji
+   it replaces), 15px in the settings tab strip, 18px for header and composer
+   buttons, and the two decorative glyphs at the size their font-size set. */
+.mobile-tabs .tab .rail-icon { width: 19px; height: 19px; display: block; }
+.stab-glyph .rail-icon { width: 15px; height: 15px; display: block; }
+.icon-btn .rail-icon,
+.back-btn .rail-icon,
+.attach-btn .rail-icon,
+.send-btn .rail-icon,
+.stop-btn .rail-icon,
+.scroll-bottom .rail-icon { width: 18px; height: 18px; display: block; margin: auto; }
+/* The send arrow sits on the accent fill, so it wants a hair more weight than
+   the ghost buttons around it to read at the same visual density. */
+.send-btn .rail-icon { stroke-width: 2; }
+/* Inline icon + text, for the Bot Manager's chips (Safe / React / Pool /
+   Change photo). These sit INSIDE the text flow, so the icon is sized in `em`
+   to track the label and nudged down to sit on the same optical line. */
+.bm-safe-btn, .bm-avatar-btn { display: inline-flex; align-items: center; gap: 5px; }
+.bm-safe-btn .rail-icon, .bm-avatar-btn .rail-icon {
+  width: 1.15em; height: 1.15em; flex: none;
+}
+/* Generic inline icon + label (2026-09-18 sweep): the thread menu, the
+   File Server / Search / Recovery / Transcript panel titles and buttons,
+   and the settings Recovery/Lock-now rows. One class instead of a bespoke
+   one per component — a `data-icon="name"` span filled by main.js's
+   iconifyDataIcons(). `h2` and `button` both go inline-flex so the icon
+   sits on the same line as the label regardless of tag. */
+h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; gap: 7px; }
+.icn { display: inline-flex; flex: none; }
+.icn .rail-icon { width: 1.05em; height: 1.05em; display: block; }
+
+/* Health dashboard (2026-09-18): card titles, the log/deep-scan buttons, the
+   stale banner and a finding's "fix" line all switched from an emoji to
+   iconLabel()'s [svg, text] pair, so they need the same inline-icon sizing
+   as .icn without the wrapper span. */
+.dash-card-title, .dash-stale { display: flex; align-items: center; gap: 6px; }
+.dash-log-toggle, .dash-fix-glyph { display: inline-flex; align-items: center; gap: 6px; }
+.dash-card-title .rail-icon, .dash-log-toggle .rail-icon,
+.dash-stale .rail-icon, .dash-fix-glyph .rail-icon { width: 1em; height: 1em; flex: none; }
+
+/* Reaction Manager: the generate button and the low-stock warning. */
+.rx-gen-row .rail-icon { width: 15px; height: 15px; flex: none; }
+.rx-pool-warn { display: inline-flex; align-items: center; gap: 5px; }
+.rx-pool-warn .rail-icon { width: 1em; height: 1em; flex: none; }
+.bubble-error-text { display: inline-flex; align-items: center; gap: 5px; }
+.bubble-error-text .rail-icon { width: 1em; height: 1em; flex: none; }
+.empty-emoji .rail-icon { width: 38px; height: 38px; display: block; margin: 0 auto; opacity: .55; }
+.lock-emoji .rail-icon { width: 40px; height: 40px; display: block; margin: 0 auto; }
+/* The glyph spans were sized for emoji and would otherwise keep a text line
+   box taller than the icon inside them. */
+.empty-emoji:has(.rail-icon), .lock-emoji:has(.rail-icon) { font-size: 0; line-height: 0; }
 .bm-links-glyph .rail-icon { width: 15px; height: 15px; display: block; }
 
 /* ---- Custom link buttons (Settings → Device editor) ---------------------- */
@@ -2867,8 +3092,10 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .bm-links-remove {
   margin-inline-start: auto; flex: 0 0 auto;
   background: none; border: 0; color: var(--text-muted);
-  padding: 2px 6px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  padding: 2px 6px; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center;
 }
+.bm-links-remove .rail-icon { width: 13px; height: 13px; }
 .bm-links-remove:hover { color: var(--error, #e5484d); background: var(--bg-tertiary, var(--bg-hover)); }
 .bm-links-addrow { margin-top: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .bm-links-addrow input {
@@ -2921,24 +3148,24 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 }
 .harness-sf-link:hover { background: var(--bg-hover); }
 
-/* The 📌 on a settings row. Pushed to the right edge so the row still reads
-   as "checkbox, label" left-to-right and the pin is an aside, not a second
-   control competing with the one it pins. */
+/* The pin toggle on a settings row. Pushed to the right edge so the row still
+   reads as "checkbox, label" left-to-right and the pin is an aside, not a
+   second control competing with the one it pins. Line icon since 2026-09-18
+   (was a 📌 emoji, sized by font-size — an <svg> needs its own size rule). */
 .pin-toggle {
   margin-left: auto;
   background: none;
   border: 0;
   padding: 2px 6px;
-  font-size: 15px;
   line-height: 1;
   cursor: pointer;
   opacity: .35;
-  filter: grayscale(1);
-  transition: opacity .12s ease, filter .12s ease;
+  transition: opacity .12s ease;
 }
+.pin-toggle .rail-icon { width: 15px; height: 15px; display: block; }
 .pin-toggle:hover,
 .pin-toggle:focus-visible { opacity: .8; }
-.pin-toggle.pinned { opacity: 1; filter: none; }
+.pin-toggle.pinned { opacity: 1; color: var(--accent); }
 
 /* The rows are labels wrapping a checkbox; they need to be flex for the pin's
    `margin-left: auto` to push it over. */
@@ -3009,7 +3236,7 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   color: var(--text-secondary); cursor: pointer;
 }
 .viewer-btn:hover, .lightbox-close.viewer-close:hover { background: var(--bg-hover); color: var(--text-primary); }
-.viewer-btn .rail-icon { width: 20px; height: 20px; }
+.viewer-btn .rail-icon, .lightbox-close.viewer-close .rail-icon { width: 20px; height: 20px; }
 /* The close button is a `.lightbox-close` so the global Escape handler finds
    it; that class is absolutely positioned for the image lightbox, which would
    float it over the header here. Put it back in the flow. */
@@ -3233,6 +3460,10 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   flex-direction: column;
   background: var(--bg-primary);
   position: relative;
+  /* The HOST does not scroll — its child [data-jobs-root] does (below).
+     Was `overflow: hidden` with no scrollable descendant at all, which is
+     why the board could not scroll on desktop: the list just clipped past
+     the bottom of the panel with no way to reach it. */
   overflow: hidden;
   /* Default full-height: matches .panel behaviour on desktop. The mobile
      override below adds top safe-area inset and bottom tab-bar clearance. */
@@ -3242,10 +3473,30 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .app[data-view="jobs"] #chatview,
 .app[data-view="jobs"] #messages { display: none; }
 
+/* [data-jobs-root] is the element jobs.js actually mounts into (a child of
+ * #job-board-host — see mountJobs()). It is the scroll container: full
+ * height of the host, column flex so the toolbar (first child) can be
+ * pinned with `position: sticky` while the month sections scroll under it.
+ * Desktop and mobile share this rule; the mobile block further down only
+ * adjusts the HOST's own height for the tab bar / safe area. */
+[data-jobs-root] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* The board list itself */
 .jobs-toolbar {
   display: flex; gap: 8px; flex-wrap: wrap;
   padding: 12px 16px; border-bottom: 1px solid var(--border, #e3e3e3);
+  /* Pinned to the top of the scrolling [data-jobs-root], not the viewport —
+     the dropdowns stay reachable while the list scrolls under them. */
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg-primary);
+  flex: 0 0 auto;
 }
 .jobs-toolbar select,
 .jobs-toolbar input {
@@ -3253,9 +3504,23 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   border-radius: 8px; background: var(--bg-elevated, #fff);
   color: var(--text-primary, #111); font: inherit;
 }
+.jobs-toolbar__field { display: inline-flex; align-items: center; gap: 4px; }
+/* The busy marker lives in the toolbar rather than replacing the list. The
+   board used to swap its whole contents for the word "Loading" on every
+   filter change, sort change and vote, so the rows you were reading vanished
+   and came back — at ~20ms that still reads as a flash, and on a phone it
+   reads as a stall. Now the rows stay put and only this line appears. */
+.jobs-toolbar__busy {
+  margin-inline-start: auto; align-self: center;
+  color: var(--text-muted); font-size: 13px;
+}
+.jobs-toolbar__busy[hidden] { display: none; }
+/* The one region render() replaces. Everything above it — toolbar, find form,
+   status line — keeps its DOM identity, and therefore its focus. */
+.jobs-list-host { display: block; }
 .jobs-list { list-style: none; padding: 0; margin: 0; }
 .jobs-empty { padding: 24px; color: var(--text-muted, #888); text-align: center; }
-.jobs-empty--error { color: var(--danger, #c0392b); }
+.jobs-empty--error { color: var(--error, #c0392b); }
 
 /* 2026-09-15 — the board is now a structured list grouped by month.
  * Each section header is a "month" (Jobs — YYYY-MM). The header
@@ -3298,6 +3563,13 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   object-fit: cover;
   background: var(--bg-hover, #f1f1f4);
 }
+/* Final fallback stage — see jobs.js's two-stage image error handler. A
+ * plain emoji tile instead of a broken-image icon when the bot has no
+ * avatar uploaded at all (both /avatar/thumb and /avatar 404). */
+.job-row__thumb--fallback {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1;
+}
 .job-row__body {
   flex: 1 1 auto; min-width: 0;
 }
@@ -3333,15 +3605,20 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   font-size: 12px; line-height: 18px;
 }
 .job-chip-state { font-weight: 500; }
-.job-chip-state--pending { background: #f1f1f4; color: #555; }
-.job-chip-state--yes { background: #d4f8d4; color: #1d6b3a; }
-.job-chip-state--no { background: #fde2e2; color: #8a2222; }
-.job-chip-state--maybe { background: #fff5d4; color: #8a6a1f; }
-.job-chip-state--applied { background: #d4e6f8; color: #1f4d8a; }
-.job-chip-state--archived { background: #ececec; color: #888; }
-.job-chip-state--duplicate { background: #ececec; color: #888; }
-.job-chip--dup { background: #ececec; color: #555; }
-.job-chip--expired { background: #fde2e2; color: #8a2222; }
+/* Token-based, not hardcoded pastels (fixed 2026-09-16 — the old literal
+ * hex values were solved for a light background and read as mismatched
+ * neon patches on every dark palette). `color-mix` against each palette's
+ * own --bg-elevated keeps the tint readable AND on-brand in every theme;
+ * the *-text token pairs are already contrast-checked per palette. */
+.job-chip-state--pending { background: var(--bg-hover); color: var(--text-secondary); }
+.job-chip-state--yes { background: color-mix(in oklab, var(--success) 24%, var(--bg-elevated)); color: var(--success-text); }
+.job-chip-state--no { background: color-mix(in oklab, var(--error) 24%, var(--bg-elevated)); color: var(--error-text); }
+.job-chip-state--maybe { background: color-mix(in oklab, var(--warning) 24%, var(--bg-elevated)); color: var(--warning-text); }
+.job-chip-state--applied { background: color-mix(in oklab, var(--accent) 30%, var(--bg-elevated)); color: var(--accent-text); }
+.job-chip-state--archived { background: var(--bg-hover); color: var(--text-muted); }
+.job-chip-state--duplicate { background: var(--bg-hover); color: var(--text-muted); }
+.job-chip--dup { background: var(--bg-hover); color: var(--text-secondary); }
+.job-chip--expired { background: color-mix(in oklab, var(--error) 24%, var(--bg-elevated)); color: var(--error-text); }
 
 /* Header card on the chat thread (one per active job thread) */
 .job-card {
@@ -3355,6 +3632,10 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 .job-card__meta { color: var(--text-muted, #888); font-size: 13px; margin: 6px 0; }
 .job-card__tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
 .job-card__brief { white-space: pre-wrap; margin: 8px 0; color: var(--text-primary, #111); }
+.job-card__dates {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  font-size: 12.5px; color: var(--text-muted, #888); margin: 4px 0;
+}
 .job-card__link {
   display: inline-block; padding: 6px 12px; border-radius: 8px;
   background: var(--accent, #6e56cf); color: #fff;
@@ -3372,12 +3653,16 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border, #e3e3e3);
   background: var(--bg-elevated, #fff); color: var(--text-primary, #111);
   font: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+.job-vote__btn .rail-icon { width: 15px; height: 15px; flex: none; }
 .job-vote__btn:hover { border-color: var(--accent, #6e56cf); }
-.job-vote__btn--yes { background: #d4f8d4; border-color: #1d6b3a; color: #1d6b3a; }
-.job-vote__btn--no { background: #fde2e2; border-color: #8a2222; color: #8a2222; }
-.job-vote__btn--maybe { background: #fff5d4; border-color: #8a6a1f; color: #8a6a1f; }
-.job-vote__btn--applied { background: #d4e6f8; border-color: #1f4d8a; color: #1f4d8a; }
+/* Token-based tints — see the .job-chip-state--* comment above; same fix,
+ * same reasoning, applied to the vote buttons. */
+.job-vote__btn--yes { background: color-mix(in oklab, var(--success) 16%, var(--bg-elevated)); border-color: var(--success); color: var(--success-text); }
+.job-vote__btn--no { background: color-mix(in oklab, var(--error) 16%, var(--bg-elevated)); border-color: var(--error); color: var(--error-text); }
+.job-vote__btn--maybe { background: color-mix(in oklab, var(--warning) 16%, var(--bg-elevated)); border-color: var(--warning); color: var(--warning-text); }
+.job-vote__btn--applied { background: color-mix(in oklab, var(--accent) 20%, var(--bg-elevated)); border-color: var(--accent); color: var(--accent-text); }
 .job-vote__btn--undo { color: var(--text-muted, #888); }
 /* Selected state — the user has voted this signal on this job. */
 .job-vote__btn--active {
@@ -3387,7 +3672,11 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 }
 .job-reason-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-  display: flex; align-items: center; justify-content: center; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  /* Above the job-detail modal (it is spawned FROM inside it) but still
+     below the toast layer (200) and the lightbox (300) — see the z-index
+     scale note on .job-modal-overlay below. */
+  z-index: 130;
 }
 .job-reason {
   background: var(--bg-elevated, #fff); color: var(--text-primary, #111);
@@ -3409,19 +3698,27 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   background: transparent; color: var(--text-muted, #888); cursor: pointer;
 }
 
-/* ===================== Job detail modal (2026-09-15) =====================
+/* ===================== Job detail modal (2026-09-15, CSS reworked 09-16) ==
  * The board list is no longer a chat; clicking a job card opens this
  * overlay instead. It carries the same metadata + voting controls the
  * old chat-header card carried, but as a single focused panel rather
  * than prepended to a chat timeline. The reason-picker (.job-reason-*)
  * sits ABOVE this in z-index because it's spawned from inside the modal.
+ *
+ * Z-INDEX SCALE (see the numbered layers already established elsewhere in
+ * this file: .modal-backdrop 100, .reconnect-overlay 150, .toast 200,
+ * .lightbox 300, .reaction-overlay 350, .lock-screen 400, #boot-veil 500).
+ * The job modal is chrome ABOVE the app but must stay BELOW toasts (a vote
+ * error has to be visible while the modal is open) — 110 sits just above
+ * the generic modal-backdrop and well under the toast layer. The reason
+ * picker (130, above) is spawned from inside this modal and must win.
  */
 .job-modal-open { overflow: hidden; }
 .job-modal-overlay {
   position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.45);
   display: flex; align-items: center; justify-content: center;
-  z-index: 9000;
+  z-index: 110;
   padding: 16px;
 }
 .job-modal {
@@ -3432,11 +3729,12 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   border-radius: 14px;
   padding: 22px 22px 18px;
   width: 100%;
-  max-width: 560px;
-  max-height: calc(100vh - 32px);
+  max-width: 680px;
+  max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
 }
+.job-modal:focus { outline: none; }
 .job-modal__close {
   position: absolute;
   top: 10px;
@@ -3455,4 +3753,266 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
   background: var(--bg-hover, #f1f1f4);
   color: var(--text-primary, #111);
 }
+.job-modal__close:focus-visible {
+  outline: 2px solid var(--accent, #6e56cf);
+  outline-offset: 1px;
+}
 .job-modal .job-card__head { padding-right: 32px; }
+.job-modal__divider { border: 0; border-top: 1px solid var(--border-light, #ececec); margin: 16px 0; }
+
+/* Narrow screens: a full-screen sheet instead of a centred card — the same
+ * treatment .settings-modal already uses at this breakpoint. */
+@media (max-width: 640px) {
+  .job-modal-overlay { padding: 0; align-items: stretch; }
+  .job-modal {
+    width: 100vw; max-width: 100vw;
+    height: 100dvh; max-height: 100dvh;
+    border-radius: 0; border: none;
+    padding-top: calc(22px + env(safe-area-inset-top));
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+}
+
+/* --- Optional note (attached to the next vote) --- */
+.job-note { margin-top: 10px; }
+.job-note__input {
+  width: 100%; resize: vertical; font: inherit;
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border, #e3e3e3);
+  background: var(--bg-input, #fff); color: var(--text-primary, #111);
+}
+.job-note__input:focus-visible { outline: 2px solid var(--accent, #6e56cf); outline-offset: 1px; }
+
+/* --- Feedback for Scout --- */
+.job-feedback__title, .job-activity__title {
+  margin: 0 0 8px; font-size: 14px; font-weight: 600;
+  color: var(--text-primary, #111);
+}
+.job-feedback__row { margin-bottom: 8px; }
+.job-feedback__row--controls {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.job-feedback__input {
+  width: 100%; resize: vertical; font: inherit;
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border, #e3e3e3);
+  background: var(--bg-input, #fff); color: var(--text-primary, #111);
+}
+.job-feedback__input:focus-visible { outline: 2px solid var(--accent, #6e56cf); outline-offset: 1px; }
+.job-feedback__reason {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border, #e3e3e3);
+  background: var(--bg-elevated, #fff); color: var(--text-primary, #111); font: inherit;
+}
+.job-feedback__error { color: var(--error-text, #c0392b); font-size: 12.5px; margin: 4px 0 0; }
+.job-feedback__confirm {
+  padding: 10px 12px; border-radius: 8px;
+  background: color-mix(in oklab, var(--success) 14%, var(--bg-elevated));
+  border: 1px solid var(--success);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.job-feedback__confirm p { margin: 0; color: var(--text-primary, #111); }
+
+/* --- Activity log --- */
+.job-activity__empty { color: var(--text-muted, #888); font-size: 13px; margin: 0; }
+.job-activity__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.job-activity__item {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px;
+  font-size: 12.5px; color: var(--text-muted, #888);
+  padding-bottom: 8px; border-bottom: 1px solid var(--border-light, #ececec);
+}
+.job-activity__item:last-child { border-bottom: 0; padding-bottom: 0; }
+.job-activity__actor { font-weight: 600; color: var(--text-secondary, #555); }
+.job-activity__type { color: var(--text-primary, #111); }
+.job-activity__states, .job-activity__reason {
+  padding: 1px 8px; border-radius: 999px; background: var(--bg-hover, #f1f1f4);
+  color: var(--text-secondary, #555); font-size: 11.5px;
+}
+.job-activity__comment {
+  flex-basis: 100%; margin: 2px 0 0; color: var(--text-primary, #111);
+  white-space: pre-wrap;
+}
+
+/* Find jobs: the toolbar button pushes right; the form sits under the toolbar. */
+.jobs-toolbar .jobs-find-btn {
+  margin-left: auto; padding: 6px 12px;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.jobs-find-btn .rail-icon { width: 15px; height: 15px; flex: none; }
+.jobs-find {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  padding: 10px 16px; border-bottom: 1px solid var(--border, #e3e3e3);
+}
+.jobs-find__input {
+  flex: 1 1 240px; min-width: 0; padding: 6px 10px;
+  border: 1px solid var(--border, #e3e3e3); border-radius: 8px;
+  background: var(--bg-elevated, #fff); color: var(--text-primary, #111); font: inherit;
+}
+.jobs-find__status { margin: 0; padding: 8px 16px; color: var(--text-muted, #888); font-size: 13px; }
+
+/* ============================================================================
+   Clients tab ("WebBuilder") — Overview / Active / Completed / 12-step
+   detail, ported from practice/gui/static/style.css onto DisPatch's own
+   tokens. Scoped under .clients-view / .clients-modal so nothing here
+   collides with an existing (differently-styled) `.primary`/`.secondary`
+   elsewhere in the app.
+   ============================================================================ */
+
+.clients-tabnav { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border-light); overflow-x: auto; flex: 0 0 auto; }
+.clients-tab-btn {
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  padding: 6px 12px; color: var(--text-secondary); font: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+.clients-tab-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.clients-tab-btn.active { background: var(--accent-muted); color: var(--accent-text); font-weight: 600; }
+
+.clients-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px; }
+.clients-root { display: flex; flex-direction: column; gap: 14px; max-width: 720px; margin: 0 auto; }
+
+.clients-view .ov-card {
+  background: var(--bg-elevated); border: 1px solid var(--border-light);
+  border-radius: var(--radius-md); padding: 14px 16px;
+}
+.clients-view .ov-card h3 { margin: 0 0 8px; font-size: var(--step-0); }
+.clients-view .health-card { display: flex; align-items: center; gap: 12px; }
+.clients-view .health-card-glyph { font-size: 22px; line-height: 1; }
+.clients-view .health-card.status-healthy .health-card-glyph { color: var(--success); }
+.clients-view .health-card.status-warn .health-card-glyph { color: var(--warning); }
+.clients-view .health-card.status-needs_human .health-card-glyph { color: var(--error); }
+
+.clients-view .empty-note { color: var(--text-muted); font-size: var(--step--1); margin: 6px 0; }
+
+.clients-view .waiting-list, .clients-view .client-list, .clients-view .log-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.clients-view .waiting-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px;
+  border-radius: var(--radius-sm); background: var(--bg-tertiary);
+}
+.clients-view .waiting-glyph { color: var(--accent-text); }
+.clients-view .waiting-body { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.clients-view .waiting-name { font-weight: 600; }
+.clients-view .waiting-detail { color: var(--text-muted); font-size: var(--step--1); }
+
+.clients-view .compact-table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
+.clients-view .compact-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
+.clients-view .compact-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
+.clients-view .client-row { cursor: pointer; }
+.clients-view .client-row:hover { background: var(--bg-hover); }
+
+.client-search-field input {
+  width: 100%; padding: 8px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-primary); font: inherit;
+}
+.clients-view .client-list-item {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 8px;
+  border: none; border-radius: var(--radius-sm); background: var(--bg-tertiary); color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.clients-view .client-list-item:hover { background: var(--bg-hover); }
+.clients-view .chip-text { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.clients-view .chip-name { font-weight: 600; }
+.clients-view .chip-state { color: var(--text-muted); font-size: var(--step--1); }
+.clients-view .list-chevron { color: var(--text-muted); }
+
+.clients-view-detail .clients-detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.clients-view-detail .clients-detail-title { flex: 1 1 auto; min-width: 0; font-size: var(--step-1); margin: 0; overflow-wrap: break-word; }
+.clients-body, .clients-root, .steps-root, .step { min-width: 0; max-width: 100%; }
+.clients-view .compact-table { display: block; overflow-x: auto; }
+.clients-view-detail .clients-detail-sub { color: var(--text-muted); font-size: var(--step--1); font-weight: 400; }
+
+.hold-banner {
+  background: color-mix(in oklab, var(--error) 14%, var(--bg-elevated));
+  border: 1px solid var(--error); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 12px;
+}
+.hold-banner h3 { color: var(--error-text); margin: 0 0 6px; }
+.hold-banner form { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.hold-banner input[type="text"] { flex: 1 1 220px; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text-primary); }
+
+.steps-root { display: flex; flex-direction: column; gap: 8px; }
+.step {
+  background: var(--bg-elevated); border: 1px solid var(--border-light);
+  border-radius: var(--radius-md); padding: 4px 0;
+}
+.step > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; }
+.step > summary::-webkit-details-marker { display: none; }
+.step-glyph { width: 1.4em; text-align: center; }
+.step.status-done .step-glyph { color: var(--success); }
+.step.status-current .step-glyph { color: var(--accent-text); }
+.step.status-upcoming .step-glyph { color: var(--text-muted); }
+.step-title { flex: 1 1 auto; }
+.gate-tag { font-size: var(--step--1); color: var(--warning-text); border: 1px solid var(--warning); border-radius: var(--radius-sm); padding: 1px 6px; }
+.step-body { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+.step-section h4 { margin: 0 0 6px; font-size: var(--step--1); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.needs-list { display: flex; flex-direction: column; gap: 6px; }
+.needs-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: var(--radius-sm); background: var(--bg-tertiary); }
+.needs-item.present .needs-glyph { color: var(--success); }
+.needs-item.missing .needs-glyph { color: var(--error-text); }
+.needs-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; }
+.needs-name { font-weight: 600; }
+.needs-hint { color: var(--text-muted); font-size: var(--step--1); }
+.do-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.if-fails summary { cursor: pointer; color: var(--text-muted); font-size: var(--step--1); }
+.if-fails-body { color: var(--text-secondary); font-size: var(--step--1); white-space: pre-wrap; }
+.log-time { color: var(--text-muted); margin-right: 6px; font-size: var(--step--1); }
+.log-client { color: var(--accent-text); margin-right: 4px; }
+
+.clients-view button.primary, .clients-modal button.primary {
+  background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 7px 14px; font: inherit; cursor: pointer;
+}
+.clients-view button.primary:hover, .clients-modal button.primary:hover { background: var(--accent-hover); }
+.clients-view button.secondary, .clients-modal button.secondary {
+  background: transparent; color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 7px 14px; font: inherit; cursor: pointer;
+}
+.clients-view button.secondary:hover { border-color: var(--accent); }
+.clients-view button.danger, .clients-modal button.danger {
+  background: var(--error); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 7px 14px; font: inherit; cursor: pointer;
+}
+
+.schema-form { display: flex; flex-direction: column; gap: 8px; }
+.schema-form .field { display: flex; flex-direction: column; gap: 4px; }
+.schema-form label { font-size: var(--step--1); color: var(--text-secondary); }
+.schema-form input, .schema-form textarea, .schema-form select {
+  padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-input); color: var(--text-primary); font: inherit;
+}
+.needs-form-error { color: var(--error-text); }
+
+.clients-modal .modal-card {
+  background: var(--bg-secondary); border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg); padding: 18px; width: min(420px, 92vw);
+  max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg);
+}
+.clients-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.confirm-hash { font-family: var(--font-mono); background: var(--bg-tertiary); padding: 8px; border-radius: var(--radius-sm); word-break: break-all; margin: 8px 0; }
+
+#clients-job-strip {
+  position: sticky; bottom: 0; background: var(--bg-elevated); border-top: 1px solid var(--border-light);
+  padding: 10px 14px; font-size: var(--step--1);
+}
+.job-headline { display: flex; align-items: center; gap: 10px; }
+.job-spinner {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-light);
+  border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.verdict-pill { padding: 2px 8px; border-radius: var(--radius-sm); font-weight: 600; font-size: var(--step--1); }
+.verdict-ok { background: color-mix(in oklab, var(--success) 22%, transparent); color: var(--success-text); }
+.verdict-refused { background: color-mix(in oklab, var(--warning) 22%, transparent); color: var(--warning-text); }
+.verdict-hold, .verdict-fail { background: color-mix(in oklab, var(--error) 22%, transparent); color: var(--error-text); }
+.verdict-waiting, .verdict-other { background: var(--bg-tertiary); color: var(--text-secondary); }
+.job-console { margin-top: 6px; }
+.job-console pre { white-space: pre-wrap; max-height: 160px; overflow-y: auto; font-family: var(--font-mono); font-size: var(--step--1); }
+
+/* Emails tab: iframe fills the pane exactly like the Harness/StudioForge
+   frames — no bespoke sizing needed beyond what .harness-frame/.studioforge-frame
+   already establish via the shared .terminal-* rules; .mail-frame reuses them. */
+.mail-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mail-frame, .studioforge-frame, .harness-frame { width: 100%; height: 100%; border: none; background: var(--bg-primary); }
+.mail-note {
+  margin: auto; text-align: center; padding: 24px; color: var(--text-secondary);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.mail-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--accent-text); }
+.mail-note p { max-width: 46ch; margin: 0; }

@@ -37,7 +37,7 @@
 //     would read worse than leaving the pair consistent;
 //   * NOT the numeric formatting (bytes, durations, clock). Unit symbols are
 //     near-universal and the values are diagnostic — see docs/dashboard.md.
-import { el } from './util.js?v=13';
+import { el, railIcon, RAIL_ICONS, iconLabel } from './util.js?v=18';
 
 // ===================== State =====================
 
@@ -190,7 +190,7 @@ function buildShell() {
   nodes.findings = el('div', { class: 'dash-findings' });
 
   // ---- log viewer ----
-  nodes.logToggle = el('button', { class: 'dash-log-toggle', text: `📜 ${T('dash.log_show')}` });
+  nodes.logToggle = el('button', { class: 'dash-log-toggle' }, iconLabel(RAIL_ICONS.history, T('dash.log_show')));
   nodes.logToggle.setAttribute('aria-expanded', 'false');
   nodes.logToggle.addEventListener('click', () => toggleLog());
 
@@ -224,7 +224,7 @@ function buildShell() {
   // "Done" is gone with the standalone modal: the dialog's own ✕ closes it, and
   // a second button that only ever did the same thing is the dead button the
   // contextual footer exists to avoid.
-  nodes.deepBtn = el('button', { class: 'btn-secondary', text: `🔬 ${T('dash.deep_run')}` });
+  nodes.deepBtn = el('button', { class: 'btn-secondary' }, iconLabel(RAIL_ICONS.search, T('dash.deep_run')));
   nodes.deepBtn.title = T('dash.deep_title');
   nodes.deepBtn.addEventListener('click', () => runDeep());
   nodes.updated = el('span', { class: 'dash-updated muted', text: '' });
@@ -291,7 +291,7 @@ export function closeDashboard() { unmountDashboard(); }
  */
 export function repaintDashboard() {
   if (!nodes.body) return;
-  nodes.logToggle.textContent = `📜 ${T(D.logOpen ? 'dash.log_hide' : 'dash.log_show')}`;
+  nodes.logToggle.replaceChildren(...iconLabel(RAIL_ICONS.history, T(D.logOpen ? 'dash.log_hide' : 'dash.log_show')));
   nodes.logSelect.setAttribute('aria-label', T('dash.lines_aria'));
   Array.from(nodes.logSelect.options).forEach((opt) => {
     opt.textContent = T('dash.n_lines', { count: Number(opt.value) });
@@ -299,7 +299,7 @@ export function repaintDashboard() {
   nodes.logRefresh.textContent = `⟳ ${T('dash.refresh')}`;
   if (nodes.checksHead) nodes.checksHead.textContent = T('dash.checks');
   if (nodes.deepBtn) {
-    nodes.deepBtn.textContent = `🔬 ${T(D.deepBusy ? 'dash.deep_running' : 'dash.deep_run')}`;
+    nodes.deepBtn.replaceChildren(...iconLabel(RAIL_ICONS.search, T(D.deepBusy ? 'dash.deep_running' : 'dash.deep_run')));
     nodes.deepBtn.title = T('dash.deep_title');
   }
   // Cards memoise on their rendered values, so a language switch alone would
@@ -368,7 +368,7 @@ async function runDeep() {
   if (D.deepBusy) return;
   D.deepBusy = true;
   nodes.deepBtn.disabled = true;
-  nodes.deepBtn.textContent = `🔬 ${T('dash.deep_running')}`;
+  nodes.deepBtn.replaceChildren(...iconLabel(RAIL_ICONS.search, T('dash.deep_running')));
   try {
     const data = await getJSON('/api/dashboard/deep');
     D.data = data;
@@ -383,7 +383,7 @@ async function runDeep() {
   } finally {
     D.deepBusy = false;
     nodes.deepBtn.disabled = false;
-    nodes.deepBtn.textContent = `🔬 ${T('dash.deep_run')}`;
+    nodes.deepBtn.replaceChildren(...iconLabel(RAIL_ICONS.search, T('dash.deep_run')));
     paint();
   }
 }
@@ -392,7 +392,7 @@ function toggleLog() {
   D.logOpen = !D.logOpen;
   nodes.logPanel.classList.toggle('hidden', !D.logOpen);
   nodes.logToggle.setAttribute('aria-expanded', String(D.logOpen));
-  nodes.logToggle.textContent = `📜 ${T(D.logOpen ? 'dash.log_hide' : 'dash.log_show')}`;
+  nodes.logToggle.replaceChildren(...iconLabel(RAIL_ICONS.history, T(D.logOpen ? 'dash.log_hide' : 'dash.log_show')));
   if (D.logOpen && !D.log) refreshLog();
 }
 
@@ -443,9 +443,9 @@ function paintBanner() {
   const stale = !!D.error;
   nodes.stale.classList.toggle('hidden', !stale);
   if (stale) {
-    nodes.stale.textContent = D.data
-      ? `⚠ ${T('dash.stale', { error: D.error, ago: fmtAgo(D.fetchedAt) })}`
-      : `⚠ ${T('dash.stale_no_data', { error: D.error })}`;
+    nodes.stale.replaceChildren(...iconLabel(RAIL_ICONS.alert, D.data
+      ? T('dash.stale', { error: D.error, ago: fmtAgo(D.fetchedAt) })
+      : T('dash.stale_no_data', { error: D.error })));
   }
 }
 
@@ -463,13 +463,13 @@ function paintUpdated() {
 // selection mid-copy — so each card only redraws when its own values changed.
 const cardSig = new Map();
 
-function card(key, title, rows, note) {
+function card(key, icon, title, rows, note) {
   const sig = JSON.stringify([title, rows.map((r) => r && [r.l, r.v, r.t]), note]);
   const existing = nodes.cards.querySelector(`[data-card="${key}"]`);
   if (existing && cardSig.get(key) === sig) return existing;
   cardSig.set(key, sig);
   const node = el('section', { class: 'dash-card', dataset: { card: key } }, [
-    el('h4', { class: 'dash-card-title', text: title }),
+    el('h4', { class: 'dash-card-title' }, iconLabel(icon, title)),
     ...rows.filter(Boolean).map((r) => row(r.l, r.v, r.t)),
     ...(note ? [el('p', { class: 'dash-card-note muted', text: note })] : []),
   ]);
@@ -511,7 +511,7 @@ function paintCards() {
   const yes = T('dash.yes'), noBad = T('dash.no_emphatic');
 
   const built = [
-    card('process', `⚙ ${T('dash.card_process')}`, [
+    card('process', RAIL_ICONS.gear, T('dash.card_process'), [
       { l: T('dash.version'), v: p.version || '—' },
       { l: T('dash.uptime'), v: fmtDuration(p.uptime_seconds) },
       { l: T('dash.memory'), v: fmtBytes(p.rss_bytes) + (p.rss_is_peak ? ` ${T('dash.peak')}` : '') },
@@ -526,7 +526,7 @@ function paintCards() {
       { l: T('dash.pid'), v: p.pid ?? '—' },
     ]),
 
-    card('storage', `💾 ${T('dash.card_storage')}`, [
+    card('storage', RAIL_ICONS.disk, T('dash.card_storage'), [
       { l: T('dash.free_space'), v: T('dash.free_of', {
           free: fmtBytes(disk.free_bytes), total: fmtBytes(disk.total_bytes) }),
         t: diskTone(disk) },
@@ -550,7 +550,7 @@ function paintCards() {
         t: s.writable === false ? 'fail' : null },
     ], storeNote.join(' · ')),
 
-    card('database', `🗄 ${T('dash.card_database')}`, [
+    card('database', RAIL_ICONS.database, T('dash.card_database'), [
       { l: T('dash.integrity'), v: db.check
         ? `${db.check.ok ? T('dash.integrity_ok') : T('dash.integrity_failed')} (${db.check.kind})` : '—',
         t: db.check && !db.check.ok ? 'fail' : null },
@@ -570,13 +570,13 @@ function paintCards() {
       { l: T('dash.snapshots'), v: backup.count ?? '—' },
     ]),
 
-    card('connections', `🔌 ${T('dash.card_connections')}`, [
+    card('connections', RAIL_ICONS.plug, T('dash.card_connections'), [
       { l: T('dash.total'), v: c.total ?? '—' },
       { l: T('dash.full_access'), v: c.tiers_available ? c.full : T('dash.unknown') },
       { l: T('dash.limited'), v: c.tiers_available ? c.limited : T('dash.unknown') },
     ], T('dash.note_connections')),
 
-    card('agent', `🤖 ${T('dash.card_agent')}`, [
+    card('agent', RAIL_ICONS.bots, T('dash.card_agent'), [
       { l: T('dash.configured'), v: a.configured ? (a.bin || yes) : T('dash.none') },
       // Direct LLM providers are the OTHER way a bot can answer, and they need
       // none of the rows below. Listed first so "Configured: none" is read in
@@ -654,7 +654,7 @@ function transportCard() {
     rows.push({ l: T('dash.image_failures_24h'), v: String(fails), t: fails ? 'warn' : null });
   }
   const since = gw && gw.since ? T('dash.note_since', { time: fmtClock(gw.since) }) : null;
-  return card('transport', `🔗 ${T('dash.card_transport')}`, rows, since);
+  return card('transport', RAIL_ICONS.link, T('dash.card_transport'), rows, since);
 }
 
 function diskTone(disk) {
@@ -700,7 +700,7 @@ function paintFindings() {
     ]);
     if (f.fix) {
       main.append(el('div', { class: 'dash-finding-fix' }, [
-        el('span', { class: 'dash-fix-glyph', 'aria-hidden': 'true', text: '🛠' }),
+        el('span', { class: 'dash-fix-glyph', 'aria-hidden': 'true' }, [railIcon(RAIL_ICONS.tools)]),
         el('span', { text: f.fix }),
       ]));
     }

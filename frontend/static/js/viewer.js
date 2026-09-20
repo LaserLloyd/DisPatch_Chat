@@ -22,11 +22,11 @@
 // icon-name table, error classification) are exported separately from the DOM
 // so they can be unit-tested under plain node — see frontend/tests/viewer.test.js.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=13';
+import { RAIL_ICONS, acquireInert, el, railIcon, releaseInert } from './util.js?v=18';
 import { t, fileSize } from './i18n.js?v=3';
 // markdown.js is versioned in lockstep across every importer (assets.test.js
 // enforces it) — this line moves with the rest when the integration pass bumps it.
-import { renderMarkdown, enhanceContent } from './markdown.js?v=28';
+import { renderMarkdown, enhanceContent } from './markdown.js?v=31';
 import { nimEnabled } from './nim.js?v=5';
 
 // ---------------------------------------------------------------------------
@@ -299,9 +299,9 @@ export function openViewer({ path, url, title, returnFocus } = {}) {
   const dlBtn = iconBtn('viewer-download', 'viewer.download', () => downloadCurrent());
   const reloadBtn = iconBtn('viewer-reload', 'viewer.reload', () => reload());
   const closeBtn = el('button', {
-    class: 'lightbox-close viewer-close', type: 'button', text: '✕',
+    class: 'lightbox-close viewer-close', type: 'button',
     'aria-label': t('viewer.close'),
-  });
+  }, [railIcon(RAIL_ICONS.close)]);
 
   const header = el('div', { class: 'viewer-header' }, [
     backBtn, titleBtn, el('div', { class: 'viewer-actions' }, [openBtn, dlBtn, reloadBtn, closeBtn]),
@@ -638,11 +638,11 @@ export function openViewer({ path, url, title, returnFocus } = {}) {
 
   // --- mount --------------------------------------------------------------
 
-  const app = doc.getElementById('app');
-  if (app) {
-    app.inert = true;
-    cleanups.push(() => { app.inert = false; });
-  }
+  // Ref-counted through util.js: the viewer and an image lightbox opened on
+  // top of it are two owners of the same attribute, and whichever closed first
+  // used to lift it for both.
+  const inertToken = acquireInert();
+  cleanups.push(() => releaseInert(inertToken));
   doc.body.append(node);
   current = {
     node,

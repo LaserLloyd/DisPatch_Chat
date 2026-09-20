@@ -14,6 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { domSkip } from './_require-dom.js';
 
 const require = createRequire(import.meta.url);
 let jsdom = null;
@@ -279,7 +280,7 @@ test('shouldShowThreadSections: mobile + search open → false (either gate trip
 
 // ===================== DOM builder (jsdom) =====================
 
-test('threadSectionHeadEl builds a desktop header with the right label', { skip: jsdom ? false : 'jsdom is not installed' }, () => {
+test('threadSectionHeadEl builds a desktop header with the right label', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
   const { JSDOM } = jsdom;
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
   globalThis.document = dom.window.document;
@@ -310,7 +311,7 @@ test('threadSectionHeadEl builds a desktop header with the right label', { skip:
   assert.equal(older.matches('.thread-item'), false);
 });
 
-test('threadSectionHeadEl falls back to English without a translator', { skip: jsdom ? false : 'jsdom is not installed' }, () => {
+test('threadSectionHeadEl falls back to English without a translator', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
   const { JSDOM } = jsdom;
   const dom = new JSDOM('<!doctype html><html><body></body></html>');
   globalThis.document = dom.window.document;

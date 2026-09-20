@@ -78,6 +78,15 @@ Thumbs.db
 /tmp/
 scratch/
 
+# Screenshots taken by the e2e scripts. A capture of a running instance shows
+# real conversation — bot names, avatars, message previews, mailbox addresses —
+# and NONE of it is visible to scripts/scrub_check.py, which reads text and
+# cannot see inside a PNG. So the e2e tooling writes here by default and
+# docs/screenshots/ only ever receives a picture somebody chose, and looked at,
+# deliberately. (tests/e2e/mobile_layout.py once wrote 20 files straight into
+# docs/screenshots/; they were one `git add -A` from a public repo.)
+.screenshots-local/
+
 # Per-fork scrubber identifiers — never publish the list itself.
 scripts/scrub-rules.local.txt
 

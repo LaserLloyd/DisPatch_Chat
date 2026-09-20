@@ -22,7 +22,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -189,4 +189,165 @@ test('the dark/light switch left no trace in the markup', () => {
   assert.ok(!/data-theme/.test(HTML), 'index.html still stamps data-theme');
   assert.ok(!/dispatch-theme/.test(HTML), 'index.html still reads dispatch-theme');
   assert.ok(!/theme\.dark|theme\.light/.test(HTML), 'index.html still references the old theme labels');
+});
+
+// --- (4) the notification contract -----------------------------------------
+//
+// The unread indicator used to paint `--accent-hover` on a resting dot of
+// `--text-muted`. Both tokens are chosen for other jobs — accent-hover sits
+// UNDER white button text so it is deliberately deep, and text-muted is
+// body-adjacent so it is deliberately bright — and the result was that in four
+// of the six palettes the "you have a message" dot was DARKER and quieter than
+// the "nothing here" dot, while no palette reached even 3:1 between the two
+// states. Daylight measured 1.16:1: the two states were the same dot.
+//
+// `--notify` and `--dot-idle` exist to make that a solved pair per palette
+// rather than a side effect of tokens picked for buttons. The contract is
+// stated in terms of contrast against the background, so it holds for light
+// and dark palettes alike without special-casing either.
+
+/** WCAG 2.x relative luminance. */
+function luminance(hex) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = [...h].map((c) => c + c).join('');
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const f = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+function contrast(a, b) {
+  const [x, y] = [luminance(a), luminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+/** A token's literal hex within one palette body. Only literals are checked;
+ *  a token defined via color-mix() is deliberately out of scope here. */
+function hexToken(body, name) {
+  const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})`).exec(body);
+  return m ? m[1] : null;
+}
+
+test('every palette solves the notification pair against its own background', () => {
+  const failures = [];
+  for (const p of paletteBlocks) {
+    const bg = hexToken(p.body, 'bg-sidebar') || hexToken(p.body, 'bg-primary');
+    const notify = hexToken(p.body, 'notify');
+    const idle = hexToken(p.body, 'dot-idle');
+    if (!bg || !notify || !idle) {
+      failures.push(`${p.id}: missing one of --bg-sidebar/--notify/--dot-idle`);
+      continue;
+    }
+    const nb = contrast(notify, bg);
+    const ib = contrast(idle, bg);
+    const ni = contrast(notify, idle);
+    // Loud enough to be seen at all. 4.5:1 rather than 1.4.11's 3:1 because
+    // this mark is ~13px and is the app's only unread signal.
+    if (nb < 4.5) failures.push(`${p.id}: --notify only ${nb.toFixed(2)}:1 on the sidebar (need >= 4.5)`);
+    // Quiet enough that its presence is not itself a signal.
+    if (ib > 3.0) failures.push(`${p.id}: --dot-idle is ${ib.toFixed(2)}:1 on the sidebar (need <= 3.0 — it must not compete)`);
+    // And the two states must never blur into each other.
+    if (ni < 3.0) failures.push(`${p.id}: --notify vs --dot-idle only ${ni.toFixed(2)}:1 (need >= 3.0)`);
+  }
+  assert.deepEqual(failures, [], '\n' + failures.join('\n'));
+});
+
+test('the unread indicator does not rely on colour alone', () => {
+  // WCAG 1.4.1: a state carried only by hue is invisible to a chunk of the
+  // audience and to anyone in bright sun. The unread dot must also change
+  // SIZE, so the state survives greyscale.
+  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
+  const rule = /\.bot-status-dot\.unread\s*\{([^}]*)\}/.exec(APP);
+  assert.ok(rule, '.bot-status-dot.unread rule not found in app.css');
+  assert.match(rule[1], /--notify/, 'the unread dot no longer uses --notify');
+  assert.match(rule[1], /\bwidth:/, 'the unread dot must also change size, not just colour');
+});
+
+test('no indicator still reaches for the retired token pair', () => {
+  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
+  for (const sel of ['.bot-status-dot.unread', '.thread-unread-dot']) {
+    const rule = new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(APP);
+    assert.ok(rule, `${sel} rule not found in app.css`);
+    assert.ok(!/--accent-hover/.test(rule[1]),
+      `${sel} is back on --accent-hover, which is tuned for button fills and fails the notification contract`);
+  }
+});
+
+test('the thinking dot is visible in every palette, including the light ones', () => {
+  // --warning is the same amber in all six palettes because it is authored
+  // against a dark surface. Painted on Paper it was 1.02:1 — a yellow dot on
+  // cream. --warning-text is the per-palette adaptation that already existed;
+  // this pins the dot to it.
+  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
+  const rule = /\.bot-status-dot\.thinking\s*\{([^}]*)\}/.exec(APP);
+  assert.ok(rule, '.bot-status-dot.thinking rule not found in app.css');
+  assert.ok(!/var\(--warning\)/.test(rule[1]),
+    'the thinking dot is back on the raw --warning, which is invisible on the light palettes');
+
+  const failures = [];
+  for (const p of paletteBlocks) {
+    const bg = hexToken(p.body, 'bg-sidebar') || hexToken(p.body, 'bg-primary');
+    const warn = hexToken(p.body, 'warning-text');
+    if (!bg || !warn) { failures.push(`${p.id}: missing --bg-sidebar/--warning-text`); continue; }
+    const r = contrast(warn, bg);
+    if (r < 3.0) failures.push(`${p.id}: --warning-text only ${r.toFixed(2)}:1 on the sidebar (need >= 3.0)`);
+  }
+  assert.deepEqual(failures, [], '\n' + failures.join('\n'));
+});
+
+test('no status indicator paints a raw, palette-invariant semantic token', () => {
+  // --success, --error and --warning are the SAME hex in all six palettes:
+  // they are authored against a dark surface, and only the *-text variants are
+  // adapted per palette. Measured against the page background, --success is
+  // 1.30:1 on Paper and 1.92:1 on Daylight, and --error is 1.86:1 / 2.77:1.
+  // A dot or tick painted with one of them is invisible on the light skins.
+  //
+  // Scoped to the small coloured MARKS that carry state. A large filled
+  // surface with its own contrasting text is a different problem and is not
+  // what this asserts.
+  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
+  const RAW = /var\(--(?:success|error|warning)[,)]/;
+  const MARK = /(^|[\s,])\.[\w-]*(?:dot|drop-icon|pip|badge-state)\b/;
+
+  const offenders = [];
+  for (const m of APP.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = m[1].trim();
+    const body = m[2];
+    if (!MARK.test(selector)) continue;
+    // Only the properties that actually paint the mark.
+    for (const decl of body.split(';')) {
+      if (!/^\s*(background|background-color|color|box-shadow|border-color)\s*:/.test(decl)) continue;
+      if (RAW.test(decl)) offenders.push(`${selector.slice(0, 70)} -> ${decl.trim().slice(0, 80)}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    '\nThese status marks use a palette-invariant token; use the --*-text variant:\n'
+    + offenders.join('\n'));
+});
+
+test('every custom property a rule reads is defined somewhere', () => {
+  // `var(--accent-soft, rgba(46,168,255,.12))` shipped for months: no --accent-soft
+  // has ever been declared, so the rule always painted its literal fallback and
+  // ignored the palette entirely. A fallback hides the mistake, which is why it
+  // needs a test rather than an eye.
+  const THEME = stripComments(readFileSync(join(STATIC, 'theme.css'), 'utf8'));
+  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
+  const DASH = stripComments(readFileSync(join(STATIC, 'dashboard.css'), 'utf8'));
+  const all = `${THEME}\n${APP}\n${DASH}`;
+
+  const defined = new Set([...all.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+
+  // A property can also be set from JS on the element itself — main.js does
+  // exactly that for --name-hue, which is per-bot and therefore cannot live in
+  // a stylesheet. Those are legitimate, so read the JS side too rather than
+  // maintaining a hand-written exception list that goes stale.
+  for (const f of readdirSync(join(STATIC, 'js')).filter((n) => n.endsWith('.js'))) {
+    const js = readFileSync(join(STATIC, 'js', f), 'utf8');
+    for (const m of js.matchAll(/setProperty\(\s*['"`](--[\w-]+)/g)) defined.add(m[1]);
+    for (const m of js.matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]);
+  }
+
+  const used = new Set([...all.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]));
+  const missing = [...used].filter((name) => !defined.has(name)).sort();
+  assert.deepEqual(missing, [],
+    '\nThese custom properties are read but never declared:\n' + missing.join('\n'));
 });
