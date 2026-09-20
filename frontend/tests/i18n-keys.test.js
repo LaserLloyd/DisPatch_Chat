@@ -105,6 +105,12 @@ const DYNAMIC = [
   // js/markdown.js  blockquote():  t(`md.callout_${kind}`), kind from CALLOUT_RE
   { re: /^msg\.callout_(note|tip|important|warning|caution)$/,
     built: 'markdown.js  t(`msg.callout_${kind}`)' },
+  // js/main.js  openModelPicker():  t(`chat.thinking_${lvl}`), lvl drawn from
+  // modelchip.js's THINKING_LEVELS (chat.thinking_default is a separate,
+  // literal t() call for the picker's "bot default" option and needs no
+  // entry here).
+  { re: /^chat\.thinking_(off|low|medium|high|max|adaptive)$/,
+    built: "main.js  t(`chat.thinking_${lvl}`)" },
 ];
 
 test('every key in en.json is used by the app', () => {

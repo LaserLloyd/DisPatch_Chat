@@ -150,6 +150,13 @@ export const api = {
   pin: (tid, pinned) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ pinned }) }),
   archive: (tid) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'DELETE' }),
   remove: (tid) => j(`/api/threads/${encodeURIComponent(tid)}?hard=true`, { method: 'DELETE' }),
+  // Per-thread model/thinking override (the header model chip). `prefs` is
+  // MERGED server-side (db.update_thread_prefs) — a null value removes that
+  // key, an absent one leaves it alone. Operator-only; a decoy or
+  // machine-inbound caller 403s (see main._require_operator_session).
+  setThreadPrefs: (tid, prefs) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ prefs }) }),
+  // The models this bot is ALLOWED to use, for that same picker. Operator-only.
+  botModels: (botId) => j(`/api/bots/${encodeURIComponent(botId)}/models`),
 
   deleteMessage: (mid) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'DELETE' }),
   // Takes either a row op ({index, checked, list}) or a whole array. The row

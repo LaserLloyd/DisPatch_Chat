@@ -106,7 +106,21 @@
     "archive_confirm": "¿Archivar este chat? Se ocultará de tu lista de chats.",
     "archived": "Chat archivado",
     "delete_confirm": "¿Eliminar este chat de forma permanente?",
-    "delete_thread": "Eliminar"
+    "delete_thread": "Eliminar",
+    "model_chip": "Modelo y razonamiento",
+    "model_picker_model": "Modelo",
+    "model_picker_thinking": "Razonamiento",
+    "model_picker_bot_default": "Predeterminado del bot",
+    "model_picker_context": "Contexto usado: {used}",
+    "model_picker_reset": "Usar predeterminado del bot",
+    "model_picker_apply": "Aplicar",
+    "thinking_default": "Predeterminado del bot",
+    "thinking_off": "Desactivado",
+    "thinking_low": "Bajo",
+    "thinking_medium": "Medio",
+    "thinking_high": "Alto",
+    "thinking_max": "Máximo",
+    "thinking_adaptive": "Adaptativo"
   },
   "welcome": {
     "with_bot": "Chatea con {name}",

@@ -109,7 +109,21 @@
     "archive_confirm": "أرشفة هذه المحادثة؟ ستُخفى من قائمة محادثاتك.",
     "archived": "تمت أرشفة المحادثة",
     "delete_confirm": "حذف هذه المحادثة نهائيًا؟",
-    "delete_thread": "حذف"
+    "delete_thread": "حذف",
+    "model_chip": "النموذج والتفكير",
+    "model_picker_model": "النموذج",
+    "model_picker_thinking": "مستوى التفكير",
+    "model_picker_bot_default": "الإعداد الافتراضي للبوت",
+    "model_picker_context": "السياق المستخدم: {used}",
+    "model_picker_reset": "استخدام الإعداد الافتراضي للبوت",
+    "model_picker_apply": "تطبيق",
+    "thinking_default": "الإعداد الافتراضي للبوت",
+    "thinking_off": "إيقاف",
+    "thinking_low": "منخفض",
+    "thinking_medium": "متوسط",
+    "thinking_high": "مرتفع",
+    "thinking_max": "أقصى",
+    "thinking_adaptive": "تكيفي"
   },
   "welcome": {
     "with_bot": "محادثة مع {name}",

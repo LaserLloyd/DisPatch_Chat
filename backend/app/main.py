@@ -1221,6 +1221,11 @@ def _redact_thread_dict(t: dict) -> dict:
     out = dict(t)
     if out.get("last_message"):
         out["last_message"] = _strip_media_text(out["last_message"])
+    # A model name is operator configuration, not family-facing — see
+    # ThreadOut.prefs. Dropped outright rather than nulled, same as every
+    # other Safe-Mode redaction here, so a locked device never learns a
+    # per-thread override exists at all.
+    out.pop("prefs", None)
     return out
 
 
@@ -1939,6 +1944,27 @@ def _require_full_access(request: Request) -> None:
     session = _session_of(request) or auth.get_session(
         request.cookies.get(COOKIE_NAME))
     if session is not None:
+        return
+    if auth.load().pin_set:
+        raise HTTPException(403, "Unlock for full access")
+
+
+def _require_operator_session(request: Request) -> None:
+    """Stricter than _require_full_access: a real PIN session only, never
+    the machine-inbound bypass.
+
+    A model name is operator configuration, not thread housekeeping. The
+    machine-to-machine surface (on-box agents, the API-token bypass) reaches
+    PATCH /api/threads/{id} for title/pin/archive — ordinary thread upkeep a
+    bot may reasonably do on its own thread — but must not be able to
+    reconfigure which model or thinking level answers it. Decoy is refused
+    like everywhere else; with no PIN set at all there is no session to
+    require, so that case is allowed the same way _require_full_access
+    allows it.
+    """
+    if getattr(request.state, "decoy", False):
+        raise HTTPException(403, "Unlock for full access")
+    if _session_of(request) is not None:
         return
     if auth.load().pin_set:
         raise HTTPException(403, "Unlock for full access")
@@ -6380,6 +6406,32 @@ async def _compose_agent_text(thread_id: str, text: str,
     return text
 
 
+async def _with_thread_model_prefs(thread_id: str,
+                                   opts: "TurnOptions | None") -> "TurnOptions":
+    """Fold a thread's standing model/thinking prefs into its TurnOptions.
+
+    The per-thread override (PATCH /api/threads/{id} prefs) is a STANDING
+    choice for the conversation, stored on the thread row, not something every
+    caller of run_agent_turn re-states on each message — the composer has no
+    idea a chip exists. So this is where it is applied: a caller that already
+    named a model or thinking level on its own opts (none do today, but a
+    future feature building its own TurnOptions might) keeps that choice;
+    anything left unset falls back to the thread's own prefs, and a thread
+    with none set falls back to the agent's default exactly as before this
+    existed — read_thread_prefs on a thread with no `prefs` row returns {}.
+    """
+    opts = opts or TurnOptions()
+    if opts.model is not None and opts.thinking is not None:
+        return opts
+    thread = await db.get_thread(thread_id)
+    prefs = (thread.prefs if thread else None) or {}
+    if opts.model is None and prefs.get("model"):
+        opts = opts._replace(model=prefs["model"])
+    if opts.thinking is None and prefs.get("thinking"):
+        opts = opts._replace(thinking=prefs["thinking"])
+    return opts
+
+
 async def run_agent_turn(thread_id: str, bot_id: str, text: str,
                          opts: "TurnOptions | None" = None) -> None:
     """Send `text` to the bot for `thread_id`, persist + broadcast the reply.
@@ -6415,6 +6467,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     session_key = openclaw.session_key_for(agent_id, thread_id)
     _thread_bot[thread_id] = bot_id   # authoritative attribution for redaction
     _mirror_nudge()                   # someone is chatting → mirror polls fast
+    opts = await _with_thread_model_prefs(thread_id, opts)
     async with lock:
         # Inside the lock: with turns queued, stopping the follower any earlier
         # would let the PREVIOUS turn's finally spawn a fresh follower that
@@ -6559,10 +6612,19 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
                 await db.update_thread_status(thread_id, "idle")
             else:
                 await db.update_thread_status(thread_id, "error")
-                await manager.broadcast(
-                    {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
-                     "message": e.message, "detail": e.detail}
-                )
+                err_frame = {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                            "message": e.message, "detail": e.detail}
+                # AgentRefused is a VERDICT on this request (a model/thinking
+                # override the agent won't accept, most often), not an outage —
+                # tag it so the model chip can tell the two apart and show its
+                # warning state instead of the generic chat-error toast. The
+                # preference itself is untouched here on purpose: nothing in
+                # this path calls db.update_thread_prefs, so a refused choice
+                # stays selected for the operator to see and correct, rather
+                # than silently reverting to the agent's default.
+                if isinstance(e, openclaw.AgentRefused):
+                    err_frame["refused"] = True
+                await manager.broadcast(err_frame)
         except Exception as e:  # pragma: no cover - defensive
             log.exception("unexpected agent turn error")
             if persisted:
@@ -7514,6 +7576,73 @@ async def _after_avatar_change(bot_id: str) -> None:
             await manager.broadcast({"type": "thread_update", "thread": thread.model_dump()})
 
 
+def _normalize_model_entries(raw: list) -> list[dict]:
+    """The gateway's models.list result, defensively shaped into
+    {id, label} pairs. Neither field name nor even dict-vs-string is pinned
+    by any contract we own, so this tolerates a plain string entry too —
+    only a blank/missing id is dropped, because an id-less entry can never
+    be sent back to the gateway as a choice."""
+    out = []
+    for m in raw if isinstance(raw, list) else []:
+        if isinstance(m, dict):
+            mid = m.get("id") or m.get("model")
+            if not isinstance(mid, str) or not mid.strip():
+                continue
+            label = m.get("label") or m.get("name") or mid
+            out.append({"id": mid.strip(), "label": str(label)})
+        elif isinstance(m, str) and m.strip():
+            out.append({"id": m.strip(), "label": m.strip()})
+    return out
+
+
+# agent_id -> (fetched_at, models). The gateway round trip is real network
+# work the header chip would otherwise repeat on every open of the picker;
+# a short TTL is "briefly", not "forever" — a newly-allowed model shows up
+# within it rather than needing a reload.
+_BOT_MODELS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_BOT_MODELS_TTL = 30.0
+
+
+@app.get("/api/bots/{bot_id}/models", responses=problem.MACHINE)
+async def bot_models(request: Request, bot_id: str):
+    """The models this bot is allowed to answer with — for the per-thread
+    model override chip.
+
+    Operator-only (see _require_operator_session): a model name is
+    configuration, not something Safe Mode or a machine caller needs to see.
+    The gateway's own list, not a guess — offering a model it will refuse is
+    a worse experience than not offering it, and only the gateway knows
+    which ones this agent is actually allowed to use. An API bot (Connect an
+    AI, no OpenClaw seat) has exactly one model, ever: its own configured one.
+    """
+    _require_operator_session(request)
+    bot = config.resolve_bot(bot_id)
+    if not bot:
+        raise HTTPException(404, "Unknown bot")
+    if bot.api:
+        model = str((bot.api or {}).get("model") or "").strip()
+        models = [{"id": model, "label": model}] if model else []
+        return {"bot_id": bot.id, "models": models, "source": "api"}
+
+    agent_id = bot.agent_id
+    now = asyncio.get_event_loop().time()
+    cached = _BOT_MODELS_CACHE.get(agent_id)
+    if cached and now - cached[0] < _BOT_MODELS_TTL:
+        return {"bot_id": bot.id, "models": cached[1], "source": "gateway"}
+
+    client = _gateway_client
+    if client is None or not client.connected.is_set():
+        raise HTTPException(503, "The agent gateway is not connected")
+    try:
+        raw = await client.models_list(agent_id)
+    except (gateway_ws.GatewayDisconnected, TimeoutError, RuntimeError) as e:
+        log.warning("models_list failed for %s: %s", agent_id, e)
+        raise HTTPException(502, "The gateway could not list models") from e
+    models = _normalize_model_entries(raw)
+    _BOT_MODELS_CACHE[agent_id] = (now, models)
+    return {"bot_id": bot.id, "models": models, "source": "gateway"}
+
+
 # --------------------------------------------------------------------------- #
 # REST: threads + messages
 # --------------------------------------------------------------------------- #
@@ -7870,6 +7999,11 @@ async def get_messages(request: Request, thread_id: str,
     }
 
 
+#: prefs keys PATCH /api/threads/{id} accepts. Anything else 400s rather than
+#: being silently ignored — a typo'd key would otherwise look like it saved.
+_THREAD_PREF_KEYS = frozenset({"model", "thinking"})
+
+
 @app.patch("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def patch_thread(request: Request, thread_id: str, payload: dict = Body(...)):
     _is_safe_mode_caller(request)
@@ -7885,6 +8019,27 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
         await db.rename_thread(thread_id, title[:120])
     if "pinned" in payload:
         await db.pin_thread(thread_id, bool(payload["pinned"]))
+    if "prefs" in payload:
+        # Operator configuration, not thread housekeeping — see
+        # _require_operator_session. This route is on the machine-inbound
+        # surface (an agent may rename or pin its own thread), but a model
+        # override chooses what LLM answers, so it stays behind a real PIN
+        # session even though title/pinned just above do not.
+        _require_operator_session(request)
+        prefs_patch = payload.get("prefs")
+        if not isinstance(prefs_patch, dict):
+            raise HTTPException(400, "prefs must be an object")
+        unknown = set(prefs_patch) - _THREAD_PREF_KEYS
+        if unknown:
+            raise HTTPException(
+                400, f"unknown prefs key(s): {', '.join(sorted(unknown))}")
+        for key, value in prefs_patch.items():
+            # A null value REMOVES the key (db.update_thread_prefs's merge
+            # rule) — that is how "back to the bot's default" is said, so
+            # None is valid input, not a missing one.
+            if value is not None and not isinstance(value, str):
+                raise HTTPException(400, f"prefs.{key} must be a string or null")
+        await db.update_thread_prefs(thread_id, prefs_patch)
     await _broadcast_thread_update(thread_id)
     return {"ok": True}
 

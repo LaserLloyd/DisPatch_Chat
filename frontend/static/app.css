@@ -220,6 +220,35 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .menu button:hover { background: var(--bg-hover); }
 .menu button.danger { color: var(--error-text); }
 
+/* ---- Per-thread model/thinking override chip + picker (Feature 7) ---- */
+.model-chip-btn { display: inline-flex; align-items: center; gap: 4px; }
+.model-chip-label {
+  font-size: 11px; font-family: var(--font-mono); max-width: 90px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A refused model/thinking choice (AgentRefused) — the preference is kept,
+   not cleared, so the chip stays in this state until the operator opens the
+   picker and corrects it. */
+.model-chip-btn.warning { color: var(--warning); }
+.model-chip-btn.warning .icn svg { stroke: var(--warning); }
+.model-picker { min-width: 240px; padding: 12px; }
+.model-picker .mp-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.model-picker .mp-row label { font-size: 11.5px; color: var(--text-secondary); }
+.model-picker select {
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 8px; font-size: 13px;
+}
+.model-picker .mp-meter {
+  font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); margin-bottom: 10px;
+}
+.model-picker .mp-warning {
+  font-size: 12px; color: var(--text-primary); margin-bottom: 10px; padding: 6px 8px;
+  border-radius: var(--radius-sm); border: 1px solid color-mix(in oklab, var(--warning) 45%, transparent);
+  background: color-mix(in oklab, var(--warning) 12%, var(--bg-tertiary));
+}
+.model-picker .mp-actions { display: flex; justify-content: space-between; gap: 8px; }
+.model-picker .mp-actions button { padding: 6px 12px; font-size: 12.5px; }
+
 /* Block layout (not flex column) — flex-direction:column on a scrollable
    container causes mobile scroll jank from extra layout passes.
    scroll-behavior is set inline by JS when needed (scrollToBottom).
@@ -1227,6 +1256,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    unlock hint, defeating the deniability model). Auto-restores on unlock —
    applyAuthChrome() toggles body.decoy-mode. */
 body.decoy-mode #search-btn,
+body.decoy-mode #ch-modelchip,
 body.decoy-mode #thread-menu-btn { display: none; }
 
 /* Generic letter-block avatar (Safe Mode: no images). Sits on the same base
