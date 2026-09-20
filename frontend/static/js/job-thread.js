@@ -16,7 +16,7 @@
 // The board itself is the single entry point; this module is the modal.
 
 import { t, fullTimestamp } from './i18n.js?v=3';
-import { api } from './api.js?v=26';
+import { api } from './api.js?v=27';
 import { validUrl } from './links.js?v=5';
 import { acquireInert, el, iconLabel, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=18';
 

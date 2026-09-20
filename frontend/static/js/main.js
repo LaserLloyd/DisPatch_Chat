@@ -2,7 +2,7 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=26';
+import { api, setOnLocked } from './api.js?v=27';
 import { ChatSocket } from './ws.js?v=8';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=31';
 import { installChecklists, applyChecklistState } from './checklist.js?v=3';
@@ -6504,11 +6504,29 @@ function wireAuthEvents() {
   // Idle auto-lock activity
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach((ev) =>
     window.addEventListener(ev, bumpIdle, { passive: true }));
+  // Coming back to a backgrounded app.
+  //
+  // The idle-lock timer is a plain setTimeout, and browsers freeze those on a
+  // backgrounded tab — so on a phone it commonly never fires and this check is
+  // the ONLY thing that re-validates an unlocked session against the server's
+  // own idle clock. It used to do that with the previous session still painted:
+  // thread list, message text, avatars, whatever was open when the phone went
+  // into a pocket, readable by whoever picked it up, for as long as the request
+  // took. `.catch(() => {})` meant a network error on the first tick of a radio
+  // reconnect left it there indefinitely.
+  //
+  // Now: cover first, synchronously, before anything is awaited. Then a
+  // time-boxed check. Then fail CLOSED — a check that did not succeed is
+  // treated as locked, because the alternative is treating "I could not ask"
+  // as "yes, still unlocked".
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (state.auth.pinSet && state.started) {
-      api.authStatus().then((s) => { if (!s.authenticated) handleLocked(); }).catch(() => {});
-    }
+    if (!(state.auth.pinSet && state.started)) return;
+    document.body.classList.add('revalidating');
+    api.authStatus()
+      .then((s) => { if (!s.authenticated) handleLocked(); })
+      .catch(() => { handleLocked(); })
+      .finally(() => { document.body.classList.remove('revalidating'); });
   });
 }
 
@@ -6707,6 +6725,9 @@ async function startApp() {
 // render. Fades out via the .gone transition, then leaves the DOM entirely.
 // Safe to call repeatedly (reboot() re-runs startApp after lock/unlock).
 function dismissBootVeil() {
+  // Tells the index.html fail-safe that boot reached its end, so it stops
+  // watching and never uncovers a half-built shell.
+  window.__bootDone = true;
   const v = document.getElementById('boot-veil');
   if (!v) return;
   v.classList.add('gone');
@@ -6732,10 +6753,57 @@ async function bootPopout() {
   history.replaceState({ view: 'chat' }, '');
 }
 
+/** Re-ask for the auth state shortly, after a failed check.
+ *
+ *  The failed check assumed "locked", which is the safe direction but also the
+ *  wrong one for an operator whose network merely blinked -- without this they
+ *  would sit in Safe-Mode chrome until something else happened to re-check.
+ *  One delayed retry, and only if the answer actually differs is anything
+ *  re-rendered.
+ */
+let _authRecheckTimer = null;
+function authRecheckSoon(delayMs = 3000) {
+  if (_authRecheckTimer) return;
+  _authRecheckTimer = setTimeout(async () => {
+    _authRecheckTimer = null;
+    let s;
+    try { s = await api.authStatus(); } catch { authRecheckSoon(8000); return; }
+    const wasDecoy = state.decoy;
+    state.auth.pinSet = !!s.pin_set;
+    state.auth.authenticated = !!s.authenticated;
+    state.decoy = state.auth.pinSet && !state.auth.authenticated;
+    if (state.decoy !== wasDecoy) {
+      applyAuthChrome();
+      renderSidebar();
+    }
+  }, delayMs);
+}
+
 async function refreshAuthAndBoot() {
   let s;
   try { s = await api.authStatus(); }
-  catch (e) { toast(t('toast.auth_failed', { error: e.message }), true); s = { pin_set: false, authenticated: true }; }
+  catch (e) {
+    toast(t('toast.auth_failed', { error: e.message }), true);
+    // FAIL CLOSED. This used to synthesise {pin_set: false, authenticated:
+    // true} -- "there is no PIN anywhere and you are fully unlocked" -- which
+    // is the most permissive answer available, chosen for the one case where
+    // we know the least. On an Android cold start the radio is often still
+    // reconnecting, so this is the ordinary path, not an exotic one.
+    //
+    // It also disabled its own repair: two separate self-heals (the WS
+    // hello/bots handler and the visibilitychange re-check) are gated on
+    // `state.auth.pinSet`, so declaring pinSet false switched BOTH off and
+    // nothing forced another look.
+    //
+    // The server never trusted any of this -- every route and every broadcast
+    // gates on the real session cookie -- so no conversation was served. What
+    // was wrong was the CHROME: a device the server treats as Safe Mode drew
+    // the File Server button and the admin settings tabs.
+    //
+    // Assume locked instead, and let the retry below correct it.
+    s = { pin_set: true, authenticated: false };
+    authRecheckSoon();
+  }
   state.auth = {
     pinSet: !!s.pin_set,
     authenticated: !!s.authenticated,

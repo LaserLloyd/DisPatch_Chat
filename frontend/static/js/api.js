@@ -6,8 +6,38 @@
 let onLocked = null;
 export function setOnLocked(fn) { onLocked = fn; }
 
+// Nothing here may hang forever.
+//
+// This wrapper had no timeout at all — no AbortController, no ceiling —
+// while i18n.js time-boxes its own fetch to 4s and the WebSocket has a
+// backoff. That asymmetry is what turned "the network is still settling"
+// on an Android resume into "the app sits in its pre-lock state", because
+// the two calls that decide whether a device is locked both come through
+// here. A request that cannot finish has to become a request that failed,
+// so the caller can fail CLOSED rather than wait.
+//
+// Generous, because some of these are real work (uploads, a board fetch on a
+// slow tailnet hop). The auth path passes its own, much shorter one.
+const DEFAULT_TIMEOUT_MS = 20000;
+
 async function j(url, opts = {}) {
-  const r = await fetch(url, opts);
+  // A caller-supplied signal wins: the Job Board aborts superseded requests
+  // and must keep that control.
+  let signal = opts.signal;
+  let timer = null;
+  if (!signal && typeof AbortController === 'function') {
+    const ctl = new AbortController();
+    signal = ctl.signal;
+    const ms = opts.timeoutMs || DEFAULT_TIMEOUT_MS;
+    timer = setTimeout(() => ctl.abort(), ms);
+  }
+  const { timeoutMs: _ignored, ...fetchOpts } = opts;
+  let r;
+  try {
+    r = await fetch(url, { ...fetchOpts, signal });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!r.ok) {
     let body = null;
     try { body = await r.json(); } catch {}
@@ -97,7 +127,11 @@ export const api = {
   health: () => j('/api/health'),
 
   // Auth / lock
-  authStatus: () => j('/api/auth/status'),
+  // Short, because this is the call that decides whether a device is locked.
+  // A slow answer here is not worth waiting for: the caller treats a failure
+  // as "locked" and re-checks, which is the safe direction and is far better
+  // than leaving an unlocked view on screen while a request hangs.
+  authStatus: () => j('/api/auth/status', { timeoutMs: 5000 }),
   unlock: (pin, remember) => j('/api/auth/unlock', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ pin, remember: !!remember }) }),
   lock: () => j('/api/auth/lock', { method: 'POST' }),
   rememberConfig: (days) => j('/api/auth/remember-config', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ days }) }),

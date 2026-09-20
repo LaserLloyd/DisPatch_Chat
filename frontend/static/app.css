@@ -1258,6 +1258,22 @@ body.decoy-mode #thread-menu-btn { display: none; }
   transition: opacity .25s ease, visibility .25s ease;
 }
 #boot-veil.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+
+/* The same cover, for the RESUME path, as a pseudo-element so it needs no DOM
+   node — #boot-veil is removed from the document the first time it is used and
+   was never available again.
+   Returning to a backgrounded app left the previous session's thread list,
+   message text and avatars on screen while an unbounded re-check decided
+   whether the session had idled out server-side. Whatever was open when the
+   phone went in a pocket was readable by whoever picked it up next, for as
+   long as that request took — and if it errored, indefinitely.
+   Above .lock-screen (400) on purpose: the cover is removed once the check
+   settles, and if the answer is "locked" the lock screen is already underneath
+   it, so the transition is cover -> keypad with no frame of content between. */
+body.revalidating::after {
+  content: ""; position: fixed; inset: 0; z-index: 500;
+  background: var(--bg-primary);
+}
 .boot-mark { display: flex; flex-direction: column; align-items: center; gap: 10px; animation: fade-in .3s ease both; }
 .boot-mark img, .boot-mark .boot-logo { width: 72px; height: 72px; border-radius: 18px; display: block; }
 .boot-name { font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: .02em; }

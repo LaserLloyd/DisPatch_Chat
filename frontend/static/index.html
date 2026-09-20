@@ -59,7 +59,7 @@
          the viewer, and the server 403s its routes for a decoy session. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-qwsyz9DUNHbxI7u5HOAyB3StcFMGSJev6sz7UYc73b4=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-tAyBsu1NZeGVF0UiHUvWswVoy5ivwYBSUy24QGCr4Ss=' 'sha256-SNqVRjhkhvRK1e8t5RJO29psDLPARaNc/InUjMrAiCg=';
+    script-src 'self' 'sha256-qwsyz9DUNHbxI7u5HOAyB3StcFMGSJev6sz7UYc73b4=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-B/4P8AyGy4SqUiBYgvGoQKCc5tVl0U48Z9aEDREIG1U=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -142,7 +142,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=5" />
-  <link rel="stylesheet" href="/static/app.css?v=78" />
+  <link rel="stylesheet" href="/static/app.css?v=79" />
   <link rel="stylesheet" href="/static/dashboard.css?v=5" />
   <script type="module" src="/static/js/theme.js?v=15"></script>
 </head>
@@ -173,10 +173,31 @@
     </div>
   </div>
   <script>
-    setTimeout(function () {
-      var v = document.getElementById('boot-veil');
-      if (v) v.classList.add('gone');
-    }, 9000);
+    // Fail-safe: never leave the veil up forever if boot dies outright.
+    //
+    // It used to fire unconditionally, which meant a slow boot got UNCOVERED
+    // at 9s -- exposing the raw, half-assembled shell (empty roster, the "pick
+    // a bot" placeholder, no Safe-Mode chrome applied yet) while the fetches
+    // it was waiting on were still in flight. That is the opposite of the
+    // veil's own job. Now it re-checks: if boot is still making progress the
+    // veil stays, and the window extends rather than tearing open.
+    //
+    // window.__bootDone is set by main.js's dismissBootVeil(); its absence
+    // after this long means boot never reached its last line.
+    (function () {
+      var tries = 0;
+      function check() {
+        if (window.__bootDone) return;               // boot finished; it owns the veil
+        var v = document.getElementById('boot-veil');
+        if (!v) return;                              // already removed
+        if (++tries < 4) { setTimeout(check, 6000); return; }
+        // ~30s with no sign of life: boot is not coming. Uncover, because a
+        // permanently blank screen is worse than a bare one the user can at
+        // least pull to refresh.
+        v.classList.add('gone');
+      }
+      setTimeout(check, 9000);
+    })();
   </script>
 
   <div id="app" class="app" data-view="bots">
@@ -1027,10 +1048,30 @@
         // render fix) can silently fail to reach an open tab. Reload exactly once
         // when control passes to a new worker so updates apply automatically.
         let reloaded = false;
+        // How OLD this document is decides whether a reload is worth anything.
+        //
+        // The reload exists for a long-open tab, whose in-memory JS really can
+        // be stale. It is pure waste on a COLD START: the fetch handler is
+        // network-first, so the navigation that just happened already brought
+        // down the current HTML and the current ?v= modules. Reloading then
+        // paints the identical page a second time -- and since every deploy
+        // bumps CACHE, the first reopen of the installed PWA after ANY deploy
+        // hit exactly that path. Paint, tear down, repaint. That double paint,
+        // with the blank teardown between, is the flash.
+        const FRESH_MS = 15000;   // a cold-start claim lands in 1-5s
         navigator.serviceWorker.addEventListener('controllerchange', () => {
           if (reloaded || !hadController) return;
           reloaded = true;
-          location.reload();
+          if (performance.now() < FRESH_MS) return;   // already fresh, nothing to gain
+          // An older tab: the reload is doing its documented job. Do it where
+          // nobody is looking, so an update never interrupts the screen the
+          // user is reading. If the app is already hidden, now is that moment.
+          if (document.visibilityState === 'hidden') { location.reload(); return; }
+          document.addEventListener('visibilitychange', function onHide() {
+            if (document.visibilityState !== 'hidden') return;
+            document.removeEventListener('visibilitychange', onHide);
+            location.reload();
+          });
         });
         // Proactively check for an update on load so a stale tab self-heals.
         try { reg.update(); } catch {}
@@ -1045,6 +1086,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=93"></script>
+  <script type="module" src="/static/js/main.js?v=94"></script>
 </body>
 </html>

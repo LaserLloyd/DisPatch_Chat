@@ -2,7 +2,20 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v115';  // v115: the Today/Older split in the thread
+const CACHE = 'local-chat-v116';  // v116: the cold-start flash, and a resume
+  //   that left the last session on screen. The flash was THIS FILE: every
+  //   deploy bumps CACHE, so the first reopen of the installed PWA installed a
+  //   new worker, clients.claim() fired controllerchange on an already-painted
+  //   page, and index.html reloaded it -- paint, tear down, repaint. The fetch
+  //   handler is network-first, so that navigation had already brought down
+  //   current bytes and the reload bought nothing. It is skipped on a fresh
+  //   document now and deferred to hidden otherwise. Separately: returning to
+  //   a backgrounded app now covers the screen before re-checking the session,
+  //   the check is time-boxed and fails CLOSED, the shared fetch wrapper has a
+  //   ceiling at last, and the boot veil re-checks instead of tearing open at
+  //   9s over a half-built shell. index.html + main.js?v=93→94 +
+  //   app.css?v=78→79 + api.js?v=26→27.
+  // v115: the Today/Older split in the thread
   //   list now shows on the PHONE. It shipped "first-cut desktop-only" and the
   //   CSS hid the headers under 769px — a scoping decision that switched the
   //   feature off for the device the list is mostly read on. Search still
