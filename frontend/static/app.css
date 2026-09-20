@@ -253,7 +253,30 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    container causes mobile scroll jank from extra layout passes.
    scroll-behavior is set inline by JS when needed (scrollToBottom).
    overscroll-behavior:contain prevents scroll-chaining to the viewport. */
-.messages { flex: 1; overflow-y: auto; padding: 18px 16px 8px; position: relative; overscroll-behavior: contain; }
+.messages {
+  flex: 1; overflow-y: auto; padding: 18px 16px 8px; position: relative; overscroll-behavior: contain;
+  /* Feature 23 (scene backdrop), tier 1 — a deterministic colour tint, never
+     an image. Plain fallback first: identical to the app's look before this
+     existed, so a browser with no relative-colour support (or a page where
+     JS never set --backdrop-hue) renders exactly as it always did. Lives
+     HERE, never on body/.chatview, so only the scrolling message pane tints —
+     the header, sidebar and rest of the shell stay the flat palette colour. */
+  background-color: var(--bg-primary);
+}
+@supports (color: oklch(from red l c h)) {
+  .messages {
+    /* `l` is the KEYWORD, not a variable: it copies --bg-primary's own
+       lightness unchanged, which is what keeps every palette's promised
+       contrast intact (frontend/tests/backdrop-contrast.test.js proves this
+       across all six palettes and the full hue range). Chroma is a small
+       fixed amount — 0.04 is comfortably below where it could meaningfully
+       move contrast even at the shortest-baseline palette (Daylight), per
+       the same test. Hue is per-bot-per-thread (main.js backdropHue); the
+       `h` fallback (this palette's own hue, i.e. no visible tint) covers a
+       thread with nothing selected, or JS not having run yet. */
+    background-color: oklch(from var(--bg-primary) l 0.04 var(--backdrop-hue, h));
+  }
+}
 
 .date-sep { text-align: center; color: var(--text-muted); font-size: 12px; margin: 16px 0 10px; position: relative; }
 .date-sep::before, .date-sep::after { content: ""; position: absolute; top: 50%; width: 32%; height: 1px; background: var(--border); }

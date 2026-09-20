@@ -323,6 +323,40 @@ function letterAvatarHue(bot) {
   return h % 360;
 }
 
+// Feature 23, tier 1: the scrolling message pane's colour backdrop. Fully
+// deterministic from data already on hand — no generation, no files, no
+// network, no user action — so it works offline on a fresh install and can
+// never fail. The hue is the bot's own letter-avatar hue (the same
+// deterministic id/name hash letterAvatarHue already gives every bot, so no
+// new failure mode is introduced by parsing an arbitrary `color` string)
+// plus a small stable offset hashed from the THREAD id, so two threads with
+// the same bot are related but not identical, and the same thread always
+// looks the same on reload. CSS (app.css) is what actually keeps this safe:
+// the backdrop is derived from the palette's own --bg-primary with
+// `oklch(from … l c h)`, which inherits l (lightness) unchanged and only
+// moves hue/chroma — see frontend/tests/backdrop-contrast.test.js for the
+// proof that holds across every palette and hue.
+function backdropHue(bot, threadId) {
+  const base = letterAvatarHue(bot);
+  const s = String(threadId || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  // ±20°: enough that two threads read as distinct, small enough that they
+  // still visibly belong to the same bot.
+  const offset = (h % 41) - 20;
+  return ((base + offset) % 360 + 360) % 360;
+}
+
+// Sets (or clears) the backdrop hue on the scrolling message pane — never on
+// body/chatview, so only that one surface tints (feature 23 is explicit that
+// the tint belongs on the pane, not the app shell).
+function applyBackdropHue(bot, thread) {
+  const pane = dom['messages'];
+  if (!pane) return;
+  if (!bot || !thread) { pane.style.removeProperty('--backdrop-hue'); return; }
+  pane.style.setProperty('--backdrop-hue', String(backdropHue(bot, thread.id)));
+}
+
 // Colour a bot's NAME by its first letter (minimal-avatar mode). Mnemonic where a
 // colour name exists (B→Blue, C→Cyan, F→Fuchsia, G→Green, R→Red, Y→Yellow…), a
 // spread hue otherwise. Bots sharing a first letter share a hue by design ("go by
@@ -485,6 +519,13 @@ function headerAvatarClickBot(key) {
 function paintHeaderAvatar(key, bot, thread) {
   const cur = dom[key];
   if (!cur) return;
+  // Any REAL repaint of the chat header (thread switch, avatar change, a NIM
+  // toggle) must invalidate a mood-face flash's pending restore — see
+  // flashHeaderMoodFace. Bumping here, unconditionally, means the restore
+  // timer only ever fires when nothing legitimate has repainted the header
+  // since it started, whether that something was another mood flash or this
+  // ordinary paint.
+  if (key === 'ch-avatar') moodHeaderEpoch += 1;
   const baseClass = cur.classList[0] || key;
   // `thread` is passed only by the CHAT header. The thread-list header sits
   // above every thread at once, so it keeps showing the bot's current face.
@@ -524,6 +565,80 @@ function paintHeaderAvatar(key, bot, thread) {
       dom[key]._zoomWired = null;
     }
     dom[key].src = url;
+  }
+}
+
+// ===================== Mood face (feature 22) =====================
+// A reply that earned metadata.mood (see _prepare_persist / avatar_pool.
+// has_mood_face) swaps the header avatar and that bubble's own avatar to the
+// mood's face for a short window, then reverts. Two DOM targets, one rule:
+// never touch anything until the picture is confirmed to load — the ordinary
+// avatar <img>s already carry an `error` handler that permanently downgrades
+// them to a letter block on a genuine failure (see avatarNode / the
+// `cur.tagName !== 'IMG'` branch above), and a missing mood face must not
+// trip that and cost the bot its real picture. Preloading with a throwaway
+// Image() means `.src` on the visible element is only ever set to a URL that
+// is already known good.
+const MOOD_FACE_MS = 30000;
+let moodHeaderEpoch = 0;
+
+// Applies to ONE message's own bubble avatar. Independent per element — each
+// bubble is built once for that message, so there is nothing to invalidate
+// beyond "is this node still on screen".
+function flashBubbleMoodFace(imgEl, url) {
+  const probe = new Image();
+  probe.onload = () => {
+    if (!imgEl.isConnected) return;
+    const original = imgEl.src;
+    imgEl.src = probe.src;
+    setTimeout(() => {
+      if (imgEl.isConnected && imgEl.src === probe.src) imgEl.src = original;
+    }, MOOD_FACE_MS);
+  };
+  probe.src = url;
+}
+
+// Applies to the CHAT header, which is a fixed element reused across threads
+// (paintHeaderAvatar repaints it in place). moodHeaderEpoch is what keeps a
+// slow-arriving restore from a PREVIOUS mood flash — or from one whose
+// message has scrolled out of relevance — clobbering whatever legitimately
+// owns the header now: every real repaint AND every new flash bumps it, and
+// a pending restore only acts while its own epoch is still current.
+function flashHeaderMoodFace(hdr, url, threadId) {
+  const probe = new Image();
+  probe.onload = () => {
+    // The header may belong to a different thread, or a different <img>
+    // entirely (paintHeaderAvatar swaps DIV<->IMG), by the time this lands.
+    if (dom['ch-avatar'] !== hdr || !hdr.isConnected) return;
+    if (state.activeThreadId !== threadId) return;
+    const original = hdr.src;
+    const epoch = (moodHeaderEpoch += 1);
+    hdr.src = probe.src;
+    setTimeout(() => {
+      if (epoch === moodHeaderEpoch && hdr.isConnected) hdr.src = original;
+    }, MOOD_FACE_MS);
+  };
+  probe.src = url;
+}
+
+// Entry point: called once, right when a live reply lands in view — never
+// from a full re-render (reopening an old thread must not re-flash a mood
+// face that fired minutes or days ago). `rowEl` is the message's own DOM
+// node, already in the document.
+//
+// Gated on NIM only, matching avatarNode/paintHeaderAvatar's own avatar-
+// visibility rule (Safe Mode DOES show a safe bot's avatar) — the server
+// route enforces the actual Safe-Mode/bot check and simply 403s otherwise,
+// which the probe's onerror (a no-op: nothing was ever touched) absorbs.
+function maybeFlashMoodFace(msg, rowEl) {
+  if (!msg || !msg.metadata || !msg.metadata.mood) return;
+  if (nimEnabled() || !rowEl) return;
+  const url = `/api/messages/${encodeURIComponent(msg.id)}/mood-face`;
+  const avatarEl = rowEl.querySelector ? rowEl.querySelector('.msg-avatar') : null;
+  if (avatarEl && avatarEl.tagName === 'IMG') flashBubbleMoodFace(avatarEl, url);
+  if (msg.thread_id === state.activeThreadId) {
+    const hdr = dom['ch-avatar'];
+    if (hdr && hdr.tagName === 'IMG') flashHeaderMoodFace(hdr, url, msg.thread_id);
   }
 }
 
@@ -1158,6 +1273,7 @@ function clearChatView() {
   else dom['ch-avatar'].textContent = '';
   delete dom['ch-avatar'].dataset.full;
   dom['ch-avatar']._zoomWired = null;
+  applyBackdropHue(null, null);
   dom['messages'].innerHTML = '';
   dom['messages'].append(el('div', { class: 'empty-state', id: 'chat-empty' },
     offerFirstRun()
@@ -1196,6 +1312,7 @@ function renderChatHeader() {
   if (!th) return;
   const bot = botById(th.bot_id) || botById(state.selectedBotId);
   if (bot) paintHeaderAvatar('ch-avatar', bot, th);
+  applyBackdropHue(bot, th);
   dom['ch-title'].textContent = bot ? bot.name : t('common.chat');
   dom['ch-sub'].textContent = threadTitle(th);
   // Model badge: latest assistant message's actual model, else the bot's hint.
@@ -5777,7 +5894,11 @@ function handleWs(data) {
       }
       if (data.thread_id === state.activeThreadId) {
         appendMessageToView(data.message);
-        if (isFinalReply) reflectComposerState();
+        if (isFinalReply) {
+          reflectComposerState();
+          const rowEl = dom['messages'].querySelector(`[data-id="${CSS.escape(data.message.id)}"]`);
+          maybeFlashMoodFace(data.message, rowEl);
+        }
         // Reading it live — keep the server's read marker current.
         if (data.message.role !== 'user' && document.visibilityState === 'visible') {
           api.markRead(data.thread_id).catch(() => {});
@@ -5962,7 +6083,12 @@ function handleWs(data) {
           // NIM: a picture-only final message has no row. Drop the streaming
           // placeholder rather than replacing it with nothing.
           const finalEl = messageEl(fullMsg);
-          if (finalEl) existingEl.replaceWith(finalEl); else existingEl.remove();
+          if (finalEl) {
+            existingEl.replaceWith(finalEl);
+            maybeFlashMoodFace(fullMsg, finalEl);
+          } else {
+            existingEl.remove();
+          }
           // The final rendered message may be taller than the streaming
           // placeholder (syntax-highlighted code blocks, full markdown).
           if (isNearBottom()) scrollToBottom(true);
@@ -5970,6 +6096,8 @@ function handleWs(data) {
           // Missed stream_start (reconnect mid-stream) — treat like a new
           // message (appendMessageToView pushes into state.messages itself).
           appendMessageToView(fullMsg);
+          const rowEl = dom['messages'].querySelector(`[data-id="${CSS.escape(fullMsg.id)}"]`);
+          maybeFlashMoodFace(fullMsg, rowEl);
         }
       } else if (fullMsg && fullMsg.role !== 'user' && !state.unread[data.thread_id]) {
         // Streamed reply landed in a background thread — mark it unread, same

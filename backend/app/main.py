@@ -2361,6 +2361,27 @@ async def _prepare_persist(
                     autopilot = True
                     log.info("reaction autopilot: %r for %s (%s)",
                              mood, bot_id, thread_id)
+        # Mood face (feature 22): stamp metadata.mood on the row so the
+        # header/message avatar can swap to it for a few seconds — but only
+        # when the bot actually has an operator-dropped face for that mood
+        # (avatar_pool.has_mood_face), or the row would carry a mood the
+        # /mood-face route can never resolve, a 404 baked into the message
+        # forever. `fired[0]` is whichever mood this reply ended up with,
+        # explicit marker or the autopilot pick above — both are plain mood
+        # names for autopilot; an explicit `:react:<id>:` marker that resolved
+        # to a specific pool image id rather than a mood name simply will not
+        # match any moods/<mood>/ folder here, which is a silent no-op, not a
+        # failure (see avatar_pool.has_mood_face's docstring).
+        if fired and bot_id:
+            try:
+                has_face = avatar_pool.has_mood_face(bot_id, fired[0])
+            except avatar_pool.PoolError:
+                # A malformed bot_id (should not happen for a thread's own
+                # resolved bot) must never break persisting the reply itself
+                # — worst case here is simply no mood face this turn.
+                has_face = False
+            if has_face:
+                metadata = {**(metadata or {}), "mood": fired[0]}
     elif content:
         # Markers are stripped on EVERY path — /api/inject with role user or
         # system included — but only an assistant's markers fire a reaction or
@@ -8136,6 +8157,45 @@ async def pin_thread_avatar(
         await manager.broadcast({"type": "thread_update", "thread": updated.model_dump()})
     return {"ok": True, "thread_id": thread_id, "avatar_snapshot": snap,
             "avatar_url": avatar_snapshots.url_for(thread_id, snap)}
+
+
+@app.get("/api/messages/{message_id}/mood-face", responses=problem.MACHINE)
+async def get_message_mood_face(request: Request, message_id: str):
+    """The face this ONE reply wears for its mood — see _prepare_persist.
+
+    A message earns a `metadata.mood` at persist time, only when its bot
+    already has an operator-dropped face for that mood (avatar_pool.
+    has_mood_face); this route resolves the actual picture, hashed on the
+    message id so the same message always shows the same face (a reload, a
+    second device, a retry all agree). It is a REUSABLE pool — unlike the
+    thread-avatar snapshot above, drawing one never moves or deletes it, and
+    this route never writes to the thread's own avatar_snapshot; the thread
+    keeps the face it was born under regardless of any reply's mood.
+
+    Gated exactly like GET /api/threads/{id}/avatar: full-session sees any
+    bot, Safe Mode only a safe bot's own thread (_deny_decoy_thread).
+    """
+    msg = await db.get_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    await _deny_decoy_thread(request, msg.thread_id)
+    mood = (msg.metadata or {}).get("mood") if isinstance(msg.metadata, dict) else None
+    if not mood:
+        raise HTTPException(404, "This message has no mood")
+    bot_id = await _bot_of_thread(msg.thread_id)
+    try:
+        path = avatar_pool.mood_face_path(bot_id, mood, message_id) if bot_id else None
+    except avatar_pool.PoolError as e:
+        # Same guard every other avatar_pool-backed route uses — a malformed
+        # bot_id should not be possible for a thread's own bot, but this
+        # keeps a future caller from turning that assumption into a 500.
+        _raise_for_pool_error(e)
+    if not path:
+        raise HTTPException(404, "No face on file for this mood")
+    # Not content-addressed (an operator can add/remove files in the folder at
+    # any time), so no long-lived immutable cache — but the client-side flash
+    # is a one-shot 30s fetch either way, so a short cache buys nothing real.
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/threads/{thread_id}/messages", responses=problem.MACHINE)

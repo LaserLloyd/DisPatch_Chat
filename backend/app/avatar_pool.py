@@ -35,6 +35,7 @@ never a local blind crop (house doctrine).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -55,6 +56,7 @@ from .reactions import (
     _IMAGE_CLI,
     IMAGE_CLI_TIMEOUT_S,
     IMAGE_EXTS,
+    MOOD_DIR_RE,
     _is_image_cli_error,
     image_cli_available,
     image_cli_state,
@@ -115,6 +117,83 @@ def _cfg_path(bot_id: str) -> Path:
 
 def bank_path(bot_id: str) -> Path:
     return config.DATA_DIR / f"avatar-prompts-{_require_bot_id(bot_id)}.yaml"
+
+
+# --------------------------------------------------------------------------- #
+# Mood faces — operator-dropped, REUSED (never burned)
+#
+# A different feature from the ready/spent one-shot pairs above: instead of a
+# thread's birth face, this is the header/bubble face a bot wears for the ~30s
+# after a reply that carries a mood (see main.py's persist chokepoint and the
+# `mood-face` route). Faces live at <data>/avatar-pool/<bot_id>/moods/<mood>/
+# — a sibling of ready/ and spent/, never those two, and drawing one does not
+# move or delete it. Same "the filesystem IS the manifest" contract as
+# reactions._mood_dirs: hand-drop a square image into moods/<mood>/ and it is
+# instantly available, no restart and no registry edit.
+#
+# Deliberately a SEPARATE namespace from reactions/moods-<bot_id>/ (the
+# reaction-image pool) — same mood vocabulary in practice, but a different
+# picture (a face, not a full reaction card) and a different lifecycle
+# (reused, not one-shot). MOOD_DIR_RE / IMAGE_EXTS are reused from reactions
+# rather than redefined, so "what counts as a mood name" and "what counts as
+# an image" cannot drift between the two pools.
+# --------------------------------------------------------------------------- #
+
+
+def moods_root(bot_id: str) -> Path:
+    return _root(bot_id) / "moods"
+
+
+def _mood_face_dir(bot_id: str, mood: str) -> Path | None:
+    """The folder for one (bot, mood), or None for a mood name that fails the
+    same containment check as every other pool-relative path on this box."""
+    if not mood or not MOOD_DIR_RE.match(mood):
+        return None
+    return moods_root(bot_id) / mood
+
+
+def mood_face_files(bot_id: str, mood: str) -> list[Path]:
+    """Sorted, drawable face images an operator dropped for this bot+mood.
+
+    Reused, never burned: unlike ready_dir/spent_dir, resolving one of these
+    does not move or remove it. A missing/unreadable folder is "no faces",
+    not an error — moods are optional and most bots will have none.
+    """
+    d = _mood_face_dir(bot_id, mood)
+    if d is None:
+        return []
+    try:
+        entries = sorted(
+            p for p in d.iterdir()
+            if p.is_file() and not p.is_symlink() and p.suffix.lower() in IMAGE_EXTS
+        )
+    except OSError:
+        return []
+    return entries
+
+
+def has_mood_face(bot_id: str, mood: str) -> bool:
+    """Cheap yes/no for the persist chokepoint: does this bot have ANY face
+    for this mood right now? Stamping metadata.mood on a row is worthless
+    (a 404 forever after) if the answer is no."""
+    return bool(mood_face_files(bot_id, mood))
+
+
+def mood_face_path(bot_id: str, mood: str, message_id: str) -> Path | None:
+    """Deterministically pick one face for (bot_id, mood, message_id).
+
+    Hashed on the MESSAGE id rather than drawn at random, so re-fetching the
+    same message — a reload, a second device, the same tab twice — always
+    resolves to the same picture. SHA-256 (not the builtin hash()) because
+    PYTHONHASHSEED is randomized per process: a random-salted hash would pick
+    a different face for the same message on every restart.
+    """
+    files = mood_face_files(bot_id, mood)
+    if not files:
+        return None
+    digest = hashlib.sha256(message_id.encode("utf-8")).digest()
+    idx = int.from_bytes(digest[:8], "big") % len(files)
+    return files[idx]
 
 
 def enabled_bots() -> list[str]:

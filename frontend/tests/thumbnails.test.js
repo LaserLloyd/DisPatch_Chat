@@ -58,6 +58,13 @@ const EXEMPT = [
        + 'is PIN-gated, so a full-res affordance there is a guaranteed 403 — '
        + 'thumbnails-only is the Safe-Mode rule everywhere',
   },
+  {
+    match: 'const probe = new Image();',
+    why: 'mood-face flash (feature 22): a throwaway preloader, never attached '
+       + 'to the DOM and never shown — it only tests whether the mood-face URL '
+       + 'loads before the VISIBLE avatar/header <img> (which already has a '
+       + 'full-resolution affordance of its own) is touched at all',
+  },
 ];
 
 function imageProducingLines(src) {
