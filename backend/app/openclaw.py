@@ -158,15 +158,41 @@ class GatewayUnavailable(AgentError):
     """
 
 
+class AgentRefused(AgentError):
+    """The gateway understood the request and said no.
+
+    A DIFFERENT thing from GatewayUnavailable, and the distinction is the whole
+    point: "not allowed", "unsupported thinking level", "rewind is unavailable
+    while the agent is working" are verdicts about THIS request. Retrying is
+    pointless and the gateway's own sentence is the only useful thing to show
+    — it names the allowed models, or the supported levels.
+
+    Every refusal used to be funnelled through `_friendly_gateway_down`, so a
+    model the agent is not allowed to use was reported to the operator as "the
+    agent gateway is down or restarting", three retries later. That made a
+    fixable configuration mistake look like an outage.
+    """
+
+
 # Signatures the CLI emits when the gateway refused the task outright (it is
 # restarting/draining, or simply not up). Deliberately narrow: an error that
 # merely CONTAINS one of these strings mid-turn still raises plain AgentError,
 # because a started turn must never be blindly retried.
+# TWO wire shapes, because there are two transports. The CLI prints prose
+# ("GatewayDrainingError", "ECONNREFUSED"); the gateway socket hands back its
+# error OBJECT, which reaches us as a dict repr — `{'code': 'UNAVAILABLE',
+# 'message': 'draining'}`. The original pattern only knew the prose forms and
+# the key name `errorCode`, so it never matched a socket refusal at all. That
+# did not show, because the socket path called _friendly_gateway_down
+# unconditionally; the moment refusals stopped being laundered (see
+# AgentRefused) the gap became visible as a real outage being misreported as a
+# verdict. Both shapes are covered now, and the test that pins the retryable
+# case is what catches a regression here.
 _GATEWAY_DOWN_RE = re.compile(
-    r"GatewayDrainingError|Gateway is draining"
+    r"GatewayDrainingError|Gateway is draining|\bdraining\b"
     r"|ECONNREFUSED|ECONNRESET before hello"
     r"|gateway (?:is )?not (?:running|reachable|available)"
-    r"|errorCode[\"':= ]+UNAVAILABLE",
+    r"|(?:error)?[Cc]ode[\"':= ]+\"?'?UNAVAILABLE",
     re.I,
 )
 
@@ -559,6 +585,8 @@ async def send_via_gateway(
     message: str,
     timeout: int | None = None,
     run_id: str | None = None,
+    model: str | None = None,
+    thinking: str | None = None,
 ) -> AgentReply:
     """Dispatch a turn over the gateway socket DisPatch already holds open.
 
@@ -588,11 +616,28 @@ async def send_via_gateway(
         "idempotencyKey": run_id or uuid.uuid4().hex,
         "cleanupBundleMcpOnRunEnd": True,
     }
+    # Only sent when actually chosen. An explicit null is not the same as
+    # absent to the gateway, and absent is what "use the agent's own default"
+    # means. A model the agent is not allowed to use, or a level its model
+    # does not support, comes back as a refusal naming the legal values —
+    # which AgentRefused now carries to the operator verbatim.
+    if model:
+        params["model"] = model
+    if thinking:
+        params["thinking"] = thinking
     try:
         payload = await client.call_agent(params, timeout=timeout + 15)
     except gateway_ws.GatewayRunRefused as e:
-        # Nothing ran. Retryable, and the caller's backoff already knows how.
-        raise _friendly_gateway_down(bot_id, str(e))
+        # Nothing ran either way — but WHY decides whether retrying can help.
+        # Only the signatures in _GATEWAY_DOWN_RE mean "the door is shut, come
+        # back in a minute"; anything else is a verdict on this request and is
+        # surfaced verbatim, unretried, because the sentence itself is the fix
+        # (it names the allowed models, or the supported thinking levels).
+        text = str(e)
+        if _GATEWAY_DOWN_RE.search(text):
+            raise _friendly_gateway_down(bot_id, text)
+        raise AgentRefused(text.strip() or f"{bot_id} refused the request.",
+                           detail=text[:800])
     except gateway_ws.GatewayRunTimeout:
         raise AgentTimeout(
             f"{bot_id} took too long to respond (>{timeout}s).",
@@ -622,6 +667,8 @@ async def send_to_agent(
     session_key: str,
     message: str,
     timeout: int | None = None,
+    model: str | None = None,
+    thinking: str | None = None,
 ) -> AgentReply:
     timeout = timeout or SETTINGS.agent_timeout
     # Pass the message via a temp file (--message-file) instead of an argv element:
@@ -650,6 +697,12 @@ async def send_to_agent(
             "--json",
             "--timeout", str(timeout),
         ]
+        # Same contract as the gateway transport above: appended only when
+        # chosen, so the CLI falls back to the agent's own configuration.
+        if model:
+            cmd += ["--model", model]
+        if thinking:
+            cmd += ["--thinking", thinking]
 
         try:
             proc = await asyncio.create_subprocess_exec(

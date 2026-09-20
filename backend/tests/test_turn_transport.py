@@ -70,6 +70,16 @@ class TurnWS:
         await self._outbound.put(json.dumps({
             "type": "res", "id": rid, "ok": True, "payload": self._final}))
 
+    def last_agent_params(self) -> dict:
+        """The params of the most recent `agent` call this fake received.
+
+        Everything sent is already recorded in `self.sent`; this just saves
+        every caller writing the same filter.
+        """
+        agents = [r for r in self.sent if r.get("method") == "agent"]
+        assert agents, "no `agent` call was made"
+        return agents[-1].get("params", {})
+
     def __aiter__(self):
         return self
 
@@ -320,3 +330,63 @@ async def test_transport_1_refuses_rather_than_silently_spawning(monkeypatch):
     monkeypatch.setattr(main, "_gateway_client", None, raising=False)
     with pytest.raises(openclaw.GatewayUnavailable):
         await main._dispatch_turn("beta", "agent:beta:t1", "hi")
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_is_not_an_outage():
+    """A refusal ABOUT this request must not be reported as the gateway being down.
+
+    The two look identical at the door — nothing ran either way — but they are
+    opposites for the caller. "The gateway is draining" means come back in a
+    minute and the backoff should retry. "Model override 'x' is not allowed for
+    agent 'beta'" is a verdict on this request: retrying cannot help, and the
+    gateway's own sentence is the fix, because it names what IS allowed.
+
+    Every refusal used to go through _friendly_gateway_down, so a mistyped
+    model was shown to the operator as "the agent gateway is down or
+    restarting" — three retries and a minute later. This is the guard for the
+    per-thread model and thinking overrides, whose whole failure mode is a
+    refusal the operator has to be able to read.
+    """
+    refusal = ("Model override \"gpt-nope\" is not allowed for agent "
+               "\"beta\" by its model list.")
+    ws = TurnWS(fail_accept={"code": "INVALID_ARGUMENT", "message": refusal})
+    client, reader = await _client_on(ws)
+    try:
+        with pytest.raises(openclaw.AgentRefused) as caught:
+            await openclaw.send_via_gateway(
+                client, bot_id="beta", session_key="agent:beta:t1",
+                message="hi", timeout=5)
+    finally:
+        reader.cancel()
+
+    # Verbatim, because the sentence names the allowed models.
+    assert "not allowed for agent" in str(caught.value)
+    assert "gateway is down" not in str(caught.value).lower()
+    # And NOT the retryable class — _send_with_gateway_retry only retries
+    # GatewayUnavailable, so inheriting from it would silently triple a
+    # refusal that can never succeed.
+    assert not isinstance(caught.value, openclaw.GatewayUnavailable)
+
+
+@pytest.mark.asyncio
+async def test_model_and_thinking_reach_the_gateway_only_when_chosen():
+    """Absent is not the same as null: absent means "the agent's own default"."""
+    ws = TurnWS(final=_final_ok("ok"))
+    client, reader = await _client_on(ws)
+    try:
+        await openclaw.send_via_gateway(
+            client, bot_id="beta", session_key="agent:beta:t1",
+            message="hi", timeout=5)
+        plain = ws.last_agent_params()
+        assert "model" not in plain and "thinking" not in plain, (
+            "an unset override must not be sent at all")
+
+        await openclaw.send_via_gateway(
+            client, bot_id="beta", session_key="agent:beta:t1",
+            message="hi", timeout=5, model="m-1", thinking="high")
+        chosen = ws.last_agent_params()
+        assert chosen["model"] == "m-1"
+        assert chosen["thinking"] == "high"
+    finally:
+        reader.cancel()
