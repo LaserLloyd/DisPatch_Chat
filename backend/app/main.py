@@ -6240,7 +6240,8 @@ _GATEWAY_RETRY_DELAYS = (3, 6, 12, 24, 45)
 _turn_transport_counts: dict[str, int] = {"socket": 0, "cli": 0}
 
 
-async def _dispatch_turn(bot_id: str, session_key: str, message: str
+async def _dispatch_turn(bot_id: str, session_key: str, message: str,
+                         model: str | None = None, thinking: str | None = None,
                          ) -> openclaw.AgentReply:
     """One attempt at a turn, over whichever transport is available.
 
@@ -6273,9 +6274,19 @@ async def _dispatch_turn(bot_id: str, session_key: str, message: str
             _inflight_register(_InflightRun(run_id, session_key, thread_id,
                                             bot_id, time.time()))
             try:
+                # Passed only when CHOSEN, the same rule the transports use
+                # internally. Absent means "the agent's own default", and
+                # sending an explicit None is a different statement. It also
+                # keeps the signature of this call unchanged for every turn
+                # that has no override, which is almost all of them.
+                extra = {}
+                if model:
+                    extra["model"] = model
+                if thinking:
+                    extra["thinking"] = thinking
                 reply = await openclaw.send_via_gateway(
                     client, bot_id=bot_id, session_key=session_key,
-                    message=message, run_id=run_id)
+                    message=message, run_id=run_id, **extra)
             except (openclaw.GatewayUnavailable, gateway_ws.GatewayRunRefused):
                 # Refused at the door: nothing ran, so there is nothing to
                 # chase after a reconnect. Anything else — a timeout, a lost
@@ -6294,12 +6305,18 @@ async def _dispatch_turn(bot_id: str, session_key: str, message: str
                 "minute.",
                 detail="DISPATCH_TURN_TRANSPORT=1 and no gateway socket")
     _turn_transport_counts["cli"] += 1
+    extra = {}
+    if model:
+        extra["model"] = model
+    if thinking:
+        extra["thinking"] = thinking
     return await openclaw.send_to_agent(
-        bot_id=bot_id, session_key=session_key, message=message)
+        bot_id=bot_id, session_key=session_key, message=message, **extra)
 
 
 async def _send_with_gateway_retry(
     bot_id: str, session_key: str, message: str, thread_id: str,
+    model: str | None = None, thinking: str | None = None,
 ) -> openclaw.AgentReply:
     """Dispatch a turn, retrying only turns the gateway refused at the door.
 
@@ -6309,7 +6326,8 @@ async def _send_with_gateway_retry(
     for delay in _GATEWAY_RETRY_DELAYS:
         try:
             async with _agent_sem:
-                return await _dispatch_turn(bot_id, session_key, message)
+                return await _dispatch_turn(bot_id, session_key, message,
+                                            model=model, thinking=thinking)
         except openclaw.GatewayUnavailable as e:
             if _shutting_down:
                 raise
@@ -6317,10 +6335,53 @@ async def _send_with_gateway_retry(
                         bot_id, thread_id, delay, (e.detail or "")[:160])
             await asyncio.sleep(delay)
     async with _agent_sem:
-        return await _dispatch_turn(bot_id, session_key, message)
+        return await _dispatch_turn(bot_id, session_key, message,
+                                    model=model, thinking=thinking)
 
 
-async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
+class TurnOptions(NamedTuple):
+    """Everything a turn may carry beyond "who said what".
+
+    One parameter object rather than eight keyword arguments, because eight
+    features are about to want a say in a single turn and they must not each
+    widen the same signature. Every field is optional and every default is
+    today's behaviour, so an existing caller that passes nothing gets exactly
+    what it got before.
+
+      user_msg_id  the row this turn answers, for features that need to point
+                   back at it (a quote, a rewind target)
+      model        per-thread model override, or None for the agent's own
+      thinking     per-thread thinking level, or None for the agent's own
+      rewind_entry gateway entry id to cut the session back to before re-running
+      replaces     rows this turn supersedes, kept so a failure can put them back
+      reply_to     the message being replied to, prepended to what the agent reads
+    """
+    user_msg_id: str | None = None
+    model: str | None = None
+    thinking: str | None = None
+    rewind_entry: str | None = None
+    replaces: tuple = ()
+    reply_to: str | None = None
+
+
+async def _compose_agent_text(thread_id: str, text: str,
+                              opts: "TurnOptions | None") -> str:
+    """What the AGENT reads, which is not always what the user typed.
+
+    A single chokepoint on purpose. Quoting prepends the quoted passage, and
+    feedback appends a short structured note — both change the prompt without
+    changing the stored message, and both would otherwise have to be bolted
+    onto two call sites each (the gateway transport and the CLI one) and kept
+    in step forever.
+
+    Identity today. The features that use it add their branch here, so there is
+    exactly one place to read to know what an agent was actually sent.
+    """
+    return text
+
+
+async def run_agent_turn(thread_id: str, bot_id: str, text: str,
+                         opts: "TurnOptions | None" = None) -> None:
     """Send `text` to the bot for `thread_id`, persist + broadcast the reply.
 
     Serialised per-thread (lock) and globally rate-limited (semaphore).
@@ -6332,11 +6393,14 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
     # lock (queued turns serialise identically) and still persists through
     # _deliver_assistant_text, so from the UI's side the two are the same thing.
     bot = config.get_bot(bot_id)
+    # Composed ONCE, before the two backends diverge, so an API bot and a
+    # gateway bot are sent the same thing.
+    agent_text = await _compose_agent_text(thread_id, text, opts)
     if bot is not None and bot.api:
         _thread_bot[thread_id] = bot_id   # authoritative attribution for redaction
         async with _thread_locks[thread_id]:
             _forget_thread_delivery(thread_id)
-            await llm_api.run_api_turn(thread_id, bot_id, text)
+            await llm_api.run_api_turn(thread_id, bot_id, agent_text)
         return
 
     # `agent_id` is the OpenClaw seat this turn actually runs on — normally
@@ -6377,9 +6441,20 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str) -> None:
             _watch_progress(thread_id, agent_id, session_key, handoff)
         )
         try:
-            agent_text = await _resolve_doc_refs(text)
+            # Doc refs resolve on the COMPOSED text, not the raw message:
+            # anything _compose_agent_text prepended or appended is part of
+            # what the agent reads, and re-deriving from `text` here would
+            # silently drop it. One chain, one answer.
+            agent_text = await _resolve_doc_refs(agent_text)
+            # Same absent-is-not-null rule as the transports below: a turn
+            # with no override calls this exactly as it always did.
+            over = {}
+            if opts and opts.model:
+                over["model"] = opts.model
+            if opts and opts.thinking:
+                over["thinking"] = opts.thinking
             reply = await _send_with_gateway_retry(
-                agent_id, session_key, agent_text, thread_id)
+                agent_id, session_key, agent_text, thread_id, **over)
             # The authoritative transcript path is built from this exact id (the
             # index can lag), so the reconciler/follower below never miss a reply.
             session_id = reply.metadata.get("session_id")

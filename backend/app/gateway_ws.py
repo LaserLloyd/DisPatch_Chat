@@ -195,6 +195,10 @@ class GatewayClient:
         self._task: asyncio.Task | None = None
         self._pump: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
+        # What the gateway's hello advertised. Empty until connected, which is
+        # why supports() reads "unknown" as False: an unasked question is not
+        # a yes, and the caller's degraded path is better than a refused call.
+        self._methods: set[str] = set()
         # `agent` requests answer TWICE on one id (accepted, then final), so
         # they cannot share the single-response map above without the
         # acceptance resolving the call and the real answer arriving to nobody.
@@ -312,6 +316,11 @@ class GatewayClient:
             hello = await self._handshake(ws, token)
             self.hello = hello
             self._assert_capabilities(hello)
+            # Remember what was advertised, for supports(). The session-editing
+            # calls are optional and ask before using, rather than joining the
+            # must-have set that _assert_capabilities enforces — a gateway
+            # without them should still deliver chat.
+            self._methods = set((hello.get("features") or {}).get("methods") or [])
             # Honour the server's advertised tick, not our pre-handshake guess.
             tick = ((hello.get("policy") or {}).get("tickIntervalMs")
                     if isinstance(hello.get("policy"), dict) else None)
@@ -712,6 +721,111 @@ class GatewayClient:
         """
         res = await self.call("chat.history", {
             "sessionKey": session_key, "limit": limit, "offset": 0})
+        return res if isinstance(res, dict) else {}
+
+    # ---------------------------------------------------------------- #
+    # Session editing: rewind, fork, branches, usage.
+    #
+    # These are NOT in the hello-frame capability check above, deliberately.
+    # That check names what DisPatch cannot work without, and an older gateway
+    # missing these should still deliver chat — the features that use them ask
+    # `supports()` first and degrade. Adding them to `need_m` would turn a
+    # missing nicety into a refusal to boot.
+    # ---------------------------------------------------------------- #
+
+    def supports(self, method: str) -> bool:
+        """Did the gateway's hello advertise this method?
+
+        Unknown (no hello yet) reads as False: the caller then takes the
+        degraded path, which is correct-but-limited, rather than firing a call
+        that will be refused.
+        """
+        return method in (self._methods or set())
+
+    async def last_user_entry(self, session_key: str,
+                              *, limit: int = 30) -> tuple[str, str] | None:
+        """The id and text of the most recent USER entry in a session.
+
+        Rewind addresses a session by the entry id of a user message, and the
+        gateway refuses anything else (`not-user-message`). DisPatch records
+        the gateway id of ASSISTANT rows only, so the user side has to be
+        looked up — walk the tail backwards and take the first user role.
+
+        Returns None when there is no user entry in the window, which is the
+        honest answer for a session that only ever received injects.
+        """
+        res = await self.history_tail(session_key, limit=limit)
+        msgs = res.get("messages") or []
+        for m in reversed(msgs):
+            if (m.get("role") or "") != "user":
+                continue
+            meta = m.get("__openclaw") or {}
+            eid = meta.get("id")
+            if eid:
+                # text_of, not this client's full_text(): that one fetches a
+                # message by id over the wire, and the row is already in hand.
+                from .gateway_router import text_of
+                return (str(eid), text_of(m) or "")
+        return None
+
+    async def rewind(self, session_key: str, entry_id: str,
+                     *, agent_id: str | None = None) -> dict:
+        """Cut a session back to the state BEFORE `entry_id`.
+
+        Returns the gateway's payload, which carries `editorText` — what the
+        user had typed — so a caller can compare it against what it believes
+        it is re-running and notice a mismatch instead of silently re-sending
+        something else.
+
+        The session keeps its key but gets a NEW session id, so anything
+        holding the old id must re-read it. Refused while a run is active, for
+        archived sessions, and for model-locked ones; those arrive as a normal
+        call error and are the caller's to surface, not to swallow.
+        """
+        params = {"sessionKey": session_key, "entryId": entry_id}
+        if agent_id:
+            params["agentId"] = agent_id
+        res = await self.call("sessions.rewind", params)
+        return res if isinstance(res, dict) else {}
+
+    async def fork(self, session_key: str, entry_id: str,
+                   *, agent_id: str | None = None) -> dict:
+        """Like rewind, but the cut history lands under a NEW session key,
+        leaving the original untouched. The new key is in the payload."""
+        params = {"sessionKey": session_key, "entryId": entry_id}
+        if agent_id:
+            params["agentId"] = agent_id
+        res = await self.call("sessions.fork", params)
+        return res if isinstance(res, dict) else {}
+
+    async def branches(self, session_key: str) -> list[dict]:
+        res = await self.call("sessions.branches.list", {"sessionKey": session_key})
+        if isinstance(res, dict):
+            got = res.get("branches")
+            return got if isinstance(got, list) else []
+        return []
+
+    async def switch_branch(self, session_key: str, leaf_entry_id: str) -> dict:
+        res = await self.call("sessions.branches.switch",
+                              {"sessionKey": session_key, "leafEntryId": leaf_entry_id})
+        return res if isinstance(res, dict) else {}
+
+    async def models_list(self, agent_id: str) -> list[dict]:
+        """The models THIS agent is allowed to use.
+
+        The per-thread override has to offer exactly this list: the gateway
+        refuses anything outside it, naming what is allowed, and offering a
+        model that will be refused is a worse experience than not offering it.
+        """
+        res = await self.call("models.list", {"agentId": agent_id})
+        if isinstance(res, dict):
+            got = res.get("models")
+            return got if isinstance(got, list) else []
+        return []
+
+    async def usage(self, session_key: str) -> dict:
+        res = await self.call("sessions.usage",
+                              {"sessionKey": session_key, "includeContextWeight": True})
         return res if isinstance(res, dict) else {}
 
     async def subscribe_sessions(self) -> None:
