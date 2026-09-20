@@ -86,6 +86,7 @@ from .models import (
     GenerateReactionIn,
     ImageJobIn,
     InjectIn,
+    MessageFeedbackIn,
     MessageOut,
     ReactionPatchIn,
     ReactionSettingsIn,
@@ -155,6 +156,11 @@ DECOY_UPLOAD_QUOTA = int(config.env("DECOY_UPLOAD_QUOTA") or (200 * 1024 * 1024)
 # DECOY_UPLOAD_QUOTA: per-client, per-day, in-memory, resets on restart.
 DECOY_TURN_QUOTA = int(config.env("DECOY_TURN_QUOTA", "200"))
 DECOY_THREAD_QUOTA = int(config.env("DECOY_THREAD_QUOTA", "50"))
+# Rating a reply is cheap (no model turn) but still an unauthenticated write,
+# so it gets the same daily-budget shape as every other decoy action rather
+# than an unlimited one. Generous: a real family device rating replies all
+# day will never come close.
+DECOY_FEEDBACK_QUOTA = int(config.env("DECOY_FEEDBACK_QUOTA", "100"))
 # Server-wide storage ceiling across ALL stored blobs (chat media + File
 # Server). Prevents even trusted-LAN uploaders from filling the disk over time.
 # Tunable via DISPATCH_FILES_TOTAL_MAX (bytes); 0 disables the cap.
@@ -1091,6 +1097,55 @@ def _strip_reply_directive(text: str) -> str:
     return _REPLY_TO_ID_RE.sub("", _REPLY_TO_CURRENT_RE.sub("", text)).strip()
 
 
+# Same id form as _REPLY_TO_ID_RE, but CAPTURING — used to resolve what the
+# directive named instead of just discarding it (see _extract_reply_directive
+# below). Kept as a second regex rather than adding a group to the original:
+# that one is matched thousands of times on plain replies with no directive at
+# all, and a non-capturing pattern is the cheaper common case.
+_REPLY_TO_ID_CAPTURE_RE = re.compile(r"^\s*\[\[reply_to:([^\]]+)\]\]")
+
+
+async def _extract_reply_directive(
+        thread_id: str, content: str, *, allow_current: bool = True,
+) -> MessageOut | None:
+    """What an assistant reply's LEADING reply directive names, if anything.
+
+    main.py has always stripped `[[reply_to_current]]` / `[[reply_to:<id>]]`
+    from the visible bubble (see _strip_reply_directive) and thrown the
+    directive away — FEATURE 5 keeps the strip (it is correct: the token is a
+    rendering instruction, never content) but also resolves what it pointed
+    at, so a bot's own quote/reply can be rendered the same way the user's
+    Reply action is.
+
+    `reply_to:<id>` is accepted only when `id` names a real message IN THIS
+    THREAD — a bot must not be able to make a reply appear to quote a message
+    it never saw, whether by a typo, a stale id, or a hallucinated one.
+    `reply_to_current` resolves to the thread's own most recent user message
+    (the same "what is this turn answering" _handle_retry already uses), so
+    it needs no id at all — BUT that resolution is only valid for a reply
+    persisting close to when it was generated. `allow_current=False` (the
+    replay/recovery paths set it — see _prepare_persist) skips that form: an
+    old reply surfacing days later would otherwise get quietly re-pointed at
+    whatever the thread's newest user message happens to be today, which is
+    not what the model was replying to. The explicit id form has no such
+    problem (it names a specific row, not "whatever is current now") and
+    stays honoured either way.
+    """
+    if not content or "[[" not in content:
+        return None
+    stripped = content.lstrip()
+    id_m = _REPLY_TO_ID_CAPTURE_RE.match(stripped)
+    if id_m:
+        candidate = id_m.group(1).strip()
+        if not candidate:
+            return None
+        target = await db.get_message(candidate)
+        return target if (target is not None and target.thread_id == thread_id) else None
+    if allow_current and _REPLY_TO_CURRENT_RE.match(stripped):
+        return await db.get_last_user_message(thread_id)
+    return None
+
+
 # The gateway WebSocket transport redacts quote/reply directives ANYWHERE in
 # the text (unanchored, case-insensitive) before its copy is delivered, while
 # the transcript files the legacy tail paths read keep the token verbatim. The
@@ -1153,6 +1208,28 @@ def _strip_media_text(s: str | None) -> str | None:
     s = _MEDIA_DIRECTIVE_RE.sub("", s)
     s = _DOC_REF_RE.sub("", s)
     return s
+
+
+# A quote (Reply action / native reply directive) never carries more than
+# this many characters — long enough to identify what is being replied to,
+# short enough that a quote of a 10,000-word report doesn't become a second
+# copy of it. Applies to BOTH the composer's own quote and the gateway's
+# `[[reply_to…]]` directive, so the two features render identically.
+_REPLY_EXCERPT_MAX = 200
+
+
+def _quote_excerpt(content: str | None) -> str:
+    """A short, media-free preview of a message for a reply quote.
+
+    Media/doc directives are stripped first (see _strip_media_text) — the
+    result is stored on the QUOTING message's own metadata, so a locked
+    device rendering its quote chip needs no further lookup of the (possibly
+    unsafe-bot) original.
+    """
+    text = (_strip_media_text(content) or "").strip()
+    if len(text) > _REPLY_EXCERPT_MAX:
+        text = text[:_REPLY_EXCERPT_MAX].rstrip() + "…"
+    return text
 
 
 # Inline-image URL capture (Safe-Mode upload allowlist uses the captured URL).
@@ -1302,7 +1379,7 @@ _DECOY_FRAME_ALLOW = frozenset({
     "message", "message_update", "stream_done", "message_deleted", "thinking",
     "stream_start", "stream_chunk", "turn_status",
     "thread_update", "thread_created", "thread_deleted", "checklist_update",
-    "threads_list", "threads", "messages", "reaction",
+    "threads_list", "threads", "messages", "reaction", "message_feedback",
 })
 
 
@@ -1345,7 +1422,8 @@ def redact_for_decoy(frame: dict):
     # errors with no bot context must still reach the requester.
     if t in ("message", "message_update", "stream_done", "thread_update",
              "thread_created", "thread_deleted", "thinking", "message_deleted",
-             "checklist_update", "stream_start", "stream_chunk", "turn_status"):
+             "checklist_update", "stream_start", "stream_chunk", "turn_status",
+             "message_feedback"):
         bot = _frame_bot(frame)
         if bot not in safe:
             return None
@@ -2172,9 +2250,30 @@ async def _prepare_persist(
     autopilot = False
     if role == "assistant":
         bot_id = await _bot_of_thread(thread_id)
+        # Resolved on the ORIGINAL content, before the strip below discards the
+        # directive itself — see _extract_reply_directive. A bot's own
+        # quote/reply then renders through the same metadata shape the user's
+        # Reply action writes (reply_to / reply_role / reply_excerpt), so the
+        # frontend needs only one quote-block renderer for both.
+        #
+        # `allow_current` is false for a replay/recovery — the gap sweep and
+        # the seq-gap backfill persist an OLD reply days after it was
+        # generated, and "current" would then resolve to whatever the thread's
+        # newest user message happens to be TODAY, not what the model actually
+        # answered. Read here off the caller's raw metadata (before any of the
+        # mutations below), same as the `replaying` flag further down.
+        reply_target = await _extract_reply_directive(
+            thread_id, content,
+            allow_current=not bool((metadata or {}).get("followup")
+                                   or (metadata or {}).get("recovered")))
         content = _salvage_media_refs(
             openclaw_text.sanitize_assistant_visible_text(
                 _strip_reply_directive(_strip_no_reply(content))))
+        if reply_target is not None:
+            metadata = dict(metadata or {})
+            metadata["reply_to"] = reply_target.id
+            metadata["reply_role"] = reply_target.role
+            metadata["reply_excerpt"] = _quote_excerpt(reply_target.content)
         # `:react:<id>:` markers are the agent's way to pop a reaction image.
         # Stripped here, at the persist chokepoint, so the marker syntax can
         # never reach a chat bubble on any path.
@@ -6364,6 +6463,51 @@ class TurnOptions(NamedTuple):
     reply_to: str | None = None
 
 
+# A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
+# MessageFeedbackIn.vote. Guards _pending_feedback_lines against a metadata
+# blob some OTHER writer put a "feedback" key into (any assistant message's
+# metadata is a shared dict; nothing enforces that only this feature uses that
+# key) turning into a fabricated note in the prompt.
+_FEEDBACK_VOTE_ENUM = frozenset({"up", "down"})
+# At most this many pending feedback notes are surfaced on any one turn — a
+# thread nobody has driven a turn on for a while must not dump an unbounded
+# backlog into a single prompt. The rest stay pending for the turn after.
+_FEEDBACK_NOTE_CAP = 3
+
+
+async def _pending_feedback_lines(thread_id: str) -> list[str]:
+    """FEATURE 28 (thumbs feedback): fixed-template lines for votes the agent
+    has not been told about yet, and marks exactly the ones returned here
+    delivered so a later turn does not repeat them.
+
+    Every line is built from two closed enums (MessageFeedbackIn.vote /
+    .reason) and a message id — never from caller-supplied text, which is the
+    whole point: this is reachable from a locked Safe-Mode device, and a
+    fixed template is what keeps that device from ever injecting prose into
+    what the agent reads.
+    """
+    pending = await db.pending_feedback_messages(thread_id, limit=_FEEDBACK_NOTE_CAP)
+    lines: list[str] = []
+    for msg in pending:
+        fb = dict((msg.metadata or {}).get("feedback") or {})
+        vote = fb.get("vote")
+        if vote not in _FEEDBACK_VOTE_ENUM:
+            continue    # not ours to narrate — see _FEEDBACK_VOTE_ENUM
+        reason = fb.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            reason = None
+        lines.append(f"[[feedback]] message={msg.id} vote={vote} "
+                     f"reason={reason or 'none'}")
+        # Marked delivered as each note is BUILT, not after the whole batch —
+        # a turn that fails after this point (gateway down, refused) must not
+        # re-surface a note the family already saw acknowledged once elsewhere;
+        # the same "recorded, not guaranteed re-narrated" tradeoff the rest of
+        # this chokepoint makes for a reply that never lands.
+        fb["pending"] = False
+        await db.merge_message_metadata(msg.id, {"feedback": fb})
+    return lines
+
+
 async def _compose_agent_text(thread_id: str, text: str,
                               opts: "TurnOptions | None") -> str:
     """What the AGENT reads, which is not always what the user typed.
@@ -6377,7 +6521,24 @@ async def _compose_agent_text(thread_id: str, text: str,
     Identity today. The features that use it add their branch here, so there is
     exactly one place to read to know what an agent was actually sent.
     """
-    return text
+    composed = text
+    if opts is not None and opts.reply_to:
+        quoted = await db.get_message(opts.reply_to)
+        # Same "id must name a row in THIS thread" rule the id-form directive
+        # is held to on the way in — a reply_to that has since been deleted,
+        # or (should it ever happen) named a message elsewhere, is silently
+        # not quoted rather than composing a prompt around a message that
+        # is not really there.
+        if quoted is not None and quoted.thread_id == thread_id:
+            excerpt = _quote_excerpt(quoted.content)
+            if excerpt:
+                who = ("your own earlier reply" if quoted.role == "assistant"
+                      else "the user")
+                composed = f'[Replying to {who}: "{excerpt}"]\n{composed}'
+    notes = await _pending_feedback_lines(thread_id)
+    if notes:
+        composed = f"{composed}\n\n" + "\n".join(notes)
+    return composed
 
 
 async def run_agent_turn(thread_id: str, bot_id: str, text: str,
@@ -8106,6 +8267,55 @@ async def update_message_checklist(request: Request, message_id: str,
         "checklist": stored,
     })
     return {"ok": True, "message_id": message_id, "checklist": stored}
+
+
+@app.post("/api/messages/{message_id}/feedback",
+          responses={**problem.MACHINE, **problem.RATE_LIMITED})
+async def message_feedback(request: Request, message_id: str,
+                           payload: MessageFeedbackIn):
+    """Rate one of the bot's own replies: thumbs up/down, optional reason.
+
+    FEATURE 28. `vote` and `reason` are closed Pydantic Literals
+    (MessageFeedbackIn) — that is the entire security property. This route is
+    reachable from a locked Safe-Mode device, and the vote it records is later
+    quoted back into the agent's own prompt (_compose_agent_text /
+    _pending_feedback_lines): nothing free-text ever reaches that quote,
+    because nothing free-text is accepted here.
+
+    The vote is stored `pending: true` and surfaces on the thread's NEXT turn
+    as a fixed-template line, then marked delivered so it is never repeated.
+
+    Tier: allowed in Safe Mode for SAFE bots (the family is exactly who rates
+    a reply) — _deny_decoy_thread scopes it the same way every other
+    thread-scoped decoy-readable route does — and rate-limited by the same
+    daily-budget mechanism as every other decoy action (DECOY_FEEDBACK_QUOTA).
+    """
+    _is_safe_mode_caller(request)
+    msg = await db.get_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    await _deny_decoy_thread(request, msg.thread_id)
+    if msg.role != "assistant" or bool((msg.metadata or {}).get("sub")):
+        raise HTTPException(
+            400, "Feedback only applies to one of the bot's own replies")
+    if _is_decoy(request):
+        ip = _request_quota_ip(request)
+        if not _decoy_action_allowed(ip, "feedback", DECOY_FEEDBACK_QUOTA):
+            raise HTTPException(429, "Daily limit reached on this device")
+    note = {"vote": payload.vote, "reason": payload.reason,
+            "at": now_iso(), "pending": True}
+    updated = await db.merge_message_metadata(message_id, {"feedback": note})
+    if updated is None:
+        raise HTTPException(404, "Message not found")
+    bot_id = await _bot_of_thread(msg.thread_id)   # lets the redactor scope frames
+    await manager.broadcast({
+        "type": "message_feedback",
+        "thread_id": msg.thread_id,
+        "bot_id": bot_id,
+        "message_id": message_id,
+        "feedback": note,
+    })
+    return {"ok": True, "message_id": message_id, "feedback": note}
 
 
 @app.delete("/api/threads/{thread_id}", responses=problem.MACHINE)
@@ -10538,6 +10748,19 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         await _ack(ws, cmid, "rejected", "Not allowed")
         return
 
+    # FEATURE 5 (quote/reply). An id that names no row, or one in ANOTHER
+    # thread, is silently ignored rather than rejecting the whole send — same
+    # "forgiving of a stale/garbled quote" treatment a bad media path gets.
+    # Allowed in Safe Mode on purpose: a locked device may already send, and
+    # everything it can name here is a message in the same safe-bot thread it
+    # is already allowed to read.
+    reply_target: MessageOut | None = None
+    reply_to_raw = data.get("reply_to")
+    if isinstance(reply_to_raw, str) and reply_to_raw.strip():
+        candidate = await db.get_message(reply_to_raw.strip())
+        if candidate is not None and candidate.thread_id == thread_id:
+            reply_target = candidate
+
     if manager.conn_decoy(ws):
         if not _decoy_action_allowed(_ws_client_ip(ws), "turn", DECOY_TURN_QUOTA):
             await manager.send(ws, {"type": "error", "thread_id": thread_id,
@@ -10570,8 +10793,19 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         if not text:
             await _ack(ws, cmid, "rejected", "Empty message")
             return
+    # The excerpt is computed and stored NOW, on the QUOTING message, so a
+    # locked device rendering its own quote chip later needs no lookup of the
+    # (possibly unsafe-bot) original — see _quote_excerpt.
+    user_metadata = None
+    if reply_target is not None:
+        user_metadata = {
+            "reply_to": reply_target.id,
+            "reply_role": reply_target.role,
+            "reply_excerpt": _quote_excerpt(reply_target.content),
+        }
     try:
-        user_msg = await db.add_message(thread_id, "user", text)
+        user_msg = await db.add_message(thread_id, "user", text,
+                                        metadata=user_metadata)
     except Exception:
         # Neutral reason — no exception detail in any client-visible frame.
         await _ack(ws, cmid, "rejected", "Server error — please retry")
@@ -10622,7 +10856,16 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         except Exception:
             log.exception("publish failed for thread %s; running the turn anyway",
                           thread_id)
-        await run_agent_turn(thread_id, thread.bot_id, text)
+        # Same "absent is not null" rule TurnOptions documents: a send with no
+        # quote calls run_agent_turn exactly as it always has (three args,
+        # opts defaulting on the far side) so nothing about the ordinary send
+        # path changes shape.
+        if reply_target is not None:
+            await run_agent_turn(thread_id, thread.bot_id, text,
+                                 TurnOptions(user_msg_id=user_msg.id,
+                                            reply_to=reply_target.id))
+        else:
+            await run_agent_turn(thread_id, thread.bot_id, text)
 
     _track(asyncio.create_task(_publish_then_run()))
     if cmid:

@@ -82,6 +82,7 @@ can spend:
 DISPATCH_DECOY_UPLOAD_QUOTA=209715200   # bytes uploaded per day
 DISPATCH_DECOY_TURN_QUOTA=200           # messages sent
 DISPATCH_DECOY_THREAD_QUOTA=50          # conversations created
+DISPATCH_DECOY_FEEDBACK_QUOTA=100       # thumbs-feedback votes cast
 ```
 
 The message budget is the one to think about: each message to a bot spawns an

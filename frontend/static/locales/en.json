@@ -131,7 +131,9 @@
     },
     "not_delivered": "Message not delivered",
     "remove_attachment": "Remove {name}",
-    "attachment": "attachment"
+    "attachment": "attachment",
+    "reply_label": "Replying to {name}",
+    "reply_cancel": "Cancel reply"
   },
   "msg": {
     "copy": "Copy",
@@ -158,7 +160,23 @@
     "callout_important": "Important",
     "callout_warning": "Warning",
     "callout_caution": "Caution",
-    "link_retargeted": "Opens on this device's network — written as {url}"
+    "link_retargeted": "Opens on this device's network — written as {url}",
+    "reply_action": "↩ Reply",
+    "reply_action_title": "Reply to this message",
+    "reply_jump_title": "Jump to the quoted message",
+    "feedback_up": "👍",
+    "feedback_up_title": "This reply was helpful",
+    "feedback_down": "👎",
+    "feedback_down_title": "This reply wasn't helpful",
+    "feedback_sent": "Thanks for the feedback",
+    "feedback_failed": "Could not send feedback",
+    "feedback_reason_skip": "Skip",
+    "feedback_reason_inaccurate": "Inaccurate",
+    "feedback_reason_unhelpful": "Not helpful",
+    "feedback_reason_too_long": "Too long",
+    "feedback_reason_off_topic": "Off topic",
+    "feedback_reason_tone": "Tone",
+    "feedback_reason_other": "Other"
   },
   "progress": {
     "hint_show": "show work ▸",

@@ -142,7 +142,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=5" />
-  <link rel="stylesheet" href="/static/app.css?v=79" />
+  <link rel="stylesheet" href="/static/app.css?v=80" />
   <link rel="stylesheet" href="/static/dashboard.css?v=5" />
   <script type="module" src="/static/js/theme.js?v=15"></script>
 </head>
@@ -330,6 +330,15 @@
         <div class="retry-chip hidden" id="retry-chip" role="status">
           <span class="icn" data-icon="alert" aria-hidden="true"></span><span data-i18n="composer.not_delivered">Message not delivered</span>
           <button type="button" id="retry-chip-btn" data-i18n="common.retry">Retry</button>
+        </div>
+        <!-- Feature 5 (quote/reply): what the next send will quote, staged by
+             tapping "Reply" on a message. Hidden while nothing is staged. -->
+        <div class="reply-chip hidden" id="reply-chip" role="status">
+          <div class="reply-chip-body">
+            <span class="reply-chip-label" id="reply-chip-label"></span>
+            <span class="reply-chip-excerpt" id="reply-chip-excerpt"></span>
+          </div>
+          <button type="button" class="reply-chip-cancel" id="reply-chip-cancel" aria-label="Cancel reply" data-i18n-attr="aria-label=composer.reply_cancel">×</button>
         </div>
         <div class="attach-preview hidden" id="attach-preview"></div>
         <div class="composer-row">
@@ -1086,6 +1095,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=94"></script>
+  <script type="module" src="/static/js/main.js?v=95"></script>
 </body>
 </html>

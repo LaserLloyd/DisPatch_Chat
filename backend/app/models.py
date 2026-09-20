@@ -226,3 +226,24 @@ class GenerateReactionIn(BaseModel):
     style: str | None = Field(default=None, max_length=60)
     workflow: str | None = Field(default=None, max_length=60)
     safe: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Message feedback (thumbs up/down on one of the bot's own replies)
+# --------------------------------------------------------------------------- #
+
+
+class MessageFeedbackIn(BaseModel):
+    """Thumbs feedback on one of the bot's own replies.
+
+    Literal enums ONLY, never free text — that is the whole security property.
+    This route is reachable from a locked Safe-Mode device, and the vote it
+    records is later quoted back into the agent's own prompt (see
+    main._pending_feedback_lines): if `reason` were a free string, a Safe-Mode
+    caller could inject arbitrary prompt text through it. Closed vocabularies
+    can't do that no matter who is asking.
+    """
+    vote: Literal["up", "down"]
+    reason: Literal[
+        "inaccurate", "unhelpful", "too_long", "off_topic", "tone", "other",
+    ] | None = None
