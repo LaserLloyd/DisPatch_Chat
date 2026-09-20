@@ -43,6 +43,11 @@ class ThreadOut(BaseModel):
     # None for threads that predate the feature (they render the live avatar).
     avatar_snapshot: str | None = None
     avatar_url: str = ""              # resolved snapshot URL, "" when none
+    # Per-thread UI choices: {"model": str, "thinking": str, "scene": str}.
+    # None means "the bot's own defaults" — which is every thread that predates
+    # the feature. REDACTED for a locked device (see _redact_thread_dict): a
+    # model name is operator configuration, not family-facing.
+    prefs: dict | None = None
 
 
 class MessageOut(BaseModel):

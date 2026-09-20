@@ -1139,10 +1139,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .app[data-view="threads"] .threadlist { display: flex; width: 100vw; border-inline-end: none; }
   .app[data-view="chat"] .chatview { display: flex; }
   .thread-item { padding: 13px 10px; }       /* bigger touch targets */
-  /* Today / Older section heads are desktop chrome — mobile list is flat.
-   * main.js also skips the headers under isMobile(); the CSS is the backstop
-   * in case a render lands with a stale DOM before the JS gate fires. */
-  .thread-section-head { display: none; }
+  /* Today / Older section heads show on the phone too. They used to be
+   * hidden here as "desktop chrome", which switched the feature off on the
+   * device the list is mostly read on. Slightly tighter than desktop so a
+   * header costs less of a short screen. */
+  .thread-section-head { padding-top: 10px; padding-bottom: 2px; }
   .icon-btn { width: 44px; height: 44px; }
   .collapse-btn, .expand-btn { display: none; }  /* desktop-only feature */
 

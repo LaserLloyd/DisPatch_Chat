@@ -167,7 +167,15 @@ export function filterSignature(threads, now, tzOffsetMin, lastMessageRoleById) 
  *  a misleading "Older" header.
  */
 export function shouldShowThreadSections({ isMobile, searchOpen }) {
-  if (isMobile) return false;
+  // `isMobile` is deliberately NOT a reason to hide these any more.
+  //
+  // The split shipped as "first-cut desktop-only", which was a scoping
+  // decision rather than a technical one — and it left the feature switched
+  // off for the device this app is mostly read on. A phone list is longer in
+  // practice, not shorter, so "what did I touch today" is worth MORE there.
+  //
+  // Search is still a reason: results are ranked by relevance, and bucketing
+  // them by date would impose a second, competing order on the same list.
   if (searchOpen) return false;
   return true;
 }

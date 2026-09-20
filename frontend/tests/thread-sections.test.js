@@ -266,15 +266,20 @@ test('shouldShowThreadSections: desktop, no search → true', () => {
   assert.equal(shouldShowThreadSections({ isMobile: false, searchOpen: false }), true);
 });
 
-test('shouldShowThreadSections: mobile → false (CSS hides too, but JS skips the work)', () => {
-  assert.equal(shouldShowThreadSections({ isMobile: true, searchOpen: false }), false);
+test('shouldShowThreadSections: mobile → TRUE (the split is not desktop chrome)', () => {
+  // It shipped desktop-only as a scoping decision, which switched the feature
+  // off for the device this list is mostly read on. A phone list is longer in
+  // practice, so the buckets are worth more there, not less.
+  assert.equal(shouldShowThreadSections({ isMobile: true, searchOpen: false }), true);
 });
 
 test('shouldShowThreadSections: desktop + search open → false', () => {
   assert.equal(shouldShowThreadSections({ isMobile: false, searchOpen: true }), false);
 });
 
-test('shouldShowThreadSections: mobile + search open → false (either gate trips it)', () => {
+test('shouldShowThreadSections: search open → false on any device', () => {
+  // Search results are ranked by relevance; date buckets would impose a
+  // second, competing order on the same list. This is the gate that stayed.
   assert.equal(shouldShowThreadSections({ isMobile: true, searchOpen: true }), false);
 });
 

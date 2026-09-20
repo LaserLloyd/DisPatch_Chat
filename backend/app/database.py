@@ -407,6 +407,13 @@ class Database:
             # on every pre-existing thread, which is exactly right: they fall
             # back to the live avatar, i.e. today's behaviour. See
             # app/avatar_snapshots.py.
+            # Per-thread preferences as one JSON blob: {model, thinking, scene}.
+            # A blob rather than a column each, because these are UI choices
+            # nothing queries or joins on — a column per preference would mean a
+            # migration every time one is added, and this table already carries
+            # eight of those. NULL everywhere on existing threads, which reads
+            # as "use the bot's defaults", i.e. today's behaviour exactly.
+            "ALTER TABLE threads ADD COLUMN prefs TEXT",
             "ALTER TABLE threads ADD COLUMN avatar_snapshot TEXT",
             # Was this thread's avatar pinned EXPLICITLY (someone gave this one
             # conversation its own picture), or captured automatically at
@@ -1073,6 +1080,91 @@ class Database:
             "UPDATE threads SET status = ? WHERE id = ?", (status, thread_id)
         )
         await self.db.commit()
+
+    async def update_thread_prefs(self, thread_id: str, patch: dict) -> dict | None:
+        """Merge `patch` into a thread's prefs and return the result.
+
+        A MERGE, not a replace: the model picker and the backdrop both write
+        here and neither knows about the other, so a replace would silently
+        drop whatever the other one set. A key set to None is REMOVED, which is
+        how "back to the bot's default" is expressed — distinct from absent,
+        which means "leave this one alone".
+        """
+        cur = await self.db.execute(
+            "SELECT prefs FROM threads WHERE id = ?", (thread_id,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        current: dict = {}
+        if row["prefs"]:
+            try:
+                parsed = _json.loads(row["prefs"])
+                if isinstance(parsed, dict):
+                    current = parsed
+            except (ValueError, TypeError):
+                current = {}
+        for key, value in patch.items():
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value
+        blob = _json.dumps(current) if current else None
+        await self.db.execute(
+            "UPDATE threads SET prefs = ? WHERE id = ?", (blob, thread_id))
+        await self.db.commit()
+        return current
+
+    async def merge_message_metadata(self, message_id: str,
+                                     patch: dict) -> MessageOut | None:
+        """Merge `patch` into one message's metadata and return the fresh row.
+
+        Same merge-not-replace rule as prefs, and for a sharper reason: four
+        features write here (alternates, edit markers, reply_to, feedback) and
+        a replace would let the newest one erase the others. None removes a key.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        meta: dict = {}
+        if row["metadata"]:
+            try:
+                parsed = _json.loads(row["metadata"])
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except (ValueError, TypeError):
+                meta = {}
+        for key, value in patch.items():
+            if value is None:
+                meta.pop(key, None)
+            else:
+                meta[key] = value
+        await self.db.execute(
+            "UPDATE messages SET metadata = ? WHERE id = ?",
+            (_json.dumps(meta) if meta else None, message_id))
+        await self.db.commit()
+        cur = await self.db.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,))
+        fresh = await cur.fetchone()
+        return self._message_from_row(fresh) if fresh else None
+
+    async def messages_after(self, thread_id: str,
+                             message_id: str) -> list[MessageOut]:
+        """Every message in the thread newer than `message_id`, oldest first.
+
+        Ordered by (created_at, rowid) to match list_messages, so "newer" means
+        the same thing here as it does on the read path — two rows written in
+        the same second still have a stable order.
+        """
+        cur = await self.db.execute(
+            "SELECT * FROM messages WHERE thread_id = ? "
+            "AND (created_at, rowid) > "
+            "    (SELECT created_at, rowid FROM messages WHERE id = ?) "
+            "ORDER BY created_at ASC, rowid ASC",
+            (thread_id, message_id),
+        )
+        return [self._message_from_row(r) for r in await cur.fetchall()]
 
     async def set_thread_avatar(self, thread_id: str, snapshot_id: str,
                                 explicit: bool = False) -> bool:
@@ -1948,6 +2040,15 @@ class Database:
         # None for threads that predate the feature — they render the live
         # avatar, which is what they have always done.
         snap = row["avatar_snapshot"] if "avatar_snapshot" in keys else None
+        prefs = None
+        if "prefs" in keys and row["prefs"]:
+            try:
+                parsed = _json.loads(row["prefs"])
+                # A non-dict here is corruption, not a preference. Treated as
+                # absent rather than crashing the thread list over it.
+                prefs = parsed if isinstance(parsed, dict) else None
+            except (ValueError, TypeError):
+                prefs = None
         return ThreadOut(
             id=row["id"],
             bot_id=row["bot_id"],
@@ -1962,6 +2063,7 @@ class Database:
             unread_since=row["unread_since"] if "unread_since" in keys else None,
             avatar_snapshot=snap,
             avatar_url=avatar_snapshots.url_for(row["id"], snap),
+            prefs=prefs,
         )
 
     @staticmethod

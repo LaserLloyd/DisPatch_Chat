@@ -38,7 +38,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=9';
 // and WHERE the buckets go in the threads list.
 import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
-} from './thread-sections.js?v=1';
+} from './thread-sections.js?v=2';
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
 import { renderLinkRail, linksSection } from './links.js?v=5';
 // The local viewer owns its own overlay (built like openLightbox, closed by the

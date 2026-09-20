@@ -212,8 +212,8 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // cached by PATH, so without the bump an installed client keeps the old
   // markup and the fixes simply are not there. If you bump again, bump here
   // too.
-  assert.equal(m[1], 'local-chat-v114',
-    'sw.js CACHE must be local-chat-v114 so old shells drop and the new board/viewport/theme/markdown fixes install');
+  assert.equal(m[1], 'local-chat-v115',
+    'sw.js CACHE must be local-chat-v115 so old shells drop and the new board/viewport/theme/markdown fixes install');
 });
 
 // =============================================================================

@@ -2,7 +2,14 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v114';  // v114: the hardening round, and a
+const CACHE = 'local-chat-v115';  // v115: the Today/Older split in the thread
+  //   list now shows on the PHONE. It shipped "first-cut desktop-only" and the
+  //   CSS hid the headers under 769px — a scoping decision that switched the
+  //   feature off for the device the list is mostly read on. Search still
+  //   suppresses it, because results are ranked by relevance and date buckets
+  //   would fight that order. main.js?v=92→93 + app.css?v=77→78 +
+  //   thread-sections.js?v=1→2.
+  // v114: the hardening round, and a
   //   cache-correctness fix that is the reason this bump matters more than
   //   most. Nine modules had their IMPORT lines rewritten by the previous
   //   round (api.js?v and util.js?v moved) without their OWN ?v= changing, so
