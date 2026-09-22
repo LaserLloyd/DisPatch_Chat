@@ -39,6 +39,17 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 `frontend/static/sw.js`. Miss one and users get a half-updated app: new HTML
 against an old module, which usually shows up as a blank screen.
 
+**Two files are generated, not written.** `frontend/static/ui-theme.js` (the
+theme runtime, the first and only blocking script in `<head>`) and
+`frontend/static/ui-theme.css` (the tokens for every theme, plus the adapter
+that maps DisPatch's own token names onto them) are vendored from a shared
+theme package. Do not edit them by hand — a local change is overwritten by
+the next re-vendor, and a colour fix belongs upstream. Their `?v=` is the
+theme revision's digits (revision `2026-09-22` → `?v=20260922`, the date
+their header comment and Settings → Theme both show); bump it, and `CACHE`
+in `sw.js`, whenever a new revision is vendored. DisPatch-only colour roles
+and layout tokens live in `frontend/static/theme.css`.
+
 `grep -rn '<module>.js?v=' frontend/static/` finds every reference — a module
 imported by three others has four places to change, not one. A **new** module
 also has to be added to `SHELL` in `sw.js`, or it is the one file an offline
