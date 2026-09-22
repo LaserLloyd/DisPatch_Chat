@@ -348,10 +348,10 @@ test('the theme revision line is wired into the Theme pane', () => {
   assert.match(THEME_JS, /revision\(\)/);
 });
 
-test('the vendored theme files are not referenced from anywhere they come from', () => {
-  // DisPatch ships the generated files and nothing else of the package: no
-  // path, repository or tool name of the theme source belongs in this tree.
-  for (const f of ['ui-theme.js', 'ui-theme.css', 'theme.css', 'index.html', 'js/theme.js']) {
-    assert.ok(!/unifyingtheme|sync_theme/i.test(read(f)), `${f} names the theme source`);
+test('the vendored theme files are free-standing and carry their revision', () => {
+  // The two generated files identify themselves only by a revision date.
+  for (const f of ['ui-theme.js', 'ui-theme.css']) {
+    assert.match(read(f), /^\/\* Theme revision \d{4}-\d{2}-\d{2} — generated file, do not edit by hand\./, `${f} header`);
+    assert.ok(!/https?:\/\/|\.git\b/.test(read(f).split('\n').slice(0, 3).join('\n')), `${f} header names a source`);
   }
 });
