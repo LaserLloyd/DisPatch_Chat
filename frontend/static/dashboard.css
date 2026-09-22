@@ -1,16 +1,16 @@
 /* ===================== Host dashboard =====================
-   Styles for js/dashboard.js. Self-contained: every colour comes from the
-   custom properties theme.css defines, so this file inherits all six palettes
-   for free — including the light-dark() pairs below, which resolve through the
-   `color-scheme` each palette block declares (dark palettes give the dark ink,
-   Paper and Daylight give the darker one).
+   Styles for js/dashboard.js. Self-contained: every colour comes from a
+   custom property — DisPatch's legacy names, which the theme adapter in
+   ui-theme.css maps onto the shared theme contract — so this file follows all
+   ten themes for free, including the light-dark() pairs below, which resolve
+   through the `color-scheme` each theme declares (dark themes take the second
+   value, Paper, Daylight and LaserLloyd Light the first).
 
-   The only new colours are the three severity tints. --success/--warning/
-   --error are tuned for dark backgrounds and don't carry enough contrast as
-   TEXT on a light palette, so each level gets a light-dark() pair: a darker
-   ink for the light skins, the existing accent for the dark ones. Backgrounds
-   and borders are derived from those with color-mix, so a level always reads
-   as one colour.                                                           */
+   The only colours of its own are the three severity tints. As TEXT on a
+   light theme the status tokens need a darker ink, so each level is a
+   light-dark() pair: a darker literal ink for light grounds, the theme's own
+   status token for dark ones. Backgrounds and borders are derived from those
+   with color-mix, so a level always reads as one colour.                   */
 
 /* The level tints hang off .dash-body because that IS the dashboard's root
    now — it used to be .dash-modal, back when this panel had a dialog of its
@@ -18,9 +18,14 @@
    resolve exactly as before. */
 .dash-body {
   /* Level ink — used for text, dots and borders. */
-  --lvl-ok:   light-dark(#0f766e, #34d399);
-  --lvl-warn: light-dark(#9a5b00, #fbbf24);
-  --lvl-fail: light-dark(#b3261e, #f87171);
+  /* Dark arm: the status tokens themselves. Every one of the six core
+     palettes resolved them to exactly the literals that used to sit here
+     (#34d399 / #fbbf24 / #f87171 — frontend/tests/fixtures/
+     palette-parity-2026-09.json), so this is a no-op for them and lets the
+     other themes bring their own status hues. The light arm stays literal. */
+  --lvl-ok:   light-dark(#0f766e, var(--success));
+  --lvl-warn: light-dark(#9a5b00, var(--warning));
+  --lvl-fail: light-dark(#b3261e, var(--danger));
   /* Level wash — the faint fill behind banners, pills and finding rows. */
   --lvl-ok-bg:   color-mix(in oklab, var(--lvl-ok) 12%, transparent);
   --lvl-warn-bg: color-mix(in oklab, var(--lvl-warn) 14%, transparent);
@@ -93,7 +98,7 @@
 }
 .dash-card {
   background: var(--bg-tertiary);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   padding: 11px 13px;
   min-width: 0;
@@ -130,7 +135,7 @@
   display: flex; gap: 10px; align-items: flex-start;
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--bg-tertiary);
 }
 .dash-finding-pill {
@@ -151,7 +156,7 @@
   margin-top: 7px; padding: 7px 9px;
   border-radius: var(--radius-sm);
   background: var(--tint-subtle);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   font-size: 12.5px; line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -167,7 +172,7 @@
 }
 .dash-empty { padding: 14px; text-align: center; font-size: 13px; }
 
-.dash-finding.level-ok   { border-color: color-mix(in oklab, var(--lvl-ok) 26%, var(--border)); }
+.dash-finding.level-ok   { border-color: color-mix(in oklab, var(--lvl-ok) 26%, var(--border-strong)); }
 .dash-finding.level-warn { border-color: color-mix(in oklab, var(--lvl-warn) 45%, transparent); background: var(--lvl-warn-bg); }
 .dash-finding.level-fail { border-color: color-mix(in oklab, var(--lvl-fail) 50%, transparent); background: var(--lvl-fail-bg); }
 .dash-finding.level-ok   .dash-finding-pill { background: var(--lvl-ok); }
@@ -187,14 +192,14 @@
 }
 .dash-log-toggle:hover { color: var(--text-primary); }
 .dash-log {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
 .dash-log-bar {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
   background: var(--bg-secondary);
 }
 .dash-log-path {

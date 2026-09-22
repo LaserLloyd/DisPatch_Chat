@@ -219,9 +219,11 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // their content rewritten by a later group while still carrying an earlier
   // group's ?v=, so a warm client would have run new main.js beside stale
   // copies of them. The shell is cached by PATH; without this name change an
-  // installed client keeps all of it.
-  assert.equal(m[1], 'local-chat-v117',
-    'sw.js CACHE must be local-chat-v117 so old shells drop and the feature wave installs');
+  // installed client keeps all of it. v118 moved the themes onto the shared
+  // theme package: two new vendored shell files (ui-theme.js, ui-theme.css)
+  // that an offline start cannot paint without.
+  assert.equal(m[1], 'local-chat-v118',
+    'sw.js CACHE must be local-chat-v118 so old shells drop and the theme package installs');
 });
 
 // =============================================================================

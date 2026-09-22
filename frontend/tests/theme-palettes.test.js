@@ -1,24 +1,21 @@
-// The palette set, pinned down across its three declarations.
+// The theme set, pinned down.
 //
-// DisPatch has no light/dark switch any more: appearance is one fixed palette
-// selected by `data-palette` on <html>. That palette id is written down in
-// THREE places that cannot import from each other:
+// DisPatch's colours come from the vendored theme package: static/ui-theme.js
+// (the blocking runtime and its registry of themes) and static/ui-theme.css
+// (every theme's contract tokens plus the adapter that maps DisPatch's own
+// token names onto them). static/theme.css keeps only what the package does
+// not own. Component CSS still reads the legacy names (--bg-primary,
+// --user-bubble, --md-em, …), so what matters is what those names RESOLVE to
+// on <html> for each theme — and nothing in any one file says that on its own.
+// helpers/theme-resolve.js replays the cascade from source to find out.
 //
-//   1. theme.css            — the [data-palette] blocks and the default block
-//   2. js/theme.js          — PALETTES (the picker) + DEFAULT_PALETTE
-//   3. index.html           — the no-FOUC script's list, which runs before any
-//                             module and therefore cannot read js/theme.js
-//
-// Drift between them is silent and ugly in a specific way: a palette missing
-// from (3) flashes the default for one frame before theme.js re-stamps it, a
-// palette missing from (2) simply cannot be picked, and a palette that omits a
-// token in theme.css inherits the default's value for it — which is how a
-// forest theme ends up with a lavender focus ring. None of those throw.
-//
-// So this file derives all three from source and compares them, and pins the
-// two invariants the CSS depends on: every palette defines the SAME complete
-// token set, and no palette redefines a structural token (a radius, a font
-// stack, a layout width) that must stay identical across skins.
+// The move onto the package promised that the six themes DisPatch already
+// shipped look the same afterwards, with two documented exceptions: Purple
+// adopts the contract's Purple, and Paper's --text-muted is the contract's
+// (slightly darker) tertiary ink. fixtures/palette-parity-2026-09.json holds
+// every legacy token's value per palette as it was BEFORE the move, generated
+// from the old theme.css, and the parity tests below hold the new cascade to
+// it. A value that drifts in a core theme fails here, not in someone's eyes.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,236 +23,200 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import {
+  registry, manifest, revision, resolveAll, resolveToken, canon, parseColor, contrast,
+} from './helpers/theme-resolve.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
-const CSS = stripComments(readFileSync(join(STATIC, 'theme.css'), 'utf8'));
-const THEME_JS = readFileSync(join(STATIC, 'js', 'theme.js'), 'utf8');
-const HTML = readFileSync(join(STATIC, 'index.html'), 'utf8');
+const read = (f) => readFileSync(join(STATIC, f), 'utf8');
+const THEME_CSS = stripComments(read('theme.css'));
+const APP = stripComments(read('app.css'));
+const DASH = stripComments(read('dashboard.css'));
+const UI_CSS = stripComments(read('ui-theme.css'));
+const THEME_JS = read('js/theme.js');
+const HTML = read('index.html').replace(/<!--[\s\S]*?-->/g, '');   // comments discuss <script> by name
+const FIXTURE = JSON.parse(readFileSync(join(HERE, 'fixtures', 'palette-parity-2026-09.json'), 'utf8'));
 
-/** Every `selector { body }` pair, innermost wins. The @media wrapper around
- *  the responsive width override is skipped by construction: `[^{}]*` cannot
- *  cross the inner `{`, so the inner `:root` rule is what comes back — which is
- *  what we want, since that is the declaration that matters. */
-function blocks(src) {
-  return [...src.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .map((m) => ({ selector: m[1].trim(), body: m[2] }));
-}
+const THEMES = registry();
+const SLUGS = THEMES.map((t) => t.slug);
+const CORE = ['glacier', 'midnight-gold', 'forest', 'paper', 'daylight', 'purple'];
 
-/** Custom properties DECLARED in a block (values are not inspected, so a
- *  var() reference inside one cannot be mistaken for a declaration). */
-function declared(body) {
-  return [...body.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
-}
+// Three legacy names clashed with contract names of a different meaning, so
+// component CSS reads them under new names; --ring was an unused alias.
+const RENAMED = {
+  '--accent-muted': '--accent-wash',
+  '--border': '--border-strong',
+  '--scrollbar-thumb': '--border-light',
+  '--ring': '--focus',
+};
+const LEGACY = Object.keys(FIXTURE.palettes.glacier.tokens);
+const now = (legacy) => RENAMED[legacy] || legacy;
 
-const ALL = blocks(CSS);
-const paletteBlocks = ALL
-  .map((b) => {
-    const m = /\[data-palette="([a-z-]+)"\]/.exec(b.selector);
-    return m ? { id: m[1], selector: b.selector, body: b.body } : null;
-  })
-  .filter(Boolean);
+// Colour roles DisPatch owns (theme.css) or that component CSS now reads
+// straight from the contract. Every theme must resolve all of them.
+const EXTRA = ['--on-accent', '--danger', '--code-card-bg', '--code-card-chrome',
+  '--code-block-text', '--on-error-fill', '--on-warning-fill', '--notify', '--dot-idle'];
 
-// The structural block is the one whose selector is EXACTLY `:root`. The
-// default palette's selector is `:root, [data-palette="glacier"]`, which is a
-// different string on purpose — it is a palette, not the structural block.
-const structural = new Set(
-  ALL.filter((b) => b.selector === ':root').flatMap((b) => declared(b.body)),
-);
-const parts = (b) => new Set(declared(b.body));
+// Purple is the one theme DisPatch deliberately re-bases onto the contract.
+// These are the tokens where that shows, and ONLY these may differ.
+const PURPLE_EXCEPTIONS = new Set([
+  '--bg-secondary', '--bg-input', '--bg-sidebar', '--tint-subtle',
+  '--text-secondary', '--text-muted', '--border', '--border-light',
+  '--scrollbar-thumb', '--user-bubble', '--bot-bubble',
+]);
 
-// --- (1) the CSS side ------------------------------------------------------
 
-test('theme.css declares every palette exactly once, default first', () => {
-  const ids = paletteBlocks.map((p) => p.id);
-  assert.deepEqual(ids, [...new Set(ids)], `a palette block is declared twice: ${ids}`);
-  assert.ok(ids.length >= 6, `expected the shipped palette set, found ${ids.length}: ${ids}`);
-  // The default block must be FIRST: every palette selector has the same
-  // specificity, so source order is what lets an explicit palette override the
-  // default when <html> carries the attribute.
-  assert.equal(ids[0], 'glacier', 'the default (glacier) palette must be the first block');
-  assert.match(paletteBlocks[0].selector, /:root/,
-    'the default palette must also match :root, or a page with no data-palette has no skin');
+// --- the set -----------------------------------------------------------------
+
+test('the runtime offers the ten themes, glacier first-class default', () => {
+  const m = manifest();
+  assert.equal(m.default, 'glacier');
+  assert.equal(m.storageKey, 'dispatch-palette',
+    'the storage key must stay dispatch-palette, or every device forgets its theme');
+  assert.equal(m.themes.length, 10);
+  for (const slug of m.themes) assert.ok(SLUGS.includes(slug), `${slug} is enabled but not registered`);
+  for (const slug of CORE) assert.ok(m.themes.includes(slug), `core theme ${slug} is not enabled`);
+  assert.match(revision() || '', /^\d{4}-\d{2}-\d{2}$/, 'ui-theme.js carries no revision date');
 });
 
-test('every palette defines the same complete token set', () => {
-  const [first, ...rest] = paletteBlocks;
-  const reference = parts(first);
-  assert.ok(reference.size > 25, `only ${reference.size} tokens in ${first.id} — inventory looks broken`);
-  for (const p of rest) {
-    const have = parts(p);
-    const missing = [...reference].filter((t) => !have.has(t));
-    const extra = [...have].filter((t) => !reference.has(t));
-    assert.deepEqual({ missing, extra }, { missing: [], extra: [] },
-      `[data-palette="${p.id}"] does not define the same tokens as "${first.id}".\n`
-      + 'A token missing here inherits the default palette\'s value, which is\n'
-      + 'exactly the half-themed result this test exists to prevent:');
-  }
-});
-
-test('palettes define the thematic tokens and nothing structural', () => {
-  // Structural = declared on the bare `:root` block (radii, layout widths,
-  // fonts, the fluid type scale, motion, and the two aliases). A palette that
-  // redefines one of these makes a skin that also moves layout, which the
-  // design deliberately does not allow.
-  for (const p of paletteBlocks) {
-    const clash = [...parts(p)].filter((t) => structural.has(t));
-    assert.deepEqual(clash, [],
-      `[data-palette="${p.id}"] redefines structural token(s) ${clash.join(', ')} — `
-      + 'move them to the :root block; a palette changes colour, not geometry');
-  }
-  // …and the thematic set really is complete: these are the tokens the app's
-  // components read, and the list is deliberately explicit rather than derived,
-  // so deleting one from every palette at once still fails here.
-  const required = [
-    '--bg-primary', '--bg-secondary', '--bg-tertiary', '--bg-elevated', '--bg-hover',
-    '--bg-input', '--bg-sidebar', '--tint-subtle', '--code-inline',
-    '--text-primary', '--text-secondary', '--text-muted',
-    '--accent', '--accent-hover', '--accent-muted', '--accent-text', '--focus', '--accent-grad',
-    '--border', '--border-light', '--user-bubble', '--bot-bubble',
-    '--md-quote', '--md-quote-text', '--md-em', '--md-strong', '--md-mark-bg',
-    '--success', '--success-text', '--error', '--error-text', '--warning', '--warning-text',
-    '--shadow-sm', '--shadow-md', '--shadow-lg',
-  ];
-  for (const p of paletteBlocks) {
-    const have = parts(p);
-    const missing = required.filter((t) => !have.has(t));
-    assert.deepEqual(missing, [], `[data-palette="${p.id}"] is missing: ${missing.join(', ')}`);
-  }
-});
-
-test('theme.css carries no light-dark() and no data-theme selector', () => {
-  // Both are the retired mechanism. light-dark() still appears in app.css and
-  // dashboard.css for two narrow, colour-scheme-driven cases (minimal-avatar
-  // name tints, host dashboard severities) — those resolve per palette through
-  // each block's color-scheme. It must not come back HERE, where a palette
-  // value that quietly follows the OS is precisely the old behaviour.
-  assert.ok(!/light-dark\s*\(/.test(CSS), 'theme.css still uses light-dark()');
-  assert.ok(!/\[data-theme/.test(CSS), 'theme.css still has a [data-theme] selector');
-});
-
-test('each palette declares the color-scheme matching its badge', () => {
-  const jsModes = new Map(
-    [...THEME_JS.matchAll(/\{\s*id:\s*'([a-z-]+)',\s*name:\s*'[^']*',\s*mode:\s*'(dark|light)'/g)]
-      .map((m) => [m[1], m[2]]),
-  );
-  for (const p of paletteBlocks) {
-    const m = /color-scheme\s*:\s*(dark|light)/.exec(p.body);
-    assert.ok(m, `[data-palette="${p.id}"] declares no color-scheme — native `
-      + 'scrollbars and form controls will not match the skin');
-    assert.equal(m[1], jsModes.get(p.id),
-      `[data-palette="${p.id}"] says color-scheme: ${m[1]} but js/theme.js badges it `
-      + `as ${jsModes.get(p.id)}`);
-  }
-});
-
-// --- (2) js/theme.js -------------------------------------------------------
-
-test('js/theme.js lists exactly the palettes theme.css defines', () => {
-  const ids = [...THEME_JS.matchAll(/id:\s*'([a-z-]+)'/g)].map((m) => m[1]);
-  assert.deepEqual(ids.sort(), paletteBlocks.map((p) => p.id).sort(),
-    'PALETTES in js/theme.js and the [data-palette] blocks in theme.css disagree');
-  const def = /const DEFAULT_PALETTE = '([a-z-]+)'/.exec(THEME_JS);
-  assert.ok(def, 'js/theme.js no longer declares DEFAULT_PALETTE');
-  assert.equal(def[1], paletteBlocks[0].id, 'DEFAULT_PALETTE is not the first CSS palette');
-  // The default must be reachable through the picker, or the CSS default is a
-  // palette no user can return to.
-  assert.ok(ids.includes(def[1]), 'DEFAULT_PALETTE is not in PALETTES');
-});
-
-// --- (3) index.html --------------------------------------------------------
-
-test('the no-FOUC palette list matches js/theme.js', () => {
-  // Three copies of one list (HTML script, theme.js, theme.css). The HTML one
-  // cannot import the other two: it runs before any module loads, which is the
-  // whole point of a no-FOUC script.
-  const m = /var P = \[([^\]]*)\]/.exec(HTML);
-  assert.ok(m, 'the no-FOUC palette list in index.html changed shape');
-  const htmlIds = [...m[1].matchAll(/'([a-z-]+)'/g)].map((x) => x[1]);
-  const jsIds = [...THEME_JS.matchAll(/id:\s*'([a-z-]+)'/g)].map((x) => x[1]);
-  assert.deepEqual(htmlIds.sort(), jsIds.sort(),
-    'the no-FOUC palette list in index.html and PALETTES in js/theme.js disagree');
-  // …and its fallback is the same default, or a first visit paints one skin
-  // and theme.js immediately swaps to another.
-  const fallback = /P\.indexOf\(p\)\s*>=\s*0\s*\?\s*p\s*:\s*'([a-z-]+)'/.exec(HTML);
-  assert.ok(fallback, 'the no-FOUC palette fallback changed shape');
-  const def = /const DEFAULT_PALETTE = '([a-z-]+)'/.exec(THEME_JS);
-  assert.ok(def, 'js/theme.js no longer declares DEFAULT_PALETTE');
-  assert.equal(fallback[1], def[1], 'the no-FOUC fallback is not DEFAULT_PALETTE');
-});
-
-test('the dark/light switch left no trace in the markup', () => {
-  assert.ok(!/data-theme/.test(HTML), 'index.html still stamps data-theme');
-  assert.ok(!/dispatch-theme/.test(HTML), 'index.html still reads dispatch-theme');
-  assert.ok(!/theme\.dark|theme\.light/.test(HTML), 'index.html still references the old theme labels');
-});
-
-// --- (4) the notification contract -----------------------------------------
-//
-// The unread indicator used to paint `--accent-hover` on a resting dot of
-// `--text-muted`. Both tokens are chosen for other jobs — accent-hover sits
-// UNDER white button text so it is deliberately deep, and text-muted is
-// body-adjacent so it is deliberately bright — and the result was that in four
-// of the six palettes the "you have a message" dot was DARKER and quieter than
-// the "nothing here" dot, while no palette reached even 3:1 between the two
-// states. Daylight measured 1.16:1: the two states were the same dot.
-//
-// `--notify` and `--dot-idle` exist to make that a solved pair per palette
-// rather than a side effect of tokens picked for buttons. The contract is
-// stated in terms of contrast against the background, so it holds for light
-// and dark palettes alike without special-casing either.
-
-/** WCAG 2.x relative luminance. */
-function luminance(hex) {
-  let h = hex.replace('#', '');
-  if (h.length === 3) h = [...h].map((c) => c + c).join('');
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
-  const f = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-}
-
-function contrast(a, b) {
-  const [x, y] = [luminance(a), luminance(b)];
-  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
-}
-
-/** A token's literal hex within one palette body. Only literals are checked;
- *  a token defined via color-mix() is deliberately out of scope here. */
-function hexToken(body, name) {
-  const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})`).exec(body);
-  return m ? m[1] : null;
-}
-
-test('every palette solves the notification pair against its own background', () => {
-  const failures = [];
-  for (const p of paletteBlocks) {
-    const bg = hexToken(p.body, 'bg-sidebar') || hexToken(p.body, 'bg-primary');
-    const notify = hexToken(p.body, 'notify');
-    const idle = hexToken(p.body, 'dot-idle');
-    if (!bg || !notify || !idle) {
-      failures.push(`${p.id}: missing one of --bg-sidebar/--notify/--dot-idle`);
-      continue;
+test('ui-theme.css defines a block for every enabled theme', () => {
+  for (const slug of manifest().themes) {
+    if (slug === 'purple') {
+      assert.match(UI_CSS, /:root,\s*\[data-palette\]\s*\{/, 'the Purple base block (:root, [data-palette]) is missing');
+    } else {
+      assert.match(UI_CSS, new RegExp(`\\[data-palette="${slug}"\\]\\s*\\{`), `no [data-palette="${slug}"] block`);
     }
-    const nb = contrast(notify, bg);
-    const ib = contrast(idle, bg);
-    const ni = contrast(notify, idle);
-    // Loud enough to be seen at all. 4.5:1 rather than 1.4.11's 3:1 because
-    // this mark is ~13px and is the app's only unread signal.
-    if (nb < 4.5) failures.push(`${p.id}: --notify only ${nb.toFixed(2)}:1 on the sidebar (need >= 4.5)`);
-    // Quiet enough that its presence is not itself a signal.
-    if (ib > 3.0) failures.push(`${p.id}: --dot-idle is ${ib.toFixed(2)}:1 on the sidebar (need <= 3.0 — it must not compete)`);
-    // And the two states must never blur into each other.
-    if (ni < 3.0) failures.push(`${p.id}: --notify vs --dot-idle only ${ni.toFixed(2)}:1 (need >= 3.0)`);
+  }
+});
+
+test('every theme declares the color-scheme its registry entry states', () => {
+  for (const t of THEMES) {
+    assert.equal(resolveToken(t.slug, 'color-scheme'), t.colorScheme,
+      `${t.slug}: color-scheme does not match the registry — native controls and the light-dark() pairs would pick the wrong side`);
+  }
+});
+
+// --- parity with the pre-package palettes -----------------------------------
+
+for (const slug of CORE) {
+  test(`parity: ${slug} resolves every legacy token to its pre-package value`, () => {
+    const want = FIXTURE.palettes[slug].tokens;
+    const got = resolveAll(slug, LEGACY.map(now));
+    const diffs = [];
+    for (const name of LEGACY) {
+      if (slug === 'purple' && PURPLE_EXCEPTIONS.has(name)) continue;
+      if (slug === 'paper' && name === '--text-muted') continue;
+      const a = canon(want[name]);
+      const b = got[now(name)];
+      if (a !== b) diffs.push(`${name}${RENAMED[name] ? ` (now ${now(name)})` : ''}: ${a} -> ${b}`);
+    }
+    assert.deepEqual(diffs, [], `\n${slug} drifted from the parity fixture:\n${diffs.join('\n')}`);
+  });
+}
+
+test('parity: the documented exceptions are real, and still the only ones', () => {
+  // An exception list that no longer excepts anything is a hole waiting for a
+  // regression, so each entry must actually differ.
+  const purple = resolveAll('purple', LEGACY.map(now));
+  for (const name of PURPLE_EXCEPTIONS) {
+    assert.notEqual(purple[now(name)], canon(FIXTURE.palettes.purple.tokens[name]),
+      `purple ${name} no longer differs from the fixture — drop it from PURPLE_EXCEPTIONS`);
+  }
+  const paperMuted = resolveToken('paper', '--text-muted');
+  assert.notEqual(paperMuted, canon(FIXTURE.palettes.paper.tokens['--text-muted']));
+  // "Slightly darker", and still an AA ink on the Paper ground.
+  const bg = resolveToken('paper', '--bg-primary');
+  assert.ok(contrast(paperMuted, bg) > contrast(FIXTURE.palettes.paper.tokens['--text-muted'], bg),
+    'Paper --text-muted was meant to get DARKER');
+});
+
+test('the hard-coded colours the sweep replaced keep their core values', () => {
+  const imp = FIXTURE.implicit;
+  for (const slug of CORE) {
+    const r = resolveAll(slug, ['--on-accent', '--code-card-bg', '--code-card-chrome',
+      '--on-error-fill', '--on-warning-fill', '--danger', '--success', '--warning']);
+    assert.equal(r['--on-accent'], canon(imp['--on-accent']), `${slug} --on-accent`);
+    assert.equal(r['--code-card-bg'], canon(imp['--code-card-bg']), `${slug} --code-card-bg`);
+    assert.equal(r['--code-card-chrome'], canon(imp['--code-card-chrome']), `${slug} --code-card-chrome`);
+    assert.equal(r['--on-error-fill'], canon(imp['--on-error-fill']), `${slug} --on-error-fill`);
+    assert.equal(r['--on-warning-fill'], canon(imp['--on-warning-fill']), `${slug} --on-warning-fill`);
+    // The washes and the dashboard's dark severity inks were literals of these.
+    assert.equal(r['--danger'], canon(imp['danger-rgb (rgba(248,113,113,a) washes)']), `${slug} --danger`);
+    assert.equal(r['--success'], '#34d399', `${slug} --success`);
+    assert.equal(r['--warning'], '#fbbf24', `${slug} --warning`);
+  }
+});
+
+// --- every theme, every legacy token ----------------------------------------
+
+test('all ten themes resolve every legacy token to a concrete value', () => {
+  const bad = [];
+  for (const slug of SLUGS) {
+    const got = resolveAll(slug, [...LEGACY.map(now), ...EXTRA]);
+    for (const [name, v] of Object.entries(got)) {
+      if (v === null || /UNRESOLVED|var\(|color-mix\(/.test(v)) bad.push(`${slug} ${name}: ${v}`);
+    }
+  }
+  assert.deepEqual(bad, [], '\n' + bad.join('\n'));
+});
+
+test('night themes light no blue sub-pixel through any legacy token', () => {
+  const night = THEMES.filter((t) => t.contrastProfile === 'night');
+  assert.ok(night.length >= 1, 'expected at least one night theme (Night Red)');
+  const hits = [];
+  for (const t of night) {
+    const got = resolveAll(t.slug, [...LEGACY.map(now), ...EXTRA]);
+    for (const [name, v] of Object.entries(got)) {
+      for (const m of v.matchAll(/#[0-9a-f]{6}|rgba\([^)]*\)/g)) {
+        const c = parseColor(m[0]);
+        if (c && c[2] > 0 && c[3] > 0) hits.push(`${t.slug} ${name}: ${m[0]}`);
+      }
+    }
+  }
+  assert.deepEqual(hits, [], '\n' + hits.join('\n'));
+});
+
+// --- the notification contract (all ten) -------------------------------------
+//
+// --notify is the ONLY thing whose job is to be noticed, --dot-idle the only
+// thing whose job is not to be. Solved as a pair, per theme, against the
+// sidebar the dots sit on:
+//   --notify vs the sidebar   >= 4.5:1   (impossible to miss)
+//   --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
+//   --notify vs --dot-idle    >= 3:1     (the two states never blur)
+
+test('every theme solves the notification pair against its own sidebar', () => {
+  const failures = [];
+  for (const slug of SLUGS) {
+    const r = resolveAll(slug, ['--bg-sidebar', '--notify', '--dot-idle']);
+    const nb = contrast(r['--notify'], r['--bg-sidebar']);
+    const ib = contrast(r['--dot-idle'], r['--bg-sidebar']);
+    const ni = contrast(r['--notify'], r['--dot-idle']);
+    if (nb < 4.5) failures.push(`${slug}: --notify only ${nb.toFixed(2)}:1 on the sidebar (need >= 4.5)`);
+    if (ib > 3.0) failures.push(`${slug}: --dot-idle is ${ib.toFixed(2)}:1 on the sidebar (need <= 3.0)`);
+    if (ni < 3.0) failures.push(`${slug}: --notify vs --dot-idle only ${ni.toFixed(2)}:1 (need >= 3.0)`);
+  }
+  assert.deepEqual(failures, [], '\n' + failures.join('\n'));
+});
+
+test('the thinking dot is visible in every theme, including the light ones', () => {
+  const rule = /\.bot-status-dot\.thinking\s*\{([^}]*)\}/.exec(APP);
+  assert.ok(rule, '.bot-status-dot.thinking rule not found in app.css');
+  assert.ok(!/var\(--warning\)/.test(rule[1]),
+    'the thinking dot is back on the raw --warning, which is invisible on the light themes');
+  const failures = [];
+  for (const slug of SLUGS) {
+    const r = resolveAll(slug, ['--bg-sidebar', '--warning-text']);
+    const ratio = contrast(r['--warning-text'], r['--bg-sidebar']);
+    if (ratio < 3.0) failures.push(`${slug}: --warning-text only ${ratio.toFixed(2)}:1 on the sidebar`);
   }
   assert.deepEqual(failures, [], '\n' + failures.join('\n'));
 });
 
 test('the unread indicator does not rely on colour alone', () => {
-  // WCAG 1.4.1: a state carried only by hue is invisible to a chunk of the
-  // audience and to anyone in bright sun. The unread dot must also change
-  // SIZE, so the state survives greyscale.
-  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
   const rule = /\.bot-status-dot\.unread\s*\{([^}]*)\}/.exec(APP);
   assert.ok(rule, '.bot-status-dot.unread rule not found in app.css');
   assert.match(rule[1], /--notify/, 'the unread dot no longer uses --notify');
@@ -263,7 +224,6 @@ test('the unread indicator does not rely on colour alone', () => {
 });
 
 test('no indicator still reaches for the retired token pair', () => {
-  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
   for (const sel of ['.bot-status-dot.unread', '.thread-unread-dot']) {
     const rule = new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(APP);
     assert.ok(rule, `${sel} rule not found in app.css`);
@@ -272,82 +232,126 @@ test('no indicator still reaches for the retired token pair', () => {
   }
 });
 
-test('the thinking dot is visible in every palette, including the light ones', () => {
-  // --warning is the same amber in all six palettes because it is authored
-  // against a dark surface. Painted on Paper it was 1.02:1 — a yellow dot on
-  // cream. --warning-text is the per-palette adaptation that already existed;
-  // this pins the dot to it.
-  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
-  const rule = /\.bot-status-dot\.thinking\s*\{([^}]*)\}/.exec(APP);
-  assert.ok(rule, '.bot-status-dot.thinking rule not found in app.css');
-  assert.ok(!/var\(--warning\)/.test(rule[1]),
-    'the thinking dot is back on the raw --warning, which is invisible on the light palettes');
-
-  const failures = [];
-  for (const p of paletteBlocks) {
-    const bg = hexToken(p.body, 'bg-sidebar') || hexToken(p.body, 'bg-primary');
-    const warn = hexToken(p.body, 'warning-text');
-    if (!bg || !warn) { failures.push(`${p.id}: missing --bg-sidebar/--warning-text`); continue; }
-    const r = contrast(warn, bg);
-    if (r < 3.0) failures.push(`${p.id}: --warning-text only ${r.toFixed(2)}:1 on the sidebar (need >= 3.0)`);
-  }
-  assert.deepEqual(failures, [], '\n' + failures.join('\n'));
-});
-
-test('no status indicator paints a raw, palette-invariant semantic token', () => {
-  // --success, --error and --warning are the SAME hex in all six palettes:
-  // they are authored against a dark surface, and only the *-text variants are
-  // adapted per palette. Measured against the page background, --success is
-  // 1.30:1 on Paper and 1.92:1 on Daylight, and --error is 1.86:1 / 2.77:1.
-  // A dot or tick painted with one of them is invisible on the light skins.
-  //
-  // Scoped to the small coloured MARKS that carry state. A large filled
-  // surface with its own contrasting text is a different problem and is not
-  // what this asserts.
-  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
-  const RAW = /var\(--(?:success|error|warning)[,)]/;
+test('no status indicator paints a raw status token', () => {
+  // --success / --error / --danger / --warning are authored against a dark
+  // surface; only the *-text variants adapt to light grounds. A dot or tick
+  // painted with a raw one is invisible on Paper or Daylight.
+  const RAW = /var\(--(?:success|error|danger|warning)[,)]/;
   const MARK = /(^|[\s,])\.[\w-]*(?:dot|drop-icon|pip|badge-state)\b/;
-
   const offenders = [];
   for (const m of APP.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selector = m[1].trim();
-    const body = m[2];
     if (!MARK.test(selector)) continue;
-    // Only the properties that actually paint the mark.
-    for (const decl of body.split(';')) {
+    for (const decl of m[2].split(';')) {
       if (!/^\s*(background|background-color|color|box-shadow|border-color)\s*:/.test(decl)) continue;
       if (RAW.test(decl)) offenders.push(`${selector.slice(0, 70)} -> ${decl.trim().slice(0, 80)}`);
     }
   }
-  assert.deepEqual(offenders, [],
-    '\nThese status marks use a palette-invariant token; use the --*-text variant:\n'
-    + offenders.join('\n'));
+  assert.deepEqual(offenders, [], '\nUse the --*-text variant for these status marks:\n' + offenders.join('\n'));
+});
+
+// --- theme.css is DisPatch-only ----------------------------------------------
+
+test('theme.css holds no theme: no palette blocks, no light/dark mechanism', () => {
+  assert.ok(!/\[data-palette/.test(THEME_CSS), 'theme.css names a palette — themes live in ui-theme.css');
+  assert.ok(!/light-dark\s*\(/.test(THEME_CSS), 'theme.css uses light-dark()');
+  assert.ok(!/\[data-theme/.test(THEME_CSS), 'theme.css keys on data-theme');
+});
+
+test('theme.css never redeclares a token the package owns', () => {
+  const pkg = new Set([...UI_CSS.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+  const mine = [...THEME_CSS.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+  const clash = [...new Set(mine.filter((n) => pkg.has(n)))];
+  assert.deepEqual(clash, [], `theme.css redeclares package tokens: ${clash.join(', ')} — ui-theme.css loads later and wins, so these are dead or, worse, a second source of truth`);
+});
+
+test('component CSS declares no token on <html>', () => {
+  // theme-resolve.js models only theme.css + ui-theme.css. A :root token in
+  // app.css or dashboard.css would sit outside that model (and outside the
+  // package), so it is not allowed to exist.
+  for (const [name, css] of [['app.css', APP], ['dashboard.css', DASH]]) {
+    for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const sel = m[1].trim();
+      if (!/^(:root|html)(\s*,|\s*$)/.test(sel)) continue;
+      assert.ok(!/--[\w-]+\s*:/.test(m[2]), `${name}: "${sel}" declares a custom property on <html>`);
+    }
+  }
+});
+
+test('the contract names that clash with DisPatch meanings are not read raw', () => {
+  // The contract owns --border, --accent-muted and --scrollbar-thumb with a
+  // different meaning; component CSS reads --border-strong / --accent-wash /
+  // --border-light for DisPatch's own versions.
+  for (const [name, css] of [['app.css', APP], ['dashboard.css', DASH]]) {
+    for (const t of ['--border', '--accent-muted', '--scrollbar-thumb']) {
+      assert.ok(!new RegExp(`var\\(${t}[,)]`).test(css), `${name} reads var(${t})`);
+    }
+  }
 });
 
 test('every custom property a rule reads is defined somewhere', () => {
-  // `var(--accent-soft, rgba(46,168,255,.12))` shipped for months: no --accent-soft
-  // has ever been declared, so the rule always painted its literal fallback and
-  // ignored the palette entirely. A fallback hides the mistake, which is why it
-  // needs a test rather than an eye.
-  const THEME = stripComments(readFileSync(join(STATIC, 'theme.css'), 'utf8'));
-  const APP = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
-  const DASH = stripComments(readFileSync(join(STATIC, 'dashboard.css'), 'utf8'));
-  const all = `${THEME}\n${APP}\n${DASH}`;
-
+  // `var(--accent-soft, …)` shipped for months with no --accent-soft ever
+  // declared — the fallback hid it. The package's tokens count as defined.
+  const all = `${THEME_CSS}\n${APP}\n${DASH}\n${UI_CSS}`;
   const defined = new Set([...all.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-
-  // A property can also be set from JS on the element itself — main.js does
-  // exactly that for --name-hue, which is per-bot and therefore cannot live in
-  // a stylesheet. Those are legitimate, so read the JS side too rather than
-  // maintaining a hand-written exception list that goes stale.
   for (const f of readdirSync(join(STATIC, 'js')).filter((n) => n.endsWith('.js'))) {
-    const js = readFileSync(join(STATIC, 'js', f), 'utf8');
+    const js = read(`js/${f}`);
     for (const m of js.matchAll(/setProperty\(\s*['"`](--[\w-]+)/g)) defined.add(m[1]);
     for (const m of js.matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]);
   }
-
-  const used = new Set([...all.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]));
+  const used = new Set([...`${THEME_CSS}\n${APP}\n${DASH}`.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]));
   const missing = [...used].filter((name) => !defined.has(name)).sort();
-  assert.deepEqual(missing, [],
-    '\nThese custom properties are read but never declared:\n' + missing.join('\n'));
+  assert.deepEqual(missing, [], '\nThese custom properties are read but never declared:\n' + missing.join('\n'));
+});
+
+// --- the markup and the picker -----------------------------------------------
+
+test('ui-theme.js is the first script in <head>, blocking, at the revision digits', () => {
+  const head = HTML.slice(0, HTML.indexOf('</head>'));
+  const scripts = [...head.matchAll(/<script\b([^>]*)>/g)];
+  assert.ok(scripts.length, 'no <script> in <head>');
+  const first = scripts[0][1];
+  const m = /src="\/static\/ui-theme\.js\?v=(\d+)"/.exec(first);
+  assert.ok(m, `the first <head> script must be ui-theme.js, found: <script${first}>`);
+  assert.ok(!/\b(defer|async|type="module")/.test(first),
+    'ui-theme.js must be BLOCKING — deferred, it paints the theme after first paint');
+  assert.equal(m[1], (revision() || '').replace(/-/g, ''), 'ui-theme.js ?v= is not the theme revision digits');
+});
+
+test('ui-theme.css loads after app.css and dashboard.css, at the revision digits', () => {
+  const at = (re) => { const m = re.exec(HTML); return m ? m.index : -1; };
+  const ui = at(/href="\/static\/ui-theme\.css\?v=(\d+)"/);
+  assert.ok(ui > 0, 'index.html does not link ui-theme.css');
+  assert.ok(ui > at(/href="\/static\/app\.css/), 'ui-theme.css must load after app.css');
+  assert.ok(ui > at(/href="\/static\/dashboard\.css/), 'ui-theme.css must load after dashboard.css');
+  assert.ok(ui > at(/href="\/static\/theme\.css/), 'ui-theme.css must load after theme.css');
+  assert.equal(/href="\/static\/ui-theme\.css\?v=(\d+)"/.exec(HTML)[1], (revision() || '').replace(/-/g, ''));
+});
+
+test('the pre-paint inline script no longer knows about themes', () => {
+  const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
+  assert.ok(!/dispatch-palette|data-palette|glacier/.test(inline),
+    'an inline script still stamps the palette — ui-theme.js owns that, and two writers race');
+  assert.ok(!/data-theme/.test(HTML), 'index.html markup stamps data-theme');
+});
+
+test('js/theme.js renders the runtime\'s list and writes no storage of its own', () => {
+  assert.match(THEME_JS, /UITheme/, 'theme.js does not use the theme runtime');
+  assert.match(THEME_JS, /\.list\(\)/, 'the gallery is not built from UITheme.list()');
+  assert.match(THEME_JS, /\.onChange\(/, 'the selection does not follow UITheme.onChange');
+  assert.ok(!/localStorage/.test(THEME_JS), 'theme.js touches localStorage — the runtime owns the pick');
+  assert.ok(!/PALETTES|DEFAULT_PALETTE/.test(THEME_JS), 'theme.js still carries its own palette list');
+});
+
+test('the theme revision line is wired into the Theme pane', () => {
+  assert.match(HTML, /id="theme-revision"[^>]*data-i18n="settings\.theme_revision"/);
+  assert.match(THEME_JS, /revision\(\)/);
+});
+
+test('the vendored theme files are not referenced from anywhere they come from', () => {
+  // DisPatch ships the generated files and nothing else of the package: no
+  // path, repository or tool name of the theme source belongs in this tree.
+  for (const f of ['ui-theme.js', 'ui-theme.css', 'theme.css', 'index.html', 'js/theme.js']) {
+    assert.ok(!/unifyingtheme|sync_theme/i.test(read(f)), `${f} names the theme source`);
+  }
 });

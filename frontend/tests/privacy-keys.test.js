@@ -49,6 +49,11 @@ const EXEMPT = new Map([
 
 const sources = () => {
   const out = [['index.html', readFileSync(join(STATIC, 'index.html'), 'utf8')]];
+  // The vendored theme runtime lives beside index.html, not under js/, and it
+  // is the ONLY writer of the theme pick (`dispatch-palette`). Leaving it out
+  // would make that key look like a phantom in APP_KEYS — or, worse, let a
+  // future storage key the runtime adds slip past the wipe unseen.
+  out.push(['ui-theme.js', readFileSync(join(STATIC, 'ui-theme.js'), 'utf8')]);
   for (const f of readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))) {
     out.push([`js/${f}`, readFileSync(join(JS_DIR, f), 'utf8')]);
   }
@@ -64,9 +69,11 @@ const STR = /^(['"`])([^'"`]*)\1$/;
  *
  *   1. a string literal at the call:   setItem('tl-collapsed', …)
  *   2. a const in the same file:       setItem(FLAG_KEY, …) + const FLAG_KEY = '…'
- *   3. a file that writes through a helper (theme.js's set(key, val) takes the
+ *   3. a file that writes through a helper (a set(key, val) that takes the
  *      key as a PARAMETER, so there is nothing at the call site to read):
  *      every `const *_KEY = '<literal>'` the module declares.
+ *   4. the generated theme runtime, whose helper writes the key its embedded
+ *      manifest names: `window.UI_THEME_MANIFEST = {… "storageKey": "…"}`.
  */
 function keysWrittenBy(src) {
   const found = new Set();
@@ -84,6 +91,8 @@ function keysWrittenBy(src) {
   }
   if (unresolved) {
     for (const [name, val] of consts) if (/_KEY$/.test(name)) found.add(val);
+    const manifest = /UI_THEME_MANIFEST\s*=\s*\{[^;]*?"storageKey"\s*:\s*"([^"]+)"/.exec(src);
+    if (manifest) found.add(manifest[1]);
   }
   return { keys: found, unresolved };
 }

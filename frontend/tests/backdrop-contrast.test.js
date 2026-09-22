@@ -6,7 +6,8 @@
 // h))`. `l` (lightness) is the KEYWORD, copied unchanged from the origin
 // colour; only chroma and hue move. That is supposed to be what keeps every
 // palette's promised contrast intact — this file is what actually PROVES it,
-// the way the brief asked for: parse every palette out of theme.css, derive
+// the way the brief asked for: resolve every theme from source (ui-theme.css
+// through helpers/theme-resolve.js), derive
 // the backdrop this exact CSS rule would produce for hues across the full
 // range, and assert the text that is actually painted directly on that pane
 // (no bubble of its own underneath it) still clears WCAG AA and does not
@@ -28,55 +29,47 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { registry, resolveAll } from './helpers/theme-resolve.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
-const THEME_CSS = stripComments(readFileSync(join(STATIC, 'theme.css'), 'utf8'));
 const APP_CSS = stripComments(readFileSync(join(STATIC, 'app.css'), 'utf8'));
 
 // --------------------------------------------------------------------------- #
-// 1. Pull the palettes straight out of theme.css (same technique as
-//    theme-palettes.test.js's `blocks`/`parts`, narrowed to the three tokens
-//    that are actually painted directly on the message pane — see below).
+// 1. Resolve every theme's tokens from source. Since the move onto the
+//    vendored theme package the values live in ui-theme.css (contract tokens
+//    plus the adapter onto DisPatch's names), so the cascade is replayed by
+//    helpers/theme-resolve.js — the same resolver the palette tests use —
+//    rather than read out of one file.
 // --------------------------------------------------------------------------- #
-
-function blocks(src) {
-  return [...src.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .map((m) => ({ selector: m[1].trim(), body: m[2] }));
-}
-
-function token(body, name) {
-  const m = new RegExp(`${name}\\s*:\\s*(#[0-9a-fA-F]{6})`).exec(body);
-  return m ? m[1] : null;
-}
-
-const paletteBlocks = blocks(THEME_CSS)
-  .map((b) => {
-    const m = /\[data-palette="([a-z-]+)"\]/.exec(b.selector);
-    return m ? { id: m[1], body: b.body } : null;
-  })
-  .filter(Boolean);
 
 // Three text tokens that land directly on `.messages`' own background with
 // no bubble underneath them, so the backdrop tint is literally what they sit
 // on: date-sep (--text-muted), the empty-state prompt (--text-secondary),
 // and --text-primary as the strongest case any in-pane prose would use.
-const PALETTES = paletteBlocks.map((p) => ({
-  id: p.id,
-  bgPrimary: token(p.body, '--bg-primary'),
-  textPrimary: token(p.body, '--text-primary'),
-  textSecondary: token(p.body, '--text-secondary'),
-  textMuted: token(p.body, '--text-muted'),
-}));
+const PALETTES = registry().map((t) => {
+  const r = resolveAll(t.slug, ['--bg-primary', '--text-primary', '--text-secondary', '--text-muted']);
+  return {
+    id: t.slug,
+    night: t.contrastProfile === 'night',
+    bgPrimary: r['--bg-primary'],
+    textPrimary: r['--text-primary'],
+    textSecondary: r['--text-secondary'],
+    textMuted: r['--text-muted'],
+  };
+});
+const STANDARD = PALETTES.filter((p) => !p.night);
+const NIGHT = PALETTES.filter((p) => p.night);
+const HEX6 = /^#[0-9a-f]{6}$/;
 
-test('setup: found the shipped palette set with real hex tokens', () => {
-  assert.ok(PALETTES.length >= 6, `expected >=6 palettes, found ${PALETTES.length}`);
+test('setup: found all ten themes with opaque hex tokens', () => {
+  assert.equal(PALETTES.length, 10, `expected 10 themes, found ${PALETTES.length}`);
   for (const p of PALETTES) {
-    assert.ok(p.bgPrimary, `${p.id}: could not read --bg-primary`);
-    assert.ok(p.textPrimary, `${p.id}: could not read --text-primary`);
-    assert.ok(p.textSecondary, `${p.id}: could not read --text-secondary`);
-    assert.ok(p.textMuted, `${p.id}: could not read --text-muted`);
+    for (const k of ['bgPrimary', 'textPrimary', 'textSecondary', 'textMuted']) {
+      assert.match(p[k] || '', HEX6, `${p.id}: ${k} did not resolve to an opaque hex (${p[k]})`);
+    }
   }
 });
 
@@ -205,7 +198,7 @@ test('the backdrop clears WCAG AA and never meaningfully undercuts baseline', ()
 
   const failures = [];
 
-  for (const p of PALETTES) {
+  for (const p of STANDARD) {
     const bg = hexToSrgb(p.bgPrimary);
     for (const label of ['textMuted', 'textSecondary', 'textPrimary']) {
       const fg = hexToSrgb(p[label]);
@@ -232,7 +225,7 @@ test('the backdrop clears WCAG AA and never meaningfully undercuts baseline', ()
 test('a pure-black or pure-white --bg-primary is inert under this formula '
    + '(no hue exists to move at L=0 or L=1, so those palettes are '
    + 'contrast-invariant by construction, not by luck)', () => {
-  for (const p of PALETTES) {
+  for (const p of STANDARD) {
     if (p.bgPrimary !== '#000000' && p.bgPrimary !== '#ffffff') continue;
     const baseline = contrast(hexToSrgb(p.bgPrimary), hexToSrgb(p.textMuted));
     for (let hue = 0; hue < 360; hue += HUE_STEP) {
@@ -243,4 +236,37 @@ test('a pure-black or pure-white --bg-primary is inert under this formula '
         + 'expected near-zero movement at an extreme lightness');
     }
   }
+});
+
+// --------------------------------------------------------------------------- #
+// 5. Night themes. A night theme exists to light no blue sub-pixel, and the
+//    tint rotates --bg-primary's hue through the whole wheel, so under the
+//    night contrast profile app.css pins the pane back to the flat ground.
+//    Pure red peaks at 5.25:1 on black, so the night profile's floors are
+//    its own: primary 5, secondary 4.5, tertiary (--text-muted) 3.5.
+// --------------------------------------------------------------------------- #
+
+const NIGHT_FLOORS = { textPrimary: 5, textSecondary: 4.5, textMuted: 3.5 };
+
+test('night themes: the backdrop tint is switched off under the night profile', () => {
+  assert.ok(NIGHT.length >= 1, 'expected at least one night theme');
+  const rule = /@supports\s*\(color:\s*oklch\(from red l c h\)\)\s*\{\s*:root\[data-contrast-profile="night"\]\s*\.messages\s*\{\s*background-color:\s*var\(--bg-primary\);?\s*\}\s*\}/;
+  assert.match(APP_CSS, rule,
+    'app.css must pin .messages to var(--bg-primary) under :root[data-contrast-profile="night"], '
+    + 'inside the same @supports as the tint, or a night theme paints a hue-rotated (blue-lit) pane');
+});
+
+test('night themes: the message pane ground lights no blue, and text clears the night floors', () => {
+  const failures = [];
+  for (const p of NIGHT) {
+    const bg = hexToSrgb(p.bgPrimary);
+    if (Math.round(bg[2] * 255) !== 0) failures.push(`${p.id}: --bg-primary ${p.bgPrimary} has a blue channel`);
+    for (const [label, floor] of Object.entries(NIGHT_FLOORS)) {
+      const fg = hexToSrgb(p[label]);
+      if (Math.round(fg[2] * 255) !== 0) failures.push(`${p.id}: ${label} ${p[label]} has a blue channel`);
+      const ratio = contrast(bg, fg);
+      if (ratio < floor) failures.push(`${p.id}/${label}: ${ratio.toFixed(2)} < night floor ${floor}`);
+    }
+  }
+  assert.deepEqual(failures, [], `\n${failures.join('\n')}`);
 });

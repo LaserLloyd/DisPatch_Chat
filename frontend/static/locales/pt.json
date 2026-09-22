@@ -239,6 +239,8 @@
     "tab_device": "Dispositivo",
     "tab_security": "Segurança",
     "theme_hint": "Escolhe o aspeto deste dispositivo. Aplica-se de imediato e fica guardado aqui — não há nada para guardar.",
+    "theme_more": "Mais temas",
+    "theme_revision": "Revisão do tema {date}",
     "device_hint": "Aplicam-se só a este dispositivo e têm efeito de imediato — aqui não há nada para guardar.",
     "hint": "Toca na foto de um bot (ou em <strong>Mudar a foto</strong>) para definir o avatar. Reordena com os botões ▲/▼ (ou arrasta as linhas no computador); usa o interruptor para mostrar ou esconder um bot na barra lateral. <strong>Seguro</strong> — esta personagem (e o seu avatar) fica visível no Modo seguro, sem precisar de PIN. As alterações de ordem, visibilidade e Seguro aplicam-se quando carregas em <strong>Guardar</strong>.",
     "language": "Idioma",

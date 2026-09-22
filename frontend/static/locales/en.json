@@ -237,6 +237,8 @@
     "tab_device": "Device",
     "tab_security": "Security",
     "theme_hint": "Pick this device's look. It applies straight away and is remembered here — there is nothing to save.",
+    "theme_more": "More themes",
+    "theme_revision": "Theme revision {date}",
     "device_hint": "These apply to this device only, and take effect straight away — there is nothing to save here.",
     "hint": "Tap a bot’s picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar. <strong>Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed. Order, visibility and Safe changes apply when you press <strong>Save</strong>.",
     "language": "Language",

@@ -59,7 +59,7 @@
          the viewer, and the server 403s its routes for a decoy session. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-qwsyz9DUNHbxI7u5HOAyB3StcFMGSJev6sz7UYc73b4=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-B/4P8AyGy4SqUiBYgvGoQKCc5tVl0U48Z9aEDREIG1U=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
+    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-B/4P8AyGy4SqUiBYgvGoQKCc5tVl0U48Z9aEDREIG1U=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -69,21 +69,23 @@
     object-src 'none';
     base-uri 'none';
     form-action 'self'" />
+  <!-- The theme runtime. BLOCKING and first on purpose: it reads the stored
+       theme and stamps <html data-palette/data-theme/data-contrast-profile>
+       plus <meta name="theme-color"> before anything paints. ui-theme.js and
+       ui-theme.css are generated, vendored files — never edit them by hand;
+       their ?v= is the theme revision's digits (docs/development.md). -->
+  <script src="/static/ui-theme.js?v=20260922"></script>
   <!-- Which locale the last visit settled on. i18n.js keeps it current so an
        installed PWA can read the choice back without waiting for the app. -->
   <meta name="i18n-lang" content="en" />
   <title data-i18n="app.title">DisPatch Chat</title>
-  <!-- No-FOUC: stamp the chosen palette before the stylesheet paints. P is the
-       shipped palette set (same list as js/theme.js PALETTES); an unknown or
-       missing value falls back to Glacier, which is the default in theme.css
-       too. Keep the three in step — frontend/tests/theme-palettes.test.js
-       fails when they drift. -->
+  <!-- No-FOUC for the per-device picture settings. The THEME is not here any
+       more: ui-theme.js (the blocking script above) stamps data-palette,
+       data-theme and data-contrast-profile before first paint. This script
+       keeps the two settings the theme runtime knows nothing about. -->
   <script>
     (function () {
       try {
-        var P = ['glacier', 'midnight-gold', 'forest', 'paper', 'daylight', 'purple'];
-        var p = localStorage.getItem('dispatch-palette');
-        document.documentElement.setAttribute('data-palette', P.indexOf(p) >= 0 ? p : 'glacier');
         var a = localStorage.getItem('dispatch-avatar-style');
         if (a === 'minimal') document.documentElement.setAttribute('data-avatar-style', a);
         // No-Image Mode, same no-FOUC reason one step further: this one hides
@@ -141,10 +143,14 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/theme.css?v=5" />
-  <link rel="stylesheet" href="/static/app.css?v=80" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=5" />
-  <script type="module" src="/static/js/theme.js?v=15"></script>
+  <link rel="stylesheet" href="/static/theme.css?v=6" />
+  <link rel="stylesheet" href="/static/app.css?v=81" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=6" />
+  <!-- Theme tokens for all ten themes + the adapter that maps DisPatch's own
+       token names onto them. AFTER app.css / dashboard.css so its blocks win
+       ties; theme.css holds only what the package does not own. -->
+  <link rel="stylesheet" href="/static/ui-theme.css?v=20260922" />
+  <script type="module" src="/static/js/theme.js?v=16"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -722,6 +728,7 @@
       <section class="settings-pane hidden" id="spane-theme" role="tabpanel" aria-labelledby="stab-theme" tabindex="0">
         <p class="muted modal-hint" data-i18n="settings.theme_hint">Pick this device's look. It applies straight away and is remembered here — there is nothing to save.</p>
         <div class="theme-grid" id="theme-grid" role="radiogroup" aria-label="Theme" data-i18n-attr="aria-label=settings.tab_theme"></div>
+        <p class="muted theme-revision" id="theme-revision" data-i18n="settings.theme_revision" data-i18n-vars='{"date":""}'></p>
       </section>
 
       <!-- ---- Device: per-device preferences (all instant, nothing to Save) ---- -->

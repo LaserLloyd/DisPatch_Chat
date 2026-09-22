@@ -239,6 +239,8 @@
     "tab_device": "Appareil",
     "tab_security": "Sécurité",
     "theme_hint": "Choisissez l’apparence de cet appareil. Elle s’applique immédiatement et est mémorisée ici — il n’y a rien à enregistrer.",
+    "theme_more": "Autres thèmes",
+    "theme_revision": "Révision du thème {date}",
     "device_hint": "Ces réglages ne concernent que cet appareil et s’appliquent aussitôt — il n’y a rien à enregistrer ici.",
     "hint": "Touche la photo d’un bot (ou <strong>Changer la photo</strong>) pour définir son avatar. Réordonne avec les boutons ▲/▼ (ou fais glisser les lignes sur ordinateur) ; utilise l’interrupteur pour afficher ou masquer un bot dans la barre latérale. <strong>Sûr</strong> — ce personnage (et son avatar) est visible en mode sécurisé, sans PIN. Les changements d’ordre, de visibilité et de statut Sûr s’appliquent quand tu appuies sur <strong>Enregistrer</strong>.",
     "language": "Langue",

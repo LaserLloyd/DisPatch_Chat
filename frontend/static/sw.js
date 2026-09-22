@@ -2,7 +2,18 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v117';  // v117: the feature wave — regenerate with
+const CACHE = 'local-chat-v118';  // v118: themes come from the shared theme
+  //   package — ten themes (the six DisPatch shipped plus Electric Yellow,
+  //   LaserLloyd, LaserLloyd Light and Night Red). Two NEW vendored files,
+  //   ui-theme.js (the blocking runtime, first script in <head>) and
+  //   ui-theme.css (tokens + the DisPatch adapter), both at ?v=20260922 and
+  //   both in SHELL below — without them an offline cold start paints an
+  //   unthemed page. theme.css 5→6 (palette blocks removed; DisPatch-only
+  //   tokens and the night profile), app.css 80→81, dashboard.css 5→6,
+  //   theme.js 15→16 (gallery from UITheme.list()), every locale (theme
+  //   revision line + the "More themes" rule), index.html (runtime script,
+  //   trimmed pre-paint script and its CSP hash).
+  // v117: the feature wave — regenerate with
   //   alternates, edit-and-rerun, quote/reply, a per-thread model and thinking
   //   override with a context meter, the mood-driven header face, scene
   //   backdrops, drafts with a persisted outbox and offline reading, and thumbs
@@ -158,6 +169,10 @@ const CACHE = 'local-chat-v117';  // v117: the feature wave — regenerate with
   // v100: appearance is a fixed palette, not a dark/light pair. theme.css?v=1→v=2 (six [data-palette] blocks; light-dark() and the data-theme selectors are gone), app.css?v=64→v=65 (the Settings → Theme gallery), theme.js?v=13→v=14 (palette persistence + picker; the rail button now opens Settings → Theme), main.js?v=81→v=82 (theme tab + rail wiring). The shell is cached by PATH, so without this bump an installed client would keep serving itself the old theme.css and paint an unstyled page.
 const SHELL = [
   '/',
+  // The theme runtime and tokens (v118). Generated, vendored files: the
+  // runtime is the first script in <head> and paints the theme before
+  // anything else, so an offline start without it has no theme at all.
+  '/static/ui-theme.js', '/static/ui-theme.css',
   '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css',

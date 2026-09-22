@@ -237,6 +237,8 @@
     "tab_device": "Gerät",
     "tab_security": "Sicherheit",
     "theme_hint": "Wähle das Aussehen für dieses Gerät. Es gilt sofort und wird hier gespeichert — es gibt nichts zu speichern.",
+    "theme_more": "Weitere Themes",
+    "theme_revision": "Theme-Revision {date}",
     "device_hint": "Diese Einstellungen gelten nur für dieses Gerät und wirken sofort — hier gibt es nichts zu speichern.",
     "hint": "Tippe auf das Bild eines Bots (oder auf <strong>Foto ändern</strong>), um seinen Avatar zu setzen. Sortiere mit den ▲/▼-Buttons (am Desktop auch per Ziehen); mit dem Schalter blendest du einen Bot in der Seitenleiste ein oder aus. <strong>Sicher</strong> — diese Figur (und ihr Avatar) ist im Sicheren Modus sichtbar, ganz ohne PIN. Reihenfolge, Sichtbarkeit und Sicher-Änderungen gelten, sobald du auf <strong>Speichern</strong> drückst.",
     "language": "Sprache",

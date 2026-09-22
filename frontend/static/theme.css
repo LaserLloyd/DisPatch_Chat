@@ -1,62 +1,46 @@
 /* ============================================================================
-   theme.css — DisPatch appearance tokens
+   theme.css — DisPatch's own tokens (v6)
    ----------------------------------------------------------------------------
-   This file holds every colour, typography, spacing, motion and elevation
-   variable the UI uses. Component CSS in app.css / dashboard.css references
-   these tokens via var(--name) and is otherwise untouched, so re-skinning the
-   app means editing ONLY this file (token NAMES stay stable; only the values
-   change).
+   COLOURS NO LONGER LIVE HERE. Every theme — the six DisPatch shipped with
+   plus the four opt-in ones — comes from the shared theme package, vendored
+   as ui-theme.css (tokens + the DisPatch compat adapter) and ui-theme.js (the
+   blocking runtime that stamps data-palette / data-theme /
+   data-contrast-profile before first paint). Component CSS in app.css and
+   dashboard.css keeps using DisPatch's legacy token names (--bg-primary,
+   --user-bubble, --md-em, …); the adapter inside ui-theme.css maps each of
+   them onto a contract token, so re-skinning is the package's job and this
+   file never names a theme.
 
-   APPEARANCE IS A PALETTE, NOT A LIGHT/DARK PAIR.
-   Up to 2026-09-15 the app had two skins selected by a `data-theme` attribute
-   and every colour was written light-dark(LIGHT, DARK). That switch is gone.
-   There is now ONE fixed palette per theme, selected by `data-palette` on
-   <html>, and each palette is a complete, self-consistent skin: it redefines
-   every thematic token and nothing else. There is no "light side" or "dark
-   side" left to fall back to, which is deliberate — a named theme that
-   inherited half its colours from the default is how you get a forest theme
-   with a lavender focus ring.
+   What is left here is what the package does not own:
 
-   `data-palette` is stamped before first paint by the no-FOUC script in
-   index.html and afterwards by js/theme.js, which also renders the picker in
-   Settings → Theme. The picker previews each card by putting its own
-   `data-palette` attribute on the card element, so a preview is painted by
-   the real token block, never by a copy of the values.
+     1. Layout and type-scale tokens DisPatch alone uses (rail widths, the
+        assistant column, the fluid type steps, the easing curve).
+     2. DisPatch-owned colour roles that are a COMPONENT decision, not a
+        theme one: the fixed-dark code card and the ink on error / warning
+        fills. The contract has near neighbours (--code-bg, --on-danger,
+        --on-warning) with different values on purpose — DisPatch's code card
+        is github-dark in every theme, and its Delete / Stop plates carry
+        white ink where the contract uses a dark one — so these stay local.
+     3. The night contrast profile: on a night theme (Night Red) those
+        DisPatch-owned roles point at contract tokens instead, because a
+        github-dark card or a white label is exactly the blue light a night
+        theme exists to remove.
 
-   ORDER MATTERS. The default palette block (`:root, [data-palette="glacier"]`)
-   comes first and every other palette block after it. All palette selectors
-   have the same specificity, so source order decides, and the later block
-   wins when <html> carries an explicit palette.
+   Radii and font stacks moved to the contract (--radius-sm/md/lg/xl,
+   --font-sans, --font-mono), with identical values for every core theme.
+   --ring and --scrollbar-thumb were aliases and are gone: nothing read
+   --ring, and the contract owns --scrollbar-thumb with its own meaning
+   (component CSS reads --border-light for DisPatch's thumb).
 
-   `color-scheme` is declared per palette: it is what makes native widgets
-   (scrollbars, form controls, the select popup) match the skin, and it is what
-   resolves the handful of light-dark() pairs still in app.css / dashboard.css
-   for the minimal-avatar name tints and the host dashboard severities. A
-   palette that forgets it renders a dark control set on a light page.
-
-   Sections:
-     1. Structural tokens (identical in every palette)
-     2. Responsive token overrides
-     3. Palettes — Glacier (default), Midnight Gold, Forest, Paper, Daylight,
-        Classic Purple
-     4. Forced-skin surfaces
-
-   frontend/tests/theme-palettes.test.js enforces the two invariants that keep
-   this file honest: every palette defines the SAME set of thematic tokens, and
-   the palette ids here match js/theme.js and the no-FOUC script in index.html.
+   LOAD ORDER: ui-theme.css must load AFTER this file and after app.css /
+   dashboard.css. This file declares nothing the package declares, so the
+   order only matters for the package's own blocks — see index.html.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
-   1. Structural tokens — identical in every palette
-   ----------------------------------------------------------------------------
-   Spacing, radii, layout widths, type and motion. A palette block must never
-   redefine one of these; the palette-parity test fails if one does. */
+   1. Layout, type scale, motion
+   ---------------------------------------------------------------------------- */
 :root {
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-
   --sidebar-width: 72px;
   --threadlist-width: 320px;
   /* Caps the width of assistant message columns. The 760px reading column was
@@ -66,9 +50,6 @@
      reading window. */
   --assistant-col: 100%;
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-
   /* Fluid, rem-anchored, zoom-safe; max <= 2.5x min for WCAG 1.4.4. */
   --step--1: clamp(.8125rem, .78rem + .18vw, .9rem);
   --step-0:  clamp(1rem, .97rem + .18vw, 1.0625rem);
@@ -77,448 +58,44 @@
 
   --easing: cubic-bezier(.22, 1, .36, 1);   /* gentle "spring-ish" ease-out */
 
-  /* Code blocks are ALWAYS dark, in every palette: the card background is a
-     fixed #0d1117 in app.css and the vendored highlight.js theme is
-     github-dark. So is their text. */
-  --code-block-text: #c9d1d9;
-
-  /* Aliases. Declared once here as var() references, so they resolve against
-     whichever palette is in force on the element that uses them — including a
-     preview card nested inside a different active palette. */
-  --ring: var(--focus);
-  --scrollbar-thumb: var(--border-light);
+  /* ------------------------------------------------------------------------
+     2. DisPatch-owned colour roles
+     ------------------------------------------------------------------------
+     Code blocks are ALWAYS dark in a standard theme: the card, its header
+     chrome and its text match the vendored highlight.js github-dark theme,
+     which is not re-skinned per theme. */
+  --code-card-bg:     #0d1117;
+  --code-card-chrome: #8b949e;
+  --code-block-text:  #c9d1d9;
+  /* Ink on a filled error plate (Delete, Stop, the attachment ×) and on a
+     filled warning plate (the reconnect card). Checked against the error and
+     warning fills of every standard theme. */
+  --on-error-fill:   #fff;
+  --on-warning-fill: #1a1a1a;
 }
 
 /* ----------------------------------------------------------------------------
-   2. Responsive token overrides
-   ----------------------------------------------------------------------------
-   The threadlist rail narrows to 280px on tablet widths and below. */
+   Responsive token overrides — the threadlist rail narrows on tablets.
+   ---------------------------------------------------------------------------- */
 @media (max-width: 1024px) {
   :root { --threadlist-width: 280px; }
 }
 
 /* ----------------------------------------------------------------------------
-   3. Palettes
+   3. Night contrast profile
    ----------------------------------------------------------------------------
-   Each block redefines the complete thematic set. Three are dark, two are
-   light, and Classic Purple is the app's original identity frozen to the dark
-   values it shipped before the palette switch (the light variant it used to
-   have is what "remove light/dark mode" retired).
+   ui-theme.js sets data-contrast-profile="night" on <html> for a night theme.
+   The code card follows the theme's own code ground and syntax ink, and fill
+   labels use the theme's on-fill inks (black on Night Red's ember and orange
+   plates). Component-level night rules (name tints, callouts, the code-card
+   header chrome, the boot mark) live next to their components in app.css.
 
-   Contrast: every palette was solved against the app's hard-coded `color:#fff`
-   on accent-filled buttons (.send-btn, .btn-primary, .icon-btn:hover), so
-   --accent is deliberately deeper than the shade you would pick by eye in
-   Midnight Gold; the brighter gold survives as --accent-text / --focus, which
-   is where it is actually used. Body text clears 7:1 on the assistant bubble in
-   every palette, and the two chat bubbles differ in LIGHTNESS and not only in
-   hue, so the conversation stays parseable under any colour vision deficiency.
-   ---------------------------------------------------------------------------- */
-
-/* ---- Glacier — cool slate-blue dark, the DEFAULT (see index.html + theme.js) ---- */
-:root,
-[data-palette="glacier"] {
-  color-scheme: dark;
-
-  --bg-primary:   #000000;
-  --bg-secondary: #060b0f;
-  --bg-tertiary:  #0d161c;
-  --bg-elevated:  #121c23;
-  --bg-hover:     #172228;
-  --bg-input:     #030608;
-  --bg-sidebar:   #000000;
-  --tint-subtle:  rgba(255,255,255,.025);
-  --code-inline:  rgba(0,0,0,.35);
-
-  --text-primary:   #dcedf4;
-  --text-secondary: #9fc0cc;
-  --text-muted:     #7fa3b0;
-
-  --accent:       #185e7a;
-  --accent-hover: #206b88;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #7fe0f2;
-  --accent-text:  #7fe0f2;
-
-  --border:       #5c7480;
-  --border-light: #33424a;
-
-  /* A lifted ice-shadow surface, not an accent wash — see the Midnight Gold
-     note below. 1.62:1 against the assistant bubble, body text 9.38:1. */
-  --user-bubble: #153f51;
-  --bot-bubble:  #0d161c;
-
-  --md-quote:      #7fe0f2;
-  --md-quote-text: #bdf1fa;
-  --md-em:         #a5b4f5;
-  --md-strong:     #f2fbff;
-  --md-mark-bg:    rgba(127,224,242,.22);
-
-  --success: #34d399; --success-text: #5fd3b0;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #7fe0f2; --dot-idle: #33424a;
-  --error:   #f87171; --error-text:   #ff8a80;
-  --warning: #fbbf24; --warning-text: #ffca28;
-
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
-  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
-  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
-
-  /* Frosted-glass highlight fading into the teal base. */
-  --accent-grad: linear-gradient(135deg, #387d94, var(--accent-hover), var(--accent));
+   Keyed on <html> only: a theme-gallery preview card carries data-palette
+   but not the profile, so a Night Red card previews its chrome, not this. */
+:root[data-contrast-profile="night"] {
+  --code-card-bg:     var(--code-bg);
+  --code-card-chrome: var(--syn-comment);
+  --code-block-text:  var(--syn-fg);
+  --on-error-fill:    var(--on-danger);
+  --on-warning-fill:  var(--on-warning);
 }
-
-/* ---- Midnight Gold — OLED-friendly true black, antique gold accent ---- */
-[data-palette="midnight-gold"] {
-  color-scheme: dark;
-
-  --bg-primary:   #000000;
-  --bg-secondary: #060504;
-  --bg-tertiary:  #0d0a06;
-  --bg-elevated:  #120e08;
-  --bg-hover:     #171209;
-  --bg-input:     #030201;
-  --bg-sidebar:   #000000;
-  --tint-subtle:  rgba(255,255,255,.025);
-  --code-inline:  rgba(0,0,0,.35);
-
-  --text-primary:   #f1e6cf;
-  --text-secondary: #b7a883;
-  --text-muted:     #96896a;
-
-  /* Deeper than the bright gold you'd reach for by eye — it has to clear
-     4.5:1 under hard-coded white button text. The brighter "hover-bright"
-     gold survives as --accent-text/--focus instead. */
-  --accent:       #7a5c12;
-  --accent-hover: #916d15;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #e3bf5a;
-  --accent-text:  #e3bf5a;
-
-  --border:       #736952;
-  --border-light: #474133;
-
-  /* Not a transparent accent wash: over a #000000 page an 18% mix of this
-     deliberately-dark gold produced ZERO lightness lift, so user and assistant
-     bubbles were the same shade in greyscale (1.12:1) — the CVD parseability
-     failure the brief warns about. Explicit lifted surface instead: 1.62:1
-     against the black assistant bubble, body text still 10.49:1 on it. */
-  --user-bubble: #3e2f0c;
-  --bot-bubble:  #000000;
-
-  --md-quote:      #7fc4b8;
-  --md-quote-text: #b9e6dd;
-  --md-em:         #e3bf5a;
-  --md-strong:     #fff6df;
-  --md-mark-bg:    rgba(227,191,90,.30);
-
-  --success: #34d399; --success-text: #34d399;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #ffca28; --dot-idle: #474133;
-  --error:   #f87171; --error-text:   #f87171;
-  --warning: #fbbf24; --warning-text: #fbbf24;
-
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
-  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
-  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
-
-  /* Metallic sheen: a brighter gold highlight (still white-text-safe on its
-     own, #8d721b clears 4.6:1) fading into the base accent. */
-  --accent-grad: linear-gradient(135deg, #8d721b, var(--accent-hover), var(--accent));
-}
-
-/* ---- Forest — dirt & wood: bark-brown surfaces, mossy/amber markdown ---- */
-[data-palette="forest"] {
-  color-scheme: dark;
-
-  --bg-primary:   #0a0806;
-  --bg-secondary: #0f0c09;
-  --bg-tertiary:  #150f0a;
-  --bg-elevated:  #1a130c;
-  --bg-hover:     #211a10;
-  --bg-input:     #060503;
-  --bg-sidebar:   #050403;
-  --tint-subtle:  rgba(255,255,255,.025);
-  --code-inline:  rgba(0,0,0,.35);
-
-  --text-primary:   #ece3d2;
-  --text-secondary: #b8a888;
-  --text-muted:     #9b8b6c;
-
-  /* Bark brown, not a sage green — the white-button-text floor is what keeps
-     it a deep saddle brown rather than a lighter tan. */
-  --accent:       #5e3a1e;
-  --accent-hover: #6f4626;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #d68a42;
-  --accent-text:  #d68a42;
-
-  --border:       #64715a;
-  --border-light: #3c4536;
-
-  /* Explicit lifted bark surface, not an accent wash — see the Midnight Gold
-     note. 1.54:1 against the assistant bubble (the most this palette gives
-     without dropping body text under 7:1), body text 9.72:1. */
-  --user-bubble: #4a2e19;
-  --bot-bubble:  #150f0a;
-
-  --md-quote:      #8fae6e;
-  --md-quote-text: #c3dba9;
-  --md-em:         #e0a52e;
-  --md-strong:     #f5ecd8;
-  --md-mark-bg:    rgba(224,165,46,.28);
-
-  --success: #34d399; --success-text: #5fcf98;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #ff9d4d; --dot-idle: #3c4536;
-  --error:   #f87171; --error-text:   #ff8f7f;
-  --warning: #fbbf24; --warning-text: #e0a52e;
-
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
-  --shadow-md: 0 6px 20px rgba(0,0,0,.50);
-  --shadow-lg: 0 18px 50px rgba(0,0,0,.65);
-
-  /* Warm amber highlight fading to bark — wood-grain warmth on the button. */
-  --accent-grad: linear-gradient(135deg, #9c6b30, var(--accent-hover), var(--accent));
-}
-
-/* ---- Paper — a light theme: cozy firelit parchment & ember red ---- */
-[data-palette="paper"] {
-  color-scheme: light;
-
-  --bg-primary:   #e6d2a8;
-  --bg-secondary: #dcc491;
-  --bg-tertiary:  #efdfb8;
-  --bg-elevated:  #efdfb8;
-  --bg-hover:     #d4b87e;
-  --bg-input:     #efdfb8;
-  --bg-sidebar:   #dcc491;
-  --tint-subtle:  rgba(0,0,0,.035);
-  --code-inline:  rgba(0,0,0,.07);
-
-  --text-primary:   #2e2013;
-  --text-secondary: #5a4429;
-  --text-muted:     #5b472b;
-
-  --accent:       #a3241c;
-  --accent-hover: #b8362d;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #8a1f18;
-  --accent-text:  #8a1f18;
-
-  --border:       #787466;
-  --border-light: #c7bda0;
-
-  /* Light themes need the user bubble DARKER than the assistant bubble for the
-     same lightness-separation reason. 1.62:1, body text 7.36:1. */
-  --user-bubble: #d8a789;
-  --bot-bubble:  #efdfb8;
-
-  /* A second ink colour (indigo, like a stamped date) instead of the usual
-     teal — the one place Paper deviates from pure red/black/cream. */
-  --md-quote:      #2b3a66;
-  --md-quote-text: #1c274a;
-  --md-em:         #a3241c;
-  --md-strong:     #0a0806;
-  --md-mark-bg:    #eddb8a;
-
-  --success: #34d399; --success-text: #13643e;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #8f1d16; --dot-idle: #c7bda0;
-  --error:   #f87171; --error-text:   #aa211c;
-  --warning: #fbbf24; --warning-text: #7a4f00;
-
-  --shadow-sm: 0 1px 2px rgba(20,15,5,.10);
-  --shadow-md: 0 6px 20px rgba(20,15,5,.14);
-  --shadow-lg: 0 18px 50px rgba(20,15,5,.20);
-
-  /* Flat-ish, top-lit — a rubber-stamp impression, not a glossy button. */
-  --accent-grad: linear-gradient(180deg, var(--accent-hover), var(--accent));
-}
-
-/* ---- Daylight — white, genuinely light; mid-weight blue accent ---- */
-[data-palette="daylight"] {
-  color-scheme: light;
-
-  --bg-primary:   #ffffff;
-  --bg-secondary: #f5f7fa;
-  --bg-tertiary:  #ffffff;
-  --bg-elevated:  #ffffff;
-  --bg-hover:     #eef1f5;
-  --bg-input:     #ffffff;
-  --bg-sidebar:   #f5f7fa;
-  --tint-subtle:  rgba(0,0,0,.035);
-  --code-inline:  rgba(0,0,0,.07);
-
-  --text-primary:   #14181f;
-  --text-secondary: #4b5563;
-  --text-muted:     #5b6472;
-
-  --accent:       #2c56c9;
-  --accent-hover: #3866d8;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #1d47b8;
-  --accent-text:  #1d47b8;
-
-  --border:       #8a91a1;
-  --border-light: #c3c8d1;
-
-  /* Darker than the white assistant bubble — 1.60:1, body text 11.12:1. */
-  --user-bubble: #c0ccef;
-  --bot-bubble:  #ffffff;
-
-  --md-quote:      #0f6a7a;
-  --md-quote-text: #0b4a56;
-  --md-em:         #8a5500;
-  --md-strong:     #12121a;
-  --md-mark-bg:    #fde68a;
-
-  --success: #34d399; --success-text: #0f7a48;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #1d47b8; --dot-idle: #c3c8d1;
-  --error:   #f87171; --error-text:   #b3241c;
-  --warning: #fbbf24; --warning-text: #8a5500;
-
-  --shadow-sm: 0 1px 3px rgba(20,25,40,.08);
-  --shadow-md: 0 8px 22px rgba(20,25,40,.12);
-  --shadow-lg: 0 20px 54px rgba(20,25,40,.18);
-
-  --accent-grad: linear-gradient(135deg, #4371d3, var(--accent-hover), var(--accent));
-}
-
-/* ---- Classic Purple — the app's original identity, frozen to its dark values ----
-   This is the pre-palette DisPatch look, kept as a first-class choice rather
-   than deleted: it is what every existing user is looking at today. Its old
-   light variant is gone with the light/dark switch — a palette is one skin. */
-[data-palette="purple"] {
-  color-scheme: dark;
-
-  --bg-primary:   #0e0e1b;
-  --bg-secondary: #15152a;
-  --bg-tertiary:  #1d1d39;
-  --bg-elevated:  #232342;
-  --bg-hover:     #262648;
-  --bg-input:     #1a1a30;
-  --bg-sidebar:   #14142a;
-  --tint-subtle:  rgba(255,255,255,.02);
-  --code-inline:  rgba(0,0,0,.35);
-
-  --text-primary:   #e8e8f0;
-  --text-secondary: #8d8db0;
-  --text-muted:     #9a9ab8;
-
-  --accent:       #7c3aed;
-  --accent-hover: #8b5cf6;
-  --accent-muted: color-mix(in oklab, var(--accent) 16%, transparent);
-  --focus:        #a78bfa;
-  --accent-text:  #a78bfa;
-
-  --border:       #292945;
-  --border-light: #38385c;
-
-  --user-bubble: color-mix(in oklab, var(--accent) 18%, transparent);
-  --bot-bubble:  #1e1e3a;
-
-  --md-quote:      #5eead4;
-  --md-quote-text: #a5f3ea;
-  --md-em:         #fcd34d;
-  --md-strong:     #ffffff;
-  --md-mark-bg:    rgba(251,191,36,.30);
-
-  --success: #34d399; --success-text: #34d399;
-  /* Notification state. --notify is the ONLY thing in the palette whose job is
-     to be noticed; --dot-idle is the only thing whose job is not to be. The
-     unread indicator used to reuse --accent-hover, which is tuned to sit UNDER
-     white button text and is therefore deliberately deep: in four of the six
-     palettes the "you have a message" dot came out DARKER and quieter than the
-     "nothing here" dot it had to be told apart from, and no palette reached
-     3:1 between the two states. Solved as a pair, per palette, so the contract
-     below holds in light and dark alike:
-       --notify vs the sidebar   >= 4.5:1   (impossible to miss)
-       --dot-idle vs the sidebar <= 3:1     (present, unremarkable)
-       --notify vs --dot-idle    >= 3:1     (the two states never blur)
-     frontend/tests/theme-palettes.test.js asserts all three. */
-  --notify: #a78bfa; --dot-idle: #38385c;
-  --error:   #f87171; --error-text:   #f87171;
-  --warning: #fbbf24; --warning-text: #fbbf24;
-
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.30);
-  --shadow-md: 0 6px 20px rgba(0,0,0,.40);
-  --shadow-lg: 0 18px 50px rgba(0,0,0,.55);
-
-  --accent-grad: linear-gradient(135deg, var(--accent-hover), var(--accent));
-}
-
-/* ----------------------------------------------------------------------------
-   4. Forced-skin surfaces
-   ----------------------------------------------------------------------------
-   The lock face is NO LONGER one of these (2026-09-18). It used to carry
-   `data-palette="purple"` in index.html, painting the PIN screen in the classic
-   dark skin whatever theme the device was set to — which is exactly what it
-   looked like from the outside: the one page that ignored your theme. The pin
-   existed because .lock-screen's backdrop was a hard-coded near-black, so a
-   light palette's dark --text-primary would have been ink on a dark sheet.
-   That backdrop is derived from --bg-primary now, so the face follows the
-   palette and its tokens always match the surface they sit on. Checked before
-   removing it: text on its own bg-primary is 10.6:1 at worst (Paper) and the
-   keypad's #eef4fa on --accent is 5.1:1 at worst (Purple) — every palette
-   clears AA, because every --accent is a dark colour in this set.
-
-   Code blocks remain deliberately fixed-dark in every palette (see
-   --code-block-text in section 1 and .bubble pre / .code-block-* in app.css):
-   the vendored highlight.js theme is github-dark and re-skinning it per palette
-   is a different job from theming the chrome. Nothing else is force-skinned. */
