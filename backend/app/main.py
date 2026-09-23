@@ -112,6 +112,10 @@ _background: set[asyncio.Task] = set()
 # Set during lifespan teardown; guards against spawning fresh background work
 # (e.g. a post-turn follower) while the loop and DB are shutting down.
 _shutting_down = False
+#: When this process started. Every in-memory "*_24h" counter on /api/health
+#: resets on restart (and the unit restarts nightly), so health reports this
+#: beside them: a zero measured over four minutes is not a zero over a day.
+_PROCESS_STARTED_AT = datetime.now(UTC)
 
 # Note: SVG is deliberately excluded — an SVG served inline can carry <script>
 # and would execute as a same-origin document (stored XSS). Raster formats only.
@@ -7077,6 +7081,11 @@ async def health(request: Request):
         "gateway_ok": await _gateway_ok(),
         # Count only — refusal details (bot names, reasons) stay in the
         # journal and the unlocked UI.
+        # The window the *_24h counters below actually cover: they live in
+        # memory, so they start at zero with the process.
+        "counters_since": _PROCESS_STARTED_AT.isoformat(timespec="seconds"),
+        "counters_window_s": round(
+            (datetime.now(UTC) - _PROCESS_STARTED_AT).total_seconds()),
         "reaction_fire_failures_24h":
             reactions.fire_failure_stats()["failures_24h"],
         "image_job_failures_24h":

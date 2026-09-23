@@ -198,3 +198,15 @@ def test_backup_staleness_is_visible_even_though_last_backup_ok_latches(on_box,
     assert body["backup_stale"] is True
     assert body["backup_age_s"] > 3600 * 2
     assert body["status"] == "degraded"
+
+
+def test_the_24h_counters_say_what_window_they_cover(on_box):
+    """The *_24h counters are process-local and the service restarts nightly,
+    so a zero right after a restart means "no data", not "no failures".
+    counters_since names the process start the counts are measured from."""
+    from datetime import datetime
+
+    body = on_box.get("/api/health").json()
+    since = datetime.fromisoformat(body["counters_since"])
+    assert since.tzinfo is not None
+    assert body["counters_window_s"] >= 0
