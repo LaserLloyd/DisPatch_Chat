@@ -310,7 +310,10 @@ def test_a_gap_sweep_exists_and_is_started():
     assert hasattr(main, "_gap_sweep_loop"), "the backstop is gone"
     # The task must actually be started, not merely defined.
     import inspect
-    lifespan_src = inspect.getsource(main.lifespan)
+    # The lifespan delegates its startup half to _lifespan_startup (so a
+    # failed startup can be caught and the process made to exit).
+    lifespan_src = (inspect.getsource(main.lifespan)
+                    + inspect.getsource(main._lifespan_startup))
     assert "_gap_sweep_loop" in lifespan_src, (
         "_gap_sweep_loop is defined but never scheduled — a backstop that does "
         "not run is worse than none, because it is believed")
