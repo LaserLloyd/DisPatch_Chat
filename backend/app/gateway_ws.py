@@ -116,6 +116,35 @@ class GatewayRunTimeout(TimeoutError):
     """We stopped waiting for a run that the gateway had already accepted."""
 
 
+class GatewayRunFailed(RuntimeError):
+    """The gateway accepted the run, then answered it with an error.
+
+    e.g. ``{'code': 'UNAVAILABLE', 'message': 'All models failed (3): …'}``
+    once every model in the agent's fallback chain has failed. The turn ran
+    (and was billed), so this is a verdict to show, never a retry signal —
+    even though the code reads UNAVAILABLE, which on a refusal at the door
+    means "come back in a minute". Before this class existed it escaped as a
+    bare RuntimeError: a traceback in the journal and a generic bubble.
+    """
+
+    def __init__(self, error: Any):
+        super().__init__(str(error))
+        self.error = error
+
+    @property
+    def message(self) -> str:
+        if isinstance(self.error, dict) and self.error.get("message"):
+            return str(self.error["message"])
+        return str(self.error)
+
+
+def _is_socket_closed(exc: BaseException) -> bool:
+    """A websockets ConnectionClosed, without importing the optional dep."""
+    return any(c.__name__.startswith("ConnectionClosed")
+               and c.__module__.startswith("websockets")
+               for c in type(exc).__mro__)
+
+
 # How long to wait for the acceptance receipt on an `agent` request. The
 # gateway answers this in milliseconds on loopback (measured: 24 ms); a long
 # wait here means the gateway is not taking work, which is exactly the
@@ -490,7 +519,7 @@ class GatewayClient:
         if frame.get("ok"):
             call.final.set_result(payload)
         else:
-            call.final.set_exception(RuntimeError(str(frame.get("error"))))
+            call.final.set_exception(GatewayRunFailed(frame.get("error")))
 
     async def call_agent(self, params: dict, *, timeout: float) -> dict:
         """Dispatch an agent turn and wait for its result.
@@ -518,8 +547,15 @@ class GatewayClient:
         call = _AgentCall(asyncio.get_event_loop())
         self._agent_calls[req_id] = call
         try:
-            await ws.send(json.dumps(
-                {"type": "req", "id": req_id, "method": "agent", "params": params}))
+            try:
+                await ws.send(json.dumps(
+                    {"type": "req", "id": req_id, "method": "agent",
+                     "params": params}))
+            except Exception as e:
+                if _is_socket_closed(e) or isinstance(e, ConnectionError):
+                    raise GatewayDisconnected(
+                        f"the socket closed while sending the run: {e}") from e
+                raise
             accepted = asyncio.ensure_future(call.accepted.wait())
             try:
                 done, _ = await asyncio.wait(
@@ -530,8 +566,16 @@ class GatewayClient:
                 accepted.cancel()
             if not call.accepted.is_set():
                 if call.final.done():
-                    # Answered without ever accepting: a refusal at the door.
                     exc = call.final.exception()
+                    # The socket died before the receipt. That is not a
+                    # verdict from the gateway, and it is not provably
+                    # "nothing ran" either (the receipt may be what was
+                    # lost), so it is a disconnect -- not retried, and not
+                    # shown to anyone as the model refusing.
+                    if isinstance(exc, ConnectionError) or (
+                            exc is not None and _is_socket_closed(exc)):
+                        raise GatewayDisconnected(str(exc)) from exc
+                    # Answered without ever accepting: a refusal at the door.
                     raise GatewayRunRefused(
                         str(exc) if exc else "the gateway refused the run")
                 raise GatewayRunRefused(

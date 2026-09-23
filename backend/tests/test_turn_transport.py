@@ -32,7 +32,7 @@ class TurnWS:
     """A gateway that accepts an `agent` run, then answers it."""
 
     def __init__(self, *, accept=True, final=None, final_delay=0.0,
-                 accept_delay=0.0, fail_accept=None):
+                 accept_delay=0.0, fail_accept=None, fail_final=None):
         self._outbound: asyncio.Queue = asyncio.Queue()
         self.sent: list[dict] = []
         self._accept = accept
@@ -40,6 +40,7 @@ class TurnWS:
         self._final_delay = final_delay
         self._accept_delay = accept_delay
         self._fail_accept = fail_accept
+        self._fail_final = fail_final
         self._tasks: list[asyncio.Task] = []
         self.closed = False
 
@@ -63,6 +64,11 @@ class TurnWS:
                 "type": "res", "id": rid, "ok": True,
                 "payload": {"runId": "r1", "sessionKey": "agent:beta:t1",
                             "status": "accepted", "acceptedAt": 1}}))
+        if self._fail_final is not None:
+            await self._outbound.put(json.dumps({
+                "type": "res", "id": rid, "ok": False,
+                "error": self._fail_final}))
+            return
         if self._final is None:
             return
         if self._final_delay:
@@ -390,3 +396,81 @@ async def test_model_and_thinking_reach_the_gateway_only_when_chosen():
         assert chosen["thinking"] == "high"
     finally:
         reader.cancel()
+
+
+# --- a verdict AFTER acceptance (2026-09-18: "All models failed") ---------
+
+_ALL_FAILED = {"code": "UNAVAILABLE",
+               "message": "All models failed (3): provider overloaded"}
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_acceptance_is_a_typed_run_failure():
+    ws = TurnWS(fail_final=_ALL_FAILED)
+    client, reader = await _client_on(ws)
+    try:
+        with pytest.raises(gateway_ws.GatewayRunFailed) as e:
+            await client.call_agent({"message": "hi"}, timeout=5)
+    finally:
+        reader.cancel()
+    assert e.value.error == _ALL_FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_acceptance_shows_the_gateways_sentence_unretried():
+    """The turn was accepted and billed: never retryable, never 'gateway down'.
+
+    It used to escape as a bare RuntimeError -> traceback + a generic bubble.
+    The UNAVAILABLE code must NOT route it through _GATEWAY_DOWN_RE either.
+    """
+    ws = TurnWS(fail_final=_ALL_FAILED)
+    client, reader = await _client_on(ws)
+    try:
+        with pytest.raises(openclaw.AgentError) as e:
+            await openclaw.send_via_gateway(
+                client, bot_id="beta", session_key="agent:beta:t1",
+                message="hi", timeout=5)
+    finally:
+        reader.cancel()
+    assert not isinstance(e.value, openclaw.GatewayUnavailable)
+    assert not isinstance(e.value, openclaw.AgentRefused)
+    assert "All models failed" in e.value.message
+    assert len([r for r in ws.sent if r.get("method") == "agent"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_before_acceptance_is_not_reported_as_a_refusal():
+    ws = TurnWS(accept=False)
+    client, reader = await _client_on(ws)
+    call = asyncio.create_task(openclaw.send_via_gateway(
+        client, bot_id="beta", session_key="agent:beta:t1",
+        message="hi", timeout=30))
+    await asyncio.sleep(0.05)
+    client._fail_pending(gateway_ws.GatewayDisconnected("socket closed"))
+    try:
+        with pytest.raises(openclaw.AgentError) as e:
+            await asyncio.wait_for(call, timeout=2)
+    finally:
+        reader.cancel()
+    assert not isinstance(e.value, openclaw.AgentRefused), e.value.message
+    assert not isinstance(e.value, openclaw.GatewayUnavailable)
+
+
+@pytest.mark.asyncio
+async def test_a_socket_that_closes_on_send_is_a_disconnect():
+    from websockets.exceptions import ConnectionClosedError
+
+    class _ClosedWS(TurnWS):
+        async def send(self, raw):
+            raise ConnectionClosedError(None, None)
+
+    ws = _ClosedWS()
+    client, reader = await _client_on(ws)
+    try:
+        with pytest.raises(openclaw.AgentError) as e:
+            await openclaw.send_via_gateway(
+                client, bot_id="beta", session_key="agent:beta:t1",
+                message="hi", timeout=5)
+    finally:
+        reader.cancel()
+    assert not isinstance(e.value, openclaw.AgentRefused)

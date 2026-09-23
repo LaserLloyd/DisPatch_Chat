@@ -639,14 +639,28 @@ async def send_via_gateway(
             raise _friendly_gateway_down(bot_id, text)
         raise AgentRefused(text.strip() or f"{bot_id} refused the request.",
                            detail=text[:800])
+    except gateway_ws.GatewayRunFailed as e:
+        # Accepted, ran, failed (e.g. "All models failed"). The gateway's own
+        # sentence is the useful thing to show. Deliberately NOT matched
+        # against _GATEWAY_DOWN_RE: its code is often UNAVAILABLE, but the
+        # turn was accepted and billed, so it must never look retryable.
+        raise AgentError(
+            f"{bot_id} couldn't answer: {e.message}".strip(),
+            detail=str(e.error)[:800])
     except gateway_ws.GatewayRunTimeout:
         raise AgentTimeout(
             f"{bot_id} took too long to respond (>{timeout}s).",
             detail="agent timeout (gateway transport)")
-    except (gateway_ws.GatewayDisconnected, ConnectionError) as e:
-        # The run was accepted, so it may still be underway on the gateway and
-        # its reply will arrive over the session subscription. Retrying would
-        # double-run it, so this is a plain AgentError, never a retryable one.
+    except Exception as e:
+        if not (isinstance(e, (gateway_ws.GatewayDisconnected, ConnectionError))
+                or gateway_ws._is_socket_closed(e)):
+            raise
+        # The socket went away mid-call (after acceptance, or before a receipt
+        # we may simply have lost). The run may still be underway on the
+        # gateway and its reply would arrive over the session subscription.
+        # Retrying could double-run it, so this is a plain AgentError, never a
+        # retryable one -- and never an AgentRefused, which would show a
+        # dropped socket to the family as the model saying no.
         raise AgentError(
             f"Lost the connection to the gateway while {bot_id} was answering.",
             detail=str(e)[:200])
