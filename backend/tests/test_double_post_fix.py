@@ -446,3 +446,34 @@ async def test_equal_length_twin_keeps_the_first(wired, monkeypatch):
 
     asst = [m.content for m in await p._db.dump_messages(t.id) if m.role == "assistant"]
     assert asst == [first], f"expected the first copy only, got {asst!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Part 3: concurrent deliveries of one reply (2026-09-21)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_first", [False, True])
+async def test_concurrent_turn_reply_and_backfill_post_once(wired, monkeypatch,
+                                                            source_first):
+    """The turn's own reply (no source_id) and the gateway backfill (with one)
+    arriving at the same moment both passed their dedup checks before either
+    had persisted, and an 11,116-char Bits reply posted twice. Deliveries to
+    one thread are serialised now, so the second sees the first's row."""
+    import asyncio
+
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    t = await p._db.create_thread(bot_id="main", title="race")
+    text = "A long considered reply. " * 40
+
+    turn = main._deliver_assistant_text(t.id, text)
+    backfill = main._deliver_assistant_text(
+        t.id, text, source_id=f"gw:agent:main:{t.id}:e84df44a")
+    pair = (backfill, turn) if source_first else (turn, backfill)
+    await asyncio.gather(*pair)
+
+    asst = [m.content for m in await p._db.dump_messages(t.id)
+            if m.role == "assistant"]
+    assert len(asst) == 1, f"expected one post, got {len(asst)}"

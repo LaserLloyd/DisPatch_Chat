@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import errno
 import fcntl
 import io
@@ -5015,7 +5016,34 @@ def _forget_thread_delivery(thread_id: str) -> None:
     _delivered.pop(thread_id, None)
 
 
-async def _deliver_assistant_text(
+#: One lock per thread around the delivery funnel. The dedup below is a
+#: check-then-persist with awaits in between; two deliveries of ONE reply
+#: arriving together (the turn's own reply, source-less, and the gateway
+#: backfill, with a source_id) both passed their checks before either row
+#: existed, and an 11,116-char reply posted twice on 2026-09-21. Serialised,
+#: the second always sees the first's row.
+_deliver_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+#: Threads whose delivery lock the CURRENT task already holds, so a delivery
+#: made from inside a delivery (none today) cannot deadlock on itself.
+_deliver_held: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+    "_deliver_held", default=frozenset())
+
+
+async def _deliver_assistant_text(thread_id: str, text: str, **kw: Any
+                                  ) -> MessageOut | None:
+    """Serialise per thread, then run the funnel (see _deliver_unlocked)."""
+    held = _deliver_held.get()
+    if thread_id in held:
+        return await _deliver_unlocked(thread_id, text, **kw)
+    async with _deliver_locks[thread_id]:
+        token = _deliver_held.set(held | {thread_id})
+        try:
+            return await _deliver_unlocked(thread_id, text, **kw)
+        finally:
+            _deliver_held.reset(token)
+
+
+async def _deliver_unlocked(
     thread_id: str, text: str, *,
     metadata: dict | None = None, media_url: str | None = None,
     stream: bool = False, source_id: str | None = None,
