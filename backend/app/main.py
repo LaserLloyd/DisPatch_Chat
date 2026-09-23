@@ -54,7 +54,9 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 from . import (
     auth,
@@ -7940,6 +7942,12 @@ async def bot_models(request: Request, bot_id: str):
 # --------------------------------------------------------------------------- #
 
 
+#: How much of a thread's last message the thread list carries. Raw text, so
+#: it is cut well past the UI's 80 visible characters: markdown syntax and
+#: link targets are stripped client-side AFTER this cut.
+THREAD_PREVIEW_CHARS = 400
+
+
 @app.get("/api/threads", responses=problem.MACHINE)
 async def list_threads(request: Request, bot_id: str = Query(...), include_archived: bool = False):
     # Inbound-exempt for machines; a sessionless browser stays Safe Mode.
@@ -7950,6 +7958,13 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
     _deny_decoy_bot(request, bot_id)
     threads = await db.list_threads(bot_id, include_archived=include_archived)
     out = [t.model_dump() for t in threads]
+    for t in out:
+        # A PREVIEW, not the message: the UI shows 80 plain-text chars, and
+        # shipping every thread's full last body made this ~242 KB a poll for
+        # a busy bot. The message itself is one GET away.
+        lm = t.get("last_message")
+        if lm and len(lm) > THREAD_PREVIEW_CHARS:
+            t["last_message"] = lm[:THREAD_PREVIEW_CHARS] + "…"
     if _is_decoy(request):
         out = [_redact_thread_dict(t) for t in out]
     return {"bot_id": bot_id, "threads": out}
@@ -11882,6 +11897,57 @@ app.include_router(localview.router)
 if bool(os.environ.get("JOBS_ENABLED") == "1"):
     jobs.JOBS_ENABLED = True
     app.include_router(jobs.router)
+
+# --------------------------------------------------------------------------- #
+# Compression (2026-09-23). Nothing was compressed: the thread list for a busy
+# bot was ~242 KB a poll and the static JS/CSS ~900 KB, fine on loopback and
+# slow on a phone over the tailnet. gzip for text-like bodies only:
+#   * pictures, video, audio and archives are already compressed -- gzipping
+#     them burns CPU for nothing;
+#   * a 206 (Range) response must go out byte-exact, or video seeking breaks;
+#   * text/event-stream is excluded by Starlette itself.
+# WebSocket routes are untouched (the middleware only sees http scopes).
+# --------------------------------------------------------------------------- #
+
+_GZIP_SKIP_PREFIXES = ("image/", "video/", "audio/", "font/woff",
+                       "application/zip", "application/gzip",
+                       "application/x-gzip", "application/octet-stream",
+                       "application/pdf")
+
+
+def _gzip_skips(status: int, content_type: str) -> bool:
+    """True when a response must go out uncompressed."""
+    return status == 206 or content_type.lower().startswith(_GZIP_SKIP_PREFIXES)
+
+
+class _SelectiveGZipResponder(GZipResponder):
+    async def send_with_compression(self, message):
+        if message["type"] == "http.response.start":
+            headers = Headers(raw=message.get("headers", []))
+            if _gzip_skips(int(message.get("status", 200)),
+                           headers.get("content-type", "")):
+                # Same bypass Starlette uses for a body that already carries
+                # a Content-Encoding: pass start + body through untouched.
+                await super().send_with_compression(message)
+                self.content_encoding_set = True
+                return
+        await super().send_with_compression(message)
+
+
+class _SelectiveGZipMiddleware(GZipMiddleware):
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] == "http"
+                and "gzip" in Headers(scope=scope).get("Accept-Encoding", "")):
+            await _SelectiveGZipResponder(
+                self.app, self.minimum_size,
+                compresslevel=self.compresslevel)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+# compresslevel 6: nearly all of level 9's saving on JSON, at a fraction of
+# the CPU on a box that also runs the gateway.
+app.add_middleware(_SelectiveGZipMiddleware, minimum_size=1024, compresslevel=6)
 
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 # BEFORE /static, and that order is the whole trick: Starlette matches mounts in
