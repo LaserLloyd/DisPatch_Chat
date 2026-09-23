@@ -271,3 +271,17 @@ def _pin_the_autopilot_clock(monkeypatch):
     """
     from app import main as _main
     monkeypatch.setattr(_main, "_autopilot_now_hour", lambda: 3)
+
+
+@pytest.fixture(autouse=True)
+def _no_hard_exit_on_failed_startup(monkeypatch):
+    """A failed lifespan in a test is an assertion, never a process to kill.
+
+    Production arms a daemon timer that os._exit(3)s a failed startup which
+    did not exit on its own (see main._arm_failed_startup_exit). Inside
+    pytest that timer would take the whole run down five seconds later.
+    tests/test_startup_failure.py exercises the real backstop in a subprocess.
+    """
+    from app import main as _main
+    monkeypatch.setattr(_main, "_HARD_EXIT_ON_FAILED_STARTUP", False,
+                        raising=False)

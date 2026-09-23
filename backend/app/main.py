@@ -289,8 +289,69 @@ def _warn_if_wide_open() -> None:
     )
 
 
+#: Backstop for a failed startup. Tests flip it off (conftest) because a
+#: startup failure there is an assertion, not a process to kill.
+_HARD_EXIT_ON_FAILED_STARTUP = True
+#: How long a failed startup may take to exit on its own before the backstop
+#: ends the process. uvicorn's own exit is milliseconds; this only ever fires
+#: when something (a non-daemon thread) is holding the interpreter open.
+_FAILED_STARTUP_EXIT_GRACE_S = 5.0
+
+
+def _arm_failed_startup_exit() -> None:
+    """Make sure a failed startup ENDS the process, with a non-zero status.
+
+    2026-09-16: a migration raised inside the lifespan, uvicorn logged
+    "Application startup failed. Exiting." -- and the process did not exit.
+    aiosqlite's connection worker is a NON-daemon thread; the failed connect
+    never closed it, so the interpreter sat in threading._shutdown joining it
+    for 11.5 hours. systemd saw a live main process, so Restart= never fired
+    and the family chat was simply gone until someone stopped it by hand.
+
+    Database.connect now closes its connection when it fails, which removes
+    that particular thread. This is the belt for the next one: a DAEMON timer
+    that calls os._exit(3) if the normal exit has not happened within the
+    grace period. Daemon threads keep running while _shutdown joins the
+    non-daemon ones, so the timer still fires in exactly the stuck state.
+    """
+    if not _HARD_EXIT_ON_FAILED_STARTUP:
+        return
+
+    def _die() -> None:
+        log.critical("startup failed and the process did not exit within "
+                     "%.0fs; forcing exit(3) so the supervisor restarts it",
+                     _FAILED_STARTUP_EXIT_GRACE_S)
+        logging.shutdown()
+        os._exit(3)
+
+    t = threading.Timer(_FAILED_STARTUP_EXIT_GRACE_S, _die)
+    t.daemon = True
+    t.start()
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        await _lifespan_startup(app)
+    except BaseException:
+        log.critical("DisPatch startup failed; the process will exit",
+                     exc_info=True)
+        # Undo what startup got as far as opening (background tasks, the
+        # gateway socket, the DB connection and its worker thread), so
+        # nothing outlives the loop and holds the interpreter open.
+        with contextlib.suppress(BaseException):
+            await _lifespan_shutdown()
+        with contextlib.suppress(BaseException):
+            await db.close()
+        _arm_failed_startup_exit()
+        raise
+    try:
+        yield
+    finally:
+        await _lifespan_shutdown()
+
+
+async def _lifespan_startup(app: FastAPI) -> None:
     config.ensure_dirs()
     # Bound to the app, not a local, to make the lifetime obvious: the flock is
     # held for exactly as long as the process serves, and released by the OS if
@@ -372,34 +433,34 @@ async def lifespan(app: FastAPI):
     # Native gateway transport. OFF unless DISPATCH_GATEWAY_WS says otherwise,
     # so nothing about how replies arrive changes without someone deciding it.
     await _gateway_ws_start()
-    try:
-        yield
-    finally:
-        global _shutting_down
-        _shutting_down = True
-        harness.runner.remove_state_hook(_harness_state_changed)
-        with contextlib.suppress(Exception):
-            await harness.runner.shutdown()
-        # Live sessions are child processes: they do not outlive the server.
-        harness_sessions.runner.remove_state_hook(_harness_sessions_changed)
-        with contextlib.suppress(Exception):
-            await harness_sessions.runner.shutdown()
-        await _gateway_ws_stop()
-        # Only OUR loop's tasks: a second app instance (tests open several
-        # clients) parks its tasks in this same module-level set, and cancelling
-        # a future from another loop raises instead of shutting down cleanly.
-        loop = asyncio.get_running_loop()
-        mine = [t for t in _background if t.get_loop() is loop]
-        for t in mine:
-            t.cancel()
-        # Let cancelled tasks actually finish their finally-blocks BEFORE the DB
-        # closes — otherwise a cancelled turn's cleanup races a closed database.
-        await asyncio.gather(*mine, return_exceptions=True)
-        _background.difference_update(mine)
-        # Fold the WAL back into the main file so the on-disk DB is self-complete
-        # for any external backup taken while we're stopped.
-        await db.checkpoint("TRUNCATE")
-        await db.close()
+
+
+async def _lifespan_shutdown() -> None:
+    global _shutting_down
+    _shutting_down = True
+    harness.runner.remove_state_hook(_harness_state_changed)
+    with contextlib.suppress(Exception):
+        await harness.runner.shutdown()
+    # Live sessions are child processes: they do not outlive the server.
+    harness_sessions.runner.remove_state_hook(_harness_sessions_changed)
+    with contextlib.suppress(Exception):
+        await harness_sessions.runner.shutdown()
+    await _gateway_ws_stop()
+    # Only OUR loop's tasks: a second app instance (tests open several
+    # clients) parks its tasks in this same module-level set, and cancelling
+    # a future from another loop raises instead of shutting down cleanly.
+    loop = asyncio.get_running_loop()
+    mine = [t for t in _background if t.get_loop() is loop]
+    for t in mine:
+        t.cancel()
+    # Let cancelled tasks actually finish their finally-blocks BEFORE the DB
+    # closes — otherwise a cancelled turn's cleanup races a closed database.
+    await asyncio.gather(*mine, return_exceptions=True)
+    _background.difference_update(mine)
+    # Fold the WAL back into the main file so the on-disk DB is self-complete
+    # for any external backup taken while we're stopped.
+    await db.checkpoint("TRUNCATE")
+    await db.close()
 
 
 # The interactive API docs are disabled in this deployment: /openapi.json,

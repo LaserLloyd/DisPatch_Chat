@@ -377,6 +377,24 @@ class Database:
     # -- lifecycle ---------------------------------------------------------- #
 
     async def connect(self) -> None:
+        try:
+            await self._open_and_migrate()
+        except BaseException:
+            # aiosqlite runs each connection on a NON-daemon worker thread. If
+            # a migration raises and the connection is left open, that thread
+            # keeps the interpreter alive after the app gives up -- which is
+            # how a failed startup on 2026-09-16 became an 11.5-hour zombie
+            # that systemd never restarted. Close it, then let the error out.
+            if self._db is not None:
+                try:
+                    await self._db.close()
+                except Exception:
+                    log.warning("closing the half-open database failed",
+                                exc_info=True)
+                self._db = None
+            raise
+
+    async def _open_and_migrate(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # isolation_level=None -> autocommit: each statement commits on its own.
         # Critical because a single connection is shared across many coroutines;
