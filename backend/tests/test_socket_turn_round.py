@@ -356,6 +356,20 @@ def test_a_normal_resend_is_still_never_dispatched_twice(app_client):
             ws.send_json({"type": "ping"})
             while ws.receive_json().get("type") != "pong":
                 pass
+        # The turn runs in a detached task after the ack, so the pong can
+        # arrive before it has been recorded. Wait for it (bounded, like the
+        # sibling test above), then give a would-be second dispatch the same
+        # number of round-trips to show up before asserting there is none.
+        for _ in range(12):
+            if app_client.agent_turns:
+                break
+            ws.send_json({"type": "ping"})
+            while ws.receive_json().get("type") != "pong":
+                pass
+        for _ in range(3):
+            ws.send_json({"type": "ping"})
+            while ws.receive_json().get("type") != "pong":
+                pass
     assert len(app_client.agent_turns) == 1
 
 
