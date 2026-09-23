@@ -5652,7 +5652,13 @@ async def _gateway_ws_start() -> None:
     except TimeoutError:
         # Not fatal: the client keeps retrying and subscribes itself when it
         # lands. Returning here used to leave it silently inert.
-        log.error("gateway-ws: no connection after 20s — still retrying")
+        # At boot the gateway routinely takes ~70 s to be ready (the unit
+        # ordering is After=, not readiness), so this was an ERROR on every
+        # start followed by "gateway connected" a minute later. A warning
+        # while we are young; an error once the process has been up a while.
+        young = (datetime.now(UTC) - _PROCESS_STARTED_AT).total_seconds() < 120
+        (log.warning if young else log.error)(
+            "gateway-ws: no connection after 20s — still retrying")
     log.warning("gateway-ws ACTIVE in %s mode", "LIVE" if live else "SHADOW")
 
 
@@ -11828,10 +11834,25 @@ async def websocket_endpoint(ws: WebSocket):
                 await manager.send(ws, {"type": "error", "message": f"Unknown type: {mtype}"})
     except WebSocketDisconnect:
         pass
-    except Exception:  # pragma: no cover - defensive
-        log.exception("websocket error")
+    except Exception as e:  # pragma: no cover - defensive
+        if _ws_already_gone(ws, e):
+            # The client went away under us (a send to a dead socket marks the
+            # app side DISCONNECTED, and the next receive raises "WebSocket is
+            # not connected"). That is a disconnect, not a server fault --
+            # logged as a traceback it read as one during triage.
+            log.info("websocket closed mid-exchange: %s", e)
+        else:
+            log.exception("websocket error")
     finally:
         await manager.disconnect(ws)
+
+
+def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
+    """True when ``exc`` only says the socket had already closed."""
+    from starlette.websockets import WebSocketState
+    return (isinstance(exc, RuntimeError)
+            and (ws.application_state != WebSocketState.CONNECTED
+                 or ws.client_state != WebSocketState.CONNECTED))
 
 
 # --------------------------------------------------------------------------- #
