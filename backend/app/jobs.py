@@ -680,26 +680,33 @@ async def get_month(request: Request, key: str,
     # Score each job once against the current profile; the chat panel
     # only needs the score for the active message but precomputing them
     # here is one DB hit instead of N.
-    score_by_job: dict[str, dict] = {}
-    for j in jobs:
-        try:
-            tags = json.loads(j.get("tags") or "[]")
-        except (TypeError, ValueError):
-            tags = []
-        score_by_job[j["job_id"]] = jobs_score.score_candidate(
-            {
-                "url": j["url"],
-                "title": j["title"],
-                "company": j.get("company", ""),
-                "location": j.get("location", ""),
-                "remote_type": j.get("remote_type", "unknown"),
-                "salary_min": j.get("salary_min"),
-                "salary_max": j.get("salary_max"),
-                "seniority": j.get("seniority", "unknown"),
-                "tags": tags,
-            },
-            profile,
-        )
+    # Scoring runs in a worker thread: it is CPU work, and if the profile ever
+    # grows embedding centroids it also lazy-loads a torch model (~8 s). Run
+    # on the event loop, that froze every request and socket in the app.
+    def _score_all() -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for j in jobs:
+            try:
+                tags = json.loads(j.get("tags") or "[]")
+            except (TypeError, ValueError):
+                tags = []
+            out[j["job_id"]] = jobs_score.score_candidate(
+                {
+                    "url": j["url"],
+                    "title": j["title"],
+                    "company": j.get("company", ""),
+                    "location": j.get("location", ""),
+                    "remote_type": j.get("remote_type", "unknown"),
+                    "salary_min": j.get("salary_min"),
+                    "salary_max": j.get("salary_max"),
+                    "seniority": j.get("seniority", "unknown"),
+                    "tags": tags,
+                },
+                profile,
+            )
+        return out
+
+    score_by_job = await asyncio.to_thread(_score_all)
     return {
         "thread": thread.model_dump(),
         "messages": [m.model_dump() for m in msgs],
@@ -722,7 +729,8 @@ async def score_candidate(payload: ScoreIn):
     db = _db()
     profile = await db.get_job_profile() or jobs_score.empty_profile()
     seniority = jobs_score.infer_seniority(payload.title)
-    return jobs_score.score_candidate(
+    return await asyncio.to_thread(
+        jobs_score.score_candidate,
         {
             "url": payload.url,
             "title": payload.title,
@@ -798,7 +806,8 @@ async def get_job(request: Request, job_id: str):
     events = await db.list_job_events(job_id, limit=50)
     feedback_rows = await db.list_job_feedback_for_job(job_id)
     profile = await db.get_job_profile() or jobs_score.empty_profile()
-    score = jobs_score.score_candidate(
+    score = await asyncio.to_thread(
+        jobs_score.score_candidate,
         {
             "url": job["url"],
             "title": job["title"],
@@ -1198,9 +1207,11 @@ async def find_jobs(payload: FindIn, request: Request,
                     bot_id: str = Query("jobboard", max_length=64)):
     """Ask the board's agent (Scout, via the bot's ``agent`` override) to go
     find postings. Posts the request into the current month's thread as a
-    user message and dispatches a turn, like ``/feedback`` does. Browser
-    only: this is deliberately NOT on the inbound tier — an agent that wants
-    to search just searches.
+    user message and dispatches a turn, like ``/feedback`` does.
+
+    On the inbound tier since 2026-09-23: the board had no scheduled search,
+    so nothing new arrived unless someone pressed the button. The daily
+    ``scout-job-sweep`` cron calls this via ``dispatch-jobs find``.
     """
     _require_full(request)
     if config.get_bot(bot_id) is None:

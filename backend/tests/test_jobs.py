@@ -386,3 +386,21 @@ def test_normalize_payload_drops_negative_salary():
     out = jobs_score.normalize_payload({"salary_min": -1, "salary_max": 50_000})
     assert out.get("salary_min") is None
     assert out.get("salary_max") == 50_000
+
+
+def test_scorer_does_not_load_embedder_without_centroids(monkeypatch):
+    """No centroid in the profile means nothing to compare an embedding
+    against, so the scorer must not load the model at all. Loading it is a
+    multi-second torch import; it used to run on the first job-detail click
+    after every restart and froze the app for ~8 s (2026-09-23)."""
+    import app.jobs_score as js
+    calls = []
+    monkeypatch.setattr(js, "_get_embedder", lambda: calls.append(1) or None)
+
+    s = jobs_score.score_candidate(_CANDIDATE_FIT, jobs_score.empty_profile())
+    assert calls == []
+    assert s["embedding_unavailable"] is False
+
+    jobs_score.score_candidate(
+        _CANDIDATE_FIT, {**jobs_score.empty_profile(), "yes_centroid": b""})
+    assert calls == [1]

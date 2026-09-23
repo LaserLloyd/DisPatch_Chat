@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from collections.abc import Iterable
 from typing import Any
 
@@ -349,6 +350,9 @@ def _band_for(mid_salary: float | int) -> str:
 
 _MODEL = None
 _MODEL_LOAD_FAILED = False
+# Scoring runs in worker threads (jobs.py uses asyncio.to_thread), so two
+# first-time callers could otherwise both pay the multi-second load.
+_MODEL_LOCK = threading.Lock()
 
 
 def _get_embedder():
@@ -357,12 +361,15 @@ def _get_embedder():
         return _MODEL
     if _MODEL_LOAD_FAILED:
         return None
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-        _MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-    except Exception:
-        _MODEL_LOAD_FAILED = True
-        return None
+    with _MODEL_LOCK:
+        if _MODEL is not None or _MODEL_LOAD_FAILED:
+            return _MODEL
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+            _MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            _MODEL_LOAD_FAILED = True
+            return None
     return _MODEL
 
 
@@ -468,29 +475,35 @@ def score_candidate(candidate: dict, profile: dict) -> dict:
         block_reasons.append(f"blocklist: location '{candidate.get('location','')}' (your reason: wrong_location)")
 
     # --- embedding centroid bonus (optional) -----------------------------
+    # The model is loaded ONLY when the profile actually carries a centroid
+    # to compare against. Loading it is ~8 s of torch import + weight load,
+    # run synchronously on whatever thread called us — which was the event
+    # loop: the first job-detail click after every restart froze the whole
+    # app for that long, and then threw the model away because no centroid
+    # existed to use it on (2026-09-23).
     embedding_unavailable = False
-    embedder = _get_embedder()
-    if embedder is None:
+    yes_centroid = profile.get("yes_centroid")
+    no_centroid = profile.get("no_centroid")
+    wants_embedding = yes_centroid is not None or no_centroid is not None
+    embedder = _get_embedder() if wants_embedding else None
+    if wants_embedding and embedder is None:
         # Lazy load failed: lock in the flag for this scorer call. We
         # still return a score — just without the centroid bonus term.
         embedding_unavailable = True
-    else:
+    elif embedder is not None:
         try:
-            yes_centroid = profile.get("yes_centroid")
-            no_centroid = profile.get("no_centroid")
-            if (yes_centroid is not None or no_centroid is not None):
-                text = " ".join(filter(None, [
-                    candidate.get("title", ""), candidate.get("brief", ""),
-                    " ".join(t for _, t in tags),
-                ]))
-                emb = embedder.encode([text])[0]
-                term = 0.0
-                if yes_centroid is not None:
-                    term += _cosine(emb, yes_centroid) * 8.0
-                if no_centroid is not None:
-                    term -= _cosine(emb, no_centroid) * 4.0
-                raw += term
-                contributions.append((f"+ embedding:centroid {term:+.1f}", term))
+            text = " ".join(filter(None, [
+                candidate.get("title", ""), candidate.get("brief", ""),
+                " ".join(t for _, t in tags),
+            ]))
+            emb = embedder.encode([text])[0]
+            term = 0.0
+            if yes_centroid is not None:
+                term += _cosine(emb, yes_centroid) * 8.0
+            if no_centroid is not None:
+                term -= _cosine(emb, no_centroid) * 4.0
+            raw += term
+            contributions.append((f"+ embedding:centroid {term:+.1f}", term))
         except Exception:
             embedding_unavailable = True
 
