@@ -325,6 +325,13 @@ def test_inbound_allowlist_includes_feedback_feed():
     assert main._is_inbound("GET", "/api/jobs/feedback") is True
 
 
+def test_inbound_allowlist_includes_find():
+    """``POST /api/jobs/find`` is how the daily sweep cron asks Scout to
+    search (``dispatch-jobs find``); without it on the machine tier the board
+    only ever grew when someone pressed the button."""
+    assert main._is_inbound("POST", "/api/jobs/find") is True
+
+
 def test_decoy_blocked_bars_jobs_paths():
     """``_decoy_blocked`` belt-and-braces: a locked session must not
     reach ``/api/jobs*`` even if auth_gate misses it."""

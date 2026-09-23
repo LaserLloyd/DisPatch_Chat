@@ -1725,6 +1725,12 @@ _JOBS_INBOUND = (
     ("GET",  "/api/jobs/profile"),
     # GET  /api/jobs/feedback   — merged vote+comment feed (machine; 2026-09-16)
     ("GET",  "/api/jobs/feedback"),
+    # POST /api/jobs/find       — ask the board's agent to search (2026-09-23).
+    #   The board's "Find jobs" button, callable by the daily sweep cron
+    #   (`dispatch-jobs find`). It only posts a fixed request into the month
+    #   thread and starts the board agent's turn — the same thing any on-box
+    #   caller can already do through /feedback.
+    ("POST", "/api/jobs/find"),
 )
 # Agent-driven write paths. The 2026-09-15 OpenClaw audit lifts
 # vote/applied/tags/archive/recompute onto the inbound tier so an on-box

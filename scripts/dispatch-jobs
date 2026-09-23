@@ -278,6 +278,58 @@ def cmd_recompute(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_find(args: argparse.Namespace) -> int:
+    """Ask the board's agent (Scout) to search for new postings — the same
+    request the board's "Find jobs" button sends. Returns at once; the agent's
+    turn runs inside DisPatch and its cards + summary land in the month thread.
+    """
+    path = "/api/jobs/find?bot_id=" + urllib.parse.quote(args.bot_id)
+    status, body = _request("POST", path, {"query": args.query} if args.query else {})
+    if status != 200:
+        print(f"dispatch-jobs find: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    if not (body or {}).get("dispatched"):
+        # The request is in the thread, but no turn could be scheduled (no
+        # agent backend reachable) — say so and fail, so a cron sees it.
+        print(f"dispatch-jobs find: request posted but NOT dispatched — {body}", file=sys.stderr)
+        return 4
+    print(f"find requested: thread {body.get('thread_id')} message {body.get('message_id')}")
+    return 0
+
+
+def cmd_feedback(args: argparse.Namespace) -> int:
+    """Read the merged vote+comment feedback feed (newest first)."""
+    qs = [f"limit={args.limit}"]
+    if args.since:
+        qs.append(f"since={urllib.parse.quote(args.since)}")
+    status, body = _request("GET", "/api/jobs/feedback?" + "&".join(qs))
+    if status != 200:
+        print(f"dispatch-jobs feedback: HTTP {status} — {body}", file=sys.stderr)
+        return 3
+    if args.json:
+        _print(body)
+        return 0
+    rows = body.get("feedback", [])
+    if not rows:
+        print("(no feedback yet)")
+        return 0
+    for r in rows:
+        kind = r.get("kind", "?")
+        who = r.get("actor", "?")
+        when = r.get("created_at", "")
+        job = f"{r.get('title', '')} @ {r.get('company', '')}".strip(" @")
+        if kind == "vote":
+            detail = r.get("signal", "?")
+            if r.get("reason_tag"):
+                detail += f" ({r['reason_tag']})"
+        else:
+            detail = r.get("comment", "") or ""
+            if r.get("reason_tag"):
+                detail += f" [reason: {r['reason_tag']}]"
+        print(f"{when}\t{kind}\t{who}\t{job}\t{detail}")
+    return 0
+
+
 def cmd_reasons(args: argparse.Namespace) -> int:
     """List the reason-tag taxonomy (the canonical id list)."""
     status, body = _request("GET", "/api/jobs/reasons")
@@ -402,13 +454,26 @@ def build_parser() -> argparse.ArgumentParser:
     pa2.add_argument("job_id")
     pa2.set_defaults(func=cmd_archive)
 
-    # profile / recompute / reasons
+    # profile / recompute / reasons / feedback
     sub.add_parser("profile", help="Read the current preference profile") \
         .set_defaults(func=cmd_profile)
     sub.add_parser("recompute", help="Force a profile recompute (admin)") \
         .set_defaults(func=cmd_recompute)
     sub.add_parser("reasons", help="List the reason-tag taxonomy") \
         .set_defaults(func=cmd_reasons)
+
+    pf = sub.add_parser("feedback", help="Read the merged vote+comment feedback feed")
+    pf.add_argument("--since", default=None,
+                    help="ISO-8601 timestamp; only feedback at/after this")
+    pf.add_argument("--limit", type=int, default=100)
+    pf.add_argument("--json", action="store_true",
+                    help="Print the raw JSON response instead of a compact listing")
+    pf.set_defaults(func=cmd_feedback)
+
+    pfind = sub.add_parser("find", help="Ask the board's agent to search for new postings")
+    pfind.add_argument("--query", default=None, help="Optional focus for this search")
+    pfind.add_argument("--bot-id", default="jobboard")
+    pfind.set_defaults(func=cmd_find)
 
     return p
 
