@@ -515,13 +515,24 @@ function _setBackgroundInert(on) {
   if (_inertToken) { releaseInert(_inertToken); _inertToken = null; }
 }
 
+// Bumped by every open AND every close. An open whose fetch resolves after
+// the counter moved on was superseded (a second click, a close, Escape) and
+// must not paint. Without it, a double-click — or an impatient second click
+// while a slow fetch was still out — stacked two overlays; outside-click and
+// Escape only knew about the newest, so the older one stayed on screen and
+// nothing but a reload removed it (2026-09-23).
+let _openSeq = 0;
+
 function _close() {
+  _openSeq += 1;
   if (_onKey) { document.removeEventListener('keydown', _onKey); _onKey = null; }
   if (_activeOverlay) {
     _activeOverlay.remove();
     _activeOverlay = null;
-    document.body.classList.remove('job-modal-open');
   }
+  // Belt and braces: never leave an overlay this module does not track.
+  document.querySelectorAll('.job-modal-overlay').forEach((o) => o.remove());
+  document.body.classList.remove('job-modal-open');
   // Always, even if there was no overlay: a stuck `inert` on #app is an app
   // nobody can click, which is far worse than an extra attribute removal.
   _setBackgroundInert(false);
@@ -539,18 +550,47 @@ export async function openJobDetail(jobId) {
   if (!jobId) return;
   const invoker = document.activeElement;
   _close();
+  const seq = ++_openSeq;
+
+  // The overlay goes up IMMEDIATELY with a loading card, before the fetch:
+  // the click is acknowledged at once, and outside-click / Escape work while
+  // the job is still loading (they close it and cancel the pending paint).
+  const overlay = el('div', {
+    class: 'job-modal-overlay', role: 'dialog', 'aria-modal': 'true',
+    'aria-label': t('jobs.loading'), 'aria-busy': 'true',
+  });
+  const card = el('div', { class: 'job-modal', tabindex: '-1' });
+  const loadingClose = el('button', {
+    type: 'button', class: 'job-modal__close', text: '×',
+    'aria-label': t('jobs.detail.close'),
+    onclick: () => _close(),
+  });
+  card.append(loadingClose, el('p', { class: 'job-modal__loading', text: t('jobs.loading') }));
+  overlay.append(card);
+  // `detail > 1` is the second click of a double-click. The overlay appears
+  // under the pointer on the FIRST click, so without this a double-click on a
+  // row opened the detail and its second half closed it again at once.
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay && !(e.detail > 1)) _close();
+  });
+  _onKey = (e) => { if (e.key === 'Escape') _close(); };
+  document.addEventListener('keydown', _onKey);
+  document.body.appendChild(overlay);
+  document.body.classList.add('job-modal-open');
+  _setBackgroundInert(true);
+  _activeOverlay = overlay;
+  _returnFocusTo = invoker;
+  loadingClose.focus();
+
   const data = await _loadJob(jobId);
+  if (seq !== _openSeq) return;           // superseded or closed meanwhile
   if (!data || data.__error || !data.job) {
+    _close();
     _toast(_loadFailureMessage(data), true);
     return;
   }
-
-  const overlay = el('div', {
-    class: 'job-modal-overlay', role: 'dialog', 'aria-modal': 'true',
-    'aria-label': data.job.title || t('jobs.untitled'),
-  });
-  const card = el('div', { class: 'job-modal', tabindex: '-1' });
-  overlay.append(card);
+  overlay.setAttribute('aria-label', data.job.title || t('jobs.untitled'));
+  overlay.removeAttribute('aria-busy');
 
   const ctx = {
     busy: false,
@@ -560,7 +600,9 @@ export async function openJobDetail(jobId) {
     // Returns the payload it fetched, so callers can hand the fresh row to
     // the board instead of making it go and ask for the same thing again.
     reload: async () => {
+      const mine = _openSeq;
       const fresh = await _loadJob(jobId);
+      if (mine !== _openSeq) return null;  // closed or replaced meanwhile
       if (!fresh || fresh.__error || !fresh.job) {
         _toast(_loadFailureMessage(fresh), true);
         _close();
@@ -572,16 +614,6 @@ export async function openJobDetail(jobId) {
   };
 
   const closeBtn = _renderCard(card, jobId, data, ctx);
-
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(); });
-  _onKey = (e) => { if (e.key === 'Escape') _close(); };
-  document.addEventListener('keydown', _onKey);
-
-  document.body.appendChild(overlay);
-  document.body.classList.add('job-modal-open');
-  _setBackgroundInert(true);
-  _activeOverlay = overlay;
-  _returnFocusTo = invoker;
   // Focus moves into the panel — the close button is always present and is
   // a sane, discoverable first stop (screen readers announce the dialog
   // role + label first anyway).

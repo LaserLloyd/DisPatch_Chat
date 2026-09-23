@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v118';  // v118: themes come from the shared theme
+const CACHE = 'local-chat-v119';  // v119: the Job Board detail opens at once
+  //   with a loading card, and a second click (or a double-click) while a job
+  //   is loading replaces the pending detail instead of stacking a second
+  //   overlay that outside-click and Escape could not remove.
+  //   job-thread.js 7→8, main.js 95→96 (its importer), app.css 81→82.
+  // v118: themes come from the shared theme
   //   package — ten themes (the six DisPatch shipped plus Electric Yellow,
   //   LaserLloyd, LaserLloyd Light and Night Red). Two NEW vendored files,
   //   ui-theme.js (the blocking runtime, first script in <head>) and

@@ -24,7 +24,7 @@ import {
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=7';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=4';
 import { mountJobs, unmountJobs } from './jobs.js?v=7';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=7';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=8';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,

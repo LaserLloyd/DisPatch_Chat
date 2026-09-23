@@ -3884,6 +3884,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
 }
 .job-modal:focus { outline: none; }
+.job-modal__loading { margin: 8px 40px 8px 0; color: var(--text-muted, #888); }
 .job-modal__close {
   position: absolute;
   top: 10px;

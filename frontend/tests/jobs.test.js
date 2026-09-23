@@ -222,8 +222,10 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // installed client keeps all of it. v118 moved the themes onto the shared
   // theme package: two new vendored shell files (ui-theme.js, ui-theme.css)
   // that an offline start cannot paint without.
-  assert.equal(m[1], 'local-chat-v118',
-    'sw.js CACHE must be local-chat-v118 so old shells drop and the theme package installs');
+  // v119 (2026-09-23): the Job Board detail's double-open fix changed
+  // job-thread.js, its importer main.js, and app.css.
+  assert.equal(m[1], 'local-chat-v119',
+    'sw.js CACHE must be local-chat-v119 so old shells drop the pre-fix job detail');
 });
 
 // =============================================================================
@@ -1040,4 +1042,89 @@ test('a failed refresh keeps the rows and shows the error beside them', { skip: 
   assert.equal(win.document.querySelectorAll('.job-row').length, 2,
     'the rows must survive a repaint while an error is showing');
   mod.unmountJobs();
+});
+
+// =============================================================================
+// 2026-09-23: a second open while the first is still loading must REPLACE it.
+// A double-click (or an impatient second click during a slow fetch) used to
+// stack two overlays; outside-click and Escape only closed the newest, and the
+// older one stayed on screen until a reload.
+// =============================================================================
+
+function deferredJobFetch(win, job) {
+  // Later suites in this file swap the global document for their own jsdom;
+  // point it back at the shared window these tests query.
+  globalThis.window = win;
+  globalThis.document = win.document;
+  const pending = [];
+  globalThis.fetch = (url) => new Promise((resolve) => {
+    pending.push(() => resolve({
+      ok: true, status: 200, headers: new win.Headers(),
+      json: async () => ({ thread: { id: job.thread_id }, job, events: [], score: null }),
+    }));
+  });
+  return pending;
+}
+
+test('two opens in flight leave exactly one overlay, and outside-click closes it', { skip: dom.skip }, async () => {
+  const win = await withDom();
+  cleanOverlays(win);
+  win.toast = () => {};
+  const job = baseJob();
+  const pending = deferredJobFetch(win, job);
+  const { openJobDetail } = await freshJobThread();
+  const a = openJobDetail(job.job_id);
+  const b = openJobDetail(job.job_id);
+  await flush();
+  pending.forEach((r) => r());            // both fetches land, in order
+  await Promise.all([a, b]);
+  await flush();
+
+  const overlays = win.document.querySelectorAll('.job-modal-overlay');
+  assert.equal(overlays.length, 1, 'a superseded open must not paint a second overlay');
+  overlays[0].dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  assert.equal(win.document.querySelectorAll('.job-modal-overlay').length, 0,
+    'clicking the backdrop must close the (only) overlay');
+});
+
+test('the overlay is up before the fetch lands, and closing it cancels the pending paint', { skip: dom.skip }, async () => {
+  const win = await withDom();
+  cleanOverlays(win);
+  win.toast = () => {};
+  const job = baseJob();
+  const pending = deferredJobFetch(win, job);
+  const { openJobDetail } = await freshJobThread();
+  const p = openJobDetail(job.job_id);
+  await flush();
+  const overlay = win.document.querySelector('.job-modal-overlay');
+  assert.ok(overlay, 'the click must be acknowledged at once with a loading overlay');
+  assert.ok(win.document.querySelector('.job-modal__loading'), 'the loading card shows while the job loads');
+  overlay.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  assert.equal(win.document.querySelectorAll('.job-modal-overlay').length, 0, 'backdrop click closes it while loading');
+  pending.forEach((r) => r());
+  await p;
+  await flush();
+  assert.equal(win.document.querySelectorAll('.job-modal-overlay').length, 0,
+    'a closed-while-loading detail must not reappear when its fetch lands');
+});
+
+test('the second click of a double-click does not close the detail it just opened', { skip: dom.skip }, async () => {
+  const win = await withDom();
+  cleanOverlays(win);
+  win.toast = () => {};
+  const job = baseJob();
+  const pending = deferredJobFetch(win, job);
+  const { openJobDetail } = await freshJobThread();
+  const p = openJobDetail(job.job_id);
+  await flush();
+  const overlay = win.document.querySelector('.job-modal-overlay');
+  overlay.dispatchEvent(new win.MouseEvent('click', { bubbles: true, detail: 2 }));
+  assert.equal(win.document.querySelectorAll('.job-modal-overlay').length, 1,
+    'a detail=2 click on the backdrop is the tail of the opening double-click');
+  pending.forEach((r) => r());
+  await p;
+  await flush();
+  assert.ok(win.document.querySelector('.job-modal [data-signal="yes"]'), 'the detail rendered');
+  win.document.querySelector('.job-modal-overlay').dispatchEvent(new win.MouseEvent('click', { bubbles: true, detail: 1 }));
+  assert.equal(win.document.querySelectorAll('.job-modal-overlay').length, 0, 'a single backdrop click still closes');
 });
