@@ -2852,10 +2852,22 @@ async def _fire_marker_reactions(ids: list[str], thread_id: str, bot_id: str | N
         for rid in ids:
             await _fire_autopilot_reaction(rid, thread_id, bot_id, actor)
         return
+    # One reaction per message. A second marker fired straight after the
+    # first is always refused by our own 2 s cooldown, and that refusal used
+    # to leave a "⚠️ didn't fire" row in the thread (the morning brief did it
+    # six days out of seven). So once one lands, the rest are skipped and
+    # logged. A marker that is refused BEFORE anything lands still reports,
+    # and the next one gets its turn.
+    landed: str | None = None
     for rid in ids:
+        if landed is not None:
+            log.info("reaction %r from %s skipped: %r already fired for this "
+                     "message (one per message)", rid, actor, landed)
+            continue
         try:
             await fire_reaction(rid, actor=actor, actor_kind="agent",
                                 thread_id=thread_id, bot_id=bot_id)
+            landed = rid
         except reactions.ReactionError as e:
             log.info("reaction %r from %s not fired: %s", rid, actor, e.message)
             reactions.note_fire_failure(rid, e.message, actor=actor)

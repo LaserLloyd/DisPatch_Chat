@@ -236,3 +236,39 @@ async def test_a_resolvable_marker_does_not_tick_the_counter(rx_env):
     _, ids = reactions.extract_markers(f"Yes :react:{known}:")
     assert ids == [known]
     assert reactions.fire_failure_stats()["failures_24h"] == baseline
+
+
+async def test_two_markers_fire_once_and_leave_no_refusal_row(rx_env, monkeypatch):
+    """One message, one reaction.
+
+    The morning brief carried two markers most days; they fired back-to-back,
+    DisPatch's own 2 s cooldown refused the second, and a "⚠️ Reaction didn't
+    fire: Slow down" row landed in Bits' daily thread six mornings out of
+    seven. The second marker is now skipped (logged), not fired and refused.
+    """
+    await main.db.connect()
+
+    async def _noop(_frame):
+        return None
+
+    monkeypatch.setattr(main.manager, "broadcast", _noop)
+    fired: list[str] = []
+    real_fire = main.fire_reaction
+
+    async def _spy(rid, **kw):
+        out = await real_fire(rid, **kw)
+        fired.append(rid)
+        return out
+
+    monkeypatch.setattr(main, "fire_reaction", _spy)
+    ids = [r.id for r in reactions.load().reactions][:2]
+    assert len(ids) == 2
+    baseline = reactions.fire_failure_stats()["failures_24h"]
+    await main.db.create_thread(bot_id="main", thread_id="t-two")
+    await main._persist_and_broadcast_message(
+        "t-two", "assistant", f"Good morning :react:{ids[0]}: and :react:{ids[1]}:")
+    msgs, _ = await main.db.list_messages("t-two")
+    assert fired == [ids[0]]
+    assert not [m for m in msgs if "didn't fire" in (m.content or "")], \
+        [m.content for m in msgs]
+    assert reactions.fire_failure_stats()["failures_24h"] == baseline
