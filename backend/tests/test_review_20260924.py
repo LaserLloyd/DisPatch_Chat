@@ -539,3 +539,54 @@ def test_a_replayed_send_is_stored_once_even_after_ack_seen_is_lost(env, monkeyp
     msgs = client.get(f"/api/threads/{tid}/messages").json()["messages"]
     assert [m["content"] for m in msgs if m["role"] == "user"] == ["DUP_TEST"]
     assert len(turns) == 1, "the replay must not start a second turn"
+
+
+# --------------------------------------------------------------------------- #
+# 10. Regenerate keeps the quote; a feedback note names the reply it rates
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.asyncio
+async def test_regenerate_carries_the_quote_into_the_rerun(wired, monkeypatch):
+    """A regenerated (or re-run) message that quoted another used to be sent
+    without its reply_to, so the agent answered a different question."""
+    db, _ = wired
+    await db.connect()
+    try:
+        th = await db.create_thread(bot_id="main")
+        await db.add_message(th.id, "user", "q1")
+        a1 = await db.add_message(th.id, "assistant", "a1")
+        u = await db.add_message(th.id, "user", "what did you mean?",
+                                 metadata={"reply_to": a1.id, "reply_role": "assistant",
+                                           "reply_excerpt": "a1"})
+        await db.add_message(th.id, "assistant", "a2")
+        monkeypatch.setattr(main, "_gateway_client", Gw(entries=[("e9", "what did you mean?")]))
+        seen: list = []
+
+        async def turn(tid, bid, text, opts=None):
+            seen.append(opts)
+            await db.add_message(tid, "assistant", "a2 again")
+
+        monkeypatch.setattr(main, "run_agent_turn", turn)
+        await main._regenerate_turn(th.id, "main", u)
+        assert seen and seen[0].reply_to == a1.id
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_feedback_note_quotes_the_reply_it_rates(wired):
+    db, _ = wired
+    await db.connect()
+    try:
+        th = await db.create_thread(bot_id="main")
+        r = await db.add_message(th.id, "assistant", "The capital of Australia is **Sydney**.\nMore…",
+                                 metadata={"feedback": {"vote": "down", "reason": "inaccurate",
+                                                        "pending": True}})
+        lines = await main._pending_feedback_lines(th.id)
+        assert len(lines) == 1
+        assert lines[0].startswith(f"[[feedback]] message={r.id} vote=down reason=inaccurate ")
+        assert 'reply_excerpt="The capital of Australia is **Sydney**. More…"' in lines[0]
+        # Delivered once.
+        assert await main._pending_feedback_lines(th.id) == []
+    finally:
+        await db.close()

@@ -27,6 +27,15 @@ const ERRORISH = /\b(fail(?:ed|ing|ure)?|error|timed out|unavailable|unreachable
 // A gateway-side error ("⚠️ 🧰 Process failed") is short. A real reply that
 // happens to start with ⚠️ is usually not, and must stay a real reply.
 const SHORT_REPLY = 240;
+// An injected post is machine-posted MOST of the time, but agents deliver
+// proactive messages through /api/inject too ("⚠️ Just so you know, I moved
+// your dentist appointment…"). So the glyph alone is not enough there
+// either: the text has to read as a failure. This list is wider than
+// ERRORISH because machine alerts are terse ("lost its network connection",
+// "cannot render", "didn't go out"); checked against every injected alert in
+// the family app's database on 2026-09-24 — none of the 111 stopped
+// collapsing.
+const INJECT_ERRORISH = /\b(fail(?:ed|ing|ure|s)?|error|timed out|timeout|unavailable|unreachable|crash(?:ed)?|down|lost|cannot|can't|missed|didn.t|refused|denied|stale|stranded|partial|degraded|never finished|not (?:running|found|reachable))\b/i;
 
 function levelFor(glyph) {
   if (!glyph) return 'warn';
@@ -64,9 +73,16 @@ export function classifyNotice(msg) {
   if (meta.source === 'watchdog-failure-notify') return { level: 'error', headline };
 
   if (!m) return null;
-  // Machine-posted (inject / run delivery): the glyph alone decides.
+  // Machine-posted (inject / run delivery): the glyph plus a failure word.
+  // A RECOVERED line is the one glyph-only exception — it is box-smoke's own
+  // pair to NEW FAIL and carries no error word by design.
   const injected = meta.origin === 'inject' || !!meta.delivery_key;
-  if (injected) return { level: levelFor(m[1]), headline };
+  if (injected) {
+    if (m[1].startsWith('✅') || INJECT_ERRORISH.test(content)) {
+      return { level: levelFor(m[1]), headline };
+    }
+    return null;
+  }
   // Anything else is a bot's own reply: only a short, error-worded one counts.
   if (content.length <= SHORT_REPLY && ERRORISH.test(content)) {
     return { level: levelFor(m[1]), headline };

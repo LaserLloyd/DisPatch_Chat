@@ -57,6 +57,17 @@ test('ordinary replies, successes and user messages are left alone', () => {
   assert.equal(classifyNotice(a('queued', { kind: 'image_job', status: 'queued' })), null);
 });
 
+test('an injected message that only OPENS with a warning glyph keeps its bubble', () => {
+  // Agents deliver proactive replies through /api/inject too; the glyph
+  // alone must not collapse them (review 2026-09-24).
+  assert.equal(classifyNotice(a('⚠️ Just so you know, I moved your dentist appointment to Tuesday at 10, '
+    + 'since the Monday slot clashed with the school run.', { origin: 'inject' })), null);
+  // …while the real machine alerts, which all carry a failure word, still do.
+  assert.equal(classifyNotice(a('⚠️ This box has lost its network connection — the rig (images) and the cloud models are unreachable.', { origin: 'inject' })).level, 'warn');
+  assert.equal(classifyNotice(a('⚠️ ComfyUI on the rig cannot render [cards_vacating] — image generation is unavailable', { origin: 'inject' })).level, 'warn');
+  assert.equal(classifyNotice(a('⚠️ My hourly picture didn’t go out — the rig is leased by a benchmark', { origin: 'inject' })).level, 'warn');
+});
+
 test('a bot opening a long, real answer with ⚠️ keeps its bubble', () => {
   const long = '⚠️ Heads up before you deploy: the backup drive is unplugged, so '
     + 'tonight’s mirror will fail. Here is what I would do instead. '.repeat(4);

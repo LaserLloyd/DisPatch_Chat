@@ -6650,6 +6650,9 @@ _FEEDBACK_VOTE_ENUM = frozenset({"up", "down"})
 _FEEDBACK_NOTE_CAP = 3
 
 
+_FEEDBACK_EXCERPT_MAX = 120
+
+
 async def _pending_feedback_lines(thread_id: str) -> list[str]:
     """FEATURE 28 (thumbs feedback): fixed-template lines for votes the agent
     has not been told about yet, and marks exactly the ones returned here
@@ -6671,8 +6674,14 @@ async def _pending_feedback_lines(thread_id: str) -> list[str]:
         reason = fb.get("reason")
         if reason is not None and not isinstance(reason, str):
             reason = None
+        # The agent's transcript has no DisPatch ids, so the id alone told
+        # it nothing about WHICH reply was rated. A short excerpt of the
+        # reply — the bot's own words, server-stored, never the voter's —
+        # is what lets it connect the vote to something it said.
+        excerpt = _quote_excerpt(msg.content).replace("\n", " ")[:_FEEDBACK_EXCERPT_MAX]
         lines.append(f"[[feedback]] message={msg.id} vote={vote} "
-                     f"reason={reason or 'none'}")
+                     f"reason={reason or 'none'} "
+                     f"reply_excerpt={json.dumps(excerpt, ensure_ascii=False)}")
         # Marked delivered as each note is BUILT, not after the whole batch —
         # a turn that fails after this point (gateway down, refused) must not
         # re-surface a note the family already saw acknowledged once elsewhere;
@@ -11541,7 +11550,8 @@ async def _session_leaf_entry(client, session_key: str) -> str | None:
 
 
 async def _rewind_gateway_session(bot_id: str, thread_id: str,
-                                  expect_text: str) -> tuple[str, str | None]:
+                                  expect_text: str, *,
+                                  what: str = "Regenerate") -> tuple[str, str | None]:
     """Cut this thread's gateway session back to before its last user turn.
 
     Returns `(entry_id, leaf_entry_id)`, and raises `_RewindError` when the
@@ -11551,7 +11561,7 @@ async def _rewind_gateway_session(bot_id: str, thread_id: str,
     """
     client = _gateway_client
     if client is None or not client.connected.is_set():
-        raise _RewindError("Regenerate needs the gateway connection, and it is down.")
+        raise _RewindError(f"{what} needs the gateway connection, and it is down.")
     # supports(), not a hello-frame requirement: an older gateway must still
     # serve chat. It just cannot do this one thing, and saying so is better
     # than quietly doing the old broken thing under the new button.
@@ -11663,7 +11673,8 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
         try:
             entry_id, leaf = await _rewind_gateway_session(
                 bot_id, thread_id,
-                user_msg.content if expect_text is None else expect_text)
+                user_msg.content if expect_text is None else expect_text,
+                what="Edit & re-run" if edit_to is not None else "Regenerate")
         except _RewindError as e:
             await manager.broadcast({"type": "error", "thread_id": thread_id,
                                      "bot_id": bot_id, "message": str(e)})
@@ -11682,8 +11693,12 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
         await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
                                  "bot_id": bot_id, "message_id": m.id})
 
+    # The quote rides along: a regenerated or re-run message that quoted
+    # another must still read as a reply to it, or the agent answers a
+    # different question than the one the family asked.
     opts = TurnOptions(user_msg_id=user_msg.id, rewind_entry=entry_id,
-                       replaces=tuple(m.id for m in superseded))
+                       replaces=tuple(m.id for m in superseded),
+                       reply_to=(user_msg.metadata or {}).get("reply_to") or None)
     try:
         await run_agent_turn(thread_id, bot_id,
                              user_msg.content if text is None else text, opts)

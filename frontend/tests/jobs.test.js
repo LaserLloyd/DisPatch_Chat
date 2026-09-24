@@ -231,8 +231,9 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // v122 (2026-09-24): system notices collapse (new module js/notice.js).
   // v123 (2026-09-24 review): store.js joins SHELL; main.js/store.js/modelchip.js,
   // index.html, theme.css and the locales moved.
-  assert.equal(m[1], 'local-chat-v123',
-    'sw.js CACHE must be local-chat-v123 so installed clients get store.js in the shell');
+  // v124 (2026-09-24 review, round 2): main.js/notice.js moved.
+  assert.equal(m[1], 'local-chat-v124',
+    'sw.js CACHE must be local-chat-v124 so installed clients get the round-2 client fixes');
 });
 
 // =============================================================================

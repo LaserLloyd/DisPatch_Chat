@@ -6,7 +6,7 @@ import { api, setOnLocked } from './api.js?v=28';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
 import { installChecklists, applyChecklistState } from './checklist.js?v=5';
-import { classifyNotice } from './notice.js?v=1';
+import { classifyNotice } from './notice.js?v=2';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -530,7 +530,6 @@ function paintHeaderAvatar(key, bot, thread) {
   // timer only ever fires when nothing legitimate has repainted the header
   // since it started, whether that something was another mood flash or this
   // ordinary paint.
-  if (key === 'ch-avatar') moodHeaderEpoch += 1;
   const baseClass = cur.classList[0] || key;
   // `thread` is passed only by the CHAT header. The thread-list header sits
   // above every thread at once, so it keeps showing the bot's current face.
@@ -539,6 +538,14 @@ function paintHeaderAvatar(key, bot, thread) {
   // avatarNode — an <img> is a download, and CSS hiding it afterwards does not
   // un-send the request.
   const url = (bot && !nimEnabled()) ? (pinned || bot.avatar_url) : '';
+  // A mood face is showing and this paint would put the SAME base picture
+  // back: keep the face. Every live reply is followed by a thread_update,
+  // which repaints the header — so the 30 s face lasted 1–2 ms (measured:
+  // avatar → face → avatar within one frame). Only a real change of picture
+  // (thread switch, avatar change, NIM) ends it early.
+  const keepMood = key === 'ch-avatar' && cur.tagName === 'IMG' && !!url
+    && cur._moodActive && cur.dataset.base === url;
+  if (key === 'ch-avatar' && !keepMood) moodHeaderEpoch += 1;
   if (!url) {
     if (cur.tagName !== 'DIV') {
       const d = el('div', { id: cur.id, class: `${baseClass} letter-avatar` });
@@ -569,7 +576,8 @@ function paintHeaderAvatar(key, bot, thread) {
       delete dom[key].dataset.full;   // Safe Mode: no full-res affordance
       dom[key]._zoomWired = null;
     }
-    dom[key].src = url;
+    dom[key].dataset.base = url;
+    if (!keepMood) dom[key].src = url;
   }
 }
 
@@ -618,9 +626,13 @@ function flashHeaderMoodFace(hdr, url, threadId) {
     if (state.activeThreadId !== threadId) return;
     const original = hdr.src;
     const epoch = (moodHeaderEpoch += 1);
+    hdr._moodActive = true;
     hdr.src = probe.src;
     setTimeout(() => {
-      if (epoch === moodHeaderEpoch && hdr.isConnected) hdr.src = original;
+      hdr._moodActive = false;
+      // Restore to the picture the header WANTS now (dataset.base), which a
+      // kept-through paint may have re-pointed, not the one from 30 s ago.
+      if (epoch === moodHeaderEpoch && hdr.isConnected) hdr.src = hdr.dataset.base || original;
     }, MOOD_FACE_MS);
   };
   probe.src = url;
@@ -1541,6 +1553,8 @@ function altPagerEl(msg, bubble, mdOpts) {
   const prev = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_prev'), 'aria-label': t('msg.alt_prev'), text: '‹' });
   const next = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_next'), 'aria-label': t('msg.alt_next'), text: '›' });
   const paint = () => {
+    // What Copy reads: the page on screen, not always the live reply.
+    msg._shownContent = pages[idx].content || '';
     bubble.innerHTML = renderMarkdown(pages[idx].content || '', mdOpts);
     enhanceContent(bubble, { noLocal: state.decoy });
     label.textContent = t('msg.alt_pos', { n: idx + 1, total: pages.length });
@@ -1597,7 +1611,7 @@ function renderReplyChip() {
   chip.classList.toggle('hidden', !target);
   if (!target) return;
   dom['reply-chip-label'].textContent = t('composer.reply_label', { name: replyWhoLabel(target.role) });
-  dom['reply-chip-excerpt'].textContent = target.text;
+  dom['reply-chip-excerpt'].textContent = toPlainPreview(target.text);
 }
 
 // Nothing worth quoting (a media-only message, say) silently declines rather
@@ -1640,7 +1654,7 @@ function quoteBlockEl(meta) {
     },
   }, [
     el('div', { class: 'quote-block-label', text: replyWhoLabel(meta.reply_role) }),
-    el('div', { class: 'quote-block-excerpt', text: meta.reply_excerpt }),
+    el('div', { class: 'quote-block-excerpt', text: toPlainPreview(meta.reply_excerpt) }),
   ]);
 }
 
@@ -1703,7 +1717,8 @@ function copyMsgBtn(msg) {
   b.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(msg.content || '');
+      await navigator.clipboard.writeText(
+        (msg._shownContent != null ? msg._shownContent : msg.content) || '');
       b.replaceChildren(railIcon(RAIL_ICONS.tick)); b.classList.add('ok');
       setTimeout(() => { b.replaceChildren(railIcon(RAIL_ICONS.copy)); b.classList.remove('ok'); }, 1200);
     } catch { /* clipboard unavailable */ }
@@ -6233,6 +6248,19 @@ function handleWs(data) {
         // no already-loaded images linger, rather than just re-skinning.
         if (data.decoy && state.auth.pinSet && !state.decoy && state.auth.authenticated) {
           handleLocked();
+          break;
+        }
+        // The reverse: we assumed Safe Mode (the boot happened offline, so
+        // /api/auth/status never answered) and the server says the session
+        // is full. Re-skinning is not enough — the local store was opened on
+        // the SAFE tier, so the unlocked outbox was never restored and a send
+        // queued before the offline reload sat unsent until the next online
+        // reload. Reboot into the real tier; restoreLocalState replays it.
+        if (!data.decoy && state.decoy && state.auth.pinSet) {
+          state.decoy = false;
+          state.auth.decoy = false;
+          state.auth.authenticated = true;
+          reboot();
           break;
         }
         state.decoy = data.decoy;

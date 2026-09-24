@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v123';  // v123: (2026-09-24 review) js/store.js was the one
+const CACHE = 'local-chat-v124';  // v124: (2026-09-24 review, round 2) the header mood
+  //   face survives the thread_update repaint, an offline boot reboots into
+  //   the real tier on the first hello, quote excerpts render as plain text,
+  //   Copy copies the alternate on screen, an injected post needs a failure
+  //   word to collapse (notice.js 1→2), main.js 99→100.
+  // v123: (2026-09-24 review) js/store.js was the one
   //   module missing from SHELL, so an offline cold start whose HTTP cache had
   //   lost it got the worker's 503 and the boot veil never came down — the
   //   exact case the offline-reading feature exists for. Also main.js 98→99,
