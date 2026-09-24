@@ -486,7 +486,7 @@ def test_parse_reply_keeps_context_budget_and_split_usage():
                     "sessionId": "s1",
                     "usage": {"total": 900, "input": 800, "output": 100},
                     "contextBudgetStatus": {"estimatedPromptTokens": 800,
-                                            "contextWindow": 262144},
+                                            "contextTokenBudget": 262144},
                 },
             },
         },
@@ -496,7 +496,7 @@ def test_parse_reply_keeps_context_budget_and_split_usage():
     assert reply.metadata["tokens_out"] == 100
     assert reply.metadata["tokens"] == 900
     assert reply.metadata["context_budget"] == {
-        "estimatedPromptTokens": 800, "contextWindow": 262144}
+        "estimatedPromptTokens": 800, "contextTokenBudget": 262144}
 
 
 def test_parse_reply_tolerates_a_missing_context_budget():

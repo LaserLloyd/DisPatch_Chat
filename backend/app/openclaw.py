@@ -190,6 +190,21 @@ class AgentRefused(AgentError):
 # verdict. Both shapes are covered now, and the test that pins the retryable
 # case is what catches a regression here.
 _GATEWAY_DOWN_RE = re.compile(
+    r"GatewayDrainingError|Gateway is draining"
+    r"|ECONNREFUSED|ECONNRESET before hello"
+    r"|gateway (?:is )?not (?:running|reachable|available)"
+    r"|errorCode[\"':= ]+UNAVAILABLE",
+)
+# The socket's refusal-at-the-door shape is wider (`{'code': 'UNAVAILABLE',
+# 'message': 'draining'}`), and it is safe to read it wider THERE because a
+# GatewayRunRefused by definition never ran. The same width applied to the CLI
+# path's post-acceptance errors (`_parse_reply` status=error, a non-zero exit)
+# would turn "All models failed" with code UNAVAILABLE — a turn that ran and
+# was billed — into a retryable outage and re-run it up to five times, which is
+# exactly what GatewayRunFailed exists to prevent on the socket path. So the
+# widened pattern is scoped to the refusal branch and the CLI keeps the narrow
+# one (review 2026-09-24).
+_GATEWAY_REFUSAL_DOWN_RE = re.compile(
     r"GatewayDrainingError|Gateway is draining|\bdraining\b"
     r"|ECONNREFUSED|ECONNRESET before hello"
     r"|gateway (?:is )?not (?:running|reachable|available)"
@@ -635,7 +650,7 @@ async def send_via_gateway(
         # surfaced verbatim, unretried, because the sentence itself is the fix
         # (it names the allowed models, or the supported thinking levels).
         text = str(e)
-        if _GATEWAY_DOWN_RE.search(text):
+        if _GATEWAY_REFUSAL_DOWN_RE.search(text):
             raise _friendly_gateway_down(bot_id, text)
         raise AgentRefused(text.strip() or f"{bot_id} refused the request.",
                            detail=text[:800])

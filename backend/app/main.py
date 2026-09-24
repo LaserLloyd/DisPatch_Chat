@@ -6556,9 +6556,14 @@ async def _dispatch_turn(bot_id: str, session_key: str, message: str,
                 reply = await openclaw.send_via_gateway(
                     client, bot_id=bot_id, session_key=session_key,
                     message=message, run_id=run_id, **extra)
-            except (openclaw.GatewayUnavailable, gateway_ws.GatewayRunRefused):
+            except (openclaw.GatewayUnavailable, openclaw.AgentRefused,
+                    gateway_ws.GatewayRunRefused):
                 # Refused at the door: nothing ran, so there is nothing to
-                # chase after a reconnect. Anything else — a timeout, a lost
+                # chase after a reconnect. AgentRefused is the typed form of
+                # that same refusal (a verdict on the request — wrong model,
+                # unsupported thinking level); without it here a refused run
+                # sat in _inflight_runs for the 1 h TTL, every reconnect
+                # waited 30 s on it, and abort could pick its dead runId. Anything else — a timeout, a lost
                 # socket — leaves the entry in place ON PURPOSE, because the
                 # run is (or was) underway and its reply has nowhere else to
                 # come from.
@@ -7974,6 +7979,11 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
     _deny_decoy_bot(request, bot_id)
     threads = await db.list_threads(bot_id, include_archived=include_archived)
     out = [t.model_dump() for t in threads]
+    # Redact BEFORE truncating: the cut can land inside a [[media:…]]
+    # directive, and a half directive no longer matches the strip regex, so
+    # a locked device would see the head of a remote URL or a local path.
+    if _is_decoy(request):
+        out = [_redact_thread_dict(t) for t in out]
     for t in out:
         # A PREVIEW, not the message: the UI shows 80 plain-text chars, and
         # shipping every thread's full last body made this ~242 KB a poll for
@@ -7981,8 +7991,6 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
         lm = t.get("last_message")
         if lm and len(lm) > THREAD_PREVIEW_CHARS:
             t["last_message"] = lm[:THREAD_PREVIEW_CHARS] + "…"
-    if _is_decoy(request):
-        out = [_redact_thread_dict(t) for t in out]
     return {"bot_id": bot_id, "threads": out}
 
 
@@ -8364,6 +8372,9 @@ async def get_messages(request: Request, thread_id: str,
 #: prefs keys PATCH /api/threads/{id} accepts. Anything else 400s rather than
 #: being silently ignored — a typo'd key would otherwise look like it saved.
 _THREAD_PREF_KEYS = frozenset({"model", "thinking"})
+#: Shape of a prefs value: a model id (`provider/name:tag`, `a.b@c`) or a
+#: thinking level. Bounded, and never option-shaped.
+_THREAD_PREF_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}")
 
 
 @app.patch("/api/threads/{thread_id}", responses=problem.MACHINE)
@@ -8374,19 +8385,21 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
     await _deny_decoy_thread(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
+    # Every field is gated and validated BEFORE any is written, so a request
+    # that is refused for one field does not half-apply (a machine caller's
+    # {"title": …, "prefs": …} used to get a 403 with the rename kept).
+    title: str | None = None
     if "title" in payload:
         title = (payload.get("title") or "").strip()
         if not title:
             raise HTTPException(400, "title required")
-        await db.rename_thread(thread_id, title[:120])
-    if "pinned" in payload:
-        await db.pin_thread(thread_id, bool(payload["pinned"]))
+    prefs_patch: dict | None = None
     if "prefs" in payload:
         # Operator configuration, not thread housekeeping — see
         # _require_operator_session. This route is on the machine-inbound
         # surface (an agent may rename or pin its own thread), but a model
         # override chooses what LLM answers, so it stays behind a real PIN
-        # session even though title/pinned just above do not.
+        # session even though title/pinned do not.
         _require_operator_session(request)
         prefs_patch = payload.get("prefs")
         if not isinstance(prefs_patch, dict):
@@ -8399,8 +8412,23 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
             # A null value REMOVES the key (db.update_thread_prefs's merge
             # rule) — that is how "back to the bot's default" is said, so
             # None is valid input, not a missing one.
-            if value is not None and not isinstance(value, str):
+            if value is None:
+                continue
+            if not isinstance(value, str):
                 raise HTTPException(400, f"prefs.{key} must be a string or null")
+            # The value becomes a CLI argument (`--model X` / `--thinking X`)
+            # on the CLI transport. Fixed argv means no shell, but a value
+            # starting with "-" reads as an option, and there is no reason
+            # for a model id or a thinking level to be a 50 KB string.
+            if not _THREAD_PREF_VALUE_RE.fullmatch(value):
+                raise HTTPException(
+                    400, f"prefs.{key} must be a short identifier "
+                         "(letters, digits, . _ : / @ -; not starting with -)")
+    if title is not None:
+        await db.rename_thread(thread_id, title[:120])
+    if "pinned" in payload:
+        await db.pin_thread(thread_id, bool(payload["pinned"]))
+    if prefs_patch is not None:
         await db.update_thread_prefs(thread_id, prefs_patch)
     await _broadcast_thread_update(thread_id)
     return {"ok": True}
@@ -11125,6 +11153,15 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None) -> bool:
 # of confirming a turn that does not exist.
 _ACK_SEEN: OrderedDict[str, dict] = OrderedDict()
 _ACK_SEEN_CAP = 512
+#: A client_msg_id is `c-<uuid>` (38 chars) from this app's composer. Anything
+#: wildly longer is not one, and it would otherwise become a source_id.
+_CLIENT_MSG_ID_MAX = 128
+
+
+def _client_source_id(client_msg_id: str) -> str:
+    """The messages.source_id under which a WS send is stored — the durable
+    twin of the in-memory _ACK_SEEN dedup, keyed on the client's own id."""
+    return f"ws:{client_msg_id}"
 
 
 def _ack_mark(client_msg_id: str, **fields: Any) -> None:
@@ -11153,7 +11190,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     text = (data.get("text") or "").strip()
     cmid = data.get("client_msg_id")
-    cmid = cmid if isinstance(cmid, str) and cmid else None
+    cmid = (cmid if isinstance(cmid, str) and cmid
+            and len(cmid) <= _CLIENT_MSG_ID_MAX else None)
     seen = _ACK_SEEN.get(cmid) if cmid else None
     if seen is not None:
         # Reconnect resend of an already-persisted message: re-ack, don't dup.
@@ -11166,6 +11204,16 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             seen["scheduled"] = True
             _track(asyncio.create_task(run_agent_turn(
                 seen["thread_id"], seen["bot_id"], seen["text"])))
+        return
+    if cmid and await db.source_id_seen(_client_source_id(cmid)):
+        # The durable half of the dedup. _ACK_SEEN is process memory: a
+        # backend restart (every deploy) or 512 later sends forgot it, and a
+        # frame the client's persisted outbox replayed after that — its ack
+        # lost — was stored a SECOND time and started a second turn. The row
+        # itself carries the client id as its source_id now, so the same
+        # unique index that keeps a gateway message from landing twice keeps
+        # a replayed send from landing twice.
+        await _ack(ws, cmid, "ok")
         return
     if not thread_id or not text:
         await _ack(ws, cmid, "rejected", "Empty message")
@@ -11241,8 +11289,18 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             "reply_excerpt": _quote_excerpt(reply_target.content),
         }
     try:
-        user_msg = await db.add_message(thread_id, "user", text,
-                                        metadata=user_metadata)
+        user_msg = await db.add_message(
+            thread_id, "user", text, metadata=user_metadata,
+            source_id=_client_source_id(cmid) if cmid else None)
+    except sqlite3.IntegrityError:
+        # Two copies of the same frame raced past source_id_seen (a
+        # reconnect that overlapped the original): the first one is stored,
+        # so this one is a duplicate, not an error.
+        if cmid and await db.source_id_seen(_client_source_id(cmid)):
+            await _ack(ws, cmid, "ok")
+            return
+        await _ack(ws, cmid, "rejected", "Server error — please retry")
+        raise
     except Exception:
         # Neutral reason — no exception detail in any client-visible frame.
         await _ack(ws, cmid, "rejected", "Server error — please retry")
@@ -11434,6 +11492,37 @@ def _is_reply_row(msg: MessageOut) -> bool:
     return msg.role == "assistant" and not (msg.metadata or {}).get("sub")
 
 
+def _is_turn_row(msg: MessageOut) -> bool:
+    """A row the BOT'S TURN wrote — the only kind a regenerate may supersede.
+
+    "Everything after the last user message" was the first rule, and it
+    deleted rows that were never part of the answer: a cron alert (`system`),
+    an injected morning brief or a delivered run report (`origin: inject` /
+    `delivery_key`), a reaction trace. Worse, an injected assistant row that
+    happened to be last became THE alternate and the real previous answer was
+    lost for good. Those rows now stay where they are; the fresh reply lands
+    after them. An image-job placeholder also stays: its job row cascades
+    away with it and a restore could not bring the job back, so a failed
+    regenerate left a permanent "Generating an image…" bubble.
+    """
+    if msg.role != "assistant":
+        return False
+    meta = msg.metadata or {}
+    if meta.get("origin") == "inject" or meta.get("delivery_key"):
+        return False
+    if meta.get("kind") == _IMAGE_JOB_KIND:
+        return False
+    return True
+
+
+#: Threads with a regenerate / edit-and-rerun in flight. `thread.status` only
+#: becomes "thinking" inside run_agent_turn, AFTER the rewind and the deletes,
+#: so a double-click used to start two of these: the second one's
+#: last_user_entry then found the turn BEFORE and rewound that too, and two
+#: replies landed.
+_regen_inflight: set[str] = set()
+
+
 async def _session_leaf_entry(client, session_key: str) -> str | None:
     """The id of the newest entry in a session — the branch we are leaving.
 
@@ -11535,7 +11624,8 @@ async def _restore_rows(thread_id: str, snapshot: list[dict]) -> None:
 
 async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
                            *, text: str | None = None,
-                           expect_text: str | None = None) -> None:
+                           expect_text: str | None = None,
+                           edit_to: str | None = None) -> None:
     """Rewind, drop the superseded rows, ask again, and keep the old answer.
 
     The order is load-bearing. The rewind happens FIRST and nothing is deleted
@@ -11546,7 +11636,23 @@ async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
     what the gateway's own copy of that turn should read, which after an edit
     is the text BEFORE it — passing the new wording would make the sanity
     check warn on every single edit-and-rerun and teach everyone to ignore it.
+    `edit_to` is the new wording to STORE on `user_msg`, applied only once the
+    rewind has succeeded: committing it first left the thread showing the new
+    question over the answer to the old one whenever the gateway said no.
+
+    The caller registers `thread_id` in `_regen_inflight`; this releases it.
     """
+    try:
+        await _regenerate_turn_inner(thread_id, bot_id, user_msg, text=text,
+                                     expect_text=expect_text, edit_to=edit_to)
+    finally:
+        _regen_inflight.discard(thread_id)
+
+
+async def _regenerate_turn_inner(thread_id: str, bot_id: str,
+                                 user_msg: MessageOut, *,
+                                 text: str | None, expect_text: str | None,
+                                 edit_to: str | None) -> None:
     bot = config.get_bot(bot_id)
     is_api = bool(bot is not None and bot.api)
     agent_id = bot.agent_id if bot is not None else bot_id
@@ -11563,14 +11669,16 @@ async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
                                      "bot_id": bot_id, "message": str(e)})
             return
 
-    superseded = await db.messages_after(thread_id, user_msg.id)
+    if edit_to is not None:
+        user_msg = await _apply_message_edit(user_msg, content=edit_to)
+        await _broadcast_message_update(user_msg, thread_id)
+
+    after = await db.messages_after(thread_id, user_msg.id)
+    superseded = [m for m in after if _is_turn_row(m)]
+    kept_ids = {m.id for m in after if not _is_turn_row(m)}
     snapshot = await _snapshot_rows(superseded)
     for m in superseded:
-        # An image job cascades away with its placeholder, so stop the render
-        # before the row it would rewrite is gone (same rule as delete).
-        orphaned = await db.open_image_jobs_for_message(m.id)
         await db.delete_message(m.id)
-        await _cancel_open_image_jobs(orphaned, "regenerated")
         await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
                                  "bot_id": bot_id, "message_id": m.id})
 
@@ -11582,7 +11690,8 @@ async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
     except Exception:
         log.exception("regenerate turn failed (%s/%s)", bot_id, thread_id)
 
-    fresh = await db.messages_after(thread_id, user_msg.id)
+    fresh = [m for m in await db.messages_after(thread_id, user_msg.id)
+             if m.id not in kept_ids]
     replies = [m for m in fresh if _is_reply_row(m)]
     if not replies:
         # Nothing came back. Put the thread back the way it was — BOTH sides
@@ -11631,7 +11740,7 @@ async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
     thread = await db.get_thread(thread_id)
     if not thread:
         return
-    if thread.status == "thinking":
+    if thread.status == "thinking" or thread_id in _regen_inflight:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "A reply is already in progress"})
         return
@@ -11642,6 +11751,7 @@ async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "No message to regenerate"})
         return
+    _regen_inflight.add(thread_id)
     _track(asyncio.create_task(
         _regenerate_turn(thread_id, thread.bot_id, last_user)))
 
@@ -11665,14 +11775,19 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
                                 "message": "Unlock for full access"})
         return
     content = content.strip()
-    if not content or len(content) > MESSAGE_MAX_CHARS:
+    if not content:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "Message must not be empty"})
+        return
+    if len(content) > MESSAGE_MAX_CHARS:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": f"Message is too long (max "
+                                           f"{MESSAGE_MAX_CHARS} characters)"})
         return
     thread = await db.get_thread(thread_id)
     if not thread:
         return
-    if thread.status == "thinking":
+    if thread.status == "thinking" or thread_id in _regen_inflight:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "A reply is already in progress"})
         return
@@ -11689,12 +11804,12 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
                                 "message": "Only the newest message can be "
                                            "edited and re-run"})
         return
-    was = msg.content or ""
-    fresh = await _apply_message_edit(msg, content=content)
-    await _broadcast_message_update(fresh, thread_id)
+    # The edit is stored INSIDE _regenerate_turn, after the rewind succeeds:
+    # a refused rewind must leave the old question over its old answer.
+    _regen_inflight.add(thread_id)
     _track(asyncio.create_task(
-        _regenerate_turn(thread_id, thread.bot_id, fresh, text=content,
-                         expect_text=was)))
+        _regenerate_turn(thread_id, thread.bot_id, msg, text=content,
+                         expect_text=msg.content or "", edit_to=content)))
 
 
 async def _handle_retry(ws: WebSocket, data: dict) -> None:

@@ -92,3 +92,11 @@ def test_images_and_ranges_are_never_gzipped(client, tmp_path):
     assert r.status_code == 206
     assert "content-encoding" not in r.headers
     assert len(r.content) == 100
+    # Over HTTP, not just the helper: an image the app really serves. (The
+    # review of 2026-09-24 found the two files written above were never
+    # fetched, so the image rule was only ever asserted on _gzip_skips.)
+    r = client.get("/static/icon-192.png", headers=GZ)
+    assert r.status_code == 200
+    assert r.headers.get("content-type", "").startswith("image/png")
+    assert "content-encoding" not in r.headers
+    assert r.content.startswith(b"\x89PNG")

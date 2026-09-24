@@ -603,13 +603,18 @@ def test_edit_rerun_refuses_anything_but_the_newest_user_message(client, monkeyp
     assert called == []
 
 
-def test_edit_rerun_saves_the_edit_before_it_re_runs(client, monkeypatch):
+def test_edit_rerun_hands_the_edit_to_the_regenerate_path(client, monkeypatch):
+    """The handler no longer stores the edit itself (2026-09-24 review): a
+    refused rewind used to leave the new question over the answer to the old
+    one. It passes the OLD row plus `edit_to`, and _regenerate_turn stores
+    the edit only once the rewind has succeeded — see
+    test_review_20260924.py for both halves of that contract."""
     tid, mid = _seed_http(client)
     seen: list = []
 
     async def _fake(thread_id, bot_id, user_msg, *, text=None,
-                    expect_text=None):
-        seen.append((user_msg.content, text))
+                    expect_text=None, edit_to=None):
+        seen.append((user_msg.content, text, expect_text, edit_to))
 
     monkeypatch.setattr(main, "_regenerate_turn", _fake)
     with client.websocket_connect("/ws") as ws:
@@ -617,11 +622,10 @@ def test_edit_rerun_saves_the_edit_before_it_re_runs(client, monkeypatch):
         ws.send_json({"type": "edit_rerun", "thread_id": tid,
                       "message_id": mid, "content": "hello, world"})
         _settle(ws, lambda: seen)
-    assert seen == [("hello, world", "hello, world")]
+    assert seen == [("hello there", "hello, world", "hello there", "hello, world")]
     msgs = client.get(f"/api/threads/{tid}/messages").json()["messages"]
-    assert msgs[-1]["content"] == "hello, world"
-    assert msgs[-1]["metadata"]["original"] == "hello there", (
-        "a re-run that rewrote the question must leave the marker behind too")
+    assert msgs[-1]["content"] == "hello there", (
+        "the handler must not store the edit before the rewind has succeeded")
 
 
 @pytest.mark.asyncio

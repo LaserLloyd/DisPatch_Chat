@@ -45,14 +45,21 @@ def test_failed_migration_closes_the_connection_thread(tmp_path, monkeypatch):
                         database.SCHEMA + "\nCREATE INDEX idx_boom ON nosuch(message_id);\n")
     before = _aiosqlite_threads()
     db = Database(tmp_path / "chats.db")
-    with pytest.raises(sqlite3.OperationalError):
-        asyncio.run(db.connect())
-    assert db._db is None
-    # The worker thread exits once close() has been processed.
-    deadline = time.monotonic() + 5
-    while _aiosqlite_threads() > before and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert _aiosqlite_threads() == before, "a failed connect left its worker thread alive"
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            asyncio.run(db.connect())
+        assert db._db is None
+        # The worker thread exits once close() has been processed.
+        deadline = time.monotonic() + 5
+        while _aiosqlite_threads() > before and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _aiosqlite_threads() == before, "a failed connect left its worker thread alive"
+    finally:
+        # If the fix regresses, the leaked worker thread would keep pytest
+        # itself from exiting — a hang, not a red test. Close it here so the
+        # assertion above is what reports the regression.
+        if db._db is not None:
+            asyncio.run(db.close())
 
 
 _PRE_JOBS_MIGRATION = """

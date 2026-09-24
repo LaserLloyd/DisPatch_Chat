@@ -714,8 +714,13 @@ def _ensure_trailing_user(history: list[dict], text: str) -> list[dict]:
     if history and history[-1]["role"] == "user" and history[-1]["content"] == text:
         return history
     if history and history[-1]["role"] == "user":
-        return [*history[:-1], {"role": "user",
-                                "content": history[-1]["content"] + "\n\n" + text}]
+        # The stored row is the RAW message; `text` is what the agent should
+        # read (_compose_agent_text may have prepended a quote or appended a
+        # feedback note). The composed text already contains the message, so
+        # it REPLACES the row — appending sent the family's message to the
+        # provider twice whenever a quote or a pending vote was attached
+        # (review 2026-09-24).
+        return [*history[:-1], {"role": "user", "content": text}]
     return [*history, {"role": "user", "content": text}]
 
 
