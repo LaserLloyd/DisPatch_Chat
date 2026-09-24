@@ -39,16 +39,22 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 `frontend/static/sw.js`. Miss one and users get a half-updated app: new HTML
 against an old module, which usually shows up as a blank screen.
 
-**Two files are generated, not written.** `frontend/static/ui-theme.js` (the
-theme runtime, the first and only blocking script in `<head>`) and
-`frontend/static/ui-theme.css` (the tokens for every theme, plus the adapter
-that maps DisPatch's own token names onto them) are vendored from a shared
-theme package. Do not edit them by hand — a local change is overwritten by
-the next re-vendor, and a colour fix belongs upstream. Their `?v=` is the
-theme revision's digits (revision `2026-09-22` → `?v=20260922`, the date
-their header comment and Settings → Theme both show); bump it, and `CACHE`
-in `sw.js`, whenever a new revision is vendored. DisPatch-only colour roles
-and layout tokens live in `frontend/static/theme.css`.
+**The themes are a drop-in folder, not code.** `frontend/static/ui-theme/`
+is the shared theme folder, copied in verbatim: `ui-theme.js` (the theme
+runtime, the first and only blocking script in `<head>`), `ui-theme.css` (the
+tokens for every theme), `adapters/dispatch-compat.css` (DisPatch's own token
+names mapped onto them), and `VERSION` (`ui-theme <revision date> <digest>`,
+the version marker a theme update is checked against). Never edit a file in
+it: a colour fix belongs upstream in the theme repository. **Updating the
+themes is replacing the whole folder** — from the theme repository, `python
+tools/sync_theme.py update --apply` does that for every app on the host.
+Nothing else changes: the folder's URLs carry no `?v=`, the server sends them
+`no-cache` (`main.py`), and `sw.js` is network-first, so a new copy is live on
+the next page load with no `CACHE` bump. DisPatch's own settings for the
+themes are the `data-*` on the runtime's `<script>` tag in `index.html` (the
+picker's themes and order, the default for a new device, and the storage
+key, which must stay `dispatch-palette`). DisPatch-only colour roles and
+layout tokens live in `frontend/static/theme.css`.
 
 `grep -rn '<module>.js?v=' frontend/static/` finds every reference — a module
 imported by three others has four places to change, not one. A **new** module

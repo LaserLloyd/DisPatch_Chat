@@ -1,6 +1,6 @@
-/* Theme revision 2026-09-22 — generated file, do not edit by hand.
-   theme tokens for dispatch | themes: glacier, midnight-gold, forest, paper, daylight, purple, electric-yellow, laserlloyd, laserlloyd-light, night-red | default: glacier
-   body sha256: de6f2118603c8731 */
+/* Theme revision 2026-09-24 — theme tokens. Generated file, do not edit by hand:
+   replace the whole ui-theme/ folder to update it.
+   body sha256: 0aa622468f4e9a12 */
 /* ============================================================================
    theme-base.css — CORE. Purple (base theme) + theme-agnostic layer.
    ----------------------------------------------------------------------------
@@ -377,168 +377,6 @@
 }
 
 
-/* theme-glacier.css — CORE
-   Ground: oled · family: glacier · color-scheme: dark · theme-color: #000000
-   Extracted from the project's existing [data-palette="glacier"] block.
-   (D) = derived from this theme's own palette. */
-
-[data-palette="glacier"] {
-  color-scheme: dark;
-
-  --surface-void:    #000000;
-  --surface-0:       #000000;
-  --surface-1:       #060b0f;
-  --surface-2:       #0d161c;
-  --surface-3:       #121c23;
-  --surface-4:       #172228;
-  --surface-sunken:  #030608;
-  --surface-overlay: #0d161c;  /* D — opaque: glass bands on true black */
-  --glass-1:         #0d161c;  /* D */
-  --glass-2:         #121c23;  /* D */
-  --glass-3:         #060b0f;  /* D */
-  --glass-highlight: rgba(255,255,255,.05);  /* D */
-  --code-bg:         #030608;
-
-  --text-primary:    #dcedf4;
-  --text-secondary:  #9fc0cc;
-  --text-tertiary:   #7fa3b0;
-  --text-disabled:   #5a747f;  /* D */
-  --text-inverse:    #000000;  /* D */
-  --text-link:       #7fe0f2;
-  --text-link-hover: #b3eef9;  /* D */
-  --on-accent:       #ffffff;
-  --on-danger:       #2a0808;  /* D */
-  --on-success:      #052215;  /* D */
-  --on-warning:      #251a00;  /* D */
-  --on-media:        #ffffff;  /* D */
-  --on-media-muted:  #cfe4ed;  /* D */
-
-  --accent:          #185e7a;
-  --accent-hover:    #206b88;
-  --accent-pressed:  #12495f;  /* D */
-  --accent-subtle:   rgba(24,94,122,.24);  /* D */
-  --accent-muted:    rgba(24,94,122,.40);  /* D */
-  --accent-glow:     rgba(127,224,242,.28);/* D */
-  --accent-rgb:      24,94,122;
-  --accent-2:        #a5b4f5;
-  --accent-2-subtle: rgba(165,180,245,.12);/* D */
-
-  --cta:              #185e7a;  /* D — aliases accent */
-  --cta-hover:        #206b88;  /* D */
-  --cta-pressed:      #12495f;  /* D */
-  --on-cta:           #ffffff;  /* D */
-  --cta-shadow:       0 6px 20px rgba(0,0,0,.55);        /* D */
-  --cta-shadow-hover: 0 10px 28px rgba(127,224,242,.18); /* D */
-  --cta-gradient:     linear-gradient(135deg, #387d94, var(--accent-hover), var(--accent));  /* DisPatch 2026-09-16: its --accent-grad */
-  --highlight:        #7fe0f2;
-  --highlight-subtle: rgba(127,224,242,.12);  /* D */
-  --on-highlight:     #021b21;  /* D */
-
-  --border-subtle:       #1c262b;  /* D */
-  --border:              #33424a;
-  --border-strong:       #5c7480;
-  --divider:             #1c262b;  /* D */
-  --focus-ring:          #7fe0f2;
-  --glass-stroke:        rgba(127,224,242,.14);  /* D */
-  --glass-stroke-strong: rgba(127,224,242,.28);  /* D */
-
-  --success: #34d399; --success-hover: #5fe0b0;
-  --success-subtle: rgba(52,211,153,.12); --success-text: #5fd3b0;
-  --success-border: rgba(52,211,153,.36);
-  --warning: #fbbf24; --warning-hover: #fcd34d;
-  --warning-subtle: rgba(251,191,36,.12); --warning-text: #ffca28;
-  --warning-border: rgba(251,191,36,.36);
-  --danger: #f87171; --danger-hover: #fca5a5;
-  --danger-subtle: rgba(248,113,113,.12); --danger-text: #ff8a80;
-  --danger-border: rgba(248,113,113,.36);
-  --info: #8fd4ff; --info-hover: #b6e3ff;
-  --info-subtle: rgba(143,212,255,.12); --info-text: #8fd4ff;
-  --info-border: rgba(143,212,255,.36);
-  --live: #6fe0c8; --live-hover: #9ceddc;
-  --live-subtle: rgba(111,224,200,.14); --live-text: #6fe0c8;
-  --live-border: rgba(111,224,200,.38);
-  --idle: #ffca28; --idle-hover: #ffd75c;
-  --idle-subtle: rgba(255,202,40,.12); --idle-text: #ffca28;
-  --idle-border: rgba(255,202,40,.34);
-  --offline: #5a747f; --offline-hover: #74909c;
-  --offline-subtle: rgba(90,116,127,.20); --offline-text: #7fa3b0;
-  --offline-border: rgba(90,116,127,.44);
-  --heartbeat: #e0a8d8; --heartbeat-hover: #eec4e8;
-  --heartbeat-subtle: rgba(224,168,216,.12); --heartbeat-text: #e0a8d8;
-  --heartbeat-border: rgba(224,168,216,.36);
-  --on-info: #021520; --on-live: #02211b; --on-idle: #241c00;  /* D */
-  --on-offline: #ffffff; --on-heartbeat: #2a0c24;              /* D */
-  --notify: #7fe0f2; --notify-idle: #33424a;  /* DisPatch 2026-09-20: unread indicator, solved as a pair */
-
-  --scrim:        rgba(0,0,0,.72);  /* D */
-  --scrim-strong: rgba(0,0,0,.92);  /* D */
-  --scrim-light:  rgba(0,0,0,.50);  /* D */
-  --scrim-media:  linear-gradient(to top, rgba(0,0,0,.90), rgba(0,0,0,0)); /* D */
-
-  --bubble-user-bg:        #153f51;
-  --bubble-user-text:      #dcedf4;  /* D */
-  --bubble-user-border:    #1d5468;  /* D */
-  --bubble-assistant-bg:   #0d161c;
-  --bubble-assistant-text: #dcedf4;  /* D */
-  --quote-bar:             #7fe0f2;
-  --mark-bg:               rgba(127,224,242,.22);
-  --md-bold:               #f2fbff;
-  --md-italic:             #a5b4f5;
-  --md-bolditalic:         #cfd6ff;  /* D */
-  --md-bolditalic-glow:    rgba(207,214,255,.40);  /* D */
-  --rp-speech:  #dcedf4;  /* D */
-  --rp-action:  #9fc0cc;  /* D */
-  --rp-thought: #bdf1fa;  /* D */
-  --rp-whisper: #7fa3b0;  /* D */
-  --rp-ooc:     #6d909d;  /* D */
-  --rp-shout:   #ffa876;  /* D */
-  --rp-shout-glow: rgba(255,168,118,.45);  /* D */
-  --rp-critical: #ff8a9c;  /* D */
-  --rp-critical-glow: rgba(255,138,156,.45);  /* D */
-  --diff-add-bg: rgba(52,211,153,.14); --diff-add-text: #7ee7bc;       /* D */
-  --diff-remove-bg: rgba(248,113,113,.14); --diff-remove-text: #ffa0a0; /* D */
-
-  /* Syntax — D */
-  --syn-fg: #d8eaf2;      --syn-bg: #030608;
-  --syn-comment: #7891a0; --syn-keyword: #8fd4ff; --syn-string: #7fe0c8;
-  --syn-number: #a8c8ff;  --syn-function: #7fe0f2; --syn-title: #7fe0f2;
-  --syn-type: #9ad8e8;    --syn-variable: #b5a8f5; --syn-attr: #a8dcf0;
-  --syn-tag: #8fd4ff;     --syn-builtin: #9ad8e8;  --syn-literal: #a8c8ff;
-  --syn-meta: #8ba3af;    --syn-operator: #c2d8e2; --syn-punctuation: #aec4d0;
-  --syn-deletion: #ff9a95; --syn-addition: #6fe0b0;
-
-  /* Categorical — D */
-  --cat-1: #7fe0f2; --cat-2: #a5b4f5; --cat-3: #6fd8b0; --cat-4: #8fb8ff;
-  --cat-5: #b5a8f5; --cat-6: #7fc4e8; --cat-7: #9ad8e8; --cat-8: #c8e8f4;
-  --cat-9: #6fe0c8; --cat-10: #a8c8ff; --cat-11: #e0a8d8; --cat-12: #ffca28;
-  --chart-grid: rgba(127,224,242,.10);  /* D */
-  --chart-axis: #5a747f;                /* D */
-
-  --canvas-mask:    rgba(0,0,0,.76);       /* D */
-  --canvas-handle:  #7fe0f2;               /* D */
-  --canvas-guide:   rgba(127,224,242,.55); /* D */
-  --canvas-outline: #f2fbff;               /* D */
-
-  --shadow-1: 0 1px 2px rgba(0,0,0,.40);
-  --shadow-2: 0 6px 20px rgba(0,0,0,.50);
-  --shadow-3: 0 18px 50px rgba(0,0,0,.65);
-  --shadow-4: 0 32px 80px rgba(0,0,0,.78);  /* D */
-  --shadow-glow:  0 0 0 1px rgba(127,224,242,.20), 0 8px 30px rgba(0,0,0,.6); /* D */
-  --shadow-inset: inset 0 1px 0 rgba(255,255,255,.045);  /* D */
-
-  --selection-bg:    rgba(127,224,242,.28);  /* D */
-  --selection-text:  #f2fbff;                /* D */
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: #25353d;                /* D */
-  --scrollbar-hover: #3a525d;                /* D */
-  /* Control-boundary fill. --surface-4 is an elevation step and can never be
-     3:1 from its neighbouring surface while still reading as subtle elevation,
-     so the slider track / toggle off-track role gets its own token.
-     3.17:1 on surface-2, 3.64:1 on surface-0. */
-  --control-track: #5f676b;
-
-}
-
 /* theme-midnight-gold.css — CORE · opt-out: none
    Ground: oled · family: midnight-gold · color-scheme: dark
    theme-color: #000000 · fonts: Inter, JetBrains Mono (shared with base)
@@ -699,6 +537,168 @@
      so the slider track / toggle off-track role gets its own token.
      3.06:1 on surface-2, 3.25:1 on surface-0. */
   --control-track: #615e58;
+
+}
+
+/* theme-glacier.css — CORE
+   Ground: oled · family: glacier · color-scheme: dark · theme-color: #000000
+   Extracted from the project's existing [data-palette="glacier"] block.
+   (D) = derived from this theme's own palette. */
+
+[data-palette="glacier"] {
+  color-scheme: dark;
+
+  --surface-void:    #000000;
+  --surface-0:       #000000;
+  --surface-1:       #060b0f;
+  --surface-2:       #0d161c;
+  --surface-3:       #121c23;
+  --surface-4:       #172228;
+  --surface-sunken:  #030608;
+  --surface-overlay: #0d161c;  /* D — opaque: glass bands on true black */
+  --glass-1:         #0d161c;  /* D */
+  --glass-2:         #121c23;  /* D */
+  --glass-3:         #060b0f;  /* D */
+  --glass-highlight: rgba(255,255,255,.05);  /* D */
+  --code-bg:         #030608;
+
+  --text-primary:    #dcedf4;
+  --text-secondary:  #9fc0cc;
+  --text-tertiary:   #7fa3b0;
+  --text-disabled:   #5a747f;  /* D */
+  --text-inverse:    #000000;  /* D */
+  --text-link:       #7fe0f2;
+  --text-link-hover: #b3eef9;  /* D */
+  --on-accent:       #ffffff;
+  --on-danger:       #2a0808;  /* D */
+  --on-success:      #052215;  /* D */
+  --on-warning:      #251a00;  /* D */
+  --on-media:        #ffffff;  /* D */
+  --on-media-muted:  #cfe4ed;  /* D */
+
+  --accent:          #185e7a;
+  --accent-hover:    #206b88;
+  --accent-pressed:  #12495f;  /* D */
+  --accent-subtle:   rgba(24,94,122,.24);  /* D */
+  --accent-muted:    rgba(24,94,122,.40);  /* D */
+  --accent-glow:     rgba(127,224,242,.28);/* D */
+  --accent-rgb:      24,94,122;
+  --accent-2:        #a5b4f5;
+  --accent-2-subtle: rgba(165,180,245,.12);/* D */
+
+  --cta:              #185e7a;  /* D — aliases accent */
+  --cta-hover:        #206b88;  /* D */
+  --cta-pressed:      #12495f;  /* D */
+  --on-cta:           #ffffff;  /* D */
+  --cta-shadow:       0 6px 20px rgba(0,0,0,.55);        /* D */
+  --cta-shadow-hover: 0 10px 28px rgba(127,224,242,.18); /* D */
+  --cta-gradient:     linear-gradient(135deg, #387d94, var(--accent-hover), var(--accent));  /* DisPatch 2026-09-16: its --accent-grad */
+  --highlight:        #7fe0f2;
+  --highlight-subtle: rgba(127,224,242,.12);  /* D */
+  --on-highlight:     #021b21;  /* D */
+
+  --border-subtle:       #1c262b;  /* D */
+  --border:              #33424a;
+  --border-strong:       #5c7480;
+  --divider:             #1c262b;  /* D */
+  --focus-ring:          #7fe0f2;
+  --glass-stroke:        rgba(127,224,242,.14);  /* D */
+  --glass-stroke-strong: rgba(127,224,242,.28);  /* D */
+
+  --success: #34d399; --success-hover: #5fe0b0;
+  --success-subtle: rgba(52,211,153,.12); --success-text: #5fd3b0;
+  --success-border: rgba(52,211,153,.36);
+  --warning: #fbbf24; --warning-hover: #fcd34d;
+  --warning-subtle: rgba(251,191,36,.12); --warning-text: #ffca28;
+  --warning-border: rgba(251,191,36,.36);
+  --danger: #f87171; --danger-hover: #fca5a5;
+  --danger-subtle: rgba(248,113,113,.12); --danger-text: #ff8a80;
+  --danger-border: rgba(248,113,113,.36);
+  --info: #8fd4ff; --info-hover: #b6e3ff;
+  --info-subtle: rgba(143,212,255,.12); --info-text: #8fd4ff;
+  --info-border: rgba(143,212,255,.36);
+  --live: #6fe0c8; --live-hover: #9ceddc;
+  --live-subtle: rgba(111,224,200,.14); --live-text: #6fe0c8;
+  --live-border: rgba(111,224,200,.38);
+  --idle: #ffca28; --idle-hover: #ffd75c;
+  --idle-subtle: rgba(255,202,40,.12); --idle-text: #ffca28;
+  --idle-border: rgba(255,202,40,.34);
+  --offline: #5a747f; --offline-hover: #74909c;
+  --offline-subtle: rgba(90,116,127,.20); --offline-text: #7fa3b0;
+  --offline-border: rgba(90,116,127,.44);
+  --heartbeat: #e0a8d8; --heartbeat-hover: #eec4e8;
+  --heartbeat-subtle: rgba(224,168,216,.12); --heartbeat-text: #e0a8d8;
+  --heartbeat-border: rgba(224,168,216,.36);
+  --on-info: #021520; --on-live: #02211b; --on-idle: #241c00;  /* D */
+  --on-offline: #ffffff; --on-heartbeat: #2a0c24;              /* D */
+  --notify: #7fe0f2; --notify-idle: #33424a;  /* DisPatch 2026-09-20: unread indicator, solved as a pair */
+
+  --scrim:        rgba(0,0,0,.72);  /* D */
+  --scrim-strong: rgba(0,0,0,.92);  /* D */
+  --scrim-light:  rgba(0,0,0,.50);  /* D */
+  --scrim-media:  linear-gradient(to top, rgba(0,0,0,.90), rgba(0,0,0,0)); /* D */
+
+  --bubble-user-bg:        #153f51;
+  --bubble-user-text:      #dcedf4;  /* D */
+  --bubble-user-border:    #1d5468;  /* D */
+  --bubble-assistant-bg:   #0d161c;
+  --bubble-assistant-text: #dcedf4;  /* D */
+  --quote-bar:             #7fe0f2;
+  --mark-bg:               rgba(127,224,242,.22);
+  --md-bold:               #f2fbff;
+  --md-italic:             #a5b4f5;
+  --md-bolditalic:         #cfd6ff;  /* D */
+  --md-bolditalic-glow:    rgba(207,214,255,.40);  /* D */
+  --rp-speech:  #dcedf4;  /* D */
+  --rp-action:  #9fc0cc;  /* D */
+  --rp-thought: #bdf1fa;  /* D */
+  --rp-whisper: #7fa3b0;  /* D */
+  --rp-ooc:     #6d909d;  /* D */
+  --rp-shout:   #ffa876;  /* D */
+  --rp-shout-glow: rgba(255,168,118,.45);  /* D */
+  --rp-critical: #ff8a9c;  /* D */
+  --rp-critical-glow: rgba(255,138,156,.45);  /* D */
+  --diff-add-bg: rgba(52,211,153,.14); --diff-add-text: #7ee7bc;       /* D */
+  --diff-remove-bg: rgba(248,113,113,.14); --diff-remove-text: #ffa0a0; /* D */
+
+  /* Syntax — D */
+  --syn-fg: #d8eaf2;      --syn-bg: #030608;
+  --syn-comment: #7891a0; --syn-keyword: #8fd4ff; --syn-string: #7fe0c8;
+  --syn-number: #a8c8ff;  --syn-function: #7fe0f2; --syn-title: #7fe0f2;
+  --syn-type: #9ad8e8;    --syn-variable: #b5a8f5; --syn-attr: #a8dcf0;
+  --syn-tag: #8fd4ff;     --syn-builtin: #9ad8e8;  --syn-literal: #a8c8ff;
+  --syn-meta: #8ba3af;    --syn-operator: #c2d8e2; --syn-punctuation: #aec4d0;
+  --syn-deletion: #ff9a95; --syn-addition: #6fe0b0;
+
+  /* Categorical — D */
+  --cat-1: #7fe0f2; --cat-2: #a5b4f5; --cat-3: #6fd8b0; --cat-4: #8fb8ff;
+  --cat-5: #b5a8f5; --cat-6: #7fc4e8; --cat-7: #9ad8e8; --cat-8: #c8e8f4;
+  --cat-9: #6fe0c8; --cat-10: #a8c8ff; --cat-11: #e0a8d8; --cat-12: #ffca28;
+  --chart-grid: rgba(127,224,242,.10);  /* D */
+  --chart-axis: #5a747f;                /* D */
+
+  --canvas-mask:    rgba(0,0,0,.76);       /* D */
+  --canvas-handle:  #7fe0f2;               /* D */
+  --canvas-guide:   rgba(127,224,242,.55); /* D */
+  --canvas-outline: #f2fbff;               /* D */
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.40);
+  --shadow-2: 0 6px 20px rgba(0,0,0,.50);
+  --shadow-3: 0 18px 50px rgba(0,0,0,.65);
+  --shadow-4: 0 32px 80px rgba(0,0,0,.78);  /* D */
+  --shadow-glow:  0 0 0 1px rgba(127,224,242,.20), 0 8px 30px rgba(0,0,0,.6); /* D */
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,.045);  /* D */
+
+  --selection-bg:    rgba(127,224,242,.28);  /* D */
+  --selection-text:  #f2fbff;                /* D */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: #25353d;                /* D */
+  --scrollbar-hover: #3a525d;                /* D */
+  /* Control-boundary fill. --surface-4 is an elevation step and can never be
+     3:1 from its neighbouring surface while still reading as subtle elevation,
+     so the slider track / toggle off-track role gets its own token.
+     3.17:1 on surface-2, 3.64:1 on surface-0. */
+  --control-track: #5f676b;
 
 }
 
@@ -1828,82 +1828,96 @@
    Ground: oled · family: night-red · color-scheme: dark · theme-color: #000000
    fonts: Inter, JetBrains Mono (shared with base)
 
-   A low-blue-light night theme: red on true black, for reading in a dark
-   room on an OLED screen. New in this theme set (not from the design import).
+   A low-blue-light night theme for a dark room and an OLED screen: warm
+   red-orange text on true black, red structure, zero blue. New in this
+   theme set (not from the design import).
 
-   Templates it follows (research, 2026-09-22):
-   - Apple Watch Ultra Night Mode: the whole face in one red on true black,
-     hierarchy from brightness steps only. The red night mode people rave
-     about.
-   - KStars "Night Vision" colour scheme: a ladder of pure reds (#FF0000 down
-     to #440000) with a few amber/gold accents (#FFAA00, #FFA500, #F1C232).
-   - N.I.N.A. night schema (its "Dark" alternative): oxblood surfaces
-     (#230409, #2d060d), dim red text (#550C18), amber warning (#F5A300).
-   - SkySafari / Stellarium night modes, f.lux Darkroom, the Obsidian
-     "RedShift" theme (light only the red sub-pixel; true black).
+   REVISION 2 (2026-09-23). The first cut (2026-09-22) followed the
+   astronomy night modes literally: every text tier pure red, near-black
+   surfaces, faint strokes. In daily use it was hard to read and its boxes
+   disappeared. Measured causes:
+   - Pure red text has almost no luma. #ff0000 carries 54/255 of BT.709
+     luma, and luma is the signal that keeps glyph edges sharp. Chroma is
+     halved (4:2:0 remote desktop and video coding) or sampled on a sparse
+     red grid (PenTile/diamond OLED phones), so red-only text smears. It
+     also tops out at 5.25:1, and APCA puts it at Lc 37, below the level
+     APCA sets even for large headings.
+   - The text ladder was flat: primary, secondary and tertiary were three
+     reds within 1.4:1, so nothing stood forward, and the tiers the apps
+     use most for labels and small print were the dimmest reds.
+   - Lines were near-invisible: --border #3d0000 was 1.2:1 and
+     --glass-stroke .16 was 1.1:1. The surfaces carried about a quarter of
+     Midnight Gold's luminance, so a dimmed OLED crushed them to black.
 
-   Rules this file keeps (the contrast audit audits the first):
-   1. Zero blue. Every colour here has a blue channel of 0, so no token
-      lights a blue sub-pixel. The night profile fails the build if a token
-      (declared here or inherited from Purple) carries any blue.
-   2. Red sub-pixel only for everything structural. Text, surfaces, lines,
-      fills, scrims and shadows have green = 0 as well. On an RGB screen,
-      "orange" is the red sub-pixel plus the ~530 nm green one, which is far
-      more rod- and melanopsin-active than red, so pure red beats orange here
-      even though orange light is gentle as a lamp.
-   3. A few warm accents are allowed (the brief: "a few non-red elements are
-      ok"). They light some green, never blue, and sit near the body text's
-      luminance so they add hue, not glare:
-        ember  #ff4a00  danger, bold, your own chat bubbles, keywords
-        amber  #c88400  links, focus ring, highlight, quote bar, thoughts
-        orange #e06000  warning, functions
-        gold   #a89400  info, numbers
-        olive  #7a9a00  success, types, additions (live #66a000)
-      Loud and rare: bold-italic #e8a000, shout #ff6a00.
-   4. OLED: surface-0 and void are #000000 (pixels off). Raised surfaces are
-      red-only near-blacks that barely light; structure comes from hairline
-      strokes, and shadows are plain black. Glass is opaque.
-   5. Calm: no coloured drop shadows; glow only on shout, critical and
-      bold-italic text. Accent fills are bright red with a black label, the
-      label cut out of the plate. Danger is ember, not red: red is the body
-      text and the accent here, so a red Delete plate, a red Stop button or
-      a red "failed" would look exactly like Save or plain text.
+   Rules this file keeps (the contrast audit audits 1, 4, 5 and 6):
+   1. Zero blue. No colour here has a blue channel. The display's blue
+      primary is by far the strongest melanopic stimulus per unit of
+      luminance, so extra brightness comes from the green channel. By a
+      rough per-primary estimate, body text drives about 5% of what white
+      text does; Midnight Gold's body text drives about 70%.
+   2. Red is the room. Surfaces, lines, tracks, scrollbars, the accent at
+      rest and every fill that is only structure light the red sub-pixel
+      only (green = 0).
+   3. Text is an ember ladder. Every tier adds some green, which is what
+      restores luma: primary #ff5800 carries 117/255 (pure red: 54),
+      secondary #ff3000 88, tertiary #f01c00 71. This matters because the
+      apps put real content in every tier: ClawForge2's labels and hints
+      are secondary and tertiary, and so is most of ClawChat's small print.
+      It is the one place usability outranks purity.
+   4. A hierarchy of heat and brightness. The more important the text, the
+      hotter and brighter it is: primary 6.65:1 (hue 21), secondary 5.68
+      (hue 11), tertiary 4.87 (hue 7), disabled 2.34. Each step is at least
+      1.15:1 and shifts toward pure red.
+   5. Visible structure at Midnight Gold's levels: --border 2.0:1 (card and
+      panel outlines), --border-subtle 1.32:1, --border-strong 3.46:1
+      (control boundaries), strokes at 1.7-2.5:1. Surfaces step up in
+      luminance like Midnight Gold's do.
+   6. The alert ladder moves one step toward yellow, because red is taken
+      by the ground. Danger is hot orange #ff9000, warning is amber-yellow
+      #d49a00, info is yellow-olive #a4a000 and success is olive #6e9e00.
+      Danger clears the red accent by 1.76:1 and dE00 26, so Delete never
+      looks like Save; body text by dE00 16, so an error line stands out
+      from prose; and bold prose (#ff6c00) by dE00 11.
+   7. Calm: black shadows, opaque glass, and glow only on shout, critical
+      and bold-italic text. Accent fills are bright red with a black label
+      (5.25:1).
 
-   Contrast: pure red peaks at 5.25:1 on black, so the brief's 7:1 floor for
-   --text-primary is out of reach for red text. This theme declares the
-   "night" profile in the theme registry: body text 5:1, secondary text 4.5:1
-   (WCAG AA), tertiary 3.5:1, disabled 2:1, bold 5:1. Every other floor is the
-   brief's own. Brightness belongs to the screen: text stays at full red so
-   it is still legible after the display is dimmed.
+   Templates it still follows: Apple Watch Ultra Night Mode (one hue family
+   on true black), KStars "Night Vision" (red ladder, amber and gold
+   accents), N.I.N.A.'s night schema (oxblood surfaces, amber warning) and
+   f.lux "Ember" (white becomes a 1200 K red-orange; #ff5800 sits beside
+   it). Legibility floors come from WCAG 2.2 and APCA.
 
-   Those floors pin the text ladder. Secondary (#f00000) is a nominal step,
-   1.12:1 from primary; the visible steps are primary, tertiary and disabled,
-   and the apps carry the rest of the hierarchy with size, weight and
-   italics. Don't "fix" secondary by dimming it: it would fall below AA. The
-   surface ramp is pinned the same way (a surface-4 above #1a0000 takes
-   primary under 5:1), so structure comes from strokes. */
+   Contrast profile "night" (the theme registry): text-primary 5.5:1 on every
+   ground, secondary 4.5, tertiary 4, disabled 2, md-bold 6, plus the
+   structure, ladder and separation checks in the contrast audit. The
+   surface ramp is sized so --text-tertiary stays above 4:1 on
+   --surface-4; lift a surface and it fails first. Text dimmed with
+   opacity is the one thing this file can't fix: 60% of #ff5800 is 2.9:1.
+   TEXT.md bans it and the Quasar adapter maps StudioForge's dimmed
+   labels onto the tiers. */
 
 [data-palette="night-red"] {
   color-scheme: dark;
 
   --surface-void:    #000000;
   --surface-0:       #000000;
-  --surface-1:       #080000;
-  --surface-2:       #0e0000;
-  --surface-3:       #140000;
-  --surface-4:       #1a0000;
-  --surface-sunken:  #040000;
-  --surface-overlay: #0e0000;   /* opaque: glass bands on true black */
-  --glass-1:         #0e0000;
-  --glass-2:         #140000;
-  --glass-3:         #080000;
-  --glass-highlight: rgba(255,0,0,.05);
-  --code-bg:         #050000;
+  --surface-1:       #140000;
+  --surface-2:       #1d0000;
+  --surface-3:       #250000;
+  --surface-4:       #2d0000;
+  --surface-sunken:  #080000;
+  --surface-overlay: #1d0000;   /* opaque: glass bands on true black */
+  --glass-1:         #1d0000;
+  --glass-2:         #250000;
+  --glass-3:         #140000;
+  --glass-highlight: rgba(255,0,0,.07);
+  --code-bg:         #0c0000;
 
-  --text-primary:    #ff0000;
-  --text-secondary:  #f00000;
-  --text-tertiary:   #d40000;
-  --text-disabled:   #900000;
+  --text-primary:    #ff5800;
+  --text-secondary:  #ff3000;
+  --text-tertiary:   #f01c00;
+  --text-disabled:   #960a00;
   --text-inverse:    #000000;
   --text-link:       #c88400;
   --text-link-hover: #e09a00;
@@ -1911,103 +1925,105 @@
   --on-danger:       #000000;
   --on-success:      #000000;
   --on-warning:      #000000;
-  --on-media:        #ff0000;
-  --on-media-muted:  #d40000;
+  --on-media:        #ff5800;
+  --on-media-muted:  #ff3000;
 
-  --accent:          #f00000;
-  --accent-hover:    #ff0000;
+  --accent:          #ff0000;
+  --accent-hover:    #ff2a00;
   --accent-pressed:  #ec0000;
   --accent-subtle:   rgba(255,0,0,.12);
-  --accent-muted:    rgba(255,0,0,.18);
-  --accent-glow:     rgba(255,0,0,.35);
-  --accent-rgb:      240,0,0;
+  --accent-muted:    rgba(255,0,0,.22);
+  --accent-glow:     rgba(255,0,0,.40);
+  --accent-rgb:      255,0,0;
   --accent-2:        #c88400;
-  --accent-2-subtle: rgba(200,132,0,.12);
+  --accent-2-subtle: rgba(200,132,0,.14);
 
-  --cta:              #f00000;  /* aliases accent */
-  --cta-hover:        #ff0000;
+  --cta:              #ff0000;  /* aliases accent */
+  --cta-hover:        #ff2a00;
   --cta-pressed:      #ec0000;
   --on-cta:           #000000;
   --cta-shadow:       0 6px 20px rgba(0,0,0,.55);
   --cta-shadow-hover: 0 10px 28px rgba(0,0,0,.60);
   --cta-gradient:     linear-gradient(135deg, var(--cta-hover), var(--cta));  /* D — derived (2026-09-22): hover step to resting step */
   --highlight:        #c88400;
-  --highlight-subtle: rgba(200,132,0,.12);
+  --highlight-subtle: rgba(200,132,0,.14);
   --on-highlight:     #000000;
 
-  --border-subtle:       #240000;
-  --border:              #3d0000;
-  --border-strong:       #bb0000;
-  --divider:             #240000;
-  --focus-ring:          #c88400;
-  --glass-stroke:        rgba(255,0,0,.16);
-  --glass-stroke-strong: rgba(255,0,0,.30);
+  --border-subtle:       #4d0000;
+  --border:              #850000;
+  --border-strong:       #c80000;
+  --divider:             #4d0000;
+  --focus-ring:          #e09a00;
+  --glass-stroke:        rgba(255,0,0,.45);
+  --glass-stroke-strong: rgba(255,0,0,.62);
 
-  --success: #7a9a00; --success-hover: #8fb000;
-  --success-subtle: rgba(122,154,0,.14); --success-text: #7a9a00;
-  --success-border: rgba(122,154,0,.40);
-  --warning: #e06000; --warning-hover: #f07000;
-  --warning-subtle: rgba(224,96,0,.14); --warning-text: #e06000;
-  --warning-border: rgba(224,96,0,.40);
-  --danger: #ff4a00; --danger-hover: #ff6000;
-  --danger-subtle: rgba(255,74,0,.14); --danger-text: #ff4a00;
-  --danger-border: rgba(255,74,0,.45);
-  --info: #a89400; --info-hover: #c0aa00;
-  --info-subtle: rgba(168,148,0,.14); --info-text: #a89400;
-  --info-border: rgba(168,148,0,.40);
-  --live: #66a000; --live-hover: #78b800;
-  --live-subtle: rgba(102,160,0,.14); --live-text: #66a000;
-  --live-border: rgba(102,160,0,.40);
+  --success: #6e9e00; --success-hover: #82b400;
+  --success-subtle: rgba(110,158,0,.14); --success-text: #6e9e00;
+  --success-border: rgba(110,158,0,.50);
+  --warning: #d49a00; --warning-hover: #e8aa00;
+  --warning-subtle: rgba(212,154,0,.14); --warning-text: #d49a00;
+  --warning-border: rgba(212,154,0,.50);
+  --danger: #ff9000; --danger-hover: #ffa000;
+  --danger-subtle: rgba(255,144,0,.14); --danger-text: #ff9000;
+  --danger-border: rgba(255,144,0,.55);
+  --info: #a4a000; --info-hover: #b8b400;
+  --info-subtle: rgba(164,160,0,.14); --info-text: #a4a000;
+  --info-border: rgba(164,160,0,.50);
+  --live: #4aa800; --live-hover: #5cc000;
+  --live-subtle: rgba(74,168,0,.14); --live-text: #4aa800;
+  --live-border: rgba(74,168,0,.50);
   --idle: #c88400; --idle-hover: #e09a00;
   --idle-subtle: rgba(200,132,0,.14); --idle-text: #c88400;
-  --idle-border: rgba(200,132,0,.40);
-  --offline: #480000; --offline-hover: #5c0000;
-  --offline-subtle: rgba(255,0,0,.06); --offline-text: #ff0000;
-  --offline-border: rgba(255,0,0,.30);
-  --heartbeat: #ff3300; --heartbeat-hover: #ff4a00;
-  --heartbeat-subtle: rgba(255,51,0,.14); --heartbeat-text: #ff3300;
-  --heartbeat-border: rgba(255,51,0,.40);
+  --idle-border: rgba(200,132,0,.50);
+  --offline: #5a0000; --offline-hover: #700000;
+  --offline-subtle: rgba(255,0,0,.08); --offline-text: #ff3000;
+  --offline-border: rgba(255,0,0,.40);
+  --heartbeat: #ff0000; --heartbeat-hover: #ff2a00;
+  --heartbeat-subtle: rgba(255,0,0,.10); --heartbeat-text: #ff3000;
+  --heartbeat-border: rgba(255,0,0,.50);
   --on-info: #000000; --on-live: #000000; --on-idle: #000000;
-  --on-offline: #ff4a00; --on-heartbeat: #000000;
+  --on-offline: #ff6400; --on-heartbeat: #000000;
   --notify: #c88400; --notify-idle: #5c0000;  /* D — unread pair (2026-09-22): notify = amber (focus/highlight accent, not red: red is body text); idle a red-only step, zero blue */
 
-  --scrim:        rgba(0,0,0,.92);  /* on-media 4.61:1 over it on a white photo */
+  --scrim:        rgba(0,0,0,.92);  /* on-media 4.5:1+ over it on a white photo */
   --scrim-strong: rgba(0,0,0,.95);
   --scrim-light:  rgba(0,0,0,.50);
   --scrim-media:  linear-gradient(to top, rgba(0,0,0,.92), rgba(0,0,0,0));
 
+  /* Your own bubbles: an oxblood plate, a visible edge and hotter text. */
   --bubble-user-bg:        #4c0000;
-  --bubble-user-text:      #ff4a00;
-  --bubble-user-border:    #660000;
+  --bubble-user-text:      #ff6400;
+  --bubble-user-border:    #850000;
   --bubble-assistant-bg:   #000000;
-  --bubble-assistant-text: #ff0000;
+  --bubble-assistant-text: #ff5800;
   --quote-bar:             #c88400;
-  --mark-bg:               rgba(200,132,0,.14);
-  --md-bold:               #ff4a00;
+  --mark-bg:               rgba(200,132,0,.18);
+  --md-bold:               #ff6c00;
   --md-italic:             #c88400;
   --md-bolditalic:         #e8a000;
   --md-bolditalic-glow:    rgba(232,160,0,.40);
-  --rp-speech:  #ff0000;
-  --rp-action:  #f00000;
+  --rp-speech:  #ff5800;
+  --rp-action:  #ff3000;
   --rp-thought: #c88400;
-  --rp-whisper: #c00000;
-  --rp-ooc:     #b00000;
-  --rp-shout:   #ff6a00;
-  --rp-shout-glow: rgba(255,106,0,.45);
-  --rp-critical: #ff2400;
-  --rp-critical-glow: rgba(255,36,0,.55);
-  --diff-add-bg: rgba(122,154,0,.14); --diff-add-text: #7a9a00;
-  --diff-remove-bg: rgba(255,0,0,.14); --diff-remove-text: #ff0000;
+  --rp-whisper: #f01c00;
+  --rp-ooc:     #f01c00;
+  --rp-shout:   #ff9000;
+  --rp-shout-glow: rgba(255,144,0,.45);
+  --rp-critical: #ff9a00;
+  --rp-critical-glow: rgba(255,154,0,.55);
+  --diff-add-bg: rgba(110,158,0,.16); --diff-add-text: #6e9e00;
+  --diff-remove-bg: rgba(255,0,0,.16); --diff-remove-text: #ff0000;
 
-  /* Syntax, on --code-bg. Body red for plain code; the warm accents mark
-     token kinds. */
-  --syn-fg: #ff0000;      --syn-bg: #050000;
-  --syn-comment: #d00000; --syn-keyword: #ff4a00; --syn-string: #c88400;
-  --syn-number: #a89400;  --syn-function: #e06000; --syn-title: #e06000;
-  --syn-type: #7a9a00;    --syn-variable: #ff3300; --syn-attr: #d07000;
-  --syn-tag: #ff4a00;     --syn-builtin: #7a9a00;  --syn-literal: #a89400;
-  --syn-meta: #ec0000;    --syn-operator: #f00000; --syn-punctuation: #ec0000;
-  --syn-deletion: #ff0000; --syn-addition: #7a9a00;
+  /* Syntax, on --code-bg. Plain code is the body ember; token kinds take
+     the warm accents, and the reds carry keywords, comments and
+     punctuation. */
+  --syn-fg: #ff5800;      --syn-bg: #0c0000;
+  --syn-comment: #e01400; --syn-keyword: #ff3000; --syn-string: #c88400;
+  --syn-number: #a4a000;  --syn-function: #ff8400; --syn-title: #ff8400;
+  --syn-type: #6e9e00;    --syn-variable: #ff6c00; --syn-attr: #d49a00;
+  --syn-tag: #ff3000;     --syn-builtin: #6e9e00;  --syn-literal: #a4a000;
+  --syn-meta: #f00000;    --syn-operator: #ff2a00; --syn-punctuation: #f00000;
+  --syn-deletion: #ff0000; --syn-addition: #6e9e00;
 
   /* Categorical: the red ladder plus the warm accents, all zero-blue. Two
      channels can't give twelve well-separated colours, so the order puts
@@ -2015,108 +2031,31 @@
   --cat-1: #ff0000; --cat-2: #ff6a00; --cat-3: #58a000; --cat-4: #e8a000;
   --cat-5: #b04000; --cat-6: #909000; --cat-7: #c88400; --cat-8: #7a9a00;
   --cat-9: #d40000; --cat-10: #c8b400; --cat-11: #a89400; --cat-12: #ff3300;
-  --chart-grid: rgba(255,0,0,.12);
-  --chart-axis: #800000;
+  --chart-grid: rgba(255,0,0,.18);
+  --chart-axis: #a00000;
 
   --canvas-mask:    rgba(0,0,0,.78);
   --canvas-handle:  #ff0000;
-  --canvas-guide:   rgba(255,0,0,.55);
+  --canvas-guide:   rgba(255,0,0,.60);
   --canvas-outline: #ff0000;
 
   --shadow-1: 0 1px 2px rgba(0,0,0,.40);
   --shadow-2: 0 6px 20px rgba(0,0,0,.50);
   --shadow-3: 0 18px 50px rgba(0,0,0,.65);
   --shadow-4: 0 32px 80px rgba(0,0,0,.78);
-  --shadow-glow:  0 0 0 1px rgba(255,0,0,.22), 0 8px 30px rgba(0,0,0,.6);
-  --shadow-inset: inset 0 1px 0 rgba(255,0,0,.05);
+  --shadow-glow:  0 0 0 1px rgba(255,0,0,.45), 0 8px 30px rgba(0,0,0,.6);
+  --shadow-inset: inset 0 1px 0 rgba(255,0,0,.07);
 
-  --selection-bg:    rgba(255,0,0,.28);
-  --selection-text:  #ff4a00;
+  --selection-bg:    rgba(255,0,0,.30);
+  --selection-text:  #ff6c00;
   --scrollbar-track: transparent;
-  --scrollbar-thumb: #3d0000;
-  --scrollbar-hover: #5c0000;
-  /* Control-boundary fill (slider track, toggle off-track): 3.06:1 on
-     surface-2, 3.11:1 on surface-0. */
-  --control-track: #bb0000;
+  --scrollbar-thumb: #5a0000;
+  --scrollbar-hover: #850000;
+  /* Control-boundary fill (slider track, toggle off-track): 3.08:1 on
+     surface-2, 3.24:1 on surface-0. The on-state (the red accent) sits
+     1.62:1 above it, and the knob position carries the state. */
+  --control-track: #c00000;
 
-}
-
-/* ============================================================================
-   dispatch-compat.css — DisPatch's own token names mapped onto the contract.
-   ----------------------------------------------------------------------------
-   DisPatch's component CSS was written against its original token names
-   (--bg-*, --user-bubble, --md-*, --accent-grad ...). This block defines each
-   of them as an alias of a contract token, so every theme drives DisPatch
-   without its component CSS naming a theme.
-
-   It is scoped to `:root, [data-palette]` like the theme tokens in this file,
-   so a theme preview card that carries its own data-palette resolves the
-   aliases against its own theme, not the page's.
-
-   Not redeclared here, because the contract already owns these names with a
-   different meaning: --border, --accent-muted, --scrollbar-thumb. DisPatch's
-   component CSS uses --border-strong, --accent-wash and --border-light for
-   its own versions instead.
-
-   Light grounds (data-theme="light", set by the runtime for Paper and
-   Daylight) keep DisPatch's lighter ladder for elevated, hover, input and
-   sidebar surfaces, and its lighter inline tints.
-   ============================================================================ */
-
-:root, [data-palette] {
-  --bg-primary:   var(--surface-0);
-  --bg-secondary: var(--surface-1);
-  --bg-tertiary:  var(--surface-2);
-  --bg-elevated:  var(--surface-3);
-  --bg-hover:     var(--surface-4);
-  --bg-input:     var(--surface-sunken);
-  --bg-sidebar:   var(--surface-void);
-
-  --tint-subtle: rgba(255,255,255,.025);  /* theme-lint: allow — DisPatch legacy white wash (dark grounds) */
-  --code-inline: rgba(0,0,0,.35);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
-
-  --text-muted: var(--text-tertiary);
-
-  --accent-wash: color-mix(in oklab, var(--accent) 16%, transparent);
-  --accent-text: var(--text-link);
-  --focus:       var(--focus-ring);
-  --accent-grad: var(--cta-gradient);
-
-  --border-light: var(--border);
-
-  --user-bubble: var(--bubble-user-bg);
-  --bot-bubble:  var(--bubble-assistant-bg);
-
-  --md-quote:      var(--quote-bar);
-  --md-quote-text: var(--rp-thought);
-  --md-em:         var(--md-italic);
-  --md-strong:     var(--md-bold);
-  --md-mark-bg:    var(--mark-bg);
-
-  --error:      var(--danger);
-  --error-text: var(--danger-text);
-  --dot-idle:   var(--notify-idle);
-
-  --shadow-sm: var(--shadow-1);
-  --shadow-md: var(--shadow-2);
-  --shadow-lg: var(--shadow-3);
-}
-
-[data-theme="light"] {
-  --bg-elevated: var(--surface-2);
-  --bg-hover:    var(--surface-3);
-  --bg-input:    var(--surface-2);
-  --bg-sidebar:  var(--surface-1);
-
-  --tint-subtle: rgba(0,0,0,.035);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
-  --code-inline: rgba(0,0,0,.07);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
-}
-
-/* Night profile: a white wash would add blue, so the tint follows the
-   theme's own text colour instead (zero blue by construction). */
-:root[data-contrast-profile="night"],
-[data-contrast-profile="night"] {
-  --tint-subtle: color-mix(in srgb, var(--text-primary) 2.5%, transparent);
 }
 
 /* ---- Locale overrides — apply to every theme ---- */

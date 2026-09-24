@@ -1,0 +1,80 @@
+/* Theme revision 2026-09-24 — adapter dispatch-compat.css. Generated file, do not edit by hand:
+   replace the whole ui-theme/ folder to update it.
+   body sha256: fe7428b1ecc4815d */
+/* ============================================================================
+   dispatch-compat.css — DisPatch's own token names mapped onto the contract.
+   ----------------------------------------------------------------------------
+   DisPatch's component CSS was written against its original token names
+   (--bg-*, --user-bubble, --md-*, --accent-grad ...). This block defines each
+   of them as an alias of a contract token, so every theme drives DisPatch
+   without its component CSS naming a theme.
+
+   It is scoped to `:root, [data-palette]` like the theme tokens in this file,
+   so a theme preview card that carries its own data-palette resolves the
+   aliases against its own theme, not the page's.
+
+   Not redeclared here, because the contract already owns these names with a
+   different meaning: --border, --accent-muted, --scrollbar-thumb. DisPatch's
+   component CSS uses --border-strong, --accent-wash and --border-light for
+   its own versions instead.
+
+   Light grounds (data-theme="light", set by the runtime for Paper and
+   Daylight) keep DisPatch's lighter ladder for elevated, hover, input and
+   sidebar surfaces, and its lighter inline tints.
+   ============================================================================ */
+
+:root, [data-palette] {
+  --bg-primary:   var(--surface-0);
+  --bg-secondary: var(--surface-1);
+  --bg-tertiary:  var(--surface-2);
+  --bg-elevated:  var(--surface-3);
+  --bg-hover:     var(--surface-4);
+  --bg-input:     var(--surface-sunken);
+  --bg-sidebar:   var(--surface-void);
+
+  --tint-subtle: rgba(255,255,255,.025);  /* theme-lint: allow — DisPatch legacy white wash (dark grounds) */
+  --code-inline: rgba(0,0,0,.35);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
+
+  --text-muted: var(--text-tertiary);
+
+  --accent-wash: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-text: var(--text-link);
+  --focus:       var(--focus-ring);
+  --accent-grad: var(--cta-gradient);
+
+  --border-light: var(--border);
+
+  --user-bubble: var(--bubble-user-bg);
+  --bot-bubble:  var(--bubble-assistant-bg);
+
+  --md-quote:      var(--quote-bar);
+  --md-quote-text: var(--rp-thought);
+  --md-em:         var(--md-italic);
+  --md-strong:     var(--md-bold);
+  --md-mark-bg:    var(--mark-bg);
+
+  --error:      var(--danger);
+  --error-text: var(--danger-text);
+  --dot-idle:   var(--notify-idle);
+
+  --shadow-sm: var(--shadow-1);
+  --shadow-md: var(--shadow-2);
+  --shadow-lg: var(--shadow-3);
+}
+
+[data-theme="light"] {
+  --bg-elevated: var(--surface-2);
+  --bg-hover:    var(--surface-3);
+  --bg-input:    var(--surface-2);
+  --bg-sidebar:  var(--surface-1);
+
+  --tint-subtle: rgba(0,0,0,.035);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
+  --code-inline: rgba(0,0,0,.07);  /* theme-lint: allow — DisPatch legacy black wash, zero blue */
+}
+
+/* Night profile: a white wash would add blue, so the tint follows the
+   theme's own text colour instead (zero blue by construction). */
+:root[data-contrast-profile="night"],
+[data-contrast-profile="night"] {
+  --tint-subtle: color-mix(in srgb, var(--text-primary) 2.5%, transparent);
+}

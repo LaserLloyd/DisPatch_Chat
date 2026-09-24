@@ -92,14 +92,14 @@ HOST_TOOLS: list[tuple[str, str]] = [
 # is upstream for it, and a sync that could pull the install's copy back would
 # be exactly the stale round-trip the locales note warns about.
 #
-# `frontend/static/ui-theme.js` and `ui-theme.css` are generated theme files,
-# vendored into this repo and never pulled back: the install only ever holds a
-# copy this repo deployed, and pulling it back could only overwrite a newer
-# vendored revision with an older one.
+# `frontend/static/ui-theme/` is the shared drop-in theme folder (generated
+# files), vendored into this repo and never pulled back: the install only ever
+# holds a copy this repo deployed, and pulling it back could only overwrite a
+# newer theme version with an older one.
 REPO_ONLY = ("README.md", "LICENSE", "Dockerfile", "docker-compose.yml",
              "docs/", ".github/", "scripts/", "deploy/", ".env.example",
              "frontend/static/locales/", "frontend/static/dashboard.css",
-             "frontend/static/ui-theme.js", "frontend/static/ui-theme.css")
+             "frontend/static/ui-theme/")
 
 # Files the PUBLIC REPO owns outright, even though a same-named file exists
 # upstream. These have diverged because the open-source build gained features

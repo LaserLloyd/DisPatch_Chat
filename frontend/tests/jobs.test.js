@@ -224,8 +224,10 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // that an offline start cannot paint without.
   // v119 (2026-09-23): the Job Board detail's double-open fix changed
   // job-thread.js, its importer main.js, and app.css.
-  assert.equal(m[1], 'local-chat-v119',
-    'sw.js CACHE must be local-chat-v119 so old shells drop the pre-fix job detail');
+  // v120 (2026-09-24): the theme moved into the drop-in folder static/ui-theme/,
+  // so the shell's theme entries changed path.
+  assert.equal(m[1], 'local-chat-v120',
+    'sw.js CACHE must be local-chat-v120 so old shells drop the loose ui-theme files');
 });
 
 // =============================================================================

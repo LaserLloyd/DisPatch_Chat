@@ -49,11 +49,19 @@ const EXEMPT = new Map([
 
 const sources = () => {
   const out = [['index.html', readFileSync(join(STATIC, 'index.html'), 'utf8')]];
-  // The vendored theme runtime lives beside index.html, not under js/, and it
-  // is the ONLY writer of the theme pick (`dispatch-palette`). Leaving it out
+  // The theme runtime lives in the drop-in folder static/ui-theme/, not under
+  // js/, and it is the ONLY writer of the theme pick (`dispatch-palette`). Leaving it out
   // would make that key look like a phantom in APP_KEYS — or, worse, let a
   // future storage key the runtime adds slip past the wipe unseen.
-  out.push(['ui-theme.js', readFileSync(join(STATIC, 'ui-theme.js'), 'utf8')]);
+  // Its storage key is not in the file: the page sets it as data-storage-key
+  // on the runtime's <script> tag, so the two are read together (rule 4).
+  const html = out[0][1].replace(/<!--[\s\S]*?-->/g, '');
+  const tag = /<script\b[^>]*src="\/static\/ui-theme\/ui-theme\.js"[^>]*>/.exec(html);
+  const key = tag && /\bdata-storage-key="([^"]+)"/.exec(tag[0]);
+  // Comments are dropped first: the runtime's usage notes show example tags.
+  const runtime = readFileSync(join(STATIC, 'ui-theme', 'ui-theme.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  out.push(['ui-theme/ui-theme.js', runtime
+    + (key ? `\n/* index.html */ data-storage-key="${key[1]}"` : '')]);
   for (const f of readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))) {
     out.push([`js/${f}`, readFileSync(join(JS_DIR, f), 'utf8')]);
   }
@@ -72,8 +80,8 @@ const STR = /^(['"`])([^'"`]*)\1$/;
  *   3. a file that writes through a helper (a set(key, val) that takes the
  *      key as a PARAMETER, so there is nothing at the call site to read):
  *      every `const *_KEY = '<literal>'` the module declares.
- *   4. the generated theme runtime, whose helper writes the key its embedded
- *      manifest names: `window.UI_THEME_MANIFEST = {… "storageKey": "…"}`.
+ *   4. the theme runtime, whose helper writes the key the page names on its
+ *      <script> tag: `data-storage-key="…"` (sources() appends it).
  */
 function keysWrittenBy(src) {
   const found = new Set();
@@ -91,8 +99,8 @@ function keysWrittenBy(src) {
   }
   if (unresolved) {
     for (const [name, val] of consts) if (/_KEY$/.test(name)) found.add(val);
-    const manifest = /UI_THEME_MANIFEST\s*=\s*\{[^;]*?"storageKey"\s*:\s*"([^"]+)"/.exec(src);
-    if (manifest) found.add(manifest[1]);
+    const tagKey = /\bdata-storage-key="([^"]+)"/.exec(src);
+    if (tagKey) found.add(tagKey[1]);
   }
   return { keys: found, unresolved };
 }

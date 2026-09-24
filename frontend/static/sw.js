@@ -2,7 +2,13 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v119';  // v119: the Job Board detail opens at once
+const CACHE = 'local-chat-v120';  // v120: the theme is now a drop-in folder,
+  //   static/ui-theme/ (runtime, tokens, adapters), replacing the two loose
+  //   files ui-theme.js / ui-theme.css. Served no-cache with no ?v=, so a
+  //   later theme update is "replace the folder" and needs NO bump here: this
+  //   worker is network-first, and the shell below is only the offline copy.
+  //   This bump is for the path change itself (SHELL entries moved).
+  // v119: the Job Board detail opens at once
   //   with a loading card, and a second click (or a double-click) while a job
   //   is loading replaces the pending detail instead of stacking a second
   //   overlay that outside-click and Escape could not remove.
@@ -174,10 +180,11 @@ const CACHE = 'local-chat-v119';  // v119: the Job Board detail opens at once
   // v100: appearance is a fixed palette, not a dark/light pair. theme.css?v=1→v=2 (six [data-palette] blocks; light-dark() and the data-theme selectors are gone), app.css?v=64→v=65 (the Settings → Theme gallery), theme.js?v=13→v=14 (palette persistence + picker; the rail button now opens Settings → Theme), main.js?v=81→v=82 (theme tab + rail wiring). The shell is cached by PATH, so without this bump an installed client would keep serving itself the old theme.css and paint an unstyled page.
 const SHELL = [
   '/',
-  // The theme runtime and tokens (v118). Generated, vendored files: the
-  // runtime is the first script in <head> and paints the theme before
-  // anything else, so an offline start without it has no theme at all.
-  '/static/ui-theme.js', '/static/ui-theme.css',
+  // The theme runtime, tokens and the DisPatch adapter (the drop-in folder,
+  // v120). The runtime is the first script in <head> and paints the theme
+  // before anything else, so an offline start without it has no theme at all.
+  '/static/ui-theme/ui-theme.js', '/static/ui-theme/ui-theme.css',
+  '/static/ui-theme/adapters/dispatch-compat.css',
   '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css',

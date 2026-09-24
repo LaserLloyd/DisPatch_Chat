@@ -1,7 +1,6 @@
-/* Theme revision 2026-09-22 — generated file, do not edit by hand.
-   theme runtime for dispatch | themes: glacier, midnight-gold, forest, paper, daylight, purple, electric-yellow, laserlloyd, laserlloyd-light, night-red | default: glacier
-   body sha256: 3884349130c78f6e */
-window.UI_THEME_MANIFEST = {"app": "dispatch", "themes": ["glacier", "midnight-gold", "forest", "paper", "daylight", "purple", "electric-yellow", "laserlloyd", "laserlloyd-light", "night-red"], "default": "glacier", "storageKey": "dispatch-palette", "families": false, "legacy": null, "mirrorAttr": null, "fontsHref": null};
+/* Theme revision 2026-09-24 — theme runtime. Generated file, do not edit by hand:
+   replace the whole ui-theme/ folder to update it.
+   body sha256: 5fe0a74d238c7d94 */
 /* ============================================================================
    ui-theme.js — portable theme runtime
    ----------------------------------------------------------------------------
@@ -11,9 +10,11 @@ window.UI_THEME_MANIFEST = {"app": "dispatch", "themes": ["glacier", "midnight-g
      <script src="ui-theme.js"></script>
 
    Configuration, first match wins:
-     1. window.UI_THEME_MANIFEST — set at the top of this generated
-        copy, from the app's theme manifest.
-     2. data-* attributes on this <script> tag (standalone use):
+     1. window.UI_THEME_MANIFEST, if a page sets one before this script (the
+        old per-app builds did; the drop-in bundle does not).
+     2. data-* attributes on this <script> tag. This is how every app
+        configures the drop-in bundle (ui-theme/), which carries no app
+        settings of its own:
           data-themes="purple,midnight-gold,glacier,forest,paper,daylight"
           data-default="purple"
           data-storage-key="theme"
@@ -60,7 +61,7 @@ window.UI_THEME_MANIFEST = {"app": "dispatch", "themes": ["glacier", "midnight-g
     {"slug": "night-red", "name": "Night Red", "family": "night-red", "ground": "oled", "colorScheme": "dark", "themeColor": "#000000", "set": "opt-in", "swatch": "#ff0000", "fonts": ["Inter", "JetBrains Mono"], "contrastProfile": "night"}
   ]/*@end-registry*/;
   /* Theme revision date, stamped at generation time. */
-  var REVISION = /*@revision*/"2026-09-22"/*@end-revision*/;
+  var REVISION = /*@revision*/"2026-09-24"/*@end-revision*/;
 
   var BASE = 'purple';
   var DATA_THEME = { oled: 'amoled', dark: 'dark', light: 'light' };

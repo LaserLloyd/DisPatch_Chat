@@ -1,10 +1,11 @@
 // Resolve DisPatch's legacy colour tokens for any theme, from source.
 //
-// Since the move onto the vendored theme package, no single file holds a
-// palette any more: the contract tokens come from static/ui-theme.css (one
+// Since the move onto the shared theme folder, no single file holds a palette
+// any more: the contract tokens come from static/ui-theme/ui-theme.css (one
 // :root base block for Purple plus one [data-palette="<slug>"] block per
-// theme, then the DisPatch compat adapter that aliases --bg-primary & co. onto
-// contract names), and DisPatch's own roles come from static/theme.css. A test
+// theme), the DisPatch compat adapter static/ui-theme/adapters/
+// dispatch-compat.css aliases --bg-primary & co. onto contract names, and
+// DisPatch's own roles come from static/theme.css. A test
 // that wants "what is --user-bubble in Forest" has to replay the cascade the
 // browser runs on <html>. This does exactly that, for the handful of selector
 // shapes those two files use, and refuses (throws) on any other shape that
@@ -12,7 +13,7 @@
 // against a cascade it did not understand.
 //
 // What <html> carries for a theme is read from the runtime's own registry in
-// static/ui-theme.js (the runtime removes data-palette for the base theme and
+// static/ui-theme/ui-theme.js (the runtime removes data-palette for the base theme and
 // derives data-theme from the ground), so the simulation cannot drift from
 // what the page does.
 //
@@ -28,6 +29,8 @@ import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const STATIC = join(HERE, '..', '..', 'static');
+export const THEME_DIR = join(STATIC, 'ui-theme');
+const RUNTIME = join(THEME_DIR, 'ui-theme.js');
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -68,21 +71,28 @@ function parseRules(src, fileOrder) {
 
 /** The runtime registry (slug, name, ground, colorScheme, contrastProfile …). */
 export function registry() {
-  const js = readFileSync(join(STATIC, 'ui-theme.js'), 'utf8');
+  const js = readFileSync(RUNTIME, 'utf8');
   const m = /\/\*@registry\*\/(\[[\s\S]*?\])\/\*@end-registry\*\//.exec(js);
   if (!m) throw new Error('ui-theme.js: registry markers not found');
   return JSON.parse(m[1]);
 }
 
+/** DisPatch's theme settings: the data-* on index.html's ui-theme.js tag. */
 export function manifest() {
-  const js = readFileSync(join(STATIC, 'ui-theme.js'), 'utf8');
-  const m = /window\.UI_THEME_MANIFEST = (\{.*\});/.exec(js);
-  if (!m) throw new Error('ui-theme.js: UI_THEME_MANIFEST not found');
-  return JSON.parse(m[1]);
+  const html = readFileSync(join(STATIC, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const tag = /<script\b[^>]*\bsrc="\/static\/ui-theme\/ui-theme\.js"[^>]*>/.exec(html);
+  if (!tag) throw new Error('index.html: no <script src="/static/ui-theme/ui-theme.js">');
+  const attr = (name) => { const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag[0]); return m ? m[1] : null; };
+  return {
+    themes: (attr('data-themes') || '').split(',').map((s) => s.trim()).filter(Boolean),
+    default: attr('data-default'),
+    storageKey: attr('data-storage-key'),
+    families: attr('data-families') === 'true',
+  };
 }
 
 export function revision() {
-  const js = readFileSync(join(STATIC, 'ui-theme.js'), 'utf8');
+  const js = readFileSync(RUNTIME, 'utf8');
   const m = /\/\*@revision\*\/"([^"]+)"\/\*@end-revision\*\//.exec(js);
   return m ? m[1] : null;
 }
@@ -133,12 +143,14 @@ function matchHtml(sel, attrs) {
 let cachedRules = null;
 function allRules() {
   if (cachedRules) return cachedRules;
-  // Load order in index.html: theme.css, app.css, dashboard.css, ui-theme.css.
+  // Load order in index.html: theme.css, app.css, dashboard.css, then
+  // ui-theme/ui-theme.css and ui-theme/adapters/dispatch-compat.css.
   // app.css / dashboard.css declare no tokens on <html> (asserted by a test),
-  // so only the two token files matter here.
+  // so only the three token files matter here.
   cachedRules = [
     ...parseRules(readFileSync(join(STATIC, 'theme.css'), 'utf8'), 0),
-    ...parseRules(readFileSync(join(STATIC, 'ui-theme.css'), 'utf8'), 3),
+    ...parseRules(readFileSync(join(THEME_DIR, 'ui-theme.css'), 'utf8'), 3),
+    ...parseRules(readFileSync(join(THEME_DIR, 'adapters', 'dispatch-compat.css'), 'utf8'), 4),
   ];
   return cachedRules;
 }

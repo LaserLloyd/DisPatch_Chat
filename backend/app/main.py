@@ -575,8 +575,12 @@ async def media_security_headers(request: Request, call_next):
     # time", which is cheap here because ETag/Last-Modified yield a 304. Versioned
     # assets (main.js?v=N, app.css?v=N) stay freely cacheable: their URL changes
     # when they change, so they don't need this.
+    # The drop-in theme folder is the one exception to "versioned assets": its
+    # URLs carry no ?v=, so replacing the folder is the whole theme update.
+    # Revalidating keeps that true — a new copy is live on the next load.
     if path == "/" or path in ("/static/sw.js", "/static/index.html",
-                               "/manifest.webmanifest", "/static/manifest.webmanifest"):
+                               "/manifest.webmanifest", "/static/manifest.webmanifest") \
+            or path.startswith("/static/ui-theme/"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     # A worker file served from /static/ may only claim a scope at or below
     # /static/ unless it says otherwise. The app lives at /, so without this the

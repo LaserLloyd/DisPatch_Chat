@@ -1,10 +1,11 @@
 // The theme set, pinned down.
 //
-// DisPatch's colours come from the vendored theme package: static/ui-theme.js
-// (the blocking runtime and its registry of themes) and static/ui-theme.css
-// (every theme's contract tokens plus the adapter that maps DisPatch's own
-// token names onto them). static/theme.css keeps only what the package does
-// not own. Component CSS still reads the legacy names (--bg-primary,
+// DisPatch's colours come from the shared drop-in theme folder static/ui-theme/:
+// ui-theme.js (the blocking runtime and its registry of themes), ui-theme.css
+// (every theme's contract tokens) and adapters/dispatch-compat.css (DisPatch's
+// own token names mapped onto them). DisPatch's settings for it are the data-*
+// on the runtime's <script> tag in index.html. static/theme.css keeps only
+// what the theme folder does not own. Component CSS still reads the legacy names (--bg-primary,
 // --user-bubble, --md-em, …), so what matters is what those names RESOLVE to
 // on <html> for each theme — and nothing in any one file says that on its own.
 // helpers/theme-resolve.js replays the cascade from source to find out.
@@ -35,7 +36,8 @@ const read = (f) => readFileSync(join(STATIC, f), 'utf8');
 const THEME_CSS = stripComments(read('theme.css'));
 const APP = stripComments(read('app.css'));
 const DASH = stripComments(read('dashboard.css'));
-const UI_CSS = stripComments(read('ui-theme.css'));
+const UI_CSS = stripComments(read('ui-theme/ui-theme.css'));
+const COMPAT_CSS = stripComments(read('ui-theme/adapters/dispatch-compat.css'));
 const THEME_JS = read('js/theme.js');
 const HTML = read('index.html').replace(/<!--[\s\S]*?-->/g, '');   // comments discuss <script> by name
 const FIXTURE = JSON.parse(readFileSync(join(HERE, 'fixtures', 'palette-parity-2026-09.json'), 'utf8'));
@@ -259,7 +261,7 @@ test('theme.css holds no theme: no palette blocks, no light/dark mechanism', () 
 });
 
 test('theme.css never redeclares a token the package owns', () => {
-  const pkg = new Set([...UI_CSS.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+  const pkg = new Set([...`${UI_CSS}\n${COMPAT_CSS}`.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
   const mine = [...THEME_CSS.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
   const clash = [...new Set(mine.filter((n) => pkg.has(n)))];
   assert.deepEqual(clash, [], `theme.css redeclares package tokens: ${clash.join(', ')} — ui-theme.css loads later and wins, so these are dead or, worse, a second source of truth`);
@@ -292,7 +294,7 @@ test('the contract names that clash with DisPatch meanings are not read raw', ()
 test('every custom property a rule reads is defined somewhere', () => {
   // `var(--accent-soft, …)` shipped for months with no --accent-soft ever
   // declared — the fallback hid it. The package's tokens count as defined.
-  const all = `${THEME_CSS}\n${APP}\n${DASH}\n${UI_CSS}`;
+  const all = `${THEME_CSS}\n${APP}\n${DASH}\n${UI_CSS}\n${COMPAT_CSS}`;
   const defined = new Set([...all.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
   for (const f of readdirSync(join(STATIC, 'js')).filter((n) => n.endsWith('.js'))) {
     const js = read(`js/${f}`);
@@ -306,33 +308,50 @@ test('every custom property a rule reads is defined somewhere', () => {
 
 // --- the markup and the picker -----------------------------------------------
 
-test('ui-theme.js is the first script in <head>, blocking, at the revision digits', () => {
+test('ui-theme.js is the first script in <head>, blocking, from the drop-in folder', () => {
   const head = HTML.slice(0, HTML.indexOf('</head>'));
   const scripts = [...head.matchAll(/<script\b([^>]*)>/g)];
   assert.ok(scripts.length, 'no <script> in <head>');
   const first = scripts[0][1];
-  const m = /src="\/static\/ui-theme\.js\?v=(\d+)"/.exec(first);
-  assert.ok(m, `the first <head> script must be ui-theme.js, found: <script${first}>`);
+  assert.match(first, /src="\/static\/ui-theme\/ui-theme\.js"/,
+    `the first <head> script must be ui-theme/ui-theme.js, found: <script${first}>`);
   assert.ok(!/\b(defer|async|type="module")/.test(first),
     'ui-theme.js must be BLOCKING — deferred, it paints the theme after first paint');
-  assert.equal(m[1], (revision() || '').replace(/-/g, ''), 'ui-theme.js ?v= is not the theme revision digits');
 });
 
-test('ui-theme.css loads after app.css and dashboard.css, at the revision digits', () => {
+test('the theme folder loads after app.css and dashboard.css, adapter last, with no ?v=', () => {
   const at = (re) => { const m = re.exec(HTML); return m ? m.index : -1; };
-  const ui = at(/href="\/static\/ui-theme\.css\?v=(\d+)"/);
-  assert.ok(ui > 0, 'index.html does not link ui-theme.css');
+  const ui = at(/href="\/static\/ui-theme\/ui-theme\.css"/);
+  const compat = at(/href="\/static\/ui-theme\/adapters\/dispatch-compat\.css"/);
+  assert.ok(ui > 0, 'index.html does not link ui-theme/ui-theme.css');
+  assert.ok(compat > ui, 'adapters/dispatch-compat.css must load right after ui-theme.css');
   assert.ok(ui > at(/href="\/static\/app\.css/), 'ui-theme.css must load after app.css');
   assert.ok(ui > at(/href="\/static\/dashboard\.css/), 'ui-theme.css must load after dashboard.css');
   assert.ok(ui > at(/href="\/static\/theme\.css/), 'ui-theme.css must load after theme.css');
-  assert.equal(/href="\/static\/ui-theme\.css\?v=(\d+)"/.exec(HTML)[1], (revision() || '').replace(/-/g, ''));
+  // Replacing the folder is the whole update, so its URLs never carry a
+  // version: the server revalidates them instead (main.py, Cache-Control).
+  assert.ok(!/\/static\/ui-theme\/[^"]*\?v=/.test(HTML), 'a ui-theme/ URL carries ?v= — the folder is served no-cache instead');
+  assert.ok(!/\/static\/ui-theme\.(js|css)/.test(HTML), 'index.html still loads the old loose ui-theme files');
+});
+
+test('the server revalidates the theme folder on every load', () => {
+  const MAIN = readFileSync(join(HERE, '..', '..', 'backend', 'app', 'main.py'), 'utf8');
+  assert.match(MAIN, /path\.startswith\("\/static\/ui-theme\/"\)/,
+    'main.py no longer serves /static/ui-theme/ no-cache — a replaced folder would sit behind a stale browser cache');
+});
+
+test('the service worker precaches the theme folder files the page loads', () => {
+  const SW = read('sw.js');
+  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/adapters/dispatch-compat.css']) {
+    assert.ok(SW.includes(`'/static/${f}'`), `sw.js SHELL lacks /static/${f}`);
+  }
 });
 
 test('the pre-paint inline script no longer knows about themes', () => {
   const inline = [...HTML.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
   assert.ok(!/dispatch-palette|data-palette|glacier/.test(inline),
     'an inline script still stamps the palette — ui-theme.js owns that, and two writers race');
-  assert.ok(!/data-theme/.test(HTML), 'index.html markup stamps data-theme');
+  assert.ok(!/\bdata-theme=/.test(HTML), 'index.html markup stamps data-theme');
 });
 
 test('js/theme.js renders the runtime\'s list and writes no storage of its own', () => {
@@ -348,10 +367,10 @@ test('the theme revision line is wired into the Theme pane', () => {
   assert.match(THEME_JS, /revision\(\)/);
 });
 
-test('the vendored theme files are free-standing and carry their revision', () => {
-  // The two generated files identify themselves only by a revision date.
-  for (const f of ['ui-theme.js', 'ui-theme.css']) {
-    assert.match(read(f), /^\/\* Theme revision \d{4}-\d{2}-\d{2} — generated file, do not edit by hand\./, `${f} header`);
+test('the theme folder files are free-standing and carry their revision', () => {
+  // The generated files identify themselves only by a revision date.
+  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/adapters/dispatch-compat.css']) {
+    assert.match(read(f), /^\/\* Theme revision \d{4}-\d{2}-\d{2} — [^\n]*Generated file, do not edit by hand/, `${f} header`);
     assert.ok(!/https?:\/\/|\.git\b/.test(read(f).split('\n').slice(0, 3).join('\n')), `${f} header names a source`);
   }
 });

@@ -71,10 +71,16 @@
     form-action 'self'" />
   <!-- The theme runtime. BLOCKING and first on purpose: it reads the stored
        theme and stamps <html data-palette/data-theme/data-contrast-profile>
-       plus <meta name="theme-color"> before anything paints. ui-theme.js and
-       ui-theme.css are generated, vendored files — never edit them by hand;
-       their ?v= is the theme revision's digits (docs/development.md). -->
-  <script src="/static/ui-theme.js?v=20260922"></script>
+       plus <meta name="theme-color"> before anything paints.
+       static/ui-theme/ is the shared drop-in theme folder: generated files,
+       never edited here. To update the themes, replace the whole folder —
+       nothing else changes (docs/development.md, "Themes"). It is served
+       no-cache, so it needs no ?v=. DisPatch's own settings are the data-*
+       below: picker order, the default for a new device, the storage key. -->
+  <script src="/static/ui-theme/ui-theme.js"
+          data-themes="glacier,midnight-gold,forest,paper,daylight,purple,electric-yellow,laserlloyd,laserlloyd-light,night-red"
+          data-default="glacier"
+          data-storage-key="dispatch-palette"></script>
   <!-- Which locale the last visit settled on. i18n.js keeps it current so an
        installed PWA can read the choice back without waiting for the app. -->
   <meta name="i18n-lang" content="en" />
@@ -146,10 +152,12 @@
   <link rel="stylesheet" href="/static/theme.css?v=6" />
   <link rel="stylesheet" href="/static/app.css?v=82" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
-  <!-- Theme tokens for all ten themes + the adapter that maps DisPatch's own
-       token names onto them. AFTER app.css / dashboard.css so its blocks win
-       ties; theme.css holds only what the package does not own. -->
-  <link rel="stylesheet" href="/static/ui-theme.css?v=20260922" />
+  <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
+       token names onto them. AFTER app.css / dashboard.css so their blocks win
+       ties; theme.css holds only what the theme folder does not own. No
+       ui-theme-base.css: DisPatch keeps its own element layer. -->
+  <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
+  <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-compat.css" />
   <script type="module" src="/static/js/theme.js?v=16"></script>
 </head>
 <body>
