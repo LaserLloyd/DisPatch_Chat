@@ -4,9 +4,9 @@
 
 import { api, setOnLocked } from './api.js?v=28';
 import { ChatSocket } from './ws.js?v=9';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=31';
-import { installChecklists, applyChecklistState } from './checklist.js?v=4';
-import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=18';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
+import { installChecklists, applyChecklistState } from './checklist.js?v=5';
+import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -20,18 +20,18 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=17';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=7';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=4';
-import { mountJobs, unmountJobs } from './jobs.js?v=7';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=8';
+} from './reactions.js?v=18';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=8';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=5';
+import { mountJobs, unmountJobs } from './jobs.js?v=8';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=9';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=5';
+} from './llm.js?v=6';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=8';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=9';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=10';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -40,13 +40,13 @@ import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=2';
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
-import { renderLinkRail, linksSection } from './links.js?v=5';
+import { renderLinkRail, linksSection } from './links.js?v=6';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=3';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=4';
 import { aboutRow } from './about.js?v=2';
-import { imageJobMessageEl } from './imagejobs.js?v=3';
+import { imageJobMessageEl } from './imagejobs.js?v=4';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=1';
@@ -1672,45 +1672,138 @@ async function sendFeedback(msg, vote, reason) {
   }
 }
 
-function feedbackReasonRow(msg) {
-  const row = el('div', { class: 'feedback-reasons' });
-  for (const reason of FEEDBACK_REASONS) {
-    row.append(el('button', {
-      class: 'feedback-reason-btn', type: 'button',
-      text: t(`msg.feedback_reason_${reason}`),
-      onclick: () => { row.remove(); sendFeedback(msg, 'down', reason); },
-    }));
-  }
-  row.append(el('button', {
-    class: 'feedback-reason-btn skip', type: 'button', text: t('msg.feedback_reason_skip'),
-    onclick: () => { row.remove(); sendFeedback(msg, 'down'); },
-  }));
-  return row;
+// The ⋯ menu's feedback entries. 👍 sends at once; 👎 swaps the menu to the
+// fixed reason list (Skip sends a bare down-vote), so no reason row is ever
+// left sitting under the message.
+function feedbackMenuItems(msg) {
+  const current = ((msg.metadata || {}).feedback || {}).vote || null;
+  const reasons = () => [
+    ...FEEDBACK_REASONS.map((reason) => ({
+      label: t(`msg.feedback_reason_${reason}`),
+      fn: () => sendFeedback(msg, 'down', reason),
+    })),
+    { label: t('msg.feedback_reason_skip'), muted: true, fn: () => sendFeedback(msg, 'down') },
+  ];
+  return [
+    { icon: 'thumbsup', label: t('msg.feedback_good'), title: t('msg.feedback_up_title'),
+      active: current === 'up', fn: () => sendFeedback(msg, 'up') },
+    { icon: 'thumbsdown', label: t('msg.feedback_bad'), title: t('msg.feedback_down_title'),
+      active: current === 'down', fn: () => reasons() },
+  ];
 }
 
-// Hoisted out of messageEl() (it used to be a local const there) so the
-// feedback helpers above, which build their own action-row buttons, can
-// share the exact same shape rather than re-implementing it.
-function actBtn(label, title, fn) {
-  const b = el('button', { class: 'msg-act-btn', title });
-  b.textContent = label;
-  b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
+// Copy is the one action left on screen, as an icon: a word under every
+// bubble is exactly the clutter the ⋯ menu exists to remove.
+function copyMsgBtn(msg) {
+  const b = el('button', {
+    class: 'msg-act-btn msg-icon-btn', type: 'button',
+    title: t('msg.copy_title'), 'aria-label': t('msg.copy'),
+  }, [railIcon(RAIL_ICONS.copy)]);
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(msg.content || '');
+      b.replaceChildren(railIcon(RAIL_ICONS.tick)); b.classList.add('ok');
+      setTimeout(() => { b.replaceChildren(railIcon(RAIL_ICONS.copy)); b.classList.remove('ok'); }, 1200);
+    } catch { /* clipboard unavailable */ }
+  });
   return b;
 }
 
-function appendFeedbackActions(actions, msg, col) {
-  const current = ((msg.metadata || {}).feedback || {}).vote || null;
-  const up = actBtn(t('msg.feedback_up'), t('msg.feedback_up_title'),
-    () => sendFeedback(msg, 'up'));
-  if (current === 'up') up.classList.add('feedback-active');
-  actions.append(up);
-  const down = actBtn(t('msg.feedback_down'), t('msg.feedback_down_title'), () => {
-    const existing = col.querySelector('.feedback-reasons');
-    if (existing) { existing.remove(); return; }
-    col.append(feedbackReasonRow(msg));
+function moreMsgBtn(items) {
+  const b = el('button', {
+    class: 'msg-act-btn msg-icon-btn msg-more-btn', type: 'button',
+    title: t('msg.more'), 'aria-label': t('msg.more'),
+    'aria-haspopup': 'menu', 'aria-expanded': 'false',
+  }, [railIcon(RAIL_ICONS.menu)]);
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (msgMenu.anchor === b) closeMsgMenu(); else openMsgMenu(b, items);
   });
-  if (current === 'down') down.classList.add('feedback-active');
-  actions.append(down);
+  return b;
+}
+
+// ONE shared popover for every message's ⋯. Fixed-positioned on <body> so
+// no bubble's overflow clips it, and so a thread of 500 messages carries 500
+// buttons, not 500 hidden menus. An item's fn may return another item list,
+// which replaces the menu in place (👎 → reasons).
+const msgMenu = { el: null, anchor: null };
+function closeMsgMenu() {
+  if (msgMenu.anchor) msgMenu.anchor.setAttribute('aria-expanded', 'false');
+  msgMenu.anchor = null;
+  if (msgMenu.el) msgMenu.el.hidden = true;
+  document.removeEventListener('click', _msgMenuOutside, true);
+  window.removeEventListener('resize', closeMsgMenu);
+  if (dom['messages']) dom['messages'].removeEventListener('scroll', closeMsgMenu);
+}
+function _msgMenuOutside(e) {
+  if (msgMenu.el && msgMenu.el.contains(e.target)) return;
+  if (msgMenu.anchor && msgMenu.anchor.contains(e.target)) return;
+  closeMsgMenu();
+}
+function fillMsgMenu(items) {
+  const m = msgMenu.el;
+  m.replaceChildren();
+  items.forEach((it, i) => {
+    if (it.sep && i > 0) m.append(el('div', { class: 'msg-menu-sep', role: 'separator' }));
+    const btn = el('button', {
+      type: 'button', role: 'menuitem',
+      class: [it.danger ? 'danger' : '', it.active ? 'active' : '', it.muted ? 'muted' : ''].filter(Boolean).join(' '),
+      title: it.title || '',
+    }, [
+      it.icon && RAIL_ICONS[it.icon] ? railIcon(RAIL_ICONS[it.icon]) : el('span', { class: 'msg-menu-noicon' }),
+      el('span', { text: it.label }),
+    ]);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = it.fn();
+      if (Array.isArray(next)) { fillMsgMenu(next); placeMsgMenu(); return; }
+      closeMsgMenu();
+    });
+    m.append(btn);
+  });
+  const first = m.querySelector('button');
+  if (first) first.focus({ preventScroll: true });
+}
+function placeMsgMenu() {
+  const m = msgMenu.el; const a = msgMenu.anchor;
+  if (!m || !a) return;
+  const r = a.getBoundingClientRect();
+  const mw = m.offsetWidth || 200; const mh = m.offsetHeight || 200;
+  const vw = window.innerWidth; const vh = window.innerHeight;
+  // Align to the button's end edge for a user bubble (right side), start
+  // edge otherwise; flip above when there is no room below.
+  const alignEnd = !!a.closest('.msg.user') !== (document.documentElement.dir === 'rtl');
+  let left = alignEnd ? r.right - mw : r.left;
+  left = Math.max(8, Math.min(left, vw - mw - 8));
+  let top = r.bottom + 4;
+  if (top + mh > vh - 8) top = Math.max(8, r.top - mh - 4);
+  m.style.left = left + 'px';
+  m.style.top = top + 'px';
+}
+function openMsgMenu(anchor, items) {
+  closeMsgMenu();
+  if (!msgMenu.el) {
+    msgMenu.el = el('div', { class: 'menu msg-menu', role: 'menu' });
+    msgMenu.el.addEventListener('keydown', (e) => {
+      const btns = [...msgMenu.el.querySelectorAll('button')];
+      const i = btns.indexOf(document.activeElement);
+      if (e.key === 'Escape') { const a = msgMenu.anchor; closeMsgMenu(); if (a) a.focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length]?.focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length]?.focus(); }
+    });
+    document.body.append(msgMenu.el);
+  }
+  msgMenu.anchor = anchor;
+  anchor.setAttribute('aria-expanded', 'true');
+  msgMenu.el.hidden = false;
+  fillMsgMenu(items);
+  placeMsgMenu();
+  setTimeout(() => {
+    document.addEventListener('click', _msgMenuOutside, true);
+    window.addEventListener('resize', closeMsgMenu);
+    if (dom['messages']) dom['messages'].addEventListener('scroll', closeMsgMenu, { passive: true });
+  }, 0);
 }
 
 // The ONE place that decides whether pictures render. Two reasons to hide
@@ -1883,7 +1976,10 @@ function messageEl(msg) {
       text: ` · ${t('msg.hidden_marker')}`,
     }));
   }
-  col.append(timeLine);
+  // Time and the Copy/⋯ buttons share one line: a separate action row
+  // cost every message an extra line of height for two small icons.
+  const foot = el('div', { class: 'msg-foot' }, [timeLine]);
+  col.append(foot);
 
   // Superseded generations, if this reply replaced one.
   if (role === 'assistant' && !isSub && !bubble.classList.contains('image-job-bubble')) {
@@ -1891,17 +1987,14 @@ function messageEl(msg) {
     if (pager) col.append(pager);
   }
 
-  // Action row — revealed on hover (desktop), always tap-reachable (mobile).
+  // Action row: Copy + a ⋯ menu, nothing else on screen. Every other action
+  // lives in the menu (msgMenu below) so a long thread is not a wall of
+  // buttons — on a phone the row is always visible, so each button costs a
+  // line under EVERY message. Revealed on hover (desktop), always
+  // tap-reachable (touch).
   const actions = el('div', { class: 'msg-actions' });
-  if (role !== 'system') {
-    actions.append(actBtn(t('msg.copy'), t('msg.copy_title'), async (b) => {
-      try {
-        await navigator.clipboard.writeText(msg.content || '');
-        const o = b.textContent; b.textContent = t('msg.copied'); b.classList.add('ok');
-        setTimeout(() => { b.textContent = o; b.classList.remove('ok'); }, 1200);
-      } catch { /* clipboard unavailable */ }
-    }));
-  }
+  const items = [];
+  if (role !== 'system') actions.append(copyMsgBtn(msg));
   // Reply/quote (Feature 5) and thumbs feedback (Feature 28) are BOTH allowed
   // in Safe Mode — quoting is send-shaped (a locked device may already send)
   // and rating is exactly what the family exists to do — so neither sits
@@ -1909,37 +2002,42 @@ function messageEl(msg) {
   // delete, which stay full-session (mutations on history, not conversation).
   if (!isSub) {
     if (role !== 'system' && quotePreview(msg.content)) {
-      actions.append(actBtn(t('msg.reply_action'), t('msg.reply_action_title'),
-        () => setReplyTarget(msg)));
+      items.push({ icon: 'reply', label: t('msg.reply'), title: t('msg.reply_action_title'), fn: () => setReplyTarget(msg) });
     }
-    if (role === 'assistant') appendFeedbackActions(actions, msg, col);
+    if (role === 'assistant') items.push(...feedbackMenuItems(msg));
   }
   // Safe Mode: Copy/Reply/Feedback only. Regenerate/Delete are decoy-blocked
   // server-side and the "copy to composer" affordance would just advertise
   // the lock — showing dead buttons defeats the deniability model.
   if (!state.decoy) {
+    const mut = [];
     if (role === 'assistant' && !isSub && state.messages[state.messages.length - 1]?.id === msg.id) {
-      actions.append(actBtn(t('msg.regenerate'), t('msg.regenerate_title'), () => regenerateLast()));
+      mut.push({ icon: 'regenerate', label: t('msg.regenerate'), title: t('msg.regenerate_title'), fn: () => regenerateLast() });
     }
     if (role === 'user') {
       // Edit rewrites the stored row; the newest user message can also be
-      // re-run from inside the editor. Distinct from the button below it,
+      // re-run from inside the editor. Distinct from the item below it,
       // whose honest label says it only prefills the composer — sending that
       // creates a NEW message and the original stays untouched.
-      actions.append(actBtn(t('msg.edit'), t('msg.edit_title'), () => openMessageEditor(msg, wrap)));
-      actions.append(actBtn(t('msg.to_composer'), t('msg.to_composer_title'), () => editUserMessage(msg)));
+      mut.push({ icon: 'rename', label: t('msg.edit'), title: t('msg.edit_title'), fn: () => openMessageEditor(msg, wrap) });
+      mut.push({ icon: 'forward', label: t('msg.to_composer'), title: t('msg.to_composer_title'), fn: () => editUserMessage(msg) });
     }
     // API bots only — see threadIsApiBot.
     if (role !== 'system' && threadIsApiBot(msg.thread_id)) {
       const hidden = !!meta.hidden;
-      actions.append(actBtn(
-        hidden ? t('msg.show_context') : t('msg.hide_context'),
-        hidden ? t('msg.show_context_title') : t('msg.hide_context_title'),
-        () => toggleMessageHidden(msg, !hidden)));
+      mut.push({
+        icon: 'eye',
+        label: hidden ? t('msg.show_context') : t('msg.hide_context'),
+        title: hidden ? t('msg.show_context_title') : t('msg.hide_context_title'),
+        fn: () => toggleMessageHidden(msg, !hidden),
+      });
     }
-    actions.append(actBtn(t('msg.delete'), t('msg.delete_title'), () => deleteMessage(msg.id, msg.thread_id)));
+    mut.push({ icon: 'trash', label: t('msg.delete'), title: t('msg.delete_title'), danger: true, sep: true,
+      fn: () => deleteMessage(msg.id, msg.thread_id) });
+    items.push(...mut);
   }
-  col.append(actions);
+  if (items.length) actions.append(moreMsgBtn(items));
+  if (actions.childElementCount) foot.append(actions);
 
   wrap.append(col);
 
@@ -1994,6 +2092,7 @@ function renderSkeleton() {
 }
 
 function renderMessages(stick = true) {
+  closeMsgMenu();
   const box = dom['messages'];
   box.innerHTML = '';   // takes any cached-tail rows with it
   cachedPainted.delete(state.activeThreadId);
@@ -3428,7 +3527,9 @@ async function threadAction(act) {
   const id = state.activeThreadId;
   if (!id) return;
   try {
-    if (act === 'pin') {
+    if (act === 'model') {
+      openModelPicker();
+    } else if (act === 'pin') {
       const pinned = !(state.activeThread && state.activeThread.is_pinned);
       await api.pin(id, pinned);
       // Optimistic update — WS thread_update will confirm
@@ -3488,14 +3589,16 @@ function renderModelChip() {
     toggleModelPicker(false);
     return;
   }
-  btn.hidden = false;
   const prefs = th.prefs || {};
   const meter = meterText(latestContextBudget(state.messages));
-  // No override at all — the chip stays icon-only rather than announcing
-  // "Bot default" on every thread that has never touched this feature.
   const parts = [prefs.model, prefs.thinking, meter].filter(Boolean);
   dom['ch-modelchip-label'].textContent = parts.join(' · ');
   const warn = state.modelChipWarn[th.id];
+  // The chip only takes header room when it has something to SAY — an
+  // override, a context reading or a refusal. Otherwise the picker is one
+  // tap away in the ⋯ thread menu ("Model & thinking"), and a bare icon in
+  // the header was just one more thing squeezing the bot's name.
+  btn.hidden = !(parts.length || warn);
   btn.classList.toggle('warning', !!warn);
   btn.title = warn || t('chat.model_chip');
 }
@@ -4221,10 +4324,13 @@ function renderBotManager() {
       // one is incoherent, and it is the last route into the crop dialog, so
       // dropping it keeps the whole photo flow unreachable rather than
       // half-reachable. el() ignores a null child, so this composes cleanly.
+      // Icon-only: tapping the picture does the same thing, so a worded
+      // button on every row was the loudest control for the rarest action.
       nimEnabled() ? null : el('button', {
-        class: 'bm-avatar-btn', title: t('settings.change_photo_title'),
+        class: 'bm-avatar-btn bm-avatar-btn--icon', title: t('settings.change_photo_title'),
+        'aria-label': t('settings.change_photo_short'),
         onclick: (e) => { e.stopPropagation(); pickAvatarFile(bot.id); },
-      }, iconLabel(RAIL_ICONS.camera, t('settings.change_photo'))),
+      }, [railIcon(RAIL_ICONS.camera)]),
       (() => {
         const lbl = el('label', { class: 'switch', title: t('settings.show_in_sidebar') });
         const cb = el('input', { type: 'checkbox', 'aria-label': t('settings.show_in_sidebar') });
@@ -6705,7 +6811,12 @@ function wireEvents() {
     toggleThreadMenu();
   });
   dom['thread-menu'].querySelectorAll('button').forEach((b) =>
-    b.addEventListener('click', () => threadAction(b.dataset.act)));
+    b.addEventListener('click', (e) => {
+      // The picker this opens closes on any document click — including the
+      // very click that asked for it, unless it stops here.
+      if (b.dataset.act === 'model') e.stopPropagation();
+      threadAction(b.dataset.act);
+    }));
   document.addEventListener('click', () => toggleThreadMenu(false));
   wireModelChip();
 

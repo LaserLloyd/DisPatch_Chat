@@ -226,8 +226,10 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // job-thread.js, its importer main.js, and app.css.
   // v120 (2026-09-24): the theme moved into the drop-in folder static/ui-theme/,
   // so the shell's theme entries changed path.
-  assert.equal(m[1], 'local-chat-v120',
-    'sw.js CACHE must be local-chat-v120 so old shells drop the loose ui-theme files');
+  // v121 (2026-09-24): the calmer chat — per-message Copy + ⋯ menu, model
+  // picker in the header ⋯; util.js/main.js/app.css/index.html/locales moved.
+  assert.equal(m[1], 'local-chat-v121',
+    'sw.js CACHE must be local-chat-v121 so installed clients pick up the new message menu');
 });
 
 // =============================================================================

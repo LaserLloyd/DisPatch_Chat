@@ -21,7 +21,7 @@
 // belt-and-suspenders layer the message renderer uses for media.
 
 import { api } from './api.js?v=28';
-import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=18';
+import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=19';
 import { t } from './i18n.js?v=3';
 import { nimEnabled } from './nim.js?v=5';
 

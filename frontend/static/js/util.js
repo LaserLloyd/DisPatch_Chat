@@ -402,6 +402,17 @@ export const RAIL_ICONS = {
     'M3.5 9h11.5v11.5H3.5Z',
   ],
   menu: ['M6 12v.01', 'M12 12v.01', 'M18 12v.01'],
+  // Two stacked sheets: copy this message's text.
+  copy: [
+    'M9 9h10.5v11.5H9Z',
+    'M15 9V4.5A1 1 0 0 0 14 3.5H5.5a1 1 0 0 0-1 1V14a1 1 0 0 0 1 1H9',
+  ],
+  // A plain tick: the copy landed.
+  tick: ['M5 12.5l4.5 4.5L19 7.5'],
+  // A hooked arrow: quote this message in a reply.
+  reply: ['M9.5 6 4.5 11l5 5', 'M4.5 11h9a6 6 0 0 1 6 6v1.5'],
+  // A circular arrow: ask for this reply again.
+  regenerate: ['M19.5 12a7.5 7.5 0 1 1-2.2-5.3', 'M19.5 4.5v4.5H15'],
   attach: ['M19.4 11.7 12 19.1a4.7 4.7 0 0 1-6.6-6.6l7.4-7.4a3.2 3.2 0 0 1 4.5 4.5l-7.4 7.4a1.7 1.7 0 0 1-2.4-2.4l6.8-6.8'],
   send: ['M12 19.5V5.2', 'M6.2 11 12 5.2 17.8 11'],
   stop: ['M8 8h8v8H8Z'],

@@ -317,6 +317,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .msg.system .bubble { background: transparent; border: 1px dashed var(--border-light); color: var(--text-secondary); font-size: 13px; }
 .msg.error .bubble { background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); color: var(--error-text); }
 .msg-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; padding: 0 4px; }
+/* Time + Copy/⋯ on one line (messageEl). User rows mirror to the end edge. */
+.msg-foot { display: flex; align-items: center; gap: 2px; min-height: 22px; }
+.msg-foot .msg-time { margin-top: 0; }
+.msg.user .msg-foot { justify-content: flex-start; flex-direction: row-reverse; }
 .msg-media { margin-top: 8px; max-width: 100%; }
 .msg-media img { max-width: 100%; max-height: min(420px, 70vh); border-radius: var(--radius-md); border: 1px solid var(--border-strong); display: block; cursor: zoom-in; }
 
@@ -853,9 +857,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 }
 @keyframes blink { 0% { opacity: 0.8; } 50% { opacity: 0; } }
 
-/* ===================== Message actions (delete) ===================== */
+/* ===================== Message actions: Copy + ⋯ ===================== */
 .msg-actions {
-  display: flex; gap: 4px; margin-top: 3px; opacity: 0;
+  display: flex; gap: 2px; margin: 0; opacity: 0;
   transition: opacity .14s ease;
 }
 .msg.user .msg-actions { justify-content: flex-end; }
@@ -1230,7 +1234,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
   .back-btn { display: block; }
   .msg-col { max-width: 86%; }
-  .model-pill { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  /* The model name is one tap away (⋯ → Model & thinking); on a phone the
+     header's width belongs to the bot's name. */
+  .model-pill { display: none; }
   .ch-title { font-size: 14.5px; }
 
   /* 16px stops iOS Safari from auto-zooming the page on input focus. */
@@ -1525,6 +1531,31 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .msg-act-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .msg-act-btn.ok { color: var(--success-text); }
+/* Icon-only buttons (Copy, ⋯) — the row carries no words. */
+.msg-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; padding: 0;
+}
+.msg-icon-btn .rail-icon { width: 16px; height: 16px; }
+.msg-more-btn .rail-icon { stroke-width: 3.2; }
+.msg-more-btn[aria-expanded="true"] { color: var(--text-primary); background: var(--bg-hover); }
+.msg:has(.msg-more-btn[aria-expanded="true"]) .msg-actions { opacity: 1; }
+
+/* The one shared ⋯ popover (openMsgMenu). Fixed so no bubble clips it. */
+.menu.msg-menu {
+  position: fixed; inset-inline-end: auto; top: auto;
+  min-width: 190px; max-width: min(280px, calc(100vw - 16px));
+  padding: 4px; z-index: 70;
+}
+.msg-menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border-radius: var(--radius-sm); font-size: 14px; color: inherit;
+}
+.msg-menu button:hover, .msg-menu button:focus-visible { background: var(--bg-hover); outline: none; }
+.msg-menu button .rail-icon, .msg-menu-noicon { width: 16px; height: 16px; flex: none; }
+.msg-menu button.active { color: var(--accent-text); font-weight: 600; }
+.msg-menu button.muted { color: var(--text-muted); }
+.msg-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-light); }
 
 /* Welcome / empty state */
 .empty-state.welcome { gap: 10px; }
@@ -1784,8 +1815,11 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .msg-act-btn:active { transform: scale(.94); }
 .msg:focus-within .msg-actions { opacity: 1; }
 @media (hover: none) {
-  .msg-actions { opacity: .85; }
-  .msg-act-btn { padding: 8px 12px; font-size: 12.5px; }
+  /* Always visible on touch (no hover to reveal it), but quiet: two small
+     icons, not a row of words. 36px keeps them honest tap targets. */
+  .msg-actions { opacity: .6; }
+  .msg-icon-btn { width: 36px; height: 30px; }
+  .msg-menu button { padding: 11px 12px; }
   /* Code-block copy: always visible on touch (no hover to reveal it). */
   .copy-btn { opacity: 1; padding: 6px 12px; }
 }
@@ -1830,14 +1864,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .msg.flash .bubble { animation: none; } }
 
 /* ---- Thumbs feedback (Feature 28) ---- */
-.msg-act-btn.feedback-active { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
-.feedback-reasons { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
-.feedback-reason-btn {
-  font-size: 11px; color: var(--text-muted); background: var(--bg-tertiary);
-  border: 1px solid var(--border-strong); padding: 2px 9px; border-radius: 999px; cursor: pointer;
-}
-.feedback-reason-btn:hover { color: var(--text-primary); border-color: var(--accent); }
-.feedback-reason-btn.skip { color: var(--text-muted); font-style: italic; }
 
 /* ---- Toast + reconnect: entrance motion + safe-area (F11) ---- */
 .toast { box-shadow: var(--shadow-lg); transition: opacity .25s var(--easing), transform .25s var(--easing); }
@@ -1868,7 +1894,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 @media (max-width: 768px) {
   .tl-header, .chat-header { padding-top: max(8px, env(safe-area-inset-top)); }
   .app[data-view="bots"] .sidebar { padding-top: max(20px, env(safe-area-inset-top)); }
-  .msg-actions { opacity: 1; }
+  .msg-actions { opacity: .6; }
 }
 
 /* ---- Attachment chip upload spinner (F9) ---- */
@@ -4310,3 +4336,10 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 @supports (color: oklch(from red l c h)) {
   :root[data-contrast-profile="night"] .messages { background-color: var(--bg-primary); }
 }
+
+/* Settings → Bots: "Change photo" is an icon now (the picture itself is the
+   main tap target). Last in the file so it beats the chip-group rules above. */
+.bm-avatar-btn.bm-avatar-btn--icon {
+  width: 32px; height: 32px; padding: 0; justify-content: center;
+}
+.bm-avatar-btn--icon .rail-icon { width: 16px; height: 16px; }

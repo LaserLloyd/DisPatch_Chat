@@ -15,7 +15,7 @@
 
 import { api } from './api.js?v=28';
 import { t } from './i18n.js?v=3';
-import { acquireInert, releaseInert } from './util.js?v=18';
+import { acquireInert, releaseInert } from './util.js?v=19';
 
 const JOB_POLL_MS = 1500;
 const JOB_TIMEOUT_MS = 30 * 60 * 1000;

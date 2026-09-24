@@ -22,7 +22,7 @@
 // survive a reload.
 import { api } from './api.js?v=28';
 import { t } from './i18n.js?v=3';
-import { cellSortValue, compareCells } from './markdown.js?v=31';
+import { cellSortValue, compareCells } from './markdown.js?v=32';
 
 // The checkbox column is always column 0; data columns start at 1.
 const CHECK_COL = 0;

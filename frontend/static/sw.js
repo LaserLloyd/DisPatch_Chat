@@ -2,7 +2,17 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v120';  // v120: the theme is now a drop-in folder,
+const CACHE = 'local-chat-v121';  // v121: calmer chat. Each message shows only
+  //   a Copy icon and a ⋯ menu on its timestamp line; Reply, thumbs, Regenerate,
+  //   Edit, Copy to composer, Hide from context and Delete moved into the menu.
+  //   "Model & thinking" moved into the header ⋯ (the chip only shows when it
+  //   has something to say; the model pill is hidden on phones). Settings →
+  //   Bots "Change photo" is an icon. main.js 96→97, app.css 82→83,
+  //   util.js 18→19, and every module whose import line that changed moved
+  //   one ?v= too (clients, dashboard, imagejobs, job-thread, jobs, links,
+  //   llm, markdown, checklist, pins, reactions, theme, viewer), index.html
+  //   + all eight locales.
+  // v120: the theme is now a drop-in folder,
   //   static/ui-theme/ (runtime, tokens, adapters), replacing the two loose
   //   files ui-theme.js / ui-theme.css. Served no-cache with no ?v=, so a
   //   later theme update is "replace the folder" and needs NO bump here: this

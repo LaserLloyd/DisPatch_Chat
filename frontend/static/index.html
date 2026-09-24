@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=6" />
-  <link rel="stylesheet" href="/static/app.css?v=82" />
+  <link rel="stylesheet" href="/static/app.css?v=83" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -158,7 +158,7 @@
        ui-theme-base.css: DisPatch keeps its own element layer. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
   <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-compat.css" />
-  <script type="module" src="/static/js/theme.js?v=16"></script>
+  <script type="module" src="/static/js/theme.js?v=17"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -348,6 +348,7 @@
           </div>
         </div>
         <div class="menu" id="thread-menu" hidden>
+          <button data-act="model" id="thread-menu-model"><span class="icn" data-icon="chip" aria-hidden="true"></span><span data-i18n="chat.model_chip">Model &amp; thinking</span></button>
           <button data-act="pin" id="thread-menu-pin"><span class="icn" data-icon="pin" aria-hidden="true"></span><span data-i18n="chat.pin">Pin</span></button>
           <button data-act="rename"><span class="icn" data-icon="rename" aria-hidden="true"></span><span data-i18n="chat.rename">Rename</span></button>
           <button data-act="sync"><span class="icn" aria-hidden="true">⤓</span><span data-i18n="chat.sync">Recover missing messages</span></button>
@@ -1136,6 +1137,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=96"></script>
+  <script type="module" src="/static/js/main.js?v=97"></script>
 </body>
 </html>
