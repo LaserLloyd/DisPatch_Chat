@@ -1,6 +1,6 @@
 /* Theme revision 2026-09-24 — theme tokens. Generated file, do not edit by hand:
    replace the whole ui-theme/ folder to update it.
-   body sha256: 0aa622468f4e9a12 */
+   body sha256: c600ec6accea5cbd */
 /* ============================================================================
    theme-base.css — CORE. Purple (base theme) + theme-agnostic layer.
    ----------------------------------------------------------------------------
@@ -1861,7 +1861,7 @@
    3. Text is an ember ladder. Every tier adds some green, which is what
       restores luma: primary #ff5800 carries 117/255 (pure red: 54),
       secondary #ff3000 88, tertiary #f01c00 71. This matters because the
-      apps put real content in every tier: ClawForge2's labels and hints
+      apps put real content in every tier: an app's labels and hints
       are secondary and tertiary, and so is most of ClawChat's small print.
       It is the one place usability outranks purity.
    4. A hierarchy of heat and brightness. The more important the text, the
@@ -1894,7 +1894,7 @@
    surface ramp is sized so --text-tertiary stays above 4:1 on
    --surface-4; lift a surface and it fails first. Text dimmed with
    opacity is the one thing this file can't fix: 60% of #ff5800 is 2.9:1.
-   TEXT.md bans it and the Quasar adapter maps StudioForge's dimmed
+   TEXT.md bans it and the Quasar adapter maps an app's dimmed
    labels onto the tiers. */
 
 [data-palette="night-red"] {
