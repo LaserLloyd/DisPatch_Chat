@@ -2,7 +2,11 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v121';  // v121: calmer chat. Each message shows only
+const CACHE = 'local-chat-v122';  // v122: machine-posted alerts (failed runs,
+  //   watchdogs, missed pictures, failed image jobs) collapse to one muted
+  //   line — new module js/notice.js (in SHELL), main.js 97→98, app.css 83→84,
+  //   all eight locales (msg.notice).
+  // v121: calmer chat. Each message shows only
   //   a Copy icon and a ⋯ menu on its timestamp line; Reply, thumbs, Regenerate,
   //   Edit, Copy to composer, Hide from context and Delete moved into the menu.
   //   "Model & thinking" moved into the header ⋯ (the chip only shows when it
@@ -224,6 +228,8 @@ const SHELL = [
   // thread-sections.js just above: it MUST be in SHELL or a cold offline
   // start has the import main.js carries but not the file behind it.
   '/static/js/modelchip.js',
+  // System-notice classifier (2026-09-24): pure module, imported by main.js.
+  '/static/js/notice.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

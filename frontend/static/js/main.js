@@ -6,6 +6,7 @@ import { api, setOnLocked } from './api.js?v=28';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
 import { installChecklists, applyChecklistState } from './checklist.js?v=5';
+import { classifyNotice } from './notice.js?v=1';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -1834,6 +1835,12 @@ function messageEl(msg) {
   const trace = reactionMessageEl(msg, { decoy: mediaHidden() });
   if (trace) return trace;
 
+  // Machine-posted alerts (failed runs, watchdogs, missed pictures) collapse
+  // to one quiet line — see notice.js. Also decided before the avatar, for
+  // the same wasted-fetch reason as the trace row above.
+  const notice = classifyNotice(msg);
+  if (notice) return noticeMessageEl(msg, notice);
+
   const wrap = el('div', { class: `msg ${role}`, dataset: { id: msg.id } });
 
   if (role !== 'user') {
@@ -2054,10 +2061,44 @@ function messageEl(msg) {
   return wrap;
 }
 
+// One collapsed line for a system notice: a level dot, the headline and the
+// time; the full text (rendered markdown) only when opened. No avatar, no
+// name, no bubble — status, not conversation. Copy/Delete live inside the
+// opened body so the closed row stays a single line.
+function noticeMessageEl(msg, notice) {
+  const wrap = el('div', { class: `msg notice notice-${notice.level}`, dataset: { id: msg.id } });
+  const details = el('details', { class: 'notice-details' });
+  const time = clockTime(msg.created_at);
+  details.append(el('summary', { class: 'notice-summary' }, [
+    el('span', { class: 'notice-dot', 'aria-hidden': 'true' }),
+    el('span', { class: 'notice-text', dir: 'auto', text: notice.headline || t('msg.notice') }),
+    time ? el('span', { class: 'notice-time', text: time }) : null,
+  ]));
+  const body = el('div', { class: 'notice-body', dir: 'auto' });
+  // Filled on first open: a thread full of closed notices renders no markdown.
+  details.addEventListener('toggle', () => {
+    if (!details.open || body.dataset.filled) return;
+    body.dataset.filled = '1';
+    body.innerHTML = renderMarkdown(msg.content || '', { noMedia: mediaHidden(), noLocal: state.decoy });
+    enhanceContent(body, { noLocal: state.decoy });
+    const actions = el('div', { class: 'msg-actions notice-actions' }, [copyMsgBtn(msg)]);
+    if (!state.decoy) {
+      actions.append(moreMsgBtn([{ icon: 'trash', label: t('msg.delete'), title: t('msg.delete_title'),
+        danger: true, fn: () => deleteMessage(msg.id, msg.thread_id) }]));
+    }
+    body.append(actions);
+  });
+  details.append(body);
+  wrap.append(details);
+  return wrap;
+}
+
 // Consecutive same-sender rows group: hide the repeated avatar/name + tighten
 // the gap (iMessage/Slack feel). Only within ~5 min and the same calendar day.
 function isGrouped(prev, msg) {
   if (!prev || !msg || prev.role !== msg.role) return false;
+  // A collapsed notice shows no avatar, so a reply after it must show its own.
+  if (classifyNotice(prev) || classifyNotice(msg)) return false;
   if ((msg.metadata && msg.metadata.sub) || (prev.metadata && prev.metadata.sub)) return false;
   if (dayKey(prev.created_at) !== dayKey(msg.created_at)) return false;
   return Math.abs(new Date(msg.created_at) - new Date(prev.created_at)) <= 5 * 60 * 1000;

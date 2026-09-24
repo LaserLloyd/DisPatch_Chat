@@ -228,8 +228,9 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // so the shell's theme entries changed path.
   // v121 (2026-09-24): the calmer chat — per-message Copy + ⋯ menu, model
   // picker in the header ⋯; util.js/main.js/app.css/index.html/locales moved.
-  assert.equal(m[1], 'local-chat-v121',
-    'sw.js CACHE must be local-chat-v121 so installed clients pick up the new message menu');
+  // v122 (2026-09-24): system notices collapse (new module js/notice.js).
+  assert.equal(m[1], 'local-chat-v122',
+    'sw.js CACHE must be local-chat-v122 so installed clients get notice.js');
 });
 
 // =============================================================================

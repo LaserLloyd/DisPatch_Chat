@@ -4343,3 +4343,29 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   width: 32px; height: 32px; padding: 0; justify-content: center;
 }
 .bm-avatar-btn--icon .rail-icon { width: 16px; height: 16px; }
+
+/* ===================== System notices (notice.js) =====================
+   Machine-posted alerts as one muted line; the full text opens below it. */
+.msg.notice { display: block; margin: 2px 0; padding: 0; }
+.notice-details { max-width: 100%; }
+.notice-summary {
+  display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer;
+  padding: 3px 8px; border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-muted); min-width: 0;
+}
+.notice-summary::-webkit-details-marker { display: none; }
+.notice-summary::after { content: '▸'; font-size: 10px; opacity: .7; flex: none; }
+.notice-details[open] > .notice-summary::after { content: '▾'; }
+.notice-summary:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.notice-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-muted); }
+.notice-error .notice-dot { background: var(--error-text); }
+.notice-warn .notice-dot { background: var(--warning-text); }
+.notice-ok .notice-dot { background: var(--success-text); }
+.notice-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notice-time { flex: none; font-size: 11px; opacity: .8; }
+.notice-body {
+  margin: 4px 8px 6px 22px; padding: 8px 10px; font-size: 13px;
+  border-inline-start: 2px solid var(--border-light); color: var(--text-secondary);
+  overflow-x: auto;
+}
+.notice-body .notice-actions { opacity: 1; margin-top: 4px; }

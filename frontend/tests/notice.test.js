@@ -1,0 +1,71 @@
+// System-notice classification (notice.js).
+//
+// The shapes below are taken from real rows in the family app's database —
+// every sender that was clogging threads — plus the replies that must NOT be
+// swallowed. The second half matters as much as the first: a real bot answer
+// hidden in a collapsed line is a worse bug than a noisy alert.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { classifyNotice, noticeHeadline } from '../static/js/notice.js';
+
+const a = (content, metadata) => ({ id: 'm', role: 'assistant', content, metadata });
+
+test('a failed run report is an error notice with a plain headline', () => {
+  const n = classifyNotice(a(
+    '❌ Run `bench-20260924-deepseek-pro` · `CrucibleForge all: deepseek-pro` failed — see report\n\n```text\nsee report\n```\n\nFull report: `/x/report.md`',
+    { delivery_key: 'ab47', origin: 'inject' }));
+  assert.equal(n.level, 'error');
+  assert.equal(n.headline, 'Run bench-20260924-deepseek-pro · CrucibleForge all: deepseek-pro failed — see report');
+});
+
+test('warning run reports and box-smoke alerts are warn notices', () => {
+  assert.equal(classifyNotice(a('⚠️ Run `w-1` · `Bench` partial', { delivery_key: 'k' })).level, 'warn');
+  const smoke = classifyNotice(a('**⚠️ NEW FAIL: mailforge_mail**\n\n```\nNEWLY FAILING:\n```', { origin: 'inject' }));
+  assert.equal(smoke.level, 'warn');
+  assert.equal(smoke.headline, 'NEW FAIL: mailforge_mail');
+  assert.equal(classifyNotice(a('⚠️ practice: practice-doctor.service failed', { origin: 'inject' })).level, 'warn');
+});
+
+test('a RECOVERED alert is an ok notice', () => {
+  const n = classifyNotice(a('**✅ RECOVERED: task_drain**\n\n```\nRECOVERED:\n```', { origin: 'inject' }));
+  assert.equal(n.level, 'ok');
+  assert.equal(n.headline, 'RECOVERED: task_drain');
+});
+
+test('metadata-flagged failures are notices whatever the text', () => {
+  assert.ok(classifyNotice(a('⚠️ My hourly picture didn’t go out', { doxy_pics: { failure: true, slot: 'hourly' } })));
+  assert.equal(classifyNotice(a('⚠️ clawforge-watchdog.service FAILED', { source: 'watchdog-failure-notify' })).level, 'error');
+  assert.equal(classifyNotice(a('⚠️ image failed: timed out', { kind: 'image_job', status: 'failed' })).level, 'error');
+  assert.ok(classifyNotice(a('anything', { notice: true })));
+  assert.equal(classifyNotice(a('anything', { notice: { level: 'info' } })).level, 'info');
+});
+
+test('a short gateway error reply is a notice', () => {
+  assert.ok(classifyNotice(a('⚠️ 🧰 Process failed', { run_id: 'r', stop_reason: 'toolUse' })));
+});
+
+test('ordinary replies, successes and user messages are left alone', () => {
+  assert.equal(classifyNotice(a('Sure! Here is the plan.', { origin: 'inject' })), null);
+  assert.equal(classifyNotice(a('✅ Run `bench-x` done — Total 88.5', { delivery_key: 'k' })), null);
+  assert.equal(classifyNotice(a('☀️ Morning brief — the fleet failed twice overnight', { origin: 'inject' })), null);
+  assert.equal(classifyNotice({ role: 'user', content: '❌ this failed', metadata: {} }), null);
+  // Sub rows already collapse on their own.
+  assert.equal(classifyNotice(a('⚠️ Reaction didn’t fire', { sub: true })), null);
+  // An image job that is still pending or finished is not a notice.
+  assert.equal(classifyNotice(a('queued', { kind: 'image_job', status: 'queued' })), null);
+});
+
+test('a bot opening a long, real answer with ⚠️ keeps its bubble', () => {
+  const long = '⚠️ Heads up before you deploy: the backup drive is unplugged, so '
+    + 'tonight’s mirror will fail. Here is what I would do instead. '.repeat(4);
+  assert.equal(classifyNotice(a(long, { followup: true })), null);
+  // …and a short one that is not error-worded stays too.
+  assert.equal(classifyNotice(a('⚠️ Careful, it is hot today', {})), null);
+});
+
+test('headline falls back to the first non-empty line', () => {
+  assert.equal(noticeHeadline('\n\n  ❌  **Deploy** failed\nmore'), 'Deploy failed');
+  assert.equal(noticeHeadline(''), '');
+});
