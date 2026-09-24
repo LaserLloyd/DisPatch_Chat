@@ -275,27 +275,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    overscroll-behavior:contain prevents scroll-chaining to the viewport. */
 .messages {
   flex: 1; overflow-y: auto; padding: 18px 16px 8px; position: relative; overscroll-behavior: contain;
-  /* Feature 23 (scene backdrop), tier 1 — a deterministic colour tint, never
-     an image. Plain fallback first: identical to the app's look before this
-     existed, so a browser with no relative-colour support (or a page where
-     JS never set --backdrop-hue) renders exactly as it always did. Lives
-     HERE, never on body/.chatview, so only the scrolling message pane tints —
-     the header, sidebar and rest of the shell stay the flat palette colour. */
+  /* The theme's own ground. (Feature 23's per-bot tint was switched off
+     2026-09-24 — every thread uses the standard background.) */
   background-color: var(--bg-primary);
-}
-@supports (color: oklch(from red l c h)) {
-  .messages {
-    /* `l` is the KEYWORD, not a variable: it copies --bg-primary's own
-       lightness unchanged, which is what keeps every palette's promised
-       contrast intact (frontend/tests/backdrop-contrast.test.js proves this
-       across every standard theme and the full hue range; night themes skip the tint). Chroma is a small
-       fixed amount — 0.04 is comfortably below where it could meaningfully
-       move contrast even at the shortest-baseline palette (Daylight), per
-       the same test. Hue is per-bot-per-thread (main.js backdropHue); the
-       `h` fallback (this palette's own hue, i.e. no visible tint) covers a
-       thread with nothing selected, or JS not having run yet. */
-    background-color: oklch(from var(--bg-primary) l 0.04 var(--backdrop-hue, h));
-  }
 }
 
 .date-sep { text-align: center; color: var(--text-muted); font-size: 12px; margin: 16px 0 10px; position: relative; }
@@ -4331,11 +4313,6 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   outline: 2px solid var(--focus-ring); outline-offset: 1px;
 }
 
-/* The scene backdrop tints --bg-primary by hue; on a night theme every hue
-   but red lights green or blue, so the pane stays the flat ground. */
-@supports (color: oklch(from red l c h)) {
-  :root[data-contrast-profile="night"] .messages { background-color: var(--bg-primary); }
-}
 
 /* Settings → Bots: "Change photo" is an icon now (the picture itself is the
    main tap target). Last in the file so it beats the chip-group rules above. */

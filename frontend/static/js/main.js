@@ -328,40 +328,6 @@ function letterAvatarHue(bot) {
   return h % 360;
 }
 
-// Feature 23, tier 1: the scrolling message pane's colour backdrop. Fully
-// deterministic from data already on hand — no generation, no files, no
-// network, no user action — so it works offline on a fresh install and can
-// never fail. The hue is the bot's own letter-avatar hue (the same
-// deterministic id/name hash letterAvatarHue already gives every bot, so no
-// new failure mode is introduced by parsing an arbitrary `color` string)
-// plus a small stable offset hashed from the THREAD id, so two threads with
-// the same bot are related but not identical, and the same thread always
-// looks the same on reload. CSS (app.css) is what actually keeps this safe:
-// the backdrop is derived from the palette's own --bg-primary with
-// `oklch(from … l c h)`, which inherits l (lightness) unchanged and only
-// moves hue/chroma — see frontend/tests/backdrop-contrast.test.js for the
-// proof that holds across every palette and hue.
-function backdropHue(bot, threadId) {
-  const base = letterAvatarHue(bot);
-  const s = String(threadId || '');
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  // ±20°: enough that two threads read as distinct, small enough that they
-  // still visibly belong to the same bot.
-  const offset = (h % 41) - 20;
-  return ((base + offset) % 360 + 360) % 360;
-}
-
-// Sets (or clears) the backdrop hue on the scrolling message pane — never on
-// body/chatview, so only that one surface tints (feature 23 is explicit that
-// the tint belongs on the pane, not the app shell).
-function applyBackdropHue(bot, thread) {
-  const pane = dom['messages'];
-  if (!pane) return;
-  if (!bot || !thread) { pane.style.removeProperty('--backdrop-hue'); return; }
-  pane.style.setProperty('--backdrop-hue', String(backdropHue(bot, thread.id)));
-}
-
 // Colour a bot's NAME by its first letter (minimal-avatar mode). Mnemonic where a
 // colour name exists (B→Blue, C→Cyan, F→Fuchsia, G→Green, R→Red, Y→Yellow…), a
 // spread hue otherwise. Bots sharing a first letter share a hue by design ("go by
@@ -1299,7 +1265,6 @@ function clearChatView() {
   else dom['ch-avatar'].textContent = '';
   delete dom['ch-avatar'].dataset.full;
   dom['ch-avatar']._zoomWired = null;
-  applyBackdropHue(null, null);
   dom['messages'].innerHTML = '';
   dom['messages'].append(el('div', { class: 'empty-state', id: 'chat-empty' },
     offerFirstRun()
@@ -1338,7 +1303,6 @@ function renderChatHeader() {
   if (!th) return;
   const bot = botById(th.bot_id) || botById(state.selectedBotId);
   if (bot) paintHeaderAvatar('ch-avatar', bot, th);
-  applyBackdropHue(bot, th);
   dom['ch-title'].textContent = bot ? bot.name : t('common.chat');
   dom['ch-sub'].textContent = threadTitle(th);
   // Model badge: latest assistant message's actual model, else the bot's hint.

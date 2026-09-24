@@ -2,7 +2,10 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v124';  // v124: (2026-09-24 review, round 2) the header mood
+const CACHE = 'local-chat-v125';  // v125: the per-bot scene backdrop tint is
+  //   off (owner request: "just use standard") — the message pane uses the theme's own
+  //   background. main.js 100→101, app.css 84→85.
+  // v124: (2026-09-24 review, round 2) the header mood
   //   face survives the thread_update repaint, an offline boot reboots into
   //   the real tier on the first hello, quote excerpts render as plain text,
   //   Copy copies the alternate on screen, an injected post needs a failure

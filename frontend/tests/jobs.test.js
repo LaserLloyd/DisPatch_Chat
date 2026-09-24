@@ -232,8 +232,9 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // v123 (2026-09-24 review): store.js joins SHELL; main.js/store.js/modelchip.js,
   // index.html, theme.css and the locales moved.
   // v124 (2026-09-24 review, round 2): main.js/notice.js moved.
-  assert.equal(m[1], 'local-chat-v124',
-    'sw.js CACHE must be local-chat-v124 so installed clients get the round-2 client fixes');
+  // v125 (2026-09-24): the scene backdrop tint is off; theme background only.
+  assert.equal(m[1], 'local-chat-v125',
+    'sw.js CACHE must be local-chat-v125 so installed clients drop the backdrop tint');
 });
 
 // =============================================================================
