@@ -33,12 +33,15 @@ export function normalizeModelOptions(models) {
 }
 
 // Candidate field names for the gateway's contextBudgetStatus object, tried
-// in order. openclaw.py's _parse_reply keeps this object VERBATIM — the two
-// names first in each list are the ones this app's own backend test pins
-// (estimatedPromptTokens / contextWindow); the rest are defensive so a
+// in order. openclaw.py's _parse_reply keeps this object VERBATIM. The first
+// name in each list is what the gateway (2026.9.x) actually emits — read off
+// real rows in the family app's database: `estimatedPromptTokens` and
+// `contextTokenBudget`. (The first version of this file pinned
+// `contextWindow`, a name the gateway never sends, so the meter only ever
+// showed the used count — review 2026-09-24.) The rest are defensive so a
 // gateway revision that renames the field does not blank the meter outright.
 const USED_KEYS = ['estimatedPromptTokens', 'usedTokens', 'used', 'promptTokens'];
-const WINDOW_KEYS = ['contextWindow', 'windowTokens', 'window', 'maxTokens', 'limit'];
+const WINDOW_KEYS = ['contextTokenBudget', 'contextWindow', 'windowTokens', 'window', 'maxTokens', 'limit'];
 
 function firstFiniteNumber(obj, keys) {
   for (const k of keys) {

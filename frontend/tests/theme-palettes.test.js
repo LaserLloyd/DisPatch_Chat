@@ -143,8 +143,16 @@ test('the hard-coded colours the sweep replaced keep their core values', () => {
     assert.equal(r['--on-accent'], canon(imp['--on-accent']), `${slug} --on-accent`);
     assert.equal(r['--code-card-bg'], canon(imp['--code-card-bg']), `${slug} --code-card-bg`);
     assert.equal(r['--code-card-chrome'], canon(imp['--code-card-chrome']), `${slug} --code-card-chrome`);
-    assert.equal(r['--on-error-fill'], canon(imp['--on-error-fill']), `${slug} --on-error-fill`);
-    assert.equal(r['--on-warning-fill'], canon(imp['--on-warning-fill']), `${slug} --on-warning-fill`);
+    // The fill inks no longer keep the fixture's literals on purpose: white on
+    // the #f87171 error fill was 2.77:1 and #1a1a1a on LaserLloyd Light's
+    // warning fill 3.44:1 (review 2026-09-24). They follow the contract's own
+    // on-fill inks now, and the assertion is the property the comment used
+    // to claim — AA text contrast on the plate they sit on.
+    const fills = resolveAll(slug, ['--error', '--warning']);
+    assert.ok(contrast(r['--on-error-fill'], fills['--error']) >= 4.5,
+      `${slug} --on-error-fill on --error: ${contrast(r['--on-error-fill'], fills['--error']).toFixed(2)}`);
+    assert.ok(contrast(r['--on-warning-fill'], fills['--warning']) >= 4.5,
+      `${slug} --on-warning-fill on --warning: ${contrast(r['--on-warning-fill'], fills['--warning']).toFixed(2)}`);
     // The washes and the dashboard's dark severity inks were literals of these.
     assert.equal(r['--danger'], canon(imp['danger-rgb (rgba(248,113,113,a) washes)']), `${slug} --danger`);
     assert.equal(r['--success'], '#34d399', `${slug} --success`);

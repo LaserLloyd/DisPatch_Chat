@@ -50,10 +50,10 @@ import { aboutRow } from './about.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=4';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
-} from './modelchip.js?v=1';
+} from './modelchip.js?v=2';
 import {
   createStore, createCachePainter, tierFor, TIER_FULL, MESSAGE_CACHE_ROWS,
-} from './store.js?v=1';
+} from './store.js?v=2';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with
@@ -1480,7 +1480,7 @@ function openMessageEditor(msg, node) {
   const col = node.querySelector('.msg-col');
   const bubble = node.querySelector('.bubble');
   if (!col || !bubble || col.querySelector('.msg-editor')) return;
-  const ta = el('textarea', { class: 'msg-editor-input', rows: '3' });
+  const ta = el('textarea', { class: 'msg-editor-input', rows: '3', 'aria-label': t('msg.edit') });
   ta.value = msg.content || '';
   const close = () => { box.remove(); bubble.hidden = false; };
   const save = el('button', { class: 'msg-act-btn', text: t('common.save') });
@@ -1538,8 +1538,8 @@ function altPagerEl(msg, bubble, mdOpts) {
   const pages = alts.concat([{ content: msg.content || '' }]);
   let idx = pages.length - 1;
   const label = el('span', { class: 'alt-pos' });
-  const prev = el('button', { class: 'alt-btn', title: t('msg.alt_prev'), text: '‹' });
-  const next = el('button', { class: 'alt-btn', title: t('msg.alt_next'), text: '›' });
+  const prev = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_prev'), 'aria-label': t('msg.alt_prev'), text: '‹' });
+  const next = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_next'), 'aria-label': t('msg.alt_next'), text: '›' });
   const paint = () => {
     bubble.innerHTML = renderMarkdown(pages[idx].content || '', mdOpts);
     enhanceContent(bubble, { noLocal: state.decoy });
@@ -1687,9 +1687,9 @@ function feedbackMenuItems(msg) {
   ];
   return [
     { icon: 'thumbsup', label: t('msg.feedback_good'), title: t('msg.feedback_up_title'),
-      active: current === 'up', fn: () => sendFeedback(msg, 'up') },
+      checkable: true, active: current === 'up', fn: () => sendFeedback(msg, 'up') },
     { icon: 'thumbsdown', label: t('msg.feedback_bad'), title: t('msg.feedback_down_title'),
-      active: current === 'down', fn: () => reasons() },
+      checkable: true, active: current === 'down', fn: () => reasons() },
   ];
 }
 
@@ -1748,9 +1748,10 @@ function fillMsgMenu(items) {
   items.forEach((it, i) => {
     if (it.sep && i > 0) m.append(el('div', { class: 'msg-menu-sep', role: 'separator' }));
     const btn = el('button', {
-      type: 'button', role: 'menuitem',
+      type: 'button', role: it.checkable ? 'menuitemradio' : 'menuitem',
       class: [it.danger ? 'danger' : '', it.active ? 'active' : '', it.muted ? 'muted' : ''].filter(Boolean).join(' '),
       title: it.title || '',
+      ...(it.checkable ? { 'aria-checked': String(!!it.active) } : {}),
     }, [
       it.icon && RAIL_ICONS[it.icon] ? railIcon(RAIL_ICONS[it.icon]) : el('span', { class: 'msg-menu-noicon' }),
       el('span', { text: it.label }),
@@ -1759,7 +1760,11 @@ function fillMsgMenu(items) {
       e.stopPropagation();
       const next = it.fn();
       if (Array.isArray(next)) { fillMsgMenu(next); placeMsgMenu(); return; }
+      const a = msgMenu.anchor;
       closeMsgMenu();
+      // Focus goes back to the ⋯ that opened the menu, so a keyboard user is
+      // not dropped on <body> after every pick.
+      if (a && a.isConnected) a.focus({ preventScroll: true });
     });
     m.append(btn);
   });
@@ -1786,6 +1791,14 @@ function openMsgMenu(anchor, items) {
   closeMsgMenu();
   if (!msgMenu.el) {
     msgMenu.el = el('div', { class: 'menu msg-menu', role: 'menu' });
+    // Tab out of the menu (or a click that focuses something else) closes it,
+    // as a real popover does; the mouse-outside listener below does not see
+    // keyboard focus moves.
+    msgMenu.el.addEventListener('focusout', (e) => {
+      const to = e.relatedTarget;
+      if (!to || msgMenu.el.contains(to) || (msgMenu.anchor && msgMenu.anchor.contains(to))) return;
+      closeMsgMenu();
+    });
     msgMenu.el.addEventListener('keydown', (e) => {
       const btns = [...msgMenu.el.querySelectorAll('button')];
       const i = btns.indexOf(document.activeElement);
@@ -2071,6 +2084,9 @@ function noticeMessageEl(msg, notice) {
   const time = clockTime(msg.created_at);
   details.append(el('summary', { class: 'notice-summary' }, [
     el('span', { class: 'notice-dot', 'aria-hidden': 'true' }),
+    // The level is a colour on the dot for sighted readers; say it in words
+    // for everyone else.
+    el('span', { class: 'sr-only', text: t(`msg.notice_level_${notice.level}`) }),
     el('span', { class: 'notice-text', dir: 'auto', text: notice.headline || t('msg.notice') }),
     time ? el('span', { class: 'notice-time', text: time }) : null,
   ]));
@@ -2726,6 +2742,14 @@ function saveDraft(tid, text) {
   if (has) state.drafts.add(tid); else state.drafts.delete(tid);
   if (changed) touchThreadRow(tid);
   ensureLocalStore().setDraft(tid, has ? text : '').catch(() => {});
+}
+
+/** Drop every local write still waiting on a timer. Called the moment the
+ *  tier flips (goSafe) and on reboot: a write that was scheduled in one tier
+ *  must never land in the next. */
+function cancelLocalWrites() {
+  clearTimeout(draftTimer); draftTimer = null; draftPending = null;
+  clearTimeout(cacheRefreshTimer); cacheRefreshTimer = null;
 }
 
 function clearDraftFor(tid) {
@@ -3439,9 +3463,13 @@ async function openThread(id, { background = false, botId = null } = {}) {
   const savedTop = box.scrollTop;
 
   let keptCachedView = false;
+  const tierAtFetch = tierFor(state.decoy);
   try {
     const r = await api.messages(id);
     if (state.activeThreadId !== id) { releaseScrollSave(); return; }   // switched away
+    // A lock during the fetch: these rows were served to the UNLOCKED tier
+    // and must not be cached into the safe one.
+    if (tierFor(state.decoy) !== tierAtFetch) { releaseScrollSave(); return; }
     // The network has spoken: from here the cache is behind by definition and
     // must never paint for this thread again.
     markThreadFresh(id);
@@ -3612,9 +3640,20 @@ async function threadAction(act) {
 function toggleModelPicker(show) {
   const menu = dom['model-picker'];
   if (!menu) return;
+  const wasOpen = !menu.hidden;
   menu.hidden = show === undefined ? !menu.hidden : !show;
   const btn = dom['ch-modelchip'];
   if (btn) btn.setAttribute('aria-expanded', String(!menu.hidden));
+  if (!menu.hidden) {
+    // A dialog that opens without taking focus is invisible to a keyboard.
+    const first = menu.querySelector('select, button, input');
+    if (first) first.focus({ preventScroll: true });
+  } else if (wasOpen && menu.contains(document.activeElement)) {
+    // Hand focus back to whichever control opened it (the chip when it is
+    // showing, else the thread ⋯ button).
+    const back = (btn && !btn.hidden) ? btn : dom['thread-menu-btn'];
+    if (back) back.focus({ preventScroll: true });
+  }
 }
 
 // Rebuilds the chip label + warning state from state alone — no request.
@@ -7299,6 +7338,7 @@ function closeAllOverlays() {
 // messages are re-fetched (full or redacted accordingly).
 async function reboot() {
   state.started = false;
+  cancelLocalWrites();
   if (socket) { socket.stop(); socket = null; }
   // A mode/session change invalidates unacked sends — never replay them on
   // the new (possibly Safe-Mode) socket.
@@ -7331,6 +7371,10 @@ async function goSafe(announce) {
   state.auth.decoy = true;
   state.auth.remembered = false;   // server-side, locking also forgets the device
   state.decoy = true;
+  // Still synchronous: a draft debounce or cache refresh armed while unlocked
+  // would otherwise fire AFTER state.decoy flipped and write the unlocked
+  // text into the SAFE tier, where no later wipeTier(TIER_FULL) reaches it.
+  cancelLocalWrites();
   // The unlocked tier's local cache goes with the session. Not being able to
   // READ it is the weaker half of the promise; on a device somebody has just
   // handed over, the drafts, the queued sends and the cached messages have to
@@ -7806,6 +7850,13 @@ async function startApp() {
   clearChatView();
   renderThreads();
 
+  // A device that boots already locked (session cookie gone, server session
+  // expired) never went through goSafe, so the unlocked tier's drafts, queued
+  // sends and cached rows would stay on disk indefinitely. Same promise as
+  // goSafe: a locked session deletes what the unlocked one left.
+  if (state.decoy && state.auth.pinSet) {
+    try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+  }
   // BEFORE the socket: restored outbox frames have to be in pendingSends by the
   // time the first 'open' fires, so the ordinary replay path sends them and
   // nothing needs a second delivery mechanism.

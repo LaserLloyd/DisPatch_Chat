@@ -54,7 +54,7 @@ test('contextMeterValues reads the documented gateway field names', () => {
   // test_parse_reply_keeps_context_budget_and_split_usage pins on the
   // backend side — the two halves of this contract must agree.
   assert.deepEqual(
-    contextMeterValues({ estimatedPromptTokens: 800, contextWindow: 262144 }),
+    contextMeterValues({ estimatedPromptTokens: 800, contextTokenBudget: 262144 }),
     { used: 800, window: 262144 });
 });
 
@@ -91,7 +91,7 @@ test('compactTokens is blank for non-numeric input', () => {
 });
 
 test('meterText renders used/window, or just used with no window', () => {
-  assert.equal(meterText({ estimatedPromptTokens: 15000, contextWindow: 262144 }), '15k/262.1k');
+  assert.equal(meterText({ estimatedPromptTokens: 15000, contextTokenBudget: 262144 }), '15k/262.1k');
   assert.equal(meterText({ estimatedPromptTokens: 500 }), '500');
   assert.equal(meterText(null), '');
 });

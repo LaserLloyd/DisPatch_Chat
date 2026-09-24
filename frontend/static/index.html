@@ -149,7 +149,7 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
-  <link rel="stylesheet" href="/static/theme.css?v=6" />
+  <link rel="stylesheet" href="/static/theme.css?v=7" />
   <link rel="stylesheet" href="/static/app.css?v=84" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
@@ -331,7 +331,7 @@
         </button>
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
-        <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking">
+        <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking" data-i18n-attr="aria-label=chat.model_chip">
           <div class="mp-row">
             <label for="mp-model" data-i18n="chat.model_picker_model">Model</label>
             <select id="mp-model"></select>
@@ -1137,6 +1137,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=98"></script>
+  <script type="module" src="/static/js/main.js?v=99"></script>
 </body>
 </html>

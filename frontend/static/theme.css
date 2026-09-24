@@ -68,10 +68,15 @@
   --code-card-chrome: #8b949e;
   --code-block-text:  #c9d1d9;
   /* Ink on a filled error plate (Delete, Stop, the attachment ×) and on a
-     filled warning plate (the reconnect card). Checked against the error and
-     warning fills of every standard theme. */
-  --on-error-fill:   #fff;
-  --on-warning-fill: #1a1a1a;
+     filled warning plate (the reconnect card). These follow the contract's
+     own on-fill inks: the white ink this used to carry measured 2.77:1 on the
+     #f87171 error fill of nine themes (3.03 on Electric Yellow), under even
+     the 3:1 UI floor, and #1a1a1a on LaserLloyd Light's #b4520c warning fill
+     was 3.44:1 — the comment that they had been "checked against every
+     standard theme" was not true (review 2026-09-24). --on-danger is 6.7:1 on
+     the same fill. */
+  --on-error-fill:   var(--on-danger);
+  --on-warning-fill: var(--on-warning);
 }
 
 /* ----------------------------------------------------------------------------
@@ -85,17 +90,16 @@
    3. Night contrast profile
    ----------------------------------------------------------------------------
    ui-theme.js sets data-contrast-profile="night" on <html> for a night theme.
-   The code card follows the theme's own code ground and syntax ink, and fill
-   labels use the theme's on-fill inks (black on Night Red's ember and orange
-   plates). Component-level night rules (name tints, callouts, the code-card
-   header chrome, the boot mark) live next to their components in app.css.
+   The code card follows the theme's own code ground and syntax ink (the fill
+   inks already follow the contract in every profile, see §2). Component-level
+   night rules (name tints, callouts, the code-card header chrome, the boot
+   mark) live next to their components in app.css.
 
-   Keyed on <html> only: a theme-gallery preview card carries data-palette
-   but not the profile, so a Night Red card previews its chrome, not this. */
+   Keyed on <html>. theme.js's gallery card() also stamps
+   data-contrast-profile on each preview card, so a Night Red card previews
+   its own code chrome as well. */
 :root[data-contrast-profile="night"] {
   --code-card-bg:     var(--code-bg);
   --code-card-chrome: var(--syn-comment);
   --code-block-text:  var(--syn-fg);
-  --on-error-fill:    var(--on-danger);
-  --on-warning-fill:  var(--on-warning);
 }

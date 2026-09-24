@@ -116,6 +116,10 @@ const DYNAMIC = [
   // entry here).
   { re: /^chat\.thinking_(off|low|medium|high|max|adaptive)$/,
     built: "main.js  t(`chat.thinking_${lvl}`)" },
+  // js/main.js  noticeMessageEl():  t(`msg.notice_level_${notice.level}`), the
+  // level set is notice.js's closed vocabulary (error | warn | ok | info).
+  { re: /^msg\.notice_level_(error|warn|ok|info)$/,
+    built: 'main.js  t(`msg.notice_level_${notice.level}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {

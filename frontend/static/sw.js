@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v122';  // v122: machine-posted alerts (failed runs,
+const CACHE = 'local-chat-v123';  // v123: (2026-09-24 review) js/store.js was the one
+  //   module missing from SHELL, so an offline cold start whose HTTP cache had
+  //   lost it got the worker's 503 and the boot veil never came down — the
+  //   exact case the offline-reading feature exists for. Also main.js 98→99,
+  //   store.js, modelchip.js, index.html, theme.css, locales.
+  // v122: machine-posted alerts (failed runs,
   //   watchdogs, missed pictures, failed image jobs) collapse to one muted
   //   line — new module js/notice.js (in SHELL), main.js 97→98, app.css 83→84,
   //   all eight locales (msg.notice).
@@ -230,6 +235,9 @@ const SHELL = [
   '/static/js/modelchip.js',
   // System-notice classifier (2026-09-24): pure module, imported by main.js.
   '/static/js/notice.js',
+  // Drafts / outbox / offline reading (IndexedDB). Statically imported by
+  // main.js — tests/shell-modules.test.js now asserts every js/*.js is here.
+  '/static/js/store.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

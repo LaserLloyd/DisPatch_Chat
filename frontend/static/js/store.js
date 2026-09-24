@@ -123,7 +123,15 @@ function openDb(factory) {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // privacy.js deletes this database while the tab is open. IndexedDB
+      // holds that delete as "blocked" until every connection closes, so
+      // without this the wipe waited for the tab to die — and every write in
+      // between still landed.
+      db.onversionchange = () => { try { db.close(); } catch { /* already gone */ } };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error || new Error('idb open failed'));
     req.onblocked = () => reject(new Error('idb open blocked'));
   });
