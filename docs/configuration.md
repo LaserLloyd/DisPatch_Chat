@@ -421,6 +421,56 @@ feature stays off entirely.
 Route: `GET /api/studioforge/status` → `{url, reachable, checked_at}`.
 403 in Safe Mode or with no PIN; 404 when disabled or unconfigured.
 
+### Tools (`<DATA_DIR>/tools.yaml`)
+
+Pages of your own in the left rail's **Tools** group, opened full-page. The
+file lives in the data dir (never in git); absent = no extra tools, malformed =
+logged and ignored (the app keeps running with the builtins only). The schema
+is closed — an unknown key rejects the file.
+
+```yaml
+tools:
+  - id: benchmark            # [a-z0-9-]{1,40}, unique, not a bot id
+    title: Benchmark Board
+    icon: 📊
+    kind: static             # static | url | builtin
+    root: /abs/path/results  # served read-only at /tools/<id>/
+    entry: report.html       # default index.html
+    enabled: true            # default true
+    safe: false              # true = also shown in Safe Mode
+    refresh:                 # optional, static only; FILE-ONLY
+      argv: [uv, run, crucibleforge, report]   # fixed argv, never a shell string
+      cwd: /abs/path         # default: root
+      timeout_s: 600         # default 300, max 3600 (timeout → rc 124)
+  - id: rig-panel
+    title: Rig
+    kind: url
+    url: http://192.0.2.5:8080/   # framed by the client; http(s) only
+  - id: deepseek-harness     # builtins: deepseek-harness, studioforge-panel,
+    kind: builtin            #   mail-panel, clients-panel
+    enabled: false           # switches the builtin OFF (its routes 404)
+```
+
+- **builtin** entries can only switch a pane *off*; no entry (or `enabled:
+  true`) leaves the env flags in charge.
+- **static** serving refuses anything outside the resolved root (symlinks
+  included), dotfiles, secret-shaped names (the Local Viewer's deny list) and
+  files over 64 MB — all as one uniform 404. HTML runs under `sandbox
+  allow-scripts allow-forms allow-popups` (no `allow-same-origin`). With a PIN
+  set, an unlocked browser asking for a page is redirected to a short-lived,
+  client-bound `/tools/_t/<ticket>/…` URL so the sandboxed page's own
+  stylesheets and scripts (which carry no cookie) still load.
+- **refresh** runs only for an unlocked operator (`POST
+  /api/tools/<id>/refresh`, 409 while running), `shell=False`, with every
+  `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PIN`/`*_PASSWORD` env name removed. The
+  Settings tab can edit titles/icons/enabled and add or remove static/url
+  tools, but can never introduce or change a `refresh` block.
+- Safe Mode sees only `safe: true` static/url tools, without paths or argv.
+
+Routes: `GET /api/tools`, `PUT /api/tools` (operator), `GET
+/api/tools/<id>/status`, `POST /api/tools/<id>/refresh` (operator), `GET
+/tools/<id>/{path}`. Full contract: `docs/design/2026-09-25-tools-plugins.md`.
+
 ## Everything else the code reads
 
 Rarely-touched settings, listed so that the documented set and the set the code

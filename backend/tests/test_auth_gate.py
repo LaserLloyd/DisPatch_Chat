@@ -107,6 +107,13 @@ DECOY_BLOCKED = [
     ("GET", "/api/local/ls?path=/tmp"),
     ("GET", "/api/local/roots"),
     ("PUT", "/api/local/config"),
+    # Tools (tools.yaml). Refresh + the write path are barred in the
+    # middleware; a tool page / status for a tool that is not `safe: true`
+    # (here: no such tool at all) is refused by the handler with the same 403.
+    ("PUT", "/api/tools"),
+    ("POST", "/api/tools/x/refresh"),
+    ("GET", "/tools/x/"),
+    ("GET", "/api/tools/x/status"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
     # The three avatar routes that used to live here moved to the INBOUND set
     # when on-box agents were given avatar management (they were documented in

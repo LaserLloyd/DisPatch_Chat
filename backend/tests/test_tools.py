@@ -1,0 +1,668 @@
+"""Tools: the tools.yaml manifest, static serving, refresh, builtin switches.
+
+Contract: docs/design/2026-09-25-tools-plugins.md. Most of this file is
+security assertions — a static tool serves bytes off the host's disk, and a
+refresh runs a process — so the interesting cases are the refusals: traversal,
+symlink escape, dotfiles, secret-shaped names, Safe-Mode callers, a UI that
+tries to introduce or change a refresh argv.
+
+Same hermetic style as the rest of tests/: throwaway data dir, nothing touches
+the live install. Run: cd backend && uv run pytest -q tests/test_tools.py
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import stat
+import sys
+import threading
+import time
+from dataclasses import replace
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import auth, config, localview, main, tools
+from app.database import Database
+
+PY = sys.executable
+
+
+@pytest.fixture
+def tools_env(tmp_path, monkeypatch):
+    """Isolated data dir + DB + a scratch site to serve. Yields
+    (make_client, site_dir)."""
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "CONFIG_PATH", data / "config.yaml")
+    monkeypatch.setattr(config, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(config, "FILES_DIR", data / "files")
+    monkeypatch.setattr(config, "LOG_DIR", data / "logs")
+    monkeypatch.setattr(config, "BACKUP_DIR", data / "backups")
+    monkeypatch.setattr(main, "MEDIA_DIR", data / "media")
+    monkeypatch.setattr(main, "FILES_DIR", data / "files")
+    monkeypatch.setattr(auth, "SECURITY_PATH", data / "security.yaml")
+    monkeypatch.setattr(auth, "RECOVERY_PATH", data / "RECOVERY-CODE.txt")
+    auth._sessions.clear()
+    auth._cache = None
+    auth._fail_count = 0
+    auth._fail_until = 0.0
+    tools._reset_state()
+    localview._reset_cache()
+    config._invalidate_bots_cache()
+
+    temp_db = Database(data / "chats.db")
+    monkeypatch.setattr(main, "db", temp_db)
+
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<h1>index</h1>")
+    (site / "report.html").write_text("<h1>report</h1><link rel=stylesheet href=css/s.css>")
+    (site / "css").mkdir()
+    (site / "css" / "s.css").write_text("h1{color:red}")
+    (site / "data.json").write_text('{"ok": true}')
+
+    clients: list[TestClient] = []
+
+    def make_client(client_addr=("testclient", 50000)) -> TestClient:
+        c = TestClient(main.app, client=client_addr)
+        c.__enter__()
+        clients.append(c)
+        return c
+
+    yield make_client, site
+
+    for c in clients:
+        c.__exit__(None, None, None)
+    tools._reset_state()
+    asyncio.run(temp_db.close())
+
+
+def _manifest(text: str) -> None:
+    (config.DATA_DIR / "tools.yaml").write_text(text)
+    tools._reset_state()
+
+
+def _bench(site, **extra) -> str:
+    lines = [
+        "tools:",
+        "  - id: bench",
+        "    title: Bench",
+        "    icon: '📊'",
+        "    kind: static",
+        f"    root: {site}",
+        "    entry: report.html",
+    ]
+    for k, v in extra.items():
+        lines.append(f"    {k}: {v}")
+    return "\n".join(lines) + "\n"
+
+
+def _unlocked(make_client):
+    c = make_client()
+    auth.set_pin("1234")
+    r = c.post("/api/auth/unlock", json={"pin": "1234"})
+    assert r.status_code == 200, r.text
+    return c
+
+
+def _decoy(make_client):
+    auth.set_pin("1234")
+    return make_client()
+
+
+# --------------------------------------------------------------------------- #
+# Manifest validation
+# --------------------------------------------------------------------------- #
+
+def _static(**kw):
+    d = {"id": "bench", "title": "Bench", "kind": "static", "root": "/tmp"}
+    d.update(kw)
+    return d
+
+
+@pytest.mark.parametrize("entry,field", [
+    (_static(id="Bench"), "id"),                     # uppercase
+    (_static(id="a" * 41), "id"),                    # too long
+    (_static(id="bad_id"), "id"),                    # underscore
+    (_static(id=""), "id"),
+    ({"id": "bench", "title": "B", "kind": "static"}, "root"),   # missing root
+    (_static(root="relative/dir"), "root"),          # relative root
+    (_static(root="/"), "root"),                     # whole filesystem
+    (_static(colour="red"), "colour"),               # unknown key
+    (_static(kind="plugin"), "kind"),
+    (_static(entry="../x.html"), "entry"),
+    (_static(entry="/abs.html"), "entry"),
+    (_static(entry=".hidden.html"), "entry"),
+    (_static(enabled="yes"), "enabled"),
+    (_static(refresh={"argv": "uv run x"}), "refresh.argv"),     # shell string
+    (_static(refresh={"argv": []}), "refresh.argv"),
+    (_static(refresh={"argv": ["x"], "timeout_s": 4000}), "refresh.timeout_s"),
+    (_static(refresh={"argv": ["x"], "cwd": "rel"}), "refresh.cwd"),
+    (_static(refresh={"argv": ["x"], "shell": True}), "refresh.shell"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "javascript:alert(1)"}, "url"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "ftp://x/"}, "url"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "http://x/", "refresh": {"argv": ["x"]}},
+     "refresh"),                                     # refresh is static-only
+    ({"id": "deepseek-harness", "kind": "builtin", "enabled": False, "title": "x"}, "title"),
+    ({"id": "not-a-builtin", "kind": "builtin"}, "id"),
+    (_static(id="mail-panel"), "id"),                # builtin id on a static tool
+    (_static(id="main"), "id"),                      # collides with a bot id
+])
+def test_validation_refuses(tools_env, entry, field):
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([entry], check_fs=False)
+    assert ei.value.index == 0
+    assert ei.value.field == field, str(ei.value)
+
+
+def test_validation_duplicate_id_names_second_index(tools_env):
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([_static(), _static()], check_fs=False)
+    assert ei.value.index == 1 and ei.value.field == "id"
+
+
+def test_validation_fs_checks_root_exists(tools_env, tmp_path):
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([_static(root=str(tmp_path / "nope"))], check_fs=True)
+    assert ei.value.field == "root"
+
+
+def test_validation_refuses_root_in_deny_tree(tools_env):
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([_static(root="/etc")], check_fs=True)
+    assert ei.value.field == "root"
+
+
+def test_validation_accepts_the_spec_example(tools_env, tmp_path):
+    out = tools.validate_tools([
+        _static(root=str(tmp_path), entry="report.html",
+                refresh={"argv": ["uv", "run", "x"], "cwd": str(tmp_path), "timeout_s": 600}),
+        {"id": "sf-web", "title": "SF", "icon": "🎛️", "kind": "url", "url": "http://192.0.2.5:8080/"},
+        {"id": "deepseek-harness", "kind": "builtin", "enabled": False},
+    ], check_fs=True)
+    assert [t.id for t in out] == ["bench", "sf-web", "deepseek-harness"]
+    assert out[0].refresh.timeout_s == 600
+    assert out[0].enabled is True and out[0].safe is False
+    assert out[2].enabled is False
+
+
+def test_absent_manifest_is_empty(tools_env):
+    assert tools.load_tools() == []
+
+
+def test_malformed_manifest_is_empty_and_app_stays_up(tools_env):
+    make_client, site = tools_env
+    _manifest("tools: [ {id: bench, kind: static\n  :::")
+    assert tools.load_tools() == []
+    _manifest("tools:\n  - id: BAD\n    kind: static\n")    # parses, fails validation
+    assert tools.load_tools() == []
+    c = make_client()
+    r = c.get("/api/tools")
+    assert r.status_code == 200
+    assert all(t["kind"] == "builtin" for t in r.json()["tools"])
+
+
+def test_manifest_reload_on_mtime_change(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    assert [t.id for t in tools.load_tools()] == ["bench"]
+    p = config.DATA_DIR / "tools.yaml"
+    p.write_text(_bench(site).replace("id: bench", "id: bench2"))
+    os.utime(p, (time.time() + 5, time.time() + 5))
+    assert [t.id for t in tools.load_tools()] == ["bench2"]
+
+
+# --------------------------------------------------------------------------- #
+# Static serving (no PIN: the app is open)
+# --------------------------------------------------------------------------- #
+
+def test_static_entry_and_nested_path(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = make_client()
+    r = c.get("/tools/bench/")
+    assert r.status_code == 200 and "report" in r.text
+    assert r.headers["content-type"].startswith("text/html")
+    r = c.get("/tools/bench/css/s.css")
+    assert r.status_code == 200 and "color:red" in r.text
+    assert r.headers["content-type"].startswith("text/css")
+    r = c.get("/tools/bench/index.html")
+    assert r.status_code == 200 and "index" in r.text
+
+
+def test_static_bare_id_redirects_to_slash(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = make_client()
+    r = c.get("/tools/bench", follow_redirects=False)
+    assert r.status_code in (307, 308)
+    assert r.headers["location"].endswith("/tools/bench/")
+
+
+def test_static_csp_and_cache_headers(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = make_client()
+    r = c.get("/tools/bench/")
+    csp = r.headers["content-security-policy"]
+    assert "sandbox allow-scripts allow-forms allow-popups" in csp
+    assert "allow-same-origin" not in csp
+    assert "frame-ancestors 'self'" in csp
+    assert "x-frame-options" not in {k.lower() for k in r.headers}
+    assert "no-cache" in r.headers["cache-control"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+    r = c.get("/tools/bench/css/s.css")
+    assert "sandbox" in r.headers["content-security-policy"]
+    assert "no-cache" in r.headers["cache-control"]
+
+
+@pytest.mark.parametrize("rel", [
+    "%2e%2e/secret.txt",
+    "css/%2e%2e/%2e%2e/secret.txt",
+    "..%2fsecret.txt",
+    ".hidden.html",
+    "sub/.git/config",
+    ".env",
+    "prod.env",
+    "server.pem",
+    "id_rsa",
+    "my-secret-notes.txt",
+    "chats.db",
+    "nope.html",
+    "escape.txt",          # symlink out of the root
+    "escdir/x.txt",        # symlinked dir out of the root
+])
+def test_static_refusals_are_uniform_404(tools_env, tmp_path, rel):
+    make_client, site = tools_env
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.txt").write_text("outside")
+    (tmp_path / "secret.txt").write_text("secret")
+    (site / ".hidden.html").write_text("h")
+    (site / "sub" / ".git").mkdir(parents=True)
+    (site / "sub" / ".git" / "config").write_text("c")
+    for n in (".env", "prod.env", "server.pem", "id_rsa", "my-secret-notes.txt", "chats.db"):
+        (site / n).write_text("s")
+    (site / "escape.txt").symlink_to(outside / "x.txt")
+    (site / "escdir").symlink_to(outside)
+    _manifest(_bench(site))
+    c = make_client()
+    r = c.get(f"/tools/bench/{rel}")
+    assert r.status_code == 404, (rel, r.status_code, r.text[:200])
+    assert "secret" not in r.text and "outside" not in r.text
+    assert r.json() == {"detail": "Not found"}
+
+
+def test_static_resolver_refuses_dotdot_directly(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    tool = tools.get_tool("bench")
+    for rel in ("../x", "a/../../x", "/etc/passwd", "a\\b", "a\x00b"):
+        with pytest.raises(tools.ToolNotFound):
+            tools.resolve_static(tool, rel)
+
+
+def test_static_unknown_disabled_and_url_tools_404(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, enabled="false") +
+              "  - id: web\n    title: W\n    kind: url\n    url: http://example.invalid/\n")
+    c = make_client()
+    assert c.get("/tools/bench/").status_code == 404
+    assert c.get("/tools/web/").status_code == 404
+    assert c.get("/tools/nope/").status_code == 404
+
+
+def test_static_unknown_type_downloads(tools_env):
+    make_client, site = tools_env
+    (site / "blob.bin").write_bytes(b"\x00\x01")
+    _manifest(_bench(site))
+    r = make_client().get("/tools/bench/blob.bin")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert "attachment" in r.headers["content-disposition"]
+
+
+def test_static_size_cap(tools_env, monkeypatch):
+    make_client, site = tools_env
+    monkeypatch.setattr(tools, "MAX_FILE_BYTES", 10)
+    (site / "big.txt").write_text("x" * 11)
+    _manifest(_bench(site))
+    assert make_client().get("/tools/bench/big.txt").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# With a PIN: the operator's framed page gets a cookieless ticket URL
+# --------------------------------------------------------------------------- #
+
+def test_pin_operator_entry_redirects_to_ticket_and_subresources_work(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = _unlocked(make_client)
+    r = c.get("/tools/bench/", follow_redirects=False)
+    assert r.status_code == 307
+    loc = r.headers["location"]
+    assert loc.startswith(tools.TICKET_PREFIX)
+    r = c.get(loc)
+    assert r.status_code == 200 and "report" in r.text
+    assert "sandbox allow-scripts" in r.headers["content-security-policy"]
+    # A sandboxed (opaque-origin) page's subresources carry NO cookie — the
+    # ticket path is what authenticates them.
+    base = loc.rsplit("/", 1)[0]
+    bare = make_client()
+    r = bare.get(base + "/css/s.css")
+    assert r.status_code == 200 and "color:red" in r.text
+    r = bare.get(base + "/data.json")
+    assert r.headers.get("access-control-allow-origin") == "*"
+    # Every guard still applies below the ticket.
+    (site / ".env").write_text("SECRET")
+    assert bare.get(base + "/.env").status_code == 404
+    assert bare.get(base + "/%2e%2e/x").status_code == 404
+    # A made-up ticket or one presented by another client is refused.
+    assert bare.get(tools.TICKET_PREFIX + "nope/report.html").status_code == 404
+    other = make_client(("203.0.113.9", 1))
+    assert other.get(base + "/css/s.css").status_code == 404
+
+
+def test_pin_decoy_cannot_reach_nonsafe_tool(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = _decoy(make_client)
+    for p in ("/tools/bench/", "/tools/bench/css/s.css", "/tools/nope/",
+              "/api/tools/bench/status"):
+        r = c.get(p)
+        assert r.status_code == 403, (p, r.status_code)
+        assert "report" not in r.text
+
+
+# --------------------------------------------------------------------------- #
+# GET /api/tools + Safe Mode
+# --------------------------------------------------------------------------- #
+
+def test_api_tools_operator_view(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, refresh="{argv: [echo, hi], timeout_s: 5}"))
+    c = make_client()                       # no PIN → open app → operator view
+    body = c.get("/api/tools").json()
+    assert body["path"] == str(config.DATA_DIR / "tools.yaml")
+    ids = [t["id"] for t in body["tools"]]
+    assert ids[:4] == ["deepseek-harness", "studioforge-panel", "mail-panel", "clients-panel"]
+    bench = next(t for t in body["tools"] if t["id"] == "bench")
+    assert bench["root"] == str(site) and bench["entry"] == "report.html"
+    assert bench["has_refresh"] is True
+    assert bench["refresh"]["argv"] == ["echo", "hi"]
+    feats = {t["id"]: t.get("builtin_feature") for t in body["tools"] if t["kind"] == "builtin"}
+    assert feats == {"deepseek-harness": "harness", "studioforge-panel": "studioforge",
+                     "mail-panel": "mail", "clients-panel": "practice"}
+
+
+def test_safe_tool_visible_in_safe_mode_stripped(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, refresh="{argv: [echo, hi]}")
+              + f"  - id: pub\n    title: Pub\n    kind: static\n    root: {site}\n    safe: true\n"
+              + f"    refresh: {{argv: [echo, x], cwd: {site}}}\n"
+              + "  - id: pubweb\n    title: PW\n    kind: url\n    url: http://example.invalid/\n"
+              + "    safe: true\n"
+              + f"  - id: offsafe\n    title: O\n    kind: static\n    root: {site}\n"
+              + "    safe: true\n    enabled: false\n")
+    c = _decoy(make_client)
+    r = c.get("/api/tools")
+    assert r.status_code == 200
+    body = r.json()
+    assert "path" not in body
+    assert [t["id"] for t in body["tools"]] == ["pub", "pubweb"]
+    for t in body["tools"]:
+        for banned in ("root", "refresh", "cwd", "argv"):
+            assert banned not in t
+        assert t["has_refresh"] is False
+    assert body["tools"][1]["url"] == "http://example.invalid/"
+    # The safe static tool is served to the Safe-Mode browser.
+    r = c.get("/tools/pub/")
+    assert r.status_code == 200 and "index" in r.text
+    assert c.get("/tools/pub/css/s.css").status_code == 200
+    st = c.get("/api/tools/pub/status")
+    assert st.status_code == 200 and "last_refresh" in st.json()
+    # ...but never its refresh or the write path.
+    assert c.post("/api/tools/pub/refresh").status_code == 403
+    assert c.put("/api/tools", json={"tools": []}).status_code == 403
+    assert c.get("/tools/offsafe/").status_code == 403
+
+
+def test_auth_status_features_tools(tools_env):
+    make_client, site = tools_env
+    c = _unlocked(make_client)
+    assert c.get("/api/auth/status").json()["features"]["tools"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Builtin switches
+# --------------------------------------------------------------------------- #
+
+def test_builtin_enabled_lookup(tools_env):
+    make_client, site = tools_env
+    assert tools.builtin_enabled("deepseek-harness") is None
+    _manifest("tools:\n  - {id: deepseek-harness, kind: builtin, enabled: false}\n"
+              "  - {id: mail-panel, kind: builtin}\n")
+    assert tools.builtin_enabled("deepseek-harness") is False
+    assert tools.builtin_enabled("mail-panel") is True
+    assert tools.builtin_enabled("clients-panel") is None
+
+
+def test_builtin_disabled_turns_harness_off(tools_env, monkeypatch):
+    make_client, site = tools_env
+    monkeypatch.setattr(main, "SETTINGS", replace(config.SETTINGS, harness_enabled=True))
+    c = _unlocked(make_client)
+    assert c.get("/api/auth/status").json()["features"]["harness"] is True
+    before = c.get("/api/harness/status").status_code
+    assert before != 404
+    _manifest("tools:\n  - {id: deepseek-harness, kind: builtin, enabled: false}\n")
+    assert c.get("/api/harness/status").status_code == 404
+    assert c.get("/api/auth/status").json()["features"]["harness"] is False
+    row = next(t for t in c.get("/api/tools").json()["tools"] if t["id"] == "deepseek-harness")
+    assert row["enabled"] is False and row["available"] is True
+
+
+@pytest.mark.parametrize("tool_id,feature,flag,path", [
+    ("studioforge-panel", "studioforge", "studioforge_enabled", "/api/studioforge/status"),
+    ("mail-panel", "mail", "mail_enabled", "/api/mail/status"),
+    ("clients-panel", "practice", "practice_enabled", "/api/practice/status"),
+])
+def test_builtin_disabled_turns_others_off(tools_env, monkeypatch, tool_id, feature, flag, path):
+    make_client, site = tools_env
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, **{flag: True, "studioforge_url": "http://127.0.0.1:9/"}))
+    c = _unlocked(make_client)
+    assert c.get("/api/auth/status").json()["features"][feature] is True
+    _manifest(f"tools:\n  - {{id: {tool_id}, kind: builtin, enabled: false}}\n")
+    assert c.get("/api/auth/status").json()["features"][feature] is False
+    assert c.get(path).status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Refresh
+# --------------------------------------------------------------------------- #
+
+def _refresh_manifest(site, code: str, timeout: int = 30) -> None:
+    import json
+    argv = json.dumps([PY, "-c", code])
+    _manifest(_bench(site, refresh=f"{{argv: {argv}, cwd: {site}, timeout_s: {timeout}}}"))
+
+
+def test_refresh_runs_fixed_argv(tools_env):
+    make_client, site = tools_env
+    _refresh_manifest(site, "import pathlib; pathlib.Path('report.html').write_text('<b>new</b>');"
+                            " print('done')")
+    c = make_client()
+    r = c.post("/api/tools/bench/refresh")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rc"] == 0 and "done" in body["stdout_tail"]
+    assert set(body) >= {"rc", "seconds", "stdout_tail", "stderr_tail"}
+    assert "new" in c.get("/tools/bench/").text
+    st = c.get("/api/tools/bench/status").json()
+    assert st["last_refresh"]["rc"] == 0 and st["refreshing"] is False
+    assert st["mtime"] is not None
+
+
+def test_refresh_env_is_scrubbed(tools_env, monkeypatch):
+    make_client, site = tools_env
+    monkeypatch.setenv("FOO_TOKEN", "t0k")
+    monkeypatch.setenv("BAR_API_KEY", "k3y")
+    monkeypatch.setenv("BAZ_SECRET", "s3c")
+    monkeypatch.setenv("MCP_PIN", "1111")
+    monkeypatch.setenv("HARMLESS_VALUE", "ok")
+    _refresh_manifest(site, "import os; print(sorted(k for k in os.environ if k in "
+                            "('FOO_TOKEN','BAR_API_KEY','BAZ_SECRET','MCP_PIN','HARMLESS_VALUE')))")
+    out = make_client().post("/api/tools/bench/refresh").json()["stdout_tail"]
+    assert "HARMLESS_VALUE" in out
+    for k in ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN"):
+        assert k not in out
+
+
+def test_refresh_timeout_is_rc_124(tools_env):
+    make_client, site = tools_env
+    _refresh_manifest(site, "import time; time.sleep(30)", timeout=1)
+    t0 = time.monotonic()
+    body = make_client().post("/api/tools/bench/refresh").json()
+    assert body["rc"] == 124
+    assert time.monotonic() - t0 < 15
+
+
+def test_refresh_409_while_running(tools_env):
+    make_client, site = tools_env
+    _refresh_manifest(site, "import time; time.sleep(2)")
+    c = make_client()
+    results = {}
+
+    def first():
+        results["first"] = c.post("/api/tools/bench/refresh").status_code
+
+    th = threading.Thread(target=first)
+    th.start()
+    deadline = time.monotonic() + 5
+    while not tools.is_refreshing("bench") and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert c.get("/api/tools/bench/status").json()["refreshing"] is True
+    assert c.post("/api/tools/bench/refresh").status_code == 409
+    th.join()
+    assert results["first"] == 200
+
+
+def test_refresh_404_without_refresh_block(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = make_client()
+    assert c.post("/api/tools/bench/refresh").status_code == 404
+    assert c.post("/api/tools/nope/refresh").status_code == 404
+
+
+def test_refresh_missing_binary_reports_rc(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, refresh="{argv: [/nonexistent/binary-xyz]}"))
+    body = make_client().post("/api/tools/bench/refresh").json()
+    assert body["rc"] == 127
+
+
+# --------------------------------------------------------------------------- #
+# PUT /api/tools
+# --------------------------------------------------------------------------- #
+
+def test_put_writes_atomically_0600(tools_env):
+    make_client, site = tools_env
+    c = _unlocked(make_client)
+    r = c.put("/api/tools", json={"tools": [
+        {"id": "bench", "title": "Bench", "icon": "📊", "kind": "static",
+         "root": str(site), "entry": "report.html"},
+        {"id": "deepseek-harness", "kind": "builtin", "enabled": False},
+    ]})
+    assert r.status_code == 200, r.text
+    p = config.DATA_DIR / "tools.yaml"
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+    assert [t.id for t in tools.load_tools()] == ["bench", "deepseek-harness"]
+    assert any(t["id"] == "bench" for t in r.json()["tools"])
+    assert tools.builtin_enabled("deepseek-harness") is False
+
+
+def test_put_roundtrips_get_output(tools_env):
+    """The Settings tab may send back what GET gave it (ToolOut rows, builtin
+    decoration included). Output-only keys are dropped, not refused."""
+    make_client, site = tools_env
+    _manifest(_bench(site, refresh="{argv: [echo, hi]}"))
+    c = _unlocked(make_client)
+    rows = c.get("/api/tools").json()["tools"]
+    for row in rows:
+        if row["id"] == "deepseek-harness":
+            row["enabled"] = False
+    r = c.put("/api/tools", json={"tools": rows})
+    assert r.status_code == 200, r.text
+    assert tools.builtin_enabled("deepseek-harness") is False
+    assert tools.get_tool("bench").refresh.argv == ("echo", "hi")
+
+
+def test_put_cannot_introduce_or_change_refresh(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, refresh="{argv: [echo, hi]}"))
+    c = _unlocked(make_client)
+    base = {"id": "bench", "title": "Bench", "kind": "static", "root": str(site)}
+    r = c.put("/api/tools", json={"tools": [{**base, "refresh": {"argv": ["rm", "-rf", "/"]}}]})
+    assert r.status_code == 422
+    assert r.json()["field"] == "refresh" and r.json()["index"] == 0
+    r = c.put("/api/tools", json={"tools": [
+        {**base, "id": "new", "refresh": {"argv": ["echo"]}}]})
+    assert r.status_code == 422 and r.json()["field"] == "refresh"
+    # Omitted = keep the stored block (the UI never sees argv as editable).
+    r = c.put("/api/tools", json={"tools": [{**base, "title": "Renamed"}]})
+    assert r.status_code == 200, r.text
+    t = tools.get_tool("bench")
+    assert t.title == "Renamed" and t.refresh.argv == ("echo", "hi")
+    # Sent back identical = fine.
+    r = c.put("/api/tools", json={"tools": [{**base, "refresh": {"argv": ["echo", "hi"]}}]})
+    assert r.status_code == 200, r.text
+
+
+def test_put_validation_422_names_index_and_field(tools_env):
+    make_client, site = tools_env
+    c = _unlocked(make_client)
+    r = c.put("/api/tools", json={"tools": [
+        {"id": "ok", "title": "O", "kind": "static", "root": str(site)},
+        {"id": "bad", "title": "B", "kind": "static", "root": "relative"},
+    ]})
+    assert r.status_code == 422
+    assert r.json()["index"] == 1 and r.json()["field"] == "root"
+    assert not (config.DATA_DIR / "tools.yaml").exists()
+
+
+def test_put_requires_operator_session(tools_env):
+    make_client, site = tools_env
+    auth.set_pin("1234")
+    c = make_client()
+    assert c.put("/api/tools", json={"tools": []}).status_code == 403
+    # A loopback on-box machine caller is not the operator either.
+    lo = make_client(("127.0.0.1", 5555))
+    assert lo.put("/api/tools", json={"tools": []}).status_code == 403
+    assert lo.post("/api/tools/bench/refresh").status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Status
+# --------------------------------------------------------------------------- #
+
+def test_status_url_tool_reports_reachable(tools_env, monkeypatch):
+    make_client, site = tools_env
+    _manifest("tools:\n  - id: web\n    title: W\n    kind: url\n    url: http://example.invalid/\n")
+    calls = []
+
+    async def fake_probe(url):
+        calls.append(url)
+        return True
+
+    monkeypatch.setattr(tools, "_probe_url", fake_probe)
+    st = make_client().get("/api/tools/web/status").json()
+    assert st["reachable"] is True and st["kind"] == "url"
+    assert calls == ["http://example.invalid/"]
+
+
+def test_status_unknown_tool_404(tools_env):
+    make_client, site = tools_env
+    assert make_client().get("/api/tools/nope/status").status_code == 404

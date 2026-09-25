@@ -79,6 +79,7 @@ from . import (
     practice_bridge,
     problem,
     reactions,
+    tools,
 )
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .database import Database, local_date, new_id, now_iso
@@ -562,6 +563,19 @@ async def media_security_headers(request: Request, call_next):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["X-Robots-Tag"] = "noindex"
+    # Tools (static pages from tools.yaml). Same contract as the Local Viewer:
+    # HTML runs script under an OPAQUE origin (never allow-same-origin, so a
+    # tool page cannot touch DisPatch's cookies or DOM); everything else is
+    # inert. `no-cache` because a refresh rewrites the page in place.
+    elif path.startswith("/tools/"):
+        html = response.headers.get("content-type", "").startswith("text/html")
+        response.headers["Content-Security-Policy"] = (
+            "sandbox allow-scripts allow-forms allow-popups; frame-ancestors 'self'"
+            if html else "default-src 'none'; sandbox; frame-ancestors 'self'")
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Robots-Tag"] = "noindex"
     # The app's own shell says in index.html that frame-ancestors is the
     # server's job, and the server did not do it. A header CSP is ADDITIVE to
     # the meta one, so this adds clickjacking protection without touching the
@@ -688,6 +702,10 @@ async def auth_gate(request: Request, call_next):
     # by the cookie-bearing stat call, client-bound, expiring). The route is
     # its own lock and fails closed — see localview.local_view.
     if path.startswith(localview.TICKET_PREFIX):
+        return await call_next(request)
+    # Tool frame tickets: the same capability model for a static tool's
+    # framed page (tools.tool_ticket_file is the only lock on this prefix).
+    if path.startswith(tools.TICKET_PREFIX):
         return await call_next(request)
 
     # Always-open: app shell, static assets, auth endpoints, health.
@@ -1906,6 +1924,17 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # of that promise.
                         "/local/", "/api/local")):
         return True
+    if path == "/api/tools" or path.startswith(("/api/tools/", "/tools/")):
+        # Tools (tools.yaml). Safe Mode may LIST (the route returns only
+        # `safe: true` static/url tools, stripped of paths and argv), read a
+        # tool's status, and GET a tool's pages — each handler answers a decoy
+        # 403 for any tool that is not safe, so the per-tool decision lives
+        # there. Refresh and the write path are operator-only, full stop.
+        if method not in ("GET", "HEAD"):
+            return True
+        if path == "/api/tools" or path.startswith("/tools/"):
+            return False
+        return not re.match(r"^/api/tools/[^/]+/status$", path)
     if path == "/api/reactions" or path.startswith("/api/reactions/"):
         # Safe Mode gets the reaction feature READ-ONLY, through the `safe`
         # flag — the same opt-in model as safe bots' avatars: it may list (the
@@ -7310,6 +7339,7 @@ async def auth_status(request: Request):
                       "studioforge": studioforge_available(),
                       "mail": mail_available(),
                       "practice": practice_available(),
+                      "tools": True,
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not cfg.pin_set) else {}),
@@ -10676,8 +10706,32 @@ _NO_PIN_MSG = ("Set a PIN first — this feature runs code and stays unavailable
                "until DisPatch has one.")
 
 
-def harness_available() -> bool:
+def _builtin_off(feature: str) -> bool:
+    """tools.yaml switched this builtin pane off (`enabled: false`). An explicit
+    False wins over the env flag; no entry, or `enabled: true`, changes nothing
+    (the manifest can switch a feature OFF, never force one on)."""
+    return tools.builtin_enabled(tools.FEATURE_TO_ID[feature]) is False
+
+
+def _harness_flag_on() -> bool:
     return SETTINGS.harness_enabled and auth.load().pin_set
+
+
+def _studioforge_flag_on() -> bool:
+    return (SETTINGS.studioforge_enabled and bool(SETTINGS.studioforge_url)
+            and auth.load().pin_set)
+
+
+def _mail_flag_on() -> bool:
+    return SETTINGS.mail_enabled and auth.load().pin_set
+
+
+def _practice_flag_on() -> bool:
+    return SETTINGS.practice_enabled and auth.load().pin_set
+
+
+def harness_available() -> bool:
+    return _harness_flag_on() and not _builtin_off("harness")
 
 
 def studioforge_available() -> bool:
@@ -10685,16 +10739,26 @@ def studioforge_available() -> bool:
     much as the flag: with no address there is nothing to frame, and the panel
     it points at has no authentication of its own, so the PIN gate is the only
     thing standing between a passer-by and the rig's admin UI."""
-    return (SETTINGS.studioforge_enabled and bool(SETTINGS.studioforge_url)
-            and auth.load().pin_set)
+    return _studioforge_flag_on() and not _builtin_off("studioforge")
 
 
 def mail_available() -> bool:
-    return SETTINGS.mail_enabled and auth.load().pin_set
+    return _mail_flag_on() and not _builtin_off("mail")
 
 
 def practice_available() -> bool:
-    return SETTINGS.practice_enabled and auth.load().pin_set
+    return _practice_flag_on() and not _builtin_off("practice")
+
+
+# tools.py lists the builtins with `available` = the feature exists on this
+# install regardless of the manifest switch (so the Settings toggle can say
+# "on, but not installed" instead of lying).
+tools.set_builtin_probes({
+    tools.FEATURE_TO_ID["harness"]: _harness_flag_on,
+    tools.FEATURE_TO_ID["studioforge"]: _studioforge_flag_on,
+    tools.FEATURE_TO_ID["mail"]: _mail_flag_on,
+    tools.FEATURE_TO_ID["practice"]: _practice_flag_on,
+})
 
 
 # --------------------------------------------------------------------------- #
@@ -10705,7 +10769,7 @@ def practice_available() -> bool:
 
 
 def _require_harness(request: Request) -> None:
-    if not SETTINGS.harness_enabled:
+    if not SETTINGS.harness_enabled or _builtin_off("harness"):
         raise HTTPException(404, "Harness disabled")
     if not auth.load().pin_set:
         raise HTTPException(403, _NO_PIN_MSG)
@@ -10979,7 +11043,8 @@ def _require_studioforge(request: Request) -> None:
     """404 when the feature is off or unconfigured (an install that was never
     told the panel's address must not even admit the route exists), 403 with no
     PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
-    if not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url:
+    if (not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url
+            or _builtin_off("studioforge")):
         raise HTTPException(404, "StudioForge panel disabled")
     if not auth.load().pin_set:
         raise HTTPException(403, _NO_PIN_MSG)
@@ -11073,7 +11138,7 @@ def _require_mail(request: Request) -> None:
     """404 when the feature is off (no MailForge UI runtime files found and
     not forced on), 403 with no PIN, 403 for a Safe-Mode session. Mirrors
     _require_harness/_require_studioforge."""
-    if not SETTINGS.mail_enabled:
+    if not SETTINGS.mail_enabled or _builtin_off("mail"):
         raise HTTPException(404, "Emails panel disabled")
     if not auth.load().pin_set:
         raise HTTPException(403, _NO_PIN_MSG)
@@ -11104,7 +11169,7 @@ async def mail_status(request: Request):
 def _require_practice(request: Request) -> None:
     """404 when the feature is off (no PIN file found and not forced on), 403
     with no PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
-    if not SETTINGS.practice_enabled:
+    if not SETTINGS.practice_enabled or _builtin_off("practice"):
         raise HTTPException(404, "Clients panel disabled")
     if not auth.load().pin_set:
         raise HTTPException(403, _NO_PIN_MSG)
@@ -12051,6 +12116,11 @@ app.include_router(dashboard_routes.router)
 # full-access gate (localview._require_full_access), and _decoy_blocked bars
 # the prefixes one layer earlier — both, deliberately.
 app.include_router(localview.router)
+# Tools: /api/tools* + /tools/<id>/* (static pages from <DATA_DIR>/tools.yaml).
+# Each handler decides operator vs Safe Mode itself (a decoy may see only
+# `safe: true` tools); _decoy_blocked bars refresh + the write path one layer
+# earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
+app.include_router(tools.router)
 # Jobs board (added 2026-09-14). Mounted only when the feature flag is
 # set — when disabled, every /api/jobs/* route returns 404 (the router
 # itself is not registered, so a sessionless caller never sees an empty
