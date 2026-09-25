@@ -202,9 +202,11 @@ A bot with `agent:` dispatches its threads' turns as
 ## The legacy prefix
 
 `api.legacy_prefix` exists so an app can take over an API that external
-callers already use. The Job Board keeps `/api/jobs`: the scout agent's
-`dispatch-jobs` skill and the daily sweep cron call it sessionless from
-loopback, and they did not have to change. Both mounts share one router, one
+callers already use. The Job Board keeps `/api/jobs`: the `dispatch-jobs`
+CLI (`~/.local/bin/dispatch-jobs`, documented in the shared OpenClaw
+`dispatch` skill), the scout agent's own brief
+(the `AGENTS.md` in its OpenClaw workspace) and the daily sweep cron call it
+sessionless from loopback, and they did not have to change. Both mounts share one router, one
 gate and one on/off switch.
 
 ## In the rail: `/api/tools`

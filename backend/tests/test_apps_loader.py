@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import os
 import sys
 import textwrap
@@ -493,6 +494,31 @@ def test_data_dir_app_needs_trusted(env):
     assert make_client().get("/api/apps/dd-test/ping").json()["pong"] is True
     # Its static root lives under DATA_DIR and is still served (trusted code).
     assert make_client().get("/apps/dd-test/").status_code == 200
+
+
+def test_untrusted_data_dir_app_is_logged_once(env, caplog):
+    repo, _, _ = env
+    _write_app(config.DATA_DIR / "apps", "untrusted-test")
+    _manifest_rows("tools:\n  - {id: untrusted-test, kind: app, enabled: true}\n")
+    caplog.set_level(logging.WARNING, logger="local-chat.apps")
+    assert "untrusted-test" not in [m.id for m in apps_loader.discover(repo_dir=repo)]
+    hits = [r for r in caplog.records
+            if r.levelno == logging.WARNING and "untrusted-test" in r.getMessage()]
+    assert len(hits) == 1, [r.getMessage() for r in hits]
+    assert "trusted: true" in hits[0].getMessage()
+    # Trusted: loads, and says nothing about trust.
+    caplog.clear()
+    _manifest_rows("tools:\n  - {id: untrusted-test, kind: app, trusted: true}\n")
+    assert "untrusted-test" in [m.id for m in apps_loader.discover(repo_dir=repo)]
+    assert "lacks" not in caplog.text
+
+
+def test_untrusted_row_without_a_package_is_quiet(env, caplog):
+    repo, _, _ = env
+    _manifest_rows("tools:\n  - {id: nopkg-test, kind: app, enabled: true}\n")
+    caplog.set_level(logging.WARNING, logger="local-chat.apps")
+    apps_loader.discover(repo_dir=repo)
+    assert "nopkg-test" not in caplog.text
 
 
 def test_data_dir_app_cannot_shadow_a_repo_app(env, caplog):

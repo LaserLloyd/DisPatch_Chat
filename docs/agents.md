@@ -250,8 +250,9 @@ to the existing job row.
 
 **`/api/jobs` still works.** Since the board became an app (2026-09-25) its
 API is mounted twice, identically: at `/api/apps/jobboard/…` and at the
-legacy `/api/jobs/…`. The scout agent's `dispatch-jobs` skill and the daily
-sweep cron keep calling `/api/jobs/…` exactly as before — sessionless, from
+legacy `/api/jobs/…`. The `dispatch-jobs` CLI (`~/.local/bin/dispatch-jobs`,
+documented in the shared OpenClaw `dispatch` skill), the scout agent's brief
+(the `AGENTS.md` in its OpenClaw workspace) and the daily sweep cron keep calling `/api/jobs/…` exactly as before — sessionless, from
 loopback, with or without a PIN — and nothing about their requests or the
 responses changed. New callers may use either prefix.
 

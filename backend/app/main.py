@@ -1742,8 +1742,8 @@ _INBOUND_AVATAR_POOL_RE = re.compile(
 
 # Apps (docs/design/2026-09-25-apps.md) — the Job Board first among them. A
 # MOUNTED app's whole API, at /api/apps/<id> and at its manifest's legacy
-# prefix (the board's /api/jobs, which the scout agent's `dispatch-jobs` skill
-# and the daily sweep cron call from loopback), is on the machine-inbound
+# prefix (the board's /api/jobs, which the `dispatch-jobs` CLI, the scout
+# agent and the daily sweep cron call from loopback), is on the machine-inbound
 # surface: `apps_loader.is_inbound`. That replaces the hand-kept /api/jobs
 # allowlist that lived here (2026-09-14..25, grown one 403 at a time). The
 # per-route decision is the app's own ctx.require_access (operator OR on-box

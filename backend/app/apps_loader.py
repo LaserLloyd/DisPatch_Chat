@@ -276,9 +276,17 @@ def discover(repo_dir: Path | None = None) -> list[Manifest]:
                 if m is not None:
                     found[m.id] = m
     for row in tools.load_tools():
-        if row.kind != "app" or not row.trusted:
+        if row.kind != "app":
             continue
         d = data_apps_dir() / row.id
+        if not row.trusted:
+            # A package is on disk and named in tools.yaml, but nobody said it
+            # may run. Skipping it is right; skipping it SILENTLY left the
+            # operator guessing why the app never appeared.
+            if row.id not in found and (d / MANIFEST).is_file():
+                log.warning("app %s: %s exists but its tools.yaml row lacks "
+                            "`trusted: true` — data-dir app not loaded", row.id, d / MANIFEST)
+            continue
         if not (d / MANIFEST).is_file():
             log.warning("app %s: trusted in tools.yaml but %s has no %s", row.id, d, MANIFEST)
             continue

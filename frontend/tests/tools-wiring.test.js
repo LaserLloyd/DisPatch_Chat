@@ -203,9 +203,11 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v132 (desktop Tools button + popup)', () => {
+test('the sw.js CACHE is local-chat-v133 (apps review round)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v133: app hints keyed by app+thread, Safe-Mode guard on an app's
+  // open-thread (main.js 108→109, index.html).
   // v132: the desktop rail's Tools group is one button with a popup (tools.js
   // 5→6, menubots.js 1→2, main.js 107→108, app.css 89→90, index.html, every
   // locale).
@@ -214,7 +216,7 @@ test('the sw.js CACHE is local-chat-v132 (desktop Tools button + popup)', () => 
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v132');
+  assert.equal(m[1], 'local-chat-v133');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
@@ -300,4 +302,65 @@ test('the app tests are collected by npm test', () => {
     assert.match(pkg.scripts[script], /"\.\.\/apps\/\*\/tests\/\*\.test\.js"/, `${script} collects apps/*/tests`);
   }
   assert.ok(existsSync(join(REPO, 'apps', 'jobboard', 'tests')));
+});
+
+// -----------------------------------------------------------------------------
+// Review round (v133): openThreadFromApp, run for real. Its three functions
+// are lifted out of main.js verbatim and evaluated against stubs — the whole
+// of main.js cannot be imported here (see the header), but these are pure
+// enough that the behaviour, not just the text, can be pinned.
+// -----------------------------------------------------------------------------
+
+function appOpener({ decoy = false, bots = [], threads = [], apps = {} } = {}) {
+  const hintKeyDecl = /const hintKey = \([^;]+;/.exec(MAIN);
+  assert.ok(hintKeyDecl, 'main.js declares hintKey');
+  const src = [
+    hintKeyDecl[0],
+    'const pendingHints = new Map();',
+    fnBody(MAIN, 'appThreadAllowed') + '\n}',
+    fnBody(MAIN, 'openThreadFromApp') + '\n}',
+    'return { openThreadFromApp, pendingHints, hintKey };',
+  ].join('\n');
+  const opened = [];
+  const state = { decoy, bots, threads, activeThreadId: null };
+  const make = new Function('state', 'appForBot', 'openThread', 'syncAppHook', 'isMobile', 'navigate', src);
+  const api = make(state, (b) => apps[b] || null, (id, o) => opened.push([id, o]), () => {}, () => false, () => {});
+  return { ...api, opened, state };
+}
+
+test('an app hint is keyed by app AND thread, so another app on the same bot cannot consume it', () => {
+  const o = appOpener({ apps: { scout: { id: 'jobboard' } } });
+  o.openThreadFromApp('thr-1', { botId: 'scout', hint: { job_id: 'j-1' }, appId: 'jobboard' });
+  assert.deepEqual(o.pendingHints.get('jobboard|thr-1'), { job_id: 'j-1' });
+  assert.equal(o.pendingHints.get('otherapp|thr-1'), undefined, "app B's hook sees nothing");
+  assert.equal(o.pendingHints.get('thr-1'), undefined, 'no bare thread-id key any more');
+  assert.deepEqual(o.opened, [['thr-1', { botId: 'scout' }]]);
+  // With no appId (an older caller), the bot's app is the owner.
+  o.openThreadFromApp('thr-2', { botId: 'scout', hint: { job_id: 'j-2' } });
+  assert.deepEqual(o.pendingHints.get('jobboard|thr-2'), { job_id: 'j-2' });
+  // syncAppHook looks the hint up — and clears it — under the resolved app id.
+  const sync = fnBody(MAIN, 'syncAppHook');
+  assert.match(sync, /pendingHints\.get\(hintKey\(app\.id, th\.id\)\)/);
+  assert.match(sync, /pendingHints\.delete\(hintKey\(app\.id, th\.id\)\)/);
+  // Both callers name the app.
+  assert.match(fnBody(TOOLS, 'onAppMessage'), /deps\.openThread\(id, \{[^}]*appId: tool\.id \}\)/);
+  assert.match(sync, /openThreadFromApp\(id, \{[^}]*appId: app\.id \}\)/);
+});
+
+test('Safe Mode: an app may only open a thread whose bot is in the (safe) roster', () => {
+  const safe = appOpener({ decoy: true, bots: [{ id: 'alpha' }],
+    threads: [{ id: 'thr-a', bot_id: 'Alpha' }, { id: 'thr-s', bot_id: 'scout' }] });
+  safe.openThreadFromApp('thr-s', { botId: 'scout', hint: { x: 1 }, appId: 'jobboard' });
+  safe.openThreadFromApp('thr-unknown', { botId: 'scout', appId: 'jobboard' });
+  safe.openThreadFromApp('thr-unknown', { appId: 'jobboard' });
+  // A thread known to belong to a hidden bot is refused even if the app claims a safe one.
+  safe.openThreadFromApp('thr-s', { botId: 'alpha', appId: 'jobboard' });
+  assert.deepEqual(safe.opened, [], 'nothing opened for a bot this session cannot see');
+  assert.equal(safe.pendingHints.size, 0, 'and no hint was parked');
+  safe.openThreadFromApp('thr-a', { botId: null, appId: 'x' });
+  assert.deepEqual(safe.opened, [['thr-a', { botId: null }]], 'the thread’s own bot is safe (case-blind)');
+  // Unlocked: unchanged.
+  const open = appOpener({ decoy: false, bots: [], threads: [] });
+  open.openThreadFromApp('thr-s', { botId: 'scout', appId: 'jobboard' });
+  assert.deepEqual(open.opened, [['thr-s', { botId: 'scout' }]]);
 });

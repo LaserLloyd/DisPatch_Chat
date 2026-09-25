@@ -5907,7 +5907,10 @@ function wireClientsView() {
 // thread works exactly as it would without it — never fatal.
 let appHook = null;       // {key, appId, threadId, unmount, onFrame} while mounted
 let appHookSeq = 0;       // bumped on every (un)mount; a slow import that lost the race never mounts
-const pendingHints = new Map();   // threadId -> hint from the app that opened it
+const pendingHints = new Map();   // `${appId}|${threadId}` -> hint from the app that opened it
+// Keyed by app AND thread: two apps may serve the same bot, and a hint is data
+// for the hook of the app that sent it — app B's hook must never consume it.
+const hintKey = (appId, threadId) => `${appId}|${threadId}`;
 
 function hookUrl(app) {
   const url = typeof app.thread_hook === 'string' ? app.thread_hook : '';
@@ -5936,12 +5939,12 @@ function syncAppHook() {
   const app = th && !state.decoy ? appForBot(th.bot_id) : null;
   const url = app && app.thread_hook ? hookUrl(app) : null;
   const key = url ? `${app.id}|${th.id}|${url}` : null;
-  const hint = key ? pendingHints.get(th.id) : undefined;
+  const hint = key ? pendingHints.get(hintKey(app.id, th.id)) : undefined;
   if (key && appHook && appHook.key === key && hint === undefined) return;
   if (!key && !appHook) return;
   unmountAppHook();
   if (!key) return;
-  pendingHints.delete(th.id);
+  pendingHints.delete(hintKey(app.id, th.id));
   const seq = appHookSeq;
   const host = dom['app-thread-host'];
   const threadId = th.id;
@@ -5966,7 +5969,7 @@ function syncAppHook() {
       t: sdk.t,
       dateTime: sdk.dateTime,
       hint: hint || null,
-      openThread: (id, opts = {}) => openThreadFromApp(id, { botId: app.bot_id || null, hint: opts.hint || null }),
+      openThread: (id, opts = {}) => openThreadFromApp(id, { botId: app.bot_id || null, hint: opts.hint || null, appId: app.id }),
       toast,
     });
     if (seq !== appHookSeq) {
@@ -5991,13 +5994,33 @@ function dispatchAppFrame(frame) {
   }
 }
 
+/** May an app open thread `id` in this mode? Unlocked: yes. Safe Mode
+ *  (state.decoy): only when the thread's bot — or, for a thread not in the
+ *  loaded list, the app's own bot — is in state.bots, which the server has
+ *  already filtered down to the safe roster. Bot ids compare case-blind. */
+function appThreadAllowed(id, botId) {
+  if (!state.decoy) return true;
+  const th = state.threads.find((x) => x.id === id);
+  const owner = (th && th.bot_id) || botId;
+  if (!owner) return false;
+  const o = String(owner).toLowerCase();
+  return state.bots.some((b) => String(b.id).toLowerCase() === o);
+}
+
 /** An app asked for one of its threads (the pane's openThread(), or a hook's).
  *  tools.js has already closed the pane and handed the previous chat back;
  *  this opens the thread over it, with the app's hint for its hook. */
-function openThreadFromApp(id, { botId = null, hint = null } = {}) {
+function openThreadFromApp(id, { botId = null, hint = null, appId = null } = {}) {
   if (!id) return;
-  if (hint) pendingHints.set(id, hint);
-  else pendingHints.delete(id);
+  // Safe Mode: only a thread whose bot this session can already see. No safe
+  // app ships today, so this is belt-and-braces — an app pane is not the
+  // place a locked tablet should learn a hidden thread exists.
+  if (!appThreadAllowed(id, botId)) return;
+  const owner = appId || (botId && appForBot(botId) ? appForBot(botId).id : null);
+  if (owner) {
+    if (hint) pendingHints.set(hintKey(owner, id), hint);
+    else pendingHints.delete(hintKey(owner, id));
+  }
   // Already on screen: openThread() will not re-render the header, so ask
   // the hook to pick the hint up directly.
   if (state.activeThreadId === id) syncAppHook();

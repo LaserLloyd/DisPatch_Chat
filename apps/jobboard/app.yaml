@@ -8,7 +8,7 @@ icon: clipboard
 safe: false                     # operator only; Safe Mode never sees it
 order: 50
 api:
-  # The scout agent's `dispatch-jobs` skill and the daily sweep cron call
+  # The `dispatch-jobs` CLI, the scout agent and the daily sweep cron call
   # /api/jobs/... sessionless from loopback — keep it mounted there too.
   legacy_prefix: /api/jobs
 bot:

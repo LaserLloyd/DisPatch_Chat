@@ -254,16 +254,14 @@ PANES = [
     {"key": "bots", "view": "bots", "content": "#bot-list", "open_thread": False},
     {"key": "threads", "view": "threads", "content": "#threads", "open_thread": False},
     {"key": "chat", "view": "chat", "content": "#messages", "open_thread": True},
-    {"key": "jobs", "view": "jobs", "content": "[data-jobs-root]", "open_thread": False},
 ]
 
 
 def goto_view(page, view: str, open_thread: bool) -> bool:
     """Put the app on one mobile tab, opening a conversation when asked.
 
-    Returns False when the pane is not reachable on this build (the Jobs tab is
-    hidden unless JOBS_ENABLED and a jobboard bot exist), which is a skip, not
-    a failure.
+    Returns False when the pane is not reachable on this build, which is a
+    skip, not a failure.
     """
     try:
         tab = page.query_selector(f'.mobile-tabs button[data-view="{view}"]:not(.hidden)')

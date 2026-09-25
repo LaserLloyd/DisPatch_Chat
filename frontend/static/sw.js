@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v132';  // v132: the desktop rail's Tools group
+const CACHE = 'local-chat-v133';  // v133: apps review round — an app's
+  // thread hint is keyed by app AND thread (app B's hook can no longer eat
+  // app A's hint), and in Safe Mode an app's open-thread is ignored unless
+  // the thread's bot is in the session's (safe) roster. main.js 108→109,
+  // index.html.
+  // v132: the desktop rail's Tools group
   // is ONE button with a popup menu (a row per tool, then the parked bots
   // under a rule); the phone Bots page keeps the tile grid. The old ⌥
   // parked-bots button is gone — its #tools-menu is now that popup.
