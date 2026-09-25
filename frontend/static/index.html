@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=85" />
+  <link rel="stylesheet" href="/static/app.css?v=86" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -219,6 +219,11 @@
     <!-- Bot sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="bot-list" id="bot-list"></div>
+      <!-- Tools group (js/tools.js): the four builtin panes plus anything in
+           the data dir's tools.yaml, one tile each, under the roster. Its own
+           container, not #bot-list, so renderSidebarInner's wipe of the roster
+           and the drag-reorder indices never touch it. Hidden while empty. -->
+      <nav class="tool-list" id="tool-list" aria-label="Tools" data-i18n-attr="aria-label=nav.tools" hidden></nav>
       <!-- The rail buttons, grouped so a phone can lay them out as ONE ROW of
            icons instead of a stack of full-width bars. The wrapper is
            `display: contents` only where neither layout needs it; above the
@@ -244,43 +249,13 @@
       </div>
     </nav>
 
-    <!-- Operator tools popover: the DeepSeek Harness and StudioForge used to
-         sit in the rail as more avatar buttons. Unlocked, that made the rail
-         read as clutter rather than navigation, so they collapse into one ⌥
-         button that opens this menu (position:fixed so it escapes the rail's
-         overflow clip, closed by the next outside click).
-
-         It lives OUTSIDE #bot-list on purpose. renderSidebarInner() clears that
-         container on every repaint, and these rows carry the live service dots
-         that renderHarness/renderStudioForge patch in place — inside the
-         rail they would be wiped mid-flight. The updaters were
-         re-scoped from #bot-list to this menu in the same change; a row here and
-         a querySelector there must move together or the dots silently freeze. -->
+    <!-- ⌥ popover: bots parked here from Settings → Bots. It used to carry
+         the four operator tools too; those are tiles in the rail's Tools
+         group now (#tool-list), so this holds parked bots only and its button
+         shows only when something is parked. position:fixed so it escapes the
+         rail's overflow clip; lives outside #bot-list because
+         renderSidebarInner() clears that container on every repaint. -->
     <div class="menu tools-menu" id="tools-menu" role="menu" aria-labelledby="tools-btn" hidden>
-      <button class="tools-item" id="tools-harness" role="menuitem" type="button" data-i18n-attr="aria-label=harness.sidebar_aria" hidden>
-        <span class="bot-avatar terminal-avatar harness-avatar" aria-hidden="true">dsh</span>
-        <span class="tools-item-label" data-i18n="harness.name">DeepSeek Harness</span>
-        <span class="bot-status-dot terminal-sidedot harness-sidedot"></span>
-      </button>
-      <button class="tools-item" id="tools-studioforge" role="menuitem" type="button" data-i18n-attr="aria-label=studioforge.sidebar_aria" hidden>
-        <span class="bot-avatar terminal-avatar studioforge-avatar" aria-hidden="true">SF</span>
-        <span class="tools-item-label" data-i18n="studioforge.name">StudioForge</span>
-        <span class="bot-status-dot terminal-sidedot studioforge-sidedot"></span>
-      </button>
-      <button class="tools-item" id="tools-mail" role="menuitem" type="button" data-i18n-attr="aria-label=mail.sidebar_aria" hidden>
-        <span class="bot-avatar terminal-avatar mail-avatar" aria-hidden="true">✉</span>
-        <span class="tools-item-label" data-i18n="mail.name">Emails</span>
-        <span class="bot-status-dot terminal-sidedot mail-sidedot"></span>
-      </button>
-      <button class="tools-item" id="tools-clients" role="menuitem" type="button" data-i18n-attr="aria-label=clients.sidebar_aria" hidden>
-        <span class="bot-avatar terminal-avatar clients-avatar" aria-hidden="true">👥</span>
-        <span class="tools-item-label" data-i18n="clients.name">Clients</span>
-        <span class="bot-status-dot terminal-sidedot clients-sidedot"></span>
-      </button>
-      <!-- Bots parked here from Settings → Bots (the ⌥ badge). Unlike the
-           rows above these are rebuilt on every sidebar repaint by
-           renderMenuBots(), because they carry no dot that is patched in place.
-           The separator hides itself when either half is empty. -->
       <div class="tools-sep" id="tools-bots-sep" role="separator" hidden></div>
       <div id="tools-bots"></div>
     </div>
@@ -611,6 +586,41 @@
         </div>
         <div class="clients-job-strip hidden" id="clients-job-strip" aria-live="polite"></div>
       </div>
+
+      <!-- Generic tool pane (js/tools.js): ONE view, reused for every static /
+           url tool from tools.yaml. Same terminal-view chrome as the builtin
+           panes above; opening it puts body.tool-full on, so it fills the
+           content column with only the rail beside it.
+           The frame's sandbox is rewritten per tool before its src is set —
+           static pages get scripts/forms/popups and NO allow-same-origin (they
+           cannot reach DisPatch's cookies or DOM); url tools add
+           allow-same-origin because they are another origin anyway. The
+           default here is the strict one, so the frame is never unsandboxed.
+           allow="" drops every permission-policy feature. -->
+      <div class="terminal-view tool-view hidden" id="tool-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini tool-avatar-mini" id="tool-icon" aria-hidden="true"></span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" id="tool-title"></div>
+            <div class="muted terminal-subtitle" id="tool-updated" aria-live="polite"></div>
+          </div>
+          <button class="btn-secondary tool-refresh hidden" id="tool-refresh" type="button" title="Regenerate this page now" data-i18n-attr="title=tools.refresh_title" data-i18n="tools.refresh">↻ Refresh</button>
+          <a class="icon-btn ghost" id="tool-open" href="#" target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab" data-i18n-attr="title=tools.open_tab;aria-label=tools.open_tab">↗</a>
+          <button class="icon-btn ghost" id="tool-close" type="button" title="Close tool" aria-label="Close tool" data-i18n-attr="title=tools.close;aria-label=tools.close">✕</button>
+        </header>
+        <details class="tool-error hidden" id="tool-error">
+          <summary id="tool-error-summary"></summary>
+          <pre class="tool-error-text" id="tool-error-text"></pre>
+        </details>
+        <div class="terminal-body tool-body">
+          <iframe class="tool-frame hidden" id="tool-frame" title="Tool page" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" allow=""></iframe>
+          <div class="harness-note tool-note hidden" id="tool-note">
+            <p id="tool-note-text"></p>
+            <p class="muted" id="tool-note-hint"></p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Job board host. A SIBLING of #chatview (not a child), so the board has
@@ -664,6 +674,7 @@
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
+        <button class="settings-tab admin-only" id="stab-tools" role="tab" data-tab="tools" aria-selected="false" aria-controls="spane-tools" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="tools.settings_tab">Tools</span></button>
         <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
         <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
@@ -767,6 +778,9 @@
       </section>
 
       <!-- ---- Security & PIN ---- -->
+      <!-- ---- Tools (admin-only; js/tools.js builds the table) ---- -->
+      <section class="settings-pane hidden tools-pane" id="spane-tools" role="tabpanel" aria-labelledby="stab-tools" tabindex="0"></section>
+
       <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
         <p class="muted modal-hint" id="sec-status-line"></p>
         <div class="sec-body">
@@ -827,6 +841,9 @@
         <div class="settings-actions hidden" data-tab="health" id="sfoot-health"></div>
         <div class="settings-actions hidden" data-tab="ai">
           <button class="btn-primary" id="llm-save" data-i18n="llm.save">Save &amp; chat</button>
+        </div>
+        <div class="settings-actions hidden" data-tab="tools">
+          <button class="btn-primary" id="tools-save" data-i18n="tools.save">Save tools</button>
         </div>
         <div class="settings-actions hidden" data-tab="security">
           <button class="btn-secondary danger-text" id="sec-remove" hidden data-i18n="security.remove_pin">Remove PIN</button>
@@ -1137,6 +1154,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=101"></script>
+  <script type="module" src="/static/js/main.js?v=102"></script>
 </body>
 </html>

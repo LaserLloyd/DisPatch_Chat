@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=28';
+import { api, setOnLocked } from './api.js?v=29';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
-import { installChecklists, applyChecklistState } from './checklist.js?v=5';
+import { installChecklists, applyChecklistState } from './checklist.js?v=6';
 import { classifyNotice } from './notice.js?v=2';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,11 +21,11 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=18';
+} from './reactions.js?v=19';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=8';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=5';
-import { mountJobs, unmountJobs } from './jobs.js?v=8';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=9';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=6';
+import { mountJobs, unmountJobs } from './jobs.js?v=9';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=10';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -41,6 +41,10 @@ import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=2';
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
+import {
+  loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
+  openFromHash, mountToolsSettings, toolsSettingsDirty,
+} from './tools.js?v=1';
 import { renderLinkRail, linksSection } from './links.js?v=6';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
@@ -202,7 +206,7 @@ async function refreshUnread() {
 const $ = (id) => document.getElementById(id);
 const dom = {};
 ['app', 'bot-list', 'manage-bots', 'theme-toggle',
- 'tools-menu', 'tools-harness', 'tools-studioforge', 'tools-mail', 'tools-clients',
+ 'tools-menu',
  'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
@@ -221,7 +225,7 @@ const dom = {};
  // Settings tab container. The panes for Reactions and Health are empty mount
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
- 'spane-ai', 'spane-theme', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ 'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
  // Locked-side one-way drop
  'drop-btn', 'drop-backdrop', 'drop-close', 'drop-list', 'drop-input',
  'drop-more', 'drop-done',
@@ -877,28 +881,19 @@ function renderSidebarInner() {
     list.append(btn);
   });
 
-  // Operator tools — the DeepSeek Harness and StudioForge. Both are
-  // unlocked-only (they execute code or drive another machine) and each is
-  // gated on its own server feature flag, so the button appears only when at
-  // least one is actually available. They used to be sibling avatars in this
-  // rail; unlocked, that pushed the roster down the screen and read as
-  // clutter rather than navigation, so they collapse into one entry that opens
-  // #tools-menu. The rows themselves live in index.html — see the comment there
-  // for why they must NOT be built here.
-  const toolsAvailable = !state.decoy && (
-    state.harnessEnabled || state.studioforgeEnabled
-    || state.mailEnabled || state.clientsEnabled
-    || menuBots.length > 0);
+  // The ⌥ entry now holds ONLY bots parked from Settings → Bots. The four
+  // operator tools that used to live in its menu moved to the Tools group in
+  // the rail (#tool-list, js/tools.js), so the button exists only when there
+  // is something parked. Never in Safe Mode (menubots.js ignores placement
+  // there, so a parked bot would be unreachable on a locked tablet).
+  const toolsAvailable = !state.decoy && menuBots.length > 0;
   if (toolsAvailable) {
-    const toolsName = t('nav.tools');
-    const selected = state.selectedBotId === HARNESS_ID
-      || state.selectedBotId === STUDIOFORGE_ID
-      || state.selectedBotId === MAIL_ID
-      || state.selectedBotId === CLIENTS_ID;
+    const toolsName = t('tools.more_bots');
+    const selected = menuBots.some((b) => b.id === state.selectedBotId);
     const btn = el('button', {
       class: 'bot-btn terminal-btn tools-btn' + (selected ? ' active' : ''),
       id: 'tools-btn',
-      'aria-label': t('nav.tools_aria'),
+      'aria-label': t('tools.more_bots_aria'),
       'aria-haspopup': 'menu',
       'aria-expanded': 'false',
       draggable: 'false',
@@ -907,35 +902,37 @@ function renderSidebarInner() {
     btn.append(el('span', { class: 'bot-avatar terminal-avatar tools-avatar', text: '⌥' }));
     btn.append(el('span', { class: 'bot-name-tip', text: toolsName }));
     btn.append(nameSpan('bot-name-label', toolsName, { name: toolsName }));
-    // One dot for the group: worst state wins, so a stopped service is visible
-    // without opening the menu. Each row keeps its own dot inside.
-    btn.append(el('span', { class: 'bot-status-dot terminal-sidedot tools-sidedot ' + toolsGroupState() }));
+    // One dot for the parked group: thinking beats unread beats resting.
+    const menuDot = menuBots.some((b) => thinkingBots.has(b.id)) ? ' thinking'
+      : (menuBots.map((b) => unreadDotClass(unreadBots[b.id])).find((c) => c) || '');
+    btn.append(el('span', { class: 'bot-status-dot' + menuDot }));
     list.append(btn);
     dom['tools-btn'] = btn;
   } else {
-    // The rail no longer offers them; a menu left open across a lock would
+    // The rail no longer offers it; a menu left open across a lock would
     // otherwise outlive its own button.
     dom['tools-btn'] = null;
     closeToolsMenu();
   }
-  syncToolsMenuRows();
   renderMenuBots(menuBots, thinkingBots, unreadBots);
+  // The Tools group (#tool-list) sits under the roster and is repainted with
+  // it, so its active tile and feature-gated builtins never go stale.
+  renderToolRail();
 }
 
-/** Bots the user parked in the ⌥ menu, drawn under the tool rows.
+/** Bots the user parked in the ⌥ menu — the only rows it has now.
  *
- *  Rebuilt wholesale on every sidebar repaint, which is safe because — unlike
- *  the tool rows above — these carry no dot that anything patches in
- *  place; their unread/thinking state is computed here from the same snapshot
- *  the rail uses, so the two can never disagree.
+ *  Rebuilt wholesale on every sidebar repaint: these carry no dot that
+ *  anything patches in place; their unread/thinking state is computed here
+ *  from the same snapshot the rail uses, so the two can never disagree.
  */
 function renderMenuBots(menuBots, thinkingBots, unreadBots) {
   const host = dom['tools-bots'];
   const sep = dom['tools-bots-sep'];
   if (!host) return;
   host.innerHTML = '';
-  const anyTools = state.harnessEnabled || state.studioforgeEnabled;
-  if (sep) sep.hidden = !(menuBots.length && anyTools && !state.decoy);
+  // Nothing sits above the parked bots any more, so the divider never shows.
+  if (sep) sep.hidden = true;
   menuBots.forEach((bot) => {
     const row = el('button', {
       class: 'tools-item' + (bot.id === state.selectedBotId ? ' active' : ''),
@@ -951,44 +948,52 @@ function renderMenuBots(menuBots, thinkingBots, unreadBots) {
   });
 }
 
-/** Which tool rows the menu should offer, in rail order. */
-function toolsMenuEntries() {
-  return [
-    { id: 'tools-harness', botId: HARNESS_ID, on: !!state.harnessEnabled },
-    { id: 'tools-studioforge', botId: STUDIOFORGE_ID, on: !!state.studioforgeEnabled },
-    { id: 'tools-mail', botId: MAIL_ID, on: !!state.mailEnabled },
-    { id: 'tools-clients', botId: CLIENTS_ID, on: !!state.clientsEnabled },
-  ];
+/** The status-dot class for a builtin tool's rail tile ('' = no dot).
+ *  Same per-service colours the ⌥ menu rows used before they moved to the
+ *  rail; renderHarness/renderStudioForge keep patching it in place. */
+function builtinDot(feature) {
+  if (feature === 'harness') return 'harness-sidedot harness-' + harnessServiceState();
+  if (feature === 'studioforge') return 'studioforge-sidedot studioforge-' + studioforgeState();
+  return '';
 }
 
-/** Show exactly the rows whose feature is on, and mark the selected one.
- *
- *  Row visibility is driven from the same flags the rail button is, so a
- *  feature switched off server-side cannot leave a dead row behind. The dots
- *  are NOT touched here — renderHarness/renderStudioForge own those and run
- *  on their own cadence.
- */
-function syncToolsMenuRows() {
-  let visible = 0;
-  toolsMenuEntries().forEach((entry) => {
-    const row = dom[entry.id];
-    if (!row) return;
-    const show = !state.decoy && entry.on;
-    row.hidden = !show;
-    if (show) visible += 1;
-    row.classList.toggle('active', state.selectedBotId === entry.botId);
-  });
-  return visible;
+/** Is that builtin tool's pane available to this session right now? */
+function builtinOn(feature) {
+  if (state.decoy) return false;
+  if (feature === 'harness') return !!state.harnessEnabled;
+  if (feature === 'studioforge') return !!state.studioforgeEnabled;
+  if (feature === 'mail') return !!state.mailEnabled;
+  if (feature === 'practice') return !!state.clientsEnabled;
+  return false;
 }
 
-/** Worst-of the service states, for the collapsed rail dot. */
-function toolsGroupState() {
-  const states = [];
-  if (state.harnessEnabled) states.push(harnessServiceState());
-  if (state.studioforgeEnabled) states.push(studioforgeState());
-  if (states.some((s) => s === 'error' || s === 'stopped' || s === 'down')) return 'error';
-  if (states.some((s) => s === 'starting' || s === 'loading')) return 'starting';
-  return states.some((s) => s === 'running' || s === 'ready' || s === 'up') ? 'running' : '';
+/** Put the selection back after the generic tool pane closes (✕ / back).
+ *  The chat pane was only covered, never torn down, so this is a repaint of
+ *  the rail and thread list, not a reload. */
+function restoreAfterTool(prev) {
+  const botId = prev && prev.botId && !isToolId(prev.botId) && botById(prev.botId) ? prev.botId : null;
+  if (!botId) {
+    state.selectedBotId = null;
+    renderSidebar();
+    clearChatView();
+    // updateThreadListHeader() paints nothing without a bot, so the tool's
+    // placeholder header would stay; put the boot-time text back.
+    dom['tl-botname'].textContent = t('app.name');
+    dom['tl-model'].textContent = t('threads.pick_bot');
+    renderThreads();
+    return;
+  }
+  if (state.threads.some((th) => th.bot_id && th.bot_id !== botId)) {
+    // The list belongs to someone else (it should not, but never show it
+    // under the wrong bot) — reload properly.
+    selectBot(botId);
+    return;
+  }
+  state.selectedBotId = botId;
+  renderSidebar();
+  updateThreadListHeader();
+  renderThreads();
+  if (isMobile()) navigate(prev.threadId && state.activeThreadId === prev.threadId ? 'chat' : 'threads');
 }
 
 // ===================== Thread list =====================
@@ -3309,10 +3314,9 @@ function openAvatarLightbox(botId) {
 // ===================== Actions =====================
 async function selectBot(id) {
   if (!id) return;
-  if (id === HARNESS_ID) { openHarnessView(); return; }
-  if (id === STUDIOFORGE_ID) { openStudioForgeView(); return; }
-  if (id === MAIL_ID) { openMailView(); return; }
-  if (id === CLIENTS_ID) { openClientsPanel(); return; }
+  // Every tool — the four builtins and anything in tools.yaml — opens
+  // through tools.js, which routes builtins back to their own openers.
+  if (isToolId(id)) { openTool(id); return; }
   // Leaving a tool pane for a real bot tears the view down cleanly.
   closeToolPanes();
   // Symptom (jobs-fix: view-stuck-on-bot-switch): if we're sitting on the
@@ -4074,10 +4078,10 @@ function syncLockNimRow() {
 // leave path has to fire on every way out of the modal, which is why
 // deactivation hangs off a MutationObserver on the backdrop rather than being
 // sprinkled through the seven places that hide it.
-const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'theme', 'device', 'security'];
-// The three that live behind the PIN. `admin-only` in the markup is the class;
+const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'tools', 'theme', 'device', 'security'];
+// The four that live behind the PIN (Tools joined 2026-09-25). `admin-only` in the markup is the class;
 // this is the list applyAuthChrome() walks.
-const ADMIN_TABS = ['reactions', 'health', 'ai'];
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'tools'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
@@ -4152,6 +4156,10 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       break;
     case 'ai':
       await activateLlmPanel(llmCtx());
+      break;
+    case 'tools':
+      // tools.js owns the table, the draft and the Save (PUT /api/tools).
+      await mountToolsSettings(pane);
       break;
     case 'device':
       mountLanguagePicker();
@@ -4252,7 +4260,7 @@ async function openBotManager(tab = 'bots') {
 }
 // Dismiss without saving; confirms first when there are unsaved edits.
 async function closeBotManager() {
-  if (bmDirty && !dom['botmanager-backdrop'].classList.contains('hidden')) {
+  if ((bmDirty || toolsSettingsDirty()) && !dom['botmanager-backdrop'].classList.contains('hidden')) {
     if (!await uiConfirm(t('settings.discard_confirm'), { okText: t('common.discard'), danger: true })) return;
   }
   bmDirty = false;
@@ -4918,10 +4926,8 @@ function toggleToolsMenu() {
 function openToolsMenu() {
   const menu = dom['tools-menu'];
   const btn = dom['tools-btn'];
-  // Never open a menu with nothing in it, and never in Safe Mode: syncToolsMenuRows
-  // returns the count of rows this tier may actually see.
-  const rows = syncToolsMenuRows()
-    + (dom['tools-bots'] ? dom['tools-bots'].childElementCount : 0);
+  // Never open a menu with nothing in it, and never in Safe Mode.
+  const rows = dom['tools-bots'] ? dom['tools-bots'].childElementCount : 0;
   if (!menu || !btn || state.decoy || rows === 0) return;
   menu.removeAttribute('hidden');
   btn.setAttribute('aria-expanded', 'true');
@@ -4962,11 +4968,6 @@ function _toolsOutside(e) {
   closeToolsMenu();
 }
 function wireToolsMenu() {
-  toolsMenuEntries().forEach((entry) => {
-    const row = dom[entry.id];
-    if (!row) return;
-    row.addEventListener('click', () => { closeToolsMenu(); selectBot(entry.botId); });
-  });
   // Escape closes and returns focus to the button, like every other popover here.
   const menu = dom['tools-menu'];
   if (menu) {
@@ -5109,6 +5110,7 @@ function renderHarnessSessionPanel() {
  *  is the re-entrant case (selectBot on the pane you are looking at).
  */
 function closeToolPanes(except) {
+  if (except !== 'tool') closeTool({ restore: false });
   if (harnessOpen && except !== 'harness') closeHarnessView();
   if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
   if (mailOpen && except !== 'mail') closeMailView();
@@ -5123,7 +5125,7 @@ function openHarnessView() {
   renderSidebar();
   renderHarnessSessionPanel();
   dom['harness-view'].classList.remove('hidden');
-  document.body.classList.add('terminal-active');
+  document.body.classList.add('tool-full');
   if (isMobile()) navigate('chat');
   renderHarness();
   // Fresh facts on open (the WS only carries deltas).
@@ -5132,7 +5134,7 @@ function openHarnessView() {
 
 function closeHarnessView() {
   harnessOpen = false;
-  document.body.classList.remove('terminal-active');
+  document.body.classList.remove('tool-full');
   dom['harness-view'].classList.add('hidden');
   // Unload the frame: a hidden iframe keeps dsh's websocket + HMR stream alive.
   if (dom['harness-frame']) { dom['harness-frame'].classList.add('hidden'); dom['harness-frame'].removeAttribute('src'); }
@@ -5164,7 +5166,7 @@ function renderHarness() {
   const st = state.harness.status;
   const svc = harnessServiceState();
   // Sidebar dot.
-  const sd = dom['tools-harness'] && dom['tools-harness'].querySelector('.bot-status-dot');
+  const sd = railToolDot(HARNESS_ID);
   if (sd) sd.className = 'bot-status-dot terminal-sidedot harness-sidedot harness-' + svc;
   if (!harnessOpen) return;
   const port = (st && st.port) || 3080;
@@ -5791,7 +5793,7 @@ function openStudioForgeView() {
   renderSidebar();
   renderStudioForgeSessionPanel();
   dom['studioforge-view'].classList.remove('hidden');
-  document.body.classList.add('terminal-active');
+  document.body.classList.add('tool-full');
   if (isMobile()) navigate('chat');
   renderStudioForge();
   api.studioforgeStatus().then((st) => {
@@ -5802,7 +5804,7 @@ function openStudioForgeView() {
 
 function closeStudioForgeView() {
   studioforgeOpen = false;
-  document.body.classList.remove('terminal-active');
+  document.body.classList.remove('tool-full');
   dom['studioforge-view'].classList.add('hidden');
   // Unload the frame: the panel holds a live socket.io telemetry stream, and a
   // hidden iframe would keep it (and the rig's per-view session) alive.
@@ -5848,7 +5850,7 @@ async function probeStudioForgeFromClient() {
 function renderStudioForge() {
   const st = state.studioforge.status;
   const sv = studioforgeState();
-  const sd = dom['tools-studioforge'] && dom['tools-studioforge'].querySelector('.bot-status-dot');
+  const sd = railToolDot(STUDIOFORGE_ID);
   if (sd) sd.className = 'bot-status-dot terminal-sidedot studioforge-sidedot studioforge-' + sv;
   if (!studioforgeOpen) return;
   const url = (st && st.url) || '';
@@ -5938,14 +5940,14 @@ function openMailView() {
   renderSidebar();
   renderMailSessionPanel();
   dom['mail-view'].classList.remove('hidden');
-  document.body.classList.add('terminal-active');
+  document.body.classList.add('tool-full');
   if (isMobile()) navigate('chat');
   renderMail();
 }
 
 function closeMailView() {
   mailOpen = false;
-  document.body.classList.remove('terminal-active');
+  document.body.classList.remove('tool-full');
   dom['mail-view'].classList.add('hidden');
   const f = dom['mail-frame'];
   if (f) { f.classList.add('hidden'); f.removeAttribute('src'); }
@@ -6050,7 +6052,7 @@ function openClientsPanel() {
   renderSidebar();
   renderClientsSessionPanel();
   dom['clients-view'].classList.remove('hidden');
-  document.body.classList.add('terminal-active');
+  document.body.classList.add('tool-full');
   if (isMobile()) navigate('chat');
   initClients(dom['clients-root'], dom['clients-job-strip']);
   showClientsTab('overview');
@@ -6058,7 +6060,7 @@ function openClientsPanel() {
 
 function closeClientsView() {
   clientsOpen = false;
-  document.body.classList.remove('terminal-active');
+  document.body.classList.remove('tool-full');
   dom['clients-view'].classList.add('hidden');
   // Hiding the view is not stopping it: the job poll reschedules itself, so
   // without this it kept polling the practice box for the rest of the session
@@ -6244,7 +6246,11 @@ function handleWs(data) {
         const vb = visibleBots();
         // Only repair the selection if one existed and its bot vanished —
         // never auto-select on a fresh landing (the bots list IS the landing).
-        if (state.selectedBotId && !vb.find((b) => b.id === state.selectedBotId)) {
+        // A TOOL is never in the roster, so it never "vanished": without the
+        // isToolId guard every bots frame (the hello on connect, an avatar
+        // change) threw an open tool — builtin or tools.yaml — back to a bot.
+        if (state.selectedBotId && !isToolId(state.selectedBotId)
+            && !vb.find((b) => b.id === state.selectedBotId)) {
           if (vb.length) selectBot(vb[0].id);
           else { state.selectedBotId = null; state.threads = []; renderSidebar(); renderThreads(); clearChatView(); }
         } else {
@@ -6814,6 +6820,48 @@ function wireEvents() {
   wireFileServer();
   wireDrop();
   wireToolsMenu();
+  wireTools({
+    state,
+    openers: {
+      harness: openHarnessView,
+      studioforge: openStudioForgeView,
+      mail: openMailView,
+      practice: openClientsPanel,
+    },
+    closeToolPanes,
+    builtinOn,
+    builtinDot,
+    restoreView: restoreAfterTool,
+    // The Job Board hides #chatview on every width, which is where every tool
+    // pane lives — leave it first or the pane opens invisibly.
+    beforeOpen: () => { if (dom.app.dataset.view === 'jobs') setView('chat'); },
+    paintPlaceholder: (title, icon) => {
+      dom['tl-botname'].textContent = title;
+      dom['tl-model'].textContent = t('tools.session_panel_title');
+      const wrap = dom['threads'];
+      wrap.innerHTML = '';
+      wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
+        el('div', { class: 'empty-emoji', text: icon }),
+        el('p', { text: t('tools.session_panel_body') }),
+      ]));
+    },
+    renderSidebar,
+    isMobile,
+    navigate,
+    toast,
+    isBotId: (id) => !!botById(id),
+    // A builtin switched on/off in Settings → Tools flips its server feature
+    // flag; re-probe so the rail and panes agree with the server.
+    onSaved: () => {
+      state.auth.features = null;
+      ensureFeatures().finally(() => {
+        refreshHarnessFeature();
+        refreshStudioForgeFeature();
+        refreshMailFeature();
+        refreshClientsFeature();
+      });
+    },
+  });
 
   // Foldable / rotation: when the viewport crosses the mobile breakpoint
   // (fold/unfold), normalize the view so panels don't vanish or stack oddly.
@@ -7718,6 +7766,7 @@ function iconifyChrome() {
     ['#stab-reactions', RAIL_ICONS.bolt, '.stab-glyph'],
     ['#stab-health', RAIL_ICONS.pulse, '.stab-glyph'],
     ['#stab-ai', RAIL_ICONS.chip, '.stab-glyph'],
+    ['#stab-tools', RAIL_ICONS.tools, '.stab-glyph'],
     ['#stab-theme', RAIL_ICONS.palette, '.stab-glyph'],
     ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
     ['#stab-security', RAIL_ICONS.shield, '.stab-glyph'],
@@ -7823,17 +7872,27 @@ async function startApp() {
     // answered 404 on every unlock. The requests are
     // harmless; the console errors the browser writes for them are not — they
     // are the first thing anyone looks at when something else breaks.
-    ensureFeatures().finally(() => {
-      refreshHarnessFeature();
-      refreshStudioForgeFeature();
-      refreshMailFeature();
-      refreshClientsFeature();
+    ensureFeatures().finally(async () => {
+      // Still non-blocking for first paint (this whole chain is detached);
+      // awaited only so a `#tool=<id>` deep link to a builtin sees its
+      // feature flag before it tries to open it.
+      await Promise.allSettled([
+        refreshHarnessFeature(),
+        refreshStudioForgeFeature(),
+        refreshMailFeature(),
+        refreshClientsFeature(),
+        loadTools(),
+      ]);
+      if (!state.decoy) openFromHash();
     });
   } else {
     state.harnessEnabled = false;
     state.studioforgeEnabled = false;
     state.mailEnabled = false;
     state.clientsEnabled = false;
+    // Safe Mode still gets the tools the server marked `safe` (the API
+    // filters); no deep link here — that is an unlocked convenience.
+    loadTools();
   }
   applyAuthChrome();
   renderSidebar();

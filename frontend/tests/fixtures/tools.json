@@ -1,0 +1,17 @@
+{
+  "path": "/home/user/.local/share/local-chat/tools.yaml",
+  "tools": [
+    { "id": "deepseek-harness", "title": "DeepSeek Harness", "icon": "", "kind": "builtin", "enabled": true, "safe": false, "has_refresh": false, "builtin_feature": "harness" },
+    { "id": "studioforge-panel", "title": "StudioForge", "icon": "", "kind": "builtin", "enabled": false, "safe": false, "has_refresh": false, "builtin_feature": "studioforge" },
+    { "id": "mail-panel", "title": "Emails", "icon": "", "kind": "builtin", "enabled": true, "safe": false, "has_refresh": false, "builtin_feature": "mail" },
+    { "id": "clients-panel", "title": "Clients", "icon": "", "kind": "builtin", "enabled": true, "safe": false, "has_refresh": false, "builtin_feature": "practice" },
+    { "id": "benchmark", "title": "Benchmark Board", "icon": "📊", "kind": "static", "enabled": true, "safe": false,
+      "root": "/home/user/Projects/bench/results", "entry": "report.html", "has_refresh": true },
+    { "id": "rig-panel", "title": "Rig panel", "icon": "🎛️", "kind": "url", "enabled": true, "safe": false,
+      "url": "http://127.0.0.1:8080/", "has_refresh": false },
+    { "id": "family-page", "title": "Family page", "icon": "🏠", "kind": "static", "enabled": true, "safe": true,
+      "root": "/home/user/family", "entry": "index.html", "has_refresh": false },
+    { "id": "old-report", "title": "Old report", "icon": "🗂", "kind": "static", "enabled": false, "safe": false,
+      "root": "/home/user/old", "has_refresh": false }
+  ]
+}

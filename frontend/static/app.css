@@ -1982,6 +1982,9 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .terminal-sidedot.harness-stopped { background: var(--text-muted); }
 .terminal-sidedot.harness-failed  { background: var(--error-text); }
 .terminal-sidedot.harness-unknown { background: var(--text-muted); }
+/* The two harness states the old ⌥ rows never coloured. */
+.terminal-sidedot.harness-starting { background: var(--warning-text); }
+.terminal-sidedot.harness-not_installed { background: var(--text-muted); opacity: .6; }
 /* Header tabs: Web UI | Headless jobs. */
 .harness-tabs { display: flex; gap: 4px; flex: 0 0 auto; }
 .harness-tab {
@@ -2124,13 +2127,26 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   display: flex; flex-direction: column; min-height: 0;
   background: var(--bg-tertiary);
 }
-/* While a tool pane is up, the thread-list panel shows an admin-session
-   placeholder — hide the per-bot chrome (stale avatar + chat/search/collapse
-   actions) that make no sense for a pseudo-bot with no chats. */
-body.terminal-active .tl-avatar,
-body.terminal-active #new-chat,
-body.terminal-active #search-btn,
-body.terminal-active #collapse-threads { display: none; }
+/* Full-page tools (2026-09-25). Opening ANY tool — the four builtins or a
+   tools.yaml page — puts `tool-full` on <body>: the grid drops the thread
+   column and the pane (absolutely filling #chatview) takes the whole content
+   area, with only the rail beside it. Supersedes `body.terminal-active`, which
+   only hid the thread list's chrome and left the column standing.
+   On a phone every view is already one column; the openers navigate to the
+   chat view, so the pane is the only thing on screen and the tab bar's Bots
+   tab (or the pane's ‹) goes back to the rail. */
+@media (min-width: 769px) {
+  body.tool-full .app,
+  body.tool-full .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
+  body.tool-full .threadlist { display: none; }
+}
+/* If a phone user does open the Chats tab mid-tool, the list shows the tool's
+   placeholder — hide the per-bot chrome (stale avatar, new/search/collapse)
+   that means nothing for a page with no chats. */
+body.tool-full .tl-avatar,
+body.tool-full #new-chat,
+body.tool-full #search-btn,
+body.tool-full #collapse-threads { display: none; }
 .terminal-session-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; }
 /* Pane header: a stable title so the panel never shows stale chat header
    content bleeding through. Mirrors the chat header height/chrome. */
@@ -4167,7 +4183,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    frames — no bespoke sizing needed beyond what .harness-frame/.studioforge-frame
    already establish via the shared .terminal-* rules; .mail-frame reuses them. */
 .mail-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.mail-frame, .studioforge-frame, .harness-frame { width: 100%; height: 100%; border: none; background: var(--bg-primary); }
+.mail-frame, .studioforge-frame, .harness-frame, .tool-frame { width: 100%; height: 100%; border: none; background: var(--bg-primary); }
 .mail-note {
   margin: auto; text-align: center; padding: 24px; color: var(--text-secondary);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -4346,3 +4362,121 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   overflow-x: auto;
 }
 .notice-body .notice-actions { opacity: 1; margin-top: 4px; }
+
+/* ===================== Tools (2026-09-25) =====================
+   docs/design/2026-09-25-tools-plugins.md. The rail's Tools group sits under
+   the roster (#bot-list keeps flex:1, so the group lands just above the gear
+   row); tiles reuse .bot-btn/.terminal-avatar so every avatar-style, palette
+   and minimal-mode rule applies to them for free. */
+.tool-list {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  flex: 0 1 auto; min-height: 0; max-height: 45%; width: 100%;
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
+  padding: 8px 0 2px; border-top: 1px solid var(--border-strong);
+}
+.tool-list-head {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted); line-height: 1.2;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* An emoji tile, not a monospace code: bigger glyph, no negative tracking. */
+.tool-btn .tool-avatar { font-size: 22px; letter-spacing: 0; font-family: inherit; }
+.tool-btn .tool-avatar.harness-avatar,
+.tool-btn .tool-avatar.studioforge-avatar { font-size: 11px; font-family: var(--font-mono); }
+.tool-btn .tool-avatar.mail-avatar,
+.tool-btn .tool-avatar.clients-avatar { font-size: 18px; }
+.tool-btn.active .tool-avatar { border-color: var(--accent); }
+.tool-avatar-mini { font-family: inherit; font-size: 17px; }
+@media (min-width: 769px) {
+  :root[data-avatar-style="minimal"] .tool-list { align-items: stretch; padding: 6px 8px 2px; gap: 4px; }
+  :root[data-avatar-style="minimal"] .tool-list-head { padding-inline-start: 12px; }
+}
+@media (max-width: 768px) {
+  .app[data-view="bots"] .tool-list {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 18px 10px; max-height: none; overflow: visible; flex: 0 0 auto;
+    padding: 14px 0 6px; align-items: start;
+  }
+  .app[data-view="bots"] .tool-list[hidden] { display: none; }
+  .app[data-view="bots"] .tool-list-head { grid-column: 1 / -1; text-align: start; font-size: 11px; }
+  .app[data-view="bots"] .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; line-height: 1.2; padding: 6px 0; }
+  .app[data-view="bots"] .tool-btn .tool-avatar { width: 84px; height: 84px; border-radius: 20px; font-size: 34px; }
+  .app[data-view="bots"] .tool-btn .tool-avatar.harness-avatar,
+  .app[data-view="bots"] .tool-btn .tool-avatar.studioforge-avatar { font-size: 18px; }
+}
+
+/* Phone: one header row, always. Title shrinks, the controls keep their
+   size — a wrapped second row of ↗/✕ costs a whole line of the page. */
+@media (max-width: 768px) {
+  .tool-view .terminal-head { flex-wrap: nowrap; gap: 6px; padding-inline: 8px; }
+  .tool-view .terminal-head > .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; }
+  .tool-view .tool-refresh { padding: 6px 9px; }
+  .tool-view #tool-close { display: none; }   /* ‹ does the same job here */
+}
+
+/* Generic tool pane: one frame (or a note) filling the body. */
+.tool-body { flex-direction: column; }
+.tool-frame { flex: 1 1 auto; }
+.tool-note { flex: 1 1 auto; }
+.tool-refresh { padding: 6px 11px; white-space: nowrap; flex: 0 0 auto; }
+.tool-refresh:disabled { opacity: .6; cursor: progress; }
+/* A failed refresh: one collapsed line, the tail behind the disclosure. */
+.tool-error {
+  flex: 0 0 auto; padding: 6px 14px; font-size: 13px;
+  border-bottom: 1px solid var(--border-strong);
+  background: color-mix(in oklab, var(--error-text) 10%, var(--bg-secondary));
+  color: var(--error-text);
+}
+.tool-error summary { cursor: pointer; }
+.tool-error-text {
+  margin: 6px 0 2px; max-height: 30vh; overflow: auto; white-space: pre-wrap;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
+}
+
+/* Settings → Tools */
+.tools-pane { padding: 4px 18px 12px; gap: 10px; }
+.tools-table-wrap { overflow-x: auto; }
+.tools-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tools-table th {
+  text-align: start; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted); padding: 6px 8px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.tools-table td { padding: 8px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+.tools-row.invalid td { background: color-mix(in oklab, var(--error-text) 10%, transparent); }
+.tools-cell-icon .tool-avatar { width: 32px; height: 32px; border-radius: 9px; font-size: 16px; }
+.tools-cell-icon .tool-avatar.harness-avatar,
+.tools-cell-icon .tool-avatar.studioforge-avatar { font-size: 10px; font-family: var(--font-mono); }
+.tools-input {
+  background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 6px 8px; color: var(--text-primary); font-size: 14px; width: 100%; min-width: 0;
+}
+.tools-input:focus { outline: none; border-color: var(--accent); }
+.tools-input-icon { width: 3.2em; text-align: center; }
+.tools-id { font-family: var(--font-mono); font-size: 11.5px; margin-top: 2px; }
+.tools-loc {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
+  word-break: break-all;
+}
+.tools-badge {
+  display: inline-block; margin-inline-start: 6px; padding: 1px 6px; border-radius: 6px;
+  font-size: 11px; background: var(--bg-tertiary); border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+}
+.tools-loc-hint { font-size: 12px; margin: 0; }
+.tools-settings-error {
+  padding: 8px 10px; border-radius: var(--radius-md); font-size: 13px;
+  color: var(--error-text); border: 1px solid color-mix(in oklab, var(--error-text) 45%, transparent);
+  background: color-mix(in oklab, var(--error-text) 8%, transparent);
+}
+/* .switch is sized for a flex row (Bots); inside a table cell it is an
+   inline label whose width/height would not apply and the track vanished. */
+.tools-cell-on .switch { display: inline-block; vertical-align: middle; }
+.tools-add-btn { align-self: flex-start; }
+.tools-add-form {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;
+  padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+.tools-field span { font-size: 12px; color: var(--text-secondary); }
+.tools-add-actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }

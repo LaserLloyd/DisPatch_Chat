@@ -2,7 +2,13 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v125';  // v125: the per-bot scene backdrop tint is
+const CACHE = 'local-chat-v126';  // v126: Tools — new module js/tools.js (in
+  //   SHELL): a Tools group in the rail (#tool-list), a generic full-page tool
+  //   pane (#tool-view), Settings → Tools, `body.tool-full` on every tool
+  //   opener; the ⌥ menu keeps only parked bots. main.js 101→102, api.js
+  //   28→29 (and every importer: checklist 5→6, reactions 18→19, clients
+  //   5→6, jobs 8→9, job-thread 9→10), app.css 85→86, index.html, every locale.
+  // v125: the per-bot scene backdrop tint is
   //   off (owner request: "just use standard") — the message pane uses the theme's own
   //   background. main.js 100→101, app.css 84→85.
   // v124: (2026-09-24 review, round 2) the header mood
@@ -246,6 +252,9 @@ const SHELL = [
   // Drafts / outbox / offline reading (IndexedDB). Statically imported by
   // main.js — tests/shell-modules.test.js now asserts every js/*.js is here.
   '/static/js/store.js',
+  // Tools rail group + generic tool pane + Settings → Tools (2026-09-25).
+  // Pure module, statically imported by main.js.
+  '/static/js/tools.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

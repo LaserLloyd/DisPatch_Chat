@@ -63,6 +63,9 @@ async function j(url, opts = {}) {
     }
     const err = new Error(`${r.status}: ${detail}`);
     err.status = r.status;
+    // The parsed body rides along for callers that need more than a message —
+    // Settings → Tools reads a 422's offending row index out of it.
+    err.body = body;
     throw err;
   }
   return r.status === 204 ? null : r.json();
@@ -325,4 +328,13 @@ export const api = {
   // "clients/c1/actions/build". See backend/app/practice_bridge.py.
   practiceGet: (path) => j(`/api/practice/${path}`),
   practicePost: (path, body) => j(`/api/practice/${path}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
+
+  // Tools (docs/design/2026-09-25-tools-plugins.md). The list is filtered
+  // server-side for Safe Mode; refresh and the write are operator-only.
+  // Refresh runs a real command, so it gets the tool's own ceiling (max
+  // 3600 s server-side) instead of the 20 s default.
+  tools: () => j('/api/tools'),
+  toolStatus: (id) => j(`/api/tools/${encodeURIComponent(id)}/status`),
+  toolRefresh: (id) => j(`/api/tools/${encodeURIComponent(id)}/refresh`, { method: 'POST', timeoutMs: 3600 * 1000 }),
+  toolsSave: (list) => j('/api/tools', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ tools: list }) }),
 };
