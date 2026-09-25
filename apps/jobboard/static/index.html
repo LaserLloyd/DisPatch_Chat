@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- The Job Board app's page (docs/design/2026-09-25-apps.md). Framed by
+       the shell at /apps/jobboard/ WITHOUT a sandbox — it is repo code on the
+       shell's own origin and calls its API with the operator's session.
+       The server sends a first-party CSP with it (script-src 'self'), so
+       nothing here is inline: the one module and the one stylesheet are
+       files, each with its own ?v= (bump it when the file changes; this page
+       is served no-cache, the assets must-revalidate). The theme's token
+       sheets are linked by app-sdk.js theme(), ahead of board.css. -->
+  <title>Job Board</title>
+  <link rel="stylesheet" href="/apps/jobboard/board.css?v=1" />
+  <script type="module" src="/apps/jobboard/board.js?v=1"></script>
+</head>
+<body class="jb-page">
+  <main class="jb-root" id="jb-root" data-jobs-root></main>
+</body>
+</html>

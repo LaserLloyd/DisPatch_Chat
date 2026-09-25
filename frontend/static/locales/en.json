@@ -1029,141 +1029,6 @@
     "save_failed": "Could not save: {error}",
     "bad_root": "Not an existing folder, or a folder that is always refused"
   },
-  "jobs": {
-    "title": "Job Board",
-    "subtitle": "Postings found for you, by month",
-    "close": "Close Job Board",
-    "sidebar_aria": "Job Board — postings by month, unlocked only",
-    "empty": "No jobs yet — post one via the API or wait for the curator.",
-    "loading": "Loading…",
-    "error": "Could not load jobs: {msg}",
-    "untitled": "(untitled)",
-    "link": {
-      "apply": "View original posting →"
-    },
-    "badge": {
-      "duplicate": "duplicate",
-      "expired": "expired"
-    },
-    "sort": {
-      "label": "Sort",
-      "updated": "Last activity",
-      "salary": "Salary",
-      "posted": "Newest posted"
-    },
-    "filter": {
-      "all": "All states",
-      "any_remote": "Any remote type",
-      "tag_placeholder": "Filter by tag"
-    },
-    "state": {
-      "pending": "Pending",
-      "yes": "Yes",
-      "no": "No",
-      "maybe": "Maybe",
-      "applied": "Applied",
-      "archived": "Archived",
-      "duplicate": "Duplicate"
-    },
-    "remote": {
-      "remote": "Remote",
-      "hybrid": "Hybrid",
-      "onsite": "Onsite"
-    },
-    "age": {
-      "today": "today",
-      "yesterday": "yesterday",
-      "days_ago": "{n}d ago"
-    },
-    "month": {
-      "count": "{n} job",
-      "count_plural": "{n} jobs"
-    },
-    "detail": {
-      "close": "Close",
-      "not_found": "That job could not be found.",
-      "posted": "Posted",
-      "first_seen": "First seen",
-      "source": "Source",
-      "offline": "Could not reach DisPatch — check your connection.",
-      "locked": "Unlock to see this job."
-    },
-    "vote": {
-      "yes": "👍 Yes",
-      "no": "👎 No",
-      "maybe": "🤔 Maybe",
-      "applied": "✓ Applied",
-      "undo": "↺ Undo",
-      "no_reason": "Why no?",
-      "cancel": "Cancel"
-    },
-    "reasons": {
-      "wrong_location": "Wrong location",
-      "too_senior": "Too senior",
-      "too_junior": "Too junior",
-      "compensation": "Compensation",
-      "company": "Company",
-      "wrong_domain": "Wrong domain",
-      "already_applied": "Already applied",
-      "duplicate": "Duplicate",
-      "other": "Other"
-    },
-    "score": {
-      "why": "Score {score}",
-      "embed_unavailable": "Score {score} (embedding unavailable)",
-      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
-    },
-    "seniority": {
-      "junior": "Junior",
-      "senior": "Senior",
-      "staff": "Staff",
-      "principal": "Principal"
-    },
-    "note": {
-      "placeholder": "Add a note (optional)…"
-    },
-    "feedback": {
-      "title": "Feedback for Scout",
-      "placeholder": "Tell Scout what to look for or avoid…",
-      "reason_label": "Reason (optional)",
-      "reason_none": "No specific reason",
-      "send": "Send to Scout",
-      "sent": "Sent — Scout will reply in the job thread",
-      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
-      "open_thread": "Open thread",
-      "error": "Could not send feedback: {msg}",
-      "need_comment": "Write a note before sending.",
-      "not_available": "Feedback isn't available yet."
-    },
-    "activity": {
-      "title": "Activity",
-      "empty": "No activity yet.",
-      "actor": {
-        "system": "System",
-        "you": "You"
-      },
-      "type": {
-        "comment": "Comment",
-        "vote": "Voted",
-        "vote_undo": "Vote undone",
-        "state_change": "State change",
-        "tag_added": "Tag added",
-        "tag_removed": "Tag removed",
-        "repost": "Reposted",
-        "duplicate_detected": "Duplicate detected",
-        "expired": "Expired",
-        "feedback": "Feedback",
-        "applied": "Applied"
-      }
-    },
-    "find": {
-      "button": "🔍 Find jobs",
-      "placeholder": "What should Scout look for? (optional)",
-      "send": "Ask Scout",
-      "sent": "Scout is searching. New postings will show up here, and a summary lands in this month's Jobs thread.",
-      "not_sent": "Request saved, but Scout couldn't be reached. Try again later."
-    }
-  },
   "tools": {
     "not_installed": "Not available on this install",
     "more_bots": "More bots",
@@ -1183,6 +1048,8 @@
     "close": "Close tool",
     "unreachable_text": "The page behind this tool is not reachable right now.",
     "unreachable_hint": "Check that the service it comes from is running.",
+    "app_unmounted_text": "This app's server side did not load.",
+    "app_unmounted_hint": "The page may open, but its data will not. The DisPatch log names the error.",
     "loopback_text": "This tool runs on the host's loopback address.",
     "loopback_hint": "Open DisPatch on the host itself to use it here.",
     "bad_url_text": "This tool has no usable address.",
@@ -1196,6 +1063,7 @@
     "col_location": "Location",
     "col_enabled": "Shown",
     "kind_builtin": "Built-in",
+    "kind_app": "App",
     "kind_static": "Folder",
     "kind_url": "Web page",
     "has_refresh": "has refresh",

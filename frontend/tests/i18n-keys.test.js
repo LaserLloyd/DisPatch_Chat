@@ -83,25 +83,6 @@ const DYNAMIC = [
   { re: /^unit\.(b|kb|mb|gb|tb|pb)$/, built: 'i18n.js  t(`unit.${u}`)' },
   // js/dashboard.js  paintBanner():  T(`dash.count_${lv}`)
   { re: /^dash\.count_(ok|warn|fail)$/, built: 'dashboard.js  T(`dash.count_${lv}`)' },
-  // js/jobs.js  _jobRow / toolbar:  t(`jobs.state.${j.effective_state || j.state}`)
-  // and  t(`jobs.state.${s}`) / t(`jobs.remote.${r}`). Set matches the
-  // backend enum (backend/app/jobs.py: pending|yes|no|maybe|applied|
-  // archived|duplicate for state; remote|hybrid|onsite for remote_type).
-  { re: /^jobs\.state\.(pending|yes|no|maybe|applied|archived|duplicate)$/,
-    built: 'jobs.js  t(`jobs.state.${...}`)' },
-  { re: /^jobs\.remote\.(remote|hybrid|onsite)$/,
-    built: 'jobs.js  t(`jobs.remote.${r}`)' },
-  // js/job-thread.js  _meta():  t(`jobs.seniority.${job.seniority}`), gated
-  // on SENIORITY_KNOWN — set matches jobs_score.infer_seniority's buckets
-  // ('unknown' is deliberately excluded from the UI, per the brief).
-  { re: /^jobs\.seniority\.(junior|senior|staff|principal)$/,
-    built: 'job-thread.js  t(`jobs.seniority.${...}`)' },
-  // js/job-thread.js  _eventLine():  t(`jobs.activity.type.${type}`), type
-  // drawn from EVENT_TYPES — matches database.py's job_events.type comment
-  // plus the 'vote_undo'/'feedback'/'applied' types jobs.py derives at
-  // write time.
-  { re: /^jobs\.activity\.type\.(comment|vote|vote_undo|state_change|tag_added|tag_removed|repost|duplicate_detected|expired|feedback|applied)$/,
-    built: 'job-thread.js  t(`jobs.activity.type.${type}`)' },
   // js/markdown.js  blockquote():  t(`md.callout_${kind}`), kind from CALLOUT_RE
   { re: /^msg\.callout_(note|tip|important|warning|caution)$/,
     built: 'markdown.js  t(`msg.callout_${kind}`)' },

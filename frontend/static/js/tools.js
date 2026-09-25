@@ -4,10 +4,16 @@
 // data dir's tools.yaml (never in git); the server lists them at /api/tools,
 // serves a static tool's pages at /tools/<id>/ and runs its optional refresh.
 //
-// Three kinds, one rail:
-//   builtin — the five panes main.js already owns (Harness, StudioForge,
-//             Emails, Clients, Job Board). This module only draws their tile and calls
+// Four kinds, one rail:
+//   builtin — the four panes main.js already owns (Harness, StudioForge,
+//             Emails, Clients). This module only draws their tile and calls
 //             the opener main.js hands in; their views are untouched.
+//   app     — a trusted package under apps/<id>/ (docs/design/2026-09-25-
+//             apps.md): its page is framed from /apps/<id>/ with NO sandbox —
+//             it is repo code on our own origin and calls its own API with the
+//             session cookie. It talks to the shell only through postMessage
+//             (js/app-sdk.js); the listener below accepts nothing that is not
+//             from our origin AND from the frame on screen.
 //   static  — a directory on the host, framed from /tools/<id>/ with NO
 //             allow-same-origin: the page may run its own JS but cannot touch
 //             DisPatch's cookies or DOM (the server's CSP says the same).
@@ -21,7 +27,7 @@
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
-import { api } from './api.js?v=29';
+import { api } from './api.js?v=30';
 import { t, relTimeLong } from './i18n.js?v=3';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 
@@ -33,7 +39,6 @@ const BUILTINS = [
   { id: 'studioforge-panel', feature: 'studioforge', icon: 'tools', name: 'studioforge.name', aria: 'studioforge.sidebar_aria' },
   { id: 'mail-panel', feature: 'mail', icon: 'mail', name: 'mail.name', aria: 'mail.sidebar_aria' },
   { id: 'clients-panel', feature: 'practice', icon: 'users', name: 'clients.name', aria: 'clients.sidebar_aria' },
-  { id: 'jobboard', feature: 'jobs', icon: 'jobs', name: 'jobs.title', aria: 'jobs.sidebar_aria' },
 ];
 const BUILTIN_BY_ID = new Map(BUILTINS.map((b) => [b.id, b]));
 const BUILTIN_BY_FEATURE = new Map(BUILTINS.map((b) => [b.feature, b]));
@@ -55,6 +60,9 @@ const ICON_ALIASES = {
   '🔗': 'link', '📁': 'folder', '📂': 'folder', '⚙': 'gear',
   '🔍': 'search', '🔎': 'search', '🗄': 'database', '💾': 'disk',
 };
+// Word names people (and app manifests) use for an icon the set already has
+// under another name. `icon: clipboard` is the contract's own example.
+const NAME_ALIASES = { clipboard: 'jobs', briefcase: 'jobs', report: 'chart', console: 'terminal' };
 const DEFAULT_GLYPH = '🧩';
 
 /** The RAIL_ICONS name a tool is drawn with, or null for a typed glyph. */
@@ -64,6 +72,7 @@ export function toolIconName(tool) {
   const raw = String((tool && tool.icon) || '').trim();
   if (!raw) return null;
   if (Object.prototype.hasOwnProperty.call(RAIL_ICONS, raw) && /^[a-z-]+$/.test(raw)) return raw;
+  if (Object.prototype.hasOwnProperty.call(NAME_ALIASES, raw)) return NAME_ALIASES[raw];
   // U+FE0F (emoji presentation) is optional in YAML: 🎛 and 🎛️ are one icon.
   return ICON_ALIASES[raw.replace(/\uFE0F/g, '')] || null;
 }
@@ -86,7 +95,7 @@ export function toolTile(tool, extra = '') {
 }
 
 // Literal keys (not t(`tools.kind_${k}`)) so the i18n key scan can see them.
-const KIND_LABEL = { builtin: 'tools.kind_builtin', static: 'tools.kind_static', url: 'tools.kind_url' };
+const KIND_LABEL = { builtin: 'tools.kind_builtin', app: 'tools.kind_app', static: 'tools.kind_static', url: 'tools.kind_url' };
 
 // Same shape the server enforces. Checked here only to give a faster, inline
 // answer — the server's 422 is the real gate.
@@ -148,6 +157,9 @@ function normalize(list) {
   return list.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id);
 }
 
+/** Is `tool` an app package row? */
+function isApp(tool) { return !!tool && tool.kind === 'app'; }
+
 /** Every tool the API knows, or — before/without the API — the builtins the
  *  feature probes found, so an older backend loses nothing. */
 function allTools() {
@@ -172,11 +184,33 @@ export function toolTitle(tool) {
   return (tool && (tool.title || tool.id)) || '';
 }
 
-/** The tiles the rail should draw, builtins first. */
+/** The enabled app row whose roster bot is `botId` — the app that owns that
+ *  bot's threads (and may hook them). Null in Safe Mode for a non-safe app. */
+export function appForBot(botId) {
+  if (!botId || !tools) return null;
+  const st = deps && deps.state;
+  for (const x of tools) {
+    if (!isApp(x) || x.enabled === false || !x.bot_id) continue;
+    if (String(x.bot_id).toLowerCase() !== String(botId).toLowerCase()) continue;
+    if (st && st.decoy && !x.safe) return null;
+    return x;
+  }
+  return null;
+}
+
+/** Apps in rail order: manifest `order`, then id. */
+function byAppOrder(a, b) {
+  const oa = Number.isFinite(a.order) ? a.order : 1000;
+  const ob = Number.isFinite(b.order) ? b.order : 1000;
+  return oa - ob || String(a.id).localeCompare(String(b.id));
+}
+
+/** The tiles the rail should draw: builtins, then apps, then static/url. */
 export function railEntries() {
   if (!deps) return [];
   const st = deps.state;
   const builtins = [];
+  const apps = [];
   const others = [];
   for (const tool of allTools()) {
     if (tool.enabled === false) continue;
@@ -185,6 +219,9 @@ export function railEntries() {
       const b = builtinOf(tool);
       if (st.decoy || !b || !deps.builtinOn(b.feature)) continue;
       builtins.push(tool);
+    } else if (isApp(tool)) {
+      if (st.decoy && !tool.safe) continue;
+      apps.push(tool);
     } else if (tool.kind === 'static' || tool.kind === 'url') {
       // The API already filters for Safe Mode; this is the belt to its braces.
       if (st.decoy && !tool.safe) continue;
@@ -193,7 +230,8 @@ export function railEntries() {
   }
   const order = (x) => BUILTINS.indexOf(builtinOf(x));
   builtins.sort((a, b) => order(a) - order(b));
-  return builtins.concat(others);
+  apps.sort(byAppOrder);
+  return builtins.concat(apps, others);
 }
 
 // ===================== Loading =====================
@@ -275,7 +313,17 @@ export function railToolDot(id) {
 
 // ===================== Pane =====================
 
+/** Where an app's page lives. Always under /apps/<id>/ on THIS origin: an
+ *  `entry` from the server that points anywhere else is ignored, because the
+ *  frame is unsandboxed and must only ever hold our own code. */
+function appSrc(tool) {
+  const base = `/apps/${encodeURIComponent(tool.id)}/`;
+  const e = typeof tool.entry === 'string' ? tool.entry : '';
+  return e.startsWith(base) && !e.includes('..') && !e.includes('//', 1) ? e : base;
+}
+
 function frameSrc(tool) {
+  if (isApp(tool)) return appSrc(tool);
   if (tool.kind === 'static') return `/tools/${encodeURIComponent(tool.id)}/`;
   const u = parseHttpUrl(tool.url);
   return u ? u.href : '';
@@ -312,7 +360,11 @@ function loadFrame(tool) {
   }
   if (note) note.classList.add('hidden');
   // Sandbox BEFORE src: the attribute is read when the navigation starts.
-  frame.setAttribute('sandbox', tool.kind === 'url' ? SANDBOX_URL : SANDBOX_STATIC);
+  // An app is trusted repo code on our own origin and needs the session
+  // cookie for its own API, so its frame has NO sandbox attribute at all —
+  // and nothing else is ever framed without one.
+  if (isApp(tool)) frame.removeAttribute('sandbox');
+  else frame.setAttribute('sandbox', tool.kind === 'url' ? SANDBOX_URL : SANDBOX_STATIC);
   frame.setAttribute('title', t('tools.frame_title', { name: toolTitle(tool) }));
   frame.classList.remove('hidden');
   frame.setAttribute('src', src);
@@ -373,6 +425,11 @@ async function refreshStatus(tool) {
   // A url tool the server could not reach: say so instead of an empty frame.
   if (tool.kind === 'url' && st && st.reachable === false) {
     showError(t('tools.unreachable_text'), t('tools.unreachable_hint'));
+  }
+  // An app whose backend failed to import/build: the page may load, its API
+  // will not. Say which half is missing.
+  if (isApp(tool) && st && st.mounted === false) {
+    showError(t('tools.app_unmounted_text'), t('tools.app_unmounted_hint'));
   }
 }
 
@@ -438,7 +495,7 @@ export function openTool(id) {
     return true;
   }
   if (!tool || tool.enabled === false) return false;
-  if (tool.kind !== 'static' && tool.kind !== 'url') return false;
+  if (tool.kind !== 'static' && tool.kind !== 'url' && !isApp(tool)) return false;
   if (st.decoy && !tool.safe) return false;
 
   rememberPrev();
@@ -505,13 +562,97 @@ export function closeTool({ restore = true } = {}) {
 
 export function toolOpen() { return openId; }
 
-/** Hand the remembered chat back after a BUILTIN pane closes itself (the Job
- *  Board's ✕). The generic pane does this inside closeTool(); a builtin's
- *  opener called rememberPrev() on the way in, so the pair matches. */
-export function restorePrev(opts) {
-  const p = prev;
-  prev = null;
-  if (deps) deps.restoreView(p, opts);
+// ===================== Apps: shell ⇄ frame messaging =====================
+// The frame of an app is unsandboxed and same-origin, so it could reach into
+// the shell directly; the contract says it does not, and the shell holds up
+// its half by acting ONLY on messages that (a) come from our own origin and
+// (b) come from the frame that is on screen right now, while it holds an app.
+// Anything else — another window, a stale frame, a static tool (opaque
+// origin), a url tool (someone else's origin) — is ignored.
+
+const THREAD_ID_RE = /^[A-Za-z0-9_.:-]{1,200}$/;
+
+function openApp() {
+  const tool = openId ? findTool(openId) : null;
+  return isApp(tool) ? tool : null;
+}
+
+/** Post to the open app's frame, if there is one. Same origin only. */
+function postToApp(msg) {
+  const frame = $('tool-frame');
+  if (!openApp() || !frame || !frame.contentWindow) return false;
+  try { frame.contentWindow.postMessage(msg, location.origin); return true; } catch { return false; }
+}
+
+/** The shell's theme, as its runtime stamped it on <html>. */
+function shellTheme() {
+  const root = document.documentElement;
+  return {
+    type: 'dispatch:theme',
+    palette: root.getAttribute('data-palette'),
+    theme: root.getAttribute('data-theme'),
+    contrast: root.getAttribute('data-contrast-profile'),
+  };
+}
+
+/** Tell the open app the shell's current theme and language. main.js calls
+ *  this on a language switch; the frame's 'load' and the theme runtime's
+ *  'ui-theme-change' event call it too. */
+export function syncAppFrame() {
+  if (!openApp()) return;
+  postToApp(shellTheme());
+  postToApp({ type: 'dispatch:lang', lang: document.documentElement.getAttribute('lang') || 'en' });
+}
+
+/** A live `app:<id>:*` WebSocket frame: hand it to that app's page when it is
+ *  the one on screen. Returns true when it was posted. */
+export function forwardAppFrame(frame) {
+  const tool = openApp();
+  if (!tool || !frame || typeof frame.type !== 'string') return false;
+  if (!frame.type.startsWith(`app:${tool.id}:`)) return false;
+  return postToApp({ type: 'dispatch:frame', frame });
+}
+
+function onAppMessage(ev) {
+  if (!deps) return;
+  const frame = $('tool-frame');
+  const tool = openApp();
+  // Both checks, always: origin says "our code", source says "the frame on
+  // screen" (not a popup it opened, not a frame left over from a close).
+  if (!tool || !frame || ev.origin !== location.origin || ev.source !== frame.contentWindow) return;
+  const msg = ev.data;
+  if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+  switch (msg.type) {
+    case 'dispatch:open-thread': {
+      const id = typeof msg.threadId === 'string' ? msg.threadId : '';
+      if (!THREAD_ID_RE.test(id)) return;
+      let hint = null;
+      if (msg.hint && typeof msg.hint === 'object') {
+        // A hint is data for the app's own thread hook: small, and plain JSON.
+        try { const s = JSON.stringify(msg.hint); if (s.length <= 2048) hint = JSON.parse(s); } catch { /* dropped */ }
+      }
+      // rememberPrev semantics: ✕-style close, the rail goes back to the last
+      // real chat, THEN the thread opens over it.
+      closeTool();
+      if (typeof deps.openThread === 'function') deps.openThread(id, { botId: tool.bot_id || null, hint, appId: tool.id });
+      return;
+    }
+    case 'dispatch:close':
+      closeTool();
+      return;
+    case 'dispatch:toast': {
+      const text = String(msg.text == null ? '' : msg.text).slice(0, 500);
+      if (text) deps.toast(text, !!msg.error);
+      return;
+    }
+    case 'dispatch:set-title': {
+      const el_ = $('tool-title');
+      const text = String(msg.text == null ? '' : msg.text).slice(0, 120);
+      if (el_) el_.textContent = text || toolTitle(tool);
+      return;
+    }
+    default:
+  }
 }
 
 /** `#tool=<id>` → that tool's id, or null. */
@@ -542,6 +683,13 @@ function cloneTools(list) {
 export function serializeTools(list) {
   return (list || []).map((x) => {
     if (x.kind === 'builtin') return { id: x.id, kind: 'builtin', enabled: x.enabled !== false };
+    // An app row may only carry id/kind/enabled (+ trusted, for an add-on in
+    // the data dir) — its package on disk owns everything else.
+    if (isApp(x)) {
+      const out = { id: x.id, kind: 'app', enabled: x.enabled !== false };
+      if (x.trusted === true) out.trusted = true;
+      return out;
+    }
     const out = {};
     for (const k of WRITABLE) {
       if (x[k] === undefined || x[k] === null || x[k] === '') continue;
@@ -553,7 +701,12 @@ export function serializeTools(list) {
 }
 
 function sortedDraft() {
-  const order = (x) => (x.kind === 'builtin' ? BUILTINS.indexOf(builtinOf(x)) : 1000);
+  // Builtins, then apps (by manifest order), then static/url — the rail's order.
+  const order = (x) => {
+    if (x.kind === 'builtin') return BUILTINS.indexOf(builtinOf(x));
+    if (isApp(x)) return 100 + (Number.isFinite(x.order) ? Math.min(Math.max(x.order, 0), 800) : 800);
+    return 1000;
+  };
   return draft.map((x, i) => [x, i]).sort((a, b) => order(a[0]) - order(b[0]) || a[1] - b[1]);
 }
 
@@ -580,7 +733,9 @@ function locationText(tool) {
 
 function toolRow(tool, idx) {
   const name = toolTitle(tool);
-  const builtin = tool.kind === 'builtin';
+  // An app's title and icon come from its package (app.yaml), like a
+  // builtin's from the code: only the switch is the operator's here.
+  const builtin = tool.kind === 'builtin' || isApp(tool);
   const row = el('tr', { class: 'tools-row', dataset: { idx: String(idx) } });
 
   // Icon
@@ -605,7 +760,10 @@ function toolRow(tool, idx) {
 
   // Title
   const titleCell = el('td', { class: 'tools-cell-title' });
-  if (builtin) titleCell.append(el('span', { text: name }));
+  if (builtin) {
+    titleCell.append(el('span', { text: name }));
+    if (isApp(tool)) titleCell.append(el('div', { class: 'muted tools-id', text: tool.id }));
+  }
   else {
     const inp = el('input', {
       type: 'text', class: 'tools-input', maxlength: '80',
@@ -620,7 +778,9 @@ function toolRow(tool, idx) {
 
   // Location (read-only by design: paths and refresh live in tools.yaml)
   const loc = el('td', { class: 'tools-cell-loc' });
-  if (!builtin) {
+  if (isApp(tool)) {
+    loc.append(el('code', { class: 'tools-loc', dir: 'ltr', text: appSrc(tool) }));
+  } else if (!builtin) {
     loc.append(el('code', { class: 'tools-loc', dir: 'ltr', text: locationText(tool) }));
     if (tool.has_refresh || tool.refresh) loc.append(el('span', { class: 'tools-badge', text: t('tools.has_refresh') }));
   } else if (tool.available === false) {
@@ -835,7 +995,8 @@ export async function saveToolsSettings() {
 
 /** Hand this module the app. `d`:
  *    state            the app state (decoy, selectedBotId, activeThreadId)
- *    openers          {harness, studioforge, mail, practice, jobs} → the builtin openers
+ *    openers          {harness, studioforge, mail, practice} → the builtin openers
+ *    openThread(id, {botId, hint, appId})  an app asked to open one of its threads
  *    closeToolPanes   main.js's pane closer (called with 'tool' before opening)
  *    builtinOn(f)     is that builtin's feature available right now?
  *    builtinDot(f)    the status-dot class for that builtin ('' = no dot)
@@ -855,10 +1016,17 @@ export function wireTools(d) {
   const save = $('tools-save');
   if (save) save.addEventListener('click', () => saveToolsSettings());
   window.addEventListener('hashchange', () => { if (hashToolId()) openFromHash(); });
+  // Apps: messages from the framed page, and the shell's theme/language
+  // handed to it once it has loaded and whenever either changes.
+  window.addEventListener('message', onAppMessage);
+  const frame = $('tool-frame');
+  if (frame) frame.addEventListener('load', () => { if (openApp() && frame.getAttribute('src')) syncAppFrame(); });
+  document.addEventListener('ui-theme-change', () => syncAppFrame());
 }
 
 // Test hook: reset module state between jsdom cases.
 export function _resetForTest() {
+  if (typeof window !== 'undefined') window.removeEventListener('message', onAppMessage);
   deps = null; tools = null; toolsPath = ''; openId = null; prev = null;
   refreshing = false; draft = null; draftDirty = false; addOpen = false; settingsHost = null;
 }

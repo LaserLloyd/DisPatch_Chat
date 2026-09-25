@@ -2,7 +2,16 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v130';  // v130: tool tiles are the bot tile's
+const CACHE = 'local-chat-v131';  // v131: apps — trusted add-on packages
+  // under apps/<id>/ (docs/design/2026-09-25-apps.md). New module
+  // js/app-sdk.js (in SHELL: main.js imports it); the Job Board moved out of
+  // the shell into apps/jobboard/ (js/jobs.js and js/job-thread.js are gone
+  // from SHELL, its CSS left app.css, its strings left every locale), and
+  // /apps/* is network-only here. api.js 29→30 (jobs calls out, thread(id)
+  // in) and so every importer moved: checklist 7→8, clients 7→8,
+  // reactions 20→21, tools 4→5; main.js 106→107, app.css 88→89, index.html
+  // (the Job Board pane is gone, #app-thread-host is new), all eight locales.
+  // v130: tool tiles are the bot tile's
   // shape on the theme's surface with line icons (util.js 19→20 gained
   // terminal/mail/users/chart, so every util.js importer moved: viewer 4→5,
   // theme 17→18, reactions 19→20, pins 10→11, markdown 32→33, checklist 6→7,
@@ -249,10 +258,9 @@ const SHELL = [
   '/static/js/nim.js', '/static/js/about.js', '/static/js/pins.js',
   '/static/js/imagejobs.js', '/static/js/links.js', '/static/js/viewer.js',
   '/static/js/menubots.js',
-  // Jobs board (added 2026-09-14). Additive modules only — must be in the
-  // shell or the cold offline start loads the new sidebar entry but no
-  // module, and the click fails silently with a blank panel.
-  '/static/js/jobs.js', '/static/js/job-thread.js',
+  // The app SDK (2026-09-25): statically imported by main.js, so a cold
+  // offline start needs it. The apps themselves (/apps/*) are never cached.
+  '/static/js/app-sdk.js',
   // Emails + Clients tabs (added 2026-09-19). clients.js is a pure module —
   // no side effects at import time — but it MUST be in SHELL so the cold
   // offline start resolves the import main.js now carries. The Emails pane
@@ -313,6 +321,10 @@ self.addEventListener('fetch', (e) => {
   // and opaque cross-origin responses bloat the quota.
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const p = url.pathname;
+  // Apps (/apps/<id>/…) are network-only, always: an app is served with its
+  // own caching rules and its data is gated per session, and a precached
+  // copy would outlive an app that was switched off in tools.yaml.
+  if (p.startsWith('/apps/')) return;
   const isShell = p === '/' ||
     (p.startsWith('/static/') && !p.startsWith('/static/avatars/'));
   if (!isShell) return;

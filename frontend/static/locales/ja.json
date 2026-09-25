@@ -1004,141 +1004,6 @@
     "save_failed": "保存できませんでした: {error}",
     "bad_root": "存在しないフォルダか、常に拒否されるフォルダです"
   },
-  "jobs": {
-    "title": "Job Board",
-    "subtitle": "見つかった求人を月別に表示",
-    "close": "求人ボードを閉じる",
-    "sidebar_aria": "求人ボード — 月別の求人（アンロック時のみ）",
-    "empty": "No jobs yet — post one via the API or wait for the curator.",
-    "loading": "Loading…",
-    "error": "Could not load jobs: {msg}",
-    "untitled": "(untitled)",
-    "link": {
-      "apply": "View original posting →"
-    },
-    "badge": {
-      "duplicate": "duplicate",
-      "expired": "expired"
-    },
-    "sort": {
-      "label": "Sort",
-      "updated": "Last activity",
-      "salary": "Salary",
-      "posted": "Newest posted"
-    },
-    "filter": {
-      "all": "All states",
-      "any_remote": "Any remote type",
-      "tag_placeholder": "Filter by tag"
-    },
-    "state": {
-      "pending": "Pending",
-      "yes": "Yes",
-      "no": "No",
-      "maybe": "Maybe",
-      "applied": "Applied",
-      "archived": "Archived",
-      "duplicate": "Duplicate"
-    },
-    "remote": {
-      "remote": "Remote",
-      "hybrid": "Hybrid",
-      "onsite": "Onsite"
-    },
-    "age": {
-      "today": "today",
-      "yesterday": "yesterday",
-      "days_ago": "{n}d ago"
-    },
-    "vote": {
-      "yes": "👍 Yes",
-      "no": "👎 No",
-      "maybe": "🤔 Maybe",
-      "applied": "✓ Applied",
-      "undo": "↺ Undo",
-      "no_reason": "Why no?",
-      "cancel": "Cancel"
-    },
-    "reasons": {
-      "wrong_location": "Wrong location",
-      "too_senior": "Too senior",
-      "too_junior": "Too junior",
-      "compensation": "Compensation",
-      "company": "Company",
-      "wrong_domain": "Wrong domain",
-      "already_applied": "Already applied",
-      "duplicate": "Duplicate",
-      "other": "Other"
-    },
-    "score": {
-      "why": "Score {score}",
-      "embed_unavailable": "Score {score} (embedding unavailable)",
-      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
-    },
-    "month": {
-      "count": "{n} job",
-      "count_plural": "{n} jobs"
-    },
-    "detail": {
-      "close": "Close",
-      "not_found": "That job could not be found.",
-      "posted": "掲載日",
-      "first_seen": "初出",
-      "source": "情報源",
-      "offline": "DisPatch に接続できません。接続を確認してください。",
-      "locked": "この求人を見るにはロックを解除してください。"
-    },
-    "seniority": {
-      "junior": "ジュニア",
-      "senior": "シニア",
-      "staff": "スタッフ",
-      "principal": "プリンシパル"
-    },
-    "note": {
-      "placeholder": "メモを追加(任意)…"
-    },
-    "feedback": {
-      "title": "Scoutへのフィードバック",
-      "placeholder": "Scoutに探してほしいこと・避けてほしいことを伝えてください…",
-      "reason_label": "理由(任意)",
-      "reason_none": "特に理由なし",
-      "send": "Scoutに送信",
-      "sent": "送信しました — Scoutがこのジョブのスレッドで返信します",
-      "sent_no_agent": "保存しました。Scoutに今すぐ届きませんでしたが、後で処理されます",
-      "open_thread": "スレッドを開く",
-      "error": "フィードバックを送信できませんでした: {msg}",
-      "need_comment": "送信する前にメモを入力してください。",
-      "not_available": "フィードバック機能はまだ利用できません。"
-    },
-    "activity": {
-      "title": "アクティビティ",
-      "empty": "まだアクティビティはありません。",
-      "actor": {
-        "system": "システム",
-        "you": "あなた"
-      },
-      "type": {
-        "comment": "コメント",
-        "vote": "投票",
-        "vote_undo": "投票取り消し",
-        "state_change": "状態変更",
-        "tag_added": "タグ追加",
-        "tag_removed": "タグ削除",
-        "repost": "再投稿",
-        "duplicate_detected": "重複を検出",
-        "expired": "期限切れ",
-        "feedback": "フィードバック",
-        "applied": "応募済み"
-      }
-    },
-    "find": {
-      "button": "🔍 求人を探す",
-      "placeholder": "Scoutに探してほしい条件（任意）",
-      "send": "Scoutに依頼",
-      "sent": "Scoutが検索中です。新しい求人はここに表示され、概要は今月のJobsスレッドに届きます。",
-      "not_sent": "依頼は保存されましたが、Scoutに接続できませんでした。後でもう一度お試しください。"
-    }
-  },
   "tools": {
     "not_installed": "このインストールでは利用できません",
     "more_bots": "その他のボット",
@@ -1158,6 +1023,8 @@
     "close": "ツールを閉じる",
     "unreachable_text": "このツールのページに現在アクセスできません。",
     "unreachable_hint": "元のサービスが動いているか確認してください。",
+    "app_unmounted_text": "このアプリのサーバー側が読み込まれていません。",
+    "app_unmounted_hint": "ページは開いても、データは表示されません。エラーは DisPatch のログに記録されています。",
     "loopback_text": "このツールはホストのループバックアドレスで動作しています。",
     "loopback_hint": "ここで使うにはホスト上で DisPatch を開いてください。",
     "bad_url_text": "このツールには使えるアドレスがありません。",
@@ -1171,6 +1038,7 @@
     "col_location": "場所",
     "col_enabled": "表示",
     "kind_builtin": "組み込み",
+    "kind_app": "アプリ",
     "kind_static": "フォルダー",
     "kind_url": "ウェブページ",
     "has_refresh": "更新あり",

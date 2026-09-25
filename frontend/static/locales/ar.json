@@ -1055,141 +1055,6 @@
     "save_failed": "تعذّر الحفظ: {error}",
     "bad_root": "ليس مجلدًا موجودًا، أو مجلد مرفوض دائمًا"
   },
-  "jobs": {
-    "title": "Job Board",
-    "subtitle": "الوظائف التي عُثر عليها لك، حسب الشهر",
-    "close": "إغلاق لوحة الوظائف",
-    "sidebar_aria": "لوحة الوظائف — الوظائف حسب الشهر، عند فتح القفل فقط",
-    "empty": "No jobs yet — post one via the API or wait for the curator.",
-    "loading": "Loading…",
-    "error": "Could not load jobs: {msg}",
-    "untitled": "(untitled)",
-    "link": {
-      "apply": "View original posting →"
-    },
-    "badge": {
-      "duplicate": "duplicate",
-      "expired": "expired"
-    },
-    "sort": {
-      "label": "Sort",
-      "updated": "Last activity",
-      "salary": "Salary",
-      "posted": "Newest posted"
-    },
-    "filter": {
-      "all": "All states",
-      "any_remote": "Any remote type",
-      "tag_placeholder": "Filter by tag"
-    },
-    "state": {
-      "pending": "Pending",
-      "yes": "Yes",
-      "no": "No",
-      "maybe": "Maybe",
-      "applied": "Applied",
-      "archived": "Archived",
-      "duplicate": "Duplicate"
-    },
-    "remote": {
-      "remote": "Remote",
-      "hybrid": "Hybrid",
-      "onsite": "Onsite"
-    },
-    "age": {
-      "today": "today",
-      "yesterday": "yesterday",
-      "days_ago": "{n}d ago"
-    },
-    "vote": {
-      "yes": "👍 Yes",
-      "no": "👎 No",
-      "maybe": "🤔 Maybe",
-      "applied": "✓ Applied",
-      "undo": "↺ Undo",
-      "no_reason": "Why no?",
-      "cancel": "Cancel"
-    },
-    "reasons": {
-      "wrong_location": "Wrong location",
-      "too_senior": "Too senior",
-      "too_junior": "Too junior",
-      "compensation": "Compensation",
-      "company": "Company",
-      "wrong_domain": "Wrong domain",
-      "already_applied": "Already applied",
-      "duplicate": "Duplicate",
-      "other": "Other"
-    },
-    "score": {
-      "why": "Score {score}",
-      "embed_unavailable": "Score {score} (embedding unavailable)",
-      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
-    },
-    "month": {
-      "count": "{n} job",
-      "count_plural": "{n} jobs"
-    },
-    "detail": {
-      "close": "Close",
-      "not_found": "That job could not be found.",
-      "posted": "Posted",
-      "first_seen": "First seen",
-      "source": "Source",
-      "offline": "تعذّر الوصول إلى DisPatch — تحقّق من الاتصال.",
-      "locked": "ألغِ القفل لعرض هذه الوظيفة."
-    },
-    "seniority": {
-      "junior": "Junior",
-      "senior": "Senior",
-      "staff": "Staff",
-      "principal": "Principal"
-    },
-    "note": {
-      "placeholder": "Add a note (optional)…"
-    },
-    "feedback": {
-      "title": "Feedback for Scout",
-      "placeholder": "Tell Scout what to look for or avoid…",
-      "reason_label": "Reason (optional)",
-      "reason_none": "No specific reason",
-      "send": "Send to Scout",
-      "sent": "Sent — Scout will reply in the job thread",
-      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
-      "open_thread": "Open thread",
-      "error": "Could not send feedback: {msg}",
-      "need_comment": "Write a note before sending.",
-      "not_available": "Feedback isn't available yet."
-    },
-    "activity": {
-      "title": "Activity",
-      "empty": "No activity yet.",
-      "actor": {
-        "system": "System",
-        "you": "You"
-      },
-      "type": {
-        "comment": "Comment",
-        "vote": "Voted",
-        "vote_undo": "Vote undone",
-        "state_change": "State change",
-        "tag_added": "Tag added",
-        "tag_removed": "Tag removed",
-        "repost": "Reposted",
-        "duplicate_detected": "Duplicate detected",
-        "expired": "Expired",
-        "feedback": "Feedback",
-        "applied": "Applied"
-      }
-    },
-    "find": {
-      "button": "🔍 ابحث عن وظائف",
-      "placeholder": "ما الذي يجب أن يبحث عنه Scout؟ (اختياري)",
-      "send": "اطلب من Scout",
-      "sent": "Scout يبحث الآن. ستظهر الوظائف الجديدة هنا، وسيصل ملخص إلى سلسلة وظائف هذا الشهر.",
-      "not_sent": "تم حفظ الطلب، لكن تعذّر الوصول إلى Scout. حاول لاحقًا."
-    }
-  },
   "mail": {
     "name": "البريد",
     "subtitle": "لوحة MailForge",
@@ -1283,6 +1148,8 @@
     "close": "إغلاق الأداة",
     "unreachable_text": "صفحة هذه الأداة غير متاحة حاليًا.",
     "unreachable_hint": "تحقّق من أن الخدمة المصدر تعمل.",
+    "app_unmounted_text": "لم يُحمَّل الجانب الخادمي لهذا التطبيق.",
+    "app_unmounted_hint": "قد تُفتح الصفحة، لكن بياناتها لن تظهر. سجل DisPatch يذكر الخطأ.",
     "loopback_text": "تعمل هذه الأداة على عنوان الاسترجاع المحلي للمضيف.",
     "loopback_hint": "افتح DisPatch على المضيف نفسه لاستخدامها هنا.",
     "bad_url_text": "لا تملك هذه الأداة عنوانًا صالحًا.",
@@ -1296,6 +1163,7 @@
     "col_location": "الموقع",
     "col_enabled": "ظاهرة",
     "kind_builtin": "مدمجة",
+    "kind_app": "تطبيق",
     "kind_static": "مجلد",
     "kind_url": "صفحة ويب",
     "has_refresh": "قابلة للتحديث",

@@ -930,141 +930,6 @@
     "save_failed": "无法保存：{error}",
     "bad_root": "不是已存在的文件夹，或者是始终会被拒绝的文件夹"
   },
-  "jobs": {
-    "title": "Job Board",
-    "subtitle": "为你找到的职位，按月排列",
-    "close": "关闭职位板",
-    "sidebar_aria": "职位板 — 按月列出的职位，仅解锁时可用",
-    "empty": "No jobs yet — post one via the API or wait for the curator.",
-    "loading": "Loading…",
-    "error": "Could not load jobs: {msg}",
-    "untitled": "(untitled)",
-    "link": {
-      "apply": "View original posting →"
-    },
-    "badge": {
-      "duplicate": "duplicate",
-      "expired": "expired"
-    },
-    "sort": {
-      "label": "Sort",
-      "updated": "Last activity",
-      "salary": "Salary",
-      "posted": "Newest posted"
-    },
-    "filter": {
-      "all": "All states",
-      "any_remote": "Any remote type",
-      "tag_placeholder": "Filter by tag"
-    },
-    "state": {
-      "pending": "Pending",
-      "yes": "Yes",
-      "no": "No",
-      "maybe": "Maybe",
-      "applied": "Applied",
-      "archived": "Archived",
-      "duplicate": "Duplicate"
-    },
-    "remote": {
-      "remote": "Remote",
-      "hybrid": "Hybrid",
-      "onsite": "Onsite"
-    },
-    "age": {
-      "today": "today",
-      "yesterday": "yesterday",
-      "days_ago": "{n}d ago"
-    },
-    "vote": {
-      "yes": "👍 Yes",
-      "no": "👎 No",
-      "maybe": "🤔 Maybe",
-      "applied": "✓ Applied",
-      "undo": "↺ Undo",
-      "no_reason": "Why no?",
-      "cancel": "Cancel"
-    },
-    "reasons": {
-      "wrong_location": "Wrong location",
-      "too_senior": "Too senior",
-      "too_junior": "Too junior",
-      "compensation": "Compensation",
-      "company": "Company",
-      "wrong_domain": "Wrong domain",
-      "already_applied": "Already applied",
-      "duplicate": "Duplicate",
-      "other": "Other"
-    },
-    "score": {
-      "why": "Score {score}",
-      "embed_unavailable": "Score {score} (embedding unavailable)",
-      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
-    },
-    "month": {
-      "count": "{n} job",
-      "count_plural": "{n} jobs"
-    },
-    "detail": {
-      "close": "Close",
-      "not_found": "That job could not be found.",
-      "posted": "Posted",
-      "first_seen": "First seen",
-      "source": "Source",
-      "offline": "无法连接 DisPatch，请检查网络。",
-      "locked": "解锁后才能查看此职位。"
-    },
-    "seniority": {
-      "junior": "Junior",
-      "senior": "Senior",
-      "staff": "Staff",
-      "principal": "Principal"
-    },
-    "note": {
-      "placeholder": "Add a note (optional)…"
-    },
-    "feedback": {
-      "title": "Feedback for Scout",
-      "placeholder": "Tell Scout what to look for or avoid…",
-      "reason_label": "Reason (optional)",
-      "reason_none": "No specific reason",
-      "send": "Send to Scout",
-      "sent": "Sent — Scout will reply in the job thread",
-      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
-      "open_thread": "Open thread",
-      "error": "Could not send feedback: {msg}",
-      "need_comment": "Write a note before sending.",
-      "not_available": "Feedback isn't available yet."
-    },
-    "activity": {
-      "title": "Activity",
-      "empty": "No activity yet.",
-      "actor": {
-        "system": "System",
-        "you": "You"
-      },
-      "type": {
-        "comment": "Comment",
-        "vote": "Voted",
-        "vote_undo": "Vote undone",
-        "state_change": "State change",
-        "tag_added": "Tag added",
-        "tag_removed": "Tag removed",
-        "repost": "Reposted",
-        "duplicate_detected": "Duplicate detected",
-        "expired": "Expired",
-        "feedback": "Feedback",
-        "applied": "Applied"
-      }
-    },
-    "find": {
-      "button": "🔍 查找职位",
-      "placeholder": "希望 Scout 查找什么？（可选）",
-      "send": "让 Scout 查找",
-      "sent": "Scout 正在搜索。新职位会显示在这里，摘要会发送到本月的 Jobs 线程。",
-      "not_sent": "请求已保存，但无法联系 Scout。请稍后再试。"
-    }
-  },
   "mail": {
     "name": "邮件",
     "subtitle": "MailForge 控制台",
@@ -1158,6 +1023,8 @@
     "close": "关闭工具",
     "unreachable_text": "此工具的页面当前无法访问。",
     "unreachable_hint": "请检查其来源服务是否在运行。",
+    "app_unmounted_text": "此应用的服务器端未能加载。",
+    "app_unmounted_hint": "页面可能能打开，但数据不会显示。错误信息见 DisPatch 日志。",
     "loopback_text": "此工具运行在主机的回环地址上。",
     "loopback_hint": "请在主机本机上打开 DisPatch 以在此使用。",
     "bad_url_text": "此工具没有可用的地址。",
@@ -1171,6 +1038,7 @@
     "col_location": "位置",
     "col_enabled": "显示",
     "kind_builtin": "内置",
+    "kind_app": "应用",
     "kind_static": "文件夹",
     "kind_url": "网页",
     "has_refresh": "可刷新",

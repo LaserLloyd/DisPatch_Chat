@@ -58,9 +58,9 @@ async function freshTools() {
 
 /** Wire tools.js the way main.js does, with recorders instead of the app. */
 function wire(mod, over = {}) {
-  const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [] };
+  const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [] };
   const state = { decoy: false, selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
-  const flags = { harness: true, studioforge: true, mail: true, practice: false, jobs: false, ...over.flags };
+  const flags = { harness: true, studioforge: true, mail: true, practice: false, ...over.flags };
   mod.wireTools({
     state,
     openers: {
@@ -68,8 +68,8 @@ function wire(mod, over = {}) {
       studioforge: () => rec.opened.push('studioforge'),
       mail: () => rec.opened.push('mail'),
       practice: () => rec.opened.push('practice'),
-      jobs: () => rec.opened.push('jobs'),
     },
+    openThread: (id, opts) => rec.threads.push([id, opts]),
     closeToolPanes: (except) => rec.closedWith.push(except),
     builtinOn: (f) => !state.decoy && !!flags[f],
     builtinDot: (f) => (f === 'harness' ? 'harness-sidedot harness-running' : ''),
@@ -85,7 +85,7 @@ function wire(mod, over = {}) {
 
 const tileIds = (win) => [...win.document.querySelectorAll('#tool-list [data-tool]')].map((b) => b.dataset.tool);
 
-test('rail: builtins first (feature-gated), then enabled static/url tools', { skip: dom.skip }, async () => {
+test('rail: builtins first (feature-gated), then apps, then enabled static/url tools', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   wire(mod);
@@ -94,7 +94,7 @@ test('rail: builtins first (feature-gated), then enabled static/url tools', { sk
   assert.equal(list.hidden, false);
   // studioforge-panel: enabled:false in the manifest. clients-panel: its
   // feature probe says off. old-report: enabled:false.
-  assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'benchmark', 'rig-panel', 'family-page']);
+  assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
   assert.ok(list.querySelector('.tool-list-head'), 'the group has its heading');
   const bench = list.querySelector('[data-tool="benchmark"]');
   // 📊 is a chrome emoji: the tile draws the theme's chart line icon instead.
@@ -109,7 +109,7 @@ test('rail: builtins first (feature-gated), then enabled static/url tools', { sk
 test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
-  wire(mod, { flags: { jobs: true, practice: true } });
+  wire(mod, { flags: { practice: true } });
   await mod.loadTools();
   const tile = (id) => win.document.querySelector(`#tool-list [data-tool="${id}"]`);
   for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']) {
@@ -125,11 +125,14 @@ test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', 
     assert.equal(av.className.match(/terminal-avatar|harness-avatar|studioforge-avatar/), null, id);
     assert.ok(b.querySelector('.bot-name-tip') && b.querySelector('.bot-name-label'), id + ' has the tip and label');
   }
-  // Builtins: line icons (currentColor SVG), never text.
+  // Builtins: line icons (currentColor SVG), never text. So is an app whose
+  // manifest names an icon word (`clipboard` is the contract's own example).
   for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard']) {
     assert.ok(tile(id).querySelector('.tool-avatar-icon svg.rail-icon'), id);
   }
-  assert.ok(tile('jobboard').getAttribute('aria-label'), 'the Job Board tile has an accessible name');
+  assert.equal(mod.toolIconName({ kind: 'app', icon: 'clipboard' }), 'jobs');
+  assert.equal(tile('jobboard').getAttribute('aria-label'), 'Job Board', 'an app tile is named by its title');
+  assert.equal(tile('jobboard').querySelector('.bot-status-dot'), null, 'an app has no service dot');
   // 🎛️ (with its U+FE0F) is the sliders icon; 🏠 is the person's own emoji.
   assert.ok(tile('rig-panel').querySelector('.tool-avatar-icon svg'));
   const fam = tile('family-page').querySelector('.tool-avatar');
@@ -146,46 +149,6 @@ test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', 
   assert.equal(tile('benchmark').getAttribute('aria-current'), 'page');
   // The pane header shows the same glyph as the tile.
   assert.ok(win.document.querySelector('#tool-icon svg.rail-icon'));
-});
-
-test('the Job Board is a builtin tile that calls the jobs opener', { skip: dom.skip }, async () => {
-  const win = setup();
-  const mod = await freshTools();
-  const { rec } = wire(mod, { flags: { jobs: true } });
-  await mod.loadTools();
-  const ids = tileIds(win);
-  assert.ok(ids.includes('jobboard'));
-  assert.ok(ids.indexOf('jobboard') < ids.indexOf('benchmark'), 'builtins come first');
-  win.document.querySelector('#tool-list [data-tool="jobboard"]').click();
-  assert.deepEqual(rec.opened, ['jobs']);
-  assert.equal(mod.isToolId('jobboard'), true, 'selectBot("jobboard") routes to the tool');
-  // Feature off → no tile, and it does not open.
-  const win2 = setup();
-  const mod2 = await freshTools();
-  const w2 = wire(mod2, { flags: { jobs: false } });
-  await mod2.loadTools();
-  assert.equal(tileIds(win2).includes('jobboard'), false);
-  // Switched off in tools.yaml → never opens even if the feature is on.
-  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: FIXTURE.tools.map((x) => (x.id === 'jobboard' ? { ...x, enabled: false } : x)) }];
-  const mod3 = await freshTools();
-  const w3 = wire(mod3, { flags: { jobs: true } });
-  await mod3.loadTools();
-  assert.equal(mod3.openTool('jobboard'), false);
-  assert.deepEqual(w3.rec.opened, []);
-  assert.deepEqual(w2.rec.opened, []);
-});
-
-test('restorePrev() hands the remembered chat back after a builtin closes itself', { skip: dom.skip }, async () => {
-  setup();
-  const mod = await freshTools();
-  const { rec, state } = wire(mod, { flags: { jobs: true } });
-  await mod.loadTools();
-  mod.rememberPrev();                 // what openJobsView() does first
-  state.selectedBotId = 'jobboard';
-  mod.restorePrev({ stay: true });
-  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }]);
-  mod.restorePrev();                  // consumed: a second close restores nothing
-  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }, null]);
 });
 
 test('rail: a backend without /api/tools still shows the builtins', { skip: dom.skip }, async () => {
@@ -427,4 +390,208 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
   assert.equal(sent.tools[0].kind, 'builtin', 'builtins first on the wire');
   assert.equal(mod.toolsSettingsDirty(), false);
   assert.ok(tileIds(win).includes('grafana'), 'the rail shows the saved tool');
+});
+
+// =============================================================================
+// Apps (docs/design/2026-09-25-apps.md): a trusted package framed WITHOUT a
+// sandbox from /apps/<id>/, talking to the shell only through postMessage.
+// =============================================================================
+
+/** A message event as the browser would deliver it to the shell window. */
+function appMessage(win, data, { origin = win.location.origin, source } = {}) {
+  const src = source === undefined ? win.document.getElementById('tool-frame').contentWindow : source;
+  const ev = new win.MessageEvent('message', { data, origin });
+  // jsdom validates MessageEventInit.source; define it directly instead.
+  Object.defineProperty(ev, 'source', { value: src });
+  win.dispatchEvent(ev);
+}
+
+test('an app opens full-page in the tool pane, framed from /apps/<id>/ with NO sandbox', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec, state } = wire(mod);
+  await mod.loadTools();
+  win.document.querySelector('#tool-list [data-tool="jobboard"]').click();
+  const doc = win.document;
+  const frame = doc.getElementById('tool-frame');
+  assert.ok(doc.body.classList.contains('tool-full'));
+  assert.equal(frame.getAttribute('src'), '/apps/jobboard/');
+  assert.equal(frame.hasAttribute('sandbox'), false, 'an app frame has no sandbox attribute at all');
+  assert.equal(doc.getElementById('tool-title').textContent, 'Job Board');
+  assert.ok(doc.getElementById('tool-refresh').classList.contains('hidden'), 'apps have no refresh');
+  assert.equal(win.location.hash, '#tool=jobboard', 'deep link');
+  assert.equal(state.selectedBotId, 'jobboard');
+  assert.deepEqual(rec.closedWith, ['tool']);
+
+  // The next tool that is NOT an app gets its sandbox back before its src.
+  mod.openTool('benchmark');
+  assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups');
+  assert.equal(frame.getAttribute('src'), '/tools/benchmark/');
+
+  // Deep link straight to the app.
+  mod.closeTool();
+  win.location.hash = '#tool=jobboard';
+  assert.equal(mod.openFromHash(), true);
+  assert.equal(frame.getAttribute('src'), '/apps/jobboard/');
+  assert.equal(frame.hasAttribute('sandbox'), false);
+});
+
+test('an app entry that points outside /apps/<id>/ is ignored', { skip: dom.skip }, async () => {
+  const win = setup();
+  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: FIXTURE.tools.map((x) => (x.id === 'jobboard' ? { ...x, entry: 'https://evil.example/' } : x)) }];
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('jobboard');
+  assert.equal(win.document.getElementById('tool-frame').getAttribute('src'), '/apps/jobboard/',
+    'an unsandboxed frame only ever holds our own origin');
+});
+
+test('Safe Mode: a non-safe app has no tile, no pane and owns no bot', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { state: { decoy: true, selectedBotId: null } });
+  await mod.loadTools();
+  assert.equal(tileIds(win).includes('jobboard'), false);
+  assert.equal(mod.openTool('jobboard'), false);
+  assert.equal(mod.appForBot('jobboard'), null);
+});
+
+test('appForBot: the enabled app that owns a roster bot (case-insensitive)', { skip: dom.skip }, async () => {
+  setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  assert.equal(mod.appForBot('jobboard').id, 'jobboard');
+  assert.equal(mod.appForBot('JobBoard').thread_hook, '/apps/jobboard/thread.js');
+  assert.equal(mod.appForBot('main'), null);
+  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: FIXTURE.tools.map((x) => (x.id === 'jobboard' ? { ...x, enabled: false } : x)) }];
+  await mod.loadTools();
+  assert.equal(mod.appForBot('jobboard'), null, 'a disabled app hooks nothing');
+  assert.equal(mod.openTool('jobboard'), false);
+});
+
+test('app messages: only our origin AND the frame on screen are obeyed', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec } = wire(mod);
+  await mod.loadTools();
+  mod.openTool('jobboard');
+  const frame = win.document.getElementById('tool-frame');
+
+  // Wrong origin: ignored.
+  appMessage(win, { type: 'dispatch:toast', text: 'x' }, { origin: 'http://evil.example' });
+  // Right origin, wrong source (some other window): ignored.
+  appMessage(win, { type: 'dispatch:toast', text: 'y' }, { source: win });
+  // No source at all: ignored.
+  appMessage(win, { type: 'dispatch:close' }, { source: null });
+  assert.deepEqual(rec.toasts, []);
+  assert.equal(mod.toolOpen(), 'jobboard');
+
+  // The real thing.
+  appMessage(win, { type: 'dispatch:toast', text: 'Saved', error: false });
+  appMessage(win, { type: 'dispatch:toast', text: 'Broke', error: true });
+  assert.deepEqual(rec.toasts, [['Saved', false], ['Broke', true]]);
+  appMessage(win, { type: 'dispatch:set-title', text: 'Job Board — March' });
+  assert.equal(win.document.getElementById('tool-title').textContent, 'Job Board — March');
+
+  // open-thread: close the pane (restoring the chat it covered), then open
+  // the thread with the app's bot and the hint for its hook.
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-2026-09', hint: { job_id: 'j-1' } });
+  assert.equal(mod.toolOpen(), null, 'the app pane is closed');
+  assert.equal(win.document.body.classList.contains('tool-full'), false);
+  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }], 'rememberPrev semantics');
+  assert.deepEqual(rec.threads, [['thr-2026-09', { botId: 'jobboard', hint: { job_id: 'j-1' }, appId: 'jobboard' }]]);
+  assert.equal(frame.hasAttribute('src'), false, 'the app document is unloaded');
+
+  // With the pane closed, a late message from that frame does nothing.
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-x' });
+  assert.equal(rec.threads.length, 1);
+
+  // A malformed thread id is refused; `close` closes.
+  mod.openTool('jobboard');
+  appMessage(win, { type: 'dispatch:open-thread', threadId: '../../etc' });
+  assert.equal(rec.threads.length, 1);
+  assert.equal(mod.toolOpen(), 'jobboard');
+  appMessage(win, { type: 'dispatch:close' });
+  assert.equal(mod.toolOpen(), null);
+});
+
+test('a static tool cannot drive the shell through the app channel', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec } = wire(mod);
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 't-9' });
+  appMessage(win, { type: 'dispatch:close' });
+  assert.deepEqual(rec.threads, []);
+  assert.equal(mod.toolOpen(), 'benchmark');
+});
+
+test('the shell posts theme + language to the app, and forwards only its own frames', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  win.document.documentElement.setAttribute('data-palette', 'paper');
+  win.document.documentElement.setAttribute('data-theme', 'light');
+  win.document.documentElement.setAttribute('lang', 'de');
+  mod.openTool('jobboard');
+  const frame = win.document.getElementById('tool-frame');
+  const posted = [];
+  frame.contentWindow.postMessage = (msg, origin) => posted.push([msg, origin]);
+  mod.syncAppFrame();
+  assert.deepEqual(posted.map(([m]) => m.type), ['dispatch:theme', 'dispatch:lang']);
+  assert.equal(posted[0][0].palette, 'paper');
+  assert.equal(posted[0][0].theme, 'light');
+  assert.equal(posted[1][0].lang, 'de');
+  assert.ok(posted.every(([, o]) => o === win.location.origin), 'targetOrigin is always our own');
+
+  posted.length = 0;
+  assert.equal(mod.forwardAppFrame({ type: 'app:jobboard:job_updated', job: { job_id: 'j-1' } }), true);
+  assert.equal(mod.forwardAppFrame({ type: 'app:other:thing' }), false, 'another app’s frame is not ours to see');
+  assert.equal(mod.forwardAppFrame({ type: 'message' }), false);
+  assert.deepEqual(posted.map(([m]) => m.type), ['dispatch:frame']);
+  assert.equal(posted[0][0].frame.type, 'app:jobboard:job_updated');
+
+  // Nothing is posted to a static tool's frame.
+  mod.openTool('benchmark');
+  frame.contentWindow.postMessage = () => { throw new Error('must not post to a static tool'); };
+  mod.syncAppFrame();
+  assert.equal(mod.forwardAppFrame({ type: 'app:jobboard:job_updated' }), false);
+});
+
+test('Settings → Tools: an app is a row with a switch, no remove, no editable fields', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  const pane = win.document.getElementById('spane-tools');
+  await mod.mountToolsSettings(pane);
+  const rows = [...pane.querySelectorAll('.tools-row')];
+  const appRow = rows.find((r) => r.querySelector('.tools-id')?.textContent === 'jobboard');
+  assert.ok(appRow, 'the app has a row');
+  assert.ok(rows.indexOf(appRow) > 0 && rows.indexOf(appRow) < rows.findIndex((r) => r.querySelector('.tools-id')?.textContent === 'benchmark'),
+    'apps sit between the builtins and the static/url tools');
+  assert.equal(appRow.querySelector('.tools-remove'), null, 'the package is on disk: no remove');
+  assert.equal(appRow.querySelector('input.tools-input'), null, 'title/icon come from app.yaml');
+  assert.ok(appRow.querySelector('input[type="checkbox"]'), 'the enabled switch');
+  assert.match(appRow.querySelector('.tools-loc').textContent, /^\/apps\/jobboard\/$/);
+  // What goes over the wire for an app: id/kind/enabled (+ trusted if set).
+  const out = mod.serializeTools([{ ...FIXTURE.tools.find((x) => x.id === 'jobboard'), enabled: false }]);
+  assert.deepEqual(out, [{ id: 'jobboard', kind: 'app', enabled: false }]);
+  assert.deepEqual(mod.serializeTools([{ id: 'addon', kind: 'app', enabled: true, trusted: true, title: 'x', bot_id: 'y' }]),
+    [{ id: 'addon', kind: 'app', enabled: true, trusted: true }]);
+});
+
+test('an app whose backend did not mount says so in the pane', { skip: dom.skip }, async () => {
+  const win = setup();
+  routes['GET /api/tools/jobboard/status'] = () => [200, { id: 'jobboard', kind: 'app', enabled: true, mounted: false }];
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('jobboard');
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(win.document.getElementById('tool-error').classList.contains('hidden'), false);
 });

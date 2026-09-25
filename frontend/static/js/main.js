@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=29';
+import { api, setOnLocked } from './api.js?v=30';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=33';
-import { installChecklists, applyChecklistState } from './checklist.js?v=7';
+import { installChecklists, applyChecklistState } from './checklist.js?v=8';
 import { classifyNotice, noticeHeadline } from './notice.js?v=3';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,11 +21,9 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=20';
+} from './reactions.js?v=21';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=7';
-import { mountJobs, unmountJobs } from './jobs.js?v=10';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=11';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=8';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -43,8 +41,12 @@ import {
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
-  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev, restorePrev,
-} from './tools.js?v=4';
+  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
+  appForBot, forwardAppFrame, syncAppFrame,
+} from './tools.js?v=5';
+// The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
+// it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
+import { forApp } from './app-sdk.js?v=1';
 import { renderLinkRail, linksSection } from './links.js?v=7';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
@@ -107,7 +109,6 @@ const state = {
   },
   mailEnabled: false, // server-side feature flag (mail_available()); full-session only
   clientsEnabled: false, // server-side feature flag (practice_available()); full-session only
-  jobsEnabled: false, // server-side feature flag (jobs_available()); full-session only
   studioforgeEnabled: false, // server-side feature flag (DISPATCH_STUDIOFORGE + a URL); full-session only
   // StudioForge pane: last /api/studioforge/status payload, plus whether THIS
   // browser could reach the panel (a separate question from whether the server
@@ -144,10 +145,6 @@ const STUDIOFORGE_ID = 'studioforge-panel';
 const MAIL_ID = 'mail-panel';
 // Clients tab ("WebBuilder" — the practice box's client pipeline, native UI).
 const CLIENTS_ID = 'clients-panel';
-// Job Board — a builtin tool since 2026-09-25. Same id as the `jobboard` bot
-// row the board's threads and the scout agent route through (that row stays
-// in config.yaml, `visible: false`, so the tile is the only entry point).
-const JOBS_ID = 'jobboard';
 // Which bots appear in Safe Mode is a SERVER-side per-bot setting ("safe" in
 // the Bot Manager, full mode only) — the server filters /api/bots and the WS
 // hello for Safe-Mode sessions, so state.bots is already the right list.
@@ -219,7 +216,7 @@ const dom = {};
  'ch-modelchip', 'ch-modelchip-label', 'model-picker', 'mp-model', 'mp-thinking-row',
  'mp-thinking', 'mp-context', 'mp-warning', 'mp-reset', 'mp-apply',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
- 'job-board-host', 'jobs-view', 'jobs-back', 'jobs-close',
+ 'app-thread-host',
  'retry-chip', 'retry-chip-btn',
  'reply-chip', 'reply-chip-label', 'reply-chip-excerpt', 'reply-chip-cancel',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
@@ -727,8 +724,8 @@ window.addEventListener('popstate', (e) => {
   // Landed on a viewer entry with no viewer open: a stale one left behind by
   // a framed page's own navigations. Step over it instead of painting "bots".
   if (e.state?.viewer) { if (!viewerOpen()) history.back(); return; }
-  // An entry from before the Job Board became a tool can still say
-  // `view: 'jobs'`; that screen is gone, so it lands on the root instead.
+  // An entry left by a screen that no longer exists (an old app build's own
+  // view name) lands on the root instead of on nothing.
   const v = e.state?.view;
   setView(v in VIEW_DEPTH ? v : 'bots');
 });
@@ -918,7 +915,6 @@ function builtinOn(feature) {
   if (feature === 'studioforge') return !!state.studioforgeEnabled;
   if (feature === 'mail') return !!state.mailEnabled;
   if (feature === 'practice') return !!state.clientsEnabled;
-  if (feature === 'jobs') return !!state.jobsEnabled;
   return false;
 }
 
@@ -1207,6 +1203,7 @@ async function deleteMessage(msgId, threadId) {
 function clearChatView() {
   state.activeThreadId = null;
   state.activeThread = null;
+  syncAppHook();
   state.messages = [];
   state.hasMoreOlder = false;
   clearAttachments();
@@ -1263,9 +1260,10 @@ function renderChatHeader() {
   if (!th) return;
   const bot = botById(th.bot_id) || botById(state.selectedBotId);
   if (bot) paintHeaderAvatar('ch-avatar', bot, th);
-  // The Job Board's bot row is hidden (the tool tile is its entry point), so a
-  // board thread has no roster entry to name it — name it after the tool.
-  dom['ch-title'].textContent = bot ? bot.name : (th.bot_id === JOBS_ID ? t('jobs.title') : t('common.chat'));
+  // An app's bot row is usually hidden (the app tile is its front door), so
+  // its thread has no roster entry to name it — name it after the app.
+  const app = bot ? null : appForBot(th.bot_id);
+  dom['ch-title'].textContent = bot ? bot.name : (app ? (app.title || app.id) : t('common.chat'));
   dom['ch-sub'].textContent = threadTitle(th);
   // Model badge: latest assistant message's actual model, else the bot's hint.
   const withModel = [...state.messages].reverse().find((m) => m.metadata && m.metadata.model);
@@ -1277,6 +1275,7 @@ function renderChatHeader() {
   dom['popout-btn'].hidden = POPOUT || !th;
   dom['thread-menu-btn'].hidden = false;
   renderModelChip();
+  syncAppHook();
   // A popout window titles itself after its conversation, so several of them
   // are tellable apart in the task bar / window switcher.
   if (POPOUT) document.title = `${threadTitle(th)} — ${bot ? bot.name : 'DisPatch Chat'}`;
@@ -2105,14 +2104,6 @@ function renderMessages(stick = true) {
   const box = dom['messages'];
   box.innerHTML = '';   // takes any cached-tail rows with it
   cachedPainted.delete(state.activeThreadId);
-  // NOTE: the 2026-09-15 redesign dropped the in-chat job-card header
-  // in favour of the modal-based detail panel (openJobDetail in
-  // job-thread.js, surfaced by the Jobs board list). The board list
-  // is the single entry point for browsing jobs; clicking a row opens
-  // the detail modal, which carries the structured metadata + voting
-  // controls. There is no in-chat card to mount any more — keeping the
-  // placeholder-mountJobCard() path would render an empty <div id="job-card-host">
-  // into every jobboard chat thread for no reason.
   if (!state.messages.length) {
     const wbot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
     const welcome = el('div', { class: 'empty-state welcome' }, [
@@ -2792,7 +2783,7 @@ function scheduleCacheRefresh(threadId) {
  *  behind and must never paint for it again.
  *
  *  Goes through ensureLocalStore() rather than touching cachePainter directly:
- *  openThread() is reachable from the jobs board before the first startApp()
+ *  openThread() is reachable from an app pane before the first startApp()
  *  has built either, and a bare `cachePainter.markFresh(...)` would throw on
  *  exactly the path that has no cache to worry about.
  */
@@ -3346,27 +3337,20 @@ async function openThread(id, { background = false, botId = null } = {}) {
   const t = state.threads.find((x) => x.id === id);
   state.activeThreadId = id;
   state.activeThread = t || state.activeThread;
-  // From the jobs board (or any other path that hands a thread_id without
-  // first calling selectBot()): state.threads only holds the previously-
-  // selected bot's threads, so `t` is undefined and the stub above leaves
-  // state.activeThread as null. The chat header's "Job Board · Senior Eng"
-  // title and the .job-card auto-mount in renderMessages() both gate on
-  // state.activeThread.bot_id === 'jobboard' — without a stub they silently
-  // never fire. Board callers pass botId='jobboard' so we can stub the
-  // minimum needed for routing; the async fetch below patches in the real
-  // title/avatar_snapshot once /api/jobs/<id> resolves, without blocking the
-  // first paint. Existing threads (Bits, etc.) are unaffected: they
-  // always come through selectBot() first, so `t` is found and this branch
-  // is skipped. The local `t` above shadows the imported i18n `t`, so the
-  // stub title is a hardcoded English fallback — this is NOT localised
-  // (deliberately, to keep the shadowing local): the WS-fetched title
-  // patches it within a round-trip, so non-English locales see a transient
-  // English header for one fetch then the real localised title.
+  // From an app pane (or any other path that hands a thread_id without first
+  // calling selectBot()): state.threads only holds the previously-selected
+  // bot's threads, so `t` is undefined and state.activeThread would stay
+  // null — the header would name nothing and no app thread hook would mount.
+  // Callers that know the owner pass `botId`, so stub the minimum, then fill
+  // in the real row (title, avatar_snapshot) from GET /api/threads/<id>
+  // without blocking the first paint. Threads reached through selectBot()
+  // always find `t` and never take this branch. (`t` shadows the i18n t()
+  // here, hence the empty title rather than a translated placeholder.)
   if (!t && botId) {
-    state.activeThread = { id, bot_id: botId, title: 'New Chat' };
-    api.jobs.get(id).then((r) => {
-      if (state.activeThreadId !== id || !r || !r.thread) return;
-      state.activeThread = { ...state.activeThread, ...r.thread };
+    state.activeThread = { id, bot_id: botId, title: '' };
+    api.thread(id).then((row) => {
+      if (state.activeThreadId !== id || !row || row.id !== id) return;
+      state.activeThread = { ...state.activeThread, ...row };
       renderChatHeader();
     }).catch(() => {});
   }
@@ -5072,7 +5056,6 @@ function closeToolPanes(except) {
   if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
   if (mailOpen && except !== 'mail') closeMailView();
   if (clientsOpen && except !== 'clients') closeClientsView();
-  if (jobsOpen && except !== 'jobs') closeJobsView();
 }
 
 function openHarnessView() {
@@ -6043,93 +6026,113 @@ function wireClientsView() {
   });
 }
 
-// ===================== Job Board (builtin tool) =====================
-// The board used to be a rail BOT (`jobboard`) with its own `data-view="jobs"`
-// screen and a mobile tab. It is a builtin tool now (js/tools.js BUILTINS,
-// backend tools.BUILTINS): a Tools tile opens it full-page like every other
-// tool. jobs.js owns the board itself; this only mounts it into the pane on
-// open and tears it down on close. The `jobboard` bot row stays in
-// config.yaml (hidden) — the board's monthly threads, avatar and the scout
-// agent's routing all key on it.
-let jobsOpen = false;
+// ===================== App thread hooks =====================
+// docs/design/2026-09-25-apps.md: an app whose row names a `bot_id` and a
+// `thread_hook` gets a say in that bot's threads. When such a thread is on
+// screen, its module is imported (plain dynamic import, ?v= from the row's
+// `hook_version`) and mount({threadEl, headerEl, thread, api, t, openThread,
+// hint}) renders into #app-thread-host; leaving the thread calls the
+// unmount() it returned. The module imports nothing from the shell but
+// js/app-sdk.js. A hook that fails to import or throws is logged and the
+// thread works exactly as it would without it — never fatal.
+let appHook = null;       // {key, appId, threadId, unmount, onFrame} while mounted
+let appHookSeq = 0;       // bumped on every (un)mount; a slow import that lost the race never mounts
+const pendingHints = new Map();   // threadId -> hint from the app that opened it
 
-async function refreshJobsFeature() {
-  if (state.decoy) { state.jobsEnabled = false; return; }
-  const f = state.auth.features;
-  if (f && typeof f.jobs === 'boolean') {
-    state.jobsEnabled = f.jobs;
-  } else {
-    // An older server (no `features.jobs`): the router is only mounted when
-    // JOBS_ENABLED=1, so a read tells us. months() is a GET — it creates nothing.
-    try {
-      await api.jobs.months();
-      state.jobsEnabled = true;
-    } catch (e) {
-      if (e.status === 404 || e.status === 403) state.jobsEnabled = false;
+function hookUrl(app) {
+  const url = typeof app.thread_hook === 'string' ? app.thread_hook : '';
+  // Our own origin, under the app's own path, or nothing: this module runs in
+  // the shell with full access, so it can only ever be the package's code.
+  if (!url.startsWith(`/apps/${app.id}/`) || url.includes('..') || url.includes('//')) return null;
+  if (app.hook_version == null || app.hook_version === '') return url;
+  return `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(app.hook_version))}`;
+}
+
+function unmountAppHook() {
+  appHookSeq += 1;
+  const h = appHook;
+  appHook = null;
+  const host = dom['app-thread-host'];
+  if (h && typeof h.unmount === 'function') {
+    try { h.unmount(); } catch (e) { console.error('[apps] thread hook unmount failed', h.appId, e); }
+  }
+  if (host) { host.replaceChildren(); host.classList.add('hidden'); }
+}
+
+/** Mount or unmount the app hook so it matches the thread on screen. Cheap
+ *  when nothing changed; renderChatHeader() and clearChatView() call it. */
+function syncAppHook() {
+  const th = state.activeThread;
+  const app = th && !state.decoy ? appForBot(th.bot_id) : null;
+  const url = app && app.thread_hook ? hookUrl(app) : null;
+  const key = url ? `${app.id}|${th.id}|${url}` : null;
+  const hint = key ? pendingHints.get(th.id) : undefined;
+  if (key && appHook && appHook.key === key && hint === undefined) return;
+  if (!key && !appHook) return;
+  unmountAppHook();
+  if (!key) return;
+  pendingHints.delete(th.id);
+  const seq = appHookSeq;
+  const host = dom['app-thread-host'];
+  const threadId = th.id;
+  appHook = { key, appId: app.id, threadId, unmount: null, onFrame: null };
+  (async () => {
+    const mod = await import(/* @vite-ignore */ url);
+    if (typeof mod.mount !== 'function') throw new Error(`${url} exports no mount()`);
+    const sdk = forApp(app.id);
+    await sdk.ready(document.documentElement.getAttribute('lang') || undefined);
+    if (seq !== appHookSeq || state.activeThreadId !== threadId) return;
+    // A fresh slot per mount, never the host itself: a mount that was still
+    // running when the thread changed must only ever clear ITS OWN slot, not
+    // the panel the next thread's hook has already put up.
+    const slot = el('div', { class: 'app-thread-slot' });
+    host.replaceChildren(slot);
+    host.classList.remove('hidden');
+    const ret = await mod.mount({
+      threadEl: slot,
+      headerEl: document.querySelector('#chatview .chat-header'),
+      thread: { ...state.activeThread },
+      api: sdk.api,
+      t: sdk.t,
+      dateTime: sdk.dateTime,
+      hint: hint || null,
+      openThread: (id, opts = {}) => openThreadFromApp(id, { botId: app.bot_id || null, hint: opts.hint || null }),
+      toast,
+    });
+    if (seq !== appHookSeq) {
+      // Unmounted (or replaced) while mount() was running: undo it now.
+      try { if (ret && typeof ret.unmount === 'function') ret.unmount(); } catch { /* best effort */ }
+      return;
     }
-  }
-  if (!state.jobsEnabled && jobsOpen) closeJobsView();
-  renderSidebar();
-}
-
-function renderJobsSessionPanel() {
-  dom['tl-botname'].textContent = t('jobs.title');
-  dom['tl-model'].textContent = t('tools.session_panel_title');
-  const wrap = dom['threads'];
-  wrap.innerHTML = '';
-  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
-    el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.jobs)]),
-    el('p', { text: t('tools.session_panel_body') }),
-  ]));
-}
-
-function openJobsView() {
-  if (state.decoy || !state.jobsEnabled) return;
-  closeToolPanes('jobs');
-  rememberPrev();   // before the selection changes: ✕ lands back on this chat
-  // Search is bound to the thread list / chat, and both are about to go away.
-  closeSearch();
-  state.selectedBotId = JOBS_ID;
-  const already = jobsOpen;
-  jobsOpen = true;
-  renderSidebar();
-  renderJobsSessionPanel();
-  dom['jobs-view'].classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  if (isMobile()) navigate('chat');
-  const host = dom['job-board-host'];
-  if (host && !(already && host.querySelector('[data-jobs-root]'))) {
-    mountJobs(host).catch(() => {});
-  }
-}
-
-function closeJobsView() {
-  jobsOpen = false;
-  document.body.classList.remove('tool-full');
-  dom['jobs-view'].classList.add('hidden');
-  // Tear the board down, not just hide it: unmountJobs drops the change
-  // listener and aborts an in-flight load, so nothing repaints a closed pane.
-  unmountJobs();
-}
-
-/** A thread opened from the board (the detail panel's "open thread"): leave
- *  the tool, put the rail back on the last real chat, then open the thread. */
-function openThreadFromBoard(id, opts = {}) {
-  if (jobsOpen) { closeJobsView(); restorePrev(); }
-  openThread(id, opts);
-  if (isMobile()) navigate('chat');
-}
-
-function wireJobsView() {
-  if (!dom['jobs-view']) return;
-  // ‹ (phones): close and go to the rail, without first bouncing through
-  // the restored chat's screen.
-  dom['jobs-back'].addEventListener('click', () => {
-    closeJobsView();
-    restorePrev({ stay: true });
-    navigate('bots');
+    if (ret && typeof ret.unmount === 'function') appHook.unmount = ret.unmount;
+    if (ret && typeof ret.onFrame === 'function') appHook.onFrame = ret.onFrame;
+  })().catch((e) => {
+    console.error('[apps] thread hook failed to load', app.id, e);
+    if (seq === appHookSeq && host) { host.replaceChildren(); host.classList.add('hidden'); }
   });
-  dom['jobs-close'].addEventListener('click', () => { closeJobsView(); restorePrev(); });
+}
+
+/** A live `app:<id>:*` frame: to the open app pane and to a mounted hook. */
+function dispatchAppFrame(frame) {
+  forwardAppFrame(frame);
+  const h = appHook;
+  if (h && typeof h.onFrame === 'function' && frame.type.startsWith(`app:${h.appId}:`)) {
+    try { h.onFrame(frame); } catch (e) { console.error('[apps] thread hook onFrame', h.appId, e); }
+  }
+}
+
+/** An app asked for one of its threads (the pane's openThread(), or a hook's).
+ *  tools.js has already closed the pane and handed the previous chat back;
+ *  this opens the thread over it, with the app's hint for its hook. */
+function openThreadFromApp(id, { botId = null, hint = null } = {}) {
+  if (!id) return;
+  if (hint) pendingHints.set(id, hint);
+  else pendingHints.delete(id);
+  // Already on screen: openThread() will not re-render the header, so ask
+  // the hook to pick the hint up directly.
+  if (state.activeThreadId === id) syncAppHook();
+  openThread(id, { botId });
+  if (isMobile()) navigate('chat');
 }
 
 // ===================== Live streaming render =====================
@@ -6246,17 +6249,11 @@ function renderStreamMarkdown(id) {
 
 // ===================== WebSocket dispatch =====================
 function handleWs(data) {
+  // An app's own live frames (`app:<id>:…`, the only shape an app backend may
+  // broadcast): to that app's open pane and to its mounted thread hook. The
+  // shell itself never acts on them.
+  if (typeof data.type === 'string' && data.type.startsWith('app:')) { dispatchAppFrame(data); return; }
   switch (data.type) {
-    // An agent posted or someone voted on a job. The server already put the
-    // whole serialised job in this frame, so pass it along: the board patches
-    // that one row instead of re-fetching the entire list, which is what it
-    // used to do on every vote.
-    case 'job_created':
-    case 'job_updated':
-      document.dispatchEvent(new CustomEvent('dispatch:jobs-changed', {
-        detail: { type: data.type, job_id: data.job_id, job: data.job || null },
-      }));
-      return;
     case 'hello':
     case 'bots':
       if (typeof data.decoy === 'boolean') {
@@ -6778,7 +6775,7 @@ function initModalFocusGuard() {
   const shown = new WeakMap();
   backdrops.forEach((b) => shown.set(b, isOpen(b)));
   // One hold for "some watched surface is open", taken and released through
-  // the shared counter so the lightbox and the job overlay can hold their own
+  // the shared counter so the lightbox and any other overlay can hold their own
   // at the same time. Writing the attribute directly here is what let a
   // backdrop closing anywhere strip another surface's trap.
   let guardToken = null;
@@ -6878,8 +6875,9 @@ function wireEvents() {
       studioforge: openStudioForgeView,
       mail: openMailView,
       practice: openClientsPanel,
-      jobs: openJobsView,
     },
+    // An app pane asked for one of its threads (open-thread postMessage).
+    openThread: openThreadFromApp,
     closeToolPanes,
     builtinOn,
     builtinDot,
@@ -6908,7 +6906,6 @@ function wireEvents() {
         refreshStudioForgeFeature();
         refreshMailFeature();
         refreshClientsFeature();
-        refreshJobsFeature();
       });
     },
   });
@@ -7364,12 +7361,10 @@ function closeAllOverlays() {
   // fetched, but the last frame stayed visible, which is exactly what Safe
   // Mode exists to prevent.
   closeToolPanes();
-  // The job detail overlay is none of the three shapes swept below: it is a
-  // body-level sibling built at click time, not a .modal-backdrop, not a
-  // .lightbox and not a <dialog>. So it survived a drop to Safe Mode with the
-  // full job detail and its vote controls on screen, and kept #app inert until
-  // somebody closed it by hand. Same leak class as the two panes above.
-  closeJobDetail();
+  // An app's thread hook (the Job Board's job detail, say) is operator UI
+  // painted into the chat: a drop to Safe Mode takes it down with the panes
+  // above rather than leaving it on a device that has just been locked.
+  unmountAppHook();
   // Never n.remove() a lightbox directly: that skips pausing the video and
   // unbinding its window-level pan listeners.
   document.querySelectorAll('.lightbox').forEach((n) => {
@@ -7919,9 +7914,11 @@ async function startApp() {
         refreshStudioForgeFeature(),
         refreshMailFeature(),
         refreshClientsFeature(),
-        refreshJobsFeature(),
         loadTools(),
       ]);
+      // The app rows are in now: a thread already on screen that belongs to
+      // an app's bot gets its name and its hook.
+      if (state.activeThread) renderChatHeader();
       if (!state.decoy) openFromHash();
     });
   } else {
@@ -7929,10 +7926,9 @@ async function startApp() {
     state.studioforgeEnabled = false;
     state.mailEnabled = false;
     state.clientsEnabled = false;
-    state.jobsEnabled = false;
     // Safe Mode still gets the tools the server marked `safe` (the API
     // filters); no deep link here — that is an unlocked convenience.
-    loadTools();
+    loadTools().then(() => { if (state.activeThread) renderChatHeader(); });
   }
   applyAuthChrome();
   renderSidebar();
@@ -8562,10 +8558,15 @@ function reRenderForLocale() {
   renderSidebar();
   updateThreadListHeader();
   renderThreads();
+  // An app's thread hook was mounted with a t() bound to the old language:
+  // remount it (renderChatHeader re-syncs) so it reads the new strings.
+  unmountAppHook();
   if (state.activeThreadId) { renderChatHeader(); renderMessages(false); }
   else clearChatView();
   reflectComposerState();
   updateDropBusy();
+  // And an open app page gets the new language (and theme) posted to it.
+  syncAppFrame();
   if (harnessOpen) { renderHarnessSessionPanel(); renderHarness(); }
   const open = (id) => dom[id] && !dom[id].classList.contains('hidden');
   // Settings repaints per TAB: only the visible pane's renderer has anything to
@@ -8598,26 +8599,6 @@ async function init() {
   // time-boxed internally, so a hung fetch degrades to English rather than
   // holding the boot veil up.
   await i18nInit();
-  // Expose openThread + setView + unmountJobs for cross-module callers
-  // (the jobs board title links dispatch into the same composer/mobile-tab
-  // flow that built-in thread rows use; without __openThread, clicking a
-  // job silently does nothing. __setView lets the board swap the chat
-  // panel back to the messages list before the thread opens, otherwise
-  // the toolbar stays painted under the job card).
-  // A thread opened from the Job Board leaves the board's full-page tool
-  // first (openThreadFromBoard); the board is the only __openThread caller.
-  window.__openThread = openThreadFromBoard;
-  window.__setView = setView;
-  window.unmountJobs = unmountJobs;
-  // Open the job detail modal from anywhere — the Jobs board list uses
-  // this to surface each card's full metadata + voting controls.
-  window.__openJobDetail = openJobDetail;
-  // job-thread.js reports vote/feedback errors through window.toast rather
-  // than importing main.js (which would pull in the entire app graph for a
-  // one-line call) — without this assignment those toasts were silently
-  // dropped (window.toast was never set, so `typeof window.toast ===
-  // 'function'` was always false and every job-panel error vanished).
-  window.toast = toast;
   onI18nChange(reRenderForLocale);
   applyRailLabels();
   // Privacy mode, if this device has it on: drop the offline cache, unregister
@@ -8663,13 +8644,8 @@ async function init() {
   wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
   wireMailView();
   wireClientsView();
-  wireJobsView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
-  // (The jobs(unmount) MutationObserver backstop that lived here is gone with
-  // the `data-view="jobs"` screen: the board is a tool pane now and
-  // closeJobsView() is its one teardown path — closeToolPanes() reaches it
-  // from every other opener and from selectBot.)
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
   // list's relative timestamps ("5m") drift.
   let lastTick = '';

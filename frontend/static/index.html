@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=88" />
+  <link rel="stylesheet" href="/static/app.css?v=89" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -332,6 +332,13 @@
           <button data-act="delete" class="danger"><span class="icn" data-icon="trash" aria-hidden="true"></span><span data-i18n="chat.delete_thread">Delete</span></button>
         </div>
       </header>
+
+      <!-- An app's thread hook (docs/design/2026-09-25-apps.md): when the open
+           thread belongs to an app's bot, main.js imports that app's
+           thread.js and hands it THIS element to render into (the Job Board
+           shows the job's detail here). Empty and hidden for every other
+           thread; the hook's unmount() clears it on the way out. -->
+      <div class="app-thread-host hidden" id="app-thread-host"></div>
 
       <div class="messages" id="messages">
         <div class="empty-state" id="chat-empty">
@@ -587,37 +594,17 @@
         <div class="clients-job-strip hidden" id="clients-job-strip" aria-live="polite"></div>
       </div>
 
-      <!-- Job Board — a builtin TOOL (2026-09-25; it used to be a rail bot
-           with its own `data-view="jobs"` screen and a mobile tab). Same
-           terminal-view chrome as the panes above, so opening it puts
-           body.tool-full on and only the rail stays beside it. jobs.js mounts
-           its [data-jobs-root] into #job-board-host on open and removes it on
-           close; the pane is hidden while closed, so no board chrome can sit
-           under a chat (the old jobs(unmount) regression). -->
-      <div class="terminal-view jobs-view hidden" id="jobs-view">
-        <header class="terminal-head">
-          <button class="back-btn" id="jobs-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
-          <span class="terminal-avatar-mini jobs-avatar-mini" data-icon="jobs" aria-hidden="true">📋</span>
-          <div class="terminal-head-info">
-            <div class="terminal-title" data-i18n="jobs.title">Job Board</div>
-            <div class="muted terminal-subtitle" data-i18n="jobs.subtitle">Postings Scout found, by month</div>
-          </div>
-          <button class="icon-btn ghost" id="jobs-close" type="button" title="Close Job Board" aria-label="Close Job Board" data-i18n-attr="title=jobs.close;aria-label=jobs.close">✕</button>
-        </header>
-        <div class="terminal-body jobs-body">
-          <section class="jobboard-host" id="job-board-host" aria-label="Job Board" data-i18n-attr="aria-label=jobs.title"></section>
-        </div>
-      </div>
-
-      <!-- Generic tool pane (js/tools.js): ONE view, reused for every static /
-           url tool from tools.yaml. Same terminal-view chrome as the builtin
-           panes above; opening it puts body.tool-full on, so it fills the
-           content column with only the rail beside it.
+      <!-- Generic tool pane (js/tools.js): ONE view, reused for every app /
+           static / url tool. Same terminal-view chrome as the builtin panes
+           above; opening it puts body.tool-full on, so it fills the content
+           column with only the rail beside it.
            The frame's sandbox is rewritten per tool before its src is set —
            static pages get scripts/forms/popups and NO allow-same-origin (they
            cannot reach DisPatch's cookies or DOM); url tools add
-           allow-same-origin because they are another origin anyway. The
-           default here is the strict one, so the frame is never unsandboxed.
+           allow-same-origin because they are another origin anyway; an APP
+           (/apps/<id>/, trusted repo code on this origin) gets the attribute
+           removed. The default here is the strict one, so the frame is never
+           unsandboxed until tools.js has decided it holds an app.
            allow="" drops every permission-policy feature. -->
       <div class="terminal-view tool-view hidden" id="tool-view">
         <header class="terminal-head">
@@ -1163,6 +1150,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=106"></script>
+  <script type="module" src="/static/js/main.js?v=107"></script>
 </body>
 </html>

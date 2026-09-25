@@ -980,141 +980,6 @@
     "save_failed": "No se pudo guardar: {error}",
     "bad_root": "No es una carpeta existente, o es una carpeta que siempre se rechaza"
   },
-  "jobs": {
-    "title": "Job Board",
-    "subtitle": "Ofertas encontradas para ti, por mes",
-    "close": "Cerrar la bolsa de empleo",
-    "sidebar_aria": "Bolsa de empleo — ofertas por mes, solo desbloqueado",
-    "empty": "No jobs yet — post one via the API or wait for the curator.",
-    "loading": "Loading…",
-    "error": "Could not load jobs: {msg}",
-    "untitled": "(untitled)",
-    "link": {
-      "apply": "View original posting →"
-    },
-    "badge": {
-      "duplicate": "duplicate",
-      "expired": "expired"
-    },
-    "sort": {
-      "label": "Sort",
-      "updated": "Last activity",
-      "salary": "Salary",
-      "posted": "Newest posted"
-    },
-    "filter": {
-      "all": "All states",
-      "any_remote": "Any remote type",
-      "tag_placeholder": "Filter by tag"
-    },
-    "state": {
-      "pending": "Pending",
-      "yes": "Yes",
-      "no": "No",
-      "maybe": "Maybe",
-      "applied": "Applied",
-      "archived": "Archived",
-      "duplicate": "Duplicate"
-    },
-    "remote": {
-      "remote": "Remote",
-      "hybrid": "Hybrid",
-      "onsite": "Onsite"
-    },
-    "age": {
-      "today": "today",
-      "yesterday": "yesterday",
-      "days_ago": "{n}d ago"
-    },
-    "vote": {
-      "yes": "👍 Yes",
-      "no": "👎 No",
-      "maybe": "🤔 Maybe",
-      "applied": "✓ Applied",
-      "undo": "↺ Undo",
-      "no_reason": "Why no?",
-      "cancel": "Cancel"
-    },
-    "reasons": {
-      "wrong_location": "Wrong location",
-      "too_senior": "Too senior",
-      "too_junior": "Too junior",
-      "compensation": "Compensation",
-      "company": "Company",
-      "wrong_domain": "Wrong domain",
-      "already_applied": "Already applied",
-      "duplicate": "Duplicate",
-      "other": "Other"
-    },
-    "score": {
-      "why": "Score {score}",
-      "embed_unavailable": "Score {score} (embedding unavailable)",
-      "embed_unavailable_note": "Embedding model not loaded — score is tag-only."
-    },
-    "month": {
-      "count": "{n} job",
-      "count_plural": "{n} jobs"
-    },
-    "detail": {
-      "close": "Close",
-      "not_found": "That job could not be found.",
-      "posted": "Posted",
-      "first_seen": "First seen",
-      "source": "Source",
-      "offline": "No se pudo contactar con DisPatch — comprueba la conexión.",
-      "locked": "Desbloquea para ver este empleo."
-    },
-    "seniority": {
-      "junior": "Junior",
-      "senior": "Senior",
-      "staff": "Staff",
-      "principal": "Principal"
-    },
-    "note": {
-      "placeholder": "Add a note (optional)…"
-    },
-    "feedback": {
-      "title": "Feedback for Scout",
-      "placeholder": "Tell Scout what to look for or avoid…",
-      "reason_label": "Reason (optional)",
-      "reason_none": "No specific reason",
-      "send": "Send to Scout",
-      "sent": "Sent — Scout will reply in the job thread",
-      "sent_no_agent": "Saved; Scout wasn't reachable, so it'll be picked up later",
-      "open_thread": "Open thread",
-      "error": "Could not send feedback: {msg}",
-      "need_comment": "Write a note before sending.",
-      "not_available": "Feedback isn't available yet."
-    },
-    "activity": {
-      "title": "Activity",
-      "empty": "No activity yet.",
-      "actor": {
-        "system": "System",
-        "you": "You"
-      },
-      "type": {
-        "comment": "Comment",
-        "vote": "Voted",
-        "vote_undo": "Vote undone",
-        "state_change": "State change",
-        "tag_added": "Tag added",
-        "tag_removed": "Tag removed",
-        "repost": "Reposted",
-        "duplicate_detected": "Duplicate detected",
-        "expired": "Expired",
-        "feedback": "Feedback",
-        "applied": "Applied"
-      }
-    },
-    "find": {
-      "button": "🔍 Buscar empleos",
-      "placeholder": "¿Qué debe buscar Scout? (opcional)",
-      "send": "Pedir a Scout",
-      "sent": "Scout está buscando. Las nuevas ofertas aparecerán aquí y un resumen llegará al hilo de empleos de este mes.",
-      "not_sent": "Solicitud guardada, pero no se pudo contactar con Scout. Inténtalo más tarde."
-    }
-  },
   "mail": {
     "name": "Correo",
     "subtitle": "Panel de MailForge",
@@ -1208,6 +1073,8 @@
     "close": "Cerrar herramienta",
     "unreachable_text": "La página de esta herramienta no está accesible ahora mismo.",
     "unreachable_hint": "Comprueba que el servicio del que proviene esté en marcha.",
+    "app_unmounted_text": "La parte de servidor de esta app no se cargó.",
+    "app_unmounted_hint": "La página puede abrirse, pero sus datos no. El registro de DisPatch indica el error.",
     "loopback_text": "Esta herramienta se ejecuta en la dirección de loopback del equipo.",
     "loopback_hint": "Abre DisPatch en el propio equipo para usarla aquí.",
     "bad_url_text": "Esta herramienta no tiene una dirección válida.",
@@ -1221,6 +1088,7 @@
     "col_location": "Ubicación",
     "col_enabled": "Visible",
     "kind_builtin": "Integrada",
+    "kind_app": "App",
     "kind_static": "Carpeta",
     "kind_url": "Página web",
     "has_refresh": "con actualización",

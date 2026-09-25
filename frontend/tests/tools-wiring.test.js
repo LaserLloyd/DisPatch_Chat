@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -81,7 +81,6 @@ test('every tool opener toggles body.tool-full (and nothing uses terminal-active
     ['openStudioForgeView', 'closeStudioForgeView'],
     ['openMailView', 'closeMailView'],
     ['openClientsPanel', 'closeClientsView'],
-    ['openJobsView', 'closeJobsView'],
   ]) {
     assert.match(fnBody(MAIN, open), /document\.body\.classList\.add\('tool-full'\)/, `${open} must add tool-full`);
     assert.match(fnBody(MAIN, close), /document\.body\.classList\.remove\('tool-full'\)/, `${close} must remove tool-full`);
@@ -106,9 +105,10 @@ test('closeToolPanes also closes the generic pane (except when it is the opener)
   assert.match(fnBody(MAIN, 'closeToolPanes'), /if \(except !== 'tool'\) closeTool\(\{ restore: false \}\);/);
 });
 
-test('wireTools() is called from init with the five builtin openers', () => {
+test('wireTools() is called from init with the four builtin openers and the app thread opener', () => {
   assert.match(MAIN, /\bwireTools\(\{/);
-  for (const opener of ['openHarnessView', 'openStudioForgeView', 'openMailView', 'openClientsPanel', 'openJobsView']) {
+  assert.match(MAIN, /openThread: openThreadFromApp,/);
+  for (const opener of ['openHarnessView', 'openStudioForgeView', 'openMailView', 'openClientsPanel']) {
     assert.match(MAIN, new RegExp(`:\\s*${opener},`), `wireTools must be handed ${opener}`);
   }
 });
@@ -136,18 +136,11 @@ test('api.js exposes the four tools calls', () => {
 });
 
 test('every builtin opener remembers the chat it covers, before the selection moves', () => {
-  for (const open of ['openHarnessView', 'openMailView', 'openClientsPanel', 'openJobsView']) {
+  for (const open of ['openHarnessView', 'openMailView', 'openClientsPanel']) {
     const body = fnBody(MAIN, open);
     assert.match(body, /rememberPrev\(\)/, `${open} must call rememberPrev()`);
     assert.ok(body.indexOf('rememberPrev()') < body.indexOf('state.selectedBotId ='), `${open}: rememberPrev before the selection moves`);
   }
-});
-
-test('the Job Board closes back to the remembered chat (✕) and to the rail (‹)', () => {
-  const body = fnBody(MAIN, 'wireJobsView');
-  assert.match(body, /jobs-close[\s\S]*closeJobsView\(\);\s*restorePrev\(\)/);
-  assert.match(body, /jobs-back[\s\S]*closeJobsView\(\);[\s\S]*restorePrev\(\{ stay: true \}\);[\s\S]*navigate\('bots'\)/);
-  assert.match(MAIN, /wireJobsView\(\);/);
 });
 
 test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => {
@@ -165,4 +158,111 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
   for (const name of ['terminal', 'mail', 'users', 'chart', 'jobs', 'tools']) {
     assert.match(util, new RegExp(`\\n  ${name}: \\[`), `RAIL_ICONS.${name}`);
   }
+});
+
+// =============================================================================
+// Apps (docs/design/2026-09-25-apps.md) — the wiring pins. The behaviour is
+// exercised in tools.test.js (pane + messaging) and app-sdk.test.js (the SDK);
+// these are the joints: the offline shell, the frame's sandbox, the listener's
+// two checks, the generic thread hook, and nothing Job-Board-shaped left in
+// the shell.
+// =============================================================================
+
+const SW = read('sw.js');
+const REPO = join(STATIC, '..', '..');
+
+test('the sw.js CACHE is local-chat-v131 (apps: app-sdk.js, the Job Board left the shell)', () => {
+  const m = /const CACHE = '([^']+)'/.exec(SW);
+  assert.ok(m, 'sw.js must declare CACHE');
+  // v130: themed tool tiles + the Job Board as a builtin tool. v131: apps —
+  // js/app-sdk.js joins SHELL, js/jobs.js + js/job-thread.js leave it, api.js
+  // and every importer, main.js, app.css, index.html and every locale moved.
+  // The shell is cached by PATH, so an installed client keeps all of the old
+  // shell without this bump. If you bump again, bump here too.
+  assert.equal(m[1], 'local-chat-v131');
+});
+
+test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
+  assert.match(SW, /'\/static\/js\/app-sdk\.js'/);
+  assert.doesNotMatch(SW, /'\/static\/js\/jobs\.js'|'\/static\/js\/job-thread\.js'/);
+});
+
+test('/apps/* is network-only in the service worker', () => {
+  const body = SW.slice(SW.indexOf("self.addEventListener('fetch'"));
+  assert.match(body, /if \(p\.startsWith\('\/apps\/'\)\) return;/);
+  assert.ok(body.indexOf("p.startsWith('/apps/')") < body.indexOf('e.respondWith('), 'decided before any cache use');
+});
+
+test('an app frame gets NO sandbox; every other frame keeps one', () => {
+  const body = fnBody(TOOLS, 'loadFrame');
+  assert.match(body, /if \(isApp\(tool\)\) frame\.removeAttribute\('sandbox'\);\s*else frame\.setAttribute\('sandbox', tool\.kind === 'url' \? SANDBOX_URL : SANDBOX_STATIC\);/);
+  assert.ok(body.indexOf("removeAttribute('sandbox')") < body.indexOf("setAttribute('src'"), 'sandbox decided BEFORE src');
+  assert.doesNotMatch(TOOLS, /allow-same-origin'[^;]*isApp|SANDBOX_APP/, 'no third sandbox flavour for apps');
+});
+
+test('the app message listener checks origin AND source before anything else', () => {
+  const body = fnBody(TOOLS, 'onAppMessage');
+  assert.match(body, /ev\.origin !== location\.origin/);
+  assert.match(body, /ev\.source !== frame\.contentWindow/);
+  const guard = body.indexOf('ev.source !== frame.contentWindow');
+  assert.ok(guard > 0 && guard < body.indexOf('switch (msg.type)'), 'the guard precedes every handler');
+  for (const type of ['open-thread', 'close', 'toast', 'set-title']) {
+    assert.match(body, new RegExp(`case 'dispatch:${type}'`), `handles dispatch:${type}`);
+  }
+  assert.match(fnBody(TOOLS, 'postToApp'), /postMessage\(msg, location\.origin\)/, 'posts only to our own origin');
+  assert.match(fnBody(TOOLS, 'wireTools'), /addEventListener\('message', onAppMessage\)/);
+});
+
+test('main.js mounts app thread hooks generically', () => {
+  const sync = fnBody(MAIN, 'syncAppHook');
+  assert.match(sync, /appForBot\(th\.bot_id\)/, 'the hook is found by the thread’s bot, not by name');
+  assert.match(sync, /await import\(\/\* @vite-ignore \*\/ url\)/);
+  assert.match(sync, /mod\.mount\(\{/);
+  assert.match(sync, /threadEl: slot,/, 'each mount gets its own slot, so a stale unmount cannot clear the next panel');
+  for (const k of ['threadEl', 'headerEl', 'thread', 'api', 't', 'openThread']) {
+    assert.match(sync, new RegExp(`\\b${k}:`), `mount() receives ${k}`);
+  }
+  assert.match(sync, /\.catch\(\(e\) => \{\s*console\.error\('\[apps\] thread hook failed to load'/, 'a broken hook is logged, never fatal');
+  assert.match(fnBody(MAIN, 'renderChatHeader'), /syncAppHook\(\);/);
+  assert.match(fnBody(MAIN, 'clearChatView'), /syncAppHook\(\);/);
+  assert.match(fnBody(MAIN, 'unmountAppHook'), /h\.unmount\(\)/);
+  assert.match(fnBody(MAIN, 'hookUrl'), /url\.startsWith\(`\/apps\/\$\{app\.id\}\/`\)/, 'only the app’s own code is imported');
+  assert.match(MAIN, /import \{ forApp \} from '\.\/app-sdk\.js\?v=\d+';/);
+  // Live app frames go to the app, never through the shell's own switch.
+  assert.match(fnBody(MAIN, 'handleWs'), /data\.type\.startsWith\('app:'\)\) \{ dispatchAppFrame\(data\); return; \}/);
+});
+
+test('index.html gives the hook a host between the chat header and the messages', () => {
+  const host = MARKUP.indexOf('id="app-thread-host"');
+  assert.ok(host > MARKUP.indexOf('class="chat-header"') && host < MARKUP.indexOf('id="messages"'));
+  assert.match(MARKUP, /<div class="app-thread-host hidden" id="app-thread-host"><\/div>/);
+});
+
+test('nothing Job-Board-shaped is left in the shell', () => {
+  for (const f of ['jobs.js', 'job-thread.js']) {
+    assert.equal(existsSync(join(STATIC, 'js', f)), false, `js/${f} moved to apps/jobboard/static/`);
+  }
+  assert.equal(existsSync(join(HERE, 'jobs.test.js')), false, 'its tests moved to apps/jobboard/tests/');
+  for (const pat of [/'\.\/jobs\.js\?v=/, /'\.\/job-thread\.js\?v=/, /\bJOBS_ID\b/, /openJobsView|closeJobsView|refreshJobsFeature/,
+    /jobsEnabled/, /job-board-host|jobs-view/, /openJobDetail|closeJobDetail|__openJobDetail|__openThread/, /'jobboard'/]) {
+    assert.doesNotMatch(MAIN, pat, `main.js still carries ${pat}`);
+  }
+  assert.doesNotMatch(read('js/api.js'), /\bjobs:\s*\{|\/api\/jobs/, 'api.js has no jobs surface');
+  assert.doesNotMatch(TOOLS, /id: 'jobboard'|feature: 'jobs'/, 'the Job Board is not a builtin');
+  assert.doesNotMatch(MARKUP, /id="jobs-view"|id="job-board-host"/);
+  // (.job-headline/.job-spinner/.job-console are the Clients tab's, unrelated.)
+  assert.doesNotMatch(read('app.css'), /\.job-(?:row|card|chip|vote|modal|reason|note|feedback|activity)|\.jobs-|#job-board|\[data-jobs-root\]/,
+    'its CSS moved to apps/jobboard/static/board.css');
+  for (const lang of ['en', 'ar', 'de', 'es', 'fr', 'ja', 'pt', 'zh']) {
+    const d = JSON.parse(read(`locales/${lang}.json`));
+    assert.equal('jobs' in d, false, `locales/${lang}.json still has a jobs namespace`);
+  }
+});
+
+test('the app tests are collected by npm test', () => {
+  const pkg = JSON.parse(readFileSync(join(STATIC, '..', 'package.json'), 'utf8'));
+  for (const script of ['test', 'test:ci']) {
+    assert.match(pkg.scripts[script], /"\.\.\/apps\/\*\/tests\/\*\.test\.js"/, `${script} collects apps/*/tests`);
+  }
+  assert.ok(existsSync(join(REPO, 'apps', 'jobboard', 'tests')));
 });
