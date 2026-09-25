@@ -169,10 +169,67 @@ def test_validation_fs_checks_root_exists(tools_env, tmp_path):
     assert ei.value.field == "root"
 
 
-def test_validation_refuses_root_in_deny_tree(tools_env):
+@pytest.mark.parametrize("sub,msg", [
+    (None, "never served"),                    # /etc
+    ("", tools.DATA_DIR_MSG),                  # the data dir itself
+    ("files", tools.DATA_DIR_MSG),             # anything under it
+    ("media/x", tools.DATA_DIR_MSG),
+])
+def test_validation_refuses_root_in_deny_tree(tools_env, sub, msg):
+    if sub is None:
+        root = "/etc"
+    else:
+        root = str(config.DATA_DIR / sub) if sub else str(config.DATA_DIR)
+        (config.DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
     with pytest.raises(tools.ToolValidationError) as ei:
-        tools.validate_tools([_static(root="/etc")], check_fs=True)
+        tools.validate_tools([_static(root=root)], check_fs=True)
     assert ei.value.field == "root"
+    assert msg in ei.value.message
+
+
+def test_validation_refuses_data_dir_via_symlink(tools_env, tmp_path):
+    link = tmp_path / "innocent"
+    link.symlink_to(config.DATA_DIR)
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([_static(root=str(link))], check_fs=False)
+    assert ei.value.message == tools.DATA_DIR_MSG
+
+
+def test_hand_edited_safe_tool_at_data_dir_serves_nothing(tools_env, monkeypatch):
+    """tools.yaml is read with check_fs=False, so validation alone does not
+    stop a hand edit. A `safe: true` tool rooted at the data dir would hand
+    files/, media/ and tools.yaml to a cookieless Safe-Mode device — the
+    resolver refuses it at serve time too."""
+    make_client, site = tools_env
+    data = config.DATA_DIR
+    (data / "files").mkdir(exist_ok=True)
+    (data / "files" / "family.txt").write_text("private")
+    (data / "index.html").write_text("<h1>data</h1>")
+    # Bypass validation: the dataclass is what load_tools would hand back if a
+    # future change loosened the check — serve-time must hold on its own.
+    t = tools.Tool(id="leak", kind="static", title="Leak", safe=True, root=str(data),
+                   entry="index.html")
+    for rel in ("index.html", "files/family.txt", "tools.yaml"):
+        with pytest.raises(tools.ToolNotFound):
+            tools.resolve_static(t, rel)
+    # And through HTTP, as Safe Mode, with the manifest written by hand...
+    _manifest(f"tools:\n  - id: leak\n    title: L\n    kind: static\n"
+              f"    root: {data}\n    safe: true\n")
+    # The data-dir rule is a shape rule, so even the check_fs=False read refuses
+    # the file (fail closed: no tools until it is fixed)...
+    assert tools.load_tools() == []
+    c = _decoy(make_client)
+    for rel in ("", "files/family.txt", "tools.yaml"):
+        r = c.get(f"/tools/leak/{rel}")
+        assert r.status_code in (403, 404), (rel, r.status_code)
+        assert "private" not in r.text and "tools:" not in r.text
+    # ...and if a loosened loader did hand the tool through, the Safe-Mode
+    # route still serves nothing (the resolver is the last line).
+    monkeypatch.setattr(tools, "load_tools", lambda: [t])
+    for rel in ("", "files/family.txt", "tools.yaml"):
+        r = c.get(f"/tools/leak/{rel}")
+        assert r.status_code == 404, (rel, r.status_code)
+        assert "private" not in r.text and "tools:" not in r.text
 
 
 def test_validation_accepts_the_spec_example(tools_env, tmp_path):
@@ -251,11 +308,26 @@ def test_static_csp_and_cache_headers(tools_env):
     assert "allow-same-origin" not in csp
     assert "frame-ancestors 'self'" in csp
     assert "x-frame-options" not in {k.lower() for k in r.headers}
-    assert "no-cache" in r.headers["cache-control"]
+    assert r.headers["cache-control"] == "private, max-age=0, must-revalidate"
     assert r.headers["x-content-type-options"] == "nosniff"
     r = c.get("/tools/bench/css/s.css")
     assert "sandbox" in r.headers["content-security-policy"]
-    assert "no-cache" in r.headers["cache-control"]
+    assert r.headers["cache-control"] == "private, max-age=0, must-revalidate"
+    # Refusals carry it too (set by main's header middleware).
+    r = c.get("/tools/bench/nope.css")
+    assert r.status_code == 404
+    assert r.headers["cache-control"] == "private, max-age=0, must-revalidate"
+
+
+def test_static_head_works(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = make_client()
+    r = c.head("/tools/bench/css/s.css")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/css")
+    assert r.content == b""
+    assert c.head("/tools/bench/nope.css").status_code == 404
 
 
 @pytest.mark.parametrize("rel", [
@@ -270,6 +342,8 @@ def test_static_csp_and_cache_headers(tools_env):
     "id_rsa",
     "my-secret-notes.txt",
     "chats.db",
+    "security.yaml",
+    "trusted-devices.yaml",
     "nope.html",
     "escape.txt",          # symlink out of the root
     "escdir/x.txt",        # symlinked dir out of the root
@@ -283,7 +357,8 @@ def test_static_refusals_are_uniform_404(tools_env, tmp_path, rel):
     (site / ".hidden.html").write_text("h")
     (site / "sub" / ".git").mkdir(parents=True)
     (site / "sub" / ".git" / "config").write_text("c")
-    for n in (".env", "prod.env", "server.pem", "id_rsa", "my-secret-notes.txt", "chats.db"):
+    for n in (".env", "prod.env", "server.pem", "id_rsa", "my-secret-notes.txt", "chats.db",
+              "security.yaml", "trusted-devices.yaml"):
         (site / n).write_text("s")
     (site / "escape.txt").symlink_to(outside / "x.txt")
     (site / "escdir").symlink_to(outside)
@@ -363,6 +438,25 @@ def test_pin_operator_entry_redirects_to_ticket_and_subresources_work(tools_env)
     assert bare.get(tools.TICKET_PREFIX + "nope/report.html").status_code == 404
     other = make_client(("203.0.113.9", 1))
     assert other.get(base + "/css/s.css").status_code == 404
+
+
+def test_pin_ticket_only_for_framed_loads(tools_env):
+    """Sec-Fetch-Dest iframe/frame (or absent) → ticket redirect; document (a
+    top-level "open in new tab") → served directly on the cookie, no ticket."""
+    make_client, site = tools_env
+    _manifest(_bench(site))
+    c = _unlocked(make_client)
+    for dest in ("iframe", "frame"):
+        r = c.get("/tools/bench/", headers={"Sec-Fetch-Dest": dest}, follow_redirects=False)
+        assert r.status_code == 307, dest
+        assert r.headers["location"].startswith(tools.TICKET_PREFIX)
+    n = len(tools._tickets)
+    r = c.get("/tools/bench/", headers={"Sec-Fetch-Dest": "document"}, follow_redirects=False)
+    assert r.status_code == 200 and "report" in r.text
+    assert len(tools._tickets) == n                  # nothing minted
+    # HEAD on a ticketed page works too.
+    r = c.get("/tools/bench/", headers={"Sec-Fetch-Dest": "iframe"}, follow_redirects=False)
+    assert c.head(r.headers["location"]).status_code == 200
 
 
 def test_pin_decoy_cannot_reach_nonsafe_tool(tools_env):
@@ -463,6 +557,40 @@ def test_builtin_disabled_turns_harness_off(tools_env, monkeypatch):
     assert row["enabled"] is False and row["available"] is True
 
 
+def test_builtin_disabled_harness_is_silent_on_the_socket(tools_env, monkeypatch):
+    """A pane tools.yaml switched off must not keep pushing its WS frames."""
+    frames: list[dict] = []
+
+    class FakeManager:
+        async def broadcast(self, frame):
+            frames.append(frame)
+
+    monkeypatch.setattr(main, "manager", FakeManager())
+    monkeypatch.setattr(main, "_shutting_down", False)
+
+    async def fire():
+        main._harness_state_changed({"running": False})
+        main._harness_sessions_changed([])
+        await asyncio.sleep(0.05)
+
+    asyncio.run(fire())
+    assert [f["type"] for f in frames] == ["harness_state", "harness_sessions"]
+    frames.clear()
+    _manifest("tools:\n  - {id: deepseek-harness, kind: builtin, enabled: false}\n")
+    asyncio.run(fire())
+    assert frames == []
+
+
+def test_builtin_disabled_studioforge_leaves_the_shell_csp(tools_env, monkeypatch):
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, studioforge_enabled=True, studioforge_url="http://198.51.100.7:8080"))
+    assert main._studioforge_origin() == "http://198.51.100.7:8080"
+    _manifest("tools:\n  - {id: studioforge-panel, kind: builtin, enabled: false}\n")
+    assert main._studioforge_origin() == ""
+    html = tools_env[0]().get("/").text
+    assert "198.51.100.7" not in html
+
+
 @pytest.mark.parametrize("tool_id,feature,flag,path", [
     ("studioforge-panel", "studioforge", "studioforge_enabled", "/api/studioforge/status"),
     ("mail-panel", "mail", "mail_enabled", "/api/mail/status"),
@@ -512,12 +640,19 @@ def test_refresh_env_is_scrubbed(tools_env, monkeypatch):
     monkeypatch.setenv("BAZ_SECRET", "s3c")
     monkeypatch.setenv("MCP_PIN", "1111")
     monkeypatch.setenv("HARMLESS_VALUE", "ok")
+    capab = ("SSH_AUTH_SOCK", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+             "WAYLAND_DISPLAY", "DISPLAY")
+    for k in capab:
+        monkeypatch.setenv(k, "live")
+    names = ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN", "HARMLESS_VALUE") + capab
     _refresh_manifest(site, "import os; print(sorted(k for k in os.environ if k in "
-                            "('FOO_TOKEN','BAR_API_KEY','BAZ_SECRET','MCP_PIN','HARMLESS_VALUE')))")
+                            f"{names!r}))")
     out = make_client().post("/api/tools/bench/refresh").json()["stdout_tail"]
     assert "HARMLESS_VALUE" in out
-    for k in ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN"):
-        assert k not in out
+    for k in ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN") + capab:
+        assert f"'{k}'" not in out, k
+    env = tools.scrubbed_env()
+    assert not set(capab) & set(env)
 
 
 def test_refresh_timeout_is_rc_124(tools_env):
@@ -666,3 +801,123 @@ def test_status_url_tool_reports_reachable(tools_env, monkeypatch):
 def test_status_unknown_tool_404(tools_env):
     make_client, site = tools_env
     assert make_client().get("/api/tools/nope/status").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# URL probe: body-less, no redirects, bounded in total
+# --------------------------------------------------------------------------- #
+
+class _ProbeServer:
+    """A tiny local HTTP server. mode: 'head405' (405 on HEAD, 200 + a large
+    body on GET), 'slow' (accepts, then dribbles one header byte a second)."""
+
+    def __init__(self, mode):
+        import socket
+        self.mode = mode
+        self.requests: list[str] = []
+        self.body_bytes_sent = 0
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.stop = threading.Event()
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        self.sock.settimeout(0.2)
+        while not self.stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                continue
+            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+    def _handle(self, conn):
+        with conn:
+            conn.settimeout(10)
+            try:
+                req = conn.recv(4096).decode("latin-1")
+            except OSError:
+                return
+            method = req.split(" ", 1)[0]
+            self.requests.append(method)
+            try:
+                if self.mode == "slow":
+                    for ch in b"HTTP/1.1 200 OK\r\n":
+                        if self.stop.is_set():
+                            return
+                        conn.sendall(bytes([ch]))
+                        time.sleep(1.0)
+                    return
+                if method == "HEAD":
+                    # One request per connection: say so, or the client may
+                    # reuse a socket this handler is about to close.
+                    conn.sendall(b"HTTP/1.1 405 Method Not Allowed\r\n"
+                             b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+                    return
+                size = 50 * 1024 * 1024
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+                             + f"Content-Length: {size}\r\n\r\n".encode())
+                chunk = b"x" * 65536
+                for _ in range(size // len(chunk)):
+                    conn.sendall(chunk)
+                    self.body_bytes_sent += len(chunk)
+            except OSError:
+                return
+
+    def close(self):
+        self.stop.set()
+        self.sock.close()
+
+
+def test_probe_head_405_falls_back_without_reading_body():
+    srv = _ProbeServer("head405")
+    try:
+        t0 = time.monotonic()
+        ok = asyncio.run(tools._probe_url(f"http://127.0.0.1:{srv.port}/"))
+        assert ok is True
+        assert srv.requests[:2] == ["HEAD", "GET"]
+        assert time.monotonic() - t0 < 4.5
+        # The GET stream was closed after the headers: nowhere near the 50 MB
+        # body was pushed (the socket buffer absorbs a little before blocking).
+        time.sleep(0.2)
+        assert srv.body_bytes_sent < 20 * 1024 * 1024
+    finally:
+        srv.close()
+
+
+def test_probe_is_bounded_in_total_time():
+    """httpx's 3 s timeout is per operation; a server trickling a byte a second
+    never trips it. The overall guard does."""
+    srv = _ProbeServer("slow")
+    try:
+        t0 = time.monotonic()
+        ok = asyncio.run(tools._probe_url(f"http://127.0.0.1:{srv.port}/"))
+        took = time.monotonic() - t0
+        assert ok is False
+        assert took < tools.PROBE_TOTAL_S + 1.0, took
+    finally:
+        srv.close()
+
+
+def test_probe_never_follows_redirects(monkeypatch):
+    seen = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            seen.append(kw)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def head(self, url):
+            class R:
+                status_code = 302
+            return R()
+
+    monkeypatch.setattr(tools.httpx, "AsyncClient", FakeClient)
+    assert asyncio.run(tools._probe_url("http://example.invalid/")) is True
+    assert seen[0]["follow_redirects"] is False

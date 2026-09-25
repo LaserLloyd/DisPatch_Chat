@@ -585,3 +585,36 @@ async def test_the_notice_backfill_collapses_old_status_lines_only(tmp_path, mon
                 assert meta["sub"] is True and meta["notice"] == {"level": want}, (text, meta)
     finally:
         await db.close()
+
+
+def test_pre_notice_backup_pruned_after_a_week(tmp_path, monkeypatch, caplog):
+    """The pre-migration copy is a whole duplicate of chats.db. Kept for a week
+    after the migration ran, then dropped on the next boot (and logged)."""
+    import logging
+    import os
+    import time as _time
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    marker = tmp_path / ".notice-migration-done"
+    backup = tmp_path / "chats.db.pre-notice-migration"
+    marker.write_text("changed=1\n")
+    backup.write_bytes(b"sqlite copy")
+
+    # Six days old: kept.
+    six = _time.time() - 6 * 86400
+    os.utime(marker, (six, six))
+    assert main._prune_notice_backup(marker) is False
+    assert backup.exists()
+    asyncio.run(main._migrate_machine_notices())
+    assert backup.exists()
+
+    # Eight days old: removed by the startup path, with a log line.
+    eight = _time.time() - 8 * 86400
+    os.utime(marker, (eight, eight))
+    with caplog.at_level(logging.INFO, logger="local-chat"):
+        asyncio.run(main._migrate_machine_notices())
+    assert not backup.exists()
+    assert marker.exists()
+    assert any("pre-notice-migration" in r.getMessage() for r in caplog.records)
+    # Nothing left to prune: a no-op, not an error.
+    assert main._prune_notice_backup(marker) is False

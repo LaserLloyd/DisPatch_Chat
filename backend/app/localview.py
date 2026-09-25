@@ -90,6 +90,9 @@ DENY_PATTERNS = (
     "*.kdbx", "*.gpg", "*.asc", "known_hosts", "authorized_keys",
     "*.sqlite*", "*.db", "*.db-*", "*credentials*", "*.netrc", "netrc",
     "*.crt", "*.jks", "*.keystore", "*.ovpn", "*.htpasswd", "*secret*",
+    # DisPatch's own credential files, by NAME wherever they sit — the deny
+    # roots only cover the live data dir's copies, not a backup or a copy.
+    "security.yaml", "trusted-devices.yaml",
 )
 
 #: Editor/backup siblings of a denied file are the standard way a secret

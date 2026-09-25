@@ -161,6 +161,56 @@ test('opening a static tool: full-page, strict sandbox, served path, refresh sho
   assert.equal(win.location.hash, '');
 });
 
+test('✕ on a generic tool opened over a builtin pane restores the last real chat', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec, state } = wire(mod);
+  // The builtin openers are main.js's; mimic one: rememberPrev() BEFORE the
+  // selection moves to the builtin's id.
+  rec.opened.length = 0;
+  const openHarness = () => { mod.rememberPrev(); state.selectedBotId = 'deepseek-harness'; state.activeThreadId = null; };
+  await mod.loadTools();
+  openHarness();
+  assert.equal(mod.openTool('benchmark'), true);
+  win.document.getElementById('tool-close').click();
+  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }],
+    'without rememberPrev the restore target was the builtin (= no bot selected)');
+
+  // Generic → builtin → generic keeps the original chat too: the builtin
+  // closing the generic pane with restore:false must not drop it.
+  rec.restored.length = 0;
+  state.selectedBotId = 'main'; state.activeThreadId = 't-2';
+  mod.openTool('benchmark');
+  mod.closeTool({ restore: false });          // what closeToolPanes('harness') does
+  openHarness();                              // selection is still 'benchmark' → no-op
+  mod.openTool('rig-panel');
+  win.document.getElementById('tool-close').click();
+  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-2' }]);
+});
+
+test('closing a tool navigates its frame to about:blank before dropping src', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  const frame = win.document.getElementById('tool-frame');
+  const seen = [];
+  const proto = Object.getPrototypeOf(frame);
+  const desc = Object.getOwnPropertyDescriptor(proto, 'src')
+    || Object.getOwnPropertyDescriptor(win.HTMLIFrameElement.prototype, 'src');
+  Object.defineProperty(frame, 'src', {
+    configurable: true,
+    get() { return desc.get.call(this); },
+    set(v) { seen.push(['set', v]); desc.set.call(this, v); },
+  });
+  const rm = frame.removeAttribute.bind(frame);
+  frame.removeAttribute = (n) => { seen.push(['remove', n]); rm(n); };
+  mod.closeTool();
+  assert.deepEqual(seen, [['set', 'about:blank'], ['remove', 'src']]);
+  assert.equal(frame.hasAttribute('src'), false);
+});
+
 test('url tool: loopback address loads only on the host, with allow-same-origin', { skip: dom.skip }, async () => {
   let win = setup('http://192.0.2.10:8765/');
   let mod = await freshTools();

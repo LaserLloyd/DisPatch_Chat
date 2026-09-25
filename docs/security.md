@@ -138,6 +138,73 @@ deliberately broad and will also hide innocent files with those words in their
 names. See
 [configuration.md](configuration.md#local-viewer).
 
+## Tools
+
+A **static** tool (`<data dir>/tools.yaml`, `kind: static`) serves a directory
+of files at `/tools/<id>/` — the same kind of disk-read surface as the local
+viewer, so it is built the same way, around refusing. A **url** tool is only
+framed by the browser; the server's one contact with it is a reachability
+probe. Contract: [design/2026-09-25-tools-plugins.md](design/2026-09-25-tools-plugins.md).
+
+- **One allowlisted root per tool.** A static tool serves nothing outside the
+  directory named in its `root`. Every request resolves with symlinks followed
+  and must land inside that resolved root; `..`, dot-components and backslashes
+  are refused before resolution, so they are never normalised away.
+- **The local viewer's deny list, shared, not copied.** The same built-in deny
+  subtrees (SSH/GPG keys, secret stores, agent state, `/etc /proc /sys /dev`,
+  systemd units, this app's credentials) and the same filename patterns (keys,
+  `.env` files, databases, `security.yaml`, `trusted-devices.yaml`, their
+  backup siblings) apply to every path below a tool root. One list, so the two
+  surfaces cannot drift apart.
+- **The app's own data directory is never a root.** A `root` that is, or is
+  under, the data directory is refused when the manifest is saved *and* when a
+  hand-edited `tools.yaml` is read — otherwise a `safe: true` tool rooted there
+  would hand `files/`, `media/` and `tools.yaml` itself to a Safe-Mode device.
+  The resolver refuses it again at serve time.
+- **Uniform refusals.** For the operator, anything not served — unknown tool,
+  disabled tool, traversal, symlink escape, denied name, missing file —
+  answers the same `404 Not found`. A Safe-Mode caller sees only tools marked
+  `safe: true`; every other tool id, existing or not, answers the same decoy
+  `403`, so a locked device cannot enumerate the manifest.
+- **Framing is sandboxed with an opaque origin.** HTML is served with
+  `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups;
+  frame-ancestors 'self'` — never `allow-same-origin` — and the client frames it
+  under the matching `sandbox` attribute. Every non-HTML response gets
+  `default-src 'none'; sandbox; frame-ancestors 'self'`, and all of them get
+  `nosniff`, `Referrer-Policy: no-referrer`,
+  `Cache-Control: private, max-age=0, must-revalidate` and
+  `X-Robots-Tag: noindex`. Content types come from the viewer's extension
+  table; an unknown extension is an attachment.
+- **Framed pages load their assets through a ticket, not the cookie.** With a
+  PIN set, an operator's request for an HTML page that will be **framed**
+  (`Sec-Fetch-Dest: iframe`/`frame`, or no fetch metadata at all) is redirected
+  to `/tools/_t/<ticket>/…`. The ticket is a random capability scoped to the
+  **whole tool root** (a tool is one site, so its pages link each other), bound
+  to the caller's address, and expiring after **two idle hours** (sliding).
+  A top-level navigation (`Sec-Fetch-Dest: document`, "open in new tab") carries
+  the cookie itself and is served directly — no ticket is minted for it. Every
+  guard above still applies below a ticket.
+- **Refresh runs a fixed argv, operator-only.** A `refresh` block is a list of
+  arguments, never a shell string, and can only come from editing
+  `tools.yaml` by hand — the Settings API refuses to introduce or change one.
+  Only the operator can trigger it — an unlocked session, or anyone when no
+  PIN is set (the whole app is open then; set a PIN). Never Safe Mode, never
+  the machine-inbound API token. It runs as the service
+  user with `shell=False`, stdin closed, its own process group (killed whole on
+  timeout), and an environment scrubbed of credential-shaped names
+  (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PIN`, `*_PASSWORD`) and of live
+  capabilities (`SSH_AUTH_SOCK`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`,
+  `WAYLAND_DISPLAY`, `DISPLAY`).
+- **The url probe never reads a body.** `HEAD`, falling back to a streamed
+  `GET` whose body is never read when the server answers 405; redirects are
+  not followed; the whole probe is bounded to a few seconds.
+
+What it does *not* protect against: the operator choosing a root full of
+things they did not mean to publish (the root is the control, exactly as with
+the viewer), a hard link inside a root, or what a refresh command itself does —
+it runs with the service user's full rights, which is why only the file can
+define it.
+
 ## Privacy mode
 
 For a device you would rather leave no trace on — a shared tablet, a phone that

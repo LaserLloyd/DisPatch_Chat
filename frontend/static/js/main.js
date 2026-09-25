@@ -43,8 +43,8 @@ import {
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
-  openFromHash, mountToolsSettings, toolsSettingsDirty,
-} from './tools.js?v=1';
+  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
+} from './tools.js?v=2';
 import { renderLinkRail, linksSection } from './links.js?v=6';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
@@ -5131,6 +5131,7 @@ function closeToolPanes(except) {
 function openHarnessView() {
   if (state.decoy || !state.harnessEnabled) return;
   closeToolPanes('harness');
+  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
   state.selectedBotId = HARNESS_ID;
   harnessOpen = true;
   renderSidebar();
@@ -5799,6 +5800,7 @@ function renderStudioForgeSessionPanel() {
 function openStudioForgeView() {
   if (state.decoy || !state.studioforgeEnabled) return;
   closeToolPanes('studioforge');
+  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
   state.selectedBotId = STUDIOFORGE_ID;
   studioforgeOpen = true;
   renderSidebar();
@@ -5946,6 +5948,7 @@ function renderMailSessionPanel() {
 function openMailView() {
   if (state.decoy || !state.mailEnabled) return;
   closeToolPanes('mail');
+  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
   state.selectedBotId = MAIL_ID;
   mailOpen = true;
   renderSidebar();
@@ -6058,6 +6061,7 @@ function renderClientsSessionPanel() {
 function openClientsPanel() {
   if (state.decoy || !state.clientsEnabled) return;
   closeToolPanes('clients');
+  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
   state.selectedBotId = CLIENTS_ID;
   clientsOpen = true;
   renderSidebar();

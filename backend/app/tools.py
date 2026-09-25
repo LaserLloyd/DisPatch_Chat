@@ -36,6 +36,7 @@ the builtin feature probes via :func:`set_builtin_probes`.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -98,6 +99,13 @@ _OUTPUT_ONLY_KEYS = {"has_refresh", "builtin_feature", "available"}
 
 #: Env names ending in these are never handed to a refresh process.
 _SCRUB_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PIN", "_PASSWORD", "_PASSWD")
+#: ...and these exact names, which carry no secret-shaped suffix but hand the
+#: child a live capability: the ssh agent, the X/Wayland display and its
+#: cookie, and the desktop session bus.
+_SCRUB_NAMES = frozenset({"SSH_AUTH_SOCK", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+                          "WAYLAND_DISPLAY", "DISPLAY"})
+
+DATA_DIR_MSG = "the app's own data directory is never served"
 
 
 # --------------------------------------------------------------------------- #
@@ -177,6 +185,17 @@ def _in_deny_roots(p: Path) -> bool:
     return any(localview._under(p, d) for d in localview._builtin_deny_roots())
 
 
+def _in_data_dir(p: Path) -> bool:
+    """Is ``p`` the app's data directory or anything under it? The deny roots
+    only name the data dir's SECRET files; a root AT the data dir would still
+    serve ``files/``, ``media/`` and ``tools.yaml`` — to Safe Mode if ``safe``."""
+    data = config.DATA_DIR
+    candidates = {data}
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        candidates.add(data.resolve())
+    return any(localview._under(p, d) for d in candidates)
+
+
 def _check_rel(value, index: int, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ToolValidationError(index, field, "must be a relative path inside root")
@@ -202,6 +221,8 @@ def _check_abs_dir(value, index: int, field: str, check_fs: bool) -> str:
         raise ToolValidationError(index, field, "cannot be resolved") from None
     if r == Path("/"):
         raise ToolValidationError(index, field, "the whole filesystem is too broad")
+    if _in_data_dir(r) or _in_data_dir(p):
+        raise ToolValidationError(index, field, DATA_DIR_MSG)
     if _in_deny_roots(r) or _in_deny_roots(p):
         raise ToolValidationError(index, field, "is inside a folder that is never served")
     if check_fs:
@@ -455,8 +476,9 @@ def resolve_static(tool: Tool, rel: str) -> Path:
         root = Path(tool.root).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
         raise ToolNotFound from None
-    if root == Path("/") or not root.is_dir() or _in_deny_roots(root):
-        raise ToolNotFound
+    if (root == Path("/") or not root.is_dir() or _in_deny_roots(root)
+            or _in_data_dir(root)):
+        raise ToolNotFound       # a hand-edited tools.yaml is read with check_fs=False
     target = root.joinpath(*parts) if parts else root
     if localview._pattern_denied(root, target):
         raise ToolNotFound
@@ -468,7 +490,7 @@ def resolve_static(tool: Tool, rel: str) -> Path:
         raise ToolNotFound                       # symlink escape
     if localview._hidden_below(root, resolved) or localview._pattern_denied(root, resolved):
         raise ToolNotFound
-    if _in_deny_roots(resolved):
+    if _in_deny_roots(resolved) or _in_data_dir(resolved):
         raise ToolNotFound
     return resolved
 
@@ -497,7 +519,10 @@ def _file_for(tool: Tool, rel: str) -> Path | str:
 
 def _send(resolved: Path, *, cors: bool = True):
     ctype = localview.content_type(resolved.name)
-    headers = {"Cache-Control": "no-cache"}
+    # Same as the Local Viewer: never in a shared cache, always revalidated
+    # (a refresh rewrites the page in place). main's header middleware sets
+    # the same value on every /tools/ response, including refusals.
+    headers = {"Cache-Control": CACHE_CONTROL}
     if cors:
         # The framed page is an opaque origin; without this its own fetch() of a
         # sibling data file is a CORS failure. `*` never admits credentials, so
@@ -512,6 +537,8 @@ def _send(resolved: Path, *, cors: bool = True):
 # --------------------------------------------------------------------------- #
 # Frame tickets (see module docstring)
 # --------------------------------------------------------------------------- #
+
+CACHE_CONTROL = "private, max-age=0, must-revalidate"
 
 TICKET_PREFIX = "/tools/_t/"     # main's auth gate lets this through
 TICKET_TTL_S = 2 * 3600
@@ -648,7 +675,7 @@ def is_refreshing(tool_id: str) -> bool:
 
 def scrubbed_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items()
-            if not k.upper().endswith(_SCRUB_SUFFIXES)}
+            if not k.upper().endswith(_SCRUB_SUFFIXES) and k.upper() not in _SCRUB_NAMES}
 
 
 def _tail(b: bytes | None) -> str:
@@ -704,16 +731,30 @@ def run_refresh(tool: Tool) -> dict:
 # --------------------------------------------------------------------------- #
 
 PROBE_TTL_S = 10.0
+PROBE_OP_TIMEOUT_S = 3.0      # httpx: per connect/read/write/pool operation
+PROBE_TOTAL_S = 4.0           # the whole probe, whatever the server does
 _probe_cache: dict[str, tuple[float, bool]] = {}
 
 
+async def _probe_once(url: str) -> bool:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(PROBE_OP_TIMEOUT_S),
+                                 follow_redirects=False) as c:
+        r = await c.head(url)
+        if r.status_code == 405:
+            # HEAD not allowed: the server answered, but confirm with a GET whose
+            # body is NEVER read — the stream is closed as soon as the status
+            # line and headers are in.
+            async with c.stream("GET", url) as g:
+                _ = g.status_code
+        return True
+
+
 async def _probe_url(url: str) -> bool:
+    """Does anything answer at ``url``? Never reads a body, never follows a
+    redirect, and bounded in TOTAL time: httpx's timeout is per operation, so a
+    server dribbling headers could otherwise hold a status call open."""
     try:
-        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as c:
-            r = await c.head(url)
-            if r.status_code == 405:
-                r = await c.get(url)
-            return True
+        return await asyncio.wait_for(_probe_once(url), PROBE_TOTAL_S)
     except Exception:
         return False
 
@@ -840,7 +881,7 @@ def api_tool_refresh(request: Request, tool_id: str):
 
 # Ticket route FIRST: `_t` would otherwise match `{tool_id}` below (ids cannot
 # contain `_`, so no real tool can shadow it either).
-@router.get(TICKET_PREFIX + "{ticket}/{rel:path}")
+@router.api_route(TICKET_PREFIX + "{ticket}/{rel:path}", methods=["GET", "HEAD"])
 def tool_ticket_file(request: Request, ticket: str, rel: str):
     """The only lock on this prefix — main's gate lets it through."""
     tool_id = _use_ticket(ticket, _client_of(request))
@@ -856,12 +897,20 @@ def tool_ticket_file(request: Request, ticket: str, rel: str):
     return _send(f)
 
 
+def _will_be_framed(request: Request) -> bool:
+    """``Sec-Fetch-Dest`` iframe/frame → framed. Absent (an old browser that
+    does not send fetch metadata) → assume framed, the case the UI makes.
+    ``document`` or anything else → not framed."""
+    dest = request.headers.get("sec-fetch-dest")
+    return dest is None or dest.lower() in ("iframe", "frame")
+
+
 @router.get("/tools/{tool_id}")
 def tool_bare(tool_id: str):
     return RedirectResponse(f"/tools/{quote(tool_id)}/", status_code=307)
 
 
-@router.get("/tools/{tool_id}/{rel:path}")
+@router.api_route("/tools/{tool_id}/{rel:path}", methods=["GET", "HEAD"])
 def tool_file(request: Request, tool_id: str, rel: str):
     operator = _is_operator(request)
     t = get_tool(tool_id)
@@ -880,8 +929,12 @@ def tool_file(request: Request, tool_id: str, rel: str):
         return RedirectResponse(request.url.path + "/", status_code=307)
     # An operator's framed page needs a cookieless capability for its own
     # subresources (see module docstring). Only when a PIN exists — without
-    # one nothing is gated and the plain URL already works.
+    # one nothing is gated and the plain URL already works — and only when the
+    # page is being FRAMED: a top-level navigation ("open in new tab") is a
+    # same-origin document that sends the cookie itself, so minting a ticket
+    # for it would only hand out a capability nobody needs.
     if (operator and localview.viewer_kind(f.name) == "html"
+            and _will_be_framed(request)
             and auth.load().pin_set and _session(request) is not None):
         tok = _mint_ticket(t.id, _client_of(request))
         target = rel if rel and not rel.endswith("/") else (

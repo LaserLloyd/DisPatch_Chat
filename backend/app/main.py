@@ -568,7 +568,8 @@ async def media_security_headers(request: Request, call_next):
     # Tools (static pages from tools.yaml). Same contract as the Local Viewer:
     # HTML runs script under an OPAQUE origin (never allow-same-origin, so a
     # tool page cannot touch DisPatch's cookies or DOM); everything else is
-    # inert. `no-cache` because a refresh rewrites the page in place.
+    # inert. Same cache policy as the viewer: private (never a shared cache)
+    # and revalidated every load, because a refresh rewrites the page in place.
     elif path.startswith("/tools/"):
         html = response.headers.get("content-type", "").startswith("text/html")
         response.headers["Content-Security-Policy"] = (
@@ -576,7 +577,7 @@ async def media_security_headers(request: Request, call_next):
             if html else "default-src 'none'; sandbox; frame-ancestors 'self'")
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["X-Robots-Tag"] = "noindex"
     # The app's own shell says in index.html that frame-ancestors is the
     # server's job, and the server did not do it. A header CSP is ADDITIVE to
@@ -6072,6 +6073,30 @@ async def _migrate_sanitize_stored_messages() -> None:
                  changed, deleted)
 
 
+NOTICE_BACKUP_KEEP_S = 7 * 86400
+
+
+def _prune_notice_backup(marker: Path, now: float | None = None) -> bool:
+    """The pre-notice-migration copy is a full duplicate of chats.db. Once the
+    migration has been done for a week (the window in which anyone would notice
+    a bad rewrite), drop it. True when a copy was deleted."""
+    backup = config.DATA_DIR / "chats.db.pre-notice-migration"
+    try:
+        age = (time.time() if now is None else now) - marker.stat().st_mtime
+    except OSError:
+        return False
+    if age < NOTICE_BACKUP_KEEP_S or not backup.exists():
+        return False
+    try:
+        backup.unlink()
+    except OSError:
+        log.warning("notice migration: could not remove %s", backup, exc_info=True)
+        return False
+    log.info("notice migration: removed %s (migration done %.0f days ago)",
+             backup.name, age / 86400)
+    return True
+
+
 async def _migrate_machine_notices() -> None:
     """One-time backfill for the `metadata.notice` convention (2026-09-25).
 
@@ -6084,6 +6109,7 @@ async def _migrate_machine_notices() -> None:
     worth a tidier thread."""
     marker = config.DATA_DIR / ".notice-migration-done"
     if marker.exists():
+        _prune_notice_backup(marker)
         return
     try:
         await db.backup_to(config.DATA_DIR / "chats.db.pre-notice-migration")
@@ -10852,7 +10878,8 @@ def _harness_state_frame(job_status: dict | None = None) -> dict:
 
 
 def _harness_state_changed(status: dict) -> None:
-    if _shutting_down:
+    # A pane tools.yaml switched off says nothing on the socket either.
+    if _shutting_down or _builtin_off("harness"):
         return
     _track(asyncio.create_task(manager.broadcast(_harness_state_frame(status))))
 
@@ -10860,7 +10887,7 @@ def _harness_state_changed(status: dict) -> None:
 def _harness_sessions_changed(status: dict) -> None:
     """Push the live-session LIST to open tabs. Deliberately not the events —
     the session view polls its own endpoint for those."""
-    if _shutting_down:
+    if _shutting_down or _builtin_off("harness"):
         return
     _track(asyncio.create_task(
         manager.broadcast({"type": "harness_sessions", "sessions": status})))
@@ -12140,7 +12167,10 @@ _CSP_CONNECT_SRC = "connect-src 'self' ws: wss:;"
 
 
 def _studioforge_origin() -> str:
-    if not (SETTINGS.studioforge_enabled and SETTINGS.studioforge_url):
+    # tools.yaml switching the pane off (`studioforge-panel: enabled: false`)
+    # also takes its origin back out of the shell CSP.
+    if (not (SETTINGS.studioforge_enabled and SETTINGS.studioforge_url)
+            or _builtin_off("studioforge")):
         return ""
     from urllib.parse import urlsplit
     u = urlsplit(SETTINGS.studioforge_url)

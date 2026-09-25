@@ -235,10 +235,19 @@ function frameSrc(tool) {
   return u ? u.href : '';
 }
 
+/** Unload a frame. Removing `src` alone does NOT navigate an iframe — the old
+ *  document keeps running (scripts, sockets, timers) in a hidden element.
+ *  Navigating to about:blank first is what actually tears it down. */
+function unloadFrame(frame) {
+  frame.classList.add('hidden');
+  frame.src = 'about:blank';
+  frame.removeAttribute('src');
+}
+
 function showNote(textKey, hintKey) {
   const note = $('tool-note');
   const frame = $('tool-frame');
-  if (frame) { frame.classList.add('hidden'); frame.removeAttribute('src'); }
+  if (frame) unloadFrame(frame);
   if (!note) return;
   $('tool-note-text').textContent = t(textKey);
   $('tool-note-hint').textContent = hintKey ? t(hintKey) : '';
@@ -357,6 +366,16 @@ function setHash(id) {
   } catch { /* not fatal */ }
 }
 
+/** Remember the chat a tool is replacing, so ✕ can hand it back. Called on
+ *  entry into ANY tool — generic here, builtin from main.js's openers — and a
+ *  no-op when hopping tool to tool (builtin or generic), or the "previous
+ *  thread" would become the tool we just left and ✕ would land on nothing. */
+export function rememberPrev() {
+  const st = deps && deps.state;
+  if (!st || isToolId(st.selectedBotId)) return;
+  prev = { botId: st.selectedBotId, threadId: st.activeThreadId };
+}
+
 /** Open a tool by id. Builtins go to their own opener; static/url tools get
  *  the generic pane. Either way the page ends up in `tool-full`. */
 export function openTool(id) {
@@ -377,9 +396,7 @@ export function openTool(id) {
   if (tool.kind !== 'static' && tool.kind !== 'url') return false;
   if (st.decoy && !tool.safe) return false;
 
-  // Remember where we came from — but not when hopping tool to tool, or the
-  // "previous thread" would become the tool we just left.
-  if (!isToolId(st.selectedBotId)) prev = { botId: st.selectedBotId, threadId: st.activeThreadId };
+  rememberPrev();
   if (deps.beforeOpen) deps.beforeOpen();
   deps.closeToolPanes('tool');
   if (openId && openId !== id) teardown();
@@ -421,7 +438,7 @@ function teardown() {
   if (view) view.classList.add('hidden');
   // Unload: a hidden frame keeps its scripts and sockets running.
   const frame = $('tool-frame');
-  if (frame) { frame.classList.add('hidden'); frame.removeAttribute('src'); }
+  if (frame) unloadFrame(frame);
   hideError();
 }
 
@@ -433,9 +450,13 @@ export function closeTool({ restore = true } = {}) {
   teardown();
   document.body.classList.remove('tool-full');
   setHash(null);
+  // `restore: false` = the caller is showing something else. If that is
+  // another tool (a builtin), keep `prev`: ✕ over there should still land on
+  // the last real chat. A real chat overwrites it on the next entry anyway.
+  if (!restore) return;
   const p = prev;
   prev = null;
-  if (restore && deps) deps.restoreView(p);
+  if (deps) deps.restoreView(p);
 }
 
 export function toolOpen() { return openId; }

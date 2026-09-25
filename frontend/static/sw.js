@@ -2,7 +2,13 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v127';  // v127: metadata.notice is the one
+const CACHE = 'local-chat-v128';  // v128: Tools review round — tools.js
+  //   1→2: a tool frame is unloaded via about:blank (a bare removeAttribute
+  //   kept the old document running), and entry into ANY tool — builtin
+  //   panes included, via rememberPrev() — records the chat to return to, so
+  //   ✕ on a generic tool opened over a builtin lands on the last real chat.
+  //   main.js 103→104, index.html.
+  // v127: metadata.notice is the one
   //   collapse convention for machine events — an explicit notice renders as
   //   a one-line notice even when the server also set `sub` (notice.js 2→3),
   //   a plain sub row shows its own first line instead of "Working…", an

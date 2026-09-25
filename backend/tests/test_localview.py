@@ -759,6 +759,9 @@ def test_config_refuses_root_and_proc_self_root(view_env):
     "foo.env.bak", "secret.pem.orig", "id_rsa~", "notes.sqlite3", "app.db-wal",
     "app.db-shm", "credentials", "credentials.json", ".netrc", "site.crt",
     "wallet.keystore", "office.ovpn", "keys.env.1", "prod.env.example",
+    # DisPatch's own credential files, outside the data dir (a copy, a backup).
+    "security.yaml", "trusted-devices.yaml", "security.yaml.bak",
+    "Trusted-Devices.yaml",
 ])
 def test_deny_patterns_cover_backup_siblings(view_env, name):
     make_client, site = view_env
