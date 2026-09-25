@@ -86,7 +86,7 @@ test('mount(): the hinted job’s detail, in the host it was given, with its thr
   assert.deepEqual([...pick.options].map((o) => o.value), ['', 'j-1', 'j-2']);
   assert.equal(pick.value, 'j-1');
   assert.equal(host.querySelector('.jb-thread__label').textContent, '2 jobs in this thread');
-  assert.ok(win.document.head.querySelector('link[data-app-css="jobboard"][href="/apps/jobboard/board.css?v=1"]'), 'its stylesheet is linked once');
+  assert.ok(win.document.head.querySelector('link[data-app-css="jobboard"][href="/apps/jobboard/board.css?v=2"]'), 'its stylesheet is linked once');
   assert.ok(calls.some((c) => c.url === `${BASE}?thread_id=t-1&limit=500`));
   // The meta line uses translated labels, and the brief keeps its newlines.
   assert.match(card(host).querySelector('.job-card__meta').textContent, /Hybrid · Senior · 150,000–190,000 USD/);

@@ -26,7 +26,7 @@ import { el, iconLabel, railIcon, RAIL_ICONS } from '/static/js/app-sdk.js?v=1';
 
 export const API_BASE = '/api/apps/jobboard';
 // Bump with board.css: the panel links the board's stylesheet into the shell.
-const CSS_HREF = '/apps/jobboard/board.css?v=1';
+const CSS_HREF = '/apps/jobboard/board.css?v=2';
 
 const REASONS = [
   'wrong_location', 'too_senior', 'too_junior', 'compensation',

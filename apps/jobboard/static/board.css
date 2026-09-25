@@ -158,7 +158,10 @@ body.jb-page button { cursor: pointer; }
 .job-chip__remove:hover { color: var(--error-text); }
 
 /* ===================== The thread panel (thread.js) ===================== */
-.jb-thread { padding: 10px 14px 12px; color: var(--text-primary); }
+/* In the shell the panel inherits the chat's type scale, which is sized for
+   message bodies; the panel's controls are chrome, so they get their own. */
+.jb-thread { padding: 10px 14px 12px; color: var(--text-primary); font-size: 14px; line-height: 1.45; }
+.jb-thread button, .jb-thread input, .jb-thread select, .jb-thread textarea { font-size: 13.5px; }
 .jb-thread__bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .jb-thread__bar .rail-icon { width: 18px; height: 18px; flex: none; color: var(--text-secondary); }
 .jb-thread__label { font-weight: 600; font-size: 13.5px; }
