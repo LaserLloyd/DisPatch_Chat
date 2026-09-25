@@ -2,10 +2,11 @@
 
 Contract: ``docs/design/2026-09-25-tools-plugins.md``. Three kinds of tool:
 
-  * **builtin** — the four panes that already exist (Harness, StudioForge,
-    Emails, Clients). The manifest only switches them off: ``enabled: false``
-    makes main's ``*_available()`` false, so their routes 404 and their feature
-    flag drops out of ``/api/auth/status``. No entry = behaviour as before.
+  * **builtin** — the five panes that already exist (Harness, StudioForge,
+    Emails, Clients, Job Board). The manifest only switches them off:
+    ``enabled: false`` makes main's ``*_available()`` false, so their routes
+    404 and their feature flag drops out of ``/api/auth/status``. No entry =
+    behaviour as before.
   * **static** — a directory served read-only at ``/tools/<id>/``. This is a
     disk-read surface, so it is written around REFUSING, the same way
     ``localview`` is (and it borrows localview's deny list rather than keeping
@@ -83,6 +84,11 @@ BUILTINS: dict[str, tuple[str, str, str]] = {
     "studioforge-panel": ("studioforge", "StudioForge", "🎛️"),
     "mail-panel": ("mail", "Emails", "✉️"),
     "clients-panel": ("practice", "Clients", "👥"),
+    # The Job Board (2026-09-25; was a rail bot). Its id is also the id of the
+    # hidden `jobboard` bot row its threads and the scout agent route through —
+    # the one place a tool id and a bot id coincide, which is why builtins skip
+    # the "already a bot id" check below.
+    "jobboard": ("jobs", "Job Board", "📋"),
 }
 FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
 

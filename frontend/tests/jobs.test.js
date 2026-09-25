@@ -4,13 +4,15 @@
 //   1. Mobile shows no jobs when the user opens the board via the sidebar.
 //   2. The toolbar stays painted across view changes (`unmountJobs` not
 //      effective on every transition path).
-// This file pins the new contract: the board lives in a dedicated sibling
-// (#job-board-host — see index.html), and `unmountJobs()` always removes the
-// [data-jobs-root] the mount created.
+// This file pins the contract: the board lives in its own host
+// (#job-board-host — the body of the Job Board tool pane since 2026-09-25,
+// see index.html), and `unmountJobs()` always removes the [data-jobs-root]
+// the mount created.
 //
-// What we DO NOT pin here: view-switch orchestration in main.js, CSS
-// layout, and the click handlers on a rendered row. Those are integration
-// territory — covered by the dispatch-e2e smoke tests on staging (:8766).
+// 2026-09-25: the Job Board became a builtin TOOL. The `data-view="jobs"`
+// screen, its navigate()/setView() branches, the selectBot() exit guard and
+// the mobile Jobs tab are gone; the pins for them are replaced by pins on the
+// tool pane (openJobsView / closeJobsView) further down.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,16 +35,19 @@ let _win = null;
 async function withDom() {
   if (_win) return _win;
   const { JSDOM } = jsdom;
-  // Mirror the real index.html host shape: an #app containing the new
-  // #job-board-host SIBLING (not child) of #chatview. The brief specifies
-  // this slot; if a refactor inlines it back into #chatview, these tests
-  // should fail loudly.
+  // Mirror the real index.html host shape: the Job Board tool pane
+  // (#jobs-view, a terminal-view inside #chatview, hidden while closed) with
+  // #job-board-host as its body — never inside #messages.
   const html = `<!doctype html><html><body>
     <div id="app" class="app" data-view="bots">
       <section class="panel chatview" id="chatview">
         <div class="messages" id="messages"></div>
+        <div class="terminal-view jobs-view hidden" id="jobs-view">
+          <div class="terminal-body jobs-body">
+            <section class="jobboard-host" id="job-board-host"></section>
+          </div>
+        </div>
       </section>
-      <section class="panel jobboard-host" id="job-board-host" hidden></section>
     </div>
   </body></html>`;
   const win = new JSDOM(html, { url: 'http://127.0.0.1:8765/', runScripts: 'outside-only' }).window;
@@ -90,7 +95,7 @@ async function freshJobs() {
   return await import(`../static/js/jobs.js?v=${Math.random()}`);
 }
 
-test('mountJobs creates a [data-jobs-root] inside the host, not in #chatview', { skip: dom.skip }, async () => {
+test('mountJobs creates a [data-jobs-root] inside the host, not in #messages', { skip: dom.skip }, async () => {
   const win = await withDom();
   // Inject globals matching the i18n.js / api.js top-level names — these
   // are belt-and-braces fallbacks (jsdom cannot intercept ESM imports
@@ -99,9 +104,8 @@ test('mountJobs creates a [data-jobs-root] inside the host, not in #chatview', {
   win.t = I18N_STUB.t;
   win.api = API_STUB;
 
-  // The host is hidden by default — mirror that, so we can prove the
-  // test (not main.js) is responsible for showing it.
-  assert.equal(win.document.getElementById('job-board-host').hidden, true);
+  // The pane is hidden by default — main.js's openJobsView() shows it.
+  assert.ok(win.document.getElementById('jobs-view').classList.contains('hidden'));
 
   const { mountJobs } = await freshJobs();
   const host = win.document.getElementById('job-board-host');
@@ -110,13 +114,13 @@ test('mountJobs creates a [data-jobs-root] inside the host, not in #chatview', {
   const root = win.document.querySelector('[data-jobs-root]');
   assert.ok(root, 'mountJobs must create a [data-jobs-root]');
   assert.equal(root.parentElement, host,
-    'the [data-jobs-root] must live inside #job-board-host (sibling of #chatview), not inside #messages / #chatview');
+    'the [data-jobs-root] must live inside #job-board-host (the tool pane body), not inside #messages');
   // Toolbar paint check: at minimum a .jobs-toolbar exists.
   assert.ok(root.querySelector('.jobs-toolbar'),
     'a freshly-mounted board must render the toolbar');
-  // The chat view must NOT carry the root — that was the original leak.
-  assert.equal(win.document.querySelector('#chatview [data-jobs-root]'), null,
-    '#chatview must not contain a [data-jobs-root] (jobs(unmount) regression guard)');
+  // The message list must NOT carry the root — that was the original leak.
+  assert.equal(win.document.querySelector('#messages [data-jobs-root]'), null,
+    '#messages must not contain a [data-jobs-root] (jobs(unmount) regression guard)');
 });
 
 test('unmountJobs removes the [data-jobs-root] (the toolbar cannot leak)', { skip: dom.skip }, async () => {
@@ -131,9 +135,9 @@ test('unmountJobs removes the [data-jobs-root] (the toolbar cannot leak)', { ski
   unmountJobs();
   assert.equal(win.document.querySelector('[data-jobs-root]'), null,
     'after unmountJobs, [data-jobs-root] is gone — the toolbar cannot stay painted');
-  // The host is left intact; main.js toggles its `hidden` attribute.
+  // The host is left intact; main.js hides the pane around it.
   assert.ok(host,
-    'unmountJobs removes the inner root, not the host slot — main.js hides the slot');
+    'unmountJobs removes the inner root, not the host slot — main.js hides the pane');
 });
 
 test('unmountJobs is idempotent — calling it twice does not throw', { skip: dom.skip }, async () => {
@@ -161,22 +165,27 @@ test('mountJobs reuses an existing [data-jobs-root] instead of stacking', { skip
   unmountJobs();
 });
 
-test('the index.html in this tree carries the dedicated #job-board-host slot', () => {
-  // The brief is explicit: a sibling of #chatview inside #app, NOT a child.
-  // If a future refactor drops this slot, the regressions come back.
+test('index.html: the Job Board is a tool pane inside #chatview, with no Jobs screen or tab', () => {
   const html = readFileSync(join(STATIC, 'index.html'), 'utf8');
-  assert.match(html, /id="job-board-host"/,
-    'index.html must carry the dedicated #job-board-host slot (jobs(mobile))');
-  // Belt and braces: it must not be nested inside #chatview.
-  const chatviewMatch = html.match(/<section[^>]*id="chatview"[\s\S]*?<\/section>/);
-  assert.ok(chatviewMatch, 'chatview section missing');
-  assert.equal(chatviewMatch[0].includes('id="job-board-host"'), false,
-    '#job-board-host must be a SIBLING of #chatview, not a child (jobs(unmount) regression guard)');
-  // The mobile Jobs tab exists and is hidden by default.
-  assert.match(html, /id="tab-jobs"/,
-    'mobile Jobs tab must exist (jobs(mobile))');
-  assert.match(html, /id="tab-jobs"[^>]*\bhidden\b/,
-    'mobile Jobs tab must start hidden and be revealed once state.bots includes a jobboard bot');
+  const pane = html.match(/<div class="terminal-view jobs-view hidden" id="jobs-view">[\s\S]*?<\/section>\s*<\/div>\s*<\/div>/);
+  assert.ok(pane, 'index.html must carry the Job Board pane #jobs-view (a hidden terminal-view)');
+  assert.match(pane[0], /id="job-board-host"/, '#job-board-host must be the body of #jobs-view');
+  assert.match(pane[0], /id="jobs-close"/, 'the pane has a ✕ that restores the previous chat');
+  assert.match(pane[0], /id="jobs-back"/, 'the pane has a ‹ for phones');
+  // Same parent as every other tool pane: inside #chatview, never inside #messages.
+  const cvStart = html.indexOf('id="chatview"');
+  const paneAt = html.indexOf('id="jobs-view"');
+  const toolView = html.indexOf('id="tool-view"');
+  assert.ok(cvStart >= 0 && paneAt > cvStart && paneAt < toolView,
+    '#jobs-view sits with the other tool panes inside #chatview');
+  assert.doesNotMatch(html, /id="tab-jobs"/, 'the mobile Jobs tab is gone — the rail tile is the entry point');
+  assert.doesNotMatch(html, /nav\.tab_jobs/, 'the Jobs tab label key is gone with the tab');
+});
+
+test('app.css: no `data-view="jobs"` screen is left', () => {
+  const css = readFileSync(join(STATIC, 'app.css'), 'utf8');
+  assert.doesNotMatch(css, /data-view="jobs"/,
+    'the Jobs screen is gone; a leftover rule would hide #chatview (and every tool pane in it)');
 });
 
 test('the sw.js CACHE was bumped for the new module paths', () => {
@@ -238,236 +247,69 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // v127 (2026-09-25): metadata.notice convention — notice.js/main.js/app.css
   // and index.html moved.
   // v128 (2026-09-25): Tools review round — tools.js/main.js and index.html moved.
-  assert.equal(m[1], 'local-chat-v129',
-    'sw.js CACHE must be local-chat-v129 so installed clients pick up the tools review round');
+  // v129 (2026-09-25): a builtin's Settings toggle saves the manifest switch.
+  // v130 (2026-09-25): tool tiles are themed bot-shaped tiles with line icons
+  // (util.js gained terminal/mail/users/chart), and the Job Board is a builtin
+  // tool — index.html, app.css, main.js, tools.js, util.js and every util.js
+  // importer, jobs.js, job-thread.js and the locales moved.
+  assert.equal(m[1], 'local-chat-v130',
+    'sw.js CACHE must be local-chat-v130 so installed clients pick up the themed tool tiles + Job Board tool');
 });
 
 // =============================================================================
-// navigate('jobs') early-branch contract (regression pin).
+// The Job Board as a builtin tool (2026-09-25).
 //
-// The mobile Jobs tab — when tapped from a deeper view (Chats or Messages)
-// — landed on Bots instead of Jobs, because navigate() treated 'jobs' as a
-// depth-0 view and called history.go(-N) to collapse the stack. The fix is
-// a textual contract: navigate() must take an early branch for 'jobs' that
-// uses history.pushState + setView, NOT history.go, and 'jobs' must NOT
-// be in the VIEW_DEPTH map.
-//
-// We pin the contract by reading main.js source. Spinning up the full
-// main.js in jsdom to call navigate() directly is not worth the import
-// graph (it pulls thread-sections, ws.js, dashboard, etc.); the textual
-// pin catches the regression cheaply and runs in <10ms. E2E on :8766
-// exercises the actual behavior end-to-end.
+// Textual pins on main.js: spinning the full app up in jsdom is not worth the
+// import graph; the E2E drive on a scratch instance exercises the behaviour.
 // =============================================================================
 
 function readMainJs() {
   return readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
 }
-
-// Slice the body of `navigate(view)` — the function that handles the history-
-// aware mobile-tab routing. There are TWO `if (view === 'jobs')` blocks in
-// main.js (one in setView, one in navigate); we explicitly locate the
-// navigate() block, not the setView() one, to avoid matching the wrong body.
-function navigateBody(src, maxLen = 4000) {
-  const start = src.indexOf('function navigate(view)');
-  assert.ok(start >= 0, 'main.js must define function navigate(view)');
-  return src.slice(start, start + maxLen);
-}
-function navigateJobsBranch(slice) {
-  // Match the FIRST `if (view === 'jobs')` inside the navigate() slice.
-  // The closing brace is indented, so we allow trailing whitespace between
-  // the newline and the `}`.
-  const m = slice.match(/if \(view === ['"]jobs['"]\)\s*\{([\s\S]*?)\n\s*\}/);
-  assert.ok(m, 'navigate() must have an early-branch for "jobs"');
-  return m[1];
+function fnBody(src, sig, maxLen = 2500) {
+  const start = src.indexOf(sig);
+  assert.ok(start >= 0, `main.js must define ${sig}`);
+  const code = src.slice(start, start + maxLen);
+  const end = code.indexOf('\n}\n');
+  return end > 0 ? code.slice(0, end) : code;
 }
 
-test('navigate() has an early-branch for "jobs" that pushStates + setView (no history.go)', () => {
+test('no Jobs screen routing is left in main.js', () => {
   const src = readMainJs();
-  const slice = navigateBody(src);
-  assert.match(slice, /if \(view === ['"]jobs['"]\)/,
-    'navigate() must short-circuit for "jobs" before the depth arithmetic ' +
-    '(jobs(fix) regression guard — review finding #1)');
-  // The early branch must use pushState + setView, NOT history.go.
-  // (Earlier draft used replaceState — that drops the intermediate entry,
-  // so Back from Jobs landed on Bots instead of the previous view.)
-  const body = navigateJobsBranch(slice);
-  assert.match(body, /history\.pushState\([^)]*['"]jobs['"]/,
-    'the jobs early branch must history.pushState({view:"jobs"}) so Back returns to the previous view (NOT Bots)');
-  assert.match(body, /setView\(['"]jobs['"]\)/,
-    'the jobs early branch must call setView("jobs") — the popstate handler is not on this code path');
-  assert.doesNotMatch(body, /history\.go/,
-    'the jobs early branch must NEVER call history.go(-N) — that is the bug the reviewer caught');
-});
-
-test('navigate() does NOT list "jobs" in VIEW_DEPTH (jobs is a sibling of the depth axis, not on it)', () => {
-  const src = readMainJs();
+  assert.doesNotMatch(fnBody(src, 'function setView('), /['"]jobs['"]/, 'setView has no jobs branch');
+  assert.doesNotMatch(fnBody(src, 'function navigate(view)'), /['"]jobs['"]/, 'navigate has no jobs branch');
+  assert.doesNotMatch(fnBody(src, 'async function selectBot('), /dataset\.view\s*===\s*['"]jobs['"]/,
+    'selectBot needs no Jobs-screen exit guard: closeToolPanes() closes the board like any tool');
+  assert.doesNotMatch(fnBody(src, 'function renderSidebarInner(', 5000), /jobboard/,
+    'the rail has no hard-coded jobboard click — the tool tile is the entry point');
+  assert.doesNotMatch(src, /['"#]tab-jobs\b/, 'the mobile Jobs tab wiring is gone (harness-tab-jobs is the Harness pane, unrelated)');
   const m = src.match(/const VIEW_DEPTH = \{[^}]+\}/);
-  assert.ok(m, 'main.js must declare const VIEW_DEPTH');
-  assert.doesNotMatch(m[0], /['"]jobs['"]/,
-    'VIEW_DEPTH must not include "jobs" — that misclassification is what made ' +
-    'navigate("jobs") pop the history stack to Bots from a deeper view');
-  const m2 = src.match(/const VIEW_AT_DEPTH = \[[^\]]+\]/);
-  assert.ok(m2, 'main.js must declare const VIEW_AT_DEPTH');
-  assert.doesNotMatch(m2[0], /['"]jobs['"]/,
-    'VIEW_AT_DEPTH must not include "jobs" — jobs is not on the depth axis');
+  assert.ok(m);
+  assert.doesNotMatch(m[0], /['"]jobs['"]/);
 });
 
-test('Jobs tab click handler routes through navigate(), not a direct setView()', () => {
+test('openJobsView() opens the board full-page, like every tool', () => {
+  const body = fnBody(readMainJs(), 'function openJobsView(');
+  assert.match(body, /state\.decoy\s*\|\|\s*!state\.jobsEnabled/, 'never in Safe Mode, only when the feature is on');
+  assert.match(body, /closeToolPanes\(['"]jobs['"]\)/, 'closes the other panes first');
+  assert.match(body, /rememberPrev\(\)/, 'remembers the chat it covers, so ✕ can hand it back');
+  assert.match(body, /closeSearch\(/, 'dismisses the messages-search modal (the old "search header sticks" fix)');
+  assert.match(body, /classList\.add\(['"]tool-full['"]\)/, 'puts body.tool-full on');
+  assert.match(body, /mountJobs\(/, 'mounts the board into its host');
+  assert.ok(body.indexOf('rememberPrev()') < body.indexOf('state.selectedBotId = JOBS_ID'),
+    'rememberPrev runs BEFORE the selection moves to the tool');
+});
+
+test('closeJobsView() tears the board down; every other opener closes it', () => {
   const src = readMainJs();
-  // Mobile tabs are wired in wireEvents() — the .tab click handler calls
-  // navigate(t.dataset.view). A refactor that switched the Jobs tab to
-  // setView('jobs') would skip the navigate branch and re-introduce the bug.
-  // Find the click handler that fires for tabs.
-  const handler = src.match(/mobile-tabs[\s\S]{0,200}\.tab'\)\s*\{?[\s\S]{0,200}?navigate\(t\.dataset\.view\)/);
-  assert.ok(handler,
-    'mobile-tabs click handler must route through navigate(t.dataset.view) — ' +
-    'a direct setView() would bypass the history-aware routing');
-});
-
-test('the navigate("jobs") branch is BEFORE the depth-arithmetic that calls history.go', () => {
-  // The early return is what matters: if the jobs check sits AFTER
-  // `history.go(target - cur)`, the bug returns. Order check.
-  // Skip leading comments — the navigate function has a docblock that
-  // mentions history.go() in prose, which we don't want to confuse with
-  // the actual call site. Strip lines that look like comments first.
-  const src = readMainJs();
-  const slice = navigateBody(src);
-  // Strip line comments (`//` to EOL) and block comments — they don't
-  // change the order of executable statements.
-  const code = slice
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/\s+\/\/.*$/gm, '');
-  const jobsCheck = code.indexOf("view === 'jobs'");
-  const historyGo = code.indexOf('history.go(');
-  assert.ok(jobsCheck >= 0, 'jobs check must exist');
-  assert.ok(historyGo >= 0, 'history.go branch must exist (unchanged behaviour for other views)');
-  assert.ok(jobsCheck < historyGo,
-    'the jobs early-return must come BEFORE the history.go(target - cur) branch ' +
-    'so a depth-1 entry cannot reach history.go(-1)');
-});
-
-test('Jobs tab click handler contract — DOM-level: tapping Jobs from chats/messages lands on Jobs', { skip: dom.skip }, async () => {
-  // Behavioural test that mirrors the click path: a `navigate('jobs')` call
-  // from a [bots, threads] stack must leave the Jobs host visible (the
-  // history.go(-1) bug would leave it hidden, the popstate handler would
-  // have painted 'bots').
-  //
-  // We replicate the navigate() branch verbatim rather than importing
-  // main.js (which drags in the full app, ws.js, privacy, etc.). The textual
-  // tests above pin that the real function does the same thing — this one
-  // pins the BEHAVIOUR the branch must produce.
-  const win = await withDom();
-  // Pre-set a [bots, threads] history stack — emulate `history.replaceState`
-  // walking the stack the way the live UI would.
-  win.history.replaceState({ view: 'bots' }, '');
-  win.history.pushState({ view: 'threads' }, '');
-  assert.equal(win.history.state.view, 'threads');
-  // The navigate() branch under test, inlined:
-  //   if (view === 'jobs') {
-  //     history.pushState({ view: 'jobs' }, '');
-  //     setView('jobs');
-  //     return;
-  //   }
-  const setView = (v) => {
-    win.document.getElementById('app').dataset.view = v;
-    const host = win.document.getElementById('job-board-host');
-    if (v === 'jobs') host.hidden = false; else host.hidden = true;
-  };
-  setView('threads');
-  setView('jobs');
-  win.history.pushState({ view: 'jobs' }, '');
-  // After the call the DOM should be on jobs.
-  const host = win.document.querySelector('#job-board-host:not([hidden])');
-  assert.ok(host,
-    'the Jobs host must be visible after navigate("jobs") — the reviewer found this ' +
-    'collapsed to Bots when called from a depth-1 entry');
-  assert.equal(win.document.getElementById('app').dataset.view, 'jobs',
-    'data-view must be "jobs" after navigate("jobs")');
-  // Sanity-check that the textual assertion above is meaningful:
-  // history.state really is `jobs` (we pushed, not popped).
-  assert.equal(win.history.state.view, 'jobs',
-    'history.state must now read "jobs" (pushState, not replaceState — Back ' +
-    'should land on the previous entry, "threads")');
-});
-
-test('navigate("jobs") is idempotent — calling it twice leaves the DOM still on Jobs', () => {
-  // Pure-state check on the textual contract: the early branch is `pushState
-  // + setView + return`, with no state mutation that depends on the prior
-  // state. A second call must do the same.
-  const src = readMainJs();
-  const slice = navigateBody(src);
-  const body = navigateJobsBranch(slice);
-  // Body should not depend on history.state (otherwise the second call
-  // would behave differently from the first).
-  assert.doesNotMatch(body, /history\.state/,
-    'jobs early-branch must not read history.state — must be idempotent');
-});
-
-// =============================================================================
-// jobs(fix): search-modal-close on Jobs entry + selectBot exits Jobs view.
-// Two regressions caught 2026-09-15 by the E2E "comprehensive test":
-//   1. Opening the messages-search modal and then clicking Job Board left
-//      the modal painted across the board (Symptom B: "search header
-//      sticks").
-//   2. Clicking another bot while on the Jobs view did not switch view;
-//      openThread loaded the chat into a display:none #chatview (Symptom C:
-//      "header sticks AND can't view chats").
-// The fixes are pure JS — closeSearch() inside the jobs-branch of setView,
-// and a `if (dom.app.dataset.view === 'jobs') setView(...)` guard at the
-// top of selectBot. We pin both with regex checks here so a future refactor
-// can't silently drop them; the dispatch-e2e smoke covers the full UI.
-// =============================================================================
-
-test('setView("jobs") dismisses the messages-search modal (the "search header sticks" fix)', () => {
-  const src = readMainJs();
-  // Slice the setView body. There is exactly one function named `setView`
-  // in main.js.
-  const start = src.indexOf('function setView(');
-  assert.ok(start >= 0, 'main.js must define function setView');
-  // Locate the jobs-branch — the only `if (view === 'jobs')` block in setView.
-  const jobsCheck = src.indexOf("if (view === 'jobs')", start);
-  assert.ok(jobsCheck >= 0, 'setView must have a jobs branch');
-  // The slice must start with `if (view === 'jobs') {` and not extend
-  // past the next `} else {` (which marks the start of the else branch).
-  const elseStart = src.indexOf('} else {', jobsCheck);
-  assert.ok(elseStart > 0, 'setView jobs branch must end with } else {');
-  const branch = src.slice(jobsCheck, elseStart);
-  assert.match(branch, /closeSearch\(/,
-    'setView("jobs") must call closeSearch() — without it, a search modal ' +
-    'opened from a prior view stays painted across the view swap. This is ' +
-    'the symptom-B regression guard.');
-});
-
-test('selectBot() exits the Jobs view (the "view-stuck-on-bot-switch" fix)', () => {
-  const src = readMainJs();
-  const start = src.indexOf('async function selectBot(');
-  assert.ok(start >= 0, 'main.js must define async function selectBot');
-  // Slice the first 800 chars of the function body — the guard sits near the
-  // top, BEFORE state.selectedBotId = id.
-  const body = src.slice(start, start + 1200);
-  // The guard exists (a) AND (b) references the current view (so it
-  // only acts when actually on Jobs, not every bot click).
-  assert.match(body, /dataset\.view\s*===\s*['"]jobs['"]/,
-    'selectBot() must short-circuit when current view === "jobs" — that is ' +
-    'the symptom-C regression guard (clicking another bot from Jobs left the ' +
-    'view stuck on Jobs with #chatview display:none).');
-  // The guard must call setView (NOT just unlock the host) — otherwise the
-  // data-view attribute never flips back. A regression that swapped in a
-  // host.hidden = false-only fix would still leave data-view="jobs". The
-  // real call is `setView(isMobile() ? 'threads' : 'chat')` — assert
-  // BOTH that setView is the chosen mechanism AND that the new view name
-  // is one of the two legal values, even when nested in a ternary. Use a
-  // non-greedy match that ignores `)` (setView's expression can itself
-  // contain `()`, e.g. `isMobile()`).
-  assert.match(body, /setView\s*\([\s\S]*?['"](threads|chat)['"]/,
-    'the Jobs-exit guard must route through setView(...chat|threads) — a ' +
-    'host.hidden reset alone would not flip data-view, so #chatview would ' +
-    'still be hidden and the user would still see no chats.');
-  assert.match(body, /setView\s*\([\s\S]*?['"](threads|chat)['"][\s\S]*?['"](threads|chat)['"]/,
-    'the Jobs-exit guard must call setView on one of "threads" / "chat" — ' +
-    'arbitrary view names would route the user into a state with no panel ' +
-    'painted. The current implementation is `setView(isMobile() ? \'threads\' : \'chat\')`.');
+  const body = fnBody(src, 'function closeJobsView(');
+  assert.match(body, /classList\.remove\(['"]tool-full['"]\)/);
+  assert.match(body, /unmountJobs\(\)/, 'unmount, not just hide: no listener or in-flight load survives');
+  assert.match(fnBody(src, 'function closeToolPanes('), /jobsOpen[\s\S]*closeJobsView\(\)/,
+    'closeToolPanes() closes the board, so a bot click or another tool leaves it cleanly');
+  assert.match(src, /jobs:\s*openJobsView/, 'wireTools() hands tools.js the jobs opener');
+  assert.match(src, /window\.__openThread = openThreadFromBoard/,
+    'a thread opened from the board leaves the full-page tool first');
 });
 
 // =============================================================================

@@ -60,7 +60,7 @@ async function freshTools() {
 function wire(mod, over = {}) {
   const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [] };
   const state = { decoy: false, selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
-  const flags = { harness: true, studioforge: true, mail: true, practice: false, ...over.flags };
+  const flags = { harness: true, studioforge: true, mail: true, practice: false, jobs: false, ...over.flags };
   mod.wireTools({
     state,
     openers: {
@@ -68,6 +68,7 @@ function wire(mod, over = {}) {
       studioforge: () => rec.opened.push('studioforge'),
       mail: () => rec.opened.push('mail'),
       practice: () => rec.opened.push('practice'),
+      jobs: () => rec.opened.push('jobs'),
     },
     closeToolPanes: (except) => rec.closedWith.push(except),
     builtinOn: (f) => !state.decoy && !!flags[f],
@@ -96,12 +97,95 @@ test('rail: builtins first (feature-gated), then enabled static/url tools', { sk
   assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'benchmark', 'rig-panel', 'family-page']);
   assert.ok(list.querySelector('.tool-list-head'), 'the group has its heading');
   const bench = list.querySelector('[data-tool="benchmark"]');
-  assert.equal(bench.querySelector('.tool-avatar').textContent, '📊');
+  // 📊 is a chrome emoji: the tile draws the theme's chart line icon instead.
+  assert.ok(bench.querySelector('.tool-avatar.tool-avatar-icon svg.rail-icon'));
   assert.equal(bench.getAttribute('aria-label'), 'Benchmark Board');
   // A builtin carries its status dot; a generic tool has none.
   assert.ok(list.querySelector('[data-tool="deepseek-harness"] .bot-status-dot.harness-running'));
   assert.equal(bench.querySelector('.bot-status-dot'), null);
   assert.equal(mod.railToolDot('deepseek-harness').classList.contains('harness-running'), true);
+});
+
+test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { flags: { jobs: true, practice: true } });
+  await mod.loadTools();
+  const tile = (id) => win.document.querySelector(`#tool-list [data-tool="${id}"]`);
+  for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']) {
+    const b = tile(id);
+    assert.ok(b, id);
+    // Same classes a bot tile carries, so every bot rule (size, radius, hover,
+    // .active ring, dot corner, Minimal rows, phone grid) applies unchanged.
+    assert.ok(b.classList.contains('bot-btn') && b.classList.contains('tool-btn'), id);
+    const av = b.querySelector('.bot-avatar.tool-avatar');
+    assert.ok(av, id + ' has a bot-shaped tile');
+    assert.equal(av.getAttribute('aria-hidden'), 'true');
+    // No hard-coded service hues or the old accent tile any more.
+    assert.equal(av.className.match(/terminal-avatar|harness-avatar|studioforge-avatar/), null, id);
+    assert.ok(b.querySelector('.bot-name-tip') && b.querySelector('.bot-name-label'), id + ' has the tip and label');
+  }
+  // Builtins: line icons (currentColor SVG), never text.
+  for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard']) {
+    assert.ok(tile(id).querySelector('.tool-avatar-icon svg.rail-icon'), id);
+  }
+  assert.ok(tile('jobboard').getAttribute('aria-label'), 'the Job Board tile has an accessible name');
+  // 🎛️ (with its U+FE0F) is the sliders icon; 🏠 is the person's own emoji.
+  assert.ok(tile('rig-panel').querySelector('.tool-avatar-icon svg'));
+  const fam = tile('family-page').querySelector('.tool-avatar');
+  assert.ok(fam.classList.contains('tool-avatar-glyph'));
+  assert.equal(fam.textContent, '🏠');
+  // A RAIL_ICONS name works as an icon too; an unknown word is just text.
+  assert.equal(mod.toolIconName({ kind: 'static', icon: 'chart' }), 'chart');
+  assert.equal(mod.toolIconName({ kind: 'static', icon: 'nope' }), null);
+  assert.equal(mod.toolIconName({ kind: 'static', icon: '' }), null);
+  assert.equal(mod.toolGlyph({ kind: 'static' }).textContent, '🧩', 'no icon at all → the default glyph');
+  // The active tile is marked the way a bot tile is.
+  mod.openTool('benchmark');
+  assert.ok(tile('benchmark').classList.contains('active'));
+  assert.equal(tile('benchmark').getAttribute('aria-current'), 'page');
+  // The pane header shows the same glyph as the tile.
+  assert.ok(win.document.querySelector('#tool-icon svg.rail-icon'));
+});
+
+test('the Job Board is a builtin tile that calls the jobs opener', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec } = wire(mod, { flags: { jobs: true } });
+  await mod.loadTools();
+  const ids = tileIds(win);
+  assert.ok(ids.includes('jobboard'));
+  assert.ok(ids.indexOf('jobboard') < ids.indexOf('benchmark'), 'builtins come first');
+  win.document.querySelector('#tool-list [data-tool="jobboard"]').click();
+  assert.deepEqual(rec.opened, ['jobs']);
+  assert.equal(mod.isToolId('jobboard'), true, 'selectBot("jobboard") routes to the tool');
+  // Feature off → no tile, and it does not open.
+  const win2 = setup();
+  const mod2 = await freshTools();
+  const w2 = wire(mod2, { flags: { jobs: false } });
+  await mod2.loadTools();
+  assert.equal(tileIds(win2).includes('jobboard'), false);
+  // Switched off in tools.yaml → never opens even if the feature is on.
+  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: FIXTURE.tools.map((x) => (x.id === 'jobboard' ? { ...x, enabled: false } : x)) }];
+  const mod3 = await freshTools();
+  const w3 = wire(mod3, { flags: { jobs: true } });
+  await mod3.loadTools();
+  assert.equal(mod3.openTool('jobboard'), false);
+  assert.deepEqual(w3.rec.opened, []);
+  assert.deepEqual(w2.rec.opened, []);
+});
+
+test('restorePrev() hands the remembered chat back after a builtin closes itself', { skip: dom.skip }, async () => {
+  setup();
+  const mod = await freshTools();
+  const { rec, state } = wire(mod, { flags: { jobs: true } });
+  await mod.loadTools();
+  mod.rememberPrev();                 // what openJobsView() does first
+  state.selectedBotId = 'jobboard';
+  mod.restorePrev({ stay: true });
+  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }]);
+  mod.restorePrev();                  // consumed: a second close restores nothing
+  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }, null]);
 });
 
 test('rail: a backend without /api/tools still shows the builtins', { skip: dom.skip }, async () => {

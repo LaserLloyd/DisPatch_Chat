@@ -51,7 +51,6 @@
     "tab_bots": "Bots",
     "tab_chats": "Chats",
     "tab_messages": "Mensajes",
-    "tab_jobs": "Trabajos",
     "label_lock": "Bloquear",
     "label_unlock": "Desbloquear",
     "label_files": "Archivos",
@@ -983,6 +982,9 @@
   },
   "jobs": {
     "title": "Job Board",
+    "subtitle": "Ofertas encontradas para ti, por mes",
+    "close": "Cerrar la bolsa de empleo",
+    "sidebar_aria": "Bolsa de empleo — ofertas por mes, solo desbloqueado",
     "empty": "No jobs yet — post one via the API or wait for the curator.",
     "loading": "Loading…",
     "error": "Could not load jobs: {msg}",

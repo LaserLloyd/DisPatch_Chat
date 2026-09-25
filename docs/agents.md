@@ -239,8 +239,10 @@ finished render appear sooner. See [configuration.md](configuration.md).
 ## Managing the Jobs board (post + vote + archive + tag)
 
 The Jobs board is a curated feed of job postings, surfaced in the chat app
-as a **structured list grouped by month** — not a chat. The bot id
-`jobboard` owns the surface; every post lands in the **current month's
+as a **structured list grouped by month** — not a chat. People open it from
+the rail's **Tools** group (it is the builtin tool `jobboard`). The bot id
+`jobboard` owns the data (keep its `config.yaml` row, hidden with
+`visible: false` — see configuration.md); every post lands in the **current month's
 discussion thread** (title `Jobs — YYYY-MM`), so all jobs from a given
 month are visible in one place and the dedup hash short-circuits reposts
 to the existing job row.

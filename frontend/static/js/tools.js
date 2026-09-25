@@ -5,8 +5,8 @@
 // serves a static tool's pages at /tools/<id>/ and runs its optional refresh.
 //
 // Three kinds, one rail:
-//   builtin — the four panes main.js already owns (Harness, StudioForge,
-//             Emails, Clients). This module only draws their tile and calls
+//   builtin — the five panes main.js already owns (Harness, StudioForge,
+//             Emails, Clients, Job Board). This module only draws their tile and calls
 //             the opener main.js hands in; their views are untouched.
 //   static  — a directory on the host, framed from /tools/<id>/ with NO
 //             allow-same-origin: the page may run its own JS but cannot touch
@@ -23,17 +23,67 @@
 
 import { api } from './api.js?v=29';
 import { t, relTimeLong } from './i18n.js?v=3';
-import { el } from './util.js?v=19';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
+// `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
+// the same currentColor line art as the gear row, never a platform emoji.
 const BUILTINS = [
-  { id: 'deepseek-harness', feature: 'harness', glyph: 'dsh', cls: 'harness-avatar', name: 'harness.name', aria: 'harness.sidebar_aria' },
-  { id: 'studioforge-panel', feature: 'studioforge', glyph: 'SF', cls: 'studioforge-avatar', name: 'studioforge.name', aria: 'studioforge.sidebar_aria' },
-  { id: 'mail-panel', feature: 'mail', glyph: '✉', cls: 'mail-avatar', name: 'mail.name', aria: 'mail.sidebar_aria' },
-  { id: 'clients-panel', feature: 'practice', glyph: '👥', cls: 'clients-avatar', name: 'clients.name', aria: 'clients.sidebar_aria' },
+  { id: 'deepseek-harness', feature: 'harness', icon: 'terminal', name: 'harness.name', aria: 'harness.sidebar_aria' },
+  { id: 'studioforge-panel', feature: 'studioforge', icon: 'tools', name: 'studioforge.name', aria: 'studioforge.sidebar_aria' },
+  { id: 'mail-panel', feature: 'mail', icon: 'mail', name: 'mail.name', aria: 'mail.sidebar_aria' },
+  { id: 'clients-panel', feature: 'practice', icon: 'users', name: 'clients.name', aria: 'clients.sidebar_aria' },
+  { id: 'jobboard', feature: 'jobs', icon: 'jobs', name: 'jobs.title', aria: 'jobs.sidebar_aria' },
 ];
 const BUILTIN_BY_ID = new Map(BUILTINS.map((b) => [b.id, b]));
 const BUILTIN_BY_FEATURE = new Map(BUILTINS.map((b) => [b.feature, b]));
+
+// A tools.yaml `icon` is what a person typed: usually one emoji. The handful
+// below are the emoji people reach for when they mean a piece of CHROME (a
+// report, a console, a mailbox), and the rail draws those in the theme's line
+// art so a manifest tool sits beside the builtins and the gear row as one
+// family. A RAIL_ICONS name (`icon: chart`) works too. Anything else is the
+// person's own choice and is shown as typed — content, not chrome (see the
+// note on RAIL_ICONS in util.js) — centred in the same themed tile.
+const ICON_ALIASES = {
+  '📊': 'chart', '📈': 'chart', '📉': 'chart',
+  '🎛': 'tools', '🎚': 'tools',
+  '💻': 'terminal', '🖥': 'terminal', '⌨': 'terminal',
+  '✉': 'mail', '📧': 'mail', '📨': 'mail', '📬': 'mail',
+  '👥': 'users', '👤': 'user',
+  '💼': 'jobs', '📋': 'jobs',
+  '🔗': 'link', '📁': 'folder', '📂': 'folder', '⚙': 'gear',
+  '🔍': 'search', '🔎': 'search', '🗄': 'database', '💾': 'disk',
+};
+const DEFAULT_GLYPH = '🧩';
+
+/** The RAIL_ICONS name a tool is drawn with, or null for a typed glyph. */
+export function toolIconName(tool) {
+  const b = tool && tool.kind === 'builtin' ? builtinOf(tool) : null;
+  if (b) return b.icon;
+  const raw = String((tool && tool.icon) || '').trim();
+  if (!raw) return null;
+  if (Object.prototype.hasOwnProperty.call(RAIL_ICONS, raw) && /^[a-z-]+$/.test(raw)) return raw;
+  // U+FE0F (emoji presentation) is optional in YAML: 🎛 and 🎛️ are one icon.
+  return ICON_ALIASES[raw.replace(/\uFE0F/g, '')] || null;
+}
+
+/** The glyph node for a tool: a line icon, or the typed emoji as text. */
+export function toolGlyph(tool) {
+  const name = toolIconName(tool);
+  if (name && RAIL_ICONS[name]) return railIcon(RAIL_ICONS[name]);
+  return el('span', { class: 'tool-glyph-text', text: (tool && String(tool.icon || '').trim()) || DEFAULT_GLYPH });
+}
+
+/** The rounded tile a tool's glyph sits in — the bot tile's geometry, the
+ *  theme's surface and border. `extra` adds size variants (Settings rows). */
+export function toolTile(tool, extra = '') {
+  const icon = !!toolIconName(tool);
+  return el('span', {
+    class: 'bot-avatar tool-avatar ' + (icon ? 'tool-avatar-icon' : 'tool-avatar-glyph') + (extra ? ' ' + extra : ''),
+    'aria-hidden': 'true',
+  }, [toolGlyph(tool)]);
+}
 
 // Literal keys (not t(`tools.kind_${k}`)) so the i18n key scan can see them.
 const KIND_LABEL = { builtin: 'tools.kind_builtin', static: 'tools.kind_static', url: 'tools.kind_url' };
@@ -182,11 +232,7 @@ function tile(tool) {
     onclick: () => openTool(tool.id),
   });
   if (active) btn.setAttribute('aria-current', 'page');
-  btn.append(el('span', {
-    class: 'bot-avatar terminal-avatar tool-avatar' + (b ? ' ' + b.cls : ''),
-    'aria-hidden': 'true',
-    text: b ? b.glyph : (tool.icon || '🧩'),
-  }));
+  btn.append(toolTile(tool));
   btn.append(el('span', { class: 'bot-name-tip', text: title }));
   btn.append(el('span', { class: 'bot-name-label', text: title }));
   if (b) {
@@ -388,7 +434,6 @@ export function openTool(id) {
     if (tool && tool.enabled === false) return false;
     const opener = deps.openers && deps.openers[b.feature];
     if (typeof opener !== 'function') return false;
-    if (deps.beforeOpen) deps.beforeOpen();
     opener();
     return true;
   }
@@ -397,7 +442,6 @@ export function openTool(id) {
   if (st.decoy && !tool.safe) return false;
 
   rememberPrev();
-  if (deps.beforeOpen) deps.beforeOpen();
   deps.closeToolPanes('tool');
   if (openId && openId !== id) teardown();
   openId = id;
@@ -405,7 +449,7 @@ export function openTool(id) {
   st.selectedBotId = id;
 
   const icon = $('tool-icon');
-  if (icon) icon.textContent = tool.icon || '🧩';
+  if (icon) icon.replaceChildren(toolGlyph(tool));
   const title = $('tool-title');
   if (title) title.textContent = toolTitle(tool);
   const upd = $('tool-updated');
@@ -422,7 +466,7 @@ export function openTool(id) {
   if (view) view.classList.remove('hidden');
   document.body.classList.add('tool-full');
   deps.renderSidebar();
-  if (deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), tool.icon || '🧩');
+  if (deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
   if (deps.isMobile()) deps.navigate('chat');
   loadFrame(tool);
   refreshStatus(tool);
@@ -460,6 +504,15 @@ export function closeTool({ restore = true } = {}) {
 }
 
 export function toolOpen() { return openId; }
+
+/** Hand the remembered chat back after a BUILTIN pane closes itself (the Job
+ *  Board's ✕). The generic pane does this inside closeTool(); a builtin's
+ *  opener called rememberPrev() on the way in, so the pair matches. */
+export function restorePrev(opts) {
+  const p = prev;
+  prev = null;
+  if (deps) deps.restoreView(p, opts);
+}
 
 /** `#tool=<id>` → that tool's id, or null. */
 export function hashToolId(hash = location.hash) {
@@ -529,19 +582,24 @@ function toolRow(tool, idx) {
   const name = toolTitle(tool);
   const builtin = tool.kind === 'builtin';
   const row = el('tr', { class: 'tools-row', dataset: { idx: String(idx) } });
-  const b = builtin ? builtinOf(tool) : null;
 
   // Icon
   const iconCell = el('td', { class: 'tools-cell-icon' });
   if (builtin) {
-    iconCell.append(el('span', { class: 'bot-avatar terminal-avatar tool-avatar' + (b ? ' ' + b.cls : ''), 'aria-hidden': 'true', text: b ? b.glyph : '?' }));
+    iconCell.append(toolTile(tool));
   } else {
     const inp = el('input', {
-      type: 'text', class: 'tools-input tools-input-icon', maxlength: '8',
+      type: 'text', class: 'tools-input tools-input-icon', maxlength: '16',
       'aria-label': t('tools.field_icon'), value: tool.icon || '',
     });
-    inp.addEventListener('input', () => { draft[idx].icon = inp.value.trim(); draftDirty = true; });
-    iconCell.append(inp);
+    // A live preview: the tile the rail will draw for what is typed.
+    let preview = toolTile(tool);
+    inp.addEventListener('input', () => {
+      draft[idx].icon = inp.value.trim(); draftDirty = true;
+      const next = toolTile(draft[idx]);
+      preview.replaceWith(next); preview = next;
+    });
+    iconCell.append(el('div', { class: 'tools-icon-edit' }, [preview, inp]));
   }
   row.append(iconCell);
 
@@ -608,7 +666,7 @@ function addForm() {
   };
   const [fId, iId] = field('tools.field_id', 'tools-add-id', { maxlength: '40', dir: 'ltr' });
   const [fTitle, iTitle] = field('tools.field_title', 'tools-add-title', { maxlength: '80' });
-  const [fIcon, iIcon] = field('tools.field_icon', 'tools-add-icon', { maxlength: '8' });
+  const [fIcon, iIcon] = field('tools.field_icon', 'tools-add-icon', { maxlength: '16' });
   const [fRoot, iRoot] = field('tools.field_root', 'tools-add-root', { dir: 'ltr', placeholder: '/abs/path' });
   const [fEntry, iEntry] = field('tools.field_entry', 'tools-add-entry', { dir: 'ltr', placeholder: 'index.html' });
   const [fUrl, iUrl] = field('tools.field_url', 'tools-add-url', { dir: 'ltr', placeholder: 'https://' });
@@ -777,13 +835,13 @@ export async function saveToolsSettings() {
 
 /** Hand this module the app. `d`:
  *    state            the app state (decoy, selectedBotId, activeThreadId)
- *    openers          {harness, studioforge, mail, practice} → the builtin openers
+ *    openers          {harness, studioforge, mail, practice, jobs} → the builtin openers
  *    closeToolPanes   main.js's pane closer (called with 'tool' before opening)
  *    builtinOn(f)     is that builtin's feature available right now?
  *    builtinDot(f)    the status-dot class for that builtin ('' = no dot)
  *    restoreView(p)   put the selection {botId, threadId} back after a close
- *    beforeOpen()     leave any view a tool pane cannot show over (the Job Board)
- *    paintPlaceholder(title, icon)  the thread-list stand-in while a tool is up
+ *    paintPlaceholder(title, glyph)  the thread-list stand-in while a tool is up
+ *                     (glyph is a node: toolGlyph()'s line icon or typed emoji)
  *    renderSidebar, isMobile, navigate, toast, isBotId, onSaved
  */
 export function wireTools(d) {

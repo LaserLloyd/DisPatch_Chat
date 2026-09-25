@@ -4,10 +4,10 @@
 
 import { api, setOnLocked } from './api.js?v=29';
 import { ChatSocket } from './ws.js?v=9';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
-import { installChecklists, applyChecklistState } from './checklist.js?v=6';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=33';
+import { installChecklists, applyChecklistState } from './checklist.js?v=7';
 import { classifyNotice, noticeHeadline } from './notice.js?v=3';
-import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
+import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -21,18 +21,18 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=19';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=8';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=6';
-import { mountJobs, unmountJobs } from './jobs.js?v=9';
-import { openJobDetail, closeJobDetail } from './job-thread.js?v=10';
+} from './reactions.js?v=20';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=7';
+import { mountJobs, unmountJobs } from './jobs.js?v=10';
+import { openJobDetail, closeJobDetail } from './job-thread.js?v=11';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=6';
+} from './llm.js?v=7';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=8';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=10';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=11';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -43,15 +43,15 @@ import {
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
-  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
-} from './tools.js?v=3';
-import { renderLinkRail, linksSection } from './links.js?v=6';
+  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev, restorePrev,
+} from './tools.js?v=4';
+import { renderLinkRail, linksSection } from './links.js?v=7';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=4';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=5';
 import { aboutRow } from './about.js?v=2';
-import { imageJobMessageEl } from './imagejobs.js?v=4';
+import { imageJobMessageEl } from './imagejobs.js?v=5';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=2';
@@ -107,6 +107,7 @@ const state = {
   },
   mailEnabled: false, // server-side feature flag (mail_available()); full-session only
   clientsEnabled: false, // server-side feature flag (practice_available()); full-session only
+  jobsEnabled: false, // server-side feature flag (jobs_available()); full-session only
   studioforgeEnabled: false, // server-side feature flag (DISPATCH_STUDIOFORGE + a URL); full-session only
   // StudioForge pane: last /api/studioforge/status payload, plus whether THIS
   // browser could reach the panel (a separate question from whether the server
@@ -143,6 +144,10 @@ const STUDIOFORGE_ID = 'studioforge-panel';
 const MAIL_ID = 'mail-panel';
 // Clients tab ("WebBuilder" — the practice box's client pipeline, native UI).
 const CLIENTS_ID = 'clients-panel';
+// Job Board — a builtin tool since 2026-09-25. Same id as the `jobboard` bot
+// row the board's threads and the scout agent route through (that row stays
+// in config.yaml, `visible: false`, so the tile is the only entry point).
+const JOBS_ID = 'jobboard';
 // Which bots appear in Safe Mode is a SERVER-side per-bot setting ("safe" in
 // the Bot Manager, full mode only) — the server filters /api/bots and the WS
 // hello for Safe-Mode sessions, so state.bots is already the right list.
@@ -214,7 +219,7 @@ const dom = {};
  'ch-modelchip', 'ch-modelchip-label', 'model-picker', 'mp-model', 'mp-thinking-row',
  'mp-thinking', 'mp-context', 'mp-warning', 'mp-reset', 'mp-apply',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
- 'job-board-host', 'tab-jobs',
+ 'job-board-host', 'jobs-view', 'jobs-back', 'jobs-close',
  'retry-chip', 'retry-chip-btn',
  'reply-chip', 'reply-chip-label', 'reply-chip-excerpt', 'reply-chip-cancel',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
@@ -682,37 +687,6 @@ function setView(view) {
     t.classList.toggle('active', on);
     if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
-  // Jobs board: when the sidebar Job Board button or the mobile Jobs tab
-  // calls setView('jobs'), mount the board into its dedicated host slot
-  // (#job-board-host is a sibling of #chatview, see index.html). The slot
-  // is mutually exclusive with the chat panel, so the toolbar cannot leak
-  // onto the chat view. The previous mount target was #chat (or its
-  // parent), which is why the toolbar stayed painted under the chat on
-  // mobile — see jobs(unmount).
-  if (view === 'jobs') {
-    // Symptom (jobs-fix: search-sticks): entering the Jobs view from any
-    // state where the messages-search modal was open used to leave the
-    // overlay painted across the board. Search is bound to the threads /
-    // chat list surfaces, so a view change is an unambiguous "I'm done
-    // searching" — dismiss the modal here so the user lands on a clean
-    // board, not a board hidden behind the search chrome.
-    closeSearch();
-    const host = dom['job-board-host'];
-    if (host) {
-      host.hidden = false;
-      if (!host.querySelector('[data-jobs-root]')) {
-        mountJobs(host).catch(() => {});
-      }
-    }
-  } else {
-    // Always tear down the board when leaving — and HIDE the host so its
-    // descendants (the toolbar, the list) cannot bleed through even if a
-    // future refactor skipped unmountJobs. Both paths are belt-and-braces:
-    // the unmount removes the [data-jobs-root]; the [hidden] hides the
-    // empty shell.
-    unmountJobs();
-    if (dom['job-board-host']) dom['job-board-host'].hidden = true;
-  }
 }
 
 // History-aware navigation (mobile only). The bots screen is the root of the
@@ -729,19 +703,6 @@ function navigate(view) {
   // as the view we are actually showing so the depth arithmetic stays true.
   if (history.state?.viewer && !viewerOpen()) {
     history.replaceState({ view: dom.app.dataset.view || 'bots' }, '');
-  }
-  // The Jobs view is a sibling of the chat-side tabs but not part of the
-  // history stack's depth axis — opening it from Chats/Messages must NOT
-  // collapse the back-stack to Bots via history.go(-N). Push a Jobs entry
-  // (do NOT replaceState — replaceState drops the intermediate entry, so a
-  // Back from Jobs lands on Bots instead of the view the user came from).
-  // pushState keeps the stack as [bots, ..., jobs] so Back returns to the
-  // previous view (correct UX for "tap Jobs from Chats → Back returns to
-  // Chats").
-  if (view === 'jobs') {
-    history.pushState({ view: 'jobs' }, '');
-    setView('jobs');
-    return;
   }
   const cur = VIEW_DEPTH[history.state?.view] ?? 0;
   const target = VIEW_DEPTH[view] ?? 0;
@@ -766,7 +727,10 @@ window.addEventListener('popstate', (e) => {
   // Landed on a viewer entry with no viewer open: a stale one left behind by
   // a framed page's own navigations. Step over it instead of painting "bots".
   if (e.state?.viewer) { if (!viewerOpen()) history.back(); return; }
-  setView(e.state?.view || 'bots');
+  // An entry from before the Job Board became a tool can still say
+  // `view: 'jobs'`; that screen is gone, so it lands on the root instead.
+  const v = e.state?.view;
+  setView(v in VIEW_DEPTH ? v : 'bots');
 });
 
 // ===================== Sidebar =====================
@@ -829,17 +793,7 @@ function renderSidebarInner() {
       // .bot-name-tip hover tip on desktop.
       'aria-label': bot.name,
       draggable: state.decoy ? 'false' : 'true',
-      onclick: () => {
-        if (bot.id === 'jobboard') {
-          // The jobboard bot gets its own entry-point: clicking it opens
-          // the board list view rather than the daily-thread fallback.
-          // A full session is required; decoy callers are refused by
-          // the backend's _is_decoy redaction in GET /api/jobs.
-          setView('jobs');
-          return;
-        }
-        selectBot(bot.id);
-      },
+      onclick: () => selectBot(bot.id),
     });
     btn.append(avatarNode(bot, 'bot-avatar'));
     btn.append(el('span', { class: 'bot-name-tip', text: bot.name }));
@@ -964,13 +918,14 @@ function builtinOn(feature) {
   if (feature === 'studioforge') return !!state.studioforgeEnabled;
   if (feature === 'mail') return !!state.mailEnabled;
   if (feature === 'practice') return !!state.clientsEnabled;
+  if (feature === 'jobs') return !!state.jobsEnabled;
   return false;
 }
 
 /** Put the selection back after the generic tool pane closes (✕ / back).
  *  The chat pane was only covered, never torn down, so this is a repaint of
  *  the rail and thread list, not a reload. */
-function restoreAfterTool(prev) {
+function restoreAfterTool(prev, { stay = false } = {}) {
   const botId = prev && prev.botId && !isToolId(prev.botId) && botById(prev.botId) ? prev.botId : null;
   if (!botId) {
     state.selectedBotId = null;
@@ -993,7 +948,7 @@ function restoreAfterTool(prev) {
   renderSidebar();
   updateThreadListHeader();
   renderThreads();
-  if (isMobile()) navigate(prev.threadId && state.activeThreadId === prev.threadId ? 'chat' : 'threads');
+  if (isMobile() && !stay) navigate(prev.threadId && state.activeThreadId === prev.threadId ? 'chat' : 'threads');
 }
 
 // ===================== Thread list =====================
@@ -1308,7 +1263,9 @@ function renderChatHeader() {
   if (!th) return;
   const bot = botById(th.bot_id) || botById(state.selectedBotId);
   if (bot) paintHeaderAvatar('ch-avatar', bot, th);
-  dom['ch-title'].textContent = bot ? bot.name : t('common.chat');
+  // The Job Board's bot row is hidden (the tool tile is its entry point), so a
+  // board thread has no roster entry to name it — name it after the tool.
+  dom['ch-title'].textContent = bot ? bot.name : (th.bot_id === JOBS_ID ? t('jobs.title') : t('common.chat'));
   dom['ch-sub'].textContent = threadTitle(th);
   // Model badge: latest assistant message's actual model, else the bot's hint.
   const withModel = [...state.messages].reverse().find((m) => m.metadata && m.metadata.model);
@@ -3330,17 +3287,6 @@ async function selectBot(id) {
   if (isToolId(id)) { openTool(id); return; }
   // Leaving a tool pane for a real bot tears the view down cleanly.
   closeToolPanes();
-  // Symptom (jobs-fix: view-stuck-on-bot-switch): if we're sitting on the
-  // Jobs view when the user clicks another bot, the rest of this function
-  // still loads threads AND opens the first one — but the jobs CSS keeps
-  // #chatview hidden. The user sees the board stay put, no chats appear,
-  // and the title bar stays "Job Board" forever. Mirror what the trailing
-  // branches already do for the other views (desktop → chat, mobile →
-  // threads) so the openThread / navigate call at the bottom lands in a
-  // panel the user can actually see.
-  if (dom.app.dataset.view === 'jobs') {
-    setView(isMobile() ? 'threads' : 'chat');
-  }
   state.selectedBotId = id;
   renderSidebar();
   updateThreadListHeader();
@@ -5126,6 +5072,7 @@ function closeToolPanes(except) {
   if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
   if (mailOpen && except !== 'mail') closeMailView();
   if (clientsOpen && except !== 'clients') closeClientsView();
+  if (jobsOpen && except !== 'jobs') closeJobsView();
 }
 
 function openHarnessView() {
@@ -6096,6 +6043,95 @@ function wireClientsView() {
   });
 }
 
+// ===================== Job Board (builtin tool) =====================
+// The board used to be a rail BOT (`jobboard`) with its own `data-view="jobs"`
+// screen and a mobile tab. It is a builtin tool now (js/tools.js BUILTINS,
+// backend tools.BUILTINS): a Tools tile opens it full-page like every other
+// tool. jobs.js owns the board itself; this only mounts it into the pane on
+// open and tears it down on close. The `jobboard` bot row stays in
+// config.yaml (hidden) — the board's monthly threads, avatar and the scout
+// agent's routing all key on it.
+let jobsOpen = false;
+
+async function refreshJobsFeature() {
+  if (state.decoy) { state.jobsEnabled = false; return; }
+  const f = state.auth.features;
+  if (f && typeof f.jobs === 'boolean') {
+    state.jobsEnabled = f.jobs;
+  } else {
+    // An older server (no `features.jobs`): the router is only mounted when
+    // JOBS_ENABLED=1, so a read tells us. months() is a GET — it creates nothing.
+    try {
+      await api.jobs.months();
+      state.jobsEnabled = true;
+    } catch (e) {
+      if (e.status === 404 || e.status === 403) state.jobsEnabled = false;
+    }
+  }
+  if (!state.jobsEnabled && jobsOpen) closeJobsView();
+  renderSidebar();
+}
+
+function renderJobsSessionPanel() {
+  dom['tl-botname'].textContent = t('jobs.title');
+  dom['tl-model'].textContent = t('tools.session_panel_title');
+  const wrap = dom['threads'];
+  wrap.innerHTML = '';
+  wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
+    el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.jobs)]),
+    el('p', { text: t('tools.session_panel_body') }),
+  ]));
+}
+
+function openJobsView() {
+  if (state.decoy || !state.jobsEnabled) return;
+  closeToolPanes('jobs');
+  rememberPrev();   // before the selection changes: ✕ lands back on this chat
+  // Search is bound to the thread list / chat, and both are about to go away.
+  closeSearch();
+  state.selectedBotId = JOBS_ID;
+  const already = jobsOpen;
+  jobsOpen = true;
+  renderSidebar();
+  renderJobsSessionPanel();
+  dom['jobs-view'].classList.remove('hidden');
+  document.body.classList.add('tool-full');
+  if (isMobile()) navigate('chat');
+  const host = dom['job-board-host'];
+  if (host && !(already && host.querySelector('[data-jobs-root]'))) {
+    mountJobs(host).catch(() => {});
+  }
+}
+
+function closeJobsView() {
+  jobsOpen = false;
+  document.body.classList.remove('tool-full');
+  dom['jobs-view'].classList.add('hidden');
+  // Tear the board down, not just hide it: unmountJobs drops the change
+  // listener and aborts an in-flight load, so nothing repaints a closed pane.
+  unmountJobs();
+}
+
+/** A thread opened from the board (the detail panel's "open thread"): leave
+ *  the tool, put the rail back on the last real chat, then open the thread. */
+function openThreadFromBoard(id, opts = {}) {
+  if (jobsOpen) { closeJobsView(); restorePrev(); }
+  openThread(id, opts);
+  if (isMobile()) navigate('chat');
+}
+
+function wireJobsView() {
+  if (!dom['jobs-view']) return;
+  // ‹ (phones): close and go to the rail, without first bouncing through
+  // the restored chat's screen.
+  dom['jobs-back'].addEventListener('click', () => {
+    closeJobsView();
+    restorePrev({ stay: true });
+    navigate('bots');
+  });
+  dom['jobs-close'].addEventListener('click', () => { closeJobsView(); restorePrev(); });
+}
+
 // ===================== Live streaming render =====================
 // Render the accumulating reply as MARKDOWN while it streams (rAF-coalesced),
 // so it looks identical to the finalized row — no plain-text→formatted snap.
@@ -6842,21 +6878,19 @@ function wireEvents() {
       studioforge: openStudioForgeView,
       mail: openMailView,
       practice: openClientsPanel,
+      jobs: openJobsView,
     },
     closeToolPanes,
     builtinOn,
     builtinDot,
     restoreView: restoreAfterTool,
-    // The Job Board hides #chatview on every width, which is where every tool
-    // pane lives — leave it first or the pane opens invisibly.
-    beforeOpen: () => { if (dom.app.dataset.view === 'jobs') setView('chat'); },
-    paintPlaceholder: (title, icon) => {
+    paintPlaceholder: (title, glyph) => {
       dom['tl-botname'].textContent = title;
       dom['tl-model'].textContent = t('tools.session_panel_title');
       const wrap = dom['threads'];
       wrap.innerHTML = '';
       wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
-        el('div', { class: 'empty-emoji', text: icon }),
+        el('div', { class: 'empty-emoji' }, [glyph]),
         el('p', { text: t('tools.session_panel_body') }),
       ]));
     },
@@ -6874,6 +6908,7 @@ function wireEvents() {
         refreshStudioForgeFeature();
         refreshMailFeature();
         refreshClientsFeature();
+        refreshJobsFeature();
       });
     },
   });
@@ -7078,17 +7113,6 @@ function applyAuthChrome() {
     applyAuthChrome._lastDecoy = state.decoy;
     resetReactions();
     loadReactions(true);
-  }
-  // Mobile Jobs tab: shown only when the server has a 'jobboard' bot
-  // configured AND the user is unlocked (the route is full-session only —
-  // /api/jobs returns the empty shape for a decoy, see backend/app/jobs.py).
-  // The tab starts hidden in index.html, so the default boot of a no-jobs
-  // install does not show a dead button.
-  const hasJobboard = state.bots.some((b) => b.id === 'jobboard');
-  if (dom['tab-jobs']) {
-    const show = !state.decoy && hasJobboard;
-    dom['tab-jobs'].classList.toggle('hidden', !show);
-    dom['tab-jobs'].hidden = !show;
   }
   dom['lock-now'].classList.toggle('hidden', !full);
   dom['bm-lock'].classList.toggle('hidden', !full);
@@ -7775,7 +7799,6 @@ function iconifyChrome() {
     ['.mobile-tabs .tab[data-view="bots"]', RAIL_ICONS.bots, 'span:not(.tab-label)'],
     ['.mobile-tabs .tab[data-view="threads"]', RAIL_ICONS.chats, 'span:not(.tab-label)'],
     ['.mobile-tabs .tab[data-view="chat"]', RAIL_ICONS.messages, 'span:not(.tab-label)'],
-    ['#tab-jobs', RAIL_ICONS.jobs, 'span:not(.tab-label)'],
     // Settings tab strip.
     ['#stab-bots', RAIL_ICONS.bots, '.stab-glyph'],
     ['#stab-reactions', RAIL_ICONS.bolt, '.stab-glyph'],
@@ -7896,6 +7919,7 @@ async function startApp() {
         refreshStudioForgeFeature(),
         refreshMailFeature(),
         refreshClientsFeature(),
+        refreshJobsFeature(),
         loadTools(),
       ]);
       if (!state.decoy) openFromHash();
@@ -7905,6 +7929,7 @@ async function startApp() {
     state.studioforgeEnabled = false;
     state.mailEnabled = false;
     state.clientsEnabled = false;
+    state.jobsEnabled = false;
     // Safe Mode still gets the tools the server marked `safe` (the API
     // filters); no deep link here — that is an unlocked convenience.
     loadTools();
@@ -8579,7 +8604,9 @@ async function init() {
   // job silently does nothing. __setView lets the board swap the chat
   // panel back to the messages list before the thread opens, otherwise
   // the toolbar stays painted under the job card).
-  window.__openThread = openThread;
+  // A thread opened from the Job Board leaves the board's full-page tool
+  // first (openThreadFromBoard); the board is the only __openThread caller.
+  window.__openThread = openThreadFromBoard;
   window.__setView = setView;
   window.unmountJobs = unmountJobs;
   // Open the job detail modal from anywhere — the Jobs board list uses
@@ -8636,32 +8663,13 @@ async function init() {
   wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
   wireMailView();
   wireClientsView();
+  wireJobsView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
-  // jobs(unmount) backstop — see also setView(). A MutationObserver on
-  // #app watches data-view and tears the board down when it flips OFF
-  // jobs. The primary path is the else-branch in setView() and the
-  // classic click to setView('chat'); this catches the rest:
-  //   * a future refactor that mutates data-view directly,
-  //   * a boot-time data-view=jobs written by a hash router that never
-  //     existed but might, and
-  //   * any code path that forgets the explicit unmount (the symptom the
-  //     lead reported on 2026-09-15 — toolbar painted across view
-  //     changes).
-  // Cheap: one attribute, no subtree.
-  if ('MutationObserver' in window && dom.app) {
-    let lastView = dom.app.dataset.view || '';
-    new MutationObserver(() => {
-      const v = dom.app.dataset.view || '';
-      if (v === lastView) return;
-      lastView = v;
-      if (v !== 'jobs') {
-        // Same teardown as setView else branch.
-        unmountJobs();
-        if (dom['job-board-host']) dom['job-board-host'].hidden = true;
-      }
-    }).observe(dom.app, { attributes: true, attributeFilter: ['data-view'] });
-  }
+  // (The jobs(unmount) MutationObserver backstop that lived here is gone with
+  // the `data-view="jobs"` screen: the board is a tool pane now and
+  // closeJobsView() is its one teardown path — closeToolPanes() reaches it
+  // from every other opener and from selectBot.)
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
   // list's relative timestamps ("5m") drift.
   let lastTick = '';

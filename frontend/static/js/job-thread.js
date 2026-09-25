@@ -17,8 +17,8 @@
 
 import { t, fullTimestamp } from './i18n.js?v=3';
 import { api } from './api.js?v=29';
-import { validUrl } from './links.js?v=6';
-import { acquireInert, el, iconLabel, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
+import { validUrl } from './links.js?v=7';
+import { acquireInert, el, iconLabel, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 
 const REASONS = [
   'wrong_location', 'too_senior', 'too_junior', 'compensation',

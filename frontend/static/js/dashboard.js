@@ -37,7 +37,7 @@
 //     would read worse than leaving the pair consistent;
 //   * NOT the numeric formatting (bytes, durations, clock). Unit symbols are
 //     near-universal and the values are diagnostic — see docs/dashboard.md.
-import { el, railIcon, RAIL_ICONS, iconLabel } from './util.js?v=19';
+import { el, railIcon, RAIL_ICONS, iconLabel } from './util.js?v=20';
 
 // ===================== State =====================
 

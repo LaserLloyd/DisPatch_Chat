@@ -422,6 +422,36 @@ export const RAIL_ICONS = {
     'M13 7.5v.01', 'M9 12v.01', 'M13 16.5v.01',
   ],
 
+  // --- Rail tool tiles (2026-09-25) -----------------------------------------
+  // The Tools group draws its builtins in the same line art as the gear row
+  // (js/tools.js). `tools` above doubles as StudioForge's sliders and `jobs`
+  // as the Job Board's clipboard.
+  // A console window with a prompt: the DeepSeek Harness (dsh).
+  terminal: [
+    'M4.5 4.5h15A1.5 1.5 0 0 1 21 6v12a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V6a1.5 1.5 0 0 1 1.5-1.5Z',
+    'M7 9.5l2.8 2.5L7 14.5',
+    'M12 15h5',
+  ],
+  // An envelope: the Emails pane (MailForge).
+  mail: [
+    'M4.5 5.5h15A1.5 1.5 0 0 1 21 7v10a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17V7a1.5 1.5 0 0 1 1.5-1.5Z',
+    'M3.5 7l8.5 6 8.5-6',
+  ],
+  // Two people: the Clients pane.
+  users: [
+    'M9 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
+    'M2.8 19.5a6.2 6.2 0 0 1 12.4 0',
+    'M15.5 4.8a3.3 3.3 0 0 1 0 6.4',
+    'M17.5 13.8a6.2 6.2 0 0 1 3.7 5.7',
+  ],
+  // A bar chart: a report page (the benchmark board's 📊).
+  chart: [
+    'M4 4v15.5a.5.5 0 0 0 .5.5H20',
+    'M8.5 16v-4',
+    'M12.5 16V8',
+    'M16.5 16v-6',
+  ],
+
   // --- Thread menu, recovery panel, transcript, jobs, dashboard (2026-09-18) -
   // A map pin: pin/unpin a thread or a settings row.
   pin: [

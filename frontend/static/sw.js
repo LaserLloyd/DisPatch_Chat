@@ -2,7 +2,15 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v129';  // v129: a builtin tool's Settings toggle
+const CACHE = 'local-chat-v130';  // v130: tool tiles are the bot tile's
+  // shape on the theme's surface with line icons (util.js 19→20 gained
+  // terminal/mail/users/chart, so every util.js importer moved: viewer 4→5,
+  // theme 17→18, reactions 19→20, pins 10→11, markdown 32→33, checklist 6→7,
+  // llm 6→7, links 6→7, job-thread 10→11, jobs 9→10, imagejobs 4→5,
+  // dashboard 8→9, clients 6→7), and the Job Board is a builtin tool
+  // (tools.js 3→4, main.js 105→106, app.css 87→88, index.html: the board is a
+  // tool pane, the mobile Jobs tab is gone; all eight locales).
+  // v129: a builtin tool's Settings toggle
   // saves the manifest switch, not the resolved state (tools.js 2→3).
   // v128: Tools review round — tools.js
   //   1→2: a tool frame is unloaded via about:blank (a bare removeAttribute

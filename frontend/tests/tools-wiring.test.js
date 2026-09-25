@@ -81,6 +81,7 @@ test('every tool opener toggles body.tool-full (and nothing uses terminal-active
     ['openStudioForgeView', 'closeStudioForgeView'],
     ['openMailView', 'closeMailView'],
     ['openClientsPanel', 'closeClientsView'],
+    ['openJobsView', 'closeJobsView'],
   ]) {
     assert.match(fnBody(MAIN, open), /document\.body\.classList\.add\('tool-full'\)/, `${open} must add tool-full`);
     assert.match(fnBody(MAIN, close), /document\.body\.classList\.remove\('tool-full'\)/, `${close} must remove tool-full`);
@@ -105,9 +106,9 @@ test('closeToolPanes also closes the generic pane (except when it is the opener)
   assert.match(fnBody(MAIN, 'closeToolPanes'), /if \(except !== 'tool'\) closeTool\(\{ restore: false \}\);/);
 });
 
-test('wireTools() is called from init with the four builtin openers', () => {
+test('wireTools() is called from init with the five builtin openers', () => {
   assert.match(MAIN, /\bwireTools\(\{/);
-  for (const opener of ['openHarnessView', 'openStudioForgeView', 'openMailView', 'openClientsPanel']) {
+  for (const opener of ['openHarnessView', 'openStudioForgeView', 'openMailView', 'openClientsPanel', 'openJobsView']) {
     assert.match(MAIN, new RegExp(`:\\s*${opener},`), `wireTools must be handed ${opener}`);
   }
 });
@@ -132,4 +133,36 @@ test('api.js exposes the four tools calls', () => {
   }
   assert.match(api, /toolsSave: \(list\) => j\('\/api\/tools', \{ method: 'PUT'/);
   assert.match(api, /\/api\/tools\/\$\{encodeURIComponent\(id\)\}\/refresh`, \{ method: 'POST'/);
+});
+
+test('every builtin opener remembers the chat it covers, before the selection moves', () => {
+  for (const open of ['openHarnessView', 'openMailView', 'openClientsPanel', 'openJobsView']) {
+    const body = fnBody(MAIN, open);
+    assert.match(body, /rememberPrev\(\)/, `${open} must call rememberPrev()`);
+    assert.ok(body.indexOf('rememberPrev()') < body.indexOf('state.selectedBotId ='), `${open}: rememberPrev before the selection moves`);
+  }
+});
+
+test('the Job Board closes back to the remembered chat (✕) and to the rail (‹)', () => {
+  const body = fnBody(MAIN, 'wireJobsView');
+  assert.match(body, /jobs-close[\s\S]*closeJobsView\(\);\s*restorePrev\(\)/);
+  assert.match(body, /jobs-back[\s\S]*closeJobsView\(\);[\s\S]*restorePrev\(\{ stay: true \}\);[\s\S]*navigate\('bots'\)/);
+  assert.match(MAIN, /wireJobsView\(\);/);
+});
+
+test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => {
+  const css = read('app.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = css.match(/\.tool-avatar \{([^}]*)\}/);
+  assert.ok(rule, '.tool-avatar has its own rule');
+  assert.match(rule[1], /background: var\(--bg-tertiary\)/);
+  assert.match(rule[1], /color: var\(--text-secondary\)/);
+  assert.match(css, /\.bot-btn\.active \.tool-avatar \{[^}]*color: var\(--accent-text\)/);
+  // The old per-service hues are gone from the rail and the pane heads.
+  assert.doesNotMatch(css, /\.(?:bot-avatar|terminal-avatar-mini)\.(?:harness|studioforge)-avatar/);
+  assert.doesNotMatch(read('js/tools.js'), /terminal-avatar/);
+  // The builtins name line icons that exist.
+  const util = read('js/util.js');
+  for (const name of ['terminal', 'mail', 'users', 'chart', 'jobs', 'tools']) {
+    assert.match(util, new RegExp(`\\n  ${name}: \\[`), `RAIL_ICONS.${name}`);
+  }
 });

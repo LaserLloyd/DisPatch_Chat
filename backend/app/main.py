@@ -7426,6 +7426,7 @@ async def auth_status(request: Request):
                       "studioforge": studioforge_available(),
                       "mail": mail_available(),
                       "practice": practice_available(),
+                      "jobs": jobs_available(),
                       "tools": True,
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
@@ -10837,6 +10838,31 @@ def practice_available() -> bool:
     return _practice_flag_on() and not _builtin_off("practice")
 
 
+#: True once the jobs router is included (JOBS_ENABLED=1 at import, below).
+_JOBS_MOUNTED = False
+
+
+def _jobs_flag_on() -> bool:
+    """The Job Board exists on this install: JOBS_ENABLED=1 put the router in.
+    No PIN requirement, unlike the four panes above — the board runs no code
+    and its routes gate themselves (full session for reads, inbound for the
+    agent's writes), exactly as before it became a tool."""
+    return _JOBS_MOUNTED and jobs.JOBS_ENABLED
+
+
+def jobs_available() -> bool:
+    return _jobs_flag_on() and not _builtin_off("jobs")
+
+
+def _require_jobs_switch() -> None:
+    """Router-wide dependency: tools.yaml `jobboard: enabled: false` turns
+    every /api/jobs route into a 404, the way `_require_mail` does for the
+    Emails pane. That includes the scout agent's own writes (post/find) — the
+    switch turns the FEATURE off, not just its tile."""
+    if _builtin_off("jobs"):
+        raise HTTPException(404, "Job Board disabled")
+
+
 # tools.py lists the builtins with `available` = the feature exists on this
 # install regardless of the manifest switch (so the Settings toggle can say
 # "on, but not installed" instead of lying).
@@ -10845,6 +10871,7 @@ tools.set_builtin_probes({
     tools.FEATURE_TO_ID["studioforge"]: _studioforge_flag_on,
     tools.FEATURE_TO_ID["mail"]: _mail_flag_on,
     tools.FEATURE_TO_ID["practice"]: _practice_flag_on,
+    tools.FEATURE_TO_ID["jobs"]: _jobs_flag_on,
 })
 
 
@@ -12216,9 +12243,12 @@ app.include_router(tools.router)
 # set — when disabled, every /api/jobs/* route returns 404 (the router
 # itself is not registered, so a sessionless caller never sees an empty
 # 200). Plan §9 "Rollout order".
+# Since 2026-09-25 the board is also a builtin TOOL (`jobboard`): tools.yaml can
+# switch it off, which 404s every route below via _require_jobs_switch.
 if bool(os.environ.get("JOBS_ENABLED") == "1"):
     jobs.JOBS_ENABLED = True
-    app.include_router(jobs.router)
+    app.include_router(jobs.router, dependencies=[Depends(_require_jobs_switch)])
+    _JOBS_MOUNTED = True
 
 # --------------------------------------------------------------------------- #
 # Compression (2026-09-23). Nothing was compressed: the thread list for a busy

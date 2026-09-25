@@ -50,7 +50,6 @@
     "tab_bots": "Bots",
     "tab_chats": "Chats",
     "tab_messages": "Nachrichten",
-    "tab_jobs": "Jobs",
     "label_lock": "Sperren",
     "label_unlock": "Entsperren",
     "label_files": "Dateien",
@@ -958,6 +957,9 @@
   },
   "jobs": {
     "title": "Job Board",
+    "subtitle": "Gefundene Stellen, nach Monat",
+    "close": "Jobbörse schließen",
+    "sidebar_aria": "Jobbörse — Stellen nach Monat, nur entsperrt",
     "empty": "No jobs yet — post one via the API or wait for the curator.",
     "loading": "Loading…",
     "error": "Could not load jobs: {msg}",

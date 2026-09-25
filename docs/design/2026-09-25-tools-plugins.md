@@ -110,8 +110,9 @@ so the frontend can map a builtin to its existing opener.
 
 Builtin ids and their existing openers: `deepseek-harness`→`openHarnessView`,
 `studioforge-panel`→`openStudioForgeView`, `mail-panel`→`openMailView`,
-`clients-panel`→`openClientsPanel`. The Job Board stays a bot (`jobboard`) and is
-out of scope.
+`clients-panel`→`openClientsPanel`, `jobboard`→`openJobsView` (see the
+addendum below — the Job Board was first left out of scope as a bot, then
+moved in the same day).
 
 ## Frontend
 
@@ -182,4 +183,33 @@ tools:
 
 Per-tool CSS/JS bundles in subfolders (deploy globs), tool-to-agent messaging,
 scheduling refreshes from DisPatch, exposing builtins in Safe Mode, migrating the
-Job Board or the Local Viewer.
+Local Viewer.
+
+## Addendum (2026-09-25, same day): tile design + the Job Board as a tool
+
+**Tiles.** A tool tile is a bot tile (`.bot-btn` + `.bot-avatar`: 56 px, 16 px
+radius, hover scale, `.active` accent ring and glow, status dot in the
+trailing-bottom corner, name tip; Minimal-avatar rows and the phone's Bots-page
+grid unchanged). Inside it: the theme's line art in `currentColor` on the
+theme's surface (`--bg-tertiary`, `--border-strong`, `--text-secondary`; the
+glyph turns `--accent-text` when active) — the gear row's recipe at bot-tile
+size, so it re-colours with every palette and light/dark family. Builtins use
+`RAIL_ICONS` (`terminal`, `tools` sliders, `mail`, `users`, `jobs`); a manifest
+`icon` may be a `RAIL_ICONS` name or one of the chrome emoji aliased to one
+(📊 → `chart`, …); anything else is drawn as typed. The hard-coded blue/amber
+service tiles are gone; the pane headers' mini tiles use the same icons.
+
+**Job Board.** Builtin id `jobboard`, feature `jobs`, title "Job Board". The
+feature exists when `JOBS_ENABLED=1` mounted the `/api/jobs` router
+(`_jobs_flag_on`); `tools.yaml` `enabled: false` 404s the whole router
+(`_require_jobs_switch`, a router dependency) and drops `features.jobs` from
+`/api/auth/status`. No PIN precondition (the board runs no code; its routes
+keep their own gates, and `/api/jobs` stays in `_decoy_blocked`). Frontend:
+`openJobsView()` opens `#jobs-view` (a terminal-view inside `#chatview`,
+`body.tool-full`, `rememberPrev()` on entry), `jobs.js` mounts into its
+`#job-board-host` and is unmounted on close; ✕ / ‹ hand the previous chat back
+through `restorePrev()`. The `data-view="jobs"` screen, the hard-coded
+`jobboard` rail click and the mobile Jobs tab are removed. The `jobboard` BOT
+row stays in `config.yaml` with `visible: false`: the board's monthly threads
+belong to it, its avatar is the board's picture, `/api/jobs/find` 404s without
+it, and its `agent:` routes feedback turns to the search agent.

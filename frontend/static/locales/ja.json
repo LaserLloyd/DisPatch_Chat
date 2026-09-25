@@ -49,7 +49,6 @@
     "tab_bots": "ボット",
     "tab_chats": "チャット",
     "tab_messages": "メッセージ",
-    "tab_jobs": "ジョブ",
     "label_lock": "ロック",
     "label_unlock": "ロック解除",
     "label_files": "ファイル",
@@ -1007,6 +1006,9 @@
   },
   "jobs": {
     "title": "Job Board",
+    "subtitle": "見つかった求人を月別に表示",
+    "close": "求人ボードを閉じる",
+    "sidebar_aria": "求人ボード — 月別の求人（アンロック時のみ）",
     "empty": "No jobs yet — post one via the API or wait for the curator.",
     "loading": "Loading…",
     "error": "Could not load jobs: {msg}",

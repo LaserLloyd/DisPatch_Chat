@@ -447,12 +447,20 @@ tools:
     kind: url
     url: http://192.0.2.5:8080/   # framed by the client; http(s) only
   - id: deepseek-harness     # builtins: deepseek-harness, studioforge-panel,
-    kind: builtin            #   mail-panel, clients-panel
+    kind: builtin            #   mail-panel, clients-panel, jobboard
     enabled: false           # switches the builtin OFF (its routes 404)
 ```
 
 - **builtin** entries can only switch a pane *off*; no entry (or `enabled:
   true`) leaves the env flags in charge.
+- **icon**: the rail draws every tool in a tile the size and shape of a bot
+  tile, on the theme's own surface, so it re-colours with each palette. The
+  builtins use the app's line icons. A manifest `icon` may name one of those
+  line icons (`icon: chart`), and the emoji people use for chrome are drawn as
+  the matching line icon (📊📈📉 chart, 🎛 sliders, 💻🖥⌨ console, ✉📧📨📬
+  envelope, 👥 people, 💼📋 clipboard, 🔗 link, 📁 folder, ⚙ gear, 🔍 search,
+  🗄 database, 💾 disk). Any other emoji or glyph is shown as typed, centred in
+  the same tile. Up to 16 characters.
 - **static** serving refuses anything outside the resolved root (symlinks
   included), dotfiles, secret-shaped names (the Local Viewer's deny list) and
   files over 64 MB — all as one uniform 404. HTML runs under `sandbox
@@ -470,6 +478,36 @@ tools:
 Routes: `GET /api/tools`, `PUT /api/tools` (operator), `GET
 /api/tools/<id>/status`, `POST /api/tools/<id>/refresh` (operator), `GET
 /tools/<id>/{path}`. Full contract: `docs/design/2026-09-25-tools-plugins.md`.
+
+#### The Job Board (`jobboard`)
+
+Since 2026-09-25 the Job Board is a builtin tool, not a rail bot. It exists
+when the server was started with `JOBS_ENABLED=1` (the `/api/jobs` router is
+only mounted then); its Tools tile opens the board full-page like any other
+tool, and there is no separate Jobs screen or mobile Jobs tab any more.
+`jobboard: enabled: false` in `tools.yaml` turns the whole feature off: every
+`/api/jobs` route answers 404, including the agent's own posts and the daily
+"find jobs" run.
+
+**Keep the `jobboard` bot row in `config.yaml`, but hide it.** The board is
+built on it: each month's discussion thread is a thread of bot `jobboard`,
+the board's picture is that bot's avatar, `POST /api/jobs/find` refuses with
+404 when the row is missing, and feedback turns are routed through its
+`agent:` field to the OpenClaw agent that runs the search. Removing the row
+silently stops the agent from being asked anything. Hide it instead, so the
+tile is the only way in:
+
+```yaml
+  - id: jobboard
+    name: Job Board
+    avatar: jobboard-face.png
+    visible: false           # was true: the Tools tile replaces the rail bot
+    safe: false
+    agent: scout             # the OpenClaw agent the board's turns run on
+```
+
+A hidden bot is left out of `/api/bots` and the WebSocket roster but is still
+resolved by id everywhere the board needs it (threads, avatar, agent routing).
 
 ## Everything else the code reads
 

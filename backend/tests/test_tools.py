@@ -481,14 +481,15 @@ def test_api_tools_operator_view(tools_env):
     body = c.get("/api/tools").json()
     assert body["path"] == str(config.DATA_DIR / "tools.yaml")
     ids = [t["id"] for t in body["tools"]]
-    assert ids[:4] == ["deepseek-harness", "studioforge-panel", "mail-panel", "clients-panel"]
+    assert ids[:5] == ["deepseek-harness", "studioforge-panel", "mail-panel", "clients-panel",
+                       "jobboard"]
     bench = next(t for t in body["tools"] if t["id"] == "bench")
     assert bench["root"] == str(site) and bench["entry"] == "report.html"
     assert bench["has_refresh"] is True
     assert bench["refresh"]["argv"] == ["echo", "hi"]
     feats = {t["id"]: t.get("builtin_feature") for t in body["tools"] if t["kind"] == "builtin"}
     assert feats == {"deepseek-harness": "harness", "studioforge-panel": "studioforge",
-                     "mail-panel": "mail", "clients-panel": "practice"}
+                     "mail-panel": "mail", "clients-panel": "practice", "jobboard": "jobs"}
 
 
 def test_safe_tool_visible_in_safe_mode_stripped(tools_env):
@@ -936,3 +937,83 @@ def test_builtin_row_enabled_is_the_switch_not_availability(tools_env, monkeypat
     path = config.DATA_DIR / "tools.yaml"
     text = path.read_text() if path.exists() else ""
     assert "enabled: false" not in text
+
+
+# --------------------------------------------------------------------------- #
+# The Job Board as a builtin tool (2026-09-25)
+# --------------------------------------------------------------------------- #
+
+def test_jobboard_is_a_builtin_and_may_share_the_bot_id(tools_env):
+    """`jobboard` is the one tool id that is also a bot id (the hidden bot row
+    the board's threads route through) — a builtin entry must validate anyway,
+    while a static/url tool still may not take a bot's id."""
+    make_client, site = tools_env
+    config._write_bots([config._bot_entry(config.Bot(id="jobboard", name="Job Board",
+                                                     agent="scout", visible=False))])
+    out = tools.validate_tools([{"id": "jobboard", "kind": "builtin", "enabled": False}])
+    assert out[0].kind == "builtin" and out[0].enabled is False
+    assert out[0].title == "Job Board"
+    with pytest.raises(tools.ToolValidationError):
+        tools.validate_tools([{"id": "jobboard", "kind": "static", "root": str(site)}])
+    with pytest.raises(tools.ToolValidationError):     # builtins carry id/kind/enabled only
+        tools.validate_tools([{"id": "jobboard", "kind": "builtin", "title": "x"}])
+
+
+def test_jobboard_feature_follows_router_and_switch(tools_env, monkeypatch):
+    make_client, site = tools_env
+    from app import jobs
+    c = _unlocked(make_client)
+    # Router not mounted (JOBS_ENABLED unset at import) → feature off.
+    monkeypatch.setattr(main, "_JOBS_MOUNTED", False)
+    assert c.get("/api/auth/status").json()["features"]["jobs"] is False
+    row = next(t for t in c.get("/api/tools").json()["tools"] if t["id"] == "jobboard")
+    assert row["available"] is False and row["builtin_feature"] == "jobs"
+    # Mounted → on, and no PIN precondition of its own.
+    monkeypatch.setattr(main, "_JOBS_MOUNTED", True)
+    monkeypatch.setattr(jobs, "JOBS_ENABLED", True)
+    assert main.jobs_available() is True
+    assert c.get("/api/auth/status").json()["features"]["jobs"] is True
+    # tools.yaml switch → off; the Settings row still says the feature exists.
+    _manifest("tools:\n  - {id: jobboard, kind: builtin, enabled: false}\n")
+    assert c.get("/api/auth/status").json()["features"]["jobs"] is False
+    row = next(t for t in c.get("/api/tools").json()["tools"] if t["id"] == "jobboard")
+    assert row["enabled"] is False and row["available"] is True
+    st = c.get("/api/tools/jobboard/status").json()
+    assert st["kind"] == "builtin" and st["enabled"] is False
+
+
+def test_jobboard_switch_404s_the_whole_jobs_router(tools_env, monkeypatch):
+    """main mounts jobs.router with `_require_jobs_switch` as a router
+    dependency; mount it the same way here (the test process was imported
+    without JOBS_ENABLED) and prove `enabled: false` 404s every route —
+    reads, the agent's inbound writes and find alike."""
+    from fastapi import Depends, FastAPI
+
+    from app import jobs
+    make_client, site = tools_env
+    src = open(main.__file__, encoding="utf-8").read()
+    assert "app.include_router(jobs.router, dependencies=[Depends(_require_jobs_switch)])" in src
+    app = FastAPI()
+    app.include_router(jobs.router, dependencies=[Depends(main._require_jobs_switch)])
+    monkeypatch.setattr(jobs, "JOBS_ENABLED", True)
+    tc = TestClient(app)
+    assert tc.get("/api/jobs/reasons").status_code == 200
+    _manifest("tools:\n  - {id: jobboard, kind: builtin, enabled: false}\n")
+    for method, path in (("get", "/api/jobs/reasons"), ("get", "/api/jobs/months"),
+                         ("post", "/api/jobs"), ("post", "/api/jobs/find")):
+        r = getattr(tc, method)(path, **({"json": {}} if method == "post" else {}))
+        assert r.status_code == 404, (path, r.status_code, r.text)
+        assert r.json()["detail"] == "Job Board disabled"
+    _manifest("tools:\n  - {id: jobboard, kind: builtin, enabled: true}\n")
+    assert tc.get("/api/jobs/reasons").status_code == 200
+
+
+def test_jobs_stay_decoy_blocked(tools_env):
+    """The Safe-Mode matrix did not change: /api/jobs is still barred for a
+    locked browser, and the builtin never lists for Safe Mode."""
+    make_client, site = tools_env
+    assert main._decoy_blocked("GET", "/api/jobs") is True
+    assert main._decoy_blocked("GET", "/api/jobs/months") is True
+    c = _decoy(make_client)
+    ids = [t["id"] for t in c.get("/api/tools").json()["tools"]]
+    assert "jobboard" not in ids

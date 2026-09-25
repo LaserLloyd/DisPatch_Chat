@@ -1278,19 +1278,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .mobile-tabs .tab span { font-size: 19px; }
   .mobile-tabs .tab.active { color: var(--accent-text); }
 
-  /* --- Jobs board (mobile) ---
-   * The host lives at #job-board-host and is mutually exclusive with
-   * #chatview. We give it a full-viewport panel sized to clear the tab
-   * bar (56px + safe-area); the scrolling itself (and the sticky toolbar)
-   * is handled by the shared [data-jobs-root] rule near the Jobs board
-   * CSS block further down — this block only sizes the host for the
-   * tab bar / safe area. No composers, no chat-header, no scroll
-   * residue — the panel is its own screen. */
-  .app[data-view="jobs"] #job-board-host {
-    width: 100vw;
-    height: calc(100dvh - 56px - env(safe-area-inset-bottom));
-    padding-top: max(0px, env(safe-area-inset-top));
-  }
 }
 
 /* ===================== Lock / PIN / Safe Mode ===================== */
@@ -1976,10 +1963,8 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .terminal-sidedot.exited  { background: var(--error-text); }
 
 /* ===================== DeepSeek Harness (dsh) ===================== */
-/* Sidebar pseudo-bot: shares the tool tile shape, but a distinct hue so the
-   two engines never get confused at a glance. */
-.bot-avatar.harness-avatar { background: #1d4ed8; font-size: 11px; letter-spacing: 0; }
-.terminal-avatar-mini.harness-avatar-mini { background: #1d4ed8; font-size: 11px; }
+/* The rail tile is a themed Tools tile (see the Tools block); only the
+   status-dot colours are the harness's own. */
 .terminal-sidedot.harness-running { background: var(--success-text); }
 .terminal-sidedot.harness-stopped { background: var(--text-muted); }
 .terminal-sidedot.harness-failed  { background: var(--error-text); }
@@ -2082,8 +2067,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
    model picker and the service buttons: the rig is somebody else's machine, so
    there is nothing here to press. Amber avatar so it never reads as the blue
    harness at a glance. */
-.bot-avatar.studioforge-avatar { background: #b45309; font-size: 11px; letter-spacing: 0; }
-.terminal-avatar-mini.studioforge-avatar-mini { background: #b45309; font-size: 11px; }
 .terminal-sidedot.studioforge-up { background: var(--success-text); }
 .terminal-sidedot.studioforge-down { background: var(--error-text); }
 .terminal-sidedot.studioforge-unreachable { background: var(--warning-text); }
@@ -2161,8 +2144,12 @@ body.tool-full #collapse-threads { display: none; }
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 8px; flex: 0 0 auto;
   font-family: var(--font-mono); font-weight: 700; font-size: 13px;
-  color: var(--on-accent); background: var(--accent);
+  /* The pane's own rail tile, small: the same themed surface and line icon
+     (main.js swaps the markup's text fallback for the icon at boot). */
+  color: var(--text-secondary); background: var(--bg-tertiary);
+  border: 1px solid var(--border-strong);
 }
+.terminal-avatar-mini .rail-icon { width: 18px; height: 18px; display: block; }
 .terminal-head-info { flex: 1 1 auto; min-width: 0; }
 .terminal-title { font-weight: 600; font-size: 15px; color: var(--text-primary); }
 .terminal-subtitle { font-size: 12px; }
@@ -3625,28 +3612,27 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
  * the toolbar on top of the chat header / composer on phones. The new
  * slot is mutually exclusive with .chatview / #messages: when the
  * board is up the chat panel hides entirely, so an unmount leak cannot
- * leave board chrome under a chat. */
+ * leave board chrome under a chat.
+ *
+ * 2026-09-25: the Job Board is a builtin TOOL, not a bot with its own view.
+ * The host moved into the tool pane #jobs-view (full-page, like every tool);
+ * old Jobs screen (a data-view of its own) and the mobile Jobs tab are gone. */
 
-/* The host slot. Hidden by default (the [hidden] attr starts it that
- * way); revealed when setView('jobs') flips it. Sits inside #app next
- * to #chatview so its flex-column layout matches the other panels. */
+/* The host slot: the body of the Job Board tool pane (#jobs-view, a
+ * terminal-view inside #chatview — see index.html). The pane is hidden while
+ * the tool is closed and jobs.js removes its [data-jobs-root] on close, so the
+ * board cannot bleed under a chat. It fills the pane body; the HOST does not
+ * scroll — its child [data-jobs-root] does (below). */
 #job-board-host {
-  display: none;
+  display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   background: var(--bg-primary);
   position: relative;
-  /* The HOST does not scroll — its child [data-jobs-root] does (below).
-     Was `overflow: hidden` with no scrollable descendant at all, which is
-     why the board could not scroll on desktop: the list just clipped past
-     the bottom of the panel with no way to reach it. */
   overflow: hidden;
-  /* Default full-height: matches .panel behaviour on desktop. The mobile
-     override below adds top safe-area inset and bottom tab-bar clearance. */
-  height: 100%;
 }
-.app[data-view="jobs"] #job-board-host { display: flex; }
-.app[data-view="jobs"] #chatview,
-.app[data-view="jobs"] #messages { display: none; }
 
 /* [data-jobs-root] is the element jobs.js actually mounts into (a child of
  * #job-board-host — see mountJobs()). It is the scroll container: full
@@ -4303,10 +4289,8 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 :root[data-contrast-profile="night"] .ap-warn { color: var(--danger-text); }
 :root[data-contrast-profile="night"] .crop-stage { background: var(--surface-sunken); }
 
-/* Service avatars (DeepSeek Harness blue, StudioForge amber). */
-:root[data-contrast-profile="night"] :is(.bot-avatar.harness-avatar, .terminal-avatar-mini.harness-avatar-mini) { background: var(--info); color: var(--on-info); }
+/* Service notes (DeepSeek Harness, StudioForge). */
 :root[data-contrast-profile="night"] .harness-note .empty-emoji { color: var(--info-text); }
-:root[data-contrast-profile="night"] :is(.bot-avatar.studioforge-avatar, .terminal-avatar-mini.studioforge-avatar-mini) { background: var(--warning); color: var(--on-warning); }
 :root[data-contrast-profile="night"] .studioforge-note .empty-emoji { color: var(--warning-text); }
 
 /* Native form chrome. Chrome paints placeholders and UNCHECKED checkboxes in
@@ -4369,10 +4353,22 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 /* ===================== Tools (2026-09-25) =====================
    docs/design/2026-09-25-tools-plugins.md. The rail's Tools group sits under
    the roster (#bot-list keeps flex:1, so the group lands just above the gear
-   row); tiles reuse .bot-btn/.terminal-avatar so every avatar-style, palette
-   and minimal-mode rule applies to them for free. */
+   row).
+
+   A tool tile IS a bot tile — .bot-btn + .bot-avatar, so the 56px/16px-radius
+   geometry, the hover scale, the .active accent ring + glow, the status-dot
+   corner, the name tip, the Minimal-avatar rows and the phone's Bots-page grid
+   all come from the bot rules unchanged. What differs is what sits inside:
+   a bot shows a FACE (a photo or its hued letter block); a tool shows the
+   theme's line art in currentColor on the theme's own surface — the gear
+   row's recipe (--bg-tertiary, --border-strong, --text-secondary) at the
+   bot tile's size. So a tool reads as part of the app's chrome, never as
+   another agent, and it re-colours with every palette and light/dark family
+   for free (no hard-coded hues: the old blue dsh / amber SF / accent tiles
+   are gone). A typed manifest emoji keeps its own colours, centred in the
+   same tile. */
 .tool-list {
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
   flex: 0 1 auto; min-height: 0; max-height: 45%; width: 100%;
   overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
   padding: 8px 0 2px; border-top: 1px solid var(--border-strong);
@@ -4382,17 +4378,32 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   color: var(--text-muted); line-height: 1.2;
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* An emoji tile, not a monospace code: bigger glyph, no negative tracking. */
-.tool-btn .tool-avatar { font-size: 22px; letter-spacing: 0; font-family: inherit; }
-.tool-btn .tool-avatar.harness-avatar,
-.tool-btn .tool-avatar.studioforge-avatar { font-size: 11px; font-family: var(--font-mono); }
-.tool-btn .tool-avatar.mail-avatar,
-.tool-btn .tool-avatar.clients-avatar { font-size: 18px; }
-.tool-btn.active .tool-avatar { border-color: var(--accent); }
+.tool-avatar {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  /* Chrome, not a photo: full opacity (the 0.7 resting dim is for faces and
+     would drop a thin glyph under AA contrast). */
+  opacity: 1;
+  font-family: inherit; font-weight: 400; letter-spacing: 0;
+  -webkit-user-select: none; user-select: none;
+}
+.tool-avatar .rail-icon { width: 46%; height: 46%; display: block; flex: none; }
+.tool-avatar .tool-glyph-text { font-size: 26px; line-height: 1; }
+.bot-btn:hover .tool-avatar,
+.bot-btn:focus-visible .tool-avatar { color: var(--text-primary); background: var(--bg-hover); }
+/* The bot rule supplies the accent ring and glow; the glyph takes the accent
+   too, exactly as an active tab's icon does. */
+.bot-btn.active .tool-avatar { color: var(--accent-text); background: var(--bg-tertiary); }
+/* Status dots keep the per-service colours main.js patches in place. */
 .tool-avatar-mini { font-family: inherit; font-size: 17px; }
+.tool-avatar-mini .tool-glyph-text { font-size: 17px; line-height: 1; }
 @media (min-width: 769px) {
   :root[data-avatar-style="minimal"] .tool-list { align-items: stretch; padding: 6px 8px 2px; gap: 4px; }
   :root[data-avatar-style="minimal"] .tool-list-head { padding-inline-start: 12px; }
+  /* Minimal rows name every bot in its own hue; a tool has no persona hue,
+     so its label is plain text in the theme's colour. */
+  :root[data-avatar-style="minimal"] .tool-btn .bot-name-label,
+  :root[data-avatar-style="minimal"] .tool-btn.active .bot-name-label { color: var(--text-primary); }
 }
 @media (max-width: 768px) {
   .app[data-view="bots"] .tool-list {
@@ -4403,18 +4414,18 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   .app[data-view="bots"] .tool-list[hidden] { display: none; }
   .app[data-view="bots"] .tool-list-head { grid-column: 1 / -1; text-align: start; font-size: 11px; }
   .app[data-view="bots"] .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; line-height: 1.2; padding: 6px 0; }
-  .app[data-view="bots"] .tool-btn .tool-avatar { width: 84px; height: 84px; border-radius: 20px; font-size: 34px; }
-  .app[data-view="bots"] .tool-btn .tool-avatar.harness-avatar,
-  .app[data-view="bots"] .tool-btn .tool-avatar.studioforge-avatar { font-size: 18px; }
+  .app[data-view="bots"] .tool-btn .tool-avatar { width: 84px; height: 84px; border-radius: 20px; }
+  .app[data-view="bots"] .tool-btn .tool-glyph-text { font-size: 38px; }
 }
 
 /* Phone: one header row, always. Title shrinks, the controls keep their
    size — a wrapped second row of ↗/✕ costs a whole line of the page. */
 @media (max-width: 768px) {
-  .tool-view .terminal-head { flex-wrap: nowrap; gap: 6px; padding-inline: 8px; }
+  :is(.tool-view, .jobs-view) .terminal-head { flex-wrap: nowrap; gap: 6px; padding-inline: 8px; }
   .tool-view .terminal-head > .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; }
   .tool-view .tool-refresh { padding: 6px 9px; }
-  .tool-view #tool-close { display: none; }   /* ‹ does the same job here */
+  .tool-view #tool-close,
+  .jobs-view #jobs-close { display: none; }   /* ‹ does the same job here */
 }
 
 /* Generic tool pane: one frame (or a note) filling the body. */
@@ -4447,9 +4458,9 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 }
 .tools-table td { padding: 8px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
 .tools-row.invalid td { background: color-mix(in oklab, var(--error-text) 10%, transparent); }
-.tools-cell-icon .tool-avatar { width: 32px; height: 32px; border-radius: 9px; font-size: 16px; }
-.tools-cell-icon .tool-avatar.harness-avatar,
-.tools-cell-icon .tool-avatar.studioforge-avatar { font-size: 10px; font-family: var(--font-mono); }
+.tools-cell-icon .tool-avatar { width: 32px; height: 32px; border-radius: 9px; }
+.tools-cell-icon .tool-avatar .tool-glyph-text { font-size: 16px; }
+.tools-icon-edit { display: flex; align-items: center; gap: 8px; }
 .tools-input {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
   padding: 6px 8px; color: var(--text-primary); font-size: 14px; width: 100%; min-width: 0;

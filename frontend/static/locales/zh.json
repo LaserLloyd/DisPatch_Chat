@@ -49,7 +49,6 @@
     "tab_bots": "机器人",
     "tab_chats": "对话",
     "tab_messages": "消息",
-    "tab_jobs": "职位",
     "label_lock": "锁定",
     "label_unlock": "解锁",
     "label_files": "文件",
@@ -933,6 +932,9 @@
   },
   "jobs": {
     "title": "Job Board",
+    "subtitle": "为你找到的职位，按月排列",
+    "close": "关闭职位板",
+    "sidebar_aria": "职位板 — 按月列出的职位，仅解锁时可用",
     "empty": "No jobs yet — post one via the API or wait for the curator.",
     "loading": "Loading…",
     "error": "Could not load jobs: {msg}",

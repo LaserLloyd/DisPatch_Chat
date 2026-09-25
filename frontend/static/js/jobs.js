@@ -26,7 +26,7 @@
 // `data-view` attribute on the root.
 
 import { t } from './i18n.js?v=3';
-import { railIcon, RAIL_ICONS, iconLabel } from './util.js?v=19';
+import { railIcon, RAIL_ICONS, iconLabel } from './util.js?v=20';
 import { api } from './api.js?v=29';
 
 // Local state — survives a remount while the view stays on 'jobs'.
