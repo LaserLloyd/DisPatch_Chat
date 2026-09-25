@@ -446,6 +446,10 @@ tools:
     title: Rig
     kind: url
     url: http://192.0.2.5:8080/   # framed by the client; http(s) only
+    remote_url: https://host.example.ts.net:8452/   # optional: framed instead
+                             # when DisPatch is NOT opened on the host (a phone
+                             # on the tailnet). Without it a loopback url shows
+                             # a "host only" note off the host.
   - id: deepseek-harness     # builtins: deepseek-harness, studioforge-panel,
     kind: builtin            #   mail-panel, clients-panel
     enabled: false           # switches the builtin OFF (its routes 404)
@@ -575,6 +579,9 @@ actually reads are the same set.
 | `DISPATCH_HARNESS_PORT` | `3080` | The loopback port that unit binds. |
 | `DISPATCH_STUDIOFORGE` | `0` | StudioForge panel pane: `1` on, anything else off + 404. Needs a URL too. |
 | `DISPATCH_STUDIOFORGE_URL` | unset | The rig panel's address, scheme included. Empty = the feature is off whatever the flag says. |
+| `DISPATCH_HARNESS_REMOTE_URL` | unset | Where a browser that is **not** on the host frames the `dsh` Web UI, e.g. an HTTPS `tailscale serve` port in front of `127.0.0.1:3080`. Unset = the Web UI tab says "host only" off the host; the Sessions and Headless-jobs tabs work from anywhere either way. `dsh web` has no password of its own — exposing it gives everyone who can reach that address a coding agent on this machine. |
+| `DISPATCH_STUDIOFORGE_REMOTE_URL` | unset | The panel's address for browsers off the host — typically an HTTPS front for an `http://` panel, so DisPatch's HTTPS front door does not refuse it as mixed content. Its origin joins the shell CSP's `connect-src` beside the primary one. |
+| `DISPATCH_MAIL_REMOTE_URL` | unset | MailForge's UI base (`scheme://host[:port]`) for browsers off the host; `/launch?k=<key>` is appended per request. MailForge refuses any `Host` but `127.0.0.1:<port>`/`localhost:<port>`, so this only works once MailForge also accepts that host. Off the host with none set, `/api/mail/status` returns `host_only: true` and no launch key. |
 | `DSH_HOME` | `~/.dsh` | `dsh`'s own home — read straight from the environment under that name, because it is `dsh`'s variable, not ours. |
 | `DISPATCH_PBKDF2_ITERATIONS` | `200000` | PBKDF2 rounds for the PIN hash. Lower it only on hardware that genuinely cannot afford the default, and know what you are trading. |
 | `TMPDIR` | system | Where multipart uploads spool. Keep it on real disk on the data volume — on a tmpfs a 4 GiB upload is a 4 GiB RAM allocation. |

@@ -110,7 +110,7 @@ const SANDBOX_URL = 'allow-scripts allow-forms allow-popups allow-same-origin';
 // Fields the manifest schema accepts. Everything else in a ToolOut
 // (has_refresh, builtin_feature) is output-only and must not be sent back —
 // the schema is closed and would 422 it.
-const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'enabled', 'safe', 'refresh'];
+const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'safe', 'refresh'];
 
 let deps = null;
 let tools = null;        // null = never loaded / API absent; [] = loaded, none
@@ -143,7 +143,16 @@ function isLoopbackHost(h) {
     || h.startsWith('127.');
 }
 /** Is THIS browser on the host (so a loopback URL means the same machine)? */
-function onHost() { return isLoopbackHost(location.hostname); }
+export function onHost() { return isLoopbackHost(location.hostname); }
+
+/** The address a url tool is framed from in THIS browser: its `url` on the
+ *  host, its optional `remote_url` anywhere else (a phone on the tailnet),
+ *  falling back to `url` — whose loopback rule in loadFrame still applies. */
+export function toolUrl(tool) {
+  if (!tool) return '';
+  if (!onHost() && tool.remote_url) return tool.remote_url;
+  return tool.url || '';
+}
 
 function parseHttpUrl(u) {
   try {
@@ -255,18 +264,20 @@ export async function loadTools() {
 
 // ===================== Rail =====================
 //
-// Two layouts, one module (2026-09-25):
-//   phone Bots page — the rail IS the page, so every tool is its own tile in
-//                     the grid, exactly like a bot (tile() below).
+// Two layouts, one control (2026-09-26):
 //   desktop         — the rail is a 72px column shared with the roster, and a
 //                     56px tile per tool pushed the bots off it. The group is
-//                     ONE rail button instead ("Tools", nine-dot line
-//                     icon, worst-of status dot) that opens a popup menu: one
-//                     row per enabled tool, then the bots parked from
-//                     Settings → Bots under a separator. That popup is the old
-//                     old ⌥ #tools-menu element, so there is one popover, not two.
-// On the phone the parked bots keep a single "More bots" tile that opens the
-// same popup with only their rows.
+//                     ONE rail button ("Tools", nine-dot line icon, worst-of
+//                     status dot) that opens a popup menu: one row per enabled
+//                     tool, then the bots parked from Settings → Bots under a
+//                     separator.
+//   phone Bots page — the rail IS the page, and DisPatch is a chat app: the
+//                     roster is the page and the tools are add-ons. So the
+//                     group is ONE quiet full-width row under the roster (the
+//                     same button, drawn as a list row), and the same menu
+//                     opens as a bottom sheet over a scrim. A tile grid of
+//                     tools used to sit there at the bots' own 84px size.
+// With no tools but some parked bots, the one control is "More bots".
 
 // The nine-dot "apps launcher" glyph, drawn like every RAIL_ICONS entry
 // (24-unit box, currentColor stroke). Nine dots, not four squares: the theme
@@ -286,7 +297,7 @@ const APPS_ICON = [
 // dot, active, open()}]. Ignored in Safe Mode, like the placement itself.
 let parked = [];
 let menuOpen = false;
-let menuMode = 'tools';     // 'tools' (desktop: tools + parked) | 'bots' (phone: parked only)
+let menuMode = 'tools';     // 'tools' (tools + parked) | 'bots' (parked only — no tools to list)
 let lastCompact = null;
 
 /** main.js: the parked-bot rows for the popup. */
@@ -299,33 +310,6 @@ function compactRail() { return !!deps && !deps.isMobile(); }
 
 function visibleParked() {
   return deps && deps.state && deps.state.decoy ? [] : parked;
-}
-
-function tile(tool) {
-  const st = deps.state;
-  const active = st.selectedBotId === tool.id;
-  const title = toolTitle(tool);
-  const b = tool.kind === 'builtin' ? builtinOf(tool) : null;
-  const btn = el('button', {
-    class: 'bot-btn tool-btn' + (active ? ' active' : ''),
-    type: 'button',
-    dataset: { tool: tool.id, id: tool.id },
-    // Builtins keep their longer "…, unlocked only" description.
-    'aria-label': b ? t(b.aria) : title,
-    draggable: 'false',
-    onclick: () => openTool(tool.id),
-  });
-  if (active) btn.setAttribute('aria-current', 'page');
-  btn.append(toolTile(tool));
-  btn.append(el('span', { class: 'bot-name-tip', text: title }));
-  btn.append(el('span', { class: 'bot-name-label', text: title }));
-  if (b) {
-    // Per-service colours; main.js's renderHarness/renderStudioForge keep
-    // patching this dot in place.
-    const dot = deps.builtinDot(b.feature);
-    if (dot) btn.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
-  }
-  return btn;
 }
 
 /** The dot class for the one rail button: the builtins' worst-of state when
@@ -374,6 +358,8 @@ function menuButton(entries, bots, mode) {
   btn.append(el('span', { class: 'bot-name-tip', text: label }));
   btn.append(el('span', { class: 'bot-name-label', text: label }));
   btn.append(el('span', { class: groupDotClass(mode, bots) }));
+  // Phone row only (CSS hides it on the rail): the "opens more" affordance.
+  btn.append(el('span', { class: 'tools-menu-chevron', 'aria-hidden': 'true', text: '›' }));
   return btn;
 }
 
@@ -391,19 +377,12 @@ export function renderToolRail() {
     ? (ae.id === 'tools-menu-btn' ? '#menu' : ae.closest('[data-tool]')?.dataset.tool) : null;
   host.textContent = '';
   host.classList.toggle('tool-list-compact', compact);
-  const mode = compact ? 'tools' : 'bots';
+  host.classList.toggle('tool-list-row', !compact);
+  const mode = entries.length ? 'tools' : 'bots';
   const empty = !entries.length && !bots.length;
   host.hidden = empty;
   if (empty) { closeToolsMenu(); return; }
-  if (compact) {
-    host.append(menuButton(entries, bots, mode));
-  } else {
-    if (entries.length) {
-      host.append(el('div', { class: 'tool-list-head', 'aria-hidden': 'true', text: t('nav.tools') }));
-      for (const tool of entries) host.append(tile(tool));
-    }
-    if (bots.length) host.append(menuButton([], bots, mode));
-  }
+  host.append(menuButton(entries, bots, mode));
   // A menu opened in the other layout (or for rows that are gone) closes;
   // an open one is repainted in place so its dots and active row stay true.
   if (menuOpen) {
@@ -497,11 +476,14 @@ function paintMenu() {
   const keep = ae && menu.contains(ae) ? { tool: ae.dataset.tool, bot: ae.dataset.bot } : null;
   toolsHost.textContent = '';
   botsHost.textContent = '';
-  if (menuMode === 'tools') for (const tool of railEntries()) toolsHost.append(menuRow(tool));
+  for (const tool of railEntries()) toolsHost.append(menuRow(tool));
   for (const bot of visibleParked()) botsHost.append(botRow(bot));
   const sep = $('tools-bots-sep');
   if (sep) sep.hidden = !(toolsHost.childElementCount && botsHost.childElementCount);
-  menu.setAttribute('aria-label', menuMode === 'tools' ? t('nav.tools') : t('tools.more_bots'));
+  const label = menuMode === 'tools' ? t('nav.tools') : t('tools.more_bots');
+  menu.setAttribute('aria-label', label);
+  const title = $('tools-menu-title');
+  if (title) title.textContent = label;
   if (keep) {
     const again = menuItems().find((r) => (keep.tool && r.dataset.tool === keep.tool) || (keep.bot && r.dataset.bot === keep.bot));
     if (again) again.focus({ preventScroll: true });
@@ -512,6 +494,15 @@ function paintMenu() {
 /** Anchor the fixed popup beside the button, on the rail's inline-end side,
  *  clamped to the viewport (RTL: the rail is on the right, so open leftwards). */
 function placeMenu(menu, btn) {
+  const sheet = !compactRail();
+  menu.classList.toggle('tools-sheet', sheet);
+  document.body.classList.toggle('tools-sheet-open', sheet);
+  if (sheet) {
+    // The phone's bottom sheet is placed by CSS; clear any desktop anchor.
+    menu.style.left = '';
+    menu.style.top = '';
+    return;
+  }
   const r = btn.getBoundingClientRect();
   const mw = menu.offsetWidth || 240;
   const mh = menu.offsetHeight || 200;
@@ -560,7 +551,8 @@ export function closeToolsMenu({ focusButton = false } = {}) {
   document.removeEventListener('click', onOutside, true);
   document.removeEventListener('keydown', onEscape, true);
   const menu = $('tools-menu');
-  if (menu) menu.hidden = true;
+  if (menu) { menu.hidden = true; menu.classList.remove('tools-sheet'); }
+  if (typeof document !== 'undefined') document.body.classList.remove('tools-sheet-open');
   const btn = $('tools-menu-btn');
   if (btn) {
     btn.setAttribute('aria-expanded', 'false');
@@ -581,6 +573,9 @@ function onOutside(e) {
   // position:fixed puts the menu outside the button's box — check both. Their
   // own listeners handle clicks on them.
   if ((btn && btn.contains(e.target)) || (menu && menu.contains(e.target))) return;
+  // The phone sheet sits over a scrim: a tap on the scrim only dismisses it.
+  // Without this the same tap would land on whatever bot tile is under it.
+  if (menu && menu.classList.contains('tools-sheet')) { e.preventDefault(); e.stopPropagation(); }
   closeToolsMenu();
 }
 
@@ -629,7 +624,7 @@ function appSrc(tool) {
 function frameSrc(tool) {
   if (isApp(tool)) return appSrc(tool);
   if (tool.kind === 'static') return `/tools/${encodeURIComponent(tool.id)}/`;
-  const u = parseHttpUrl(tool.url);
+  const u = parseHttpUrl(toolUrl(tool));
   return u ? u.href : '';
 }
 
@@ -991,7 +986,7 @@ function stateTool() {
 }
 
 function urlOrigin(tool) {
-  const u = parseHttpUrl(tool.url);
+  const u = parseHttpUrl(toolUrl(tool));
   return u ? u.origin : null;
 }
 

@@ -43,7 +43,8 @@ import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
-} from './tools.js?v=7';
+  onHost, toolOpen,
+} from './tools.js?v=8';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';
@@ -726,8 +727,33 @@ window.addEventListener('popstate', (e) => {
   // An entry left by a screen that no longer exists (an old app build's own
   // view name) lands on the root instead of on nothing.
   const v = e.state?.view;
-  setView(v in VIEW_DEPTH ? v : 'bots');
+  const view = v in VIEW_DEPTH ? v : 'bots';
+  // Back out of a full-page tool: the tool closes, exactly as its ‹ does.
+  // Opened from the Bots page it pushed [threads, chat]; stopping on the
+  // threads entry would show the tool's "open full-width" placeholder with
+  // the tool still up underneath, so step on through to Bots.
+  if (view !== 'chat' && anyToolPaneOpen()) {
+    leaveToolPanes({ navigateTo: null });
+    if (view === 'threads') { history.back(); return; }
+  }
+  setView(view);
 });
+
+/** Is any full-page tool (builtin or generic) on screen? */
+function anyToolPaneOpen() {
+  return !!toolOpen() || harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
+}
+
+/** Leave whatever tool pane is up for the Bots page (the phone's ‹ on every
+ *  tool, and hardware Back). The pane is torn down — a hidden frame keeps its
+ *  sockets — and the thread list gets its own header back instead of the
+ *  tool's placeholder. `navigateTo: null` = the caller moves the view. */
+function leaveToolPanes({ navigateTo = 'bots' } = {}) {
+  const wasTool = isToolId(state.selectedBotId);
+  closeToolPanes(null);
+  if (wasTool) restoreAfterTool(null, { stay: true });
+  if (navigateTo) navigate(navigateTo);
+}
 
 // ===================== Sidebar =====================
 let sidebarDragIdx = null;
@@ -4855,12 +4881,20 @@ function harnessServiceState() {
   return 'stopped';
 }
 
-// The frame can only load when THIS browser can reach the host's loopback:
-// DisPatch opened on the host itself. Over the tailnet / LAN the UI is not
-// reachable (dsh binds 127.0.0.1 only, on purpose).
-function harnessLocalReachable() {
-  const h = location.hostname;
-  return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]';
+// Where THIS browser can load the dsh Web UI from, or '' for nowhere. On the
+// host: the loopback URL (dsh binds 127.0.0.1 only, on purpose). Anywhere else
+// (a phone on the tailnet / LAN): only the operator's DISPATCH_HARNESS_REMOTE_URL
+// — e.g. an HTTPS Tailscale Serve port — and never an http:// one under an
+// https:// page (mixed content: the frame would be refused and draw nothing).
+// '' makes the pane show its "host only" note; the Sessions and Headless-jobs
+// tabs are API-backed and work from anywhere regardless.
+function harnessFrameUrl() {
+  const st = state.harness.status;
+  const port = (st && st.port) || 3080;
+  if (onHost()) return (st && st.url) || `http://127.0.0.1:${port}/`;
+  const remote = st && st.remote_url;
+  if (!remote || isMixedContent(window.location.href, remote)) return '';
+  return remote;
 }
 
 async function refreshHarnessFeature() {
@@ -4981,11 +5015,11 @@ function renderHarness() {
   paintToolsGroupDot();
   if (!harnessOpen) return;
   const port = (st && st.port) || 3080;
-  const url = (st && st.url) || `http://127.0.0.1:${port}/`;
+  const url = harnessFrameUrl();
   if (dom['harness-subtitle']) dom['harness-subtitle'].textContent = t('harness.subtitle', { port: String(port) });
   if (dom['harness-open']) {
-    dom['harness-open'].href = url;
-    dom['harness-open'].classList.toggle('hidden', !harnessLocalReachable() || svc !== 'running');
+    if (url) dom['harness-open'].href = url; else dom['harness-open'].removeAttribute('href');
+    dom['harness-open'].classList.toggle('hidden', !url || svc !== 'running');
   }
   // Bar.
   if (dom['harness-dot']) dom['harness-dot'].className = 'terminal-dot harness-' + svc;
@@ -5001,7 +5035,7 @@ function renderHarness() {
   if (frame && note) {
     let noteKey = null;
     if (!installed) noteKey = 'not_installed';
-    else if (!harnessLocalReachable()) noteKey = 'remote';
+    else if (!url) noteKey = 'remote';
     else if (!running) noteKey = 'stopped';
     if (noteKey) {
       if (!frame.classList.contains('hidden')) { frame.classList.add('hidden'); frame.removeAttribute('src'); }
@@ -5485,7 +5519,7 @@ async function harnessClearSession(id) {
 
 function wireHarnessView() {
   if (!dom['harness-view']) return;
-  dom['harness-back'].addEventListener('click', () => navigate('bots'));
+  dom['harness-back'].addEventListener('click', () => leaveToolPanes());
   dom['harness-tab-ui'].addEventListener('click', () => setHarnessTab('ui'));
   dom['harness-tab-jobs'].addEventListener('click', () => setHarnessTab('jobs'));
   dom['harness-tab-sessions'].addEventListener('click', () => setHarnessTab('sessions'));
@@ -5544,12 +5578,24 @@ function studioforgeInsecure(url) {
   return isMixedContent(window.location.href, url);
 }
 
+/** The panel address for THIS browser: DISPATCH_STUDIOFORGE_URL on the host,
+ *  and off it DISPATCH_STUDIOFORGE_REMOTE_URL when the operator gave one (an
+ *  HTTPS Tailscale Serve port, so the tailnet front door is not refused it as
+ *  mixed content), else the same address — whose note says why it cannot. */
+function studioforgeUrl() {
+  const st = state.studioforge.status;
+  if (!st) return '';
+  if (!onHost() && st.remote_url) return st.remote_url;
+  return st.url || '';
+}
+
 function studioforgeState() {
   const st = state.studioforge.status;
   if (!st) return 'unknown';
   // Ahead of `checking`: a scheme mismatch is a certainty, not a measurement,
   // so there is nothing to wait for and no point spinning.
-  if (st.url && studioforgeInsecure(st.url)) return 'insecure';
+  const url = studioforgeUrl();
+  if (url && studioforgeInsecure(url)) return 'insecure';
   if (studioforgeProbing) return 'checking';
   if (st.reachable === false) return 'down';
   if (state.studioforge.clientReachable === false) return 'unreachable';
@@ -5639,7 +5685,7 @@ function closeStudioForgeView() {
 // run at all; what remains is a genuine network question.
 async function probeStudioForgeFromClient() {
   const st = state.studioforge.status;
-  const url = st && st.url;
+  const url = studioforgeUrl();
   if (!url) return;
   // Nothing to measure: the browser will refuse this URL whatever the network
   // says, and a probe would answer "fine" (see above).
@@ -5666,7 +5712,7 @@ function renderStudioForge() {
   if (sd) sd.className = 'bot-status-dot terminal-sidedot studioforge-sidedot studioforge-' + sv;
   paintToolsGroupDot();
   if (!studioforgeOpen) return;
-  const url = (st && st.url) || '';
+  const url = studioforgeUrl();
   if (dom['studioforge-dot']) dom['studioforge-dot'].className = 'terminal-dot studioforge-' + sv;
   if (dom['studioforge-status-label']) dom['studioforge-status-label'].textContent = t('studioforge.state_' + sv);
   // The address is shown, not hidden: it is the one fact an operator needs when
@@ -5711,7 +5757,7 @@ function renderStudioForge() {
 
 function wireStudioForgeView() {
   if (!dom['studioforge-view']) return;
-  dom['studioforge-back'].addEventListener('click', () => navigate('bots'));
+  dom['studioforge-back'].addEventListener('click', () => leaveToolPanes());
 }
 
 // ===================== Emails tab (MailForge dashboard) =====================
@@ -5798,7 +5844,32 @@ async function renderMail() {
     dom['mail-note-hint'].textContent = t('mail.not_installed_hint');
     return;
   }
-  if (!st.reachable || !st.launch_url) {
+  // Which launch URL THIS browser can use. The server already picks by the
+  // Host this page was loaded under (the loopback one only on the host, the
+  // operator's DISPATCH_MAIL_REMOTE_URL elsewhere); the client re-checks, so a
+  // loopback address is never framed off the host — on a phone it is the
+  // phone's own loopback, where nothing listens, and the pane went blank.
+  let launch = st.launch_url || st.remote_launch_url || null;
+  if (launch && !onHost()) {
+    let h = '';
+    try { h = new URL(launch).hostname; } catch { launch = null; }
+    if (h === '127.0.0.1' || h === 'localhost' || h === '[::1]' || h.startsWith('127.')) launch = null;
+  }
+  if (launch && isMixedContent(window.location.href, launch)) launch = null;
+  if (st.reachable && !launch && (st.host_only || !onHost())) {
+    // MailForge is up — just not reachable from this device.
+    dot.classList.add('running');
+    label.textContent = t('mail.state_host_only');
+    note.classList.remove('hidden');
+    frame.classList.add('hidden');
+    frame.removeAttribute('src');
+    dom['mail-open'].removeAttribute('href');
+    dom['mail-open'].classList.add('hidden');
+    dom['mail-note-text'].textContent = t('mail.remote_text');
+    dom['mail-note-hint'].textContent = t('mail.remote_hint');
+    return;
+  }
+  if (!st.reachable || !launch) {
     dot.classList.add('stopped');
     label.textContent = t('mail.state_down');
     note.classList.remove('hidden');
@@ -5815,16 +5886,15 @@ async function renderMail() {
   // markup ships href="#" target="_blank", so when MailForge answers without a
   // launch_url the arrow opened a second, blank copy of DisPatch in a new tab
   // — an affordance that looks like it works and does something unrelated.
-  if (st.launch_url) dom['mail-open'].href = st.launch_url;
-  else dom['mail-open'].removeAttribute('href');
-  dom['mail-open'].classList.toggle('hidden', !st.launch_url);
-  if (st.launch_url && frame.getAttribute('src') !== st.launch_url) frame.setAttribute('src', st.launch_url);
+  dom['mail-open'].href = launch;
+  dom['mail-open'].classList.remove('hidden');
+  if (frame.getAttribute('src') !== launch) frame.setAttribute('src', launch);
   frame.classList.remove('hidden');
 }
 
 function wireMailView() {
   if (!dom['mail-view']) return;
-  dom['mail-back'].addEventListener('click', () => navigate('bots'));
+  dom['mail-back'].addEventListener('click', () => leaveToolPanes());
 }
 
 // ===================== Clients tab ("WebBuilder") =====================
@@ -5886,7 +5956,7 @@ function closeClientsView() {
 
 function wireClientsView() {
   if (!dom['clients-view']) return;
-  dom['clients-back'].addEventListener('click', () => navigate('bots'));
+  dom['clients-back'].addEventListener('click', () => leaveToolPanes());
   clientsTabNav(dom['clients-tabnav']);
   window.addEventListener('clients:open-thread', (ev) => {
     const threadId = ev && ev.detail && ev.detail.threadId;

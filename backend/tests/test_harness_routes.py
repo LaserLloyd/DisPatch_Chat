@@ -277,3 +277,15 @@ def test_not_installed_is_reported_not_500(route_client, fake_svc, monkeypatch):
 
 def test_redactor_drops_harness_state_frames():
     assert main.redact_for_decoy({"type": "harness_state", "jobs": {}}) is None
+
+
+def test_status_reports_remote_url_only_when_configured(route_client, fake_svc, monkeypatch):
+    """The off-host Web UI address (DISPATCH_HARNESS_REMOTE_URL) is reported so
+    a phone can frame it; with none, null — and the pane says "host only"."""
+    _unlock(route_client)
+    assert route_client.get("/api/harness/status").json()["remote_url"] is None
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, harness_remote_url="https://host.tailnet.example:8453/"))
+    st = route_client.get("/api/harness/status").json()
+    assert st["remote_url"] == "https://host.tailnet.example:8453/"
+    assert st["url"].startswith("http://127.0.0.1:"), "the host URL is unchanged"

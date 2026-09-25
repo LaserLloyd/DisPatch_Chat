@@ -308,3 +308,38 @@ def test_no_origin_without_the_flag(monkeypatch):
 ])
 def test_framable_reads_the_headers(headers, expected):
     assert main._framable(httpx.Headers(headers)) is expected
+
+
+def test_status_reports_remote_url(route_client, monkeypatch):
+    _unlock(route_client)
+    assert route_client.get("/api/studioforge/status").json()["remote_url"] is None
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, studioforge_remote_url="https://host.tailnet.example:8452"))
+    body = route_client.get("/api/studioforge/status").json()
+    assert body["remote_url"] == "https://host.tailnet.example:8452"
+    assert body["url"] == PANEL_URL
+
+
+def test_origin_includes_the_remote_address(monkeypatch):
+    """A phone probes the remote address with the same no-cors fetch, so the
+    shell CSP's connect-src must name it too (origin only, deduplicated)."""
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, studioforge_enabled=True, studioforge_url=PANEL_URL,
+        studioforge_remote_url="https://host.tailnet.example:8452/x"))
+    assert main._studioforge_origin() == PANEL_URL + " https://host.tailnet.example:8452"
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, studioforge_enabled=True, studioforge_url=PANEL_URL,
+        studioforge_remote_url=PANEL_URL + "/"))
+    assert main._studioforge_origin() == PANEL_URL
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("", ""),
+    ("https://host.tailnet.example:8452/", "https://host.tailnet.example:8452/"),
+    ("http://192.0.2.4:3080", "http://192.0.2.4:3080"),
+    ("ftp://x/", ""),
+    ("https://user:pw@example.com/", ""),
+    ("https:///nohost", ""),
+])
+def test_remote_url_validation(raw, expected):
+    assert config._remote_url(raw, "TEST_REMOTE_URL") == expected

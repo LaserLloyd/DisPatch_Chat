@@ -136,6 +136,39 @@ def _studioforge_url(raw: str) -> str:
         return ""
     return url
 
+def _remote_url(raw: str, name: str) -> str:
+    """Validate an optional DISPATCH_*_REMOTE_URL: the address a tool's page is
+    reachable at from a browser that is NOT on the host (a phone on the
+    tailnet), e.g. a `tailscale serve` HTTPS port in front of a loopback-only
+    service. Same rules as _studioforge_url (http/https, a host, no
+    credentials); anything else is logged once and treated as unset, so the
+    pane falls back to its "host only" note rather than framing something odd.
+    Empty (the default) = no remote address: loopback-only stays host-only.
+    """
+    url = (raw or "").strip()
+    if not url:
+        return ""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url)
+    except ValueError:
+        u = None
+    bad = None
+    if u is None:
+        bad = "unparseable"
+    elif u.scheme not in ("http", "https"):
+        bad = "scheme must be http or https"
+    elif not u.hostname:
+        bad = "no host"
+    elif u.username or u.password:
+        bad = "credentials in the URL are not allowed"
+    if bad:
+        import logging
+        logging.getLogger(__name__).warning("DISPATCH_%s ignored (%s)", name, bad)
+        return ""
+    return url
+
+
 def _image_jobs_default(flag: str, endpoint: str) -> bool:
     """DISPATCH_IMAGE_JOBS: "auto" (default) = on iff an image server is
     configured; truthy = on; anything else = off.
@@ -390,6 +423,18 @@ class Settings:
     # No default: see _studioforge_url. Empty == feature off, whatever the flag
     # says, which is what keeps a private address out of this repo.
     studioforge_url: str = _studioforge_url(env("STUDIOFORGE_URL", ""))
+    # Optional addresses the three host-bound panes are reachable at from a
+    # browser that is NOT on the host (see _remote_url). The loopback rule
+    # stays: without one of these, a phone gets the pane's "host only" note
+    # instead of a frame that can never load. Nothing here is a default —
+    # exposing dsh / MailForge on a network is the operator's decision (and
+    # dsh web has no password of its own).
+    harness_remote_url: str = _remote_url(env("HARNESS_REMOTE_URL", ""), "HARNESS_REMOTE_URL")
+    studioforge_remote_url: str = _remote_url(env("STUDIOFORGE_REMOTE_URL", ""), "STUDIOFORGE_REMOTE_URL")
+    # MailForge's UI: the BASE (scheme://host[:port]); /launch?k=<key> is
+    # appended per request. MailForge's own Host guard must also accept that
+    # host, or the frame answers 403 — see docs/configuration.md.
+    mail_remote_url: str = _remote_url(env("MAIL_REMOTE_URL", ""), "MAIL_REMOTE_URL")
     # Gateway chat mirror: continuously tail OpenClaw's own conversations (the
     # Control-UI webchat + each agent's main session) into DisPatch threads.
     # DISPATCH_MIRROR=0 disables the loop entirely.

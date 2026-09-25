@@ -427,7 +427,10 @@
     "down_hint": "Check: systemctl --user status mailforge",
     "unreachable_text": "Could not reach MailForge's dashboard from DisPatch's backend.",
     "unreachable_hint": "Check: systemctl --user status mailforge",
-    "state_unknown": "Checking…"
+    "state_unknown": "Checking…",
+    "state_host_only": "Running here, not from this device",
+    "remote_text": "MailForge only answers on the host itself, so its dashboard can't be shown on this device.",
+    "remote_hint": "Open DisPatch on the host to read mail here, or give MailForge an address on your network (DISPATCH_MAIL_REMOTE_URL)."
   },
   "clients": {
     "name": "Clients",

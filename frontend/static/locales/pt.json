@@ -1000,7 +1000,10 @@
     "down_text": "O painel do MailForge não está respondendo.",
     "down_hint": "Verificar: systemctl --user status mailforge",
     "unreachable_text": "O DisPatch não conseguiu acessar o painel do MailForge.",
-    "unreachable_hint": "Verificar: systemctl --user status mailforge"
+    "unreachable_hint": "Verificar: systemctl --user status mailforge",
+    "state_host_only": "Em execução só no host",
+    "remote_text": "O MailForge só responde no próprio host, por isso o painel não pode ser exibido neste dispositivo.",
+    "remote_hint": "Abra o DisPatch no host para ler e-mails aqui, ou dê ao MailForge um endereço na sua rede (DISPATCH_MAIL_REMOTE_URL)."
   },
   "clients": {
     "name": "Clientes",

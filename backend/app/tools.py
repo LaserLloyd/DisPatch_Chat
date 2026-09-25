@@ -99,7 +99,7 @@ FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
 _COMMON_KEYS = {"id", "title", "icon", "kind", "enabled", "safe"}
 _ALLOWED_KEYS = {
     "static": _COMMON_KEYS | {"root", "entry", "refresh"},
-    "url": _COMMON_KEYS | {"url"},
+    "url": _COMMON_KEYS | {"url", "remote_url"},
     "builtin": {"id", "kind", "enabled"},
     "app": {"id", "kind", "enabled", "trusted"},
 }
@@ -150,6 +150,9 @@ class Tool:
     root: str | None = None
     entry: str = "index.html"
     url: str | None = None
+    #: url tools only: where a browser that is NOT on the host frames the page
+    #: (e.g. a Tailscale Serve HTTPS port in front of a loopback service).
+    remote_url: str | None = None
     refresh: Refresh | None = None
     trusted: bool = False
 
@@ -167,6 +170,8 @@ class Tool:
             d["entry"] = self.entry
         else:
             d["url"] = self.url
+            if self.remote_url:
+                d["remote_url"] = self.remote_url
         d["enabled"] = self.enabled
         d["safe"] = self.safe
         if self.refresh is not None:
@@ -290,6 +295,14 @@ def _check_refresh(value, index: int, check_fs: bool) -> Refresh:
     return Refresh(argv=tuple(argv), cwd=cwd, timeout_s=t)
 
 
+def _http_url_ok(url) -> bool:
+    """An http(s) URL with a host, bounded, no NUL — what a frame may load."""
+    if not isinstance(url, str) or len(url) > 2048 or "\x00" in url:
+        return False
+    u = urlsplit(url.strip())
+    return u.scheme in ("http", "https") and bool(u.netloc)
+
+
 def _check_bool(row: dict, key: str, default: bool, index: int) -> bool:
     v = row.get(key, default)
     if not isinstance(v, bool):
@@ -373,14 +386,14 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
                             refresh=refresh))
         else:
             url = row.get("url")
-            ok = False
-            if isinstance(url, str) and len(url) <= 2048 and "\x00" not in url:
-                u = urlsplit(url.strip())
-                ok = u.scheme in ("http", "https") and bool(u.netloc)
-            if not ok:
+            if not _http_url_ok(url):
                 raise ToolValidationError(i, "url", "must be an http(s) URL")
+            remote = row.get("remote_url")
+            if remote is not None and remote != "" and not _http_url_ok(remote):
+                raise ToolValidationError(i, "remote_url", "must be an http(s) URL")
             out.append(Tool(id=tid, kind=kind, title=title.strip(), icon=icon.strip(),
-                            enabled=enabled, safe=safe, url=url.strip()))
+                            enabled=enabled, safe=safe, url=url.strip(),
+                            remote_url=remote.strip() if remote else None))
     return out
 
 
@@ -667,6 +680,7 @@ def _out_operator(t: Tool) -> dict:
             d["refresh"] = t.refresh.as_dict()
     elif t.kind == "url":
         d["url"] = t.url
+        d["remote_url"] = t.remote_url
     return d
 
 
@@ -677,6 +691,7 @@ def _out_limited(t: Tool) -> dict:
         d["entry"] = t.entry
     else:
         d["url"] = t.url
+        d["remote_url"] = t.remote_url
     return d
 
 

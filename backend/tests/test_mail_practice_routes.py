@@ -120,12 +120,15 @@ def test_mail_status_installed_and_reachable(route_client, monkeypatch):
 
     monkeypatch.setattr(mailforge_bridge, "reachable", fake_reachable)
 
-    r = route_client.get("/api/mail/status")
+    # A browser on the host (addressed DisPatch by a loopback name).
+    r = route_client.get("/api/mail/status", headers={"Host": "127.0.0.1:8765"})
     assert r.status_code == 200
     body = r.json()
     assert body["installed"] is True
     assert body["reachable"] is True
     assert body["launch_url"] == "http://127.0.0.1:54321/launch?k=SECRETKEY123"
+    assert body["remote_launch_url"] is None
+    assert body["host_only"] is False
 
 
 def test_mail_status_installed_but_unreachable_never_returns_launch_url(route_client, monkeypatch):
@@ -255,3 +258,52 @@ def test_mailforge_bridge_launch_url_none_without_runtime_files(tmp_path):
     settings = replace(config.SETTINGS, mail_data_dir=tmp_path / "mf")
     assert mailforge_bridge.launch_url(settings) is None
     assert mailforge_bridge.installed(settings) is False
+
+
+def _mail_up(monkeypatch):
+    data_dir = main.SETTINGS.mail_data_dir
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "ui_port").write_text("54321")
+    (data_dir / "ui_launcher_key").write_text("SECRETKEY123")
+
+    async def fake_reachable(settings):
+        return True
+
+    monkeypatch.setattr(mailforge_bridge, "reachable", fake_reachable)
+
+
+@pytest.mark.parametrize("host", ["phone-front.tail.example", "192.0.2.37:8765", "[2001:db8::1]:8765"])
+def test_mail_status_off_host_gets_no_loopback_key(route_client, monkeypatch, host):
+    """MailForge binds loopback and refuses any other Host: a phone (the tailnet
+    front door, a LAN IP) can never use the loopback launch URL, so it is not
+    handed the key — it gets host_only and the pane says why."""
+    _unlock(route_client)
+    _mail_up(monkeypatch)
+    body = route_client.get("/api/mail/status", headers={"Host": host}).json()
+    assert body["reachable"] is True
+    assert body["launch_url"] is None
+    assert body["remote_launch_url"] is None
+    assert body["host_only"] is True
+
+
+@pytest.mark.parametrize("host", ["localhost:8765", "127.0.0.1", "[::1]:8765"])
+def test_mail_status_loopback_names_are_the_host(route_client, monkeypatch, host):
+    _unlock(route_client)
+    _mail_up(monkeypatch)
+    body = route_client.get("/api/mail/status", headers={"Host": host}).json()
+    assert body["launch_url"] == "http://127.0.0.1:54321/launch?k=SECRETKEY123"
+
+
+def test_mail_status_off_host_uses_the_remote_address(route_client, monkeypatch):
+    _unlock(route_client)
+    _mail_up(monkeypatch)
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, mail_remote_url="https://host.tailnet.example:8454/"))
+    body = route_client.get("/api/mail/status", headers={"Host": "host.tailnet.example"}).json()
+    assert body["launch_url"] is None
+    assert body["remote_launch_url"] == "https://host.tailnet.example:8454/launch?k=SECRETKEY123"
+    assert body["host_only"] is False
+    # ...and the host itself still gets the loopback one, never the remote.
+    body = route_client.get("/api/mail/status", headers={"Host": "127.0.0.1:8765"}).json()
+    assert body["launch_url"].startswith("http://127.0.0.1:54321/")
+    assert body["remote_launch_url"] is None

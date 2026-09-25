@@ -1000,7 +1000,10 @@
     "down_text": "Le tableau de bord MailForge ne répond pas.",
     "down_hint": "Vérifier : systemctl --user status mailforge",
     "unreachable_text": "DisPatch n'a pas pu joindre le tableau de bord MailForge.",
-    "unreachable_hint": "Vérifier : systemctl --user status mailforge"
+    "unreachable_hint": "Vérifier : systemctl --user status mailforge",
+    "state_host_only": "Actif sur l'hôte uniquement",
+    "remote_text": "MailForge ne répond que sur l'hôte lui-même : son tableau de bord ne peut pas s'afficher sur cet appareil.",
+    "remote_hint": "Ouvrez DisPatch sur l'hôte pour lire le courrier ici, ou donnez à MailForge une adresse sur votre réseau (DISPATCH_MAIL_REMOTE_URL)."
   },
   "clients": {
     "name": "Clients",

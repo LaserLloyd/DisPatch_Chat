@@ -1622,6 +1622,22 @@ def _ip_is_loopback(host: str) -> bool:
                            or host.startswith("127."))
 
 
+def _browser_on_host(request: Request) -> bool:
+    """Did the browser address DisPatch by a loopback name (127.0.0.1,
+    localhost, ::1)? Then a loopback URL in a frame means THIS machine; from
+    any other name (a LAN IP, the tailnet name behind Tailscale Serve) it
+    means the viewer's own device, where nothing is listening. Read from the
+    Host header, which is what the browser typed — not the socket peer, which
+    Tailscale Serve turns into 127.0.0.1 for every tailnet phone. Used only to
+    choose which address to hand back, never to grant anything."""
+    host = (request.headers.get("host") or "").strip().lower()
+    if host.startswith("["):
+        name = host[1:].split("]", 1)[0]
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return name in ("localhost", "::1") or _ip_is_loopback(name)
+
+
 def _loopback_socket(request: Request) -> bool:
     """Is the peer on this machine? See _proxied_request for the caveat."""
     return _ip_is_loopback(request.client.host if request.client else "")
@@ -10872,6 +10888,9 @@ async def _harness_service_status() -> dict:
         "healthy": healthy,
         "port": SETTINGS.harness_port,
         "url": f"http://127.0.0.1:{SETTINGS.harness_port}/",
+        # Where the Web UI is framed from off the host (DISPATCH_HARNESS_REMOTE_URL);
+        # null = host only, and the pane says so instead of framing loopback.
+        "remote_url": SETTINGS.harness_remote_url or None,
         "home": str(harness.dsh_home()),
     }
 
@@ -11178,6 +11197,10 @@ async def studioforge_status(request: Request):
     _require_studioforge(request)
     reachable, checked_at, framable = await _studioforge_reachable()
     return {"url": SETTINGS.studioforge_url,
+            # Optional off-host address (DISPATCH_STUDIOFORGE_REMOTE_URL), e.g. an
+            # HTTPS Tailscale Serve port, so a phone on the HTTPS front door is
+            # not refused the panel as mixed content. null = none configured.
+            "remote_url": SETTINGS.studioforge_remote_url or None,
             "reachable": reachable,
             # None when the panel could not be reached at all -- "we do not
             # know yet", which the pane must not read as "refused".
@@ -11207,13 +11230,23 @@ async def mail_status(request: Request):
     _require_mail(request)
     installed = mailforge_bridge.installed(SETTINGS)
     reach = await mailforge_bridge.reachable(SETTINGS) if installed else False
+    live = installed and reach
+    on_host = _browser_on_host(request)
     return {
         "installed": installed,
         "reachable": reach,
         # Only present once MailForge's UI has actually run at least once
         # (persisted its port + launcher key) AND is reachable right now —
-        # never hand the browser a launch URL for a dead service.
-        "launch_url": mailforge_bridge.launch_url(SETTINGS) if (installed and reach) else None,
+        # never hand the browser a launch URL for a dead service. And only to
+        # a browser on the host: MailForge binds loopback and refuses any
+        # other Host, so off the host the loopback URL is a key the viewer
+        # cannot use (the same reason a dead service gets none).
+        "launch_url": mailforge_bridge.launch_url(SETTINGS) if (live and on_host) else None,
+        # Off the host: the operator's remote address (DISPATCH_MAIL_REMOTE_URL)
+        # when there is one, else nothing and `host_only` tells the pane why.
+        "remote_launch_url": (mailforge_bridge.remote_launch_url(SETTINGS)
+                              if (live and not on_host) else None),
+        "host_only": live and not on_host and not SETTINGS.mail_remote_url,
     }
 
 
@@ -12142,8 +12175,18 @@ def _studioforge_origin() -> str:
             or _builtin_off("studioforge")):
         return ""
     from urllib.parse import urlsplit
-    u = urlsplit(SETTINGS.studioforge_url)
-    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else ""
+    out = []
+    # The optional off-host address is probed from a phone the same way, so it
+    # is spliced in beside the primary one (never the full URL either).
+    for raw in (SETTINGS.studioforge_url, SETTINGS.studioforge_remote_url):
+        if not raw:
+            continue
+        u = urlsplit(raw)
+        if u.scheme and u.netloc:
+            o = f"{u.scheme}://{u.netloc}"
+            if o not in out:
+                out.append(o)
+    return " ".join(out)
 
 
 @app.get("/")

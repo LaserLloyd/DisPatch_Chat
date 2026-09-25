@@ -1075,7 +1075,10 @@
     "down_text": "لوحة MailForge لا تستجيب.",
     "down_hint": "تحقّق: systemctl --user status mailforge",
     "unreachable_text": "تعذّر على DisPatch الوصول إلى لوحة MailForge.",
-    "unreachable_hint": "تحقّق: systemctl --user status mailforge"
+    "unreachable_hint": "تحقّق: systemctl --user status mailforge",
+    "state_host_only": "يعمل على المضيف فقط",
+    "remote_text": "لا يستجيب MailForge إلا على المضيف نفسه، لذا لا يمكن عرض لوحته على هذا الجهاز.",
+    "remote_hint": "افتح DisPatch على المضيف لقراءة البريد هنا، أو امنح MailForge عنوانًا على شبكتك (DISPATCH_MAIL_REMOTE_URL)."
   },
   "clients": {
     "name": "العملاء",

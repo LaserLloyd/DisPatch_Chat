@@ -2,7 +2,14 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v134';  // v134: per-tool layout state bridge —
+const CACHE = 'local-chat-v135';  // v135: tools are add-ons on the phone —
+  // the Bots page shows ONE quiet "Tools" row under the roster (no tile grid)
+  // that opens the tools + parked bots as a bottom sheet; hardware Back and
+  // every builtin ‹ close a full-page tool; off the host the Harness /
+  // StudioForge / Emails / url tools use their optional remote address or say
+  // "host only" instead of framing a loopback URL. tools.js 7→8, main.js
+  // 110→111, app.css 90→91, index.html, locales (mail.*).
+  // v134: per-tool layout state bridge —
   // a framed static/url/app tool may post {type:'dispatch:tool-state',
   // op:'get'|'set'} and the shell keeps its state in this browser's
   // localStorage (a sandboxed static page cannot); privacy mode wipes that

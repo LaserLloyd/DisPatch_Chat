@@ -87,8 +87,28 @@ function wire(mod, over = {}) {
   return { rec, state };
 }
 
-// The phone layout's tiles (wire()'s default).
-const tileIds = (win) => [...win.document.querySelectorAll('#tool-list [data-tool]')].map((b) => b.dataset.tool);
+// Per-tool tiles drawn straight into the rail. Neither layout has any since
+// 2026-09-26: the phone got the desktop's one control (as a row + a sheet).
+const railTiles = (win) => [...win.document.querySelectorAll('#tool-list [data-tool]')].map((b) => b.dataset.tool);
+/** The tools the one Tools control lists: open its menu (if shut), read the
+ *  rows, put it back the way it was. */
+function listedIds(win) {
+  const doc = win.document;
+  const btn = doc.getElementById('tools-menu-btn');
+  if (!btn) return [];
+  const menu = doc.getElementById('tools-menu');
+  const wasOpen = !menu.hidden;
+  if (!wasOpen) pointerClick(win, btn);
+  const ids = [...doc.querySelectorAll('#tools-menu-tools [data-tool]')].map((r) => r.dataset.tool);
+  if (!wasOpen) pointerClick(win, btn);
+  return ids;
+}
+/** Open a tool the way a person does: the Tools control, then its row. */
+function pick(win, id) {
+  const doc = win.document;
+  if (doc.getElementById('tools-menu').hidden) pointerClick(win, doc.getElementById('tools-menu-btn'));
+  doc.querySelector(`#tools-menu [data-tool="${id}"]`).click();
+}
 
 test('rail: builtins first (feature-gated), then apps, then enabled static/url tools', { skip: dom.skip }, async () => {
   const win = setup();
@@ -99,48 +119,48 @@ test('rail: builtins first (feature-gated), then apps, then enabled static/url t
   assert.equal(list.hidden, false);
   // studioforge-panel: enabled:false in the manifest. clients-panel: its
   // feature probe says off. old-report: enabled:false.
-  assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
-  assert.ok(list.querySelector('.tool-list-head'), 'the group has its heading');
-  const bench = list.querySelector('[data-tool="benchmark"]');
+  assert.deepEqual(listedIds(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
+  assert.deepEqual(railTiles(win), [], 'phone: no tool tiles beside the roster');
+  pointerClick(win, win.document.getElementById('tools-menu-btn'));
+  const menu = win.document.getElementById('tools-menu');
+  const bench = menu.querySelector('[data-tool="benchmark"]');
   // 📊 is a chrome emoji: the tile draws the theme's chart line icon instead.
   assert.ok(bench.querySelector('.tool-avatar.tool-avatar-icon svg.rail-icon'));
   assert.equal(bench.getAttribute('aria-label'), 'Benchmark Board');
   // A builtin carries its status dot; a generic tool has none.
-  assert.ok(list.querySelector('[data-tool="deepseek-harness"] .bot-status-dot.harness-running'));
+  assert.ok(menu.querySelector('[data-tool="deepseek-harness"] .bot-status-dot.harness-running'));
   assert.equal(bench.querySelector('.bot-status-dot'), null);
   assert.equal(mod.railToolDot('deepseek-harness').classList.contains('harness-running'), true);
 });
 
-test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', { skip: dom.skip }, async () => {
+test('menu rows: the theme\'s line icons, typed emoji kept, the active row marked', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   wire(mod, { flags: { practice: true } });
   await mod.loadTools();
-  const tile = (id) => win.document.querySelector(`#tool-list [data-tool="${id}"]`);
+  pointerClick(win, win.document.getElementById('tools-menu-btn'));
+  const row = (id) => win.document.querySelector(`#tools-menu [data-tool="${id}"]`);
   for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']) {
-    const b = tile(id);
-    assert.ok(b, id);
-    // Same classes a bot tile carries, so every bot rule (size, radius, hover,
-    // .active ring, dot corner, Minimal rows, phone grid) applies unchanged.
-    assert.ok(b.classList.contains('bot-btn') && b.classList.contains('tool-btn'), id);
-    const av = b.querySelector('.bot-avatar.tool-avatar');
-    assert.ok(av, id + ' has a bot-shaped tile');
+    const r = row(id);
+    assert.ok(r, id);
+    const av = r.querySelector('.bot-avatar.tool-avatar');
+    assert.ok(av, id + ' has its tile');
     assert.equal(av.getAttribute('aria-hidden'), 'true');
     // No hard-coded service hues or the old accent tile any more.
     assert.equal(av.className.match(/terminal-avatar|harness-avatar|studioforge-avatar/), null, id);
-    assert.ok(b.querySelector('.bot-name-tip') && b.querySelector('.bot-name-label'), id + ' has the tip and label');
+    assert.ok(r.querySelector('.tools-item-label').textContent, id + ' has its label');
   }
   // Builtins: line icons (currentColor SVG), never text. So is an app whose
   // manifest names an icon word (`clipboard` is the contract's own example).
   for (const id of ['deepseek-harness', 'mail-panel', 'clients-panel', 'jobboard']) {
-    assert.ok(tile(id).querySelector('.tool-avatar-icon svg.rail-icon'), id);
+    assert.ok(row(id).querySelector('.tool-avatar-icon svg.rail-icon'), id);
   }
   assert.equal(mod.toolIconName({ kind: 'app', icon: 'clipboard' }), 'jobs');
-  assert.equal(tile('jobboard').getAttribute('aria-label'), 'Job Board', 'an app tile is named by its title');
-  assert.equal(tile('jobboard').querySelector('.bot-status-dot'), null, 'an app has no service dot');
+  assert.equal(row('jobboard').getAttribute('aria-label'), 'Job Board', 'an app row is named by its title');
+  assert.equal(row('jobboard').querySelector('.bot-status-dot'), null, 'an app has no service dot');
   // 🎛️ (with its U+FE0F) is the sliders icon; 🏠 is the person's own emoji.
-  assert.ok(tile('rig-panel').querySelector('.tool-avatar-icon svg'));
-  const fam = tile('family-page').querySelector('.tool-avatar');
+  assert.ok(row('rig-panel').querySelector('.tool-avatar-icon svg'));
+  const fam = row('family-page').querySelector('.tool-avatar');
   assert.ok(fam.classList.contains('tool-avatar-glyph'));
   assert.equal(fam.textContent, '🏠');
   // A RAIL_ICONS name works as an icon too; an unknown word is just text.
@@ -148,11 +168,12 @@ test('tiles: the bot tile\'s shape, the theme\'s line icons, typed emoji kept', 
   assert.equal(mod.toolIconName({ kind: 'static', icon: 'nope' }), null);
   assert.equal(mod.toolIconName({ kind: 'static', icon: '' }), null);
   assert.equal(mod.toolGlyph({ kind: 'static' }).textContent, '🧩', 'no icon at all → the default glyph');
-  // The active tile is marked the way a bot tile is.
-  mod.openTool('benchmark');
-  assert.ok(tile('benchmark').classList.contains('active'));
-  assert.equal(tile('benchmark').getAttribute('aria-current'), 'page');
-  // The pane header shows the same glyph as the tile.
+  // The open tool's row is marked the way a bot tile is.
+  row('benchmark').click();
+  pointerClick(win, win.document.getElementById('tools-menu-btn'));
+  assert.ok(row('benchmark').classList.contains('active'));
+  assert.equal(row('benchmark').getAttribute('aria-current'), 'page');
+  // The pane header shows the same glyph as the row.
   assert.ok(win.document.querySelector('#tool-icon svg.rail-icon'));
 });
 
@@ -162,7 +183,7 @@ test('rail: a backend without /api/tools still shows the builtins', { skip: dom.
   const mod = await freshTools();
   wire(mod);
   await mod.loadTools();
-  assert.deepEqual(tileIds(win), ['deepseek-harness', 'studioforge-panel', 'mail-panel']);
+  assert.deepEqual(listedIds(win), ['deepseek-harness', 'studioforge-panel', 'mail-panel']);
 });
 
 test('Safe Mode: only safe static/url tools, never a builtin', { skip: dom.skip }, async () => {
@@ -170,7 +191,7 @@ test('Safe Mode: only safe static/url tools, never a builtin', { skip: dom.skip 
   const mod = await freshTools();
   wire(mod, { state: { decoy: true, selectedBotId: null } });
   await mod.loadTools();
-  assert.deepEqual(tileIds(win), ['family-page']);
+  assert.deepEqual(listedIds(win), ['family-page']);
   // And no refresh control, even if the tool had one.
   mod.openTool('family-page');
   assert.ok(win.document.getElementById('tool-refresh').classList.contains('hidden'));
@@ -184,7 +205,7 @@ test('opening a static tool: full-page, strict sandbox, served path, refresh sho
   const mod = await freshTools();
   const { rec, state } = wire(mod);
   await mod.loadTools();
-  win.document.querySelector('#tool-list [data-tool="benchmark"]').click();
+  pick(win, 'benchmark');
 
   const doc = win.document;
   assert.ok(doc.body.classList.contains('tool-full'), 'body.tool-full must be set');
@@ -197,7 +218,7 @@ test('opening a static tool: full-page, strict sandbox, served path, refresh sho
   assert.equal(doc.getElementById('tool-refresh').classList.contains('hidden'), false);
   assert.deepEqual(rec.closedWith, ['tool'], 'the builtin panes are closed first');
   assert.equal(state.selectedBotId, 'benchmark');
-  assert.ok(doc.querySelector('#tool-list [data-tool="benchmark"]').classList.contains('active'));
+  assert.ok(doc.getElementById('tools-menu-btn').classList.contains('active'), 'the Tools control is lit while a tool is open');
   assert.equal(win.location.hash, '#tool=benchmark');
   // Status lands asynchronously: "updated … ago".
   await new Promise((r) => setTimeout(r, 0));
@@ -284,12 +305,41 @@ test('url tool: loopback address loads only on the host, with allow-same-origin'
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups allow-same-origin');
 });
 
+test('url tool: a remote_url is framed off the host; the loopback url stays host-only', { skip: dom.skip }, async () => {
+  const withRemote = () => [200, { ...FIXTURE, tools: FIXTURE.tools.map((x) => (x.id === 'rig-panel'
+    ? { ...x, remote_url: 'https://host.tailnet.example:8452/' } : x)) }];
+  // Off the host: the remote address, same sandbox as any url tool.
+  let win = setup('https://host.tailnet.example/');
+  routes['GET /api/tools'] = withRemote;
+  let mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('rig-panel');
+  let frame = win.document.getElementById('tool-frame');
+  assert.equal(frame.getAttribute('src'), 'https://host.tailnet.example:8452/');
+  assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups allow-same-origin');
+  assert.ok(win.document.getElementById('tool-note').classList.contains('hidden'));
+  assert.equal(win.document.getElementById('tool-open').getAttribute('href'), 'https://host.tailnet.example:8452/');
+  // On the host: the plain url, remote or not.
+  win = setup('http://127.0.0.1:8765/');
+  routes['GET /api/tools'] = withRemote;
+  mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('rig-panel');
+  frame = win.document.getElementById('tool-frame');
+  assert.equal(frame.getAttribute('src'), 'http://127.0.0.1:8080/');
+  // And it survives a Settings save round-trip.
+  const rows = mod.serializeTools([{ id: 'x', kind: 'url', title: 'X', url: 'http://127.0.0.1:1/', remote_url: 'https://h.example/' }]);
+  assert.equal(rows[0].remote_url, 'https://h.example/');
+});
+
 test('builtin tiles call their own opener; selectBot-style ids are tool ids', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   const { rec } = wire(mod);
   await mod.loadTools();
-  win.document.querySelector('#tool-list [data-tool="deepseek-harness"]').click();
+  pick(win, 'deepseek-harness');
   assert.deepEqual(rec.opened, ['harness']);
   assert.equal(mod.isToolId('mail-panel'), true);
   assert.equal(mod.isToolId('benchmark'), true);
@@ -394,7 +444,7 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
   assert.ok(sent.tools.some((x) => x.id === 'grafana' && x.url === 'https://grafana.example/' && x.kind === 'url'));
   assert.equal(sent.tools[0].kind, 'builtin', 'builtins first on the wire');
   assert.equal(mod.toolsSettingsDirty(), false);
-  assert.ok(tileIds(win).includes('grafana'), 'the rail shows the saved tool');
+  assert.ok(listedIds(win).includes('grafana'), 'the Tools menu lists the saved tool');
 });
 
 // =============================================================================
@@ -416,7 +466,7 @@ test('an app opens full-page in the tool pane, framed from /apps/<id>/ with NO s
   const mod = await freshTools();
   const { rec, state } = wire(mod);
   await mod.loadTools();
-  win.document.querySelector('#tool-list [data-tool="jobboard"]').click();
+  pick(win, 'jobboard');
   const doc = win.document;
   const frame = doc.getElementById('tool-frame');
   assert.ok(doc.body.classList.contains('tool-full'));
@@ -457,7 +507,7 @@ test('Safe Mode: a non-safe app has no tile, no pane and owns no bot', { skip: d
   const mod = await freshTools();
   wire(mod, { state: { decoy: true, selectedBotId: null } });
   await mod.loadTools();
-  assert.equal(tileIds(win).includes('jobboard'), false);
+  assert.equal(listedIds(win).includes('jobboard'), false);
   assert.equal(mod.openTool('jobboard'), false);
   assert.equal(mod.appForBot('jobboard'), null);
 });
@@ -619,7 +669,7 @@ test('desktop rail: one Tools button, no tiles; its popup lists every enabled to
   const list = doc.getElementById('tool-list');
   assert.equal(list.hidden, false);
   assert.ok(list.classList.contains('tool-list-compact'));
-  assert.deepEqual(tileIds(win), [], 'no per-tool tiles on the desktop rail');
+  assert.deepEqual(railTiles(win), [], 'no per-tool tiles on the desktop rail');
   assert.equal(list.querySelector('.tool-list-head'), null, 'the button names itself — no heading');
   const btns = list.querySelectorAll('button');
   assert.equal(btns.length, 1, 'exactly one rail button');
@@ -772,7 +822,7 @@ test('desktop rail: the dot is worst-of, and the button hides with nothing to sh
   assert.equal(win.document.getElementById('tools-menu-btn'), null);
 });
 
-test('phone Bots page: tiles stay; parked bots get one "More bots" tile with only their rows', { skip: dom.skip }, async () => {
+test('phone Bots page: ONE quiet Tools row; it opens a bottom sheet with the tools, then the parked bots', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   wire(mod, { mobile: true });
@@ -781,17 +831,52 @@ test('phone Bots page: tiles stay; parked bots get one "More bots" tile with onl
   const doc = win.document;
   const list = doc.getElementById('tool-list');
   assert.equal(list.classList.contains('tool-list-compact'), false);
-  assert.ok(list.querySelector('.tool-list-head'));
-  assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
-  const more = doc.getElementById('tools-menu-btn');
+  assert.ok(list.classList.contains('tool-list-row'), 'drawn as a row under the roster');
+  assert.equal(list.querySelector('.tool-list-head'), null, 'no TOOLS heading');
+  assert.deepEqual(railTiles(win), [], 'no tool tiles at the bots\' size');
+  const btns = list.querySelectorAll('button');
+  assert.equal(btns.length, 1, 'exactly one control');
+  const btn = btns[0];
+  assert.equal(btn.id, 'tools-menu-btn');
+  assert.equal(btn.dataset.menu, 'tools');
+  assert.equal(btn.querySelector('.bot-name-label').textContent, 'Tools');
+  assert.ok(btn.querySelector('.tools-menu-chevron'));
+  pointerClick(win, btn);
+  const menu = doc.getElementById('tools-menu');
+  assert.equal(menu.hidden, false);
+  assert.ok(menu.classList.contains('tools-sheet'), 'the phone gets the sheet');
+  assert.ok(doc.body.classList.contains('tools-sheet-open'), 'the scrim is up');
+  assert.equal(menu.style.left, '', 'placed by CSS, not anchored to the row');
+  assert.equal(doc.getElementById('tools-menu-title').textContent, 'Tools');
+  assert.deepEqual(rowKeys(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page', 'bot:parked-1']);
+  assert.equal(doc.getElementById('tools-bots-sep').hidden, false);
+  // A tap on the scrim only dismisses: it must not reach what lies under it.
+  const under = doc.createElement('button');
+  doc.body.append(under);
+  let reached = false;
+  under.addEventListener('click', () => { reached = true; });
+  under.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+  assert.equal(menu.hidden, true);
+  assert.equal(reached, false, 'the scrim tap was swallowed');
+  assert.equal(doc.body.classList.contains('tools-sheet-open'), false);
+});
+
+test('phone with no tools but parked bots: the one row is "More bots"', { skip: dom.skip }, async () => {
+  const win = setup();
+  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: [] }];
+  const mod = await freshTools();
+  wire(mod, { mobile: true, flags: { harness: false, studioforge: false, mail: false } });
+  mod.setParkedBots([{ id: 'parked-1', name: 'Parked Pal', dot: '', open: () => {} }]);
+  await mod.loadTools();
+  const more = win.document.getElementById('tools-menu-btn');
   assert.equal(more.dataset.menu, 'bots');
   assert.equal(more.querySelector('.bot-name-label').textContent, 'More bots');
   pointerClick(win, more);
-  assert.deepEqual(rowKeys(win), ['bot:parked-1'], 'no tool rows on the phone — the tiles are right there');
-  assert.equal(doc.getElementById('tools-bots-sep').hidden, true);
+  assert.deepEqual(rowKeys(win), ['bot:parked-1']);
+  assert.equal(win.document.getElementById('tools-bots-sep').hidden, true);
 });
 
-test('crossing the breakpoint re-lays the rail out (tiles ⇄ one button)', { skip: dom.skip }, async () => {
+test('crossing the breakpoint re-lays the one control out (rail button ⇄ phone row)', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   let mobile = false;
@@ -804,15 +889,18 @@ test('crossing the breakpoint re-lays the rail out (tiles ⇄ one button)', { sk
   };
   mod.wireTools(d);
   await mod.loadTools();
-  assert.ok(win.document.getElementById('tools-menu-btn'));
+  const list = win.document.getElementById('tool-list');
+  assert.ok(list.classList.contains('tool-list-compact'));
   pointerClick(win, win.document.getElementById('tools-menu-btn'));
   mobile = true;
   win.dispatchEvent(new win.Event('resize'));
   assert.equal(win.document.getElementById('tools-menu').hidden, true, 'a resize closes the popup');
-  assert.ok(tileIds(win).length > 0, 'phone: tiles again');
+  assert.ok(list.classList.contains('tool-list-row'), 'phone: the row');
+  assert.deepEqual(railTiles(win), []);
   mobile = false;
   win.dispatchEvent(new win.Event('resize'));
-  assert.deepEqual(tileIds(win), []);
+  assert.ok(list.classList.contains('tool-list-compact'));
+  assert.deepEqual(railTiles(win), []);
 });
 
 // ===================== Tool layout state bridge (sw v134) =====================

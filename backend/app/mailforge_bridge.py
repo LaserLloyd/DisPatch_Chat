@@ -85,6 +85,17 @@ def launch_url(settings: Settings) -> str | None:
     return f"{base}/launch?k={key}"
 
 
+def remote_launch_url(settings: Settings) -> str | None:
+    """The launch URL through ``settings.mail_remote_url`` (the operator's
+    address for MailForge from off the host), or None when none is set.
+    Same key, same one-time semantics; only the origin differs."""
+    remote = (settings.mail_remote_url or "").rstrip("/")
+    key = _read_launcher_key(settings)
+    if not remote or not key:
+        return None
+    return f"{remote}/launch?k={key}"
+
+
 _probe_cache: dict[str, tuple[float, bool]] = {}
 
 

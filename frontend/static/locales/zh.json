@@ -950,7 +950,10 @@
     "down_text": "MailForge 控制台无响应。",
     "down_hint": "检查：systemctl --user status mailforge",
     "unreachable_text": "DisPatch 无法连接到 MailForge 控制台。",
-    "unreachable_hint": "检查：systemctl --user status mailforge"
+    "unreachable_hint": "检查：systemctl --user status mailforge",
+    "state_host_only": "仅在主机上运行",
+    "remote_text": "MailForge 只在主机本机上响应，因此无法在此设备上显示其控制台。",
+    "remote_hint": "请在主机上打开 DisPatch 阅读邮件，或为 MailForge 配置一个网络地址（DISPATCH_MAIL_REMOTE_URL）。"
   },
   "clients": {
     "name": "客户",

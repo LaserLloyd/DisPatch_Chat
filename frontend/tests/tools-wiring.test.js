@@ -96,10 +96,14 @@ test('index.html: one popover — #tools-menu is the Tools popup, labelled by it
   assert.doesNotMatch(MARKUP, /id="tools-btn"/);
 });
 
-test('app.css: the desktop rail collapses to one button; the phone grid rules stay', () => {
+test('app.css: the desktop rail collapses to one button; the phone gets one row and a bottom sheet', () => {
   const css = read('app.css').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(css, /\.tool-list\.tool-list-compact \{/);
-  assert.match(css, /\.app\[data-view="bots"\] \.tool-list \{[^}]*display: grid/);
+  // Phone: no tool grid at the bots' size any more — one row, one sheet.
+  assert.doesNotMatch(css, /\.app\[data-view="bots"\] \.tool-list \{[^}]*display: grid/);
+  assert.match(css, /\.app\[data-view="bots"\] \.tool-list\.tool-list-row \{[^}]*display: block/);
+  assert.match(css, /\.tools-menu\.tools-sheet \{[^}]*bottom: 0/);
+  assert.match(css, /body\.tools-sheet-open::after \{[^}]*position: fixed/);
   assert.match(css, /\.tools-menu \{[^}]*position: fixed/);
   assert.match(css, /\.tools-menu \{[^}]*overflow-y: auto/);
   for (const s of ['running', 'starting', 'error']) {
@@ -203,9 +207,12 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v134 (tool layout state bridge)', () => {
+test('the sw.js CACHE is local-chat-v135 (phone Tools row + sheet, remote tool URLs)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v135: the phone's Tools row + bottom sheet, Back closes a tool, remote
+  // addresses for host-bound tools (tools.js 7→8, main.js 110→111, app.css
+  // 90→91, index.html, locales).
   // v134: per-tool layout state bridge (tools.js 6→7, privacy.js 8→9,
   // pins.js 11→12, main.js 109→110, index.html).
   // v133: app hints keyed by app+thread, Safe-Mode guard on an app's
@@ -218,7 +225,7 @@ test('the sw.js CACHE is local-chat-v134 (tool layout state bridge)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v134');
+  assert.equal(m[1], 'local-chat-v135');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

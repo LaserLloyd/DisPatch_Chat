@@ -131,7 +131,14 @@ moved in the same day).
   is its popup: a row per enabled tool, then the parked bots under a rule. The
   separate ⌥ button is gone; `menubots.js` still decides which bots are
   parked. The phone Bots page keeps the tile grid, plus one "More bots" tile
-  when bots are parked. Keyboard: Enter/Space/arrows open, arrows/Home/End
+  when bots are parked. **Superseded again 2026-09-26 (sw v135):** the phone Bots page
+  lost its tile grid too — DisPatch is a chat app and the tools are add-ons, so
+  84 px tool tiles at the bots' own weight were the wrong emphasis. `#tool-list`
+  is the same one control there, drawn as a quiet full-width row under the
+  roster (`.tool-list-row`: 30 px line-icon tile, label, worst-of dot, chevron),
+  and `#tools-menu` opens as a bottom sheet (`.tools-sheet`, a scrim via
+  `body.tools-sheet-open`; a scrim tap only closes it). Tools first, then the
+  parked bots; with no tools the row is "More bots". Keyboard: Enter/Space/arrows open, arrows/Home/End
   move, Esc closes and refocuses the button, click-outside closes.
 - Generic pane `#tool-view` (one, reused): header row = icon+title, "updated N
   min ago" (from `status.mtime`), ↻ Refresh button when `has_refresh` (disabled
@@ -245,3 +252,26 @@ for every framed tool (static, url, app; never a builtin):
 - A separate `message` listener (`onToolStateMessage`); the app channel's
   origin rule is unchanged.
 
+
+
+## Addendum (2026-09-26): tools off the host
+
+A tool that points at a loopback service (the Harness Web UI on
+`127.0.0.1:3080`, MailForge's UI, a `kind: url` row on `127.0.0.1`) cannot load
+on a phone: "127.0.0.1" there is the phone. Each such surface now has an
+optional **remote address**, used only when DisPatch itself was not opened by a
+loopback name:
+
+| Surface | Remote address | Reported as |
+|---|---|---|
+| Harness Web UI | `DISPATCH_HARNESS_REMOTE_URL` | `/api/harness/status` `remote_url` |
+| StudioForge panel | `DISPATCH_STUDIOFORGE_REMOTE_URL` | `/api/studioforge/status` `remote_url` (+ CSP `connect-src`) |
+| Emails (MailForge) | `DISPATCH_MAIL_REMOTE_URL` (base; `/launch?k=` appended) | `/api/mail/status` `remote_launch_url` |
+| `kind: url` tools | `remote_url` on the row | `/api/tools` `remote_url` |
+
+The loopback rule is unchanged: with no remote address the pane shows its
+"host only" note instead of a frame that can never load, and an `http://`
+address is never framed under an `https://` page (mixed content). The mail
+route decides from the request's `Host` header and hands the loopback launch key
+only to a browser on the host (`host_only: true` otherwise). Nothing here
+exposes a service: that is the operator's `tailscale serve` (or proxy) decision.

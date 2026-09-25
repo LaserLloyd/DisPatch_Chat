@@ -975,7 +975,10 @@
     "down_text": "Das MailForge-Dashboard antwortet nicht.",
     "down_hint": "Prüfen: systemctl --user status mailforge",
     "unreachable_text": "DisPatch konnte das MailForge-Dashboard nicht erreichen.",
-    "unreachable_hint": "Prüfen: systemctl --user status mailforge"
+    "unreachable_hint": "Prüfen: systemctl --user status mailforge",
+    "state_host_only": "Läuft nur auf dem Host",
+    "remote_text": "MailForge antwortet nur auf dem Host selbst, daher kann das Dashboard auf diesem Gerät nicht angezeigt werden.",
+    "remote_hint": "Öffne DisPatch auf dem Host, um hier Mails zu lesen, oder gib MailForge eine Adresse in deinem Netzwerk (DISPATCH_MAIL_REMOTE_URL)."
   },
   "clients": {
     "name": "Kunden",

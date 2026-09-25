@@ -3569,8 +3569,8 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 
 /* ===================== Tools popup =====================
    The menu behind the desktop rail's one "Tools" button (js/tools.js): a row
-   per enabled tool, then the bots parked from Settings → Bots under a rule.
-   On the phone it holds only the parked bots. Fixed positioning so it escapes
+   per enabled tool, then the bots parked from Settings → Bots under a rule
+   (a bottom sheet on the phone, below). Fixed positioning so it escapes
    the rail's overflow clip; .menu above supplies the theme surface, border
    and shadow. */
 .tools-menu {
@@ -3581,6 +3581,37 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   min-width: 232px; max-width: min(320px, calc(100vw - 16px));
   max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain;
   z-index: 60; padding: 4px;
+}
+/* Its title is shown only as the phone sheet's header. */
+.tools-menu-title { display: none; }
+/* Phone: the same menu as a bottom sheet over a scrim (tools.js placeMenu adds
+   .tools-sheet and body.tools-sheet-open; a tap on the scrim only closes it).
+   It sits over the tab bar (z 90) and clears the gesture bar itself. */
+.tools-menu.tools-sheet {
+  left: 0; right: 0; bottom: 0; top: auto; inset-inline: 0;
+  min-width: 0; max-width: none; width: 100%;
+  max-height: min(75dvh, calc(100dvh - 48px));
+  border-radius: 16px 16px 0 0; border-bottom: none;
+  padding: 6px 8px calc(10px + env(safe-area-inset-bottom));
+  z-index: 96;
+}
+.tools-menu.tools-sheet .tools-menu-title {
+  display: block; padding: 14px 10px 8px; font-size: 13px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
+}
+.tools-menu.tools-sheet::before {
+  content: ""; display: block; width: 36px; height: 4px; margin: 4px auto 0;
+  border-radius: 2px; background: var(--border-strong);
+}
+.tools-menu.tools-sheet .tools-item { min-height: 52px; padding: 10px 12px; font-size: 15px; }
+.tools-menu.tools-sheet .tools-item .bot-avatar { width: 32px; height: 32px; min-width: 32px; border-radius: 9px; }
+body.tools-sheet-open::after {
+  content: ""; position: fixed; inset: 0; z-index: 95;
+  background: rgb(0 0 0 / .45);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tools-menu.tools-sheet { animation: tools-sheet-in .18s ease-out; }
+  @keyframes tools-sheet-in { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
 }
 .tools-item {
   display: flex; align-items: center; gap: 10px; width: 100%;
@@ -4013,17 +4044,45 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   :root[data-avatar-style="minimal"] .tool-btn .bot-name-label,
   :root[data-avatar-style="minimal"] .tool-btn.active .bot-name-label { color: var(--text-primary); }
 }
+/* The chevron is the phone row's "opens more" cue; the rail button has none. */
+.tools-menu-chevron { display: none; }
+/* Phone Bots page: DisPatch is a chat app, so the roster owns the page and the
+   tools are add-ons behind ONE quiet list row (2026-09-26 — a grid of 84px
+   tool tiles used to sit here with the bots' own visual weight). The row is
+   the same #tools-menu-btn the desktop rail draws; only its shape differs:
+   a 30px line-icon tile, the label, the worst-of dot and a chevron, in the
+   secondary text colour. It opens the menu as a bottom sheet (below). */
 @media (max-width: 768px) {
-  .app[data-view="bots"] .tool-list {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-    gap: 18px 10px; max-height: none; overflow: visible; flex: 0 0 auto;
-    padding: 14px 0 6px; align-items: start;
+  .app[data-view="bots"] .tool-list.tool-list-row {
+    display: block; max-height: none; overflow: visible; flex: 0 0 auto;
+    padding: 10px 0 4px; border-top: 1px solid var(--border-light);
   }
   .app[data-view="bots"] .tool-list[hidden] { display: none; }
-  .app[data-view="bots"] .tool-list-head { grid-column: 1 / -1; text-align: start; font-size: 11px; }
-  .app[data-view="bots"] .tool-btn { display: flex; flex-direction: column; align-items: center; gap: 8px; line-height: 1.2; padding: 6px 0; }
-  .app[data-view="bots"] .tool-btn .tool-avatar { width: 84px; height: 84px; border-radius: 20px; }
-  .app[data-view="bots"] .tool-btn .tool-glyph-text { font-size: 38px; }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn {
+    display: flex; flex-direction: row; align-items: center; gap: 12px;
+    width: 100%; min-height: 48px; padding: 8px 10px; line-height: 1.2;
+    border-radius: var(--radius-md); background: none;
+    color: var(--text-secondary); text-align: start;
+  }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn:active,
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn:focus-visible { background: var(--bg-hover); }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn .tool-avatar {
+    width: 30px; height: 30px; min-width: 30px; border-radius: 9px; box-shadow: none;
+  }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn .tool-avatar .rail-icon { width: 60%; height: 60%; }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn .bot-name-label {
+    flex: 1 1 auto; max-width: none; font-size: 14px; font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn .bot-status-dot {
+    position: static; inset: auto; transform: none; flex: none;
+  }
+  .app[data-view="bots"] .tool-list-row .tools-menu-chevron {
+    display: inline; flex: none; font-size: 20px; line-height: 1; color: var(--text-muted);
+  }
+  :root[dir="rtl"] .app[data-view="bots"] .tool-list-row .tools-menu-chevron { transform: scaleX(-1); }
+  /* No accent ring on the row: "a tool is open" is not a roster selection. */
+  .app[data-view="bots"] .tool-list-row .tools-menu-btn.active .tool-avatar { border-width: 1px; }
 }
 
 /* Phone: one header row, always. Title shrinks, the controls keep their

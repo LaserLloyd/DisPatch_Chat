@@ -421,7 +421,10 @@
     "down_hint": "確認: systemctl --user status mailforge",
     "unreachable_text": "DisPatch のバックエンドから MailForge のダッシュボードに到達できませんでした。",
     "unreachable_hint": "確認: systemctl --user status mailforge",
-    "state_unknown": "確認中…"
+    "state_unknown": "確認中…",
+    "state_host_only": "ホストでのみ稼働",
+    "remote_text": "MailForge はホスト上でしか応答しないため、この端末ではダッシュボードを表示できません。",
+    "remote_hint": "ホストで DisPatch を開いてメールを読むか、MailForge にネットワーク上のアドレスを設定してください（DISPATCH_MAIL_REMOTE_URL）。"
   },
   "clients": {
     "name": "クライアント",

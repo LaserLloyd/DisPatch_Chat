@@ -143,6 +143,9 @@ def _static(**kw):
     (_static(refresh={"argv": ["x"], "shell": True}), "refresh.shell"),
     ({"id": "web", "title": "W", "kind": "url", "url": "javascript:alert(1)"}, "url"),
     ({"id": "web", "title": "W", "kind": "url", "url": "ftp://x/"}, "url"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "http://x/", "remote_url": "javascript:x"}, "remote_url"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "http://x/", "remote_url": 7}, "remote_url"),
+    (_static(remote_url="https://x/"), "remote_url"),  # url tools only
     ({"id": "web", "title": "W", "kind": "url", "url": "http://x/", "refresh": {"argv": ["x"]}},
      "refresh"),                                     # refresh is static-only
     ({"id": "deepseek-harness", "kind": "builtin", "enabled": False, "title": "x"}, "title"),
@@ -959,3 +962,28 @@ def test_jobs_stay_decoy_blocked(tools_env):
     c = _decoy(make_client)
     ids = [t["id"] for t in c.get("/api/tools").json()["tools"]]
     assert "jobboard" not in ids
+
+
+# --------------------------------------------------------------------------- #
+# url tools: the optional off-host address (remote_url)
+# --------------------------------------------------------------------------- #
+
+def test_url_tool_remote_url_round_trips(tools_env):
+    make_client, _site = tools_env
+    c = _unlocked(make_client)
+    r = c.put("/api/tools", json={"tools": [
+        {"id": "rig", "title": "Rig", "kind": "url", "url": "http://127.0.0.1:3080/",
+         "remote_url": "https://host.tailnet.example:8452/"},
+        {"id": "plain", "title": "Plain", "kind": "url", "url": "https://example.org/"},
+    ]})
+    assert r.status_code == 200, r.text
+    t = tools.get_tool("rig")
+    assert t.remote_url == "https://host.tailnet.example:8452/"
+    assert t.to_manifest()["remote_url"] == "https://host.tailnet.example:8452/"
+    assert "remote_url" not in tools.get_tool("plain").to_manifest(), "absent stays absent in the file"
+    rows = {x["id"]: x for x in c.get("/api/tools").json()["tools"]}
+    assert rows["rig"]["remote_url"] == "https://host.tailnet.example:8452/"
+    assert rows["plain"]["remote_url"] is None
+    # GET's rows go straight back (null remote_url included).
+    assert c.put("/api/tools", json={"tools": list(rows.values())}).status_code == 200
+    assert tools.get_tool("rig").remote_url == "https://host.tailnet.example:8452/"
