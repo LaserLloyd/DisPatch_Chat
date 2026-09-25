@@ -66,6 +66,15 @@ export const APP_KEYS = [
   // an oversight; do not "fix" it by adding the key.
 ];
 
+// Key FAMILIES wiped the same way: every key that starts with one of these.
+// tools.js keeps a framed tool's saved layout (column choice, sort, filters)
+// under 'dispatch-tool-state:<tool id>' — one key per tool, so it cannot be
+// named in APP_KEYS. frontend/tests/privacy-keys.test.js resolves a
+// `setItem(SOMETHING_PREFIX + …)` writer against this list.
+export const APP_KEY_PREFIXES = [
+  'dispatch-tool-state:',     // tools.js (per-tool layout state bridge)
+];
+
 export function privacyEnabled() {
   try { return localStorage.getItem(FLAG_KEY) === '1'; } catch { return false; }
 }
@@ -92,6 +101,12 @@ async function purgeServiceWorker() {
 function wipeAppKeys() {
   try {
     for (const k of APP_KEYS) localStorage.removeItem(k);
+    const family = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && APP_KEY_PREFIXES.some((p) => k.startsWith(p))) family.push(k);
+    }
+    for (const k of family) localStorage.removeItem(k);
   } catch { /* storage disabled entirely — nothing to wipe */ }
 }
 

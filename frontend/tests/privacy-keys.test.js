@@ -30,7 +30,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { APP_KEYS, APP_DATABASES } from '../static/js/privacy.js';
+import { APP_KEYS, APP_KEY_PREFIXES, APP_DATABASES } from '../static/js/privacy.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
@@ -85,6 +85,7 @@ const STR = /^(['"`])([^'"`]*)\1$/;
  */
 function keysWrittenBy(src) {
   const found = new Set();
+  const prefixes = new Set();
   const consts = new Map();
   for (const m of src.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(['"`])([^'"`]*)\2\s*;/g)) {
     consts.set(m[1], m[3]);
@@ -95,6 +96,10 @@ function keysWrittenBy(src) {
     const lit = STR.exec(arg);
     if (lit) { found.add(lit[2]); continue; }
     if (consts.has(arg)) { found.add(consts.get(arg)); continue; }
+    // 5. a key family: setItem(SOMETHING_PREFIX + id, …) with the prefix a
+    //    const in the same file — must match privacy.js APP_KEY_PREFIXES.
+    const fam = /^([A-Za-z_$][\w$]*_PREFIX)\s*\+/.exec(arg);
+    if (fam && consts.has(fam[1])) { prefixes.add(consts.get(fam[1])); continue; }
     unresolved = true;                       // a parameter — fall back to (3)
   }
   if (unresolved) {
@@ -102,7 +107,7 @@ function keysWrittenBy(src) {
     const tagKey = /\bdata-storage-key="([^"]+)"/.exec(src);
     if (tagKey) found.add(tagKey[1]);
   }
-  return { keys: found, unresolved };
+  return { keys: found, prefixes, unresolved };
 }
 
 test('every localStorage key the app writes is wiped, or explicitly exempt', () => {
@@ -110,8 +115,11 @@ test('every localStorage key the app writes is wiped, or explicitly exempt', () 
   const orphans = [];
   const opaque = [];
   for (const [file, src] of sources()) {
-    const { keys, unresolved } = keysWrittenBy(src);
+    const { keys, prefixes, unresolved } = keysWrittenBy(src);
     if (unresolved && !keys.size) opaque.push(file);
+    for (const p of prefixes) {
+      if (!APP_KEY_PREFIXES.includes(p)) orphans.push(`${p}*  (key family written by ${file})`);
+    }
     for (const k of keys) {
       if (wiped.has(k) || EXEMPT.has(k)) continue;
       orphans.push(`${k}  (written by ${file})`);
@@ -200,3 +208,13 @@ test('APP_DATABASES names no database that nothing opens', () => {
     '\nAPP_DATABASES lists databases no code opens. Remove them — a padded list\n'
     + 'reads as a maintained one:\n' + phantom.join('\n'));
 });
+
+test('APP_KEY_PREFIXES names no key family that nothing writes, and the wipe clears a family', async () => {
+  const written = new Set();
+  for (const [, src] of sources()) for (const p of keysWrittenBy(src).prefixes) written.add(p);
+  assert.deepEqual(APP_KEY_PREFIXES.filter((p) => !written.has(p)), []);
+  assert.ok(written.has('dispatch-tool-state:'), 'tools.js writes the per-tool layout family');
+  assert.match(readFileSync(join(JS_DIR, 'privacy.js'), 'utf8'), /APP_KEY_PREFIXES\.some\(/,
+    'wipeAppKeys must clear every key of each family');
+});
+

@@ -494,6 +494,27 @@ Routes: `GET /api/tools`, `PUT /api/tools` (operator), `GET
 /api/tools/<id>/status`, `POST /api/tools/<id>/refresh` (operator), `GET
 /tools/<id>/{path}`. Full contract: `docs/design/2026-09-25-tools-plugins.md`.
 
+**Saved layout (tool state bridge).** A static page has no `localStorage` of
+its own (no `allow-same-origin`), so the shell keeps a small layout for it —
+the Benchmark Board saves its columns, sort and filters this way. The page
+talks to its parent with `postMessage`:
+
+| Direction | Message |
+|---|---|
+| page → shell | `{type: 'dispatch:tool-state', op: 'get'}` |
+| page → shell | `{type: 'dispatch:tool-state', op: 'set', state: <JSON, ≤ 16 KB>}` (`state: null` forgets it) |
+| shell → page | `{type: 'dispatch:tool-state', state: <object or null>}` — the reply to `get`, the ack of `set` (with `ok: false` and the still-stored state when the set was refused), and once after the frame's `load` |
+
+The shell stores it in the viewing browser's
+`localStorage['dispatch-tool-state:<tool id>']` — per viewer and per device,
+never sent to the server. It acts only on a message whose `source` is the
+tool frame on screen, from the origin that frame can have: `'null'` (the
+sandbox's opaque origin) for static and url tools, the url's own origin for a
+url tool, DisPatch's own origin for an app. Replies to an opaque-origin frame
+must be addressed to `'*'`, so a page should post nothing but its own layout.
+A page opened outside DisPatch gets no reply and should fall back to its own
+storage.
+
 #### The Job Board (`jobboard`)
 
 The Job Board is an **app** (`apps/jobboard/`, see [apps.md](apps.md)), not a

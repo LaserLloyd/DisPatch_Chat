@@ -814,3 +814,107 @@ test('crossing the breakpoint re-lays the rail out (tiles ⇄ one button)', { sk
   win.dispatchEvent(new win.Event('resize'));
   assert.deepEqual(tileIds(win), []);
 });
+
+// ===================== Tool layout state bridge (sw v134) =====================
+// A framed tool keeps its viewer's layout in the shell: a sandboxed static
+// page (opaque origin) has no localStorage of its own.
+
+function stateRecorder(win) {
+  const frame = win.document.getElementById('tool-frame');
+  const posted = [];
+  frame.contentWindow.postMessage = (msg, target) => posted.push([msg, target]);
+  return posted;
+}
+
+test('tool state: accepted from the static frame on screen (origin "null"), stored per tool, replied with "*"', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  const posted = stateRecorder(win);
+
+  appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'null' });
+  assert.deepEqual(posted, [[{ type: 'dispatch:tool-state', state: null }, '*']]);
+
+  const layout = { version: 1, columns: ['c:RP', 'notes'], sortKey: 'c:Tools', sortDir: -1, filters: { 'c:Programs': 70 } };
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: layout }, { origin: 'null' });
+  assert.deepEqual(JSON.parse(win.localStorage.getItem('dispatch-tool-state:benchmark')), layout);
+  assert.deepEqual(posted[1], [{ type: 'dispatch:tool-state', state: layout }, '*'], 'the set is acked with what is stored');
+
+  // Round trip: close, reopen — the frame's load pushes the stored layout once.
+  mod.closeTool();
+  mod.openTool('benchmark');
+  const again = stateRecorder(win);
+  win.document.getElementById('tool-frame').dispatchEvent(new win.Event('load'));
+  assert.deepEqual(again, [[{ type: 'dispatch:tool-state', state: layout }, '*']]);
+  appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'null' });
+  assert.deepEqual(again[1][0].state, layout);
+  assert.deepEqual(mod.readToolState('benchmark'), layout);
+  assert.equal(mod.readToolState('family-page'), null, 'state is per tool id');
+
+  // set null forgets it.
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: null }, { origin: 'null' });
+  assert.equal(win.localStorage.getItem('dispatch-tool-state:benchmark'), null);
+});
+
+test('tool state: a foreign source, a wrong origin or a closed pane is ignored; apps and url tools use their own origin', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  const posted = stateRecorder(win);
+  const set = { type: 'dispatch:tool-state', op: 'set', state: { evil: true } };
+
+  appMessage(win, set, { origin: 'null', source: win });                    // another window
+  appMessage(win, set, { origin: 'null', source: null });                   // no source
+  appMessage(win, set, { origin: 'http://evil.example' });                  // a static frame is never a real origin
+  appMessage(win, set, { origin: win.location.origin });                    // …not even ours
+  appMessage(win, { type: 'dispatch:tool-state', op: 'nope' }, { origin: 'null' });
+  assert.equal(win.localStorage.getItem('dispatch-tool-state:benchmark'), null);
+  assert.deepEqual(posted, []);
+
+  // An app frame: our origin only; the opaque origin is refused.
+  mod.openTool('jobboard');
+  const appPosted = stateRecorder(win);
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: { a: 1 } }, { origin: 'null' });
+  assert.equal(win.localStorage.getItem('dispatch-tool-state:jobboard'), null);
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: { a: 1 } });
+  assert.deepEqual(JSON.parse(win.localStorage.getItem('dispatch-tool-state:jobboard')), { a: 1 });
+  assert.deepEqual(appPosted, [[{ type: 'dispatch:tool-state', state: { a: 1 } }, win.location.origin]]);
+
+  // A url tool: its own origin (allow-same-origin) or 'null'; replies go to that origin.
+  mod.openTool('rig-panel');
+  const urlPosted = stateRecorder(win);
+  appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'http://127.0.0.1:8080' });
+  appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'http://127.0.0.1:9999' });
+  assert.deepEqual(urlPosted, [[{ type: 'dispatch:tool-state', state: null }, 'http://127.0.0.1:8080']]);
+
+  // Closed pane: a late message from the old frame does nothing.
+  mod.closeTool();
+  appMessage(win, set, { origin: 'null' });
+  assert.equal(win.localStorage.getItem('dispatch-tool-state:rig-panel'), null);
+});
+
+test('tool state: over 16 KB (or not JSON) is refused and the stored state kept', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  const posted = stateRecorder(win);
+  const small = { version: 1, text: 'ok' };
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: small }, { origin: 'null' });
+  const big = { version: 1, text: 'x'.repeat(mod.TOOL_STATE_MAX) };
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: big }, { origin: 'null' });
+  assert.deepEqual(JSON.parse(win.localStorage.getItem('dispatch-tool-state:benchmark')), small);
+  assert.deepEqual(posted[1], [{ type: 'dispatch:tool-state', state: small, ok: false }, '*']);
+  // just under the cap is fine
+  const edge = { t: 'y'.repeat(mod.TOOL_STATE_MAX - 20) };
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: edge }, { origin: 'null' });
+  assert.equal(JSON.parse(win.localStorage.getItem('dispatch-tool-state:benchmark')).t.length, mod.TOOL_STATE_MAX - 20);
+  // a set with no state at all is refused, not a wipe
+  appMessage(win, { type: 'dispatch:tool-state', op: 'set' }, { origin: 'null' });
+  assert.ok(win.localStorage.getItem('dispatch-tool-state:benchmark'));
+});

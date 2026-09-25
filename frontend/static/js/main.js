@@ -28,9 +28,9 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=7';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=8';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=11';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=12';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -43,7 +43,7 @@ import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
-} from './tools.js?v=6';
+} from './tools.js?v=7';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';

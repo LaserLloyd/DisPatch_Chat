@@ -203,9 +203,11 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v133 (apps review round)', () => {
+test('the sw.js CACHE is local-chat-v134 (tool layout state bridge)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v134: per-tool layout state bridge (tools.js 6→7, privacy.js 8→9,
+  // pins.js 11→12, main.js 109→110, index.html).
   // v133: app hints keyed by app+thread, Safe-Mode guard on an app's
   // open-thread (main.js 108→109, index.html).
   // v132: the desktop rail's Tools group is one button with a popup (tools.js
@@ -216,7 +218,7 @@ test('the sw.js CACHE is local-chat-v133 (apps review round)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v133');
+  assert.equal(m[1], 'local-chat-v134');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

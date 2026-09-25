@@ -959,6 +959,111 @@ function onAppMessage(ev) {
   }
 }
 
+// ===================== Tool layout state (static / url / app frames) =====================
+// A tool page may keep its viewer's layout (columns, sort, filters…) in the
+// shell. A static tool runs sandboxed WITHOUT allow-same-origin, so its own
+// localStorage throws; this bridge is the one thing the shell does for it:
+//
+//   frame → shell  {type:'dispatch:tool-state', op:'get'}
+//   frame → shell  {type:'dispatch:tool-state', op:'set', state:<JSON, ≤16 KB>}
+//   shell → frame  {type:'dispatch:tool-state', state:<obj|null>[, ok:false]}
+//                  in reply to `get`, as the ack of a `set` (ok:false = refused:
+//                  not JSON or over the cap; `state` is then what is still
+//                  stored), and once after the frame's `load` event.
+//
+// Stored in THIS browser's localStorage['dispatch-tool-state:<toolId>'] —
+// per viewer, per device, never sent to the server. Accepted ONLY from the
+// frame on screen (`event.source === frame.contentWindow`) of an open static,
+// url or app tool, and only with the origin that frame can have: 'null' (the
+// opaque origin of a sandboxed page) for static and url tools, the url's own
+// origin for a url tool (it has allow-same-origin), our own origin for an app.
+// A static frame's origin is opaque, so replies to it must target '*'; the
+// payload is the viewer's own layout, nothing else is ever posted to one.
+
+const TOOL_STATE_TYPE = 'dispatch:tool-state';
+const TOOL_STATE_PREFIX = 'dispatch-tool-state:';
+export const TOOL_STATE_MAX = 16 * 1024;
+
+/** The open tool, when it is one whose frame may keep state. */
+function stateTool() {
+  const tool = openId ? findTool(openId) : null;
+  return tool && (tool.kind === 'static' || tool.kind === 'url' || isApp(tool)) ? tool : null;
+}
+
+function urlOrigin(tool) {
+  const u = parseHttpUrl(tool.url);
+  return u ? u.origin : null;
+}
+
+function stateOriginOk(tool, origin) {
+  if (isApp(tool)) return origin === location.origin;
+  if (origin === 'null') return true;
+  return tool.kind === 'url' && origin === urlOrigin(tool);
+}
+
+/** Where a push to this tool's frame is addressed: an app → our origin, a url
+ *  tool → its own origin, a static tool (opaque origin) → '*'. */
+function stateTarget(tool, origin = null) {
+  if (isApp(tool)) return location.origin;
+  if (origin && origin !== 'null') return origin;
+  if (tool.kind === 'url' && origin !== 'null') return urlOrigin(tool) || '*';
+  return '*';
+}
+
+function byteLength(s) {
+  try { return new TextEncoder().encode(s).length; } catch { return s.length; }
+}
+
+/** The stored state for a tool id, or null (missing, unreadable, no storage). */
+export function readToolState(id) {
+  try {
+    const raw = window.localStorage.getItem(TOOL_STATE_PREFIX + id);
+    return raw == null ? null : JSON.parse(raw);
+  } catch { return null; }
+}
+
+/** Store (or, with null, forget) a tool's state. False = refused: undefined,
+ *  not JSON-serialisable, over TOOL_STATE_MAX bytes, or storage unavailable. */
+function writeToolState(id, state) {
+  try {
+    if (state === null) { window.localStorage.removeItem(TOOL_STATE_PREFIX + id); return true; }
+    const json = JSON.stringify(state);
+    if (typeof json !== 'string' || byteLength(json) > TOOL_STATE_MAX) return false;
+    window.localStorage.setItem(TOOL_STATE_PREFIX + id, json);
+    return true;
+  } catch { return false; }
+}
+
+function postToolState(tool, frame, target, extra = null) {
+  if (!frame || !frame.contentWindow) return false;
+  const msg = { type: TOOL_STATE_TYPE, state: readToolState(tool.id), ...(extra || {}) };
+  try { frame.contentWindow.postMessage(msg, target); return true; } catch { return false; }
+}
+
+/** Push the open tool's stored state to its frame (the frame's `load`). */
+export function pushToolState() {
+  const tool = stateTool();
+  const frame = $('tool-frame');
+  if (!tool || !frame || !frame.getAttribute('src')) return false;
+  return postToolState(tool, frame, stateTarget(tool));
+}
+
+function onToolStateMessage(ev) {
+  if (!deps) return;
+  const msg = ev.data;
+  if (!msg || typeof msg !== 'object' || msg.type !== TOOL_STATE_TYPE) return;
+  const tool = stateTool();
+  const frame = $('tool-frame');
+  if (!tool || !frame || !frame.contentWindow || ev.source !== frame.contentWindow) return;
+  if (!stateOriginOk(tool, ev.origin)) return;
+  const target = stateTarget(tool, ev.origin);
+  if (msg.op === 'get') { postToolState(tool, frame, target); return; }
+  if (msg.op === 'set') {
+    const ok = Object.prototype.hasOwnProperty.call(msg, 'state') && writeToolState(tool.id, msg.state);
+    postToolState(tool, frame, target, ok ? null : { ok: false });
+  }
+}
+
 /** `#tool=<id>` → that tool's id, or null. */
 export function hashToolId(hash = location.hash) {
   const m = /^#tool=([^&]+)$/.exec(hash || '');
@@ -1325,8 +1430,16 @@ export function wireTools(d) {
   // Apps: messages from the framed page, and the shell's theme/language
   // handed to it once it has loaded and whenever either changes.
   window.addEventListener('message', onAppMessage);
+  // Every framed tool: its saved layout, on request and once per load.
+  window.addEventListener('message', onToolStateMessage);
   const frame = $('tool-frame');
-  if (frame) frame.addEventListener('load', () => { if (openApp() && frame.getAttribute('src')) syncAppFrame(); });
+  if (frame) {
+    frame.addEventListener('load', () => {
+      if (!frame.getAttribute('src')) return;
+      if (openApp()) syncAppFrame();
+      pushToolState();
+    });
+  }
   document.addEventListener('ui-theme-change', () => syncAppFrame());
   // The Tools popup: its keys, and a re-layout when the viewport crosses the
   // phone breakpoint (one button ⇄ tile grid). Any resize moves the anchor,
@@ -1341,7 +1454,10 @@ export function wireTools(d) {
 
 // Test hook: reset module state between jsdom cases.
 export function _resetForTest() {
-  if (typeof window !== 'undefined') window.removeEventListener('message', onAppMessage);
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('message', onAppMessage);
+    window.removeEventListener('message', onToolStateMessage);
+  }
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', onOutside, true);
     document.removeEventListener('keydown', onEscape, true);

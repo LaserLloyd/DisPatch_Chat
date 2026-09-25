@@ -221,3 +221,27 @@ through `restorePrev()`. The `data-view="jobs"` screen, the hard-coded
 row stays in `config.yaml` with `visible: false`: the board's monthly threads
 belong to it, its avatar is the board's picture, `/api/jobs/find` 404s without
 it, and its `agent:` routes feedback turns to the search agent.
+
+## Addendum (2026-09-26): per-tool layout state (sw v134)
+
+A static tool is framed without `allow-same-origin`, so its page has an
+opaque origin and `localStorage` throws — the Benchmark Board could not
+remember a viewer's columns, sort or filters. `tools.js` now keeps that state
+for every framed tool (static, url, app; never a builtin):
+
+- page → shell `{type:'dispatch:tool-state', op:'get'}` or `{…, op:'set',
+  state}`; shell → page `{type:'dispatch:tool-state', state}` in reply to
+  `get`, as the ack of `set` (`ok:false` when refused), and once after the
+  frame's `load`.
+- Stored in `localStorage['dispatch-tool-state:<toolId>']` in the viewing
+  browser (per viewer, per device; the server never sees it). `state` must be
+  JSON-serialisable and ≤ 16 KB (UTF-8 of its JSON); `null` forgets it; a
+  refused set keeps the old value.
+- Accepted only when `event.source === frame.contentWindow` of the pane on
+  screen AND the origin is the one that frame can have: `'null'` for static
+  and url tools, the url's origin for a url tool, `location.origin` for an
+  app. Replies go to `'*'` for an opaque origin (the only target that reaches
+  it), else to that origin. Nothing else is ever posted to a static frame.
+- A separate `message` listener (`onToolStateMessage`); the app channel's
+  origin rule is unchanged.
+

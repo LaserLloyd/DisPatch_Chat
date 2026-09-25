@@ -2,7 +2,13 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v133';  // v133: apps review round — an app's
+const CACHE = 'local-chat-v134';  // v134: per-tool layout state bridge —
+  // a framed static/url/app tool may post {type:'dispatch:tool-state',
+  // op:'get'|'set'} and the shell keeps its state in this browser's
+  // localStorage (a sandboxed static page cannot); privacy mode wipes that
+  // key family (privacy.js APP_KEY_PREFIXES). tools.js 6→7, privacy.js 8→9
+  // (so pins.js 11→12), main.js 109→110, index.html.
+  // v133: apps review round — an app's
   // thread hint is keyed by app AND thread (app B's hook can no longer eat
   // app A's hint), and in Safe Mode an app's open-thread is ignored unless
   // the thread's bot is in the session's (safe) roster. main.js 108→109,
