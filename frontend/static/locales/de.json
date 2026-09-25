@@ -1033,6 +1033,7 @@
     "not_installed": "Auf dieser Installation nicht verfügbar",
     "more_bots": "Weitere Bots",
     "more_bots_aria": "In Einstellungen → Bots geparkte Bots",
+    "menu_aria": "Werkzeuge – Werkzeugmenü öffnen",
     "session_panel_title": "Werkzeugseite",
     "session_panel_body": "Diese Seite ist in voller Breite geöffnet. Wähle links einen Bot, um zu den Chats zurückzukehren.",
     "frame_title": "{name} — Werkzeugseite",

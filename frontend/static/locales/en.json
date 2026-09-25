@@ -1033,6 +1033,7 @@
     "not_installed": "Not available on this install",
     "more_bots": "More bots",
     "more_bots_aria": "Bots parked from Settings → Bots",
+    "menu_aria": "Tools — open the tools menu",
     "session_panel_title": "Tool page",
     "session_panel_body": "This page is open full-width. Pick a bot in the rail to go back to chats.",
     "frame_title": "{name} — tool page",

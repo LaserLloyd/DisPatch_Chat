@@ -2,7 +2,13 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v131';  // v131: apps — trusted add-on packages
+const CACHE = 'local-chat-v132';  // v132: the desktop rail's Tools group
+  // is ONE button with a popup menu (a row per tool, then the parked bots
+  // under a rule); the phone Bots page keeps the tile grid. The old ⌥
+  // parked-bots button is gone — its #tools-menu is now that popup.
+  // tools.js 5→6, menubots.js 1→2 (comments), main.js 107→108, app.css
+  // 89→90, index.html, every locale (tools.menu_aria).
+  // v131: apps — trusted add-on packages
   // under apps/<id>/ (docs/design/2026-09-25-apps.md). New module
   // js/app-sdk.js (in SHELL: main.js imports it); the Job Board moved out of
   // the shell into apps/jobboard/ (js/jobs.js and js/job-thread.js are gone

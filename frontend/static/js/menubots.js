@@ -1,4 +1,5 @@
-// Menu bots — move a bot off the avatar rail and into the ⌥ Tools menu.
+// Menu bots — move a bot off the avatar rail and into the Tools popup
+// (js/tools.js: under the tools on the desktop, a "More bots" tile on the phone).
 //
 // Why this is a DEVICE setting and not a roster field: it answers "where do I
 // want this on THIS screen", not "does this bot exist". The unlocked desktop
@@ -9,7 +10,7 @@
 // them an account preference. The server keeps owning whether a bot is visible
 // at all (`bot.visible`); this only chooses where a visible bot is drawn.
 //
-// SAFE MODE IGNORES THIS ENTIRELY. The ⌥ menu is unlocked-only, so honouring a
+// SAFE MODE IGNORES THIS ENTIRELY. Parked bots are unlocked-only, so honouring a
 // placement while locked would make a bot unreachable rather than merely moved
 // — the roster would silently lose an entry on a handed-over tablet. menuIds()
 // returns an empty set in Safe Mode, so every visible bot falls back to the
@@ -17,7 +18,7 @@
 
 const KEY = 'dispatch-menu-bots';
 
-/** Bot ids the user has moved into the ⌥ menu on this device. */
+/** Bot ids the user has moved into the Tools popup on this device. */
 export function menuBotIds() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || '[]');

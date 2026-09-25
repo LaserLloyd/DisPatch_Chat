@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=89" />
+  <link rel="stylesheet" href="/static/app.css?v=90" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -219,8 +219,10 @@
     <!-- Bot sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="bot-list" id="bot-list"></div>
-      <!-- Tools group (js/tools.js): the four builtin panes plus anything in
-           the data dir's tools.yaml, one tile each, under the roster. Its own
+      <!-- Tools group (js/tools.js): the builtin panes plus anything in the
+           data dir's tools.yaml, under the roster — one "Tools" button with a
+           popup (#tools-menu) on the desktop, one tile each on the phone's
+           Bots page. Its own
            container, not #bot-list, so renderSidebarInner's wipe of the roster
            and the drag-reorder indices never touch it. Hidden while empty. -->
       <nav class="tool-list" id="tool-list" aria-label="Tools" data-i18n-attr="aria-label=nav.tools" hidden></nav>
@@ -249,15 +251,17 @@
       </div>
     </nav>
 
-    <!-- ⌥ popover: bots parked here from Settings → Bots. It used to carry
-         the four operator tools too; those are tiles in the rail's Tools
-         group now (#tool-list), so this holds parked bots only and its button
-         shows only when something is parked. position:fixed so it escapes the
-         rail's overflow clip; lives outside #bot-list because
-         renderSidebarInner() clears that container on every repaint. -->
-    <div class="menu tools-menu" id="tools-menu" role="menu" aria-labelledby="tools-btn" hidden>
+    <!-- Tools popup (js/tools.js). On the desktop the rail's Tools group is
+         ONE button (#tools-menu-btn, drawn into #tool-list) and this is its
+         menu: a row per enabled tool, then — under the separator — the bots
+         parked from Settings → Bots. On the phone the tools are tiles on the
+         Bots page and this holds only the parked bots ("More bots" tile).
+         position:fixed so it escapes the rail's overflow clip; outside
+         #tool-list because renderToolRail() clears that on every repaint. -->
+    <div class="menu tools-menu" id="tools-menu" role="menu" aria-labelledby="tools-menu-btn" hidden>
+      <div id="tools-menu-tools" role="none"></div>
       <div class="tools-sep" id="tools-bots-sep" role="separator" hidden></div>
-      <div id="tools-bots"></div>
+      <div id="tools-bots" role="none"></div>
     </div>
 
     <!-- Thread list -->
@@ -1150,6 +1154,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=107"></script>
+  <script type="module" src="/static/js/main.js?v=108"></script>
 </body>
 </html>

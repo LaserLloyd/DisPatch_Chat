@@ -3567,16 +3567,20 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 }
 .viewer-error-text { color: var(--text-secondary); font-size: 14px; }
 
-/* ===================== Operator tools popover =====================
-   The DeepSeek Harness and StudioForge collapsed out of the rail into
-   one ⌥ entry. Fixed positioning so the menu escapes the rail's overflow clip;
-   .menu above supplies the surface, border and shadow. */
+/* ===================== Tools popup =====================
+   The menu behind the desktop rail's one "Tools" button (js/tools.js): a row
+   per enabled tool, then the bots parked from Settings → Bots under a rule.
+   On the phone it holds only the parked bots. Fixed positioning so it escapes
+   the rail's overflow clip; .menu above supplies the theme surface, border
+   and shadow. */
 .tools-menu {
   /* .menu pins itself with inset-inline-end/top for the in-panel popovers.
-     This one is positioned from script (openToolsMenu writes left/top), so
-     the inherited end/top anchors must be released or they fight it. */
+     This one is positioned from script (placeMenu writes left/top through the
+     CSSOM), so the inherited end/top anchors must be released or they fight it. */
   position: fixed; inset-inline-end: auto; right: auto; top: auto;
-  min-width: 232px; z-index: 60; padding: 4px;
+  min-width: 232px; max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain;
+  z-index: 60; padding: 4px;
 }
 .tools-item {
   display: flex; align-items: center; gap: 10px; width: 100%;
@@ -3585,20 +3589,27 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   color: inherit; cursor: pointer;
 }
 .tools-item:hover, .tools-item:focus-visible { background: var(--bg-hover); }
+.tools-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tools-item.active { background: var(--bg-hover); font-weight: 600; }
 .tools-item .bot-avatar {
-  width: 26px; height: 26px; min-width: 26px; font-size: 11px;
+  width: 26px; height: 26px; min-width: 26px; font-size: 11px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.tools-item .bot-avatar:hover { transform: none; }
+.tools-item .tool-avatar .rail-icon { width: 62%; height: 62%; }
+.tools-item .tool-avatar .tool-glyph-text { font-size: 15px; }
+.tools-item.active .tool-avatar-row { color: var(--accent-text); }
 /* The label takes the slack so every dot lines up on the trailing edge. */
-.tools-item-label { flex: 1 1 auto; }
-.tools-item .bot-status-dot { position: static; margin-inline-start: auto; }
-/* The rail button's own glyph reads as a control, not an agent's face. */
-.tools-avatar { font-size: 15px; }
-/* Divider between the operator tools and any bots parked in the menu. Hidden
-   by renderMenuBots when either half is empty, so the menu never opens with a
-   rule floating above or below nothing. */
+.tools-item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tools-item .bot-status-dot { position: static; margin-inline-start: auto; flex: none; }
+/* Divider between the tools and any bots parked in the menu. Hidden by
+   tools.js when either half is empty, so the menu never opens with a rule
+   floating above or below nothing. */
 .tools-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }
+/* Minimal avatars hide .bot-avatar and move .bot-status-dot for the RAIL; the
+   popup is not the rail — its rows keep their icon and an in-flow dot. */
+:root[data-avatar-style="minimal"] .tools-item .bot-avatar { display: inline-flex; }
+:root[data-avatar-style="minimal"] .tools-item .bot-status-dot { transform: none; }
 
 /* ============================================================================
    Clients tab ("WebBuilder") — Overview / Active / Completed / 12-step
@@ -3986,6 +3997,14 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
 /* Status dots keep the per-service colours main.js patches in place. */
 .tool-avatar-mini { font-family: inherit; font-size: 17px; }
 .tool-avatar-mini .tool-glyph-text { font-size: 17px; line-height: 1; }
+/* Desktop: the whole group is ONE rail button (.tools-menu-btn) — a bot tile
+   with the nine-dot line icon — so the roster keeps the rail. No heading
+   (the button's own tip names it) and no scroll box to cap. */
+.tool-list.tool-list-compact { max-height: none; overflow: visible; padding: 10px 0 2px; }
+/* The button's one dot: worst-of the builtin services (tools.js groupDotClass). */
+.terminal-sidedot.tools-sidedot.running { background: var(--success-text); }
+.terminal-sidedot.tools-sidedot.starting { background: var(--warning-text); }
+.terminal-sidedot.tools-sidedot.error { background: var(--error-text); }
 @media (min-width: 769px) {
   :root[data-avatar-style="minimal"] .tool-list { align-items: stretch; padding: 6px 8px 2px; gap: 4px; }
   :root[data-avatar-style="minimal"] .tool-list-head { padding-inline-start: 12px; }

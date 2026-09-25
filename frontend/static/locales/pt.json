@@ -1058,6 +1058,7 @@
     "not_installed": "Indisponível nesta instalação",
     "more_bots": "Mais bots",
     "more_bots_aria": "Bots guardados em Definições → Bots",
+    "menu_aria": "Ferramentas — abrir o menu de ferramentas",
     "session_panel_title": "Página da ferramenta",
     "session_panel_body": "Esta página está aberta em largura total. Escolha um bot na barra para voltar às conversas.",
     "frame_title": "{name} — página da ferramenta",

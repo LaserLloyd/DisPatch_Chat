@@ -1008,6 +1008,7 @@
     "not_installed": "此安装不可用",
     "more_bots": "更多机器人",
     "more_bots_aria": "从 设置 → 机器人 收起的机器人",
+    "menu_aria": "工具 — 打开工具菜单",
     "session_panel_title": "工具页面",
     "session_panel_body": "此页面以全宽打开。在侧栏中选择一个机器人即可返回聊天。",
     "frame_title": "{name} — 工具页面",

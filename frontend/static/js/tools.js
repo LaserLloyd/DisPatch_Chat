@@ -254,6 +254,52 @@ export async function loadTools() {
 }
 
 // ===================== Rail =====================
+//
+// Two layouts, one module (2026-09-25):
+//   phone Bots page — the rail IS the page, so every tool is its own tile in
+//                     the grid, exactly like a bot (tile() below).
+//   desktop         — the rail is a 72px column shared with the roster, and a
+//                     56px tile per tool pushed the bots off it. The group is
+//                     ONE rail button instead ("Tools", nine-dot line
+//                     icon, worst-of status dot) that opens a popup menu: one
+//                     row per enabled tool, then the bots parked from
+//                     Settings → Bots under a separator. That popup is the old
+//                     old ⌥ #tools-menu element, so there is one popover, not two.
+// On the phone the parked bots keep a single "More bots" tile that opens the
+// same popup with only their rows.
+
+// The nine-dot "apps launcher" glyph, drawn like every RAIL_ICONS entry
+// (24-unit box, currentColor stroke). Nine dots, not four squares: the theme
+// button right below it in the gear row is a four-square swatch, and two
+// look-alike glyphs stacked in one rail read as one control. Local to this
+// module on purpose: it is the one place that draws it, and util.js is
+// imported by a dozen modules whose cache-busting versions would all have to
+// move for one icon.
+const APPS_ICON = [
+  'M6 4.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M12 4.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M18 4.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z',
+  'M6 10.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M12 10.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M18 10.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z',
+  'M6 16.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M12 16.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z', 'M18 16.6a1.4 1.4 0 1 1 0 2.8a1.4 1.4 0 1 1 0-2.8Z',
+];
+
+// Bots parked in the menu (menubots.js decides WHICH; main.js hands the rows
+// over on every sidebar repaint via setParkedBots): [{id, name, avatar(),
+// dot, active, open()}]. Ignored in Safe Mode, like the placement itself.
+let parked = [];
+let menuOpen = false;
+let menuMode = 'tools';     // 'tools' (desktop: tools + parked) | 'bots' (phone: parked only)
+let lastCompact = null;
+
+/** main.js: the parked-bot rows for the popup. */
+export function setParkedBots(list) {
+  parked = Array.isArray(list) ? list.filter((b) => b && typeof b.id === 'string') : [];
+}
+
+/** Desktop layout? (the one-button rail). */
+function compactRail() { return !!deps && !deps.isMobile(); }
+
+function visibleParked() {
+  return deps && deps.state && deps.state.decoy ? [] : parked;
+}
 
 function tile(tool) {
   const st = deps.state;
@@ -274,11 +320,60 @@ function tile(tool) {
   btn.append(el('span', { class: 'bot-name-tip', text: title }));
   btn.append(el('span', { class: 'bot-name-label', text: title }));
   if (b) {
-    // The same per-service colours the ⌥ menu rows used; main.js's
-    // renderHarness/renderStudioForge keep patching this dot in place.
+    // Per-service colours; main.js's renderHarness/renderStudioForge keep
+    // patching this dot in place.
     const dot = deps.builtinDot(b.feature);
     if (dot) btn.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
   }
+  return btn;
+}
+
+/** The dot class for the one rail button: the builtins' worst-of state when
+ *  there is one, else the parked bots' (thinking beats unread). */
+function groupDotClass(mode, bots) {
+  if (mode === 'tools') {
+    const g = typeof deps.groupState === 'function' ? deps.groupState() : '';
+    if (g) return 'bot-status-dot terminal-sidedot tools-sidedot ' + g;
+  }
+  const d = bots.some((b) => b.dot === 'thinking') ? 'thinking'
+    : (bots.find((b) => b.dot) || {}).dot || '';
+  return 'bot-status-dot' + (d ? ' ' + d : '');
+}
+
+/** The rail button that opens the popup. `mode` 'tools' on the desktop,
+ *  'bots' for the phone's parked-bots tile. */
+function menuButton(entries, bots, mode) {
+  const st = deps.state;
+  const active = (mode === 'tools' && (entries.some((x) => x.id === st.selectedBotId) || !!openId))
+    || bots.some((b) => b.active);
+  const label = mode === 'tools' ? t('nav.tools') : t('tools.more_bots');
+  const btn = el('button', {
+    class: 'bot-btn tool-btn tools-menu-btn' + (active ? ' active' : ''),
+    id: 'tools-menu-btn',
+    type: 'button',
+    dataset: { menu: mode },
+    'aria-label': mode === 'tools' ? t('tools.menu_aria') : t('tools.more_bots_aria'),
+    'aria-haspopup': 'menu',
+    'aria-controls': 'tools-menu',
+    'aria-expanded': menuOpen ? 'true' : 'false',
+    draggable: 'false',
+  });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // e.detail 0 = keyboard (Enter/Space): land on the first row, as a menu
+    // button should. A pointer click leaves focus on the button.
+    toggleToolsMenu(mode, { focus: e.detail === 0 ? 'first' : null });
+  });
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      openToolsMenu(mode, { focus: e.key === 'ArrowDown' ? 'first' : 'last' });
+    }
+  });
+  btn.append(el('span', { class: 'bot-avatar tool-avatar tool-avatar-icon', 'aria-hidden': 'true' }, [railIcon(APPS_ICON)]));
+  btn.append(el('span', { class: 'bot-name-tip', text: label }));
+  btn.append(el('span', { class: 'bot-name-label', text: label }));
+  btn.append(el('span', { class: groupDotClass(mode, bots) }));
   return btn;
 }
 
@@ -288,27 +383,236 @@ export function renderToolRail() {
   const host = $('tool-list');
   if (!host || !deps) return;
   const entries = railEntries();
-  const focused = document.activeElement && host.contains(document.activeElement)
-    ? document.activeElement.closest('[data-tool]')?.dataset.tool : null;
+  const bots = visibleParked();
+  const compact = compactRail();
+  lastCompact = compact;
+  const ae = document.activeElement;
+  const focused = ae && host.contains(ae)
+    ? (ae.id === 'tools-menu-btn' ? '#menu' : ae.closest('[data-tool]')?.dataset.tool) : null;
   host.textContent = '';
-  host.hidden = entries.length === 0;
-  if (!entries.length) return;
-  host.append(el('div', { class: 'tool-list-head', 'aria-hidden': 'true', text: t('nav.tools') }));
-  for (const tool of entries) host.append(tile(tool));
-  if (focused) {
+  host.classList.toggle('tool-list-compact', compact);
+  const mode = compact ? 'tools' : 'bots';
+  const empty = !entries.length && !bots.length;
+  host.hidden = empty;
+  if (empty) { closeToolsMenu(); return; }
+  if (compact) {
+    host.append(menuButton(entries, bots, mode));
+  } else {
+    if (entries.length) {
+      host.append(el('div', { class: 'tool-list-head', 'aria-hidden': 'true', text: t('nav.tools') }));
+      for (const tool of entries) host.append(tile(tool));
+    }
+    if (bots.length) host.append(menuButton([], bots, mode));
+  }
+  // A menu opened in the other layout (or for rows that are gone) closes;
+  // an open one is repainted in place so its dots and active row stay true.
+  if (menuOpen) {
+    if (menuMode !== mode || !$('tools-menu-btn')) closeToolsMenu();
+    else paintMenu();
+  }
+  if (focused === '#menu') {
+    const b = $('tools-menu-btn');
+    if (b) b.focus({ preventScroll: true });
+  } else if (focused) {
     const again = host.querySelector(`[data-tool="${CSS.escape ? CSS.escape(focused) : focused}"]`);
     if (again) again.focus({ preventScroll: true });
   }
 }
 
-/** The rail dot for a builtin, for main.js to patch in place. */
+/** main.js: repaint just the rail button's worst-of dot (a service changed). */
+export function paintToolsGroupDot() {
+  const btn = $('tools-menu-btn');
+  if (!btn || !deps) return;
+  const dot = btn.querySelector('.bot-status-dot');
+  if (dot) dot.className = groupDotClass(btn.dataset.menu, visibleParked());
+}
+
+/** The dot for a builtin, for main.js to patch in place: its phone tile, or
+ *  its row in the open popup. */
 export function railToolDot(id) {
-  const host = $('tool-list');
-  if (!host) return null;
-  for (const b of host.querySelectorAll('[data-tool]')) {
-    if (b.dataset.tool === id) return b.querySelector('.bot-status-dot');
+  for (const hostId of ['tool-list', 'tools-menu-tools']) {
+    const host = $(hostId);
+    if (!host) continue;
+    for (const b of host.querySelectorAll('[data-tool]')) {
+      if (b.dataset.tool === id) return b.querySelector('.bot-status-dot');
+    }
   }
   return null;
+}
+
+// ----- The popup -----
+
+function menuRow(tool) {
+  const st = deps.state;
+  const b = tool.kind === 'builtin' ? builtinOf(tool) : null;
+  const title = toolTitle(tool);
+  const active = st.selectedBotId === tool.id;
+  const row = el('button', {
+    class: 'tools-item' + (active ? ' active' : ''),
+    type: 'button',
+    role: 'menuitem',
+    tabindex: '-1',
+    dataset: { tool: tool.id },
+    'aria-label': b ? t(b.aria) : title,
+  });
+  if (active) row.setAttribute('aria-current', 'page');
+  row.addEventListener('click', () => { closeToolsMenu(); openTool(tool.id); });
+  row.append(toolTile(tool, 'tool-avatar-row'));
+  row.append(el('span', { class: 'tools-item-label', text: title }));
+  if (b) {
+    const dot = deps.builtinDot(b.feature);
+    if (dot) row.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
+  }
+  return row;
+}
+
+function botRow(bot) {
+  const row = el('button', {
+    class: 'tools-item' + (bot.active ? ' active' : ''),
+    type: 'button',
+    role: 'menuitem',
+    tabindex: '-1',
+    dataset: { bot: bot.id },
+  });
+  row.addEventListener('click', () => { closeToolsMenu(); if (typeof bot.open === 'function') bot.open(); });
+  const av = typeof bot.avatar === 'function' ? bot.avatar() : null;
+  if (av) row.append(av);
+  row.append(el('span', { class: 'tools-item-label', text: bot.name || bot.id }));
+  row.append(el('span', { class: 'bot-status-dot' + (bot.dot ? ' ' + bot.dot : '') }));
+  return row;
+}
+
+function menuItems() {
+  const menu = $('tools-menu');
+  return menu ? [...menu.querySelectorAll('[role="menuitem"]')] : [];
+}
+
+/** Fill the popup for the current mode, keeping keyboard focus on the same row. */
+function paintMenu() {
+  const menu = $('tools-menu');
+  const toolsHost = $('tools-menu-tools');
+  const botsHost = $('tools-bots');
+  if (!menu || !toolsHost || !botsHost) return 0;
+  const ae = document.activeElement;
+  const keep = ae && menu.contains(ae) ? { tool: ae.dataset.tool, bot: ae.dataset.bot } : null;
+  toolsHost.textContent = '';
+  botsHost.textContent = '';
+  if (menuMode === 'tools') for (const tool of railEntries()) toolsHost.append(menuRow(tool));
+  for (const bot of visibleParked()) botsHost.append(botRow(bot));
+  const sep = $('tools-bots-sep');
+  if (sep) sep.hidden = !(toolsHost.childElementCount && botsHost.childElementCount);
+  menu.setAttribute('aria-label', menuMode === 'tools' ? t('nav.tools') : t('tools.more_bots'));
+  if (keep) {
+    const again = menuItems().find((r) => (keep.tool && r.dataset.tool === keep.tool) || (keep.bot && r.dataset.bot === keep.bot));
+    if (again) again.focus({ preventScroll: true });
+  }
+  return toolsHost.childElementCount + botsHost.childElementCount;
+}
+
+/** Anchor the fixed popup beside the button, on the rail's inline-end side,
+ *  clamped to the viewport (RTL: the rail is on the right, so open leftwards). */
+function placeMenu(menu, btn) {
+  const r = btn.getBoundingClientRect();
+  const mw = menu.offsetWidth || 240;
+  const mh = menu.offsetHeight || 200;
+  const vw = window.innerWidth || 1024;
+  const vh = window.innerHeight || 768;
+  const rtl = document.documentElement.dir === 'rtl';
+  const beside = rtl ? r.left - mw - 8 : r.right + 8;
+  const fits = rtl ? beside >= 8 : beside + mw <= vw - 8;
+  const left = fits ? beside : Math.min(r.left, vw - mw - 8);
+  // CSSOM, not a style="" attribute: the page's CSP blocks the latter.
+  menu.style.left = Math.max(8, Math.min(left, vw - mw - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(r.top, vh - mh - 8)) + 'px';
+}
+
+function focusItem(which) {
+  const items = menuItems();
+  if (!items.length) return;
+  const i = which === 'last' ? items.length - 1 : 0;
+  items[i].focus({ preventScroll: true });
+}
+
+export function openToolsMenu(mode = menuMode, { focus = null } = {}) {
+  const menu = $('tools-menu');
+  const btn = $('tools-menu-btn');
+  if (!menu || !btn || !deps) return false;
+  menuMode = mode;
+  if (!paintMenu()) { closeToolsMenu(); return false; }   // never an empty menu
+  menu.hidden = false;
+  menuOpen = true;
+  btn.setAttribute('aria-expanded', 'true');
+  placeMenu(menu, btn);
+  // Capture phase, added on open and removed on close: sees the click before
+  // any handler on the way down can stop it.
+  document.addEventListener('click', onOutside, true);
+  // Escape from anywhere (focus may still be on the button after a pointer
+  // click), not only from inside the menu.
+  document.addEventListener('keydown', onEscape, true);
+  if (focus) focusItem(focus);
+  return true;
+}
+
+/** Close the popup. `focusButton` hands keyboard focus back to the rail button. */
+export function closeToolsMenu({ focusButton = false } = {}) {
+  const wasOpen = menuOpen;
+  menuOpen = false;
+  document.removeEventListener('click', onOutside, true);
+  document.removeEventListener('keydown', onEscape, true);
+  const menu = $('tools-menu');
+  if (menu) menu.hidden = true;
+  const btn = $('tools-menu-btn');
+  if (btn) {
+    btn.setAttribute('aria-expanded', 'false');
+    if (wasOpen && focusButton) btn.focus({ preventScroll: true });
+  }
+}
+
+export function toggleToolsMenu(mode = menuMode, opts = {}) {
+  if (menuOpen) { closeToolsMenu(); return false; }
+  return openToolsMenu(mode, opts);
+}
+
+export function toolsMenuOpen() { return menuOpen; }
+
+function onOutside(e) {
+  const btn = $('tools-menu-btn');
+  const menu = $('tools-menu');
+  // position:fixed puts the menu outside the button's box — check both. Their
+  // own listeners handle clicks on them.
+  if ((btn && btn.contains(e.target)) || (menu && menu.contains(e.target))) return;
+  closeToolsMenu();
+}
+
+function onEscape(e) {
+  if (!menuOpen || e.key !== 'Escape') return;
+  e.preventDefault();
+  e.stopPropagation();     // one Escape closes the popup, not the pane under it too
+  closeToolsMenu({ focusButton: true });
+}
+
+function onMenuKey(e) {
+  if (!menuOpen) return;
+  const items = menuItems();
+  const i = items.indexOf(document.activeElement);
+  switch (e.key) {
+    case 'Tab':
+      closeToolsMenu({ focusButton: true });
+      return;
+    case 'ArrowDown':
+      e.preventDefault();
+      if (items.length) items[(i + 1) % items.length].focus();
+      return;
+    case 'ArrowUp':
+      e.preventDefault();
+      if (items.length) items[(i - 1 + items.length) % items.length].focus();
+      return;
+    case 'Home':
+      e.preventDefault(); focusItem('first'); return;
+    case 'End':
+      e.preventDefault(); focusItem('last'); return;
+    default:
+  }
 }
 
 // ===================== Pane =====================
@@ -1000,6 +1304,8 @@ export async function saveToolsSettings() {
  *    closeToolPanes   main.js's pane closer (called with 'tool' before opening)
  *    builtinOn(f)     is that builtin's feature available right now?
  *    builtinDot(f)    the status-dot class for that builtin ('' = no dot)
+ *    groupState()     worst-of the builtin services ('error'|'starting'|'running'|'')
+ *                     for the desktop Tools button's dot
  *    restoreView(p)   put the selection {botId, threadId} back after a close
  *    paintPlaceholder(title, glyph)  the thread-list stand-in while a tool is up
  *                     (glyph is a node: toolGlyph()'s line icon or typed emoji)
@@ -1022,11 +1328,25 @@ export function wireTools(d) {
   const frame = $('tool-frame');
   if (frame) frame.addEventListener('load', () => { if (openApp() && frame.getAttribute('src')) syncAppFrame(); });
   document.addEventListener('ui-theme-change', () => syncAppFrame());
+  // The Tools popup: its keys, and a re-layout when the viewport crosses the
+  // phone breakpoint (one button ⇄ tile grid). Any resize moves the anchor,
+  // so an open popup closes rather than floating somewhere stale.
+  const menu = $('tools-menu');
+  if (menu) menu.addEventListener('keydown', onMenuKey);
+  window.addEventListener('resize', () => {
+    if (menuOpen) closeToolsMenu();
+    if (deps && compactRail() !== lastCompact) renderToolRail();
+  });
 }
 
 // Test hook: reset module state between jsdom cases.
 export function _resetForTest() {
   if (typeof window !== 'undefined') window.removeEventListener('message', onAppMessage);
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', onOutside, true);
+    document.removeEventListener('keydown', onEscape, true);
+  }
   deps = null; tools = null; toolsPath = ''; openId = null; prev = null;
+  parked = []; menuOpen = false; menuMode = 'tools'; lastCompact = null;
   refreshing = false; draft = null; draftDirty = false; addOpen = false; settingsHost = null;
 }

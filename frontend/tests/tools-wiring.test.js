@@ -70,9 +70,41 @@ test('no leftover hardcoded tool rows in the ⌥ menu', () => {
   assert.match(MARKUP, /id="tools-bots"/);
 });
 
-test('the ⌥ button shows only when parked bots exist', () => {
+test('the ⌥ button is gone: parked bots are rows in the ONE Tools popup', () => {
   const body = fnBody(MAIN, 'renderSidebarInner');
-  assert.match(body, /const toolsAvailable = !state\.decoy && menuBots\.length > 0;/);
+  assert.doesNotMatch(body, /tools-btn|toolsAvailable/, 'no separate ⌥ rail button any more');
+  assert.match(body, /setParkedBots\(parkedBotRows\(menuBots, thinkingBots, unreadBots\)\)/);
+  assert.ok(body.indexOf('setParkedBots(') < body.indexOf('renderToolRail()'), 'rows handed over before the rail paints');
+  for (const fn of ['toggleToolsMenu', 'openToolsMenu', 'closeToolsMenu', 'wireToolsMenu', 'renderMenuBots']) {
+    assert.doesNotMatch(MAIN, new RegExp(`function\\s+${fn}\\s*\\(`), `main.js must not define ${fn} (tools.js owns the popup)`);
+  }
+  // menubots.js stays the data source for WHICH bots are parked.
+  assert.match(MAIN, /from '\.\/menubots\.js\?v=\d+'/);
+  assert.match(MAIN, /groupState: toolsGroupState/, 'the desktop button gets the worst-of dot');
+});
+
+test('index.html: one popover — #tools-menu is the Tools popup, labelled by its button', () => {
+  const menus = MARKUP.match(/id="tools-menu"/g) || [];
+  assert.equal(menus.length, 1);
+  const tag = /<div[^>]*id="tools-menu"[^>]*>/.exec(MARKUP)[0];
+  assert.match(tag, /role="menu"/);
+  assert.match(tag, /aria-labelledby="tools-menu-btn"/);
+  assert.match(tag, /\shidden[\s>]/);
+  const inner = MARKUP.slice(MARKUP.indexOf(tag));
+  assert.ok(inner.indexOf('id="tools-menu-tools"') < inner.indexOf('id="tools-bots-sep"')
+    && inner.indexOf('id="tools-bots-sep"') < inner.indexOf('id="tools-bots"'), 'tools, rule, parked bots — in that order');
+  assert.doesNotMatch(MARKUP, /id="tools-btn"/);
+});
+
+test('app.css: the desktop rail collapses to one button; the phone grid rules stay', () => {
+  const css = read('app.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.tool-list\.tool-list-compact \{/);
+  assert.match(css, /\.app\[data-view="bots"\] \.tool-list \{[^}]*display: grid/);
+  assert.match(css, /\.tools-menu \{[^}]*position: fixed/);
+  assert.match(css, /\.tools-menu \{[^}]*overflow-y: auto/);
+  for (const s of ['running', 'starting', 'error']) {
+    assert.match(css, new RegExp(`\\.terminal-sidedot\\.tools-sidedot\\.${s} \\{`), `group dot colour for ${s}`);
+  }
 });
 
 test('every tool opener toggles body.tool-full (and nothing uses terminal-active)', () => {
@@ -171,15 +203,18 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v131 (apps: app-sdk.js, the Job Board left the shell)', () => {
+test('the sw.js CACHE is local-chat-v132 (desktop Tools button + popup)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v132: the desktop rail's Tools group is one button with a popup (tools.js
+  // 5→6, menubots.js 1→2, main.js 107→108, app.css 89→90, index.html, every
+  // locale).
   // v130: themed tool tiles + the Job Board as a builtin tool. v131: apps —
   // js/app-sdk.js joins SHELL, js/jobs.js + js/job-thread.js leave it, api.js
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v131');
+  assert.equal(m[1], 'local-chat-v132');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

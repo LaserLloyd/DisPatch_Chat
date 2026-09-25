@@ -123,8 +123,16 @@ moved in the same day).
   colours), active state when open. Clicking a builtin calls its existing
   opener; clicking static/url opens the generic pane.
 - The ⌥ `#tools-menu` popover keeps ONLY the parked-bots rows (`menubots.js`);
-  its four hardcoded tool rows go away (the rail group replaces them). Keep
-  `syncToolsMenuRows`' status-dot logic by pointing it at the rail tiles.
+  its four hardcoded tool rows go away (the rail group replaces them).
+  **Superseded 2026-09-25 (sw v132):** on the desktop the tile-per-tool group
+  crowded the roster off the rail, so `#tool-list` there is ONE "Tools" button
+  (`#tools-menu-btn`, bot-tile geometry, nine-dot line icon, worst-of
+  `toolsGroupState` dot, `.active` while a tool pane is open) and `#tools-menu`
+  is its popup: a row per enabled tool, then the parked bots under a rule. The
+  separate ⌥ button is gone; `menubots.js` still decides which bots are
+  parked. The phone Bots page keeps the tile grid, plus one "More bots" tile
+  when bots are parked. Keyboard: Enter/Space/arrows open, arrows/Home/End
+  move, Esc closes and refocuses the button, click-outside closes.
 - Generic pane `#tool-view` (one, reused): header row = icon+title, "updated N
   min ago" (from `status.mtime`), ↻ Refresh button when `has_refresh` (disabled
   while `refreshing`; on completion reloads the iframe; a non-zero rc shows the

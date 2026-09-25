@@ -1058,6 +1058,7 @@
     "not_installed": "Indisponible sur cette installation",
     "more_bots": "Autres bots",
     "more_bots_aria": "Bots rangés depuis Réglages → Bots",
+    "menu_aria": "Outils — ouvrir le menu des outils",
     "session_panel_title": "Page d'outil",
     "session_panel_body": "Cette page est ouverte en pleine largeur. Choisissez un bot dans la barre pour revenir aux discussions.",
     "frame_title": "{name} — page d'outil",

@@ -56,7 +56,10 @@ async function freshTools() {
   return await import(`../static/js/tools.js?v=${Math.random()}`);
 }
 
-/** Wire tools.js the way main.js does, with recorders instead of the app. */
+/** Wire tools.js the way main.js does, with recorders instead of the app.
+ *  `over.mobile` picks the layout: true (the default here) = the phone Bots
+ *  page, one tile per tool — what most of these cases inspect; false = the
+ *  desktop rail, ONE Tools button with a popup (the "desktop rail" cases). */
 function wire(mod, over = {}) {
   const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [] };
   const state = { decoy: false, selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
@@ -75,7 +78,8 @@ function wire(mod, over = {}) {
     builtinDot: (f) => (f === 'harness' ? 'harness-sidedot harness-running' : ''),
     restoreView: (p) => rec.restored.push(p),
     renderSidebar: () => { rec.sidebar += 1; mod.renderToolRail(); },
-    isMobile: () => false,
+    isMobile: () => (over.mobile === undefined ? true : !!over.mobile),
+    groupState: () => (over.groupState === undefined ? 'running' : over.groupState),
     navigate: (v) => rec.navigated.push(v),
     toast: (m, err) => rec.toasts.push([m, !!err]),
     isBotId: (id) => id === 'main',
@@ -83,6 +87,7 @@ function wire(mod, over = {}) {
   return { rec, state };
 }
 
+// The phone layout's tiles (wire()'s default).
 const tileIds = (win) => [...win.document.querySelectorAll('#tool-list [data-tool]')].map((b) => b.dataset.tool);
 
 test('rail: builtins first (feature-gated), then apps, then enabled static/url tools', { skip: dom.skip }, async () => {
@@ -594,4 +599,218 @@ test('an app whose backend did not mount says so in the pane', { skip: dom.skip 
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(win.document.getElementById('tool-error').classList.contains('hidden'), false);
+});
+
+// =============================================================================
+// Desktop rail: ONE Tools button + a popup menu (the phone keeps the tiles).
+// =============================================================================
+
+const menuRows = (win) => [...win.document.querySelectorAll('#tools-menu [role="menuitem"]')];
+const rowKeys = (win) => menuRows(win).map((r) => r.dataset.tool || ('bot:' + r.dataset.bot));
+const key = (win, target, k) => target.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const pointerClick = (win, target) => target.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+
+test('desktop rail: one Tools button, no tiles; its popup lists every enabled tool', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: false });
+  await mod.loadTools();
+  const doc = win.document;
+  const list = doc.getElementById('tool-list');
+  assert.equal(list.hidden, false);
+  assert.ok(list.classList.contains('tool-list-compact'));
+  assert.deepEqual(tileIds(win), [], 'no per-tool tiles on the desktop rail');
+  assert.equal(list.querySelector('.tool-list-head'), null, 'the button names itself — no heading');
+  const btns = list.querySelectorAll('button');
+  assert.equal(btns.length, 1, 'exactly one rail button');
+  const btn = btns[0];
+  assert.equal(btn.id, 'tools-menu-btn');
+  assert.ok(btn.classList.contains('bot-btn') && btn.classList.contains('tool-btn'), 'bot-tile geometry');
+  assert.equal(btn.getAttribute('aria-haspopup'), 'menu');
+  assert.equal(btn.getAttribute('aria-controls'), 'tools-menu');
+  assert.equal(btn.getAttribute('aria-expanded'), 'false');
+  assert.equal(btn.getAttribute('aria-label'), 'Tools — open the tools menu');
+  assert.equal(btn.querySelector('.bot-name-tip').textContent, 'Tools');
+  assert.ok(btn.querySelector('.tool-avatar-icon svg.rail-icon'), 'a line icon, not a glyph');
+  assert.ok(btn.querySelector('.bot-status-dot.tools-sidedot.running'), 'worst-of dot from groupState');
+  const menu = doc.getElementById('tools-menu');
+  assert.equal(menu.hidden, true);
+
+  pointerClick(win, btn);
+  assert.equal(menu.hidden, false);
+  assert.equal(btn.getAttribute('aria-expanded'), 'true');
+  assert.equal(menu.getAttribute('role'), 'menu');
+  assert.deepEqual(rowKeys(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
+  for (const r of menuRows(win)) {
+    assert.ok(r.querySelector('.tool-avatar'), r.dataset.tool + ' has its icon');
+    assert.ok(r.querySelector('.tools-item-label').textContent, r.dataset.tool + ' has its title');
+  }
+  assert.ok(doc.querySelector('#tools-menu [data-tool="deepseek-harness"] .bot-status-dot.harness-running'), 'builtin row dot');
+  assert.equal(doc.querySelector('#tools-menu [data-tool="benchmark"] .bot-status-dot'), null);
+  assert.equal(mod.railToolDot('deepseek-harness').classList.contains('harness-running'), true, 'main.js can patch the row dot');
+  assert.equal(doc.getElementById('tools-bots-sep').hidden, true, 'no parked bots → no rule');
+  // Positioned through the CSSOM, never a style="" attribute string built by hand.
+  assert.match(menu.style.left, /px$/);
+
+  // A second click on the button closes it.
+  pointerClick(win, btn);
+  assert.equal(menu.hidden, true);
+  assert.equal(btn.getAttribute('aria-expanded'), 'false');
+});
+
+test('desktop rail: a row opens its tool and closes the popup; the button is active while it is open', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec, state } = wire(mod, { mobile: false });
+  await mod.loadTools();
+  const doc = win.document;
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  doc.querySelector('#tools-menu [data-tool="deepseek-harness"]').click();
+  assert.deepEqual(rec.opened, ['harness'], 'a builtin row calls its own opener');
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  doc.querySelector('#tools-menu [data-tool="benchmark"]').click();
+  assert.equal(state.selectedBotId, 'benchmark');
+  assert.ok(doc.body.classList.contains('tool-full'));
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+  assert.ok(doc.getElementById('tools-menu-btn').classList.contains('active'), 'active while a tool pane is open');
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  assert.ok(doc.querySelector('#tools-menu [data-tool="benchmark"]').classList.contains('active'));
+  doc.getElementById('tool-close').click();
+  // main.js's restoreView puts the chat back and repaints the rail; mimic it.
+  state.selectedBotId = 'main';
+  mod.renderToolRail();
+  assert.equal(doc.getElementById('tools-menu-btn').classList.contains('active'), false);
+});
+
+test('desktop rail: parked bots follow the tools under a separator', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const opened = [];
+  wire(mod, { mobile: false });
+  mod.setParkedBots([
+    { id: 'parked-1', name: 'Parked Pal', avatar: () => win.document.createElement('span'), dot: 'unread', active: false, open: () => opened.push('parked-1') },
+  ]);
+  await mod.loadTools();
+  const doc = win.document;
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  assert.deepEqual(rowKeys(win).slice(-2), ['family-page', 'bot:parked-1'], 'bots come after the tools');
+  assert.equal(doc.getElementById('tools-bots-sep').hidden, false);
+  assert.ok(doc.querySelector('#tools-bots [data-bot="parked-1"] .bot-status-dot.unread'));
+  doc.querySelector('#tools-bots [data-bot="parked-1"]').click();
+  assert.deepEqual(opened, ['parked-1']);
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+});
+
+test('desktop rail: keyboard — Enter/arrows open, arrows move, Esc closes and returns focus', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: false });
+  await mod.loadTools();
+  const doc = win.document;
+  const btn = doc.getElementById('tools-menu-btn');
+  btn.focus();
+  btn.click();                      // keyboard activation: detail 0 → first row
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  const rows = menuRows(win);
+  assert.equal(doc.activeElement, rows[0]);
+  assert.ok(rows.every((r) => r.getAttribute('tabindex') === '-1'), 'roving focus, rows out of the tab order');
+  key(win, rows[0], 'ArrowDown');
+  assert.equal(doc.activeElement, rows[1]);
+  key(win, rows[1], 'ArrowUp');
+  key(win, rows[0], 'ArrowUp');
+  assert.equal(doc.activeElement, rows[rows.length - 1], 'ArrowUp wraps to the last row');
+  key(win, doc.activeElement, 'Home');
+  assert.equal(doc.activeElement, rows[0]);
+  key(win, doc.activeElement, 'Escape');
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+  assert.equal(doc.activeElement, doc.getElementById('tools-menu-btn'), 'focus back on the button');
+  // Opened by a pointer, focus stays on the button — Escape still closes.
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  key(win, doc.getElementById('tools-menu-btn'), 'Escape');
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+  // ArrowUp on the button opens on the last row.
+  key(win, doc.getElementById('tools-menu-btn'), 'ArrowUp');
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  assert.equal(doc.activeElement.dataset.tool, 'family-page');
+});
+
+test('desktop rail: a click outside closes the popup; a repaint keeps it open', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: false });
+  await mod.loadTools();
+  const doc = win.document;
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  mod.renderToolRail();             // every sidebar repaint does this
+  assert.equal(doc.getElementById('tools-menu').hidden, false, 'survives a repaint');
+  assert.equal(doc.getElementById('tools-menu-btn').getAttribute('aria-expanded'), 'true');
+  pointerClick(win, doc.querySelector('#tools-menu [data-tool="benchmark"]').parentElement);   // inside: stays
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  pointerClick(win, doc.getElementById('threads'));
+  assert.equal(doc.getElementById('tools-menu').hidden, true);
+  assert.equal(doc.getElementById('tools-menu-btn').getAttribute('aria-expanded'), 'false');
+});
+
+test('desktop rail: the dot is worst-of, and the button hides with nothing to show', { skip: dom.skip }, async () => {
+  let win = setup();
+  let mod = await freshTools();
+  wire(mod, { mobile: false, groupState: 'error' });
+  await mod.loadTools();
+  assert.ok(win.document.querySelector('#tools-menu-btn .bot-status-dot.tools-sidedot.error'));
+
+  // Safe Mode: parked bots are ignored and only safe tools count.
+  win = setup();
+  routes['GET /api/tools'] = () => [200, { tools: [] }];
+  mod = await freshTools();
+  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
+  mod.setParkedBots([{ id: 'parked-1', name: 'Parked Pal', dot: '', open: () => {} }]);
+  await mod.loadTools();
+  assert.equal(win.document.getElementById('tool-list').hidden, true);
+  assert.equal(win.document.getElementById('tools-menu-btn'), null);
+});
+
+test('phone Bots page: tiles stay; parked bots get one "More bots" tile with only their rows', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: true });
+  mod.setParkedBots([{ id: 'parked-1', name: 'Parked Pal', dot: '', open: () => {} }]);
+  await mod.loadTools();
+  const doc = win.document;
+  const list = doc.getElementById('tool-list');
+  assert.equal(list.classList.contains('tool-list-compact'), false);
+  assert.ok(list.querySelector('.tool-list-head'));
+  assert.deepEqual(tileIds(win), ['deepseek-harness', 'mail-panel', 'jobboard', 'benchmark', 'rig-panel', 'family-page']);
+  const more = doc.getElementById('tools-menu-btn');
+  assert.equal(more.dataset.menu, 'bots');
+  assert.equal(more.querySelector('.bot-name-label').textContent, 'More bots');
+  pointerClick(win, more);
+  assert.deepEqual(rowKeys(win), ['bot:parked-1'], 'no tool rows on the phone — the tiles are right there');
+  assert.equal(doc.getElementById('tools-bots-sep').hidden, true);
+});
+
+test('crossing the breakpoint re-lays the rail out (tiles ⇄ one button)', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  let mobile = false;
+  // Wired by hand: this case needs a viewport it can switch.
+  const d = {
+    state: { decoy: false, selectedBotId: 'main', activeThreadId: 't-1' },
+    openers: {}, closeToolPanes: () => {}, builtinOn: () => true, builtinDot: () => '',
+    groupState: () => '', restoreView: () => {}, renderSidebar: () => mod.renderToolRail(),
+    isMobile: () => mobile, navigate: () => {}, toast: () => {}, isBotId: () => false,
+  };
+  mod.wireTools(d);
+  await mod.loadTools();
+  assert.ok(win.document.getElementById('tools-menu-btn'));
+  pointerClick(win, win.document.getElementById('tools-menu-btn'));
+  mobile = true;
+  win.dispatchEvent(new win.Event('resize'));
+  assert.equal(win.document.getElementById('tools-menu').hidden, true, 'a resize closes the popup');
+  assert.ok(tileIds(win).length > 0, 'phone: tiles again');
+  mobile = false;
+  win.dispatchEvent(new win.Event('resize'));
+  assert.deepEqual(tileIds(win), []);
 });

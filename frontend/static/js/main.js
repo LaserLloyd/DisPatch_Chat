@@ -38,12 +38,12 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=11';
 import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=2';
-import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=1';
+import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=2';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
-  appForBot, forwardAppFrame, syncAppFrame,
-} from './tools.js?v=5';
+  appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
+} from './tools.js?v=6';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';
@@ -208,8 +208,7 @@ async function refreshUnread() {
 const $ = (id) => document.getElementById(id);
 const dom = {};
 ['app', 'bot-list', 'manage-bots', 'theme-toggle',
- 'tools-menu',
- 'tools-bots', 'tools-bots-sep', 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
+ 'tl-avatar', 'tl-botname', 'tl-model', 'new-chat',
  'threads', 'back-btn', 'ch-avatar', 'ch-title', 'ch-sub', 'ch-model', 'popout-btn', 'thread-menu-btn',
  'thread-menu', 'messages', 'chat-empty', 'scroll-bottom', 'composer', 'input', 'send', 'stop',
  // Per-thread model/thinking override chip + its picker (Feature 7).
@@ -773,7 +772,7 @@ function renderSidebarInner() {
   const unreadBots = oldestUnreadByBot();
   const allVisible = visibleBots();
   // Placement is per-device and Safe Mode ignores it (see menubots.js): a bot
-  // parked in the ⌥ menu would be unreachable on a locked tablet, not moved.
+  // parked in the Tools popup would be unreachable on a locked tablet, not moved.
   pruneMenuBots(state.bots.map((b) => b.id));
   const menuIds = activeMenuBotIds(state.decoy);
   const bots = allVisible.filter((b) => !menuIds.has(b.id));
@@ -832,76 +831,31 @@ function renderSidebarInner() {
     list.append(btn);
   });
 
-  // The ⌥ entry now holds ONLY bots parked from Settings → Bots. The four
-  // operator tools that used to live in its menu moved to the Tools group in
-  // the rail (#tool-list, js/tools.js), so the button exists only when there
-  // is something parked. Never in Safe Mode (menubots.js ignores placement
-  // there, so a parked bot would be unreachable on a locked tablet).
-  const toolsAvailable = !state.decoy && menuBots.length > 0;
-  if (toolsAvailable) {
-    const toolsName = t('tools.more_bots');
-    const selected = menuBots.some((b) => b.id === state.selectedBotId);
-    const btn = el('button', {
-      class: 'bot-btn terminal-btn tools-btn' + (selected ? ' active' : ''),
-      id: 'tools-btn',
-      'aria-label': t('tools.more_bots_aria'),
-      'aria-haspopup': 'menu',
-      'aria-expanded': 'false',
-      draggable: 'false',
-      onclick: (e) => { e.stopPropagation(); toggleToolsMenu(); },
-    });
-    btn.append(el('span', { class: 'bot-avatar terminal-avatar tools-avatar', text: '⌥' }));
-    btn.append(el('span', { class: 'bot-name-tip', text: toolsName }));
-    btn.append(nameSpan('bot-name-label', toolsName, { name: toolsName }));
-    // One dot for the parked group: thinking beats unread beats resting.
-    const menuDot = menuBots.some((b) => thinkingBots.has(b.id)) ? ' thinking'
-      : (menuBots.map((b) => unreadDotClass(unreadBots[b.id])).find((c) => c) || '');
-    btn.append(el('span', { class: 'bot-status-dot' + menuDot }));
-    list.append(btn);
-    dom['tools-btn'] = btn;
-  } else {
-    // The rail no longer offers it; a menu left open across a lock would
-    // otherwise outlive its own button.
-    dom['tools-btn'] = null;
-    closeToolsMenu();
-  }
-  renderMenuBots(menuBots, thinkingBots, unreadBots);
+  // Bots parked from Settings → Bots are rows in the Tools popup (js/tools.js
+  // draws it: under the tools on the desktop, a "More bots" tile on the
+  // phone). Never in Safe Mode — activeMenuBotIds() is empty there, so a
+  // parked bot is back on the rail rather than unreachable on a locked tablet.
+  setParkedBots(parkedBotRows(menuBots, thinkingBots, unreadBots));
   // The Tools group (#tool-list) sits under the roster and is repainted with
-  // it, so its active tile and feature-gated builtins never go stale.
+  // it, so its active state and feature-gated builtins never go stale.
   renderToolRail();
 }
 
-/** Bots the user parked in the ⌥ menu — the only rows it has now.
- *
- *  Rebuilt wholesale on every sidebar repaint: these carry no dot that
- *  anything patches in place; their unread/thinking state is computed here
- *  from the same snapshot the rail uses, so the two can never disagree.
- */
-function renderMenuBots(menuBots, thinkingBots, unreadBots) {
-  const host = dom['tools-bots'];
-  const sep = dom['tools-bots-sep'];
-  if (!host) return;
-  host.innerHTML = '';
-  // Nothing sits above the parked bots any more, so the divider never shows.
-  if (sep) sep.hidden = true;
-  menuBots.forEach((bot) => {
-    const row = el('button', {
-      class: 'tools-item' + (bot.id === state.selectedBotId ? ' active' : ''),
-      role: 'menuitem',
-      type: 'button',
-      onclick: () => { closeToolsMenu(); selectBot(bot.id); },
-    });
-    row.append(avatarNode(bot, 'bot-avatar'));
-    row.append(el('span', { class: 'tools-item-label', text: bot.name }));
-    const dotClass = thinkingBots.has(bot.id) ? ' thinking' : unreadDotClass(unreadBots[bot.id]);
-    row.append(el('span', { class: 'bot-status-dot' + dotClass }));
-    host.append(row);
-  });
+/** The parked bots as popup rows. Computed from the same snapshot the rail
+ *  uses, so the two can never disagree about thinking/unread. */
+function parkedBotRows(menuBots, thinkingBots, unreadBots) {
+  return menuBots.map((bot) => ({
+    id: bot.id,
+    name: bot.name,
+    avatar: () => avatarNode(bot, 'bot-avatar'),
+    dot: thinkingBots.has(bot.id) ? 'thinking' : unreadDotClass(unreadBots[bot.id]).trim(),
+    active: bot.id === state.selectedBotId,
+    open: () => selectBot(bot.id),
+  }));
 }
 
-/** The status-dot class for a builtin tool's rail tile ('' = no dot).
- *  Same per-service colours the ⌥ menu rows used before they moved to the
- *  rail; renderHarness/renderStudioForge keep patching it in place. */
+/** The status-dot class for a builtin tool's tile or popup row ('' = no dot).
+ *  renderHarness/renderStudioForge keep patching it in place. */
 function builtinDot(feature) {
   if (feature === 'harness') return 'harness-sidedot harness-' + harnessServiceState();
   if (feature === 'studioforge') return 'studioforge-sidedot studioforge-' + studioforgeState();
@@ -916,6 +870,18 @@ function builtinOn(feature) {
   if (feature === 'mail') return !!state.mailEnabled;
   if (feature === 'practice') return !!state.clientsEnabled;
   return false;
+}
+
+/** Worst-of the builtin services, for the desktop Tools button's one dot.
+ *  Same buckets the per-row dots colour: red (failed/down) beats amber
+ *  (starting/checking/unreachable) beats green; '' = nothing to report. */
+function toolsGroupState() {
+  const states = [];
+  if (builtinOn('harness')) states.push(harnessServiceState());
+  if (builtinOn('studioforge')) states.push(studioforgeState());
+  if (states.some((s) => s === 'failed' || s === 'down')) return 'error';
+  if (states.some((s) => s === 'starting' || s === 'checking' || s === 'unreachable')) return 'starting';
+  return states.some((s) => s === 'running' || s === 'up' || s === 'blocked') ? 'running' : '';
 }
 
 /** Put the selection back after the generic tool pane closes (✕ / back).
@@ -4306,7 +4272,7 @@ function renderBotManager() {
     // Placement badge. DEVICE-local, unlike its neighbours: it writes straight
     // to localStorage and repaints, rather than joining bmDirty and waiting for
     // Save, because there is nothing server-side to save. Off in Safe Mode —
-    // the ⌥ menu does not exist there, so offering to move a bot into it would
+    // parked bots are ignored there, so offering to move a bot into the popup would
     // promise something the tier cannot deliver.
     const mbBtn = state.decoy ? null : el('button', {
       class: 'bm-safe-btn' + (isMenuBot(bot.id) ? ' on' : ''),
@@ -4844,104 +4810,6 @@ function wireFileServer() {
   });
 }
 
-// ---- Operator tools popover (DeepSeek Harness / StudioForge) ----
-// Click-driven, not hover. This app is used on family Android tablets and as an
-// installed PWA, where a hover-only menu is unreachable; desktop hover is added
-// on top in wireToolsMenu() for pointers that actually have it.
-let toolsPinned = false;   // opened by a click, not by hover
-/** Click behaviour, reconciled with hover-open.
- *
- *  On a desktop the pointer opens this menu on hover, so a plain toggle made the
- *  button look dead: hover opened it, the click closed it again. A click now
- *  PINS an already-open menu instead of closing it, and only a second click (or
- *  an outside click, or Escape) dismisses it. On touch there is no hover, so
- *  this is an ordinary open/close toggle.
- */
-function toggleToolsMenu() {
-  const menu = dom['tools-menu'];
-  if (!menu) return;
-  if (menu.hasAttribute('hidden')) { toolsPinned = true; openToolsMenu(); }
-  else if (!toolsPinned) { toolsPinned = true; }
-  else closeToolsMenu();
-}
-function openToolsMenu() {
-  const menu = dom['tools-menu'];
-  const btn = dom['tools-btn'];
-  // Never open a menu with nothing in it, and never in Safe Mode.
-  const rows = dom['tools-bots'] ? dom['tools-bots'].childElementCount : 0;
-  if (!menu || !btn || state.decoy || rows === 0) return;
-  menu.removeAttribute('hidden');
-  btn.setAttribute('aria-expanded', 'true');
-  // Fixed positioning so the pop-up escapes the rail's overflow clip. The rail
-  // is on the inline-start edge, so open to its side and clamp to the viewport.
-  const r = btn.getBoundingClientRect();
-  const mw = menu.offsetWidth || 232;
-  const mh = menu.offsetHeight || 160;
-  const rtl = document.documentElement.dir === 'rtl';
-  const beside = rtl ? r.left - mw - 6 : r.right + 6;
-  const fits = rtl ? beside >= 8 : beside + mw <= window.innerWidth - 8;
-  menu.style.left = Math.max(8, Math.min(
-    fits ? beside : Math.min(r.left, window.innerWidth - mw - 8),
-    window.innerWidth - mw - 8)) + 'px';
-  menu.style.top = Math.max(8, Math.min(r.top, window.innerHeight - mh - 8)) + 'px';
-  // Capture phase, added on open and removed on close. The sibling popovers
-  // use a deferred { once: true } listener; that re-arms itself by hand on
-  // every inside click and silently stops closing the menu if any handler
-  // between the target and document stops propagation. A plain capture
-  // listener sees the click before anything can swallow it.
-  setTimeout(() => document.addEventListener('click', _toolsOutside, true), 0);
-}
-function closeToolsMenu() {
-  const menu = dom['tools-menu'];
-  toolsPinned = false;
-  document.removeEventListener('click', _toolsOutside, true);
-  if (menu) menu.setAttribute('hidden', '');
-  const btn = dom['tools-btn'];
-  if (btn) btn.setAttribute('aria-expanded', 'false');
-}
-function _toolsOutside(e) {
-  const btn = dom['tools-btn'];
-  const menu = dom['tools-menu'];
-  // position:fixed means the menu is not inside the button's hit-box — check both.
-  // A click on either is handled by their own listeners; only a click elsewhere
-  // dismisses. No re-arming: the listener stays until closeToolsMenu removes it.
-  if ((btn && btn.contains(e.target)) || (menu && menu.contains(e.target))) return;
-  closeToolsMenu();
-}
-function wireToolsMenu() {
-  // Escape closes and returns focus to the button, like every other popover here.
-  const menu = dom['tools-menu'];
-  if (menu) {
-    menu.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      closeToolsMenu();
-      if (dom['tools-btn']) dom['tools-btn'].focus();
-    });
-  }
-  // Desktop convenience only: open on hover where a real pointer exists, and
-  // close when the cursor leaves both the button and the menu. Guarded so touch
-  // devices never get a menu that opens on an accidental tap-and-hold.
-  if (!window.matchMedia || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
-  let leaveTimer = null;
-  const cancelLeave = () => { if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; } };
-  const scheduleLeave = () => {
-    cancelLeave();
-    // Short grace period so the diagonal trip from button to menu doesn't close it.
-    leaveTimer = setTimeout(() => { if (!toolsPinned) closeToolsMenu(); }, 220);
-  };
-  document.addEventListener('mouseover', (e) => {
-    const btn = dom['tools-btn'];
-    if (btn && btn.contains(e.target)) { cancelLeave(); openToolsMenu(); }
-  });
-  document.addEventListener('mouseout', (e) => {
-    const btn = dom['tools-btn'];
-    const m = dom['tools-menu'];
-    const to = e.relatedTarget;
-    const inside = (n) => n && ((btn && btn.contains(n)) || (m && m.contains(n)));
-    if (inside(e.target) && !inside(to)) scheduleLeave();
-  });
-}
-
 /** Make sure `state.auth.features` describes the session we are actually in.
  *
  *  The server discloses the optional-subsystem inventory only to a FULL
@@ -5110,6 +4978,7 @@ function renderHarness() {
   // Sidebar dot.
   const sd = railToolDot(HARNESS_ID);
   if (sd) sd.className = 'bot-status-dot terminal-sidedot harness-sidedot harness-' + svc;
+  paintToolsGroupDot();
   if (!harnessOpen) return;
   const port = (st && st.port) || 3080;
   const url = (st && st.url) || `http://127.0.0.1:${port}/`;
@@ -5795,6 +5664,7 @@ function renderStudioForge() {
   const sv = studioforgeState();
   const sd = railToolDot(STUDIOFORGE_ID);
   if (sd) sd.className = 'bot-status-dot terminal-sidedot studioforge-sidedot studioforge-' + sv;
+  paintToolsGroupDot();
   if (!studioforgeOpen) return;
   const url = (st && st.url) || '';
   if (dom['studioforge-dot']) dom['studioforge-dot'].className = 'terminal-dot studioforge-' + sv;
@@ -6867,7 +6737,6 @@ function wireEvents() {
   wireSettingsTabs();
   wireFileServer();
   wireDrop();
-  wireToolsMenu();
   wireTools({
     state,
     openers: {
@@ -6881,6 +6750,7 @@ function wireEvents() {
     closeToolPanes,
     builtinOn,
     builtinDot,
+    groupState: toolsGroupState,
     restoreView: restoreAfterTool,
     paintPlaceholder: (title, glyph) => {
       dom['tl-botname'].textContent = title;
