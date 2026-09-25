@@ -44,7 +44,7 @@ import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './men
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
-} from './tools.js?v=2';
+} from './tools.js?v=3';
 import { renderLinkRail, linksSection } from './links.js?v=6';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in

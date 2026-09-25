@@ -565,6 +565,9 @@ function toolRow(tool, idx) {
   if (!builtin) {
     loc.append(el('code', { class: 'tools-loc', dir: 'ltr', text: locationText(tool) }));
     if (tool.has_refresh || tool.refresh) loc.append(el('span', { class: 'tools-badge', text: t('tools.has_refresh') }));
+  } else if (tool.available === false) {
+    // The switch is what gets saved; the feature itself is off on this install.
+    loc.append(el('span', { class: 'muted', text: t('tools.not_installed') }));
   } else {
     loc.append(el('span', { class: 'muted', text: '—' }));
   }

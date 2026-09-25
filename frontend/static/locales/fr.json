@@ -1188,6 +1188,7 @@
     "console_output": "Sortie console"
   },
   "tools": {
+    "not_installed": "Indisponible sur cette installation",
     "more_bots": "Autres bots",
     "more_bots_aria": "Bots rangés depuis Réglages → Bots",
     "session_panel_title": "Page d'outil",

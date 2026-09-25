@@ -1188,6 +1188,7 @@
     "console_output": "Salida de consola"
   },
   "tools": {
+    "not_installed": "No disponible en esta instalación",
     "more_bots": "Más bots",
     "more_bots_aria": "Bots aparcados desde Ajustes → Bots",
     "session_panel_title": "Página de herramienta",

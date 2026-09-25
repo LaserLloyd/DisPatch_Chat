@@ -2,7 +2,9 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v128';  // v128: Tools review round — tools.js
+const CACHE = 'local-chat-v129';  // v129: a builtin tool's Settings toggle
+  // saves the manifest switch, not the resolved state (tools.js 2→3).
+  // v128: Tools review round — tools.js
   //   1→2: a tool frame is unloaded via about:blank (a bare removeAttribute
   //   kept the old document running), and entry into ANY tool — builtin
   //   panes included, via rememberPrev() — records the chat to return to, so

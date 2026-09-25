@@ -1163,6 +1163,7 @@
     }
   },
   "tools": {
+    "not_installed": "Not available on this install",
     "more_bots": "More bots",
     "more_bots_aria": "Bots parked from Settings → Bots",
     "session_panel_title": "Tool page",

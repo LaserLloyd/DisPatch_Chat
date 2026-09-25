@@ -921,3 +921,18 @@ def test_probe_never_follows_redirects(monkeypatch):
     monkeypatch.setattr(tools.httpx, "AsyncClient", FakeClient)
     assert asyncio.run(tools._probe_url("http://example.invalid/")) is True
     assert seen[0]["follow_redirects"] is False
+
+
+def test_builtin_row_enabled_is_the_switch_not_availability(tools_env, monkeypatch):
+    """A Settings save round-trips `enabled`; it must be the manifest switch, so an
+    unavailable feature never gets `enabled: false` written into tools.yaml."""
+    make_client, site = tools_env
+    monkeypatch.setattr(main, "SETTINGS", replace(config.SETTINGS, harness_enabled=False))
+    c = _unlocked(make_client)
+    row = next(t for t in c.get("/api/tools").json()["tools"] if t["id"] == "deepseek-harness")
+    assert row["available"] is False and row["enabled"] is True
+    rows = c.get("/api/tools").json()["tools"]
+    assert c.put("/api/tools", json={"tools": rows}).status_code == 200
+    path = config.DATA_DIR / "tools.yaml"
+    text = path.read_text() if path.exists() else ""
+    assert "enabled: false" not in text

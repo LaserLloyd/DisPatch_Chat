@@ -639,8 +639,12 @@ def _out_limited(t: Tool) -> dict:
 def _builtin_row(tid: str) -> dict:
     feat, title, icon = BUILTINS[tid]
     return {"id": tid, "title": title, "icon": icon, "kind": "builtin",
-            "enabled": builtin_resolved(tid), "safe": False, "has_refresh": False,
-            "builtin_feature": feat, "available": _builtin_available(tid)}
+            # `enabled` is the manifest SWITCH (what a Settings save round-trips),
+            # never the resolved value — otherwise saving while a feature is
+            # merely unavailable would persist `enabled: false` into tools.yaml.
+            "enabled": builtin_enabled(tid) is not False, "safe": False,
+            "has_refresh": False, "builtin_feature": feat,
+            "available": _builtin_available(tid)}
 
 
 def list_out(operator: bool) -> list[dict]:

@@ -1138,6 +1138,7 @@
     }
   },
   "tools": {
+    "not_installed": "このインストールでは利用できません",
     "more_bots": "その他のボット",
     "more_bots_aria": "設定 → ボット からしまったボット",
     "session_panel_title": "ツールページ",

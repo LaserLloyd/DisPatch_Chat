@@ -1263,6 +1263,7 @@
     "console_output": "مخرجات وحدة التحكم"
   },
   "tools": {
+    "not_installed": "غير متاح في هذا التثبيت",
     "more_bots": "بوتات أخرى",
     "more_bots_aria": "بوتات نُقلت من الإعدادات ← البوتات",
     "session_panel_title": "صفحة الأداة",

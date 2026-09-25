@@ -1163,6 +1163,7 @@
     "console_output": "Konsolenausgabe"
   },
   "tools": {
+    "not_installed": "Auf dieser Installation nicht verfügbar",
     "more_bots": "Weitere Bots",
     "more_bots_aria": "In Einstellungen → Bots geparkte Bots",
     "session_panel_title": "Werkzeugseite",

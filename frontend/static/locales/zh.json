@@ -1138,6 +1138,7 @@
     "console_output": "控制台输出"
   },
   "tools": {
+    "not_installed": "此安装不可用",
     "more_bots": "更多机器人",
     "more_bots_aria": "从 设置 → 机器人 收起的机器人",
     "session_panel_title": "工具页面",

@@ -238,8 +238,8 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // v127 (2026-09-25): metadata.notice convention — notice.js/main.js/app.css
   // and index.html moved.
   // v128 (2026-09-25): Tools review round — tools.js/main.js and index.html moved.
-  assert.equal(m[1], 'local-chat-v128',
-    'sw.js CACHE must be local-chat-v128 so installed clients pick up the tools review round');
+  assert.equal(m[1], 'local-chat-v129',
+    'sw.js CACHE must be local-chat-v129 so installed clients pick up the tools review round');
 });
 
 // =============================================================================
