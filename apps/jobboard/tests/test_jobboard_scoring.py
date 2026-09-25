@@ -1,8 +1,8 @@
-"""Unit tests for the jobs board — pure scoring & dedup logic.
+"""Unit tests for the Job Board app — pure scoring & dedup logic.
 
 WHAT THIS FILE IS
 -----------------
-Pure unit tests for ``jobs_score.py`` and ``jobs_dedup.py``. No DB, no
+Pure unit tests for ``apps/jobboard/jobs_score.py`` and ``jobs_dedup.py``. No DB, no
 HTTP, no async runtime. Each test is a single attribute or two of the
 score, and they can all run in a few hundred ms total.
 
@@ -21,14 +21,19 @@ Per plan §10, every assertion lives here:
   - URL dedup (identical hash + title within 30d returns the existing
     thread_id with `duplicate: true`; no second thread is created).
 
-These are the SAME assertions the integration suite (``test_jobs_api.py``)
+These are the SAME assertions the integration suite (``test_jobboard_api.py``)
 checks at the HTTP layer; here they verify the score and dedup modules
 in isolation so a regression to either module is caught even without
 the integration stack.
 """
 from __future__ import annotations
 
-from app import jobs_dedup, jobs_score
+import dispatch_app_jobboard.jobs_dedup as jobs_dedup
+import dispatch_app_jobboard.jobs_score as jobs_score
+
+# The app package is imported by the shell's loader (as `dispatch_app_jobboard`)
+# when `app.main` is imported; its sibling modules are submodules of it.
+from app import main  # noqa: F401  (loads the apps)
 
 # --------------------------------------------------------------------------- #
 # Pure scoring — purity, breakdown, blocklist, embedding fallback
@@ -290,7 +295,7 @@ def test_embedding_fallback_when_model_unloadable(monkeypatch):
     fails, the scorer must return a tag-only result with
     ``embedding_unavailable: True`` in the explanation. No crash.
     """
-    import app.jobs_score as js
+    js = jobs_score
     js._MODEL = None
     js._MODEL_LOAD_FAILED = True   # simulate a previous failed load
 
@@ -367,7 +372,7 @@ def test_seniority_inference_table():
 
 
 # --------------------------------------------------------------------------- #
-# Payload normalizer — input boundary used by jobs.py::create_job
+# Payload normalizer — input boundary used by backend.py::create_job
 # --------------------------------------------------------------------------- #
 
 
@@ -375,7 +380,7 @@ def test_normalize_payload_clamps_tags():
     raw = {"tags": [" Python ", "ML", "  ", "x"] * 100}
     out = jobs_score.normalize_payload(raw)
     assert len(out["tags"]) <= 32
-    # Module defines MAX_TAGS in jobs.py, not jobs_score.  Cap at 32
+    # Module defines MAX_TAGS in backend.py, not jobs_score.  Cap at 32
     # instead, mirroring the API-layer rule.
     assert len(out["tags"]) <= 32
     # All entries are stripped + lowered.
@@ -393,7 +398,7 @@ def test_scorer_does_not_load_embedder_without_centroids(monkeypatch):
     against, so the scorer must not load the model at all. Loading it is a
     multi-second torch import; it used to run on the first job-detail click
     after every restart and froze the app for ~8 s (2026-09-23)."""
-    import app.jobs_score as js
+    js = jobs_score
     calls = []
     monkeypatch.setattr(js, "_get_embedder", lambda: calls.append(1) or None)
 

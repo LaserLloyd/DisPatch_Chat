@@ -1,4 +1,5 @@
-"""Tests for the monthly-threading jobs board (added 2026-09-15).
+"""Tests for the Job Board app's monthly threading (added 2026-09-15; moved
+under apps/jobboard/ with the app on 2026-09-25).
 
 WHAT THIS FILE IS
 -----------------
@@ -23,10 +24,11 @@ unit suite already covers the score / dedup modules in isolation.
 """
 from __future__ import annotations
 
+import dispatch_app_jobboard as jobs
 import pytest
 from fastapi import HTTPException
 
-from app import config, database, jobs
+from app import config, database, main  # main import loads the apps
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -36,10 +38,10 @@ from app import config, database, jobs
 @pytest.fixture
 async def wired(tmp_path, monkeypatch):
     """A clean staging DB with the jobs router loaded, mirroring the
-    ``wired`` fixture in test_jobs_api.py but without the FastAPI
+    ``wired`` fixture in test_jobboard_api.py but without the FastAPI
     app wrapper (we test the helpers directly)."""
+    from app import auth
     from app import database as db_module
-    from app import main
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
@@ -48,7 +50,8 @@ async def wired(tmp_path, monkeypatch):
     db = db_module.Database(tmp_path / "chats.db")
     await db.connect()
     monkeypatch.setattr(main, "db", db)
-    jobs.JOBS_ENABLED = True
+    monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
+    auth._cache = None
     p = {"_db": db}
     yield p
     await db.close()
@@ -190,9 +193,8 @@ async def test_list_months_after_creating_jobs(wired):
     threads, with parsed (year, month) metadata."""
     res = await jobs.create_job_from_dict(_payload(
         "https://anthropic.com/careers/staff-swe"))
-    # The wired DB has no PIN installed, so main._is_decoy returns
-    # False (auth_gate's no-PIN allow). Build a fake request whose
-    # .state.decoy is False.
+    # The wired DB has no PIN installed (auth_gate's no-PIN allow). Build a
+    # fake request whose .state.decoy is False.
     req = _FakeRequest(cookie=None)
     out = await jobs.list_months(request=req, bot_id="jobboard")
     assert "months" in out
@@ -262,13 +264,13 @@ async def test_current_month_ensure_creates(wired):
 
 
 def _FakeRequest(cookie=None, decoy=False):
-    """Inline copy of the helper from test_jobs_api.py — we need a
+    """Inline copy of the helper from test_jobboard_api.py — we need a
     request whose ``state.decoy`` is set so ``_is_decoy`` returns
     False in the no-PIN install used by the wired fixture."""
     from types import SimpleNamespace
     return SimpleNamespace(
         cookies={"lc_session": cookie} if cookie else {},
-        state=SimpleNamespace(decoy=decoy),
+        state=SimpleNamespace(decoy=decoy, machine=False, session=None),
         query_params={},
     )
 

@@ -287,7 +287,7 @@ def new_id() -> str:
 # thread title always uses the form ``Jobs — YYYY-MM`` (a structured
 # suffix that survives localisation), but the friendly display name on
 # the API layer is built from this list. We deliberately keep this list
-# here (and not in jobs.py) so the storage layer never has to reach
+# here (and not in the Job Board app, apps/jobboard/backend.py) so the storage layer never has to reach
 # across modules to format a title.
 _MONTH_NAMES: tuple[str, ...] = (
     "January", "February", "March", "April", "May", "June",
@@ -1737,7 +1737,7 @@ class Database:
     # Storage for the additive jobs / job_events / job_feedback /
     # job_profile tables. All four are simple — the write paths are the
     # only complicated thing (atomic vote + event + feedback + recompute),
-    # which lives in jobs.py, not here.
+    # which lives in apps/jobboard/backend.py, not here.
     # ----------------------------------------------------------------- #
 
     async def get_job(self, job_id: str) -> dict | None:
@@ -1964,7 +1964,7 @@ class Database:
         """Return feedback rows in created_at ASC order.
 
         Profile recompute depends on ASC ordering — the fold iterates rows
-        oldest-first, latest per thread wins, see jobs_score.py. Limit is
+        oldest-first, latest per thread wins, see apps/jobboard/jobs_score.py. Limit is
         generous so a full recompute over a long history stays single-pass.
 
         Filter note: ``thread_id`` here means the MONTHLY thread (so the
@@ -1993,7 +1993,7 @@ class Database:
         share one) for the profile fold's "latest per thread" semantics;
         computing a job's own ``last_vote`` needs the narrower, per-job
         view instead. ASC so the caller can fold forward and let a later
-        `undo` cancel the vote before it, the same shape jobs.py already
+        `undo` cancel the vote before it, the same shape the Job Board app already
         uses for the profile recompute.
         """
         cur = await self.db.execute(
@@ -2100,7 +2100,7 @@ class Database:
     async def recent_job_duplicate_hashes(self, since: str) -> list[dict]:
         """The rolling dedup window — returns {hash, thread_id, seen_at}
         entries from the profile, filtered to those seen in the last
-        `since`. The hash list itself is parsed by jobs_dedup.py; here we
+        `since`. The hash list itself is parsed by apps/jobboard/jobs_dedup.py; here we
         only return the raw row so the caller doesn't re-hit the disk.
         """
         profile = await self.get_job_profile()

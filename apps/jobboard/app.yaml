@@ -1,0 +1,24 @@
+# The Job Board — the first DisPatch app (docs/apps.md,
+# docs/design/2026-09-25-apps.md). Until 2026-09-25 this was hand-wired into
+# the shell (backend/app/jobs.py + a builtin tool); now the package carries
+# its backend, page, thread hook, locale strings and bot identity itself.
+id: jobboard
+title: Job Board
+icon: clipboard
+safe: false                     # operator only; Safe Mode never sees it
+order: 50
+api:
+  # The scout agent's `dispatch-jobs` skill and the daily sweep cron call
+  # /api/jobs/... sessionless from loopback — keep it mounted there too.
+  legacy_prefix: /api/jobs
+bot:
+  id: jobboard                  # owns the monthly "Jobs — YYYY-MM" threads
+  name: Job Board
+  emoji: "🎯"
+  avatar: jobboard-face.png
+  agent: scout                  # feedback / find turns run on the scout agent
+  visible: false                # the app tile is the front door, not a rail bot
+thread_hook: true               # static/thread.js: the job-detail panel in the thread
+# The backend reads no environment variables (checked 2026-09-25: the old
+# jobs.py read none; JOBS_ENABLED was main's mount flag and is retired).
+env: []

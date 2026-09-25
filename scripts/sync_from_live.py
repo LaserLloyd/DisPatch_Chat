@@ -33,7 +33,10 @@ REPO = Path(__file__).resolve().parent.parent
 
 # (source path relative to the install, destination relative to the repo, glob)
 # A directory entry copies only files matching `glob`, non-recursively, so a
-# stray subdirectory of user data can never ride along.
+# stray subdirectory of user data can never ride along — with ONE exception:
+# the `apps/` rows below are recursive (`*/…`, `**`), because an app package
+# (docs/design/2026-09-25-apps.md) is repo code end to end and nests by design.
+# Those still skip __pycache__, *.pyc and every dot-path (`_wanted`).
 ALLOW: list[tuple[str, str, str]] = [
     ("backend/app",                 "backend/app",                 "*.py"),
     ("backend/tests",               "backend/tests",               "*.py"),
@@ -54,7 +57,25 @@ ALLOW: list[tuple[str, str, str]] = [
     ("frontend/static",             "frontend/static",             "manifest.webmanifest"),
     ("frontend/static/js",          "frontend/static/js",          "*.js"),
     ("frontend/static/vendor",      "frontend/static/vendor",      "*"),
+    # Apps: manifest, backend (+ sibling modules), page, thread hook, locales,
+    # tests. Mirrors the deploy tool's APP_PATHS apps rows; apps/conftest.py is the
+    # glue that gives the apps' tests the backend suite's hermetic fixtures.
+    ("apps",                        "apps",                        "conftest.py"),
+    ("apps",                        "apps",                        "*/app.yaml"),
+    ("apps",                        "apps",                        "*/*.py"),
+    ("apps",                        "apps",                        "*/static/**/*"),
+    ("apps",                        "apps",                        "*/locales/*.json"),
+    ("apps",                        "apps",                        "*/tests/**/*"),
 ]
+
+
+def _wanted(base: Path, f: Path) -> bool:
+    """A matched path that may be copied: a real file, not bytecode, and no
+    dot-component or __pycache__ anywhere below the ALLOW row's directory."""
+    if not f.is_file() or f.suffix == ".pyc":
+        return False
+    return not any(p.startswith(".") or p == "__pycache__"
+                   for p in f.relative_to(base).parts)
 
 # Operator tools that do NOT live in the install tree.
 #
@@ -213,12 +234,13 @@ def stage(src_root: Path, staging: Path, tools_root: Path | None = None) -> list
         if not src_dir.is_dir():
             continue
         for src in sorted(src_dir.glob(pattern)):
-            if not src.is_file():
-                continue          # never recurse into a subdirectory
-            dst = staging / dst_rel / src.name
+            if not _wanted(src_dir, src):
+                continue          # only what the pattern names (see ALLOW)
+            sub = src.relative_to(src_dir).as_posix()
+            dst = staging / dst_rel / sub
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-            copied.append(f"{dst_rel}/{src.name}")
+            copied.append(f"{dst_rel}/{sub}")
     return copied
 
 
@@ -248,8 +270,8 @@ def orphans(copied: list[str]) -> list[str]:
         if not d.is_dir():
             continue
         for p in sorted(d.glob(pattern)):
-            rel = f"{dst_rel}/{p.name}"
-            if p.is_file() and rel not in tracked:
+            rel = f"{dst_rel}/{p.relative_to(d).as_posix()}"
+            if _wanted(d, p) and rel not in tracked:
                 found.append(rel)
     return found
 

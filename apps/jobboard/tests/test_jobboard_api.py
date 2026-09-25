@@ -1,9 +1,12 @@
-"""Integration tests for the jobs board HTTP surface.
+"""Integration tests for the Job Board app's HTTP surface.
 
 WHAT THIS FILE IS
 -----------------
-Integration tests for ``backend/app/jobs.py`` — the FastAPI router,
-mounted only when ``JOBS_ENABLED=1``. Plan §10:
+Integration tests for ``apps/jobboard/backend.py`` — the router the shell's
+app loader mounts at ``/api/apps/jobboard`` AND at the legacy ``/api/jobs``
+(the scout agent's skill and the daily sweep cron still call the latter).
+Moved here from ``backend/tests/test_jobs_api.py`` on 2026-09-25 when the
+board became an app. Plan §10:
   * Create / list / get / vote / applied / archive endpoints against
     an empty staging DB.
   * ``job_events`` is append-only (UPDATE/DELETE attempts raise).
@@ -15,7 +18,7 @@ mounted only when ``JOBS_ENABLED=1``. Plan §10:
     (no data leak).
 
 Why both unit AND integration cover the same property: the unit
-suite (``test_jobs.py``) keeps the score / dedup modules honest in
+suite (``test_jobboard_scoring.py``) keeps the score / dedup modules honest in
 isolation; the integration suite here pins the HTTP contracts the
 agent-facing API is built on.
 """
@@ -23,10 +26,11 @@ from __future__ import annotations
 
 import asyncio
 
+import dispatch_app_jobboard as jobs
 import pytest
 from pydantic import ValidationError
 
-from app import auth, config, jobs, main
+from app import auth, config, main  # main import loads the apps
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -64,16 +68,16 @@ def sample_job_payload():
 class _FakeRequest:
     """Minimal stand-in for fastapi.Request used by the tier helpers.
 
-    Only the cookies / state attributes are read by ``_is_decoy`` /
-    ``_require_full`` in jobs.py — keep the surface narrow and the
-    rest fakeable.
+    Only the cookies / state attributes are read by the app's
+    ``_is_decoy`` and the shell's ``ctx.require_access`` — keep the surface
+    narrow and the rest fakeable. ``decoy``/``machine`` mirror what the auth
+    gate stamps on ``request.state``.
     """
-    def __init__(self, cookie=None, decoy=False):
+    def __init__(self, cookie=None, decoy=False, machine=False):
         self.cookies = {"lc_session": cookie} if cookie else {}
-        # main._is_decoy reads ``request.state.decoy``. Use a SimpleNamespace
-        # so tests can flip it on/off without touching main directly.
         from types import SimpleNamespace
-        self.state = SimpleNamespace(decoy=decoy)
+        self.state = SimpleNamespace(decoy=decoy, machine=machine, session=None)
+        self.method = "GET"
 
 
 @pytest.fixture
@@ -90,23 +94,6 @@ def full_session(monkeypatch):
     monkeypatch.setattr(auth, "get_session",
                         lambda token: {"id": sid, "full": True} if token == sid else orig(token))
     return sid
-
-
-@pytest.fixture
-def jobs_router(monkeypatch):
-    """Wire the router: monkeypatch JOBS_ENABLED + main.config so the
-    FastAPI app can mount it. Returns the mounted routes so tests can
-    invoke handlers directly.
-    """
-    jobs.JOBS_ENABLED = True
-    monkeypatch.setattr(jobs, "JOBS_ENABLED", True)
-    # main imports `from . import jobs` already; the mount is gated on
-    # JOBS_ENABLED. Mount the router into a fresh app for direct test
-    # access (the global main.app has the production router set already).
-    from fastapi import FastAPI
-    test_app = FastAPI()
-    test_app.include_router(jobs.router)
-    return test_app
 
 
 # --------------------------------------------------------------------------- #
@@ -127,7 +114,11 @@ async def wired(tmp_path, monkeypatch):
     # Make jobs' lazy `_db()` resolver see our test DB. Mirrors the
     # pattern in test_double_post_fix.py.
     monkeypatch.setattr(main, "db", db)
-    jobs.JOBS_ENABLED = True
+    # The app's require_access reads the PIN state: point auth at a scratch
+    # security.yaml (no PIN) so the live install's lock never leaks in.
+    monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
+    monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
+    auth._cache = None
     p = {}
     p["_db"] = db
     yield p
@@ -144,7 +135,7 @@ async def test_create_then_list_then_get(wired, sample_job_payload):
     db = wired["_db"]
     # `POST /api/jobs` -> create the row directly via the same path
     # the router takes, so we cover the upsert + thread + first message.
-    from app.jobs import create_job_from_dict
+    from dispatch_app_jobboard import create_job_from_dict
     res = await create_job_from_dict(sample_job_payload)
     assert res["duplicate"] is False
     job_id = res["job_id"]
@@ -167,7 +158,7 @@ async def test_duplicate_within_30d_returns_existing(wired, sample_job_payload):
     is created. (Plan §7 + §10 last assertion.)
     """
     db = wired["_db"]
-    from app.jobs import create_job_from_dict
+    from dispatch_app_jobboard import create_job_from_dict
     res1 = await create_job_from_dict(sample_job_payload)
     res2 = await create_job_from_dict(sample_job_payload)
     assert res1["duplicate"] is False
@@ -185,7 +176,7 @@ async def test_vote_appends_immortal_event(wired, sample_job_payload):
     is that the vote handler only inserts.
     """
     db = wired["_db"]
-    from app.jobs import _record_vote, create_job_from_dict
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
     await _record_vote(job_id, "yes", None, None, "user")
@@ -204,22 +195,43 @@ async def test_vote_appends_immortal_event(wired, sample_job_payload):
 # --------------------------------------------------------------------------- #
 
 
-def test_require_full_passes_a_cookieless_caller():
-    """No cookie = no PIN set up, or an on-box machine caller: passes."""
-    jobs._require_full(_FakeRequest(cookie=None))
+def test_require_access_passes_a_no_pin_caller(wired):
+    """No PIN set up yet: the app is wide open, a bare caller is the operator."""
+    jobs.CTX.require_access(_FakeRequest(cookie=None))
 
 
-def test_require_full_rejects_an_unknown_session(monkeypatch):
-    """A cookie that doesn't resolve to a live session is a 403."""
+def test_require_access_passes_a_machine_caller(wired):
+    """The auth gate stamped this request as an on-box machine (loopback or
+    api_token) — the scout agent's path. Passes even with a PIN set."""
+    auth.set_pin("1234")
+    jobs.CTX.require_access(_FakeRequest(machine=True))
+
+
+def test_require_access_rejects_a_decoy(wired):
     from fastapi import HTTPException
-    monkeypatch.setattr(auth, "get_session", lambda _tok: None)
     with pytest.raises(HTTPException) as ei:
-        jobs._require_full(_FakeRequest(cookie="stale"))
+        jobs.CTX.require_access(_FakeRequest(decoy=True))
     assert ei.value.status_code == 403
 
 
-def test_require_full_accepts_a_live_session(full_session):
-    jobs._require_full(_FakeRequest(cookie=full_session))
+def test_require_access_rejects_a_sessionless_caller_once_a_pin_exists(wired):
+    from fastapi import HTTPException
+    auth.set_pin("1234")
+    with pytest.raises(HTTPException) as ei:
+        jobs.CTX.require_access(_FakeRequest(cookie="stale"))
+    assert ei.value.status_code == 403
+
+
+def test_require_access_accepts_a_live_session(wired, full_session):
+    auth.set_pin("1234")
+    jobs.CTX.require_access(_FakeRequest(cookie=full_session))
+
+
+def test_require_operator_refuses_a_machine(wired):
+    from fastapi import HTTPException
+    auth.set_pin("1234")
+    with pytest.raises(HTTPException):
+        jobs.CTX.require_operator(_FakeRequest(machine=True))
 
 
 # --------------------------------------------------------------------------- #
@@ -231,7 +243,7 @@ def test_require_full_accepts_a_live_session(full_session):
 async def test_profile_recompute_fires_after_vote_not_after_get(wired,
                                                                  sample_job_payload):
     db = wired["_db"]
-    from app.jobs import _record_vote, create_job_from_dict, get_profile
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict, get_profile
     await create_job_from_dict(sample_job_payload)
     # Before any vote, the profile is empty (no recompute yet).
     pre = await get_profile(_FakeRequest(cookie="x"))
@@ -256,38 +268,26 @@ async def test_profile_recompute_fires_after_vote_not_after_get(wired,
 
 @pytest.mark.asyncio
 async def test_decoy_get_returns_empty_shape(wired, sample_job_payload, monkeypatch):
-    from app.jobs import create_job_from_dict, list_jobs
+    from dispatch_app_jobboard import create_job_from_dict, list_jobs
     await create_job_from_dict(sample_job_payload)
-    # Patch _is_decoy to True for this request.
-    monkeypatch.setattr(main, "_is_decoy", lambda r: True)
-    req = _FakeRequest()
+    req = _FakeRequest(decoy=True)
     out = await list_jobs(req)
     assert out == {"jobs": [], "next_cursor": None}
 
 
 @pytest.mark.asyncio
-async def test_decoy_write_is_403(wired, sample_job_payload, monkeypatch):
-    """A decoy caller hitting the WRITE path gets 403 — the
-    ``_require_full`` gate."""
-    from app.jobs import create_job_from_dict, vote
+async def test_decoy_write_is_403(wired, sample_job_payload):
+    """A decoy caller hitting the WRITE path gets 403 from
+    ``ctx.require_access`` (the auth gate refuses it a layer earlier too)."""
+    from dispatch_app_jobboard import create_job_from_dict, vote
+    from fastapi import HTTPException
     await create_job_from_dict(sample_job_payload)
     db = wired["_db"]
     job_id = (await db.list_jobs())[0]["job_id"]
-    req = _FakeRequest(cookie=None)
-    # Without a session cookie, _require_full passes (no PIN install)
-    # OR raises 403 (PIN installed). The exact outcome depends on the
-    # test order in the suite — pin that the helper does EITHER branch
-    # correctly and never silently falls through.
-    raised = False
-    try:
-        await vote(job_id, jobs.VoteIn(signal="yes"), req)
-    except Exception as e:
-        raised = True
-        assert "Unlock" in str(e) or "for full access" in str(e)
-    if not raised:
-        # No PIN case — helper passed; the vote lands. The next test
-        # covers the PIN-installed path explicitly via monkeypatch.
-        pass
+    with pytest.raises(HTTPException) as ei:
+        await vote(job_id, jobs.VoteIn(signal="yes"), _FakeRequest(decoy=True))
+    assert ei.value.status_code == 403
+    assert (await db.get_job(job_id))["state"] == "pending"
 
 
 # --------------------------------------------------------------------------- #
@@ -297,10 +297,15 @@ async def test_decoy_write_is_403(wired, sample_job_payload, monkeypatch):
 
 def test_inbound_allowlist_includes_job_writes():
     """``_is_inbound`` MUST grant machine access to ``POST /api/jobs``
-    and ``POST /api/jobs/score`` — these are the only routes an
-    on-box agent drives (plan §4 + §12 risk 2 fix)."""
+    and ``POST /api/jobs/score`` — the routes an on-box agent drives
+    (plan §4 + §12 risk 2 fix). Since the board became an app the whole
+    mounted surface is machine-inbound at BOTH prefixes; the per-route
+    ``ctx.require_access``/``require_operator`` decides from there."""
     assert main._is_inbound("POST", "/api/jobs") is True
     assert main._is_inbound("POST", "/api/jobs/score") is True
+    assert main._is_inbound("POST", "/api/apps/jobboard") is True
+    assert main._is_inbound("POST", "/api/apps/jobboard/score") is True
+    assert main._is_inbound("GET", "/api/apps/jobboard/months") is True
 
 
 def test_inbound_allowlist_includes_manage_verbs():
@@ -340,6 +345,8 @@ def test_decoy_blocked_bars_jobs_paths():
     assert main._decoy_blocked("POST", "/api/jobs") is True
     assert main._decoy_blocked("GET", "/api/jobs/feedback") is True
     assert main._decoy_blocked("POST", "/api/jobs/abc/feedback") is True
+    assert main._decoy_blocked("GET", "/api/apps/jobboard") is True
+    assert main._decoy_blocked("GET", "/apps/jobboard/") is True
 
 
 # --------------------------------------------------------------------------- #
@@ -408,7 +415,7 @@ def test_serialise_job_keeps_a_good_stored_url():
 async def test_applied_end_to_end(wired, sample_job_payload):
     """POST .../applied records an `applied` feedback signal, a
     state_change event, and flips the job's state — all in one call."""
-    from app.jobs import applied, create_job_from_dict
+    from dispatch_app_jobboard import applied, create_job_from_dict
 
     db = wired["_db"]
     res = await create_job_from_dict(sample_job_payload)
@@ -439,7 +446,7 @@ def test_applied_accepts_a_null_comment():
 
 @pytest.mark.asyncio
 async def test_find_posts_request_into_month_thread_and_dispatches(wired, monkeypatch):
-    from app.jobs import find_jobs
+    from dispatch_app_jobboard import find_jobs
 
     db = wired["_db"]
     config._write_bots([config._bot_entry(config.Bot(id="jobboard", name="Jobs", agent="scout"))])
@@ -462,9 +469,8 @@ async def test_find_posts_request_into_month_thread_and_dispatches(wired, monkey
 
 @pytest.mark.asyncio
 async def test_find_unknown_bot_is_404(wired):
+    from dispatch_app_jobboard import find_jobs
     from fastapi import HTTPException
-
-    from app.jobs import find_jobs
     config._write_bots([config._bot_entry(config.Bot(id="jobboard", name="Jobs"))])
     with pytest.raises(HTTPException) as ei:
         await find_jobs(jobs.FindIn(), _FakeRequest(cookie=None), bot_id="nope")
@@ -480,7 +486,7 @@ async def test_find_unknown_bot_is_404(wired):
 async def test_feedback_records_event_posts_message_and_dispatches(
     wired, sample_job_payload, monkeypatch,
 ):
-    from app.jobs import create_job_from_dict, feedback
+    from dispatch_app_jobboard import create_job_from_dict, feedback
 
     db = wired["_db"]
     res = await create_job_from_dict(sample_job_payload)
@@ -528,7 +534,7 @@ async def test_feedback_records_event_posts_message_and_dispatches(
 async def test_feedback_reason_tag_lands_in_the_message(
     wired, sample_job_payload, monkeypatch,
 ):
-    from app.jobs import create_job_from_dict, feedback
+    from dispatch_app_jobboard import create_job_from_dict, feedback
 
     db = wired["_db"]
     res = await create_job_from_dict(sample_job_payload)
@@ -557,7 +563,7 @@ async def test_feedback_dispatched_false_when_no_bot_config(
     before the operator wires up `jobboard`) — the feedback is still recorded and
     posted, but `dispatched` is honestly False rather than claiming a turn
     that never started."""
-    from app.jobs import create_job_from_dict, feedback
+    from dispatch_app_jobboard import create_job_from_dict, feedback
 
     db = wired["_db"]
     res = await create_job_from_dict(sample_job_payload)
@@ -573,7 +579,7 @@ async def test_feedback_dispatched_false_when_no_bot_config(
 
 @pytest.mark.asyncio
 async def test_feedback_unknown_job_is_404(wired):
-    from app.jobs import feedback
+    from dispatch_app_jobboard import feedback
 
     req = _FakeRequest(cookie=None)
     with pytest.raises(Exception) as exc_info:
@@ -605,7 +611,7 @@ def test_feedback_reason_tag_must_be_known():
 async def test_feedback_feed_merges_votes_and_comments(
     wired, sample_job_payload, monkeypatch,
 ):
-    from app.jobs import _record_vote, create_job_from_dict, feedback, list_feedback
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict, feedback, list_feedback
 
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
@@ -641,11 +647,10 @@ async def test_feedback_feed_merges_votes_and_comments(
 @pytest.mark.asyncio
 async def test_feedback_feed_decoy_gets_empty_shape(wired, sample_job_payload,
                                                     monkeypatch):
-    from app.jobs import create_job_from_dict, list_feedback
+    from dispatch_app_jobboard import create_job_from_dict, list_feedback
 
     await create_job_from_dict(sample_job_payload)
-    monkeypatch.setattr(main, "_is_decoy", lambda r: True)
-    out = await list_feedback(_FakeRequest(), since=None, limit=100)
+    out = await list_feedback(_FakeRequest(decoy=True), since=None, limit=100)
     assert out == {"feedback": []}
 
 
@@ -656,7 +661,7 @@ async def test_feedback_feed_decoy_gets_empty_shape(wired, sample_job_payload,
 
 @pytest.mark.asyncio
 async def test_get_job_reports_last_vote(wired, sample_job_payload):
-    from app.jobs import _record_vote, create_job_from_dict, get_job
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict, get_job
 
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
@@ -667,7 +672,7 @@ async def test_get_job_reports_last_vote(wired, sample_job_payload):
 
 @pytest.mark.asyncio
 async def test_get_job_last_vote_is_none_after_undo(wired, sample_job_payload):
-    from app.jobs import _record_vote, create_job_from_dict, get_job
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict, get_job
 
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
@@ -679,12 +684,167 @@ async def test_get_job_last_vote_is_none_after_undo(wired, sample_job_payload):
 
 @pytest.mark.asyncio
 async def test_list_jobs_reports_last_vote(wired, sample_job_payload, monkeypatch):
-    from app.jobs import _record_vote, create_job_from_dict, list_jobs
+    from dispatch_app_jobboard import _record_vote, create_job_from_dict, list_jobs
 
-    monkeypatch.setattr(main, "_is_decoy", lambda r: False)
     res = await create_job_from_dict(sample_job_payload)
     job_id = res["job_id"]
     await _record_vote(job_id, "maybe", None, None, "user")
     out = await list_jobs(_FakeRequest(), limit=200)
     row = next(j for j in out["jobs"] if j["job_id"] == job_id)
     assert row["last_vote"]["signal"] == "vote_maybe"
+
+
+# --------------------------------------------------------------------------- #
+# Over HTTP, through the shell: both prefixes, the scout agent's path, Safe Mode.
+# --------------------------------------------------------------------------- #
+
+LOOPBACK = ("127.0.0.1", 50000)
+BROWSER = {"origin": "http://127.0.0.1:8765", "sec-fetch-site": "same-origin"}
+
+
+@pytest.fixture
+def http_env(tmp_path, monkeypatch):
+    """main.app on a throwaway data dir; yields a client factory by peer."""
+    from fastapi.testclient import TestClient
+
+    from app import tools
+    from app.database import Database
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(config, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(main, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
+    monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
+    auth._sessions.clear()
+    auth._cache = None
+    auth._fail_count = 0
+    auth._fail_until = 0.0
+    tools._reset_state()
+    config._invalidate_bots_cache()
+    temp_db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", temp_db)
+    turns = []
+
+    async def _fake_turn(tid, bid, text):
+        turns.append((tid, bid, text))
+    monkeypatch.setattr(main, "run_agent_turn", _fake_turn)
+    monkeypatch.setattr("app.openclaw.cli_available", lambda: True)
+    clients = []
+
+    def make(addr=LOOPBACK):
+        c = TestClient(main.app, client=addr)
+        c.__enter__()
+        clients.append(c)
+        return c
+
+    yield make, turns
+    for c in clients:
+        c.__exit__(None, None, None)
+    tools._reset_state()
+    asyncio.run(temp_db.close())
+
+
+def _job_body(**kw):
+    body = {"url": "https://example.com/careers/1", "title": "Staff Engineer",
+            "company": "Example", "location": "Remote", "remote_type": "remote",
+            "tags": ["python"], "source_agent": "scout"}
+    body.update(kw)
+    return body
+
+
+def test_both_prefixes_serve_identically(http_env):
+    make, _ = http_env
+    c = make()                                  # no PIN: operator
+    created = c.post("/api/apps/jobboard", json=_job_body())
+    assert created.status_code == 200, created.text
+    job_id = created.json()["job_id"]
+    for path in ("", "/reasons", "/months", "/profile", f"/{job_id}", "/feedback",
+                 "/current?ensure=false"):
+        a = c.get(f"/api/apps/jobboard{path}")
+        b = c.get(f"/api/jobs{path}")
+        assert a.status_code == b.status_code == 200, (path, a.status_code, b.status_code)
+        ja, jb = a.json(), b.json()
+        if path == "/profile":          # an empty profile is stamped "now" per read
+            ja.pop("updated_at"), jb.pop("updated_at")
+        assert ja == jb, path
+    # And a write through the legacy prefix lands in the same store.
+    dup = c.post("/api/jobs", json=_job_body())
+    assert dup.json()["duplicate"] is True and dup.json()["existing_job_id"] == job_id
+
+
+def test_sessionless_loopback_agent_path_works_with_a_pin_set(http_env):
+    """The scout agent's skill (`dispatch-jobs`) and the daily sweep cron call
+    /api/jobs/... from loopback with no cookie while the family app HAS a PIN.
+    That path must keep working after the move to an app."""
+    make, turns = http_env
+    c = make(LOOPBACK)                          # startup provisions the jobboard bot
+    auth.set_pin("1234")
+    assert config.get_bot("jobboard") is not None
+    r = c.post("/api/jobs", json=_job_body())
+    assert r.status_code == 200, r.text
+    job_id = r.json()["job_id"]
+    assert c.get("/api/jobs").json()["jobs"][0]["job_id"] == job_id
+    assert c.post("/api/jobs/score", json=_job_body()).status_code == 200
+    f = c.post("/api/jobs/find", json={"query": "remote"})
+    assert f.status_code == 200 and f.json()["dispatched"] is True, f.text
+    fb = c.post(f"/api/jobs/{job_id}/feedback", json={"comment": "looks good"})
+    assert fb.status_code == 200 and fb.json()["ok"] is True, fb.text
+    assert c.post(f"/api/jobs/{job_id}/vote", json={"signal": "yes"}).status_code == 200
+    assert c.post("/api/apps/jobboard/profile/recompute").status_code == 200
+    assert len(turns) == 2 and all(t[1] == "jobboard" for t in turns)
+
+
+def test_safe_mode_gets_403_on_everything(http_env):
+    make, _ = http_env
+    c = make(LOOPBACK)
+    auth.set_pin("1234")
+    for method, path in (("GET", "/api/jobs"), ("GET", "/api/jobs/months"),
+                         ("POST", "/api/jobs"), ("POST", "/api/jobs/find"),
+                         ("POST", "/api/jobs/x/feedback"), ("GET", "/api/apps/jobboard"),
+                         ("POST", "/api/apps/jobboard/find"), ("GET", "/apps/jobboard/"),
+                         ("GET", "/api/tools/jobboard/status")):
+        r = c.request(method, path, headers=BROWSER,
+                      **({"json": {}} if method == "POST" else {}))
+        assert r.status_code == 403, (method, path, r.status_code, r.text)
+        assert r.json().get("decoy") is True, (method, path)
+
+
+def test_remote_machine_without_token_is_401(http_env):
+    make, _ = http_env
+    c = make(("testclient", 50000))
+    auth.set_pin("1234")
+    assert c.get("/api/jobs").status_code == 401
+    assert c.post("/api/apps/jobboard/find", json={}).status_code == 401
+
+
+def test_disabled_in_tools_yaml_404s_the_agent_path_too(http_env):
+    from app import tools
+    make, _ = http_env
+    c = make(LOOPBACK)
+    (config.DATA_DIR / "tools.yaml").write_text(
+        "tools:\n  - {id: jobboard, kind: app, enabled: false}\n")
+    tools._reset_state()
+    for method, path in (("GET", "/api/jobs/reasons"), ("POST", "/api/jobs"),
+                         ("POST", "/api/jobs/find"), ("GET", "/api/apps/jobboard/months")):
+        r = c.request(method, path, **({"json": {}} if method == "POST" else {}))
+        assert r.status_code == 404, (method, path, r.status_code)
+
+
+def test_job_frames_are_app_prefixed(http_env, monkeypatch):
+    make, _ = http_env
+    c = make()
+    sent = []
+
+    async def fake(frame):
+        sent.append(frame)
+    monkeypatch.setattr(main.manager, "broadcast", fake)
+    job_id = c.post("/api/jobs", json=_job_body()).json()["job_id"]
+    c.post(f"/api/jobs/{job_id}/vote", json={"signal": "no"})
+    types = [f["type"] for f in sent]
+    assert "app:jobboard:job_created" in types and "app:jobboard:job_updated" in types
+    assert not any(t in ("job_created", "job_updated") for t in types)

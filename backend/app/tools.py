@@ -1,9 +1,10 @@
 """Tools — operator-defined pages in the left rail, read from ``<DATA_DIR>/tools.yaml``.
 
-Contract: ``docs/design/2026-09-25-tools-plugins.md``. Three kinds of tool:
+Contract: ``docs/design/2026-09-25-tools-plugins.md`` (apps:
+``docs/design/2026-09-25-apps.md``). Four kinds of row:
 
-  * **builtin** — the five panes that already exist (Harness, StudioForge,
-    Emails, Clients, Job Board). The manifest only switches them off:
+  * **builtin** — the four panes that already exist (Harness, StudioForge,
+    Emails, Clients). The manifest only switches them off:
     ``enabled: false`` makes main's ``*_available()`` false, so their routes
     404 and their feature flag drops out of ``/api/auth/status``. No entry =
     behaviour as before.
@@ -16,6 +17,11 @@ Contract: ``docs/design/2026-09-25-tools-plugins.md``. Three kinds of tool:
     secret-shaped filenames are refused, and every refusal is the same 404.
   * **url** — an external page the client frames. The server only reports
     whether it answers (``status.reachable``).
+  * **app** — a trusted package under ``apps/<id>/`` (see ``apps_loader``).
+    Its row carries only ``id, kind, enabled, trusted``: ``enabled: false``
+    404s the app, and ``trusted: true`` is what lets a DATA-DIR package load
+    at all. ``trusted`` runs code, so like a refresh argv it can only be set
+    by editing the file — the write API refuses to introduce or change it.
 
 A static tool may carry a ``refresh`` block: a FIXED argv (never a shell
 string) that regenerates the page. It can only come from the file — the write
@@ -68,7 +74,7 @@ COOKIE_NAME = "lc_session"          # must match main.COOKIE_NAME (import cycle)
 MANIFEST_NAME = "tools.yaml"
 
 ID_RE = re.compile(r"\A[a-z0-9-]{1,40}\Z")
-KINDS = ("static", "url", "builtin")
+KINDS = ("static", "url", "builtin", "app")
 DEFAULT_ICON = "🧩"
 DEFAULT_TIMEOUT_S = 300
 MAX_TIMEOUT_S = 3600
@@ -84,11 +90,9 @@ BUILTINS: dict[str, tuple[str, str, str]] = {
     "studioforge-panel": ("studioforge", "StudioForge", "🎛️"),
     "mail-panel": ("mail", "Emails", "✉️"),
     "clients-panel": ("practice", "Clients", "👥"),
-    # The Job Board (2026-09-25; was a rail bot). Its id is also the id of the
-    # hidden `jobboard` bot row its threads and the scout agent route through —
-    # the one place a tool id and a bot id coincide, which is why builtins skip
-    # the "already a bot id" check below.
-    "jobboard": ("jobs", "Job Board", "📋"),
+    # The Job Board was a builtin here for one day (2026-09-25) and is now an
+    # APP (apps/jobboard/, loaded by apps_loader) — its switch is a `kind: app`
+    # row, not a builtin one.
 }
 FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
 
@@ -97,7 +101,14 @@ _ALLOWED_KEYS = {
     "static": _COMMON_KEYS | {"root", "entry", "refresh"},
     "url": _COMMON_KEYS | {"url"},
     "builtin": {"id", "kind", "enabled"},
+    "app": {"id", "kind", "enabled", "trusted"},
 }
+#: What GET /api/tools says about an app that the PACKAGE owns (app.yaml). The
+#: Settings tab sends rows back as it got them; these are dropped from a PUT
+#: when they still say what the package says, and refused when they do not —
+#: a title is changed in app.yaml, not through this API.
+_APP_MIRROR_KEYS = ("title", "icon", "safe", "order", "has_refresh", "bot_id",
+                    "thread_hook", "entry", "hook_version", "mounted")
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
 #: the Settings tab can send back the rows it was given.
@@ -140,10 +151,16 @@ class Tool:
     entry: str = "index.html"
     url: str | None = None
     refresh: Refresh | None = None
+    trusted: bool = False
 
     def to_manifest(self) -> dict:
         if self.kind == "builtin":
             return {"id": self.id, "kind": "builtin", "enabled": self.enabled}
+        if self.kind == "app":
+            d = {"id": self.id, "kind": "app", "enabled": self.enabled}
+            if self.trusted:
+                d["trusted"] = True
+            return d
         d: dict = {"id": self.id, "title": self.title, "icon": self.icon, "kind": self.kind}
         if self.kind == "static":
             d["root"] = self.root
@@ -184,6 +201,15 @@ class RefreshBusy(Exception):
 def _bot_ids() -> set[str]:
     with contextlib.suppress(Exception):
         return {b.id.lower() for b in config.load_bots()}
+    return set()
+
+
+def _app_ids() -> set[str]:
+    """Ids of every app package the loader knows (lazy import: apps_loader
+    imports this module)."""
+    with contextlib.suppress(Exception):
+        from . import apps_loader
+        return apps_loader.app_ids()
     return set()
 
 
@@ -282,6 +308,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
     if not isinstance(rows, list):
         raise ToolValidationError(None, "tools", "must be a list")
     bots = _bot_ids()
+    apps = _app_ids()
     seen: set[str] = set()
     out: list[Tool] = []
     for i, row in enumerate(rows):
@@ -290,7 +317,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
             raise ToolValidationError(i, "tools", "each tool must be a mapping")
         kind = row.get("kind")
         if kind not in KINDS:
-            raise ToolValidationError(i, "kind", "must be one of static, url, builtin")
+            raise ToolValidationError(i, "kind", "must be one of static, url, builtin, app")
         for k in row:
             if k not in _ALLOWED_KEYS[kind]:
                 raise ToolValidationError(i, str(k), f"unknown key for a {kind} tool")
@@ -308,8 +335,19 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
                             icon=BUILTINS[tid][2],
                             enabled=_check_bool(row, "enabled", True, i)))
             continue
+        if kind == "app":
+            # No bot-id check: an app may share its id with its OWN bot (the
+            # loader refuses an app whose id is some other bot's).
+            if tid in BUILTINS:
+                raise ToolValidationError(i, "id", "is reserved for a builtin")
+            out.append(Tool(id=tid, kind="app", title=tid,
+                            enabled=_check_bool(row, "enabled", True, i),
+                            trusted=_check_bool(row, "trusted", False, i)))
+            continue
         if tid in BUILTINS:
             raise ToolValidationError(i, "id", "is reserved for a builtin")
+        if tid in apps:
+            raise ToolValidationError(i, "id", "is reserved for an app")
         if tid in bots:
             raise ToolValidationError(i, "id", "is already a bot id")
 
@@ -653,12 +691,45 @@ def _builtin_row(tid: str) -> dict:
             "available": _builtin_available(tid)}
 
 
+def _app_row(la) -> dict:
+    m = la.manifest
+    d = {"id": m.id, "title": m.title, "icon": m.icon, "kind": "app",
+         # The manifest SWITCH, like a builtin row (never a resolved value).
+         "enabled": _app_enabled(m.id), "safe": m.safe, "order": m.order,
+         "has_refresh": False}
+    if m.bot is not None:
+        d["bot_id"] = m.bot.id
+    d["thread_hook"] = f"/apps/{m.id}/thread.js" if m.thread_hook else None
+    d["entry"] = f"/apps/{m.id}/"
+    if m.thread_hook:
+        from . import apps_loader
+        d["hook_version"] = apps_loader.hook_version(la)
+    return d
+
+
+def _app_enabled(app_id: str) -> bool:
+    t = get_tool(app_id)
+    return t.enabled if t is not None and t.kind == "app" else True
+
+
+def _mounted_apps() -> list:
+    with contextlib.suppress(Exception):
+        from . import apps_loader
+        return apps_loader.mounted()
+    return []
+
+
 def list_out(operator: bool) -> list[dict]:
+    """Builtins first, then apps by `order` (then id), then static/url tools."""
     manifest = load_tools()
+    apps = _mounted_apps()
     if not operator:
-        return [_out_limited(t) for t in manifest if _limited_visible(t)]
+        rows = [_app_row(la) for la in apps
+                if la.manifest.safe and _app_enabled(la.manifest.id)]
+        return rows + [_out_limited(t) for t in manifest if _limited_visible(t)]
     rows = [_builtin_row(tid) for tid in BUILTINS]
-    rows += [_out_operator(t) for t in manifest if t.kind != "builtin"]
+    rows += [_app_row(la) for la in apps]
+    rows += [_out_operator(t) for t in manifest if t.kind not in ("builtin", "app")]
     return rows
 
 
@@ -806,13 +877,23 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
     current = {t.id: t for t in load_tools()}
     cleaned: list = []
     fs_rows: set[int] = set()
+    sent_ids: set[str] = set()
     for i, row in enumerate(rows):
         if not isinstance(row, dict):
             cleaned.append(row)            # validate_tools names it
             continue
         row = {k: v for k, v in row.items() if k not in _OUTPUT_ONLY_KEYS}
+        if isinstance(row.get("id"), str):
+            sent_ids.add(row["id"])
         if row.get("kind") == "builtin":
             row = {k: row[k] for k in ("id", "kind", "enabled") if k in row}
+        if row.get("kind") == "app":
+            try:
+                row = _clean_app_row(i, row, current.get(row.get("id")))
+            except ToolValidationError as e:
+                return _err422(e)
+            cleaned.append(row)
+            continue
         tid = row.get("id")
         stored = current.get(tid) if isinstance(tid, str) else None
         # The UI can never introduce or change a refresh argv: sent = must equal
@@ -832,12 +913,48 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
                 or (row.get("kind") == "static" and row.get("root") != stored.root)):
             fs_rows.add(i)
         cleaned.append(row)
+    # App rows are never removed through this API (the Settings table has no
+    # remove button for them — the package is on disk): a stored app row the
+    # client did not send back is kept, `trusted` and all.
+    cleaned += [t.to_manifest() for t in current.values()
+                if t.kind == "app" and t.id not in sent_ids]
     try:
         validated = validate_tools(cleaned, check_fs=fs_rows)
     except ToolValidationError as e:
         return _err422(e)
     write_tools(validated)
     return {"tools": list_out(True), "path": str(manifest_path())}
+
+
+def _clean_app_row(i: int, row: dict, stored: Tool | None) -> dict:
+    """An app row from the Settings tab → the manifest row to store.
+
+    The package-owned fields GET returned may come back unchanged (dropped);
+    a CHANGED one is refused, as is any other key. `trusted` keeps what the
+    file holds and may not be introduced or changed here."""
+    from . import apps_loader
+    tid = row.get("id")
+    la = apps_loader.get(tid) if isinstance(tid, str) else None
+    if la is None and (stored is None or stored.kind != "app"):
+        raise ToolValidationError(i, "id", "no such app (an app is a package on disk)")
+    if la is not None:
+        mirror = _app_row(la)
+        for k in _APP_MIRROR_KEYS:
+            if k in row:
+                if k in mirror and row[k] == mirror[k]:
+                    row = {kk: vv for kk, vv in row.items() if kk != k}
+                else:
+                    raise ToolValidationError(i, k, "is set by the app's app.yaml, not here")
+    stored_trusted = bool(stored is not None and stored.kind == "app" and stored.trusted)
+    if "trusted" in row and row["trusted"] != stored_trusted:
+        raise ToolValidationError(i, "trusted", "trusted can only be set by editing tools.yaml")
+    for k in row:
+        if k not in _ALLOWED_KEYS["app"]:
+            raise ToolValidationError(i, str(k), "unknown key for an app row")
+    out = {"id": tid, "kind": "app", "enabled": row.get("enabled", True)}
+    if stored_trusted:
+        out["trusted"] = True
+    return out
 
 
 def _same_refresh(sent, stored: Refresh) -> bool:
@@ -853,7 +970,20 @@ def _same_refresh(sent, stored: Refresh) -> bool:
 @router.get("/api/tools/{tool_id}/status")
 async def api_tool_status(request: Request, tool_id: str):
     operator = _is_operator(request)
+    from . import apps_loader
+    la = apps_loader.get(tool_id)
+    if la is not None:
+        visible = la.mounted and la.manifest.safe and _app_enabled(tool_id)
+        if not operator and not visible:
+            return JSONResponse(DECOY_BODY, status_code=403)
+        return {"id": tool_id, "kind": "app", "enabled": _app_enabled(tool_id),
+                "mounted": la.mounted}
     t = get_tool(tool_id)
+    if t is not None and t.kind == "app":
+        # A tools.yaml app row whose package did not load (missing / untrusted).
+        if not operator:
+            return JSONResponse(DECOY_BODY, status_code=403)
+        return {"id": tool_id, "kind": "app", "enabled": t.enabled, "mounted": False}
     if t is None and tool_id in BUILTINS:
         t = Tool(id=tool_id, kind="builtin")
     if not operator:

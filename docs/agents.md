@@ -240,17 +240,24 @@ finished render appear sooner. See [configuration.md](configuration.md).
 
 The Jobs board is a curated feed of job postings, surfaced in the chat app
 as a **structured list grouped by month** — not a chat. People open it from
-the rail's **Tools** group (it is the builtin tool `jobboard`). The bot id
-`jobboard` owns the data (keep its `config.yaml` row, hidden with
-`visible: false` — see configuration.md); every post lands in the **current month's
+the rail's **Tools** group (it is the app `jobboard`, a package under
+`apps/jobboard/` — see [apps.md](apps.md)). The bot id `jobboard` owns the
+data (its hidden `config.yaml` row is added on startup if missing — see
+configuration.md); every post lands in the **current month's
 discussion thread** (title `Jobs — YYYY-MM`), so all jobs from a given
 month are visible in one place and the dedup hash short-circuits reposts
 to the existing job row.
 
-Every route is **inbound-exempt** (machine-callable without a PIN-derived
-session) since the 2026-09-15 OpenClaw audit. Safe-Mode browsers are still
-blocked at the `/api/jobs` prefix in `_decoy_blocked`, so a locked device
-never sees a row.
+**`/api/jobs` still works.** Since the board became an app (2026-09-25) its
+API is mounted twice, identically: at `/api/apps/jobboard/…` and at the
+legacy `/api/jobs/…`. The scout agent's `dispatch-jobs` skill and the daily
+sweep cron keep calling `/api/jobs/…` exactly as before — sessionless, from
+loopback, with or without a PIN — and nothing about their requests or the
+responses changed. New callers may use either prefix.
+
+Every route is **machine-callable** (no PIN-derived session needed from
+loopback, or remotely with the `api_token`). Safe-Mode browsers are blocked
+at both prefixes in `_decoy_blocked`, so a locked device never sees a row.
 
 The full lifecycle from one call:
 
@@ -333,19 +340,24 @@ no second row is written. A repost with the same URL but a changed title
 or company (90-day window) returns `{duplicate: false, repost_of:
 <existing_job_id>, hash}` so callers can link the new and old jobs.
 
-**Auth matrix.** The 14 routes split cleanly:
+**Auth matrix.** Same at both prefixes:
 
-- **Inbound-exempt** (no session needed): `POST /api/jobs`,
-  `POST /api/jobs/score`, every `GET /api/jobs*` read, and the manage
-  verbs `vote / applied / tags / archive / recompute` on individual
-  jobs.
-- **Locked browser** (`_decoy_blocked` prefix match on `/api/jobs`):
-  every route refuses a Safe-Mode caller with 403, so a locked device
-  never sees a row.
-- **No-PIN install**: `_require_full` is no-op (passes when no cookie is
-  present), so a freshly-installed box lets any caller reach every verb.
-  A PIN-protected install requires a full session for the manage verbs
-  via the inbound allowlist bypass.
+- **On-box machine** (loopback, or a remote caller with the `api_token`): every
+  route, reads and writes (`POST /api/jobs`, `score`, `find`, and the manage
+  verbs `vote / applied / feedback / tags / archive / recompute`). The app's
+  write routes all use `ctx.require_access` = operator OR machine.
+- **Unlocked browser session**: every route.
+- **Locked browser** (Safe Mode): 403 `{"decoy": true}` on every route and on
+  the `/apps/jobboard/` page, so a locked device never sees a row.
+- **Remote caller without the token**: 401.
+- **No-PIN install**: everything is open, as for the rest of DisPatch.
+- **Switched off** (`{id: jobboard, kind: app, enabled: false}` in
+  `tools.yaml`): 404 everywhere.
+
+**WebSocket frames.** A new or changed job is broadcast as
+`app:jobboard:job_created` / `app:jobboard:job_updated` (they were
+`job_created` / `job_updated` before the move). Safe-Mode sockets never
+receive them.
 
 ## Pointing at a file on the host
 

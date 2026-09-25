@@ -115,6 +115,15 @@ DECOY_BLOCKED = [
     ("GET", "/tools/x/"),
     ("GET", "/api/tools/x/status"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
+    # Apps (docs/design/2026-09-25-apps.md). An unknown app id is not on the
+    # machine surface, so a sessionless caller is plain Safe Mode; a known,
+    # non-safe app's STATIC page is never a machine surface either.
+    ("GET", "/api/apps"),
+    ("GET", "/api/apps/x/y"),
+    ("POST", "/api/apps/x/y"),
+    ("GET", "/apps/x/"),
+    ("GET", "/apps/jobboard/"),
+    ("GET", "/apps/jobboard/board.js"),
     # The three avatar routes that used to live here moved to the INBOUND set
     # when on-box agents were given avatar management (they were documented in
     # OPENCLAW.md as available and actually returned 403). A remote caller is
@@ -685,3 +694,22 @@ def test_two_devices_behind_one_proxy_get_separate_thread_budgets(gate_env, monk
     assert make("203.0.113.9") == 200
     assert make("203.0.113.9") == 429, "the device's own budget did not apply"
     assert make("203.0.113.10") == 200, "a second device shared the first's budget"
+
+
+# --------------------------------------------------------------------------- #
+# Apps: a locked BROWSER gets the decoy on a real app's API at both prefixes
+# (a sessionless non-browser caller is a machine there — 401 remote, allowed
+# on loopback — which apps/jobboard/tests/test_jobboard_api.py pins).
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/jobs"), ("POST", "/api/jobs/find"), ("GET", "/api/jobs/months"),
+    ("GET", "/api/apps/jobboard"), ("POST", "/api/apps/jobboard/abc/vote"),
+])
+def test_locked_browser_gets_decoy_on_app_api(gate_env, method, path):
+    client = gate_env(("127.0.0.1", 50000))
+    auth.set_pin("1234")
+    r = client.request(method, path, headers={"origin": "http://127.0.0.1:8765"},
+                       **({"json": {}} if method == "POST" else {}))
+    assert r.status_code == 403, (method, path, r.status_code)
+    assert r.json().get("decoy") is True

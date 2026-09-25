@@ -43,7 +43,9 @@ dev = [
 packages = ["app"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# `../apps` collects each app package's own tests (apps/<id>/tests/test_*.py);
+# apps/conftest.py hands them this suite's fixtures and hermetic guards.
+testpaths = ["tests", "../apps"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 

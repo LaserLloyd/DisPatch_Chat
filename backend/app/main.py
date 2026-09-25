@@ -59,6 +59,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 from . import (
+    apps_loader,
     auth,
     avatar_pool,
     avatar_snapshots,
@@ -69,7 +70,6 @@ from . import (
     harness,
     harness_sessions,
     image_jobs,
-    jobs,
     llm_api,
     localview,
     mailforge_bridge,
@@ -367,6 +367,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
     app.state.instance_lock = _claim_single_instance()
     _warn_if_wide_open()
     config.load_bots()  # materialises config.yaml on first run
+    # Apps that bring a roster bot (the Job Board's `jobboard`) get it appended
+    # if absent — never edited if present; the operator owns the row.
+    apps_loader.provision_bots()
     # Reaction pack: renders the starter cards + reactions.yaml on first run.
     # Idempotent and non-fatal — a box without usable fonts just starts empty.
     await asyncio.to_thread(reactions.seed_starter_pack)
@@ -565,6 +568,18 @@ async def media_security_headers(request: Request, call_next):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["X-Robots-Tag"] = "noindex"
+    # Apps (trusted packages, /apps/<id>/…). First-party pages, NOT sandboxed:
+    # the page is repo code that needs the session cookie for its own API.
+    # The static route sets these itself; this is the same policy for every
+    # other answer on the prefix (refusals, redirects), set only where absent.
+    elif path == "/apps" or path.startswith("/apps/"):
+        html = response.headers.get("content-type", "").startswith("text/html")
+        response.headers.setdefault("Content-Security-Policy",
+                                    apps_loader.CSP_HTML if html else apps_loader.CSP_OTHER)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Cache-Control", apps_loader.CACHE_ASSET)
+        response.headers.setdefault("X-Robots-Tag", "noindex")
     # Tools (static pages from tools.yaml). Same contract as the Local Viewer:
     # HTML runs script under an OPAQUE origin (never allow-same-origin, so a
     # tool page cannot touch DisPatch's cookies or DOM); everything else is
@@ -1725,70 +1740,16 @@ _INBOUND_AVATAR_RE = re.compile(
 _INBOUND_AVATAR_POOL_RE = re.compile(
     r"^/api/avatar-pool(?:/[A-Za-z0-9_-]+(?:/refill|/prompts)?)?$")
 
-# Jobs board (added 2026-09-14): the two routes on-box agents legitimately
-# drive. BEFORE 2026-09-14 these were NOT in the allowlist and every agent
-# following the job-board spec got a 403 — see the scar comment at
-# main.py:1541–1545 above (the thread-management trap) for why it mattered
-# to add these entries proactively with a comment that names the failure.
-# The session-only routes (vote / applied / tags / archive /
-# profile/recompute) deliberately stay on the session tier: those are the
-# surfaces the operator drives from the browser, not agents.
-_JOBS_INBOUND = (
-    # POST /api/jobs            — create a job (auto-routes to current month's thread)
-    ("POST", "/api/jobs"),
-    # POST /api/jobs/score      — score a candidate (read-only side-effect)
-    ("POST", "/api/jobs/score"),
-    # GET  /api/jobs            — list jobs (machine-readable, no session)
-    ("GET",  "/api/jobs"),
-    # GET  /api/jobs/current    — current month's thread info (machine)
-    ("GET",  "/api/jobs/current"),
-    # GET  /api/jobs/months     — list monthly threads (machine)
-    ("GET",  "/api/jobs/months"),
-    # GET  /api/jobs/reasons    — reason-tag taxonomy (machine)
-    ("GET",  "/api/jobs/reasons"),
-    # GET  /api/jobs/profile    — current preference profile (machine)
-    ("GET",  "/api/jobs/profile"),
-    # GET  /api/jobs/feedback   — merged vote+comment feed (machine; 2026-09-16)
-    ("GET",  "/api/jobs/feedback"),
-    # POST /api/jobs/find       — ask the board's agent to search (2026-09-23).
-    #   The board's "Find jobs" button, callable by the daily sweep cron
-    #   (`dispatch-jobs find`). It only posts a fixed request into the month
-    #   thread and starts the board agent's turn — the same thing any on-box
-    #   caller can already do through /feedback.
-    ("POST", "/api/jobs/find"),
-)
-# Agent-driven write paths. The 2026-09-15 OpenClaw audit lifts
-# vote/applied/tags/archive/recompute onto the inbound tier so an on-box
-# agent can manage a job end-to-end without first obtaining a PIN-derived
-# session cookie. The handlers still refuse decoy callers via the prefix
-# block in _decoy_blocked (`/api/jobs` returns True there), so Safe Mode
-# is still shut out — only on-box agents gain the new verbs. 2026-09-16
-# adds `feedback` (free-text comment -> job_events + a dispatched turn) to
-# the same manage-verb tier as vote/applied/tags/archive.
-_JOBS_INBOUND_RE = (
-    # GET  /api/jobs/{job_id}                                  — single job
-    # GET  /api/jobs/month/{key}                               — one month
-    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}$"),
-    re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
-    # POST /api/jobs/{job_id}/(vote|applied|tags|archive|feedback) — manage verbs
-    re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive|feedback)$"),
-    # POST /api/jobs/profile/recompute                          — rebuild profile
-    re.compile(r"^/api/jobs/profile/recompute$"),
-)
-# Methods allowed for each inbound regex. GET on a write-pattern path
-# returns 405 by FastAPI's routing — the regex doesn't change that.
-# A POST on a read-pattern path is also rejected by the router. The
-# allowlist is a session-tier bypass, NOT a method override.
-_JOBS_INBOUND_RE_METHODS = {
-    "GET": (
-        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}$"),
-        re.compile(r"^/api/jobs/month/[0-9]{4}-[0-9]{2}$"),
-    ),
-    "POST": (
-        re.compile(r"^/api/jobs/[A-Za-z0-9_-]{1,64}/(?:vote|applied|tags|archive|feedback)$"),
-        re.compile(r"^/api/jobs/profile/recompute$"),
-    ),
-}
+# Apps (docs/design/2026-09-25-apps.md) — the Job Board first among them. A
+# MOUNTED app's whole API, at /api/apps/<id> and at its manifest's legacy
+# prefix (the board's /api/jobs, which the scout agent's `dispatch-jobs` skill
+# and the daily sweep cron call from loopback), is on the machine-inbound
+# surface: `apps_loader.is_inbound`. That replaces the hand-kept /api/jobs
+# allowlist that lived here (2026-09-14..25, grown one 403 at a time). The
+# per-route decision is the app's own ctx.require_access (operator OR on-box
+# machine) / ctx.require_operator (a real session only), behind a router-level
+# gate that refuses Safe Mode and 404s a disabled app; a locked BROWSER never
+# takes the machine branch at all (see auth_gate).
 
 
 # Thread management OPENCLAW.md has always documented as available to on-box
@@ -1846,16 +1807,8 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if method in ("GET", "PUT", "POST") and _INBOUND_AVATAR_POOL_RE.match(path):
         return True
-    # Jobs board — agents post, score, list, browse months, fetch one job,
-    # AND manage it end-to-end (vote / applied / tags / archive / recompute).
-    # The literal tuple covers the static paths; the per-method regex map
-    # covers the dynamic ones (job_id, month key, manage verbs). 2026-09-15
-    # added the manage verbs so agents can drive the full lifecycle without
-    # first obtaining a PIN-derived session cookie.
-    if (method, path) in _JOBS_INBOUND:
-        return True
-    methods = _JOBS_INBOUND_RE_METHODS.get(method, ())
-    if any(rx.match(path) for rx in methods):
+    # Apps (the Job Board's /api/jobs among them): see the note above.
+    if apps_loader.is_inbound(method, path):
         return True
     return bool(method == "POST" and _INBOUND_MSG_RE.match(path))
 
@@ -1899,11 +1852,6 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # operator only — a locked device sees the resulting
                         # message (redacted) and nothing else.
                         "/api/image-jobs",
-                        # Jobs board: write surface is gated on a full session;
-                        # reads redact to the empty shape (jobs.py handles it).
-                        # Either way a locked device must never see a job row,
-                        # so the path is blocked here as well.
-                        "/api/jobs",
                         # The harness is code execution — a headless job runs
                         # a shell agent in the operator's home directory —
                         # so this is belt-and-braces on top of
@@ -1927,6 +1875,12 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # of that promise.
                         "/local/", "/api/local")):
         return True
+    # Apps: /api/apps/*, /apps/* and each mounted app's legacy prefix (the Job
+    # Board's /api/jobs). Blocked unless the app is `safe: true` and the method
+    # only reads; an app path naming no app is blocked outright.
+    app_rule = apps_loader.decoy_blocked(method, path)
+    if app_rule is not None:
+        return app_rule
     if path == "/api/tools" or path.startswith(("/api/tools/", "/tools/")):
         # Tools (tools.yaml). Safe Mode may LIST (the route returns only
         # `safe: true` static/url tools, stripped of paths and argv), read a
@@ -7426,7 +7380,6 @@ async def auth_status(request: Request):
                       "studioforge": studioforge_available(),
                       "mail": mail_available(),
                       "practice": practice_available(),
-                      "jobs": jobs_available(),
                       "tools": True,
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
@@ -10838,29 +10791,19 @@ def practice_available() -> bool:
     return _practice_flag_on() and not _builtin_off("practice")
 
 
-#: True once the jobs router is included (JOBS_ENABLED=1 at import, below).
-_JOBS_MOUNTED = False
-
-
-def _jobs_flag_on() -> bool:
-    """The Job Board exists on this install: JOBS_ENABLED=1 put the router in.
-    No PIN requirement, unlike the four panes above — the board runs no code
-    and its routes gate themselves (full session for reads, inbound for the
-    agent's writes), exactly as before it became a tool."""
-    return _JOBS_MOUNTED and jobs.JOBS_ENABLED
-
-
-def jobs_available() -> bool:
-    return _jobs_flag_on() and not _builtin_off("jobs")
-
-
-def _require_jobs_switch() -> None:
-    """Router-wide dependency: tools.yaml `jobboard: enabled: false` turns
-    every /api/jobs route into a 404, the way `_require_mail` does for the
-    Emails pane. That includes the scout agent's own writes (post/find) — the
-    switch turns the FEATURE off, not just its tile."""
-    if _builtin_off("jobs"):
-        raise HTTPException(404, "Job Board disabled")
+def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
+    """AppContext.dispatch_turn: start `bot_id`'s turn for `text`, the same
+    fire-and-forget way a typed message is dispatched. False when there is
+    nothing to dispatch to — no such bot, or (for the OpenClaw-CLI backend) no
+    `openclaw` binary; a bot with a direct-provider `api` block never shells
+    out. The caller's own writes stand either way."""
+    bot = config.get_bot(bot_id)
+    if bot is None:
+        return False
+    if not bot.api and not openclaw.cli_available():
+        return False
+    _track(asyncio.create_task(run_agent_turn(thread_id, bot_id, text)))
+    return True
 
 
 # tools.py lists the builtins with `available` = the feature exists on this
@@ -10871,7 +10814,6 @@ tools.set_builtin_probes({
     tools.FEATURE_TO_ID["studioforge"]: _studioforge_flag_on,
     tools.FEATURE_TO_ID["mail"]: _mail_flag_on,
     tools.FEATURE_TO_ID["practice"]: _practice_flag_on,
-    tools.FEATURE_TO_ID["jobs"]: _jobs_flag_on,
 })
 
 
@@ -12239,16 +12181,19 @@ app.include_router(localview.router)
 # `safe: true` tools); _decoy_blocked bars refresh + the write path one layer
 # earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
-# Jobs board (added 2026-09-14). Mounted only when the feature flag is
-# set — when disabled, every /api/jobs/* route returns 404 (the router
-# itself is not registered, so a sessionless caller never sees an empty
-# 200). Plan §9 "Rollout order".
-# Since 2026-09-25 the board is also a builtin TOOL (`jobboard`): tools.yaml can
-# switch it off, which 404s every route below via _require_jobs_switch.
-if bool(os.environ.get("JOBS_ENABLED") == "1"):
-    jobs.JOBS_ENABLED = True
-    app.include_router(jobs.router, dependencies=[Depends(_require_jobs_switch)])
-    _JOBS_MOUNTED = True
+# Apps (docs/design/2026-09-25-apps.md): trusted packages under apps/<id>/
+# (plus data-dir packages tools.yaml trusts). Each is mounted at
+# /api/apps/<id> and at its manifest's legacy prefix — the Job Board keeps
+# /api/jobs that way — with /apps/<id>/ serving its page. A package that fails
+# to import or build is logged and skipped; it never stops the shell booting.
+# (The old env flag is retired: the board is on by default, and `{id: jobboard,
+# kind: app, enabled: false}` in tools.yaml turns it off.)
+APP_HOOKS = apps_loader.Hooks(
+    db=lambda: db,
+    broadcast=lambda frame: manager.broadcast(frame),
+    dispatch_turn=lambda thread_id, bot_id, text: _app_dispatch_turn(thread_id, bot_id, text),
+)
+apps_loader.load_all(app, hooks=APP_HOOKS)
 
 # --------------------------------------------------------------------------- #
 # Compression (2026-09-23). Nothing was compressed: the thread list for a busy

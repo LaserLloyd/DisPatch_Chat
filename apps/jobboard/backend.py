@@ -1,4 +1,20 @@
-"""HTTP surface for the monthly-threading jobs board.
+"""The Job Board app's backend (``apps/jobboard/backend.py``).
+
+Loaded by the shell's app loader (``backend/app/apps_loader.py``) as the
+package ``dispatch_app_jobboard``: ``build(ctx)`` returns this module's
+prefix-less router, which the loader mounts at ``/api/apps/jobboard`` AND at
+the manifest's ``legacy_prefix`` ``/api/jobs`` — the scout agent's skill
+(``dispatch-jobs``) and the daily sweep cron still call the latter, sessionless,
+from loopback. Until 2026-09-25 this file was ``backend/app/jobs.py``; the
+routes, tables, monthly threads and scoring are unchanged by the move.
+
+Everything it needs from the shell comes through ``ctx`` (``AppContext``):
+``ctx.db`` (the shared Database — the jobs tables still live in
+``app/database.py``), ``ctx.require_access`` (operator OR on-box machine),
+``ctx.broadcast`` (``app:jobboard:*`` frames), ``ctx.broadcast_message`` and
+``ctx.dispatch_turn`` (post into a thread / start the bot's turn),
+``ctx.config``. The one direct shell import is ``app.database`` for the
+monthly-thread title helpers the storage layer itself uses.
 
 WHAT THIS MODULE OWNS
 ---------------------
@@ -27,18 +43,19 @@ user browsing the Jobs board sees the current month's chat, can page
 back through prior months via a small picker, and can vote / apply /
 tag per-job from the chat itself.
 
-Auth matrix (unchanged):
-- Inbound-exempt: ``POST /api/jobs``, ``POST /api/jobs/score``. These
-  are the two routes an on-box agent calls — no PIN-derived session
-  needed; the allowlist covers them.
-- Session-only (full PIN unlock, not Safe Mode): vote, applied, tags,
-  archive, profile/recompute. Each handler calls ``_require_full``
-  directly; a decoy caller gets 403.
-- Read: ``GET /api/jobs*``. No session needed on the inbound-exempt
-  layer, but ``_is_safe_mode_caller`` redacts the response to the empty
-  shape so a Safe-Mode client gets ``{"jobs": [], "next_cursor": null}``
-  — same pattern as ``/api/threads`` (main.py:7213–7225).
-- All other endpoints: feature-flag gate + route-local tier check.
+Auth matrix (unchanged in effect by the move to an app):
+- The whole mounted API is on the shell's machine-inbound surface, so an
+  on-box agent (loopback, or a remote holding the api_token) reaches every
+  route without a PIN-derived session; a locked browser never does.
+- Every write route (vote, applied, find, feedback, tags, archive,
+  profile/recompute) calls ``ctx.require_access``: a full operator session,
+  a no-PIN install, or an on-box machine. Since 2026-09-15 none of them was
+  operator-only (the manage verbs were lifted onto the agent tier), so none
+  uses ``ctx.require_operator``.
+- Reads keep their Safe-Mode redaction to the empty shape — belt-and-braces
+  under the loader's router gate, which already refuses Safe Mode with the
+  uniform decoy 403 (the app is not ``safe: true``).
+- ``tools.yaml`` ``{id: jobboard, kind: app, enabled: false}`` 404s it all.
 """
 from __future__ import annotations
 
@@ -51,13 +68,16 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, config, database, jobs_dedup, jobs_score
+from app import database
 
-log = logging.getLogger("local-chat.jobs")
+from . import jobs_dedup, jobs_score
 
-# Feature flag: ``main`` reads this BEFORE mounting the router. Default
-# off so a stock install never sees the surface until flipped.
-JOBS_ENABLED: bool = False
+log = logging.getLogger("local-chat.app.jobboard")
+
+APP_ID = "jobboard"
+#: The shell's AppContext, set by build(). Module-level so the handlers below
+#: (and the tests, which call them directly) keep their plain signatures.
+CTX = None
 
 # Reason-tag enum (mirrored exactly by the UI; do NOT add new tags
 # without updating both sides).
@@ -76,9 +96,9 @@ MAX_TAGS = 32
 
 
 def _is_decoy(request: Request) -> bool:
-    """A locked Safe-Mode session is a 'decoy' from main.py's vocabulary."""
-    from . import main
-    return bool(getattr(main, "_is_decoy", lambda r: False)(request))
+    """A locked Safe-Mode caller ("decoy" in the shell's vocabulary). The
+    shell's auth gate stamps ``request.state.decoy``."""
+    return bool(getattr(getattr(request, "state", None), "decoy", False))
 
 
 def _safe_mode_redact(jobs_payload: dict) -> dict:
@@ -88,34 +108,21 @@ def _safe_mode_redact(jobs_payload: dict) -> dict:
     return {"jobs": [], "next_cursor": None}
 
 
-def _require_full(request: Request) -> None:
-    """Raise 403 unless this request holds a full (PIN-derived) session.
-
-    Used by every session-only write route. Decoy callers and missing
-    cookies both 403; full sessions and pre-PIN installs pass.
-    """
-    from . import main
-    sid = request.cookies.get(getattr(main, "COOKIE_NAME", "lc_session"))
-    if sid is None:
-        # No PIN set up yet -> the app is wide open (no-pin allow in
-        # auth.py). A bare caller is fine.
-        return
-    if auth.get_session(sid) is None:
-        raise HTTPException(403, "Unlock for full access")
+def _require_access(request: Request) -> None:
+    """403 unless the caller is the operator or an on-box machine — the
+    shell's ``ctx.require_access``. Every write route calls it."""
+    CTX.require_access(request)
 
 
 def _db():
-    """Resolve ``main.db`` at request time — main imports this module,
-    so a module-level import would be a cycle. Tests that patch
-    ``main.db`` get the patched value."""
-    from . import main
-    return main.db
+    """The shared Database, resolved at call time (``ctx.db`` is a getter,
+    so a test that swaps ``main.db`` is seen here)."""
+    return CTX.db
 
 
-def _manager():
-    """Same lazy pattern for the WS broadcast funnel."""
-    from . import main
-    return main.manager
+async def _broadcast(kind: str, **fields) -> None:
+    """An ``app:jobboard:<kind>`` WS frame (Safe Mode never receives it)."""
+    await CTX.broadcast({"type": f"app:{APP_ID}:{kind}", **fields})
 
 
 def _now() -> str:
@@ -401,7 +408,15 @@ class TagsIn(BaseModel):
 # --------------------------------------------------------------------------- #
 
 # Inline prefix to keep route names discoverable from the spec.
-router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+# Prefix-less: the loader mounts it at /api/apps/jobboard AND /api/jobs.
+router = APIRouter(tags=["jobboard"])
+
+
+def build(ctx) -> APIRouter:
+    """The app entry point the shell's loader calls once at startup."""
+    global CTX
+    CTX = ctx
+    return router
 
 
 # ---- read paths ----------------------------------------------------------- #
@@ -757,7 +772,8 @@ async def list_feedback(
     on what the humans said without re-reading every monthly thread.
 
     Machine-readable without a session from loopback, exactly like
-    ``GET /api/jobs`` (see ``_JOBS_INBOUND`` in main.py). Safe-Mode/decoy
+    ``GET /api/jobs`` (the shell puts a mounted app's whole API on the
+    machine-inbound surface). Safe-Mode/decoy
     callers get the empty shape.
 
     MUST stay registered before ``/{job_id}`` — see the route-order note
@@ -982,12 +998,12 @@ async def create_job_from_dict(payload: dict) -> dict:
     # broadcast below carries the complete record.
     job_row["message_id"] = message.id
     job_row["updated_at"] = _now()
-    await _manager().broadcast({"type": "job_created",
-                                "job_id": job_id,
-                                "thread_id": thread.id,
-                                "bot_id": bot_id,
-                                "message_id": message.id,
-                                "job": _serialise_job(job_row)})
+    await _broadcast("job_created",
+                     job_id=job_id,
+                     thread_id=thread.id,
+                     bot_id=bot_id,
+                     message_id=message.id,
+                     job=_serialise_job(job_row))
     return {
         "duplicate": False,
         "job_id": job_id,
@@ -1090,15 +1106,15 @@ async def _record_vote(job_id: str, signal: str, reason_tag: str | None,
     # UI updates without a re-GET.
     refreshed = await db.get_job(job_id)
     if refreshed:
-        await _manager().broadcast({"type": "job_updated",
-                                    "job_id": job_id,
-                                    "thread_id": refreshed["thread_id"],
-                                    "job": _serialise_job(refreshed)})
+        await _broadcast("job_updated",
+                         job_id=job_id,
+                         thread_id=refreshed["thread_id"],
+                         job=_serialise_job(refreshed))
 
 
 @router.post("/{job_id}/vote")
 async def vote(job_id: str, payload: VoteIn, request: Request):
-    _require_full(request)
+    _require_access(request)
     await _record_vote(job_id, payload.signal, payload.reason_tag,
                        payload.comment, actor="user")
     return {"ok": True}
@@ -1107,7 +1123,7 @@ async def vote(job_id: str, payload: VoteIn, request: Request):
 @router.post("/{job_id}/applied")
 async def applied(job_id: str, payload: CommentIn, request: Request):
     """Mark as applied. Same write pattern as vote but with signal=applied."""
-    _require_full(request)
+    _require_access(request)
     db = _db()
     job = await db.get_job(job_id)
     if not job:
@@ -1148,34 +1164,24 @@ async def applied(job_id: str, payload: CommentIn, request: Request):
     await db.write_job_profile(profile)
     refreshed = await db.get_job(job_id)
     if refreshed:
-        await _manager().broadcast({"type": "job_updated",
-                                    "job_id": job_id,
-                                    "thread_id": refreshed["thread_id"],
-                                    "job": _serialise_job(refreshed)})
+        await _broadcast("job_updated",
+                         job_id=job_id,
+                         thread_id=refreshed["thread_id"],
+                         job=_serialise_job(refreshed))
     return {"ok": True}
 
 
 def _try_dispatch_feedback_turn(thread_id: str, bot_id: str, text: str) -> bool:
     """Kick off a real agent turn for freshly-posted feedback, the same
-    fire-and-forget way ``main._handle_send`` dispatches a normal typed
-    message — the caller never awaits the turn's outcome, only whether it
-    could be SCHEDULED.
+    fire-and-forget way the shell dispatches a normal typed message — the
+    caller never awaits the turn's outcome, only whether it could be
+    SCHEDULED (``ctx.dispatch_turn``).
 
     Returns False (feedback still recorded by the caller either way) when
     there is nothing to dispatch to: the thread's bot has no config, or
     (for the OpenClaw-CLI backend) the ``openclaw`` binary isn't reachable.
-    A bot with a direct-provider ``api`` block skips that second check —
-    it never shells out.
     """
-    from . import main, openclaw
-    bot = config.get_bot(bot_id)
-    if bot is None:
-        return False
-    if not bot.api and not openclaw.cli_available():
-        return False
-    task = asyncio.create_task(main.run_agent_turn(thread_id, bot_id, text))
-    main._track(task)
-    return True
+    return CTX.dispatch_turn(thread_id, bot_id, text)
 
 
 class FindIn(BaseModel):
@@ -1213,8 +1219,8 @@ async def find_jobs(payload: FindIn, request: Request,
     so nothing new arrived unless someone pressed the button. The daily
     ``scout-job-sweep`` cron calls this via ``dispatch-jobs find``.
     """
-    _require_full(request)
-    if config.get_bot(bot_id) is None:
+    _require_access(request)
+    if CTX.config.get_bot(bot_id) is None:
         raise HTTPException(404, "Unknown board bot")
     thread = await _current_month_thread(bot_id)
     body = FIND_PROMPT
@@ -1222,10 +1228,7 @@ async def find_jobs(payload: FindIn, request: Request,
         body += f"\n\nFocus: {payload.query}"
     db = _db()
     message = await db.add_message(thread.id, "user", body)
-    await _manager().broadcast({
-        "type": "message", "thread_id": thread.id,
-        "bot_id": bot_id, "message": message.model_dump(),
-    })
+    await CTX.broadcast_message(thread.id, bot_id, message)
     dispatched = _try_dispatch_feedback_turn(thread.id, bot_id, body)
     return {"ok": True, "thread_id": thread.id, "message_id": message.id,
             "dispatched": dispatched}
@@ -1239,9 +1242,9 @@ async def feedback(job_id: str, payload: FeedbackIn, request: Request):
     it into the chat themselves, so the bot can act on it (re-score, note
     a pattern, follow up) without anyone copy-pasting.
 
-    Gate: same tier as ``/vote`` — ``_require_full`` (a full PIN session,
-    or a no-PIN install; an on-box machine caller with no cookie at all
-    also passes, and IS the expected caller per ``_JOBS_INBOUND_RE``).
+    Gate: same tier as ``/vote`` — ``ctx.require_access`` (a full PIN
+    session, a no-PIN install, or an on-box machine caller with no cookie at
+    all — which IS the expected caller: the scout agent).
 
     The turn is fire-and-forget: this handler does not wait for the bot to
     answer, only for the feedback to be durably recorded and the message
@@ -1249,7 +1252,7 @@ async def feedback(job_id: str, payload: FeedbackIn, request: Request):
     be scheduled (e.g. the OpenClaw CLI isn't on PATH) — the feedback
     itself is still saved and still visible in the thread either way.
     """
-    _require_full(request)
+    _require_access(request)
     db = _db()
     job = await db.get_job(job_id)
     if not job:
@@ -1271,10 +1274,7 @@ async def feedback(job_id: str, payload: FeedbackIn, request: Request):
     if payload.reason_tag:
         body += f" [reason: {payload.reason_tag}]"
     message = await db.add_message(job["thread_id"], "user", body)
-    await _manager().broadcast({
-        "type": "message", "thread_id": job["thread_id"],
-        "bot_id": thread.bot_id, "message": message.model_dump(),
-    })
+    await CTX.broadcast_message(job["thread_id"], thread.bot_id, message)
     await db.set_title_if_empty(job["thread_id"], body[:50])
     dispatched = _try_dispatch_feedback_turn(job["thread_id"], thread.bot_id, body)
     return {
@@ -1288,7 +1288,7 @@ async def feedback(job_id: str, payload: FeedbackIn, request: Request):
 
 @router.post("/{job_id}/tags")
 async def edit_tags(job_id: str, payload: TagsIn, request: Request):
-    _require_full(request)
+    _require_access(request)
     db = _db()
     job = await db.get_job(job_id)
     if not job:
@@ -1318,16 +1318,16 @@ async def edit_tags(job_id: str, payload: TagsIn, request: Request):
         })
     refreshed = await db.get_job(job_id)
     if refreshed:
-        await _manager().broadcast({"type": "job_updated",
-                                    "job_id": job_id,
-                                    "thread_id": refreshed["thread_id"],
-                                    "job": _serialise_job(refreshed)})
+        await _broadcast("job_updated",
+                         job_id=job_id,
+                         thread_id=refreshed["thread_id"],
+                         job=_serialise_job(refreshed))
     return {"ok": True, "tags": new_tags}
 
 
 @router.post("/{job_id}/archive")
 async def archive(job_id: str, request: Request):
-    _require_full(request)
+    _require_access(request)
     db = _db()
     job = await db.get_job(job_id)
     if not job:
@@ -1341,10 +1341,10 @@ async def archive(job_id: str, request: Request):
     })
     refreshed = await db.get_job(job_id)
     if refreshed:
-        await _manager().broadcast({"type": "job_updated",
-                                    "job_id": job_id,
-                                    "thread_id": refreshed["thread_id"],
-                                    "job": _serialise_job(refreshed)})
+        await _broadcast("job_updated",
+                         job_id=job_id,
+                         thread_id=refreshed["thread_id"],
+                         job=_serialise_job(refreshed))
     return {"ok": True}
 
 
@@ -1377,7 +1377,7 @@ def _profile_to_json(profile: dict) -> dict:
 
 @router.post("/profile/recompute")
 async def recompute_profile(request: Request):
-    _require_full(request)
+    _require_access(request)
     db = _db()
     rows = await db.list_job_feedback()
     profile = jobs_score.recompute_profile(rows)

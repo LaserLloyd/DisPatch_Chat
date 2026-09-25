@@ -433,7 +433,7 @@ tools:
   - id: benchmark            # [a-z0-9-]{1,40}, unique, not a bot id
     title: Benchmark Board
     icon: 📊
-    kind: static             # static | url | builtin
+    kind: static             # static | url | builtin | app
     root: /abs/path/results  # served read-only at /tools/<id>/
     entry: report.html       # default index.html
     enabled: true            # default true
@@ -447,8 +447,14 @@ tools:
     kind: url
     url: http://192.0.2.5:8080/   # framed by the client; http(s) only
   - id: deepseek-harness     # builtins: deepseek-harness, studioforge-panel,
-    kind: builtin            #   mail-panel, clients-panel, jobboard
+    kind: builtin            #   mail-panel, clients-panel
     enabled: false           # switches the builtin OFF (its routes 404)
+  - id: jobboard             # an APP (a package under apps/<id>/)
+    kind: app
+    enabled: false           # switches the app OFF (its routes and page 404)
+  - id: my-addon             # an app package in <DATA_DIR>/apps/my-addon/
+    kind: app
+    trusted: true            # FILE-ONLY: loads its Python into the server
 ```
 
 - **builtin** entries can only switch a pane *off*; no entry (or `enabled:
@@ -473,7 +479,16 @@ tools:
   `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PIN`/`*_PASSWORD` env name removed. The
   Settings tab can edit titles/icons/enabled and add or remove static/url
   tools, but can never introduce or change a `refresh` block.
-- Safe Mode sees only `safe: true` static/url tools, without paths or argv.
+- Safe Mode sees only `safe: true` static/url tools, without paths or argv
+  (and `safe: true` apps).
+- **app** rows carry only `id, kind, enabled, trusted`. An app's title, icon,
+  order and so on come from its own `app.yaml` — see [apps.md](apps.md).
+  Repo apps (`apps/<id>/` in the install) are loaded and **on by default**; a
+  row with `enabled: false` turns one off. An app package in
+  `<DATA_DIR>/apps/<id>/` is loaded only when its row says `trusted: true`,
+  because loading it runs its code inside DisPatch. Like a `refresh` argv,
+  `trusted` can only be written by editing this file — `PUT /api/tools`
+  refuses to introduce or change it, and never removes an app row.
 
 Routes: `GET /api/tools`, `PUT /api/tools` (operator), `GET
 /api/tools/<id>/status`, `POST /api/tools/<id>/refresh` (operator), `GET
@@ -481,27 +496,32 @@ Routes: `GET /api/tools`, `PUT /api/tools` (operator), `GET
 
 #### The Job Board (`jobboard`)
 
-Since 2026-09-25 the Job Board is a builtin tool, not a rail bot. It exists
-when the server was started with `JOBS_ENABLED=1` (the `/api/jobs` router is
-only mounted then); its Tools tile opens the board full-page like any other
-tool, and there is no separate Jobs screen or mobile Jobs tab any more.
-`jobboard: enabled: false` in `tools.yaml` turns the whole feature off: every
-`/api/jobs` route answers 404, including the agent's own posts and the daily
-"find jobs" run.
+The Job Board is an **app** (`apps/jobboard/`, see [apps.md](apps.md)), not a
+builtin and not a rail bot. It is **on by default** — the old `JOBS_ENABLED=1`
+environment flag is retired and no longer read. To turn it off, add
 
-**Keep the `jobboard` bot row in `config.yaml`, but hide it.** The board is
-built on it: each month's discussion thread is a thread of bot `jobboard`,
-the board's picture is that bot's avatar, `POST /api/jobs/find` refuses with
-404 when the row is missing, and feedback turns are routed through its
-`agent:` field to the OpenClaw agent that runs the search. Removing the row
-silently stops the agent from being asked anything. Hide it instead, so the
-tile is the only way in:
+```yaml
+tools:
+  - {id: jobboard, kind: app, enabled: false}
+```
+
+to `tools.yaml`: every route answers 404 at both `/api/apps/jobboard` and the
+legacy `/api/jobs` (including the agent's own posts and the daily "find jobs"
+run), and `/apps/jobboard/` stops serving the board.
+
+**The `jobboard` bot row.** The board is built on it: each month's discussion
+thread is a thread of bot `jobboard`, the board's picture is that bot's
+avatar, `POST /api/jobs/find` refuses with 404 when the row is missing, and
+feedback turns are routed through its `agent:` field to the OpenClaw agent that
+runs the search. On startup DisPatch **adds** the row from the app's manifest
+if it is missing (hidden, `agent: scout`, avatar `jobboard-face.png`); it never
+edits a row that already exists, so an operator's changes stand:
 
 ```yaml
   - id: jobboard
     name: Job Board
     avatar: jobboard-face.png
-    visible: false           # was true: the Tools tile replaces the rail bot
+    visible: false           # the Tools tile is the way in, not a rail bot
     safe: false
     agent: scout             # the OpenClaw agent the board's turns run on
 ```
