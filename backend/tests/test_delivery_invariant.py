@@ -469,3 +469,119 @@ async def test_a_backup_succeeds_while_the_app_is_reading(tmp_path):
         con.close()
     finally:
         await db.close()
+
+
+# --- metadata.notice: the one collapse convention for machine events --------
+
+@pytest.mark.parametrize("given, level", [
+    (True, "info"),
+    ({"level": "error"}, "error"),
+    ({"level": "ok"}, "ok"),
+    ({"level": "warn"}, "warn"),
+    ({"level": "shouting"}, "info"),      # unknown clamps
+    ({}, None),                           # falsy: dropped, an ordinary row
+    (None, None),
+])
+def test_notice_normalises_level_and_implies_sub(given, level):
+    out = main._normalize_notice({"origin": "inject", "notice": given})
+    if not given:
+        assert "notice" not in out and not out.get("sub"), out
+        return
+    assert out["sub"] is True
+    assert out["notice"]["level"] == level
+    assert out["origin"] == "inject"
+
+
+def test_no_notice_leaves_metadata_untouched():
+    meta = {"origin": "inject"}
+    assert main._normalize_notice(meta) is meta
+    assert main._normalize_notice(None) is None
+
+
+@pytest.mark.asyncio
+async def test_an_error_notice_still_lights_the_unread_dot(wired, monkeypatch):
+    """A collapsed row is quiet — but a FAILED run that is both collapsed and
+    dot-less is a failure that reports nothing, this box's dominant defect."""
+    p = wired
+    monkeypatch.setattr(main, "db", p._db)
+    quiet = await p._db.create_thread(bot_id="main", title="quiet")
+    loud = await p._db.create_thread(bot_id="main", title="loud")
+
+    for lvl in ("info", "ok", "warn"):
+        await main._persist_and_broadcast_message(
+            quiet.id, "assistant", f"🔧 Run x · {lvl}",
+            metadata={"origin": "inject", "notice": {"level": lvl}})
+    await main._persist_and_broadcast_message(
+        loud.id, "assistant", "❌ Run `bench-1` failed — see report",
+        metadata={"origin": "inject", "notice": {"level": "error"}})
+
+    q = await p._db.get_thread(quiet.id)
+    lo = await p._db.get_thread(loud.id)
+    assert q.unread_since is None, "an info/ok/warn notice lit the unread dot"
+    assert lo.unread_since is not None, "a failed-run notice was invisible to the dot"
+    # …but no notice, even an error, becomes the thread's preview line.
+    assert lo.last_message in (None, "")
+    summary = {u["thread_id"] for u in await p._db.unread_summary()}
+    assert loud.id in summary and quiet.id not in summary
+
+
+@pytest.mark.asyncio
+async def test_the_notice_backfill_collapses_old_status_lines_only(tmp_path, monkeypatch):
+    """The one-time migration: old injected run/summary lines become notices;
+    reports, story lines, practice rows and conversation are left alone; a
+    backup of the DB is written first; the marker makes it one-time."""
+    import json
+
+    from app.database import Database
+
+    db = Database(tmp_path / "chats.db")
+    await db.connect()
+    try:
+        th = await db.create_thread(bot_id="main", title="history")
+        inj = {"origin": "inject"}
+        rows = {
+            "🔧 Run `bench-1` recovered after 3h01m": ("info", inj),
+            "📊 **WEEKLY PERF**": ("info", inj),
+            "❌ Run `orion-2` failed — see report": ("error", inj),
+            "⚠️ Run `w-2026` partial": ("warn", inj),
+            "**✅ RECOVERED: task_drain**": ("ok", inj),
+            "📬 Run `laserlloyd` report": (None, inj),
+            "● __rehearsal__ step 3": (None, inj),
+            "The Optimization chapter, part 2": (None, inj),
+            "🔧 Run typed by a bot, not injected": (None, {"run_id": "r"}),
+            "❌ Run already flagged": ("warn-kept", {**inj, "notice": {"level": "warn"}}),
+        }
+        ids = {}
+        for text, (_, meta) in rows.items():
+            ids[text] = (await db.add_message(th.id, "assistant", text, metadata=meta)).id
+
+        marker = tmp_path / ".notice-migration-done"
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(main, "db", db)
+        await main._migrate_machine_notices()
+        assert marker.exists()
+        assert (tmp_path / "chats.db.pre-notice-migration").stat().st_size > 0
+        assert "changed=5" in marker.read_text()
+        # The copy is the history BEFORE the rewrite (one pre-existing notice).
+        snap = tmp_path / "chats.db.pre-notice-migration"
+        con = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
+        assert con.execute("SELECT count(*) FROM messages WHERE "
+                           "json_extract(metadata, '$.notice') IS NOT NULL").fetchone()[0] == 1
+        con.close()
+        # The marker short-circuits a second run: no fresh backup is taken.
+        (tmp_path / "chats.db.pre-notice-migration").unlink()
+        await main._migrate_machine_notices()
+        assert not (tmp_path / "chats.db.pre-notice-migration").exists()
+
+        for text, (want, _) in rows.items():
+            cur = await db.db.execute("SELECT metadata FROM messages WHERE id = ?", (ids[text],))
+            meta = json.loads((await cur.fetchone())[0] or "{}")
+            await cur.close()
+            if want is None:
+                assert "notice" not in meta and not meta.get("sub"), (text, meta)
+            elif want == "warn-kept":
+                assert meta["notice"] == {"level": "warn"} and not meta.get("sub"), meta
+            else:
+                assert meta["sub"] is True and meta["notice"] == {"level": want}, (text, meta)
+    finally:
+        await db.close()

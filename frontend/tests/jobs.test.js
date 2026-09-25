@@ -235,8 +235,10 @@ test('the sw.js CACHE was bumped for the new module paths', () => {
   // v125 (2026-09-24): the scene backdrop tint is off; theme background only.
   // v126 (2026-09-25): Tools — new module js/tools.js, api.js and all its
   // importers moved, index.html/app.css/main.js/locales moved.
-  assert.equal(m[1], 'local-chat-v126',
-    'sw.js CACHE must be local-chat-v126 so installed clients pick up the Tools rail');
+  // v127 (2026-09-25): metadata.notice convention — notice.js/main.js/app.css
+  // and index.html moved.
+  assert.equal(m[1], 'local-chat-v127',
+    'sw.js CACHE must be local-chat-v127 so installed clients pick up the notice convention');
 });
 
 // =============================================================================

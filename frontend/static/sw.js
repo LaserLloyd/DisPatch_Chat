@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v126';  // v126: Tools — new module js/tools.js (in
+const CACHE = 'local-chat-v127';  // v127: metadata.notice is the one
+  //   collapse convention for machine events — an explicit notice renders as
+  //   a one-line notice even when the server also set `sub` (notice.js 2→3),
+  //   a plain sub row shows its own first line instead of "Working…", an
+  //   info-level dot. main.js 102→103, app.css 86→87, index.html.
+  // v126: Tools — new module js/tools.js (in
   //   SHELL): a Tools group in the rail (#tool-list), a generic full-page tool
   //   pane (#tool-view), Settings → Tools, `body.tool-full` on every tool
   //   opener; the ⌥ menu keeps only parked bots. main.js 101→102, api.js

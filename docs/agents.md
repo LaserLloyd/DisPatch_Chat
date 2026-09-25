@@ -125,6 +125,43 @@ one is a place where a naive caller silently does the wrong thing:
   truncates, so a `200` means the whole body landed. Split long output across
   messages rather than relying on a silent cut.
 
+### Posting events: one-line notices
+
+A status line — a run finished, a watchdog tripped, a backup summary — is not
+conversation, and should not arrive as a full chat bubble. Mark it with
+`metadata.notice` and the chat shows it as ONE collapsed line: a coloured
+level dot, the message's first line, and the time. Tapping it opens the full
+text.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/inject \
+  -H 'Content-Type: application/json' \
+  -d '{"bot_id": "assistant",
+       "content": "❌ Run bench-42 failed — see report\n\nFull log: /var/log/bench-42.txt",
+       "metadata": {"notice": {"level": "error"}}}'
+```
+
+- `level` is one of `info`, `ok`, `warn`, `error`. `"notice": true` means
+  `info`; an unknown level is clamped to `info`.
+- Send `notice` only. The server also sets `metadata.sub`, so the row is kept
+  out of the thread-list preview, the agent's conversation history and the
+  reaction autopilot — you do not need to set `sub` yourself.
+- The **first line** is the headline. Put the whole story on line one; details
+  go below it.
+- Quiet by design: `info`, `ok` and `warn` notices do **not** light the
+  thread's unread dot. **`error` does** — a failure that reports nothing is
+  the worst outcome, so a failed run stays visible even though it is
+  collapsed.
+- Anything that needs a person to answer — a question, a decision, "approve
+  this?" — is **not** a notice. Post it as a plain message so it arrives as a
+  full bubble and lights the dot.
+
+Rows posted before this convention existed are still recognised by their
+leading glyph (`⚠️`, `❌`, `✅ RECOVERED`) plus a failure word, and a one-time
+startup migration marked the old `🔧 Run` / `📊` / `❌ Run` / `⚠️ Run` /
+`✅ RECOVERED` injected lines as notices (the database is copied to
+`chats.db.pre-notice-migration` first).
+
 ## Asking for a generated image
 
 A bot can ask DisPatch for a picture instead of generating one itself. This is

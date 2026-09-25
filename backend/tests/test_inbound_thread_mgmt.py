@@ -244,3 +244,31 @@ def test_remote_machine_needs_token_for_files_list(env):
     auth.set_pin("1234")
     r = client.get("/api/files")
     assert r.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# metadata.notice via /api/inject — scripts send only `notice`; `sub` is implied
+# --------------------------------------------------------------------------- #
+
+def test_inject_notice_implies_sub_and_normalises_level(env):
+    c = env()
+    tid = _seed_thread(c)
+    r = c.post("/api/inject", json={"thread_id": tid, "content": "🔧 Run `x` recovered",
+                                    "metadata": {"notice": True}})
+    assert r.status_code == 200, r.text
+    meta = r.json()["message"]["metadata"]
+    assert meta["sub"] is True and meta["notice"] == {"level": "info"}
+    assert meta["origin"] == "inject"
+
+    r = c.post("/api/inject", json={"thread_id": tid, "content": "❌ Run `y` failed",
+                                    "metadata": {"notice": {"level": "error"}}})
+    meta = r.json()["message"]["metadata"]
+    assert meta["sub"] is True and meta["notice"]["level"] == "error"
+
+    r = c.post("/api/inject", json={"thread_id": tid, "content": "📊 weird level",
+                                    "metadata": {"notice": {"level": "LOUD"}}})
+    assert r.json()["message"]["metadata"]["notice"]["level"] == "info"
+
+    # A plain inject is untouched: still a full bubble.
+    r = c.post("/api/inject", json={"thread_id": tid, "content": "A real question for the operator?"})
+    assert not (r.json()["message"]["metadata"] or {}).get("sub")

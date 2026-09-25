@@ -80,3 +80,28 @@ test('headline falls back to the first non-empty line', () => {
   assert.equal(noticeHeadline('\n\n  ❌  **Deploy** failed\nmore'), 'Deploy failed');
   assert.equal(noticeHeadline(''), '');
 });
+
+// --- the metadata.notice convention (2026-09-25) ---------------------------
+
+test('an explicit notice renders as a notice even though the server set sub', () => {
+  for (const level of ['info', 'ok', 'warn', 'error']) {
+    const n = classifyNotice(a('🔧 Run `bench-1` recovered after 3h01m', { origin: 'inject', sub: true, notice: { level } }));
+    assert.ok(n, `level ${level} was swallowed by the sub early-return`);
+    assert.equal(n.level, level);
+  }
+});
+
+test('an explicit notice with no or unknown level falls back to the glyph, then info', () => {
+  assert.equal(classifyNotice(a('📊 Daily summary', { sub: true, notice: true })).level, 'info');
+  assert.equal(classifyNotice(a('❌ Run x failed', { sub: true, notice: { level: 'LOUD' } })).level, 'error');
+  assert.equal(classifyNotice(a('plain words', { notice: {} })).level, 'info');
+});
+
+test('the notice headline is the first line, without markdown', () => {
+  const n = classifyNotice(a('📊 **Daily summary** — 3 runs\n\nline two', { sub: true, notice: { level: 'info' } }));
+  assert.equal(n.headline, '📊 Daily summary — 3 runs');
+});
+
+test('a plain sub row without notice is still not a notice', () => {
+  assert.equal(classifyNotice(a('⚠️ 🛠️ Exec failed: `x` (exit 1)', { sub: true })), null);
+});

@@ -10,12 +10,15 @@
 // not conversation: still there, one tap to expand, but not shouting.
 //
 // Pure module — no DOM — so the classification can be tested on its own. The
-// decision is made from data every row already carries; nothing server-side
-// changed, which is also why the rows already in the database get the new
-// look without a migration.
+// decision is made from data every row already carries.
 //
-// A sender can opt in explicitly with metadata.notice = true (or a
-// metadata.notice object with a `level`) instead of relying on the text rule.
+// THE CONVENTION (2026-09-25): a sender marks a machine event with
+// metadata.notice = { level: 'info' | 'ok' | 'warn' | 'error' } and nothing
+// else. The server implies metadata.sub and clamps the level (main.py
+// _normalize_notice), so a notice row usually carries BOTH flags — which is
+// why the explicit notice is checked before the sub early-return below. The
+// glyph/word guessing further down is only the fallback for rows posted
+// before the convention (and senders that never adopted it).
 
 // A leading alert glyph, optionally inside the **bold** box-smoke uses.
 const LEAD = /^\s*(?:\*\*)?\s*(⚠️|⚠|❌|🚨|✅\s*RECOVERED\b)/u;
@@ -36,6 +39,8 @@ const SHORT_REPLY = 240;
 // the family app's database on 2026-09-24 — none of the 111 stopped
 // collapsing.
 const INJECT_ERRORISH = /\b(fail(?:ed|ing|ure|s)?|error|timed out|timeout|unavailable|unreachable|crash(?:ed)?|down|lost|cannot|can't|missed|didn.t|refused|denied|stale|stranded|partial|degraded|never finished|not (?:running|found|reachable))\b/i;
+
+const LEVELS = ['info', 'ok', 'warn', 'error'];
 
 function levelFor(glyph) {
   if (!glyph) return 'warn';
@@ -58,16 +63,19 @@ export function noticeHeadline(content) {
 export function classifyNotice(msg) {
   if (!msg || msg.role === 'user') return null;
   const meta = msg.metadata || {};
-  // Sub rows (working output, "reaction didn't fire") already collapse.
-  if (meta.sub) return null;
   const content = String(msg.content || '');
   const m = LEAD.exec(content);
   const headline = noticeHeadline(content);
 
+  // Explicit notice first — it wins over `sub` (the server sets both).
   if (meta.notice) {
     const lvl = typeof meta.notice === 'object' && meta.notice.level;
-    return { level: ['error', 'warn', 'ok', 'info'].includes(lvl) ? lvl : levelFor(m && m[1]), headline };
+    if (LEVELS.includes(lvl)) return { level: lvl, headline };
+    return { level: m ? levelFor(m[1]) : 'info', headline };
   }
+  // Plain sub rows (working output, "reaction didn't fire") collapse on
+  // their own, as a sub-details box.
+  if (meta.sub) return null;
   if (meta.kind === 'image_job' && meta.status === 'failed') return { level: 'error', headline };
   if (meta.doxy_pics && meta.doxy_pics.failure) return { level: 'warn', headline };
   if (meta.source === 'watchdog-failure-notify') return { level: 'error', headline };

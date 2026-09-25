@@ -1041,10 +1041,17 @@ class Database:
     # existed and nobody saw it; here, nobody saw anything and the app insisted
     # there was something. Both are the indicator disagreeing with reality, and
     # the same rule fixes both — count what a person can actually read.
+    #
+    # One exception to "sub rows never light the dot": a collapsed machine
+    # event whose `notice.level` is 'error' (a failed run, a dead watchdog).
+    # Collapsing it keeps the thread calm; hiding it from the dot as well
+    # would turn a failure into silence, and a failure that reports nothing
+    # is exactly the defect this box keeps suffering. info/ok/warn stay quiet.
     _UNREAD_SQL = """
                    (SELECT MIN(m.created_at) FROM messages m WHERE m.thread_id = t.id
                       AND m.role != 'user'
-                      AND COALESCE(json_extract(m.metadata, '$.sub'), 0) NOT IN (1, 'true')
+                      AND (COALESCE(json_extract(m.metadata, '$.sub'), 0) NOT IN (1, 'true')
+                           OR json_extract(m.metadata, '$.notice.level') = 'error')
                       AND COALESCE(json_extract(m.metadata, '$.kind'), '') != 'reaction'
                       AND TRIM(COALESCE(m.content, '')) != ''
                       AND m.created_at > COALESCE(t.last_read_at, '')) AS unread_since
@@ -1428,6 +1435,42 @@ class Database:
         await self.db.execute(
             "UPDATE messages SET content = ? WHERE id = ?", (content, msg_id))
         await self.db.commit()
+
+    # Machine posts made before the `metadata.notice` convention existed
+    # (2026-09-25), by leading text → notice level. Deliberately narrow: only
+    # the run-report and summary shapes that are unambiguously status lines.
+    # 📬 report deliveries, story progress and ●/■ practice rows stay as they
+    # are. An optional leading `**` covers box-smoke's bold form.
+    NOTICE_BACKFILL_PREFIXES: tuple[tuple[str, str], ...] = (
+        ("🔧 Run", "info"),
+        ("📊", "info"),
+        ("❌ Run", "error"),
+        ("⚠️ Run", "warn"),
+        ("✅ RECOVERED", "ok"),
+    )
+
+    async def backfill_machine_notices(self) -> int:
+        """Mark old injected status lines as collapsed notices: set
+        ``$.sub = true`` and ``$.notice = {"level": …}`` on ``origin='inject'``
+        rows whose content starts with one of NOTICE_BACKFILL_PREFIXES and that
+        carry no ``notice`` yet. Returns the number of rows changed."""
+        total = 0
+        for prefix, level in self.NOTICE_BACKFILL_PREFIXES:
+            cur = await self.db.execute(
+                """
+                UPDATE messages
+                   SET metadata = json_set(metadata, '$.sub', json('true'),
+                                           '$.notice', json_object('level', ?))
+                 WHERE json_valid(metadata)
+                   AND json_extract(metadata, '$.origin') = 'inject'
+                   AND json_extract(metadata, '$.notice') IS NULL
+                   AND (substr(content, 1, ?) = ? OR substr(content, 1, ?) = ?)
+                """,
+                (level, len(prefix), prefix, len(prefix) + 2, "**" + prefix))
+            total += cur.rowcount or 0
+            await cur.close()
+        await self.db.commit()
+        return total
 
     async def update_message_metadata(self, msg_id: str,
                                       metadata: dict[str, Any] | None) -> None:

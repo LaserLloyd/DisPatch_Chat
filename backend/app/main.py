@@ -403,6 +403,8 @@ async def _lifespan_startup(app: FastAPI) -> None:
     await _startup_recovery()
     # One-time cleanup of scaffolding stored before the sanitizer existed.
     await _migrate_sanitize_stored_messages()
+    # One-time: old injected status lines become collapsed notices.
+    await _migrate_machine_notices()
     # Reconcile blob storage: drop partial/orphan uploads, flag missing blobs.
     await _sweep_orphan_blobs()
     # Same idea for the per-thread avatar store: a pinned snapshot whose file
@@ -2205,6 +2207,34 @@ async def _broadcast_thread_update(thread_id: str) -> None:
         await manager.broadcast({"type": "thread_update", "thread": thread.model_dump()})
 
 
+# The machine-event collapse convention (2026-09-25). A sender that posts a
+# status line rather than conversation — run reports, watchdogs, box-smoke,
+# backup health, doxy-pics misses — marks it `metadata.notice = {"level": …}`
+# and nothing else. The server then implies `sub`, so every server-side rule
+# that already knows collapsed rows (thread preview, LLM history, autopilot,
+# streaming) treats the event correctly without a second flag to remember.
+# The frontend renders it as one line with a level dot (notice.js).
+NOTICE_LEVELS = ("info", "ok", "warn", "error")
+
+
+def _normalize_notice(metadata: dict | None) -> dict | None:
+    """`notice: true` → `{"level": "info"}`; an unknown level clamps to info;
+    any truthy notice also sets `sub`. A falsy notice is dropped so a caller
+    that sends `notice: false`/`null` gets an ordinary message, not a stray
+    key the frontend would have to second-guess."""
+    if not metadata or "notice" not in metadata:
+        return metadata
+    raw = metadata.get("notice")
+    if not raw:
+        return {k: v for k, v in metadata.items() if k != "notice"}
+    if isinstance(raw, dict):
+        level = raw.get("level")
+        notice = {**raw, "level": level if level in NOTICE_LEVELS else "info"}
+    else:
+        notice = {"level": "info"}
+    return {**metadata, "notice": notice, "sub": True}
+
+
 def _demote_tool_warning(content: str, metadata: dict | None) -> dict | None:
     """Collapse a gateway tool-status warning ("⚠️ 🛠️ Exec failed: `…`") to
     "sub" (collapsed working-output) style. These are the runtime narrating a
@@ -2381,6 +2411,9 @@ async def _prepare_persist(
     pic_drops: list = []
     bot_id: str | None = None
     autopilot = False
+    # First, so every rule below that keys off `sub` (autopilot, mood face)
+    # already sees a notice as the collapsed event it is.
+    metadata = _normalize_notice(metadata)
     if role == "assistant":
         bot_id = await _bot_of_thread(thread_id)
         # Resolved on the ORIGINAL content, before the strip below discards the
@@ -6037,6 +6070,34 @@ async def _migrate_sanitize_stored_messages() -> None:
     if changed or deleted:
         log.info("sanitize migration: cleaned %d message(s), removed %d scaffolding-only row(s)",
                  changed, deleted)
+
+
+async def _migrate_machine_notices() -> None:
+    """One-time backfill for the `metadata.notice` convention (2026-09-25).
+
+    Injected status lines stored before the posting scripts learned to send
+    `metadata.notice` rendered as full bubbles. This marks the unambiguous
+    shapes (see Database.NOTICE_BACKFILL_PREFIXES) as collapsed notices. The
+    database is copied to ``chats.db.pre-notice-migration`` first; if that
+    copy cannot be made the migration does not run (and retries next boot) —
+    a metadata rewrite of the family's history without a way back is not
+    worth a tidier thread."""
+    marker = config.DATA_DIR / ".notice-migration-done"
+    if marker.exists():
+        return
+    try:
+        await db.backup_to(config.DATA_DIR / "chats.db.pre-notice-migration")
+    except Exception:
+        log.exception("notice migration: pre-migration backup failed; skipped (will retry next boot)")
+        return
+    try:
+        changed = await db.backfill_machine_notices()
+    except Exception:
+        log.exception("notice migration failed (will retry next boot)")
+        return
+    with contextlib.suppress(OSError):
+        marker.write_text(f"changed={changed}\n")
+    log.info("notice migration: %d injected status line(s) collapsed to notices", changed)
 
 
 async def _sweep_orphan_blobs() -> None:

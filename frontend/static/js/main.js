@@ -6,7 +6,7 @@ import { api, setOnLocked } from './api.js?v=29';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=32';
 import { installChecklists, applyChecklistState } from './checklist.js?v=6';
-import { classifyNotice } from './notice.js?v=2';
+import { classifyNotice, noticeHeadline } from './notice.js?v=3';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=19';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
@@ -1889,7 +1889,10 @@ function messageEl(msg) {
     // Intermediate / working output: collapsed by default, click to expand.
     wrap.classList.add('sub-msg');
     const details = el('details', { class: 'sub-details' });
-    details.append(el('summary', { text: glyphless(t('msg.working')) }));
+    // The row's own first line is its summary ("🛠️ Exec failed: …", a
+    // demoted narration) — a fixed "Working…" on every collapsed row made them
+    // indistinguishable. "Working…" stays only for a row with no text.
+    details.append(el('summary', { dir: 'auto', text: subSummary(msg.content) }));
     const inner = el('div', { class: 'sub-content' });
     inner.innerHTML = renderMarkdown(msg.content || '', mdOpts);
     enhanceContent(inner, { noLocal: state.decoy });
@@ -2056,6 +2059,14 @@ function messageEl(msg) {
   // gets the widgets read-only (VIEW + SEND only — checking is a mutation).
   installChecklists(wrap, { message: msg, readonly: state.decoy });
   return wrap;
+}
+
+// A collapsed sub row's one-line summary: its first line, plain, capped.
+const SUB_SUMMARY_MAX = 120;
+function subSummary(content) {
+  const line = noticeHeadline(content);
+  if (!line) return glyphless(t('msg.working'));
+  return line.length > SUB_SUMMARY_MAX ? `${line.slice(0, SUB_SUMMARY_MAX - 1).trimEnd()}…` : line;
 }
 
 // One collapsed line for a system notice: a level dot, the headline and the
