@@ -3717,7 +3717,6 @@ function mountLanguagePicker() {
   const row = dom['bm-lang-row'];
   if (!row) return;
   const body = (id) => document.getElementById(id);
-  const displayBody = body('dev-body-display');
   const picturesBody = body('dev-body-pictures');
   const barBody = body('dev-body-bar');
   const filesBody = body('dev-body-files');

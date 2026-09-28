@@ -244,9 +244,7 @@
     "device_hint": "这些设置仅适用于本设备，并且立即生效——无需保存。",
     "hint": "点按图片即可更换。用 ▲/▼（或拖动）排序；开关用于显示或隐藏机器人。<strong>安全</strong>机器人无需 PIN 即可看到。按<strong>保存</strong>生效。",
     "language": "语言",
-    "language_hint": "改动会立即生效。",
     "minimal_avatars": "极简头像",
-    "minimal_avatars_hint": "— 侧边栏用名字代替图片，消息上不显示头像（立即生效）",
     "change_photo": "📷 更换照片",
     "change_photo_title": "更换头像",
     "change_photo_short": "更换照片",
@@ -884,7 +882,6 @@
   "pins": {
     "pin": "固定到侧栏",
     "unpin": "从侧栏取消固定",
-    "theme_hint": "在栏中保留主题按钮。",
     "pin_short": "固定",
     "pinned_short": "已固定"
   },

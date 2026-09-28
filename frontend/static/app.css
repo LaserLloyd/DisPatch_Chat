@@ -4303,6 +4303,14 @@ body.tools-sheet-open::after {
 .tool-body { flex-direction: column; }
 .tool-frame { flex: 1 1 auto; }
 .tool-note { flex: 1 1 auto; }
+/* The fallback card's buttons (Open in a new window / Try again). They reuse
+   .tools-add-actions for the button row, whose grid-column/flex-end placement
+   is for the Settings add form — inside the centred card they centre too. */
+.tool-note .tool-note-actions { justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+/* Menu row: the ↗ that says a window-mode tool leaves DisPatch. */
+.tools-item-ext { flex: none; font-size: 13px; }
+/* Settings → Tools: the "New window" switch under a row's location. */
+.tools-open-window { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; }
 .tool-refresh { padding: 6px 11px; white-space: nowrap; flex: 0 0 auto; }
 .tool-refresh:disabled { opacity: .6; cursor: progress; }
 /* A failed refresh: one collapsed line, the tail behind the disclosure. */

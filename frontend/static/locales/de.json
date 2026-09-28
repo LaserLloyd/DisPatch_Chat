@@ -246,9 +246,7 @@
     "device_hint": "Diese Einstellungen gelten nur für dieses Gerät und wirken sofort — hier gibt es nichts zu speichern.",
     "hint": "Tippe auf ein Bild, um es zu ändern. Mit ▲/▼ (oder Ziehen) sortieren; der Schalter blendet einen Bot ein oder aus. <strong>Sicher</strong>-Bots sind ohne PIN sichtbar. Mit <strong>Speichern</strong> übernehmen.",
     "language": "Sprache",
-    "language_hint": "Änderungen gelten sofort.",
     "minimal_avatars": "Minimale Avatare",
-    "minimal_avatars_hint": "— Namen statt Bilder in der Seitenleiste, keine Avatare an Nachrichten (gilt sofort)",
     "change_photo": "📷 Foto ändern",
     "change_photo_title": "Avatar ändern",
     "change_photo_short": "Foto ändern",
@@ -907,7 +905,6 @@
   "pins": {
     "pin": "An die Leiste anheften",
     "unpin": "Von der Leiste lösen",
-    "theme_hint": "die Themenschaltfläche in der Leiste behalten.",
     "pin_short": "Anheften",
     "pinned_short": "Angeheftet"
   },

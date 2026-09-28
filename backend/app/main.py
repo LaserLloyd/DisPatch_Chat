@@ -11146,17 +11146,9 @@ def _framable(headers) -> bool:
 
     Anything else (no header at all, an unparseable one) is framable, which is
     the web's own default."""
-    # frame-ancestors first: where both are present the CSP directive wins and
-    # the browser ignores X-Frame-Options entirely.
-    csp = (headers.get("content-security-policy") or "").lower()
-    for directive in csp.split(";"):
-        parts = directive.split()
-        if parts and parts[0] == "frame-ancestors":
-            return parts[1:] == ["*"]
-    xfo = (headers.get("x-frame-options") or "").strip().lower()
-    if xfo in ("deny", "sameorigin") or xfo.startswith("allow-from"):
-        return False
-    return True
+    # One reading of these headers for the whole app: tools.framable is the
+    # same test for url tools' status (it used to be a copy of this body).
+    return tools.framable(headers)
 
 
 async def _studioforge_reachable() -> tuple[bool, float, bool | None]:

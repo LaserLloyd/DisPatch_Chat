@@ -244,9 +244,7 @@
     "device_hint": "これらはこの端末だけに適用され、すぐに反映されます。保存は不要です。",
     "hint": "画像をタップして変更。▲/▼（またはドラッグ）で並べ替え、スイッチでボットの表示／非表示を切り替えます。<strong>セーフ</strong>のボットはPINなしで表示されます。<strong>保存</strong>で反映。",
     "language": "言語",
-    "language_hint": "変更はすぐに反映されます。",
     "minimal_avatars": "ミニマルアバター",
-    "minimal_avatars_hint": "— サイドバーは画像ではなく名前で表示し、メッセージにはアバターを表示しません（すぐに反映されます）",
     "change_photo": "📷 写真を変更",
     "change_photo_title": "アバターを変更",
     "change_photo_short": "写真を変更",
@@ -977,7 +975,6 @@
   "pins": {
     "pin": "バーに固定",
     "unpin": "バーから外す",
-    "theme_hint": "テーマボタンをバーに表示したままにします。",
     "pin_short": "ピン留め",
     "pinned_short": "ピン留め中"
   },

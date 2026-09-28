@@ -207,9 +207,14 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v135 (phone Tools row + sheet, remote tool URLs)', () => {
+test('the sw.js CACHE is local-chat-v137 (review round: tool card CSS, dead locale keys)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v137: review round — tool fallback-card/menu/Settings CSS, three dead
+  // locale keys dropped (main.js 112→113, app.css 92→93, index.html, locales).
+  // v136: tools open:window + fallback card, clients site links, Device-tab
+  // groups, pin pills (main.js 111→112, app.css 91→92, api.js 30→31, tools.js
+  // 8→9, clients.js 8→9, pins.js 12→13, index.html, locales).
   // v135: the phone's Tools row + bottom sheet, Back closes a tool, remote
   // addresses for host-bound tools (tools.js 7→8, main.js 110→111, app.css
   // 90→91, index.html, locales).
@@ -225,7 +230,7 @@ test('the sw.js CACHE is local-chat-v135 (phone Tools row + sheet, remote tool U
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v135');
+  assert.equal(m[1], 'local-chat-v137');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

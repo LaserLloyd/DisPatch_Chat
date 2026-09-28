@@ -2,7 +2,12 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v136';  // v136: settings modal fixed size, Device tab
+const CACHE = 'local-chat-v137';  // v137: review round — tool fallback
+// card buttons / menu ↗ / Settings "New window" switch get their CSS, dead
+// locale keys (settings.language_hint, settings.minimal_avatars_hint,
+// pins.theme_hint) removed from all eight locales, an unused variable in
+// main.js. index.html + main.js?v=112→113 + app.css?v=92→93 + locales.
+// v136: settings modal fixed size, Device tab
 // cards, pin pills, tools open:window + fallback card, clients site links.
 // index.html + main.js?v=111→112 + app.css?v=91→92 + api.js?v=30→31 +
 // tools.js?v=8→9 + clients.js?v=8→9 + pins.js?v=12→13 + checklist/reactions

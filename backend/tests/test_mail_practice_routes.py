@@ -436,3 +436,23 @@ def test_client_links_repo_field_is_never_url_validated(tmp_path, monkeypatch):
     client_links.reset_cache()
     row = client_links.set_link("c1", repo="~/Projects/example-site")
     assert row["repo"] == "~/Projects/example-site"
+
+
+def test_client_links_failed_write_leaves_cache_matching_disk(tmp_path, monkeypatch):
+    """A save that cannot reach disk must not linger in memory: the cache used
+    to be mutated before _write ran, so a failed write served a value the next
+    restart silently lost."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    client_links.reset_cache()
+    client_links.set_link("c1", live_url="https://old.example.com")
+
+    def boom(_data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(client_links, "_write", boom)
+    with pytest.raises(OSError):
+        client_links.set_link("c1", live_url="https://new.example.com")
+    with pytest.raises(OSError):
+        client_links.set_link("c2", live_url="https://other.example.com")
+    assert client_links.get("c1")["live_url"] == "https://old.example.com"
+    assert client_links.get("c2")["live_url"] is None

@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app import config
+from . import config
 
 FILE_NAME = "client-links.json"
 
@@ -134,12 +134,17 @@ def set_link(client_id: str, *, live_url: Any = None, repo: Any = None,
         "repo": _clean_text(repo, "Repo"),
         "notes": _clean_text(notes, "Notes"),
     }
+    global _cache
     with _lock:
-        data = _load()
+        # Edit a COPY and only adopt it once it is on disk: a failed write
+        # (disk full, permissions) must leave memory agreeing with the file,
+        # not serving a value that the next restart silently loses.
+        data = dict(_load())
         if not any(row.values()):
             data.pop(str(client_id), None)
         else:
             row["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             data[str(client_id)] = row
         _write(data)
+        _cache = data
     return get(client_id)

@@ -248,9 +248,7 @@
     "device_hint": "Ces réglages ne concernent que cet appareil et s’appliquent aussitôt — il n’y a rien à enregistrer ici.",
     "hint": "Touchez une image pour la changer. Réordonnez avec ▲/▼ (ou en glissant) ; l’interrupteur affiche ou masque un bot. Les bots <strong>sûrs</strong> sont visibles sans code. Appuyez sur <strong>Enregistrer</strong> pour appliquer.",
     "language": "Langue",
-    "language_hint": "Les changements s’appliquent tout de suite.",
     "minimal_avatars": "Avatars minimalistes",
-    "minimal_avatars_hint": "— des noms au lieu des photos dans la barre latérale, aucun avatar sur les messages (effet immédiat)",
     "change_photo": "📷 Changer la photo",
     "change_photo_title": "Changer l’avatar",
     "change_photo_short": "Changer la photo",
@@ -930,7 +928,6 @@
   "pins": {
     "pin": "Épingler à la barre",
     "unpin": "Retirer de la barre",
-    "theme_hint": "garder le bouton de thème dans la barre.",
     "pin_short": "Épingler",
     "pinned_short": "Épinglé"
   },

@@ -248,9 +248,7 @@
     "device_hint": "Aplicam-se só a este dispositivo e têm efeito de imediato — aqui não há nada para guardar.",
     "hint": "Toque numa imagem para a alterar. Reordene com ▲/▼ (ou arrastando); o interruptor mostra ou oculta um bot. Bots <strong>seguros</strong> ficam visíveis sem PIN. Toque em <strong>Guardar</strong> para aplicar.",
     "language": "Idioma",
-    "language_hint": "As alterações aplicam-se de imediato.",
     "minimal_avatars": "Avatares mínimos",
-    "minimal_avatars_hint": "— nomes em vez de imagens na barra lateral, sem avatares nas mensagens (aplica-se de imediato)",
     "change_photo": "📷 Mudar a foto",
     "change_photo_title": "Mudar o avatar",
     "change_photo_short": "Mudar a foto",
@@ -930,7 +928,6 @@
   "pins": {
     "pin": "Fixar na barra",
     "unpin": "Remover da barra",
-    "theme_hint": "manter o botão de tema na barra.",
     "pin_short": "Fixar",
     "pinned_short": "Fixado"
   },

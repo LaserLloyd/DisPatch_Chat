@@ -246,9 +246,7 @@
     "device_hint": "These apply to this device only, and take effect straight away — there is nothing to save here.",
     "hint": "Tap a picture to change it. Reorder with ▲/▼ (or drag); the switch shows or hides a bot. <strong>Safe</strong> bots are visible without a PIN. Press <strong>Save</strong> to apply.",
     "language": "Language",
-    "language_hint": "Changes apply straight away.",
     "minimal_avatars": "Minimal avatars",
-    "minimal_avatars_hint": "— names instead of pictures in the sidebar, no avatars on messages (applies immediately)",
     "change_photo": "📷 Change photo",
     "change_photo_title": "Change avatar",
     "change_photo_short": "Change photo",
@@ -1000,7 +998,6 @@
   "pins": {
     "pin": "Pin to the bar",
     "unpin": "Unpin from the bar",
-    "theme_hint": "keep the theme button on the bar.",
     "pin_short": "Pin",
     "pinned_short": "Pinned"
   },
