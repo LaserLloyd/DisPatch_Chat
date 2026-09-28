@@ -2,7 +2,11 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v135';  // v135: tools are add-ons on the phone —
+const CACHE = 'local-chat-v136';  // v136: settings modal fixed size, Device tab
+// cards, pin pills, tools open:window + fallback card, clients site links.
+// index.html + main.js?v=111→112 + app.css?v=91→92 + api.js?v=30→31 +
+// tools.js?v=8→9 + clients.js?v=8→9 + pins.js?v=12→13 + checklist/reactions
+// (import bump only). v135: tools are add-ons on the phone —
   // the Bots page shows ONE quiet "Tools" row under the roster (no tile grid)
   // that opens the tools + parked bots as a bottom sheet; hardware Back and
   // every builtin ‹ close a full-page tool; off the host the Harness /

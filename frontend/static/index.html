@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=91" />
+  <link rel="stylesheet" href="/static/app.css?v=92" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -754,29 +754,66 @@
       </section>
 
       <!-- ---- Device: per-device preferences (all instant, nothing to Save) ---- -->
+      <!-- Grouped by subject (2026-09-26): each group is a titled card of rows,
+           every row reads "name / one-line explanation" on the left and its
+           control on the right (switch, select or button), with the Pin pill
+           beside the switch where the setting can go on the bar. The rows
+           built in JS (No-Image Mode, Privacy, the theme pin, links, viewer,
+           About) are mounted into these group bodies by mountLanguagePicker();
+           every id a module looks up is unchanged. -->
       <section class="settings-pane hidden" id="spane-device" role="tabpanel" aria-labelledby="stab-device" tabindex="0">
         <p class="muted modal-hint" data-i18n="settings.device_hint">These apply to this device only, and take effect straight away — there is nothing to save here.</p>
-        <!-- Language: the <select> itself is built by i18n.js languageSelect() and
-             appended here, so the option list can never drift from the shipped
-             locales. Like the avatar style below it, this is a device preference —
-             it applies immediately and is deliberately outside the Save/dirty flow. -->
-        <label class="bm-avatar-style bm-lang" id="bm-lang-row">
-          <span><strong data-i18n="settings.language">Language</strong> — <span data-i18n="settings.language_hint">Changes apply straight away.</span></span>
-        </label>
-        <!-- Avatar style moved here from the theme button: its old 4-state cycle
-             resized the sidebar mid-cycle, so switching theme shoved the rail
-             around. Applies instantly (pure CSS attribute swap, no Save needed). -->
-        <label class="bm-avatar-style" id="bm-avatar-style-row">
-          <input type="checkbox" id="bm-avatar-minimal" />
-          <span><strong data-i18n="settings.minimal_avatars">Minimal avatars</strong> <span data-i18n="settings.minimal_avatars_hint">— names instead of pictures in the
-            sidebar, no avatars on messages (applies immediately)</span></span>
-        </label>
+
+        <section class="dev-group" id="dev-group-display" aria-labelledby="dev-h-display">
+          <h3 class="dev-group-title" id="dev-h-display" data-i18n="settings.dev_display">Language &amp; display</h3>
+          <div class="dev-group-body" id="dev-body-display">
+            <!-- Language: the <select> is built by i18n.js languageSelect() and
+                 added here, so the option list can never drift from the shipped
+                 locales. -->
+            <label class="bm-avatar-style bm-lang dev-row" id="bm-lang-row">
+              <span class="dev-row-text"><strong data-i18n="settings.language">Language</strong><span class="dev-row-hint" data-i18n="settings.language_desc">Menus, buttons and messages from the app.</span></span>
+            </label>
+            <!-- Avatar style: a pure CSS attribute swap, applies instantly. -->
+            <label class="bm-avatar-style dev-row" id="bm-avatar-style-row">
+              <input type="checkbox" id="bm-avatar-minimal" />
+              <span class="dev-row-text"><strong data-i18n="settings.minimal_avatars">Minimal avatars</strong><span class="dev-row-hint" data-i18n="settings.minimal_avatars_desc">Names instead of pictures in the sidebar, and no avatars on messages.</span></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="dev-group" id="dev-group-pictures" aria-labelledby="dev-h-pictures">
+          <h3 class="dev-group-title" id="dev-h-pictures" data-i18n="settings.dev_pictures">Pictures &amp; privacy</h3>
+          <div class="dev-group-body" id="dev-body-pictures"></div>
+        </section>
+
+        <section class="dev-group" id="dev-group-bar" aria-labelledby="dev-h-bar">
+          <h3 class="dev-group-title" id="dev-h-bar" data-i18n="settings.dev_bar">Menu bar shortcuts</h3>
+          <p class="dev-group-hint" data-i18n="settings.dev_bar_hint">A pinned setting gets its own button on the menu bar, one tap away. Use the Pin button on any row.</p>
+          <div class="dev-group-body" id="dev-body-bar"></div>
+        </section>
+
+        <section class="dev-group" id="dev-group-files" aria-labelledby="dev-h-files">
+          <h3 class="dev-group-title" id="dev-h-files" data-i18n="viewer.settings_title">Local viewer</h3>
+          <div class="dev-group-body" id="dev-body-files"></div>
+        </section>
+
         <!-- Recovery stays its own modal: it is a full screen in its own
              right (an export/restore flow), and nesting it inside a settings
              pane would bury a footer of actions under a second footer. -->
-        <div class="bm-actions">
-          <button class="btn-secondary" id="open-recovery"><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="settings.recovery">Recovery &amp; Export</span></button>
-        </div>
+        <section class="dev-group" id="dev-group-backup" aria-labelledby="dev-h-backup">
+          <h3 class="dev-group-title" id="dev-h-backup" data-i18n="settings.dev_backup">Backup &amp; recovery</h3>
+          <div class="dev-group-body">
+            <div class="dev-row dev-row-action">
+              <span class="dev-row-text"><strong data-i18n="settings.recovery">Recovery &amp; Export</strong><span class="dev-row-hint" data-i18n="settings.recovery_desc">Export every message to a file, or restore messages that did not save.</span></span>
+              <button class="btn-secondary" id="open-recovery"><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="settings.recovery_open">Open</span></button>
+            </div>
+          </div>
+        </section>
+
+        <section class="dev-group" id="dev-group-about" aria-labelledby="dev-h-about">
+          <h3 class="dev-group-title" id="dev-h-about" data-i18n="about.title">About</h3>
+          <div class="dev-group-body" id="dev-body-about"></div>
+        </section>
       </section>
 
       <!-- ---- Security & PIN ---- -->
@@ -1156,6 +1193,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=111"></script>
+  <script type="module" src="/static/js/main.js?v=112"></script>
 </body>
 </html>

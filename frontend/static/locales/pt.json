@@ -280,7 +280,18 @@
     "lock_now": "Bloquear agora",
     "discard_confirm": "Descartar as alterações?",
     "menu_badge": "⌥",
-    "menu_title": "Mover este bot para o menu ⌥ Ferramentas (apenas neste dispositivo)"
+    "menu_title": "Mover este bot para o menu ⌥ Ferramentas (apenas neste dispositivo)",
+    "dev_display": "Idioma e exibição",
+    "dev_pictures": "Imagens e privacidade",
+    "dev_bar": "Atalhos da barra de menu",
+    "dev_bar_hint": "Uma configuração fixada ganha um botão próprio na barra de menu, a um toque. Use o botão Fixar em cada linha.",
+    "dev_backup": "Backup e recuperação",
+    "language_desc": "Menus, botões e mensagens do app.",
+    "minimal_avatars_desc": "Nomes em vez de imagens na barra lateral, e sem avatares nas mensagens.",
+    "recovery_desc": "Exporte todas as mensagens para um arquivo ou recupere as que não foram salvas.",
+    "recovery_open": "Abrir",
+    "theme_button": "Botão de tema",
+    "theme_button_desc": "Abre o seletor de tema direto da barra de menu."
   },
   "companions": {
     "title": "Companheiros",
@@ -919,7 +930,9 @@
   "pins": {
     "pin": "Fixar na barra",
     "unpin": "Remover da barra",
-    "theme_hint": "manter o botão de tema na barra."
+    "theme_hint": "manter o botão de tema na barra.",
+    "pin_short": "Fixar",
+    "pinned_short": "Fixado"
   },
   "checklist": {
     "done": "Concluído",
@@ -1035,6 +1048,22 @@
     "jump": "Ir ›",
     "search_placeholder": "Buscar por nome…",
     "open_thread": "Abrir conversa",
+    "site_links": "Links do site",
+    "preview_heading": "Pré-visualização da prática",
+    "no_preview": "Ainda não há uma pré-visualização ativa.",
+    "open_preview": "Abrir pré-visualização",
+    "preview_expired": "Pré-visualização expirada",
+    "expires_on": "expira em",
+    "expired_on": "expirou em",
+    "live_site_heading": "Site no ar",
+    "open_live_site": "Abrir site no ar",
+    "no_live_url": "Ainda não há uma URL definida.",
+    "repo_field_label": "Repositório / local:",
+    "notes_label": "Notas",
+    "edit_links": "Editar",
+    "live_url_label": "URL no ar",
+    "repo_placeholder": "~/Projects/… ou uma URL de repositório",
+    "opens_new_tab": "abre em uma nova aba",
     "security_hold": "Retenção de segurança",
     "hold_generic": "Este cliente está retido.",
     "hold_note_placeholder": "O que você verificou e por que é seguro continuar?",
@@ -1117,6 +1146,20 @@
     "saved": "Ferramentas guardadas",
     "save_failed": "Não foi possível guardar: {error}",
     "error_at": "Ferramenta {n}: {error}",
-    "load_failed": "Não foi possível carregar a lista de ferramentas: {error}"
+    "load_failed": "Não foi possível carregar a lista de ferramentas: {error}",
+    "open_window": "Abrir numa nova janela",
+    "opened_window": "{name} foi aberto numa nova aba",
+    "opens_window": "abre numa nova janela",
+    "window_text": "{name} abre na sua própria aba.",
+    "window_hint": "Não pode ser mostrado dentro do DisPatch. Use o botão para abri-lo.",
+    "refuses_text": "Esta página recusa ser mostrada dentro de outra página.",
+    "refuses_hint": "O servidor dela proíbe a incorporação, por isso nenhum navegador a mostrará aqui. Na sua própria aba funciona normalmente.",
+    "slow_text": "Esta página ainda não terminou de carregar.",
+    "slow_hint": "Pode estar lenta ou bloqueada aqui. Tente novamente ou abra-a na sua própria aba.",
+    "missing_text": "A página desta ferramenta está em falta.",
+    "missing_hint": "O arquivo de entrada não foi encontrado. Verifique a pasta em tools.yaml ou execute a atualização.",
+    "retry": "Tentar novamente",
+    "col_open": "Nova janela",
+    "open_window_aria": "Abrir {name} numa nova janela em vez do painel"
   }
 }

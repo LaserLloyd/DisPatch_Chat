@@ -20,6 +20,18 @@
 //   url     — someone else's page, framed as-is. Loopback addresses only load
 //             when DisPatch itself was opened on the host (the Harness rule).
 //
+// How a tool opens (`open`, from the server's row): 'frame' — the pane — or
+// 'window', its own browser tab. Some pages refuse every embed (StudioForge's
+// panel sends X-Frame-Options: DENY + frame-ancestors 'none', so framed it can
+// only ever be an empty rectangle); for those a click LAUNCHES the page
+// instead of opening a blank pane, and the StudioForge builtin defaults to it.
+// A launch needs a user gesture (a popup blocker is right to refuse anything
+// else), so a hash-restore of such a tool opens the pane with a card and one
+// button. A framed tool that turns out to be unembeddable, unreachable, empty
+// or stuck gets the same themed card with "Open in a new window" rather than
+// a blank pane. `open` only moves WHERE a page opens: every tier gate on WHO
+// may open it (Safe Mode, the loopback rule) runs first, unchanged.
+//
 // Every opener, builtin or generic, puts `tool-full` on <body>: the thread
 // column goes away and the pane owns the whole content area. Closing takes the
 // class off and hands the previous selection back to main.js.
@@ -27,7 +39,7 @@
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
-import { api } from './api.js?v=30';
+import { api } from './api.js?v=31';
 import { t, relTimeLong } from './i18n.js?v=3';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 
@@ -110,7 +122,11 @@ const SANDBOX_URL = 'allow-scripts allow-forms allow-popups allow-same-origin';
 // Fields the manifest schema accepts. Everything else in a ToolOut
 // (has_refresh, builtin_feature) is output-only and must not be sent back —
 // the schema is closed and would 422 it.
-const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'safe', 'refresh'];
+const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'safe', 'refresh', 'open'];
+
+// A framed page that has not fired `load` by now gets the "not finished
+// loading" card (the frame keeps loading underneath and is shown if it lands).
+export const FRAME_TIMEOUT_MS = 20000;
 
 let deps = null;
 let tools = null;        // null = never loaded / API absent; [] = loaded, none
@@ -119,6 +135,9 @@ let openId = null;       // the generic tool on screen, or null
 let prev = null;         // {botId, threadId} to hand back on close
 let refreshing = false;
 let statusSeq = 0;
+let frameTimer = null;   // the FRAME_TIMEOUT_MS watchdog for the open frame
+let frameLoaded = false; // the open frame fired `load` for its current src
+let cardShown = null;    // why the card is up ('slow', 'refuses', …) or null
 
 // Settings draft
 let draft = null;        // working copy while Settings → Tools is open
@@ -159,6 +178,49 @@ function parseHttpUrl(u) {
     const url = new URL(String(u || ''));
     return (url.protocol === 'http:' || url.protocol === 'https:') ? url : null;
   } catch { return null; }
+}
+
+/** 'window' when this tool launches in its own tab, else 'frame'. Only kinds
+ *  that are a page at an address can: an app never does (its frame is our
+ *  own code behind the message bridge), a native builtin never does. */
+export function openMode(tool) {
+  if (!tool || tool.open !== 'window') return 'frame';
+  if (tool.kind === 'static' || tool.kind === 'url') return 'window';
+  if (tool.kind === 'builtin' && Object.prototype.hasOwnProperty.call(tool, 'open_url')) return 'window';
+  return 'frame';
+}
+
+/** The address this tool opens at in a tab from THIS browser, or '' when it
+ *  cannot be opened here (a loopback address seen from another device — the
+ *  same rule the pane applies — or no address at all). */
+export function windowUrl(tool) {
+  if (!tool) return '';
+  let raw = '';
+  if (tool.kind === 'static') raw = new URL(`/tools/${encodeURIComponent(tool.id)}/`, location.href).href;
+  else if (tool.kind === 'url') raw = toolUrl(tool);
+  else if (tool.kind === 'builtin') raw = (!onHost() && tool.open_remote_url) || tool.open_url || '';
+  const u = parseHttpUrl(raw);
+  if (!u) return '';
+  if (tool.kind !== 'static' && isLoopbackHost(u.hostname) && !onHost()) return '';
+  return u.href;
+}
+
+/** Does this call run inside a user gesture (so a new tab is not a popup a
+ *  blocker should refuse)? Browsers without the API: assume yes. */
+function hasGesture() {
+  const ua = typeof navigator !== 'undefined' ? navigator.userActivation : null;
+  return ua ? !!ua.isActive : true;
+}
+
+/** Open `tool` in its own tab. noopener: the page never gets a handle on
+ *  DisPatch's window (so it cannot navigate it). False when there is no
+ *  usable address from this browser. */
+export function launchWindow(tool) {
+  const url = windowUrl(tool);
+  if (!url) return false;
+  try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { return false; }
+  if (deps && typeof deps.toast === 'function') deps.toast(t('tools.opened_window', { name: toolTitle(tool) }));
+  return true;
 }
 
 function normalize(list) {
@@ -432,12 +494,14 @@ function menuRow(tool) {
     role: 'menuitem',
     tabindex: '-1',
     dataset: { tool: tool.id },
-    'aria-label': b ? t(b.aria) : title,
+    'aria-label': (b ? t(b.aria) : title) + (openMode(tool) === 'window' ? ' — ' + t('tools.opens_window') : ''),
   });
   if (active) row.setAttribute('aria-current', 'page');
   row.addEventListener('click', () => { closeToolsMenu(); openTool(tool.id); });
   row.append(toolTile(tool, 'tool-avatar-row'));
   row.append(el('span', { class: 'tools-item-label', text: title }));
+  // The "leaves DisPatch" affordance, the same ↗ the pane header uses.
+  if (openMode(tool) === 'window') row.append(el('span', { class: 'muted tools-item-ext', 'aria-hidden': 'true', text: '↗' }));
   if (b) {
     const dot = deps.builtinDot(b.feature);
     if (dot) row.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
@@ -637,19 +701,91 @@ function unloadFrame(frame) {
   frame.removeAttribute('src');
 }
 
-function showNote(textKey, hintKey) {
+function clearFrameTimer() {
+  if (frameTimer) { clearTimeout(frameTimer); frameTimer = null; }
+}
+
+/** The card's action row, created once inside #tool-note (the markup only
+ *  carries the two text lines). Existing themed button classes only. */
+function noteActions() {
+  const note = $('tool-note');
+  if (!note) return null;
+  let box = $('tool-note-actions');
+  if (!box) {
+    box = el('div', { class: 'tools-add-actions tool-note-actions', id: 'tool-note-actions' });
+    note.append(box);
+  }
+  return box;
+}
+
+/** Show the themed card instead of the frame. `actions`: 'window' (Open in
+ *  a new window — only offered when this browser has an address to open) and
+ *  'retry'. `keepFrame`: leave the frame loading underneath (the slow case —
+ *  if it lands after all, onFrameLoad swaps it back in). */
+function showNote(textKey, hintKey, { actions = [], vars = {}, keepFrame = false, why = 'note' } = {}) {
   const note = $('tool-note');
   const frame = $('tool-frame');
-  if (frame) unloadFrame(frame);
+  if (frame) {
+    if (keepFrame) frame.classList.add('hidden');
+    else { clearFrameTimer(); unloadFrame(frame); }
+  }
   if (!note) return;
-  $('tool-note-text').textContent = t(textKey);
-  $('tool-note-hint').textContent = hintKey ? t(hintKey) : '';
+  cardShown = why;
+  $('tool-note-text').textContent = t(textKey, vars);
+  $('tool-note-hint').textContent = hintKey ? t(hintKey, vars) : '';
+  const box = noteActions();
+  if (box) {
+    box.textContent = '';
+    const tool = openId ? findTool(openId) : null;
+    if (tool && actions.includes('window') && windowUrl(tool)) {
+      box.append(el('button', {
+        type: 'button', class: 'btn-primary', id: 'tool-note-window', text: t('tools.open_window'),
+        onclick: () => { const cur = openId && findTool(openId); if (cur) launchWindow(cur); },
+      }));
+    }
+    if (tool && actions.includes('retry')) {
+      box.append(el('button', {
+        type: 'button', class: 'btn-secondary', id: 'tool-note-retry', text: t('tools.retry'),
+        onclick: () => { const cur = openId && findTool(openId); if (cur) { loadFrame(cur); refreshStatus(cur); } },
+      }));
+    }
+    box.hidden = !box.childElementCount;
+  }
   note.classList.remove('hidden');
+}
+
+function hideNote() {
+  cardShown = null;
+  const note = $('tool-note');
+  if (note) note.classList.add('hidden');
+}
+
+/** The open frame fired `load`. Cross-origin, that proves little (a
+ *  browser's own error page fires it too — the status probe covers what the
+ *  headers say); what it does prove is that the page is not stuck. */
+function onFrameLoad() {
+  frameLoaded = true;
+  clearFrameTimer();
+  if (cardShown === 'slow') {
+    hideNote();
+    const frame = $('tool-frame');
+    if (frame) frame.classList.remove('hidden');
+  }
+}
+
+function armFrameTimer(tool) {
+  clearFrameTimer();
+  frameLoaded = false;
+  const id = tool.id;
+  frameTimer = setTimeout(() => {
+    frameTimer = null;
+    if (openId !== id || frameLoaded || cardShown) return;
+    showNote('tools.slow_text', 'tools.slow_hint', { actions: ['window', 'retry'], keepFrame: true, why: 'slow' });
+  }, FRAME_TIMEOUT_MS);
 }
 
 function loadFrame(tool) {
   const frame = $('tool-frame');
-  const note = $('tool-note');
   if (!frame) return;
   const src = frameSrc(tool);
   if (!src) { showNote('tools.bad_url_text', 'tools.location_hint'); return; }
@@ -657,7 +793,13 @@ function loadFrame(tool) {
     showNote('tools.loopback_text', 'tools.loopback_hint');
     return;
   }
-  if (note) note.classList.add('hidden');
+  // A window-mode tool reached without a click (a #tool= restore): the pane
+  // says where it lives and offers the one button a popup blocker allows.
+  if (openMode(tool) === 'window') {
+    showNote('tools.window_text', 'tools.window_hint', { actions: ['window'], vars: { name: toolTitle(tool) }, why: 'window' });
+    return;
+  }
+  hideNote();
   // Sandbox BEFORE src: the attribute is read when the navigation starts.
   // An app is trusted repo code on our own origin and needs the session
   // cookie for its own API, so its frame has NO sandbox attribute at all —
@@ -666,6 +808,7 @@ function loadFrame(tool) {
   else frame.setAttribute('sandbox', tool.kind === 'url' ? SANDBOX_URL : SANDBOX_STATIC);
   frame.setAttribute('title', t('tools.frame_title', { name: toolTitle(tool) }));
   frame.classList.remove('hidden');
+  armFrameTimer(tool);
   frame.setAttribute('src', src);
 }
 
@@ -721,9 +864,19 @@ async function refreshStatus(tool) {
     return;
   }
   paintRefreshBtn(tool);
-  // A url tool the server could not reach: say so instead of an empty frame.
-  if (tool.kind === 'url' && st && st.reachable === false) {
-    showError(t('tools.unreachable_text'), t('tools.unreachable_hint'));
+  // The card, not an empty frame, whenever the server already knows the
+  // frame cannot show the page. A card that is already up (the loopback
+  // rule, a window-mode tool) is more specific and stays.
+  if (st && !cardShown && openMode(tool) === 'frame') {
+    if (tool.kind === 'url' && st.reachable === false) {
+      showNote('tools.unreachable_text', 'tools.unreachable_hint', { actions: ['window', 'retry'], why: 'unreachable' });
+    } else if (tool.kind === 'url' && st.framable === false) {
+      // Its server forbids embedding: no browser will draw it in the frame.
+      showNote('tools.refuses_text', 'tools.refuses_hint', { actions: ['window'], why: 'refuses' });
+    } else if (tool.kind === 'static' && Object.prototype.hasOwnProperty.call(st, 'mtime') && st.mtime == null) {
+      // The entry file does not resolve: the frame would show a bare 404.
+      showNote('tools.missing_text', 'tools.missing_hint', { actions: ['retry'], why: 'missing' });
+    }
   }
   // An app whose backend failed to import/build: the page may load, its API
   // will not. Say which half is missing.
@@ -745,7 +898,7 @@ async function doRefresh() {
     const rc = r && typeof r.rc === 'number' ? r.rc : -1;
     if (rc === 0) {
       const frame = $('tool-frame');
-      if (frame && frame.getAttribute('src')) frame.setAttribute('src', frameSrc(tool));
+      if (frame && frame.getAttribute('src')) { armFrameTimer(tool); frame.setAttribute('src', frameSrc(tool)); }
       deps.toast(t('tools.refresh_ok'));
     } else {
       showError(t('tools.refresh_failed', { rc: String(rc) }),
@@ -779,9 +932,15 @@ export function rememberPrev() {
 }
 
 /** Open a tool by id. Builtins go to their own opener; static/url tools get
- *  the generic pane. Either way the page ends up in `tool-full`. */
-export function openTool(id) {
+ *  the generic pane. Either way the page ends up in `tool-full` — except a
+ *  window-mode tool opened by a click, which launches in its own tab and
+ *  leaves the current view (and selection) exactly as it was. */
+export function openTool(id, { launch = true } = {}) {
   if (!deps || !id) return false;
+  // `launch: false` (a #tool= restore) never opens a tab by itself: Chromium
+  // counts a typed or reloaded URL as user activation, so the gesture check
+  // alone would pop the page again on every reload.
+  launch = launch && hasGesture();
   const st = deps.state;
   const tool = findTool(id);
   const b = BUILTIN_BY_ID.get(id) || (tool && tool.kind === 'builtin' ? builtinOf(tool) : null);
@@ -790,12 +949,19 @@ export function openTool(id) {
     if (tool && tool.enabled === false) return false;
     const opener = deps.openers && deps.openers[b.feature];
     if (typeof opener !== 'function') return false;
+    // Only once the pane's own probe found the feature on (the rail's rule):
+    // the tab is another way into the SAME unlocked-only page, never a way
+    // around its gate. No address from here (loopback seen off the host) →
+    // the pane, whose notes explain why.
+    if (tool && openMode(tool) === 'window' && deps.builtinOn(b.feature)
+        && launch && launchWindow(tool)) return true;
     opener();
     return true;
   }
   if (!tool || tool.enabled === false) return false;
   if (tool.kind !== 'static' && tool.kind !== 'url' && !isApp(tool)) return false;
   if (st.decoy && !tool.safe) return false;
+  if (openMode(tool) === 'window' && launch && launchWindow(tool)) return true;
 
   rememberPrev();
   deps.closeToolPanes('tool');
@@ -839,6 +1005,8 @@ function teardown() {
   // Unload: a hidden frame keeps its scripts and sockets running.
   const frame = $('tool-frame');
   if (frame) unloadFrame(frame);
+  clearFrameTimer();
+  hideNote();
   hideError();
 }
 
@@ -1071,7 +1239,7 @@ export function openFromHash() {
   const id = hashToolId();
   if (!id || !deps || deps.state.decoy) return false;
   if (openId === id) return true;
-  const ok = openTool(id);
+  const ok = openTool(id, { launch: false });
   if (!ok) deps.toast(t('tools.not_found'), true);
   return ok;
 }
@@ -1086,7 +1254,11 @@ function cloneTools(list) {
  *  fields the manifest honours for them), the rest only schema fields. */
 export function serializeTools(list) {
   return (list || []).map((x) => {
-    if (x.kind === 'builtin') return { id: x.id, kind: 'builtin', enabled: x.enabled !== false };
+    if (x.kind === 'builtin') {
+      const out = { id: x.id, kind: 'builtin', enabled: x.enabled !== false };
+      if (x.open === 'window' || x.open === 'frame') out.open = x.open;
+      return out;
+    }
     // An app row may only carry id/kind/enabled (+ trusted, for an add-on in
     // the data dir) — its package on disk owns everything else.
     if (isApp(x)) {
@@ -1192,6 +1364,18 @@ function toolRow(tool, idx) {
     loc.append(el('span', { class: 'muted', text: t('tools.not_installed') }));
   } else {
     loc.append(el('span', { class: 'muted', text: '—' }));
+  }
+  // How it opens: only where a tab is a real alternative (a page at an
+  // address — static, url, or a builtin the server gave an address field).
+  const windowable = tool.kind === 'static' || tool.kind === 'url'
+    || (tool.kind === 'builtin' && Object.prototype.hasOwnProperty.call(tool, 'open_url'));
+  if (windowable) {
+    const wl = el('label', { class: 'tools-open-window', title: t('tools.open_window_aria', { name }) });
+    const wcb = el('input', { type: 'checkbox', 'aria-label': t('tools.open_window_aria', { name }) });
+    wcb.checked = tool.open === 'window';
+    wcb.addEventListener('change', () => { draft[idx].open = wcb.checked ? 'window' : 'frame'; draftDirty = true; });
+    wl.append(wcb, document.createTextNode(' ' + t('tools.col_open')));
+    loc.append(el('div', {}, [wl]));
   }
   row.append(loc);
 
@@ -1431,6 +1615,7 @@ export function wireTools(d) {
   if (frame) {
     frame.addEventListener('load', () => {
       if (!frame.getAttribute('src')) return;
+      onFrameLoad();
       if (openApp()) syncAppFrame();
       pushToolState();
     });
@@ -1457,6 +1642,7 @@ export function _resetForTest() {
     document.removeEventListener('click', onOutside, true);
     document.removeEventListener('keydown', onEscape, true);
   }
+  clearFrameTimer(); frameLoaded = false; cardShown = null;
   deps = null; tools = null; toolsPath = ''; openId = null; prev = null;
   parked = []; menuOpen = false; menuMode = 'tools'; lastCompact = null;
   refreshing = false; draft = null; draftDirty = false; addOpen = false; settingsHost = null;

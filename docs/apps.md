@@ -226,6 +226,12 @@ gate and one on/off switch.
 when `thread.js` does. Only apps that loaded are listed.
 `GET /api/tools/<id>/status` → `{id, kind: "app", enabled, mounted}`.
 
+An app row never carries `open`: an app is our own code framed with the
+message bridge (`app-sdk.js`), so it always opens in the pane. `open: window`
+on an app row is refused as an unknown key; the `open` field is for static,
+url and window-capable builtin tools (see the tools design doc's
+2026-09-26 `open: window` addendum).
+
 `PUT /api/tools` accepts app rows of `{id, kind: "app", enabled}`. The
 package-owned fields `GET` returned may be sent back unchanged (they are
 dropped); changing one — or sending any other key — is a 422. `trusted` keeps

@@ -280,7 +280,18 @@
     "lock_now": "Verrouiller",
     "discard_confirm": "Abandonner les modifications ?",
     "menu_badge": "⌥",
-    "menu_title": "Déplacer ce bot dans le menu ⌥ Outils (cet appareil uniquement)"
+    "menu_title": "Déplacer ce bot dans le menu ⌥ Outils (cet appareil uniquement)",
+    "dev_display": "Langue et affichage",
+    "dev_pictures": "Images et confidentialité",
+    "dev_bar": "Raccourcis de la barre de menu",
+    "dev_bar_hint": "Un réglage épinglé a son propre bouton dans la barre de menu, à portée d’un geste. Utilisez le bouton Épingler de chaque ligne.",
+    "dev_backup": "Sauvegarde et récupération",
+    "language_desc": "Menus, boutons et messages de l’application.",
+    "minimal_avatars_desc": "Des noms au lieu d’images dans la barre latérale, et pas d’avatars sur les messages.",
+    "recovery_desc": "Exporter tous les messages dans un fichier, ou restaurer ceux qui n’ont pas été enregistrés.",
+    "recovery_open": "Ouvrir",
+    "theme_button": "Bouton du thème",
+    "theme_button_desc": "Ouvre le choix du thème directement depuis la barre de menu."
   },
   "companions": {
     "title": "Compagnons",
@@ -919,7 +930,9 @@
   "pins": {
     "pin": "Épingler à la barre",
     "unpin": "Retirer de la barre",
-    "theme_hint": "garder le bouton de thème dans la barre."
+    "theme_hint": "garder le bouton de thème dans la barre.",
+    "pin_short": "Épingler",
+    "pinned_short": "Épinglé"
   },
   "checklist": {
     "done": "Terminé",
@@ -1035,6 +1048,22 @@
     "jump": "Aller ›",
     "search_placeholder": "Rechercher par nom…",
     "open_thread": "Ouvrir la conversation",
+    "site_links": "Liens du site",
+    "preview_heading": "Aperçu de la pratique",
+    "no_preview": "Aucun aperçu en direct pour l'instant.",
+    "open_preview": "Ouvrir l'aperçu",
+    "preview_expired": "Aperçu expiré",
+    "expires_on": "expire le",
+    "expired_on": "a expiré le",
+    "live_site_heading": "Site en ligne",
+    "open_live_site": "Ouvrir le site en ligne",
+    "no_live_url": "Aucune URL en ligne définie pour l'instant.",
+    "repo_field_label": "Dépôt / emplacement :",
+    "notes_label": "Notes",
+    "edit_links": "Modifier",
+    "live_url_label": "URL en ligne",
+    "repo_placeholder": "~/Projects/… ou une URL de dépôt",
+    "opens_new_tab": "s'ouvre dans un nouvel onglet",
     "security_hold": "Blocage de sécurité",
     "hold_generic": "Ce client est bloqué.",
     "hold_note_placeholder": "Qu'avez-vous vérifié, et pourquoi est-il sûr de continuer ?",
@@ -1117,6 +1146,20 @@
     "saved": "Outils enregistrés",
     "save_failed": "Échec de l'enregistrement : {error}",
     "error_at": "Outil {n} : {error}",
-    "load_failed": "Impossible de charger la liste des outils : {error}"
+    "load_failed": "Impossible de charger la liste des outils : {error}",
+    "open_window": "Ouvrir dans une nouvelle fenêtre",
+    "opened_window": "{name} s’est ouvert dans un nouvel onglet",
+    "opens_window": "s’ouvre dans une nouvelle fenêtre",
+    "window_text": "{name} s’ouvre dans son propre onglet.",
+    "window_hint": "Il ne peut pas s’afficher dans DisPatch. Utilisez le bouton pour l’ouvrir.",
+    "refuses_text": "Cette page refuse de s’afficher dans une autre page.",
+    "refuses_hint": "Son serveur interdit l’intégration : aucun navigateur ne l’affichera ici. Elle fonctionne normalement dans son propre onglet.",
+    "slow_text": "Cette page n’a pas fini de se charger.",
+    "slow_hint": "Elle est peut-être lente, ou bloquée ici. Réessayez, ou ouvrez-la dans son propre onglet.",
+    "missing_text": "La page de cet outil est introuvable.",
+    "missing_hint": "Son fichier d’entrée est introuvable. Vérifiez le dossier dans tools.yaml, ou lancez son actualisation.",
+    "retry": "Réessayer",
+    "col_open": "Nouvelle fenêtre",
+    "open_window_aria": "Ouvrir {name} dans une nouvelle fenêtre plutôt que dans le panneau"
   }
 }

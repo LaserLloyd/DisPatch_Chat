@@ -278,7 +278,18 @@
     "lock_now": "Lock now",
     "discard_confirm": "Discard changes?",
     "menu_badge": "⌥",
-    "menu_title": "Move this bot into the ⌥ Tools menu (this device only)"
+    "menu_title": "Move this bot into the ⌥ Tools menu (this device only)",
+    "dev_display": "Language & display",
+    "dev_pictures": "Pictures & privacy",
+    "dev_bar": "Menu bar shortcuts",
+    "dev_bar_hint": "A pinned setting gets its own button on the menu bar, one tap away. Use the Pin button on any row.",
+    "dev_backup": "Backup & recovery",
+    "language_desc": "Menus, buttons and messages from the app.",
+    "minimal_avatars_desc": "Names instead of pictures in the sidebar, and no avatars on messages.",
+    "recovery_desc": "Export every message to a file, or restore messages that did not save.",
+    "recovery_open": "Open",
+    "theme_button": "Theme button",
+    "theme_button_desc": "Opens the theme picker straight from the menu bar."
   },
   "companions": {
     "title": "Companions",
@@ -462,6 +473,22 @@
     "jump": "Jump ›",
     "search_placeholder": "Search by name…",
     "open_thread": "Open thread",
+    "site_links": "Site links",
+    "preview_heading": "Practice preview",
+    "no_preview": "No live preview issued yet.",
+    "open_preview": "Open preview",
+    "preview_expired": "Preview expired",
+    "expires_on": "expires",
+    "expired_on": "expired",
+    "live_site_heading": "Live site",
+    "open_live_site": "Open live site",
+    "no_live_url": "No live URL set yet.",
+    "repo_field_label": "Repo / location:",
+    "notes_label": "Notes",
+    "edit_links": "Edit",
+    "live_url_label": "Live URL",
+    "repo_placeholder": "~/Projects/… or a repo URL",
+    "opens_new_tab": "opens in a new tab",
     "security_hold": "Security hold",
     "hold_generic": "This client is on hold.",
     "hold_note_placeholder": "What did you check, and why is it safe to continue?",
@@ -973,7 +1000,9 @@
   "pins": {
     "pin": "Pin to the bar",
     "unpin": "Unpin from the bar",
-    "theme_hint": "keep the theme button on the bar."
+    "theme_hint": "keep the theme button on the bar.",
+    "pin_short": "Pin",
+    "pinned_short": "Pinned"
   },
   "checklist": {
     "done": "Completed",
@@ -1092,6 +1121,20 @@
     "saved": "Tools saved",
     "save_failed": "Could not save: {error}",
     "error_at": "Tool {n}: {error}",
-    "load_failed": "Could not load the tools list: {error}"
+    "load_failed": "Could not load the tools list: {error}",
+    "open_window": "Open in a new window",
+    "opened_window": "{name} opened in a new tab",
+    "opens_window": "opens in a new window",
+    "window_text": "{name} opens in its own tab.",
+    "window_hint": "It can't be shown inside DisPatch. Use the button to open it.",
+    "refuses_text": "This page refuses to be shown inside another page.",
+    "refuses_hint": "Its server forbids embedding, so no browser will draw it here. It works normally in its own tab.",
+    "slow_text": "This page hasn't finished loading.",
+    "slow_hint": "It may be slow, or blocked from loading here. Try again, or open it in its own tab.",
+    "missing_text": "This tool's page is missing.",
+    "missing_hint": "Its entry file was not found. Check the folder in tools.yaml, or run its refresh.",
+    "retry": "Try again",
+    "col_open": "New window",
+    "open_window_aria": "Open {name} in a new window instead of the pane"
   }
 }

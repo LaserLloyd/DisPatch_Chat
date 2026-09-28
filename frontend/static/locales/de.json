@@ -278,7 +278,18 @@
     "lock_now": "Jetzt sperren",
     "discard_confirm": "Änderungen verwerfen?",
     "menu_badge": "⌥",
-    "menu_title": "Diesen Bot ins ⌥ Werkzeuge-Menü verschieben (nur dieses Gerät)"
+    "menu_title": "Diesen Bot ins ⌥ Werkzeuge-Menü verschieben (nur dieses Gerät)",
+    "dev_display": "Sprache & Anzeige",
+    "dev_pictures": "Bilder & Privatsphäre",
+    "dev_bar": "Kurzbefehle in der Menüleiste",
+    "dev_bar_hint": "Eine angeheftete Einstellung bekommt eine eigene Schaltfläche in der Menüleiste, nur einen Tipp entfernt. Nutze dazu „Anheften“ in der jeweiligen Zeile.",
+    "dev_backup": "Sicherung & Wiederherstellung",
+    "language_desc": "Menüs, Schaltflächen und Meldungen der App.",
+    "minimal_avatars_desc": "Namen statt Bildern in der Seitenleiste und keine Avatare an Nachrichten.",
+    "recovery_desc": "Alle Nachrichten in eine Datei exportieren oder nicht gespeicherte Nachrichten wiederherstellen.",
+    "recovery_open": "Öffnen",
+    "theme_button": "Design-Schaltfläche",
+    "theme_button_desc": "Öffnet die Design-Auswahl direkt aus der Menüleiste."
   },
   "companions": {
     "title": "Begleiter",
@@ -896,7 +907,9 @@
   "pins": {
     "pin": "An die Leiste anheften",
     "unpin": "Von der Leiste lösen",
-    "theme_hint": "die Themenschaltfläche in der Leiste behalten."
+    "theme_hint": "die Themenschaltfläche in der Leiste behalten.",
+    "pin_short": "Anheften",
+    "pinned_short": "Angeheftet"
   },
   "checklist": {
     "done": "Erledigt",
@@ -1010,6 +1023,22 @@
     "jump": "Springen ›",
     "search_placeholder": "Nach Namen suchen…",
     "open_thread": "Thread öffnen",
+    "site_links": "Website-Links",
+    "preview_heading": "Praxis-Vorschau",
+    "no_preview": "Noch keine Live-Vorschau erstellt.",
+    "open_preview": "Vorschau öffnen",
+    "preview_expired": "Vorschau abgelaufen",
+    "expires_on": "läuft ab am",
+    "expired_on": "abgelaufen am",
+    "live_site_heading": "Live-Website",
+    "open_live_site": "Live-Website öffnen",
+    "no_live_url": "Noch keine Live-URL hinterlegt.",
+    "repo_field_label": "Repo / Ort:",
+    "notes_label": "Notizen",
+    "edit_links": "Bearbeiten",
+    "live_url_label": "Live-URL",
+    "repo_placeholder": "~/Projects/… oder eine Repo-URL",
+    "opens_new_tab": "öffnet in einem neuen Tab",
     "security_hold": "Sicherheitssperre",
     "hold_generic": "Dieser Kunde ist gesperrt.",
     "hold_note_placeholder": "Was haben Sie geprüft, und warum ist eine Fortsetzung sicher?",
@@ -1092,6 +1121,20 @@
     "saved": "Werkzeuge gespeichert",
     "save_failed": "Speichern fehlgeschlagen: {error}",
     "error_at": "Werkzeug {n}: {error}",
-    "load_failed": "Werkzeugliste konnte nicht geladen werden: {error}"
+    "load_failed": "Werkzeugliste konnte nicht geladen werden: {error}",
+    "open_window": "In neuem Fenster öffnen",
+    "opened_window": "{name} wurde in einem neuen Tab geöffnet",
+    "opens_window": "öffnet in einem neuen Fenster",
+    "window_text": "{name} öffnet sich in einem eigenen Tab.",
+    "window_hint": "Es kann nicht in DisPatch angezeigt werden. Öffne es mit der Schaltfläche.",
+    "refuses_text": "Diese Seite lässt sich nicht in eine andere Seite einbetten.",
+    "refuses_hint": "Ihr Server verbietet das Einbetten, daher zeigt kein Browser sie hier an. In einem eigenen Tab funktioniert sie normal.",
+    "slow_text": "Diese Seite ist noch nicht fertig geladen.",
+    "slow_hint": "Sie ist vielleicht langsam oder wird hier blockiert. Versuche es erneut oder öffne sie in einem eigenen Tab.",
+    "missing_text": "Die Seite dieses Werkzeugs fehlt.",
+    "missing_hint": "Die Startdatei wurde nicht gefunden. Prüfe den Ordner in tools.yaml oder führe die Aktualisierung aus.",
+    "retry": "Erneut versuchen",
+    "col_open": "Neues Fenster",
+    "open_window_aria": "{name} in einem neuen Fenster statt im Bereich öffnen"
   }
 }

@@ -107,6 +107,20 @@ on a phone, in both themes.
 - Live streaming replies with a collapsible "what the agent is doing" panel
 - Offline-capable PWA — installs to a phone home screen
 
+**Images & media delivery**
+- Agent- and script-posted pictures arrive as an instant placeholder in the
+  thread that resolves into the image when the render lands — failures turn
+  the placeholder into a visible warning, never silence
+- Per-bot avatar pools and one-shot reaction overlays, topped up automatically
+- Every thumbnail opens its full-resolution original in the lightbox
+
+**Tools & apps (plugins)**
+- Embed your own projects as switchable modules: a static directory, a URL, or
+  a trusted app package with its own backend routes, UI and bot
+  (`apps/<id>/`, [docs/apps.md](docs/apps.md))
+- Tools open full-page inside the app — or in a new browser window for pages
+  that refuse framing — from one Tools button in the rail
+
 **Access control**
 - A PIN unlocks full access; sessions idle-expire, and a device can be trusted
   for a sliding window if you choose
@@ -130,8 +144,9 @@ on a phone, in both themes.
 **Interface**
 - Eight languages — English, العربية, Deutsch, Español, Français, 日本語,
   Português, 中文 — including full right-to-left layout
-- Six built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
-  Daylight and Classic Purple — picked per device from Settings → Theme, each
+- Ten built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
+  Daylight, Classic Purple, Electric Yellow, Night Red and two LaserLloyd
+  skins — picked per device from Settings → Theme, each
   with a live preview. A theme is one fixed skin; there is no separate
   light/dark switch
 - Keyboard-navigable, screen-reader labelled, WCAG AA contrast in every theme

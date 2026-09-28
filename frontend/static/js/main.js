@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=30';
+import { api, setOnLocked } from './api.js?v=31';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=33';
-import { installChecklists, applyChecklistState } from './checklist.js?v=8';
+import { installChecklists, applyChecklistState } from './checklist.js?v=9';
 import { classifyNotice, noticeHeadline } from './notice.js?v=3';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,16 +21,16 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=21';
+} from './reactions.js?v=22';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=8';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=9';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=7';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=12';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -44,7 +44,7 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen,
-} from './tools.js?v=8';
+} from './tools.js?v=9';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';
@@ -3705,97 +3705,122 @@ function wireModelChip() {
 }
 
 // ===================== Bot Manager =====================
-// The language <select> is built by i18n.js rather than declared in markup, so
-// the option list can never drift from the locales that actually ship. It is
-// rebuilt on every open because the control reflects the active language at
-// construction time. Like the avatar-style toggle beside it, this is a device
-// preference: it applies instantly and stays outside the Save/dirty flow.
+// Settings → Device. The pane is static markup of titled groups (index.html,
+// #dev-group-*); this mounts the rows other modules build into those groups.
+// Everything here is a device preference: it applies instantly and stays
+// outside the Save/dirty flow. Rebuilt on every Device-tab open (and on a
+// language switch) so each row reflects the CURRENT session — NIM's ratchet,
+// Safe Mode hiding the unlocked-only rows — never the one it was first built in.
+//
+// (The function keeps its old name: three call sites and a locale hook know it.)
 function mountLanguagePicker() {
   const row = dom['bm-lang-row'];
   if (!row) return;
-  const existing = row.querySelector('.lang-select');
-  if (existing) existing.remove();
-  row.prepend(languageSelect({ id: 'bm-lang' }));
-  // Privacy mode sits with it: also per-device, also instant, also nothing to
-  // do with the bot roster that Save applies.
-  const oldRow = document.getElementById('privacy-row');
-  if (oldRow) oldRow.remove();
-  const pr = privacyRow(t);
-  pr.id = 'privacy-row';
-  row.after(pr);
-  // No-Image Mode sits with them: third device preference, same instant-apply
-  // rules, nothing to do with the bot roster that Save applies. Rebuilt on each
-  // open so the ratchet's disabled state reflects the CURRENT session — a
-  // device that has since locked must not still offer an operable switch.
-  const oldNim = document.getElementById('nim-row');
-  if (oldNim) oldNim.remove();
+  const body = (id) => document.getElementById(id);
+  const displayBody = body('dev-body-display');
+  const picturesBody = body('dev-body-pictures');
+  const barBody = body('dev-body-bar');
+  const filesBody = body('dev-body-files');
+  const aboutBody = body('dev-body-about');
+
+  // Language: the <select> is built by i18n.js rather than declared in markup,
+  // so the option list can never drift from the locales that actually ship. It
+  // is rebuilt on every open because it reflects the active language at
+  // construction time. It goes AFTER the text: every row reads name-then-control.
+  row.querySelector('.lang-select')?.remove();
+  row.append(languageSelect({ id: 'bm-lang' }));
+
+  // Pictures & privacy. No-Image Mode first — it is the one a parent reaches
+  // for — then Privacy mode. nimRow is rebuilt on each open so the ratchet's
+  // disabled state reflects the CURRENT session: a device that has since
+  // locked must not still offer an operable switch.
+  document.getElementById('privacy-row')?.remove();
+  document.getElementById('nim-row')?.remove();
   const nr = nimRow(t, { decoy: state.decoy, pinSet: !!state.auth.pinSet, onChange: applyNimChange });
   nr.id = 'nim-row';
-  pr.after(nr);
-  // A 📌 on each pinnable row puts that switch on the rail. It lives on the
-  // row rather than in a list of its own so the thing you pin and the pin
-  // control are the same object — nothing to keep in step.
-  for (const [row, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
+  const pr = privacyRow(t);
+  pr.id = 'privacy-row';
+  for (const r of [nr, pr]) { r.classList.add('dev-row'); tidyRowText(r); }
+  if (picturesBody) picturesBody.append(nr, pr);
+  else row.after(nr, pr);
+  // The Pin pill on each pinnable row puts that switch on the menu bar. It
+  // lives on the row rather than in a list of its own so the thing you pin and
+  // the pin control are the same object — nothing to keep in step.
+  for (const [r, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
     const pin = pinToggle(pinId, { t, onChange: renderPins });
-    if (pin) row.append(pin);
+    if (pin) r.append(pin);
   }
   // Minimal avatars is pinnable too. Its row is static markup (unlike the two
-  // built above), so the 📌 from the previous mount must go before a new one
-  // lands — this function runs on every Device-tab open.
+  // built above), so the pill from the previous mount must go first.
   const avRow = dom['bm-avatar-style-row'];
   if (avRow) {
     avRow.querySelector('.pin-toggle')?.remove();
     const avPin = pinToggle('avatars', { t, onChange: renderPins });
     if (avPin) avRow.append(avPin);
   }
-  // The 🎨 rail button, as a row whose ONLY control is its 📌. It ships pinned
-  // (pins.js `pinnedByDefault`), so unlike the rows above there is no switch to
-  // pin — the pin IS the setting. A <div>, not a <label>: there is no checkbox
-  // for a label to belong to. Unlocked only, matching the button itself, which
-  // Safe Mode hides because the palette picker is a full-session surface.
+
+  // Menu bar shortcuts: the 🎨 rail button (a row whose ONLY control is its
+  // pin — it ships pinned, pins.js `pinnedByDefault`, so the pin IS the
+  // setting) and the custom link buttons. Both unlocked only, matching the
+  // rail itself: Safe Mode hides the palette picker, and a locked device
+  // neither sees the link buttons nor the URLs behind them.
   document.getElementById('theme-pin-row')?.remove();
+  document.getElementById('links-row')?.remove();
   if (!state.decoy) {
-    const tRow = document.createElement('div');
-    tRow.id = 'theme-pin-row';
-    tRow.className = 'bm-avatar-style';
-    const txt = document.createElement('span');
-    const strong = document.createElement('strong');
-    strong.textContent = t ? t('nav.theme') : 'Theme';
-    txt.append(strong, document.createTextNode(
-      t ? ` — ${t('pins.theme_hint')}` : ' — keep the theme button on the bar.',
-    ));
-    tRow.append(txt);
+    const tRow = el('div', { class: 'bm-avatar-style dev-row', id: 'theme-pin-row' }, [
+      el('span', { class: 'dev-row-text' }, [
+        el('strong', { text: t('settings.theme_button') }),
+        el('span', { class: 'dev-row-hint', text: t('settings.theme_button_desc') }),
+      ]),
+    ]);
     const tPin = pinToggle('theme', { t, onChange: renderPins });
     if (tPin) tRow.append(tPin);
-    (avRow || nr).after(tRow);
-  }
-  // Custom link buttons: fourth device preference, same instant-apply rules —
-  // add a link here and it is on the rail before the modal closes (renderPins
-  // is the onChange). Unlocked sessions only: the editor is simply not built
-  // in Safe Mode, matching the rail, so a locked device neither sees the
-  // buttons nor the URLs behind them.
-  const oldLinks = document.getElementById('links-row');
-  if (oldLinks) oldLinks.remove();
-  // Local viewer roots: fifth device preference, same rules, rebuilt on every
-  // open so its contents reflect the CURRENT session and the current server
-  // config rather than whatever was loaded the last time Settings was opened.
-  const oldViewer = document.getElementById('viewer-row');
-  if (oldViewer) oldViewer.remove();
-  if (!state.decoy) {
     const lr = linksSection(t, { onChange: renderPins });
-    nr.after(lr);
-    lr.after(viewerSection());
+    lr.classList.add('dev-row', 'dev-row-block');
+    tidyRowText(lr);
+    if (barBody) barBody.append(tRow, lr);
   }
+  // In Safe Mode the bar group has nothing of its own to show (the pins that
+  // survive Safe Mode sit on their rows above), so the whole card goes.
+  const barGroup = document.getElementById('dev-group-bar');
+  if (barGroup) barGroup.hidden = !!state.decoy;
+
+  // Local viewer roots: same rules, rebuilt on every open so its contents
+  // reflect the current session and server config. Unlocked only.
+  document.getElementById('viewer-row')?.remove();
+  const filesGroup = document.getElementById('dev-group-files');
+  if (filesGroup) filesGroup.hidden = !!state.decoy;
+  if (!state.decoy && filesBody) filesBody.append(viewerSection());
+
   // About: version + the source link. In the Device pane on purpose — it is the
   // one settings tab a Safe-Mode session can open, so every user of the running
-  // program can see what it is, not just the operator.
-  const oldAbout = document.getElementById('about-row');
-  if (oldAbout) oldAbout.remove();
+  // program can see what it is, not just the operator. LAST: it is reference
+  // information, not a control. Its own title duplicates the group's, so the
+  // group heading is the one that shows.
+  document.getElementById('about-row')?.remove();
   const ab = aboutRow(t);
   ab.id = 'about-row';
-  // LAST in the pane, under the action buttons: it is reference information,
-  // not a control, and inserting it between two toggles reads as a setting.
-  (dom['spane-device'] || nr.parentNode).append(ab);
+  ab.classList.add('dev-row', 'dev-row-block');
+  ab.querySelector('.about-title')?.remove();
+  (aboutBody || dom['spane-device'] || nr.parentNode).append(ab);
+}
+
+/** Normalise a row built elsewhere (nim.js, privacy.js, links.js) from the
+ *  old one-line "<strong>Name</strong> — hint" shape into the pane's two-line
+ *  "name / explanation" shape, without touching the modules that build them.
+ *  Idempotent, and a no-op for a row that does not have that shape. */
+function tidyRowText(rowEl) {
+  const span = Array.from(rowEl.children).find((c) => c.tagName === 'SPAN' && c.querySelector(':scope > strong'));
+  if (!span || span.classList.contains('dev-row-text')) return;
+  const strong = span.querySelector(':scope > strong');
+  const rest = Array.from(span.childNodes).filter((n) => n !== strong);
+  const text = rest.map((n) => n.textContent).join('').replace(/^\s*[—–-]\s*/, '').trim();
+  rest.forEach((n) => n.remove());
+  span.classList.add('dev-row-text');
+  if (text) {
+    const cap = text.charAt(0).toLocaleUpperCase() + text.slice(1);
+    span.append(el('span', { class: 'dev-row-hint', text: cap }));
+  }
 }
 
 /** Settings → Device: the local viewer's served roots.
@@ -3813,10 +3838,11 @@ function mountLanguagePicker() {
  *  contract as the rest of the pane, nothing to press Save on.
  */
 function viewerSection() {
-  const wrap = el('div', { class: 'bm-links bm-viewer', id: 'viewer-row' });
-  wrap.append(el('span', {}, [
-    el('strong', { text: t('viewer.settings_title') }),
-    ` — ${t('viewer.settings_hint')}`,
+  // The group heading (index.html #dev-h-files) is the title; the row carries
+  // only the explanation, so the name is not said twice.
+  const wrap = el('div', { class: 'bm-links bm-viewer dev-row dev-row-block', id: 'viewer-row' });
+  wrap.append(el('span', { class: 'dev-row-text' }, [
+    el('span', { class: 'dev-row-hint', text: t('viewer.settings_hint') }),
   ]));
 
   const list = el('div', { class: 'bm-links-list' });
@@ -3933,8 +3959,8 @@ function syncMinimalAvatarRow() {
     row.classList.toggle('is-forced', nim);
     let note = row.querySelector('.bm-forced-note');
     if (nim && !note) {
-      note = el('span', { class: 'bm-forced-note', text: ` — ${t('nim.controls_avatars')}` });
-      row.querySelector('span')?.append(note);
+      note = el('span', { class: 'bm-forced-note', text: t('nim.controls_avatars') });
+      row.querySelector('.dev-row-text, span')?.append(note);
     } else if (!nim && note) {
       note.remove();
     }

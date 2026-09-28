@@ -13,7 +13,7 @@
 // routing; back/forward inside the panel is handled by the tab buttons +
 // an internal history-less stack (Back always returns to the list).
 
-import { api } from './api.js?v=30';
+import { api } from './api.js?v=31';
 import { t } from './i18n.js?v=3';
 import { acquireInert, releaseInert } from './util.js?v=20';
 
@@ -329,6 +329,10 @@ async function renderClientDetail(root, clientId) {
   view.appendChild(backBar);
   wireOpenThreadButton(backBar.querySelector('#cd-open-thread'), client.client);
 
+  const linksSlot = el('<div class="detail-links-slot"></div>');
+  view.appendChild(linksSlot);
+  await renderSiteLinks(linksSlot, client);
+
   const holdSlot = el('<div class="detail-hold-slot"></div>');
   view.appendChild(holdSlot);
   renderHoldBanner(holdSlot, client);
@@ -365,6 +369,164 @@ async function wireOpenThreadButton(btn, clientMeta) {
       });
     }
   } catch (e) { /* no thread API surface reachable, or none matches — leave hidden */ }
+}
+
+// --------------------------------------------------------------------------
+// Site links: the practice box's own preview tokens (read-only, auto — see
+// practice/framework's previews.json) plus a DisPatch-local "where this
+// client's build actually ended up" overlay (editable; see
+// backend/app/client_links.py). Both open in a NEW TAB — these are external
+// sites/panels that generally refuse to be iframed, and this pane has no
+// business trying.
+// --------------------------------------------------------------------------
+
+function isHttpUrl(v) {
+  if (typeof v !== 'string' || !v) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
+}
+
+function openLinkAnchor(url, label, extraClass) {
+  const a = el(`<a class="site-link-btn${extraClass ? ` ${extraClass}` : ''}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"></a>`);
+  a.appendChild(document.createTextNode(label));
+  a.appendChild(el(`<span class="site-link-ext" aria-hidden="true"> ↗</span>`));
+  a.setAttribute('aria-label', `${label} (${t('clients.opens_new_tab') || 'opens in a new tab'})`);
+  return a;
+}
+
+function formatPreviewExpiry(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
+
+async function renderSiteLinks(slot, client) {
+  slot.innerHTML = '';
+  const clientId = client.client.id;
+  const card = el(`<section class="ov-card site-links-card"><h3>${escapeHtml(t('clients.site_links') || 'Site links')}</h3></section>`);
+  const body = el('<div class="site-links-body"></div>');
+  card.appendChild(body);
+  slot.appendChild(card);
+
+  // Auto: preview tokens straight off the client payload the practice box
+  // already sent us — no extra round trip, never editable here.
+  const tokens = (client.previews && Array.isArray(client.previews.tokens)) ? client.previews.tokens : [];
+  const previewSect = el(`<div class="site-links-group"><h4>${escapeHtml(t('clients.preview_heading') || 'Practice preview')}</h4></div>`);
+  if (!tokens.length) {
+    previewSect.appendChild(el(`<p class="empty-note">${escapeHtml(t('clients.no_preview') || 'No live preview issued yet.')}</p>`));
+  } else {
+    const now = Date.now();
+    const list = el('<ul class="site-links-preview-list"></ul>');
+    // Newest-expiry first, so a live token always surfaces above an expired
+    // one regardless of what order the practice box happened to write them.
+    const sorted = tokens.slice().sort((a, b) => {
+      const ea = a && a.expires_at ? new Date(a.expires_at).getTime() : -Infinity;
+      const eb = b && b.expires_at ? new Date(b.expires_at).getTime() : -Infinity;
+      return (Number.isNaN(eb) ? -Infinity : eb) - (Number.isNaN(ea) ? -Infinity : ea);
+    });
+    sorted.forEach((tok) => {
+      const url = tok && tok.url;
+      const expIso = tok && tok.expires_at;
+      const expAt = expIso ? new Date(expIso).getTime() : NaN;
+      const expired = !Number.isNaN(expAt) && expAt < now;
+      const expText = formatPreviewExpiry(expIso);
+      const li = document.createElement('li');
+      if (url && isHttpUrl(url) && !expired) {
+        li.appendChild(openLinkAnchor(url, t('clients.open_preview') || 'Open preview'));
+      } else {
+        li.appendChild(el(`<span class="site-link-dead">${escapeHtml(t('clients.preview_expired') || 'Preview expired')}</span>`));
+      }
+      if (expText) {
+        li.appendChild(el(`<span class="site-link-meta">${escapeHtml(expired ? (t('clients.expired_on') || 'expired') : (t('clients.expires_on') || 'expires'))} ${escapeHtml(expText)}</span>`));
+      }
+      list.appendChild(li);
+    });
+    previewSect.appendChild(list);
+  }
+  body.appendChild(previewSect);
+
+  // Manual overlay: where this client's build actually ended up (the operator's own
+  // hosting, a client's own domain, a repo). DisPatch-local; never sent to,
+  // or read from anywhere but, this app's own data dir.
+  let links;
+  try {
+    links = await api.practiceLinksGet(clientId);
+  } catch (e) {
+    if (e && e.status === 401) return;
+    links = { live_url: null, repo: null, notes: null };
+  }
+  const liveSect = el(`<div class="site-links-group site-links-manual"><h4>${escapeHtml(t('clients.live_site_heading') || 'Live site')}</h4></div>`);
+  body.appendChild(liveSect);
+  paintManualLinks(liveSect, clientId, links);
+}
+
+function paintManualLinks(sect, clientId, links) {
+  sect.querySelectorAll('.site-links-view, .site-links-form').forEach((n) => n.remove());
+  const view = el('<div class="site-links-view"></div>');
+  if (links.live_url && isHttpUrl(links.live_url)) {
+    view.appendChild(openLinkAnchor(links.live_url, t('clients.open_live_site') || 'Open live site', 'primary'));
+  } else {
+    view.appendChild(el(`<p class="empty-note">${escapeHtml(t('clients.no_live_url') || 'No live URL set yet.')}</p>`));
+  }
+  if (links.repo) view.appendChild(el(`<p class="site-links-repo"><span class="site-links-label">${escapeHtml(t('clients.repo_field_label') || 'Repo / location:')}</span> ${escapeHtml(links.repo)}</p>`));
+  if (links.notes) view.appendChild(el(`<p class="site-links-notes">${escapeHtml(links.notes)}</p>`));
+  const editBtn = el(`<button type="button" class="secondary site-links-edit-btn">${escapeHtml(t('clients.edit_links') || 'Edit')}</button>`);
+  editBtn.addEventListener('click', () => paintManualForm(sect, clientId, links));
+  view.appendChild(editBtn);
+  sect.appendChild(view);
+}
+
+function paintManualForm(sect, clientId, links) {
+  sect.querySelectorAll('.site-links-view, .site-links-form').forEach((n) => n.remove());
+  const form = el(`
+    <form class="site-links-form schema-form">
+      <div class="field">
+        <label for="sl-live-url">${escapeHtml(t('clients.live_url_label') || 'Live URL')}</label>
+        <input type="text" id="sl-live-url" placeholder="https://example.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="sl-repo">${escapeHtml(t('clients.repo_field_label') || 'Repo / location:')}</label>
+        <input type="text" id="sl-repo" placeholder="${escapeHtml(t('clients.repo_placeholder') || '~/Projects/… or a repo URL')}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="sl-notes">${escapeHtml(t('clients.notes_label') || 'Notes')}</label>
+        <textarea id="sl-notes" rows="2"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="sl-cancel">${escapeHtml(t('common.cancel') || 'Cancel')}</button>
+        <button type="submit" class="primary">${escapeHtml(t('clients.save') || 'Save')}</button>
+      </div>
+      <p class="empty-note site-links-form-error hidden"></p>
+    </form>
+  `);
+  form.querySelector('#sl-live-url').value = links.live_url || '';
+  form.querySelector('#sl-repo').value = links.repo || '';
+  form.querySelector('#sl-notes').value = links.notes || '';
+  const err = form.querySelector('.site-links-form-error');
+  form.querySelector('#sl-cancel').addEventListener('click', () => paintManualLinks(sect, clientId, links));
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = {
+      live_url: form.querySelector('#sl-live-url').value.trim(),
+      repo: form.querySelector('#sl-repo').value.trim(),
+      notes: form.querySelector('#sl-notes').value.trim(),
+    };
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const saved = await api.practiceLinksPut(clientId, body);
+      paintManualLinks(sect, clientId, saved);
+    } catch (e) {
+      if (e && e.status === 401) return;
+      err.textContent = (e && e.message) || (t('clients.save_failed') || 'Could not save.');
+      err.classList.remove('hidden');
+      submitBtn.disabled = false;
+    }
+  });
+  sect.appendChild(form);
 }
 
 function renderHoldBanner(slot, client) {

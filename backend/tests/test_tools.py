@@ -987,3 +987,223 @@ def test_url_tool_remote_url_round_trips(tools_env):
     # GET's rows go straight back (null remote_url included).
     assert c.put("/api/tools", json={"tools": list(rows.values())}).status_code == 200
     assert tools.get_tool("rig").remote_url == "https://host.tailnet.example:8452/"
+
+
+# --------------------------------------------------------------------------- #
+# `open`: frame (default) or window — a tool that cannot be embedded launches
+# in its own tab instead of drawing an empty pane (2026-09-26). StudioForge's
+# panel sends `X-Frame-Options: DENY` + `frame-ancestors 'none'`, so its
+# builtin defaults to `window`.
+# --------------------------------------------------------------------------- #
+
+SF_URL = "http://198.51.100.7:8080/"
+
+
+def _sf_on(monkeypatch, **extra):
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, studioforge_enabled=True, studioforge_url=SF_URL, **extra))
+
+
+def test_open_field_validation(tools_env):
+    ok = tools.validate_tools([
+        {"id": "web", "title": "W", "kind": "url", "url": "https://example.org/", "open": "window"},
+        {"id": "web2", "title": "W2", "kind": "url", "url": "https://example.org/"},
+        {"id": "studioforge-panel", "kind": "builtin"},
+        {"id": "deepseek-harness", "kind": "builtin", "open": "window"},
+        {"id": "mail-panel", "kind": "builtin", "open": "frame"},
+    ], check_fs=False)
+    by = {t.id: t for t in ok}
+    assert by["web"].open == "window"
+    assert by["web2"].open == "frame"
+    assert by["studioforge-panel"].open == "window", "StudioForge defaults to a new window"
+    assert by["deepseek-harness"].open == "window"
+    assert by["mail-panel"].open == "frame"
+
+
+@pytest.mark.parametrize("row, field", [
+    ({"id": "web", "title": "W", "kind": "url", "url": "https://e.org/", "open": "popup"}, "open"),
+    ({"id": "web", "title": "W", "kind": "url", "url": "https://e.org/", "open": True}, "open"),
+    # Native panes have no page of their own to put in a window.
+    ({"id": "clients-panel", "kind": "builtin", "open": "window"}, "open"),
+    ({"id": "mail-panel", "kind": "builtin", "open": "window"}, "open"),
+    # An app is our own code in an unsandboxed frame with a message bridge.
+    ({"id": "someapp", "kind": "app", "open": "window"}, "open"),
+])
+def test_open_field_refused(tools_env, row, field):
+    with pytest.raises(tools.ToolValidationError) as ei:
+        tools.validate_tools([row], check_fs=False)
+    assert ei.value.field == field
+
+
+def test_open_default_is_not_written_to_the_file(tools_env):
+    t = tools.validate_tools([
+        {"id": "studioforge-panel", "kind": "builtin", "open": "window"},
+        {"id": "web", "title": "W", "kind": "url", "url": "https://e.org/", "open": "frame"},
+        {"id": "win", "title": "X", "kind": "url", "url": "https://e.org/", "open": "window"},
+        {"id": "deepseek-harness", "kind": "builtin", "open": "window"},
+    ], check_fs=False)
+    m = {x.id: x.to_manifest() for x in t}
+    assert "open" not in m["studioforge-panel"]
+    assert "open" not in m["web"]
+    assert m["win"]["open"] == "window"
+    assert m["deepseek-harness"]["open"] == "window"
+    # An operator who wants StudioForge framed after all can say so.
+    sf = tools.validate_tools([{"id": "studioforge-panel", "kind": "builtin", "open": "frame"}],
+                              check_fs=False)[0]
+    assert sf.to_manifest()["open"] == "frame"
+
+
+def test_api_studioforge_row_opens_in_a_window_with_its_address(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    _sf_on(monkeypatch, studioforge_remote_url="https://host.tailnet.example:8452")
+    c = _unlocked(make_client)
+    rows = {x["id"]: x for x in c.get("/api/tools").json()["tools"]}
+    sf = rows["studioforge-panel"]
+    assert sf["open"] == "window"
+    assert sf["open_url"] == SF_URL
+    assert sf["open_remote_url"] == "https://host.tailnet.example:8452"
+    assert rows["clients-panel"]["open"] == "frame"
+    assert "open_url" not in rows["clients-panel"]
+
+
+def test_api_builtin_row_has_no_address_when_unavailable(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, studioforge_enabled=False, studioforge_url=SF_URL))
+    c = _unlocked(make_client)
+    sf = next(x for x in c.get("/api/tools").json()["tools"] if x["id"] == "studioforge-panel")
+    assert sf["open_url"] is None
+
+
+def test_api_open_round_trips_and_builtin_open_is_writable(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    _sf_on(monkeypatch)
+    c = _unlocked(make_client)
+    r = c.put("/api/tools", json={"tools": [
+        {"id": "win", "title": "Win", "kind": "url", "url": "https://e.org/", "open": "window"},
+        {"id": "studioforge-panel", "kind": "builtin", "enabled": True, "open": "frame"},
+    ]})
+    assert r.status_code == 200, r.text
+    assert tools.get_tool("win").open == "window"
+    assert tools.get_tool("studioforge-panel").open == "frame"
+    rows = c.get("/api/tools").json()["tools"]
+    assert next(x for x in rows if x["id"] == "studioforge-panel")["open"] == "frame"
+    # GET's rows go straight back, output-only address fields included.
+    assert c.put("/api/tools", json={"tools": rows}).status_code == 200
+    assert tools.get_tool("win").open == "window"
+    assert tools.get_tool("studioforge-panel").open == "frame"
+    # Defaults stay out of the file after a plain round trip.
+    c.put("/api/tools", json={"tools": [
+        {"id": "studioforge-panel", "kind": "builtin", "enabled": True, "open": "window"}]})
+    assert "open" not in (config.DATA_DIR / "tools.yaml").read_text()
+
+
+def test_safe_mode_row_carries_open(tools_env):
+    make_client, _site = tools_env
+    _manifest("tools:\n  - {id: web, title: W, kind: url, url: 'https://e.org/', safe: true, open: window}\n")
+    c = _decoy(make_client)
+    rows = c.get("/api/tools").json()["tools"]
+    assert rows == [r for r in rows if r["id"] == "web"] and rows[0]["open"] == "window"
+
+
+@pytest.mark.parametrize("headers, expected", [
+    ({}, True),
+    ({"X-Frame-Options": "DENY"}, False),
+    ({"X-Frame-Options": "SAMEORIGIN"}, False),
+    ({"Content-Security-Policy": "frame-ancestors 'none'"}, False),
+    ({"Content-Security-Policy": "frame-ancestors *"}, True),
+    ({"X-Frame-Options": "DENY",
+      "Content-Security-Policy": "default-src 'self'; frame-ancestors *"}, True),
+])
+def test_tools_framable_matches_main(headers, expected):
+    import httpx
+    h = httpx.Headers(headers)
+    assert tools.framable(h) is expected
+    assert main._framable(h) is expected
+
+
+class _XfoServer:
+    """StudioForge's exact shape: HEAD → 405, GET → 200 with
+    X-Frame-Options: DENY and CSP frame-ancestors 'none'."""
+
+    def __init__(self, deny=True):
+        import socket
+        self.deny = deny
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.stop = threading.Event()
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        self.sock.settimeout(0.2)
+        while not self.stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                continue
+            with conn:
+                try:
+                    method = conn.recv(4096).decode("latin-1").split(" ", 1)[0]
+                    hdr = (b"X-Frame-Options: DENY\r\n"
+                           b"Content-Security-Policy: frame-ancestors 'none'\r\n") if self.deny else b""
+                    if method == "HEAD":
+                        conn.sendall(b"HTTP/1.1 405 Method Not Allowed\r\n" + hdr
+                                     + b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+                    else:
+                        conn.sendall(b"HTTP/1.1 200 OK\r\n" + hdr
+                                     + b"Content-Length: 2\r\nConnection: close\r\n\r\nok")
+                except OSError:
+                    pass
+
+    def close(self):
+        self.stop.set()
+        self.sock.close()
+
+
+@pytest.mark.parametrize("deny, expected", [(True, False), (False, True)])
+def test_status_url_tool_reports_framable(tools_env, deny, expected):
+    make_client, _site = tools_env
+    srv = _XfoServer(deny=deny)
+    try:
+        _manifest(f"tools:\n  - {{id: web, title: W, kind: url, url: 'http://127.0.0.1:{srv.port}/'}}\n")
+        st = make_client().get("/api/tools/web/status").json()
+        assert st["reachable"] is True
+        assert st["framable"] is expected
+        assert st["open"] == "frame"
+    finally:
+        srv.close()
+
+
+def test_status_framable_unknown_when_unreachable(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    _manifest("tools:\n  - {id: web, title: W, kind: url, url: 'http://example.invalid/'}\n")
+
+    async def down(url):
+        return False
+
+    monkeypatch.setattr(tools, "_probe_url", down)
+    st = make_client().get("/api/tools/web/status").json()
+    assert st["reachable"] is False and st["framable"] is None
+
+
+def test_api_harness_row_addresses(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        config.SETTINGS, harness_enabled=True, harness_port=3999,
+        harness_remote_url="https://host.tailnet.example:8453"))
+    c = _unlocked(make_client)
+    h = next(x for x in c.get("/api/tools").json()["tools"] if x["id"] == "deepseek-harness")
+    assert h["open"] == "frame", "the Harness pane (service control, jobs) stays the default"
+    assert h["open_url"] == "http://127.0.0.1:3999/"
+    assert h["open_remote_url"] == "https://host.tailnet.example:8453"
+
+
+def test_builtin_open_url_never_reaches_safe_mode(tools_env, monkeypatch):
+    make_client, _site = tools_env
+    _sf_on(monkeypatch)
+    c = _decoy(make_client)
+    body = c.get("/api/tools").text
+    assert "198.51.100.7" not in body and "open_url" not in body
+    assert c.get("/api/tools/studioforge-panel/status").status_code == 403

@@ -199,6 +199,15 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
         const needsReload = await entry.toggle(next);
         if (needsReload) { location.reload(); return; }
         renderPinnedRail(container, { decoy, t, onChange });
+        // The rail is rebuilt wholesale, so a CSS transition has nothing to
+        // run between; mark the fresh button so the state change still reads
+        // as a change rather than a silent swap.
+        const fresh = container.querySelector(`.pin-btn[data-pin="${entry.id}"]`);
+        if (fresh) {
+          fresh.classList.add('pin-pop');
+          fresh.addEventListener('animationend', () => fresh.classList.remove('pin-pop'), { once: true });
+          try { fresh.focus(); } catch { /* ignore */ }
+        }
         if (onChange) onChange(entry.id, next);
       });
     }
@@ -207,7 +216,19 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
   }
 }
 
-/** The 📌 control that goes on a settings row. */
+/** The Pin control that goes on a settings row.
+ *
+ *  A labelled pill, not a bare glyph: the old control was a 15px pin at 35%
+ *  opacity whose only "on" cue was turning accent-coloured, which nobody could
+ *  read at a glance (and which a monochrome-leaning palette made near-invisible).
+ *  Now the state is carried three ways at once so it survives any palette:
+ *    - FILL: outline pill when off, solid accent pill (--accent / --on-accent,
+ *      the same pairing every primary button uses) when on;
+ *    - ICON: the pin tilts over when off and stands filled when on;
+ *    - WORD: "Pin" / "Pinned" — the visible text is the accessible name, and
+ *      aria-pressed is what a screen reader announces as the state.
+ *  A short pop animation marks the moment it changes (reduced-motion: none).
+ */
 export function pinToggle(id, { t = null, onChange = null } = {}) {
   const entry = pinnableById(id);
   if (!entry) return null;
@@ -215,14 +236,18 @@ export function pinToggle(id, { t = null, onChange = null } = {}) {
   btn.type = 'button';                 // inside a <label>: a bare button submits
   btn.className = 'pin-toggle';
   btn.dataset.pinToggle = id;
+  const icon = railIcon(RAIL_ICONS.pin);
+  const word = document.createElement('span');
+  word.className = 'pin-toggle-label';
+  btn.append(icon, word);
   const paint = () => {
     const on = isPinned(id);
-    btn.replaceChildren(railIcon(RAIL_ICONS.pin));
     btn.classList.toggle('pinned', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    word.textContent = t ? t(on ? 'pins.pinned_short' : 'pins.pin_short') : (on ? 'Pinned' : 'Pin');
+    // The tooltip says what a click will DO; the label says what IS.
     const key = on ? 'pins.unpin' : 'pins.pin';
     btn.title = t ? t(key) : (on ? 'Unpin from the bar' : 'Pin to the bar');
-    btn.setAttribute('aria-label', btn.title);
   };
   paint();
   btn.addEventListener('click', (ev) => {
@@ -232,7 +257,13 @@ export function pinToggle(id, { t = null, onChange = null } = {}) {
     ev.stopPropagation();
     setPinned(id, !isPinned(id));
     paint();
+    // Restart the pop even on a fast double-click: drop the class, force a
+    // style flush, add it back.
+    btn.classList.remove('pin-pop');
+    void btn.offsetWidth;
+    btn.classList.add('pin-pop');
     if (onChange) onChange(id, isPinned(id));
   });
+  btn.addEventListener('animationend', () => btn.classList.remove('pin-pop'));
   return btn;
 }

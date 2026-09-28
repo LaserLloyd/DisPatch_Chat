@@ -20,7 +20,7 @@
 // and 403s the image of anything else. The `safe` re-check here is the same
 // belt-and-suspenders layer the message renderer uses for media.
 
-import { api } from './api.js?v=30';
+import { api } from './api.js?v=31';
 import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
 import { t } from './i18n.js?v=3';
 import { nimEnabled } from './nim.js?v=5';

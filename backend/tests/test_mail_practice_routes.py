@@ -11,7 +11,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, config, mailforge_bridge, main, practice_bridge
+from app import auth, client_links, config, mailforge_bridge, main, practice_bridge
 from app.database import Database
 
 
@@ -40,6 +40,7 @@ def route_client(tmp_path, monkeypatch):
         practice_pin_file=tmp_path / "practice-pin",
     ))
     practice_bridge.reset_session()
+    client_links.reset_cache()
 
     with TestClient(main.app) as client:
         yield client
@@ -91,6 +92,12 @@ def test_decoy_blocked_prefixes_cover_mail_and_practice():
     assert main._decoy_blocked("GET", "/api/mail/status") is True
     assert main._decoy_blocked("GET", "/api/practice/board") is True
     assert main._decoy_blocked("POST", "/api/practice/clients/c1/actions/build") is True
+    # The DisPatch-local "site links" overlay is a sibling feature under a
+    # sibling path, not literally /api/practice/* — it must be covered by the
+    # SAME belt-and-braces prefix, or a decoy session could read/write it even
+    # though _require_practice's own _deny_decoy_mutation also blocks it.
+    assert main._decoy_blocked("GET", "/api/practice-links/c1") is True
+    assert main._decoy_blocked("PUT", "/api/practice-links/c1") is True
 
 
 # --------------------------------------------------------------------------- #
@@ -307,3 +314,125 @@ def test_mail_status_off_host_uses_the_remote_address(route_client, monkeypatch)
     body = route_client.get("/api/mail/status", headers={"Host": "127.0.0.1:8765"}).json()
     assert body["launch_url"].startswith("http://127.0.0.1:54321/")
     assert body["remote_launch_url"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Clients tab: /api/practice-links/* — the DisPatch-local site-links overlay.
+# Never proxied to the practice box (see client_links.py); same gate as the
+# rest of the Clients tab (_require_practice).
+# --------------------------------------------------------------------------- #
+
+
+def test_practice_links_403_no_pin(route_client):
+    assert route_client.get("/api/practice-links/c1").status_code == 403
+    assert route_client.put("/api/practice-links/c1", json={}).status_code == 403
+
+
+def test_practice_links_403_locked(route_client):
+    auth.set_pin("1234")
+    assert route_client.get("/api/practice-links/c1").status_code == 403
+    assert route_client.put("/api/practice-links/c1", json={}).status_code == 403
+
+
+def test_practice_links_404_when_disabled(route_client, monkeypatch):
+    monkeypatch.setattr(main, "SETTINGS", replace(main.SETTINGS, practice_enabled=False))
+    _unlock(route_client)
+    assert route_client.get("/api/practice-links/c1").status_code == 404
+
+
+def test_practice_links_get_empty_by_default(route_client):
+    _unlock(route_client)
+    r = route_client.get("/api/practice-links/c1")
+    assert r.status_code == 200
+    assert r.json() == {"live_url": None, "repo": None, "notes": None, "updated_at": None}
+
+
+def test_practice_links_put_and_get_roundtrip(route_client):
+    _unlock(route_client)
+    r = route_client.put("/api/practice-links/c1", json={
+        "live_url": "https://example.com",
+        "repo": "~/Projects/example-site",
+        "notes": "LAN preview on :8790 until deploy.",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["live_url"] == "https://example.com"
+    assert body["repo"] == "~/Projects/example-site"
+    assert body["notes"] == "LAN preview on :8790 until deploy."
+    assert body["updated_at"]   # stamped
+
+    r2 = route_client.get("/api/practice-links/c1")
+    assert r2.json() == body
+
+    # A second, unrelated client id must not see the first one's links.
+    r3 = route_client.get("/api/practice-links/c2")
+    assert r3.json()["live_url"] is None
+
+
+def test_practice_links_put_rejects_non_http_url(route_client):
+    _unlock(route_client)
+    r = route_client.put("/api/practice-links/c1", json={"live_url": "javascript:alert(1)"})
+    assert r.status_code == 400
+    # The rejected write must not have landed.
+    assert route_client.get("/api/practice-links/c1").json()["live_url"] is None
+
+
+def test_practice_links_put_blank_clears_existing(route_client):
+    _unlock(route_client)
+    route_client.put("/api/practice-links/c1", json={"live_url": "https://example.com"})
+    r = route_client.put("/api/practice-links/c1", json={"live_url": "", "repo": "", "notes": ""})
+    assert r.status_code == 200
+    assert r.json() == {"live_url": None, "repo": None, "notes": None, "updated_at": None}
+
+
+def test_practice_links_bad_client_id_400(route_client):
+    _unlock(route_client)
+    # A character outside the id allowlist (still one path segment, so it
+    # reaches the handler rather than 404ing on route shape) — same style of
+    # check as test_practice_proxy_rejects_bad_path above.
+    r = route_client.get("/api/practice-links/c1%3Bdrop")
+    assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# client_links unit tests: storage + validation, no HTTP involved.
+# --------------------------------------------------------------------------- #
+
+
+def test_client_links_get_default_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    client_links.reset_cache()
+    assert client_links.get("nope") == {
+        "live_url": None, "repo": None, "notes": None, "updated_at": None,
+    }
+
+
+def test_client_links_set_and_persist_to_disk(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    client_links.reset_cache()
+    client_links.set_link("c1", live_url="https://example.com", repo=None, notes="hi")
+
+    # Drop the in-process cache and read back from disk — proves this is a
+    # real durable file, not just an in-memory dict.
+    client_links.reset_cache()
+    row = client_links.get("c1")
+    assert row["live_url"] == "https://example.com"
+    assert row["notes"] == "hi"
+    assert (tmp_path / client_links.FILE_NAME).exists()
+
+
+def test_client_links_rejects_javascript_scheme(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    client_links.reset_cache()
+    with pytest.raises(client_links.InvalidLink):
+        client_links.set_link("c1", live_url="javascript:alert(1)")
+
+
+def test_client_links_repo_field_is_never_url_validated(tmp_path, monkeypatch):
+    """A `repo` is as often a local path (`~/Projects/example-site`) as a
+    URL on this box — it must be accepted verbatim, never checked for a
+    scheme the way live_url is."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    client_links.reset_cache()
+    row = client_links.set_link("c1", repo="~/Projects/example-site")
+    assert row["repo"] == "~/Projects/example-site"

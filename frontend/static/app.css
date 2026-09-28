@@ -631,6 +631,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    two-column card grid — rather than the 640px the bot rows were tuned for.
    Everything narrower simply centres in it. */
 .settings-modal { width: min(800px, 96vw); max-height: 90vh; }
+/* A FIXED height, not just a cap (2026-09-26). With only max-height the dialog
+   was as tall as its current pane, so every tab click resized it and the tab
+   strip jumped up or down under the pointer — you could not click along the
+   tabs. Now the frame never moves: short panes leave room at the bottom, long
+   ones scroll inside .settings-pane (the one scroll region). min() keeps it
+   inside short viewports; the phone rule below goes full-screen instead. */
+@media (min-width: 769px) {
+  .settings-modal { height: min(720px, 90vh); }
+}
 
 /* Horizontal on desktop, a swipeable strip on a phone: six tabs never fit
    390px, and truncating labels to fit is worse than scrolling to them. */
@@ -3155,13 +3164,23 @@ hr.rule { border: none; border-top: 1px solid var(--border-strong); margin: 8px 
 
 /* ---- Pinned settings -----------------------------------------------------
    A pinned setting is a rail button like any other, so it inherits .gear-btn
-   wholesale and only adds the on/off state. `pin-on` is a filled look rather
+   wholesale and only adds the on/off state. `pin-on` is a SOLID fill rather
    than a colour change alone: the rail is monochrome glyphs, and colour by
-   itself would not survive a theme that inverts it. */
+   itself would not survive a theme that inverts it. It used to be a faint
+   --accent-wash that several palettes rendered almost identical to "off";
+   now it is the --accent / --on-accent pair every primary button uses, so the
+   icon keeps its contrast in every palette. */
+.gear-btn.pin-btn { transition: background-color .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .gear-btn.pin-on {
-  background: var(--accent-wash);   /* --accent-soft has never existed */
-  box-shadow: inset 0 0 0 1px var(--accent, #2ea8ff);
+  background: var(--accent);
+  /* --accent-text for the ring: in several dark palettes the accent fill is
+     under 3:1 against the rail, and the ring is what keeps "on" legible as a
+     shape (WCAG 1.4.11) rather than only as a colour. */
+  border-color: var(--accent-text);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
 }
+.gear-btn.pin-on:hover { background: var(--accent-hover); color: var(--on-accent); }
 .gear-btn.pin-btn[disabled] { opacity: .45; cursor: not-allowed; }
 
 /* A custom link button is an <a> wearing .gear-btn, and anchors bring two
@@ -3315,23 +3334,171 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    second control competing with the one it pins. Line icon since 2026-09-18
    (was a 📌 emoji, sized by font-size — an <svg> needs its own size rule). */
 .pin-toggle {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 2px 6px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: .35;
-  transition: opacity .12s ease;
+  margin-inline-start: auto;
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  min-height: 30px; padding: 4px 11px 4px 8px;
+  border-radius: 999px;
+  /* OFF: an outline pill. --text-secondary for both the ring and the word so
+     the unpinned state is still plainly a control (the old one sat at 35%
+     opacity and read as decoration). */
+  background: transparent;
+  border: 1.5px solid var(--text-secondary);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; line-height: 1;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color .18s ease, color .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
-.pin-toggle .rail-icon { width: 15px; height: 15px; display: block; }
-.pin-toggle:hover,
-.pin-toggle:focus-visible { opacity: .8; }
-.pin-toggle.pinned { opacity: 1; color: var(--accent); }
+.pin-toggle .rail-icon {
+  width: 15px; height: 15px; display: block; flex: none;
+  /* Unpinned = the pin lies tilted over; pinned = it stands up, filled. */
+  transform: rotate(35deg);
+  transition: transform .22s cubic-bezier(.3, 1.6, .5, 1);
+}
+.pin-toggle:hover { border-color: var(--accent); color: var(--text-primary); }
+.pin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* ON: a solid accent pill. --accent/--on-accent is the pair .btn-primary uses,
+   which the theme contract keeps at AA in every palette. */
+.pin-toggle.pinned {
+  background: var(--accent); color: var(--on-accent);
+  /* Ring in --accent-text: the accent fill alone is under 3:1 against the card
+     in some dark palettes (glacier, forest, purple); the ring is not. */
+  border-color: var(--accent-text);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.pin-toggle.pinned:hover { background: var(--accent-hover); color: var(--on-accent); }
+.pin-toggle.pinned .rail-icon { transform: none; }
+.pin-toggle.pinned .rail-icon path:first-child { fill: currentColor; }
+.pin-toggle.pinned .rail-icon path:last-child { fill: var(--accent); stroke: var(--accent); }
+.pin-toggle.pinned:hover .rail-icon path:last-child { fill: var(--accent-hover); stroke: var(--accent-hover); }
+/* The moment of change: a short pop on the pill (settings) or rail button. */
+@keyframes pin-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.pin-toggle.pin-pop, .gear-btn.pin-pop { animation: pin-pop .28s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .pin-toggle, .pin-toggle .rail-icon, .gear-btn.pin-btn { transition: none; }
+  .pin-toggle.pin-pop, .gear-btn.pin-pop { animation: none; }
+}
 
 /* The rows are labels wrapping a checkbox; they need to be flex for the pin's
    `margin-left: auto` to push it over. */
 .bm-avatar-style:has(.pin-toggle) { display: flex; align-items: center; gap: 8px; }
+
+/* ---- Settings → Device, grouped (2026-09-26) ------------------------------
+   The pane used to be one undifferentiated stack — a select, three checkboxes,
+   two editors, a lone pin row, a button and a footer — separated by hairlines
+   that did not line up (some rows had them, the editors did not). It is now
+   titled groups, each a card of rows, and every row has the same anatomy:
+   name + one-line explanation on the start side, the control on the end side,
+   the Pin pill just before the control. The markup is index.html #dev-group-*;
+   rows built in other modules are normalised by main.js tidyRowText(). */
+#spane-device > .modal-hint { padding-inline: 20px; }
+.dev-group { margin: 16px 18px 0; }
+.dev-group:last-child { margin-bottom: 18px; }
+.dev-group[hidden] { display: none; }
+.dev-group-title {
+  margin: 0 0 6px 2px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.dev-group-hint { margin: -2px 2px 8px; font-size: 12.5px; line-height: 1.45; color: var(--text-secondary); }
+.dev-group-body {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.dev-group-body:empty { display: none; }
+
+/* One row. Beats .bm-avatar-style / .bm-links / .about-row, which each brought
+   their own padding and top rule. */
+.dev-group-body > .dev-row {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0; padding: 12px 14px;
+  border: 0; border-top: 1px solid var(--border-strong);
+  font-size: 13px; line-height: 1.45; color: var(--text-secondary);
+}
+.dev-group-body > .dev-row:first-child { border-top: 0; }
+.dev-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dev-row-text > strong { color: var(--text-primary); font-weight: 600; font-size: 14px; }
+.dev-row-hint { color: var(--text-secondary); font-size: 12.5px; }
+.dev-row .bm-forced-note { display: block; color: var(--warning-text, var(--text-secondary)); font-size: 12px; font-weight: 600; }
+/* Control column: the text is first in reading order, the pill then the
+   switch/select/button at the end — whatever order the builder appended. */
+.dev-row > .pin-toggle { order: 2; margin-inline-start: 0; }
+.dev-row > input[type="checkbox"],
+.dev-row > .lang-select,
+.dev-row > .btn-secondary { order: 3; flex: none; }
+.dev-row > .lang-select { max-width: 48%; min-width: 150px; }
+/* Block rows (link editor, viewer roots, About) stack instead of lining up. */
+.dev-group-body > .dev-row-block { display: block; }
+.dev-row-block .dev-row-text { margin-bottom: 2px; }
+.dev-row-block .bm-links-list:empty { display: none; }
+.dev-row-block .bm-links-addrow { margin-top: 10px; }
+#about-row { gap: 2px; }
+#about-row .about-line { font-size: 13px; }
+#about-row .about-source { color: var(--accent-text); font-size: 13px; font-weight: 600; }
+
+/* The row's on/off switch. Same look as the Bots-tab .switch, but drawn on the
+   checkbox itself (appearance: none) so nim.js/privacy.js keep building a
+   plain <input type="checkbox"> — its checked/disabled/change behaviour, and
+   the NIM ratchet that rides on `disabled`, are untouched. The knob is a
+   background gradient rather than ::before because form controls do not get
+   pseudo-elements in every engine. OFF uses text-secondary for knob and ring
+   so the control keeps 3:1 against the card in every palette; ON is the
+   accent/on-accent pair. #spane-device in the selector: the night contrast
+   profile redraws every checkbox as a 14px box (bottom of this file), and
+   the switch has to outrank that. */
+#spane-device .dev-row > input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none;
+  width: 44px; height: 26px; margin: 0; flex: none; cursor: pointer;
+  border-radius: 999px; box-shadow: none;
+  border: 1.5px solid var(--text-secondary);
+  background-color: var(--bg-input, var(--bg-secondary));
+  background-image: radial-gradient(circle closest-side, var(--text-secondary) 0 82%, transparent 90%);
+  background-size: 22px 22px; background-repeat: no-repeat;
+  background-position: 1px center;
+  transition: background-color .18s ease, border-color .18s ease, background-position .2s ease;
+}
+#spane-device .dev-row > input[type="checkbox"]:checked {
+  border-color: var(--accent-text);   /* same reason as .pin-toggle.pinned */
+  background-color: var(--accent);
+  background-image: radial-gradient(circle closest-side, var(--on-accent) 0 82%, transparent 90%);
+  background-position: calc(100% - 1px) center;
+  box-shadow: none;
+}
+[dir="rtl"] #spane-device .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
+[dir="rtl"] #spane-device .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
+#spane-device .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Disabled (the NIM ratchet on a locked device, or Minimal avatars while NIM
+   drives it): still reads ON/OFF, just visibly not operable. */
+#spane-device .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
+#spane-device .dev-row:has(> input:disabled) { cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  #spane-device .dev-row > input[type="checkbox"] { transition: none; }
+}
+@media (max-width: 768px) {
+  .dev-group { margin-inline: 12px; }
+  #spane-device > .modal-hint { padding-inline: 14px; }
+  .dev-group-body > .dev-row { padding: 12px; gap: 10px; }
+  /* Language: the select would squeeze the name to a sliver at 390px. */
+  .dev-group-body > .bm-lang { flex-wrap: wrap; }
+  .dev-group-body > .bm-lang > .lang-select { max-width: none; flex: 1 1 100%; }
+  .dev-group-body > .dev-row-action { flex-wrap: wrap; }
+  .dev-group-body > .dev-row-action > .btn-secondary { flex: 1 1 100%; justify-content: center; }
+}
+
+/* A line icon inside a standard button (iconLabel()'s [svg, text] pair, no
+   .icn wrapper) — e.g. the Health tab's "Run deep check". Without this the
+   <svg> had no size and rendered at its intrinsic 150px, turning the footer
+   button into a giant tile that matched nothing else in any palette. */
+.btn-primary:has(> .rail-icon), .btn-secondary:has(> .rail-icon) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+}
+.btn-primary > .rail-icon, .btn-secondary > .rail-icon { width: 1.05em; height: 1.05em; flex: none; display: block; }
+.btn-secondary:disabled { opacity: .6; cursor: progress; }
 
 /* ===================== Local viewer ===================== */
 /* A full-screen pane, not a picture on a backdrop: `.viewer` reuses `.lightbox`
@@ -3711,6 +3878,34 @@ body.tools-sheet-open::after {
 .clients-body, .clients-root, .steps-root, .step { min-width: 0; max-width: 100%; }
 .clients-view .compact-table { display: block; overflow-x: auto; }
 .clients-view-detail .clients-detail-sub { color: var(--text-muted); font-size: var(--step--1); font-weight: 400; }
+
+/* Site links: practice-box preview tokens (auto, read-only) + the
+   DisPatch-local live-URL/repo/notes overlay (editable). Both kinds of link
+   open in a new tab — see clients.js renderSiteLinks / openLinkAnchor. */
+.site-links-card { margin-bottom: 12px; }
+.site-links-body { display: flex; flex-direction: column; gap: 12px; }
+.site-links-group h4 { margin: 0 0 6px; font-size: var(--step--1); color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.site-links-preview-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.site-links-preview-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.site-link-btn {
+  display: inline-flex; align-items: center; gap: 4px; text-decoration: none;
+  background: transparent; color: var(--accent-text); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 6px 12px; font: inherit; cursor: pointer;
+}
+.site-link-btn:hover { border-color: var(--accent); background: var(--bg-hover); }
+.site-link-btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.site-link-btn.primary:hover { background: var(--accent-hover); }
+.site-link-ext { opacity: .7; }
+.site-link-dead { color: var(--text-muted); font-size: var(--step--1); }
+.site-link-meta { color: var(--text-muted); font-size: var(--step--1); }
+.site-links-view { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.site-links-label { color: var(--text-muted); }
+.site-links-repo, .site-links-notes { margin: 0; font-size: var(--step--1); overflow-wrap: anywhere; }
+.site-links-notes { white-space: pre-wrap; color: var(--text-secondary); }
+.site-links-edit-btn { margin-top: 2px; }
+.site-links-form textarea { resize: vertical; }
+.clients-view .site-links-form .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.site-links-form-error { color: var(--error-text); }
 
 .hold-banner {
   background: color-mix(in oklab, var(--error) 14%, var(--bg-elevated));

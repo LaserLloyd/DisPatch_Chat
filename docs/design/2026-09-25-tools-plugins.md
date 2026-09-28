@@ -275,3 +275,71 @@ address is never framed under an `https://` page (mixed content). The mail
 route decides from the request's `Host` header and hands the loopback launch key
 only to a browser on the host (`host_only: true` otherwise). Nothing here
 exposes a service: that is the operator's `tailscale serve` (or proxy) decision.
+
+## Addendum (2026-09-26): `open: window` — tools that cannot be embedded
+
+**What broke.** The StudioForge panel (`DISPATCH_STUDIOFORGE_URL`) answers
+every request — including the `405` it gives a `HEAD` — with
+`X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`.
+No browser will draw it inside another page, so the pane could only ever say
+"refuses embedding" and point at its ↗ link. It is not a network, mixed-content
+or host-binding problem: the panel is reachable from the host and from the
+tailnet, it just forbids framing (Chromium logs "Framing … violates …
+frame-ancestors 'none'").
+
+**The field.** Every static, url and window-capable builtin row takes an
+optional `open`:
+
+| `open` | Meaning |
+|---|---|
+| `frame` | The full-width pane (the default for everything except below). |
+| `window` | A click launches the page in its own browser tab (`noopener,noreferrer`); the current view and selection stay as they were, and a toast says so. |
+
+```yaml
+tools:
+  - {id: studioforge-panel, kind: builtin}            # open: window by default
+  - {id: studioforge-panel, kind: builtin, open: frame}  # …or framed after all
+  - {id: grafana, title: Grafana, kind: url, url: "https://grafana.example/", open: window}
+```
+
+- **Defaults.** `studioforge-panel` → `window`; everything else → `frame`.
+  A value equal to the default is never written back to `tools.yaml`.
+- **Where it is allowed.** static, url, and the builtins that are a page at an
+  address: `studioforge-panel` and `deepseek-harness` (whose pane keeps service
+  control and jobs, so it stays `frame` by default). `mail-panel` (it needs a
+  one-time launch key its pane fetches) and `clients-panel` (native DOM) refuse
+  `open: window` with a 422; so does an app row (unknown key).
+- **Addresses.** The operator listing carries `open_url` / `open_remote_url` on
+  those two builtin rows — the values their own full-session status routes
+  already return, and `null` when the feature is not available on this install.
+  Builtins never list for Safe Mode, so neither do these fields. A static tool
+  opens `/tools/<id>/` as a top-level page (its own cookie; no frame ticket), a
+  url tool its `url`/`remote_url`.
+- **Gates.** `open` changes WHERE a page opens, never WHO may: the Safe-Mode
+  filter, the builtin's own feature probe and the loopback rule run first. A
+  loopback address seen from another device (and no remote address) falls back
+  to the pane and its "host only" note, never a tab pointed at the phone itself.
+- **No gesture, no tab.** A `#tool=<id>` restore never launches on its own
+  (Chromium counts a typed or reloaded URL as user activation, so the gesture
+  check alone would pop the page on every reload). It opens the pane with a card
+  — "<name> opens in its own tab" — and an **Open in a new window** button.
+- **Rail.** A window-mode row in the Tools popup carries a trailing ↗ and
+  "— opens in a new window" in its accessible name.
+- **Settings → Tools.** A "New window" checkbox in the Location cell of every
+  row where a tab is possible; builtin rows now round-trip `open` too.
+
+**Graceful fallback for framed tools.** A framed tool that cannot show its page
+gets a themed card (the existing `tool-note`, with an action row) instead of a
+blank pane:
+
+| Condition | Source | Card | Actions |
+|---|---|---|---|
+| url tool, server cannot reach it | `status.reachable: false` | "not reachable right now" | Open in a new window, Try again |
+| url tool refuses embedding | `status.framable: false` (read off `X-Frame-Options` / CSP `frame-ancestors`, the same rule as `main._framable`) | "refuses to be shown inside another page" | Open in a new window |
+| static tool's entry file missing | `status.mtime: null` | "page is missing" | Try again |
+| no `load` within 20 s | client watchdog | "hasn't finished loading" (the frame keeps loading underneath and replaces the card if it lands) | Open in a new window, Try again |
+
+`GET /api/tools/<id>/status` now also carries `open` for every kind and
+`framable` (`true`/`false`, or `null` when unreachable or the answer was a
+redirect we do not follow) for url tools. The probe reads headers only, never a
+body, exactly as before.

@@ -463,6 +463,12 @@ tools:
 
 - **builtin** entries can only switch a pane *off*; no entry (or `enabled:
   true`) leaves the env flags in charge.
+- **open**: `frame` (the default) or `window`. `window` opens the tool in a
+  new browser tab instead of framing it — for pages that send
+  `X-Frame-Options`/`frame-ancestors` and refuse embedding. Allowed on static
+  and url tools and on the `studioforge-panel` / `deepseek-harness` builtins;
+  `studioforge-panel` defaults to `window`. A value equal to the default is
+  never written back to the file.
 - **icon**: the rail draws every tool in a tile the size and shape of a bot
   tile, on the theme's own surface, so it re-colours with each palette. The
   builtins use the app's line icons. A manifest `icon` may name one of those

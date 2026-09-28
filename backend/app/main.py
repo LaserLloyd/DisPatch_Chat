@@ -63,6 +63,7 @@ from . import (
     auth,
     avatar_pool,
     avatar_snapshots,
+    client_links,
     config,
     dashboard_routes,
     gateway_router,
@@ -11287,6 +11288,43 @@ async def practice_proxy(path: str, request: Request):
         raise HTTPException(502, "Clients backend (practice box) is unreachable")
     return Response(content=resp.content, status_code=resp.status_code,
                      media_type=resp.content_type)
+
+
+_CLIENT_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+@app.get("/api/practice-links/{client_id}", operation_id="practice_links_get")
+def practice_links_get(client_id: str, request: Request):
+    """DisPatch-local "site links" for one client — separate from, and never
+    proxied to, the practice box (see client_links.py). Same gate as the rest
+    of the Clients tab."""
+    _require_practice(request)
+    if not _CLIENT_ID_RE.match(client_id):
+        raise HTTPException(400, "invalid client id")
+    return client_links.get(client_id)
+
+
+@app.put("/api/practice-links/{client_id}", operation_id="practice_links_put")
+async def practice_links_put(client_id: str, request: Request):
+    _require_practice(request)
+    if not _CLIENT_ID_RE.match(client_id):
+        raise HTTPException(400, "invalid client id")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "invalid JSON body")
+    try:
+        row = client_links.set_link(
+            client_id,
+            live_url=body.get("live_url"),
+            repo=body.get("repo"),
+            notes=body.get("notes"),
+        )
+    except client_links.InvalidLink as e:
+        raise HTTPException(400, str(e))
+    return row
 
 
 # --------------------------------------------------------------------------- #

@@ -277,6 +277,13 @@ export const api = {
   practiceGet: (path) => j(`/api/practice/${path}`),
   practicePost: (path, body) => j(`/api/practice/${path}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
 
+  // Clients tab "site links": a DisPatch-local overlay (never proxied to the
+  // practice box, and NOT under /api/practice/*) that records where a
+  // client's build actually ended up once handed off — live URL, repo/notes
+  // free text. See backend/app/client_links.py.
+  practiceLinksGet: (clientId) => j(`/api/practice-links/${encodeURIComponent(clientId)}`),
+  practiceLinksPut: (clientId, body) => j(`/api/practice-links/${encodeURIComponent(clientId)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
+
   // Tools (docs/design/2026-09-25-tools-plugins.md). The list is filtered
   // server-side for Safe Mode; refresh and the write are operator-only.
   // Refresh runs a real command, so it gets the tool's own ceiling (max

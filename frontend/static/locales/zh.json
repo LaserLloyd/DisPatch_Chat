@@ -276,7 +276,18 @@
     "lock_now": "立即锁定",
     "discard_confirm": "放弃更改？",
     "menu_badge": "⌥",
-    "menu_title": "将此机器人移入 ⌥ 工具菜单（仅此设备）"
+    "menu_title": "将此机器人移入 ⌥ 工具菜单（仅此设备）",
+    "dev_display": "语言与显示",
+    "dev_pictures": "图片与隐私",
+    "dev_bar": "菜单栏快捷方式",
+    "dev_bar_hint": "固定的设置会在菜单栏上有自己的按钮，一点即达。使用每一行的“固定”按钮。",
+    "dev_backup": "备份与恢复",
+    "language_desc": "应用的菜单、按钮和消息所用的语言。",
+    "minimal_avatars_desc": "侧边栏显示名称而不是图片，消息旁不显示头像。",
+    "recovery_desc": "将所有消息导出为文件，或恢复未保存的消息。",
+    "recovery_open": "打开",
+    "theme_button": "主题按钮",
+    "theme_button_desc": "直接从菜单栏打开主题选择器。"
   },
   "companions": {
     "title": "伙伴",
@@ -873,7 +884,9 @@
   "pins": {
     "pin": "固定到侧栏",
     "unpin": "从侧栏取消固定",
-    "theme_hint": "在栏中保留主题按钮。"
+    "theme_hint": "在栏中保留主题按钮。",
+    "pin_short": "固定",
+    "pinned_short": "已固定"
   },
   "checklist": {
     "done": "已完成",
@@ -985,6 +998,22 @@
     "jump": "跳转 ›",
     "search_placeholder": "按名称搜索…",
     "open_thread": "打开对话",
+    "site_links": "站点链接",
+    "preview_heading": "练习预览",
+    "no_preview": "尚未生成实时预览。",
+    "open_preview": "打开预览",
+    "preview_expired": "预览已过期",
+    "expires_on": "到期时间",
+    "expired_on": "已于",
+    "live_site_heading": "正式站点",
+    "open_live_site": "打开正式站点",
+    "no_live_url": "尚未设置正式网址。",
+    "repo_field_label": "仓库 / 位置：",
+    "notes_label": "备注",
+    "edit_links": "编辑",
+    "live_url_label": "正式网址",
+    "repo_placeholder": "~/Projects/… 或仓库网址",
+    "opens_new_tab": "在新标签页中打开",
     "security_hold": "安全暂停",
     "hold_generic": "该客户已被暂停。",
     "hold_note_placeholder": "您检查了什么，为什么继续是安全的？",
@@ -1067,6 +1096,20 @@
     "saved": "工具已保存",
     "save_failed": "无法保存：{error}",
     "error_at": "工具 {n}：{error}",
-    "load_failed": "无法加载工具列表：{error}"
+    "load_failed": "无法加载工具列表：{error}",
+    "open_window": "在新窗口中打开",
+    "opened_window": "已在新标签页中打开 {name}",
+    "opens_window": "在新窗口中打开",
+    "window_text": "{name} 会在独立的标签页中打开。",
+    "window_hint": "它无法在 DisPatch 内显示。请使用按钮打开。",
+    "refuses_text": "此页面拒绝被嵌入到其他页面中。",
+    "refuses_hint": "其服务器禁止嵌入，因此任何浏览器都不会在这里显示它。在独立的标签页中可正常使用。",
+    "slow_text": "此页面尚未加载完成。",
+    "slow_hint": "可能加载较慢，或在此处被阻止。请重试，或在独立的标签页中打开。",
+    "missing_text": "此工具的页面缺失。",
+    "missing_hint": "未找到入口文件。请检查 tools.yaml 中的文件夹，或运行刷新。",
+    "retry": "重试",
+    "col_open": "新窗口",
+    "open_window_aria": "在新窗口而不是面板中打开 {name}"
   }
 }

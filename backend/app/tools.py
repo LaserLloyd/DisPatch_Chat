@@ -23,6 +23,21 @@ Contract: ``docs/design/2026-09-25-tools-plugins.md`` (apps:
     at all. ``trusted`` runs code, so like a refresh argv it can only be set
     by editing the file — the write API refuses to introduce or change it.
 
+How a tool opens (``open``, 2026-09-26): ``frame`` (the default) puts the
+page in the full-width pane; ``window`` launches it in its own browser tab
+instead. It exists because some pages refuse to be embedded at all —
+StudioForge's panel sends ``X-Frame-Options: DENY`` and ``frame-ancestors
+'none'``, so framed it could only ever draw an empty rectangle — and a click
+that opens a working tab beats a pane that explains why it is blank. Allowed
+on static and url rows, and on the builtins that ARE a page at an address
+(StudioForge, the Harness web UI); the StudioForge builtin defaults to
+``window``. Never on an app (our own code behind a message bridge) or on a
+native pane (Emails, Clients). ``open`` changes WHERE a page opens, never WHO
+may open it: every tier gate below applies unchanged, and a builtin row's
+``open_url`` is only ever in the operator listing. A url tool's status also
+reports ``framable`` (read off the same two headers the browser obeys) so the
+client can offer the tab instead of a blank frame.
+
 A static tool may carry a ``refresh`` block: a FIXED argv (never a shell
 string) that regenerates the page. It can only come from the file — the write
 API refuses to introduce or change one — and only an operator session can run
@@ -96,11 +111,20 @@ BUILTINS: dict[str, tuple[str, str, str]] = {
 }
 FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
 
-_COMMON_KEYS = {"id", "title", "icon", "kind", "enabled", "safe"}
+#: How a tool opens: in the pane, or launched in its own browser tab.
+OPEN_MODES = ("frame", "window")
+#: Builtins that are a page at an address, so a tab is a real alternative to
+#: the pane. Emails needs a one-time launch key its pane fetches, Clients is
+#: native DOM — neither has anything to put in a window.
+BUILTIN_WINDOWABLE = frozenset({"studioforge-panel", "deepseek-harness"})
+#: Builtins whose default is NOT the pane. StudioForge refuses every embed.
+BUILTIN_OPEN_DEFAULT = {"studioforge-panel": "window"}
+
+_COMMON_KEYS = {"id", "title", "icon", "kind", "enabled", "safe", "open"}
 _ALLOWED_KEYS = {
     "static": _COMMON_KEYS | {"root", "entry", "refresh"},
     "url": _COMMON_KEYS | {"url", "remote_url"},
-    "builtin": {"id", "kind", "enabled"},
+    "builtin": {"id", "kind", "enabled", "open"},
     "app": {"id", "kind", "enabled", "trusted"},
 }
 #: What GET /api/tools says about an app that the PACKAGE owns (app.yaml). The
@@ -112,7 +136,8 @@ _APP_MIRROR_KEYS = ("title", "icon", "safe", "order", "has_refresh", "bot_id",
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
 #: the Settings tab can send back the rows it was given.
-_OUTPUT_ONLY_KEYS = {"has_refresh", "builtin_feature", "available"}
+_OUTPUT_ONLY_KEYS = {"has_refresh", "builtin_feature", "available",
+                     "open_url", "open_remote_url"}
 
 #: Env names ending in these are never handed to a refresh process.
 _SCRUB_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PIN", "_PASSWORD", "_PASSWD")
@@ -155,10 +180,18 @@ class Tool:
     remote_url: str | None = None
     refresh: Refresh | None = None
     trusted: bool = False
+    #: "frame" (the pane) or "window" (its own browser tab). See module doc.
+    open: str = "frame"
+
+    def default_open(self) -> str:
+        return default_open(self.kind, self.id)
 
     def to_manifest(self) -> dict:
         if self.kind == "builtin":
-            return {"id": self.id, "kind": "builtin", "enabled": self.enabled}
+            d = {"id": self.id, "kind": "builtin", "enabled": self.enabled}
+            if self.open != self.default_open():
+                d["open"] = self.open
+            return d
         if self.kind == "app":
             d = {"id": self.id, "kind": "app", "enabled": self.enabled}
             if self.trusted:
@@ -174,6 +207,8 @@ class Tool:
                 d["remote_url"] = self.remote_url
         d["enabled"] = self.enabled
         d["safe"] = self.safe
+        if self.open != self.default_open():     # a default is never written
+            d["open"] = self.open
         if self.refresh is not None:
             r = {"argv": list(self.refresh.argv)}
             if self.refresh.cwd:
@@ -181,6 +216,12 @@ class Tool:
             r["timeout_s"] = self.refresh.timeout_s
             d["refresh"] = r
         return d
+
+
+def default_open(kind: str, tool_id: str) -> str:
+    if kind == "builtin":
+        return BUILTIN_OPEN_DEFAULT.get(tool_id, "frame")
+    return "frame"
 
 
 class ToolValidationError(ValueError):
@@ -310,6 +351,18 @@ def _check_bool(row: dict, key: str, default: bool, index: int) -> bool:
     return v
 
 
+def _check_open(row: dict, kind: str, tid: str, index: int) -> str:
+    v = row.get("open")
+    if v is None:
+        return default_open(kind, tid)
+    if not isinstance(v, str) or v not in OPEN_MODES:
+        raise ToolValidationError(index, "open", "must be frame or window")
+    if v == "window" and kind == "builtin" and tid not in BUILTIN_WINDOWABLE:
+        raise ToolValidationError(index, "open",
+                                  "this built-in has no page of its own to open in a window")
+    return v
+
+
 def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[Tool]:
     """Raw manifest rows → Tools. Raises ToolValidationError(index, field, msg).
 
@@ -346,7 +399,8 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
                                           + ", ".join(BUILTINS))
             out.append(Tool(id=tid, kind="builtin", title=BUILTINS[tid][1],
                             icon=BUILTINS[tid][2],
-                            enabled=_check_bool(row, "enabled", True, i)))
+                            enabled=_check_bool(row, "enabled", True, i),
+                            open=_check_open(row, kind, tid, i)))
             continue
         if kind == "app":
             # No bot-id check: an app may share its id with its OWN bot (the
@@ -374,6 +428,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
             raise ToolValidationError(i, "icon", "must be a short glyph (1..16 characters)")
         enabled = _check_bool(row, "enabled", True, i)
         safe = _check_bool(row, "safe", False, i)
+        open_ = _check_open(row, kind, tid, i)
 
         if kind == "static":
             root = _check_abs_dir(row.get("root"), i, "root", fs)
@@ -383,7 +438,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
                 refresh = _check_refresh(row["refresh"], i, fs)
             out.append(Tool(id=tid, kind=kind, title=title.strip(), icon=icon.strip(),
                             enabled=enabled, safe=safe, root=root, entry=entry,
-                            refresh=refresh))
+                            refresh=refresh, open=open_))
         else:
             url = row.get("url")
             if not _http_url_ok(url):
@@ -393,7 +448,8 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
                 raise ToolValidationError(i, "remote_url", "must be an http(s) URL")
             out.append(Tool(id=tid, kind=kind, title=title.strip(), icon=icon.strip(),
                             enabled=enabled, safe=safe, url=url.strip(),
-                            remote_url=remote.strip() if remote else None))
+                            remote_url=remote.strip() if remote else None,
+                            open=open_))
     return out
 
 
@@ -475,6 +531,41 @@ def builtin_enabled(tool_id: str) -> bool | None:
     return t.enabled
 
 
+def builtin_open(tool_id: str) -> str:
+    """How a builtin opens: the manifest's `open`, else its default."""
+    t = get_tool(tool_id)
+    if t is not None and t.kind == "builtin":
+        return t.open
+    return default_open("builtin", tool_id)
+
+
+def _settings():
+    """main's SETTINGS (tests swap it there), without importing main: this
+    module is imported BY main, so by the time a request runs it is loaded."""
+    import sys
+    m = sys.modules.get(f"{__package__}.main")
+    return getattr(m, "SETTINGS", None) or config.SETTINGS
+
+
+def builtin_addresses(tool_id: str) -> tuple[str | None, str | None]:
+    """(url, remote_url) a window-capable builtin opens in a tab. Nothing
+    unless the feature is actually available on this install — the same
+    condition under which its own status route answers with these values."""
+    if tool_id not in BUILTIN_WINDOWABLE or not _builtin_available(tool_id):
+        return None, None
+    s = _settings()
+    if tool_id == "studioforge-panel":
+        return (getattr(s, "studioforge_url", "") or None,
+                getattr(s, "studioforge_remote_url", "") or None)
+    if tool_id == "deepseek-harness":
+        port = getattr(s, "harness_port", None)
+        # Loopback on the host; off it only the operator's remote address (the
+        # client falls back to the pane, and its note, when there is none).
+        return ((f"http://127.0.0.1:{port}/" if port else None),
+                getattr(s, "harness_remote_url", "") or None)
+    return None, None
+
+
 #: builtin id → probe for "the feature exists on this install" (env flag,
 #: config, PIN) WITHOUT the manifest switch. Registered by main.
 _builtin_probes: dict[str, Callable[[], bool]] = {}
@@ -509,6 +600,7 @@ def _reset_state() -> None:
         _tickets.clear()
     _last_refresh.clear()
     _probe_cache.clear()
+    _frame_cache.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -672,7 +764,8 @@ def _limited_visible(t: Tool) -> bool:
 
 def _out_operator(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": t.refresh is not None}
+         "enabled": t.enabled, "safe": t.safe, "has_refresh": t.refresh is not None,
+         "open": t.open}
     if t.kind == "static":
         d["root"] = t.root
         d["entry"] = t.entry
@@ -686,7 +779,7 @@ def _out_operator(t: Tool) -> dict:
 
 def _out_limited(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": False}
+         "enabled": t.enabled, "safe": t.safe, "has_refresh": False, "open": t.open}
     if t.kind == "static":
         d["entry"] = t.entry
     else:
@@ -697,13 +790,19 @@ def _out_limited(t: Tool) -> dict:
 
 def _builtin_row(tid: str) -> dict:
     feat, title, icon = BUILTINS[tid]
-    return {"id": tid, "title": title, "icon": icon, "kind": "builtin",
+    d = {"id": tid, "title": title, "icon": icon, "kind": "builtin",
             # `enabled` is the manifest SWITCH (what a Settings save round-trips),
             # never the resolved value — otherwise saving while a feature is
             # merely unavailable would persist `enabled: false` into tools.yaml.
             "enabled": builtin_enabled(tid) is not False, "safe": False,
             "has_refresh": False, "builtin_feature": feat,
-            "available": _builtin_available(tid)}
+            "available": _builtin_available(tid),
+            "open": builtin_open(tid)}
+    if tid in BUILTIN_WINDOWABLE:
+        # Operator listing only (builtins never list for Safe Mode), and the
+        # same values the feature's own full-session status route returns.
+        d["open_url"], d["open_remote_url"] = builtin_addresses(tid)
+    return d
 
 
 def _app_row(la) -> dict:
@@ -830,18 +929,45 @@ PROBE_TTL_S = 10.0
 PROBE_OP_TIMEOUT_S = 3.0      # httpx: per connect/read/write/pool operation
 PROBE_TOTAL_S = 4.0           # the whole probe, whatever the server does
 _probe_cache: dict[str, tuple[float, bool]] = {}
+#: url → would a browser frame it (None = unknown: unreachable, or a redirect
+#: whose target we deliberately do not follow). Filled by the same probe.
+_frame_cache: dict[str, bool | None] = {}
+
+
+def framable(headers) -> bool:
+    """Would a browser let another origin put this response in an <iframe>?
+    The two headers the browser itself obeys: CSP ``frame-ancestors`` (which
+    supersedes X-Frame-Options where both are present — only a bare ``*``
+    admits an origin we cannot name in advance) and ``X-Frame-Options``
+    (DENY / SAMEORIGIN / ALLOW-FROM all refuse us). Neither → framable, the
+    web's default. Same reading as main._framable (StudioForge's pane)."""
+    csp = (headers.get("content-security-policy") or "").lower()
+    for directive in csp.split(";"):
+        parts = directive.split()
+        if parts and parts[0] == "frame-ancestors":
+            return parts[1:] == ["*"]
+    xfo = (headers.get("x-frame-options") or "").strip().lower()
+    if xfo in ("deny", "sameorigin") or xfo.startswith("allow-from"):
+        return False
+    return True
+
+
+def _frame_verdict(r) -> bool | None:
+    return None if 300 <= r.status_code < 400 else framable(r.headers)
 
 
 async def _probe_once(url: str) -> bool:
     async with httpx.AsyncClient(timeout=httpx.Timeout(PROBE_OP_TIMEOUT_S),
                                  follow_redirects=False) as c:
         r = await c.head(url)
+        verdict = _frame_verdict(r)
         if r.status_code == 405:
             # HEAD not allowed: the server answered, but confirm with a GET whose
             # body is NEVER read — the stream is closed as soon as the status
-            # line and headers are in.
+            # line and headers are in. Its headers are the page's own.
             async with c.stream("GET", url) as g:
-                _ = g.status_code
+                verdict = _frame_verdict(g)
+        _frame_cache[url] = verdict
         return True
 
 
@@ -860,8 +986,11 @@ async def _reachable(url: str) -> bool:
     hit = _probe_cache.get(url)
     if hit and now - hit[0] < PROBE_TTL_S:
         return hit[1]
+    _frame_cache.pop(url, None)
     ok = await _probe_url(url)
     _probe_cache[url] = (now, ok)
+    if not ok:
+        _frame_cache[url] = None
     return ok
 
 
@@ -901,7 +1030,7 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
         if isinstance(row.get("id"), str):
             sent_ids.add(row["id"])
         if row.get("kind") == "builtin":
-            row = {k: row[k] for k in ("id", "kind", "enabled") if k in row}
+            row = {k: row[k] for k in ("id", "kind", "enabled", "open") if k in row}
         if row.get("kind") == "app":
             try:
                 row = _clean_app_row(i, row, current.get(row.get("id")))
@@ -1008,8 +1137,8 @@ async def api_tool_status(request: Request, tool_id: str):
         return JSONResponse(NOT_FOUND, status_code=404)
     if t.kind == "builtin":
         return {"id": t.id, "kind": "builtin", "enabled": builtin_resolved(t.id),
-                "refreshing": False, "last_refresh": None}
-    body: dict = {"id": t.id, "kind": t.kind, "enabled": t.enabled,
+                "refreshing": False, "last_refresh": None, "open": builtin_open(t.id)}
+    body: dict = {"id": t.id, "kind": t.kind, "enabled": t.enabled, "open": t.open,
                   "refreshing": is_refreshing(t.id) if operator else False,
                   "last_refresh": _last_refresh.get(t.id) if operator else None}
     if t.kind == "static":
@@ -1019,6 +1148,7 @@ async def api_tool_status(request: Request, tool_id: str):
         body["mtime"] = mtime
     else:
         body["reachable"] = await _reachable(t.url or "")
+        body["framable"] = _frame_cache.get(t.url or "") if body["reachable"] else None
     return body
 
 
@@ -1036,7 +1166,8 @@ def api_tool_refresh(request: Request, tool_id: str):
 
 # Ticket route FIRST: `_t` would otherwise match `{tool_id}` below (ids cannot
 # contain `_`, so no real tool can shadow it either).
-@router.api_route(TICKET_PREFIX + "{ticket}/{rel:path}", methods=["GET", "HEAD"])
+@router.api_route(TICKET_PREFIX + "{ticket}/{rel:path}", methods=["GET", "HEAD"],
+                  include_in_schema=False)
 def tool_ticket_file(request: Request, ticket: str, rel: str):
     """The only lock on this prefix — main's gate lets it through."""
     tool_id = _use_ticket(ticket, _client_of(request))
@@ -1065,7 +1196,8 @@ def tool_bare(tool_id: str):
     return RedirectResponse(f"/tools/{quote(tool_id)}/", status_code=307)
 
 
-@router.api_route("/tools/{tool_id}/{rel:path}", methods=["GET", "HEAD"])
+@router.api_route("/tools/{tool_id}/{rel:path}", methods=["GET", "HEAD"],
+                  include_in_schema=False)
 def tool_file(request: Request, tool_id: str, rel: str):
     operator = _is_operator(request)
     t = get_tool(tool_id)

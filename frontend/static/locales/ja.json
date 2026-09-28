@@ -276,7 +276,18 @@
     "lock_now": "今すぐロック",
     "discard_confirm": "変更を破棄しますか？",
     "menu_badge": "⌥",
-    "menu_title": "このボットを ⌥ ツールメニューへ移動（この端末のみ）"
+    "menu_title": "このボットを ⌥ ツールメニューへ移動（この端末のみ）",
+    "dev_display": "言語と表示",
+    "dev_pictures": "画像とプライバシー",
+    "dev_bar": "メニューバーのショートカット",
+    "dev_bar_hint": "ピン留めした設定はメニューバーに専用ボタンができ、ワンタップで切り替えられます。各行の「ピン留め」ボタンを使ってください。",
+    "dev_backup": "バックアップと復元",
+    "language_desc": "アプリのメニュー、ボタン、メッセージの言語です。",
+    "minimal_avatars_desc": "サイドバーでは画像の代わりに名前を表示し、メッセージにはアバターを表示しません。",
+    "recovery_desc": "すべてのメッセージをファイルに書き出すか、保存されなかったメッセージを復元します。",
+    "recovery_open": "開く",
+    "theme_button": "テーマボタン",
+    "theme_button_desc": "メニューバーから直接テーマ選択を開きます。"
   },
   "companions": {
     "title": "コンパニオン",
@@ -456,6 +467,22 @@
     "jump": "移動 ›",
     "search_placeholder": "名前で検索…",
     "open_thread": "スレッドを開く",
+    "site_links": "サイトのリンク",
+    "preview_heading": "プラクティス・プレビュー",
+    "no_preview": "まだライブプレビューは発行されていません。",
+    "open_preview": "プレビューを開く",
+    "preview_expired": "プレビューは期限切れです",
+    "expires_on": "有効期限",
+    "expired_on": "期限切れ",
+    "live_site_heading": "公開中のサイト",
+    "open_live_site": "サイトを開く",
+    "no_live_url": "まだ公開URLは設定されていません。",
+    "repo_field_label": "リポジトリ／保存先:",
+    "notes_label": "メモ",
+    "edit_links": "編集",
+    "live_url_label": "公開URL",
+    "repo_placeholder": "~/Projects/… またはリポジトリのURL",
+    "opens_new_tab": "新しいタブで開きます",
     "security_hold": "セキュリティ保留",
     "hold_generic": "このクライアントは保留中です。",
     "hold_note_placeholder": "何を確認し、なぜ続行しても安全なのか",
@@ -950,7 +977,9 @@
   "pins": {
     "pin": "バーに固定",
     "unpin": "バーから外す",
-    "theme_hint": "テーマボタンをバーに表示したままにします。"
+    "theme_hint": "テーマボタンをバーに表示したままにします。",
+    "pin_short": "ピン留め",
+    "pinned_short": "ピン留め中"
   },
   "checklist": {
     "done": "完了",
@@ -1067,6 +1096,20 @@
     "saved": "ツールを保存しました",
     "save_failed": "保存できませんでした: {error}",
     "error_at": "ツール {n}: {error}",
-    "load_failed": "ツール一覧を読み込めませんでした: {error}"
+    "load_failed": "ツール一覧を読み込めませんでした: {error}",
+    "open_window": "新しいウィンドウで開く",
+    "opened_window": "{name} を新しいタブで開きました",
+    "opens_window": "新しいウィンドウで開きます",
+    "window_text": "{name} は専用のタブで開きます。",
+    "window_hint": "DisPatch の中には表示できません。ボタンから開いてください。",
+    "refuses_text": "このページは他のページ内への表示を拒否しています。",
+    "refuses_hint": "サーバーが埋め込みを禁止しているため、ここには表示できません。専用のタブでは通常どおり動作します。",
+    "slow_text": "このページの読み込みが終わっていません。",
+    "slow_hint": "遅いか、ここでの読み込みがブロックされている可能性があります。再試行するか、専用のタブで開いてください。",
+    "missing_text": "このツールのページが見つかりません。",
+    "missing_hint": "入口のファイルが見つかりません。tools.yaml のフォルダーを確認するか、更新を実行してください。",
+    "retry": "再試行",
+    "col_open": "新しいウィンドウ",
+    "open_window_aria": "{name} をパネルではなく新しいウィンドウで開く"
   }
 }
