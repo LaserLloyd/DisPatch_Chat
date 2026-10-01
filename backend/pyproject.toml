@@ -97,7 +97,7 @@ ignore = [
     # (Selected via B, so it needs turning off explicitly.)
     "BLE001",
     # `datetime.now()` here is the box-local clock on purpose — daily thread
-    # rollover, the night window and the JST-facing UI are all local-time
+    # rollover, the night window and the user-facing UI are all local-time
     # concepts. UTC would be the bug.
     "DTZ005",
     # Unpacking a whole tuple (`rc, out, err = ...`) documents the shape of the

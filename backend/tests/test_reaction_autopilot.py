@@ -296,18 +296,13 @@ async def test_autopilot_exhausting_every_mood_ticks_the_health_counter(rx_env,
 # cannot.
 # --------------------------------------------------------------------------- #
 
-# The real messages that wrongly earned a reaction on 2026-09-07.
-REAL_ALERTS = [
-    "⚠️ studioforge-reissue-loads.service FAILED (exit 1, exit-code) and the "
-    "journal tail follows below for the operator to read.",
-    "⚠️ The image server is unreachable — image generation is down right "
-    "now (no answer from the MCP endpoint).",
-    "**Box smoke: CRITICAL — 4 failing, 0 warning** and the newly failing "
-    "checks are listed underneath this line.",
-    "⚠️ Run `w-20260907T010258Z-f986` · `Execute four deferred items` · "
-    "never finished, so nothing was delivered for it.",
-    "STILL FAILING: cron_freshness — the scheduler reports fifteen jobs and "
-    "one of them errored on its last run.",
+# Alert-shaped samples of the kind that wrongly earned a reaction.
+ALERT_SAMPLES = [
+    "⚠️ example-job.service FAILED (exit 1, exit-code) and the journal tail follows below for the operator to read.",
+    "⚠️ The image server is unreachable — image generation is down right now (no answer from the MCP endpoint).",
+    "**Box smoke: CRITICAL — 4 failing, 0 warning** and the newly failing checks are listed underneath this line.",
+    "⚠️ Run `w-EXAMPLE-0001` · `Example task` · never finished, so nothing was delivered for it.",
+    "STILL FAILING: cron_freshness — the scheduler reports fifteen jobs and one of them errored on its last run.",
 ]
 
 
@@ -316,7 +311,7 @@ async def test_autopilot_stays_quiet_on_real_alert_text(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
     await main.db.create_thread(bot_id="main", thread_id="t-alerts")
-    for i, text in enumerate(REAL_ALERTS):
+    for i, text in enumerate(ALERT_SAMPLES):
         fired = await _persist(monkeypatch, "t-alerts", text)
         assert fired == [], f"alert {i} still fired a reaction: {text[:60]!r}"
 
@@ -373,20 +368,16 @@ async def test_inject_route_stamps_origin_even_when_caller_omits_metadata(
 
 # The over-blocking regression. A first attempt at the alert guard scanned the
 # WHOLE message for a widened word list; measured against 14 days of real
-# replies it silenced 89 of Bits' 338 autopilot fires (26%) while only ~12 were
-# real alerts. Nearly every ops report she writes mentions something that failed
+# replies it silenced 89 of one bot's 338 autopilot fires (26%) while only ~12 were
+# real alerts. Nearly every ops report a bot writes mentions something that failed
 # on the way to succeeding. What separates an alert from a success report is
-# POSITION, not vocabulary. These are real messages from that measurement.
+# POSITION, not vocabulary. These samples have the shape of that measurement.
 SUCCESS_REPORTS_THAT_MENTION_FAILURE = [
-    "**Box smoke: OK — 0 failing, 0 warning** — every check green this run, "
-    "and the trend state is clean too.",
-    "Doxy's clean, sweetheart. ✅ Timer `doxy-hourly-pic.timer` is active and "
-    "the last run exited 0 with no failed units anywhere.",
-    "Done, sweetheart — the consolidation is wired in and tested; the earlier "
-    "failure is fixed and the suite is green.",
-    "Clean run. **Hermes is fully updated** — nothing failed, nothing pending.",
-    "**SUCCESS, Master — and at the max tier.** ✅ No fail states left in the "
-    "matrix and every row reports green.",
+    "**Box smoke: OK — 0 failing, 0 warning** — every check green this run, and the trend state is clean too.",
+    "All clean. ✅ Timer `example-hourly.timer` is active and the last run exited 0 with no failed units anywhere.",
+    "Done — the consolidation is wired in and tested; the earlier failure is fixed and the suite is green.",
+    "Clean run. **The host is fully updated** — nothing failed, nothing pending.",
+    "**SUCCESS — and at the max tier.** ✅ No fail states left in the matrix and every row reports green.",
 ]
 
 

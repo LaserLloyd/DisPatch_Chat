@@ -1669,12 +1669,12 @@ def test_a_render_lease_waits_and_says_who_has_the_rig(env, monkeypatch):
     c = env()
     tid = _thread(c)
     fired = _fire(c, tid).json()
-    _use(monkeypatch, FakeForge(enqueue=_leased("render", holder="doxy-pics")))
+    _use(monkeypatch, FakeForge(enqueue=_leased("render", holder="image-cli")))
     asyncio.run(main._image_job_sweep())
 
     row = [m for m in _messages(c, tid) if m["id"] == fired["message_id"]][0]
     assert row["metadata"]["status"] == "queued", "still pending, not failed"
-    assert "reserved by doxy-pics (render)" in row["content"]
+    assert "reserved by image-cli (render)" in row["content"]
 
 
 def _wrong_shape(needs: int = 2, have: int = 1) -> image_jobs.ImageJobError:
@@ -2154,15 +2154,15 @@ def test_an_image_job_row_is_absent_from_a_redacted_message_list(env):
 # --------------------------------------------------------------------------- #
 # Per-bot identity injection (`image_identity_source`)
 #
-# A companion whose look is curated (Doxy) should write the SCENE ONLY — the
-# server prepends her canonical identity block before the prompt ever reaches
-# the rig. See app/image_jobs.identity_prompt, which parses the exact same
-# "## Canonical base prompt" file+format the `doxy-pics` CLI does.
+# A companion whose look is curated should write the SCENE ONLY — the server
+# prepends its canonical identity block before the prompt ever reaches the
+# rig. See app/image_jobs.identity_prompt, which parses the exact same
+# "## Canonical base prompt" file+format an external image CLI can share.
 # --------------------------------------------------------------------------- #
 
 IDENTITY_PROMPT = (
-    "athletic curvy dog-girl kemono, floppy dog ears, wagging tail, "
-    "auburn hair, warm brown eyes, anime illustration, soft studio lighting"
+    "friendly red robot mascot, round head, blue visor, flat vector "
+    "illustration, soft studio lighting"
 )
 
 
@@ -2191,11 +2191,11 @@ def test_identity_injection_prepends_the_canonical_prompt(env, tmp_path):
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
     tid = _thread(c)
-    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+    _say(c, tid, "[[pic:reading by the window, morning light]]")
 
     job = _job_of(c, _placeholders(c, tid)[0])
     assert job["prompt"].startswith(IDENTITY_PROMPT)
-    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window, morning light"
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, reading by the window, morning light"
 
 
 def test_identity_injection_keeps_the_identity_out_of_the_visible_line(env,
@@ -2205,11 +2205,11 @@ def test_identity_injection_keeps_the_identity_out_of_the_visible_line(env,
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
     tid = _thread(c)
-    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+    _say(c, tid, "[[pic:reading by the window, morning light]]")
 
     placeholder = _placeholders(c, tid)[0]
     assert IDENTITY_PROMPT not in placeholder["content"]
-    assert "kneeling by the window, morning light" in placeholder["content"]
+    assert "reading by the window, morning light" in placeholder["content"]
     assert placeholder["metadata"]["prompt"].startswith(IDENTITY_PROMPT), (
         "the STORED spec is the full rig-bound prompt")
     # ...and a locked device is redacted down to the card either way.
@@ -2221,12 +2221,12 @@ def test_a_bots_own_caption_survives_identity_injection(env, tmp_path):
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
     tid = _thread(c)
-    _say(c, tid, "[[pic:kneeling by the window|Good morning]]")
+    _say(c, tid, "[[pic:reading by the window|Good morning]]")
 
     placeholder = _placeholders(c, tid)[0]
     assert "Good morning" in placeholder["content"]
     assert IDENTITY_PROMPT not in placeholder["content"]
-    assert _job_of(c, placeholder)["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window"
+    assert _job_of(c, placeholder)["prompt"] == f"{IDENTITY_PROMPT}, reading by the window"
 
 
 def test_a_bot_without_the_flag_gets_no_identity_injection(env):
@@ -2243,7 +2243,7 @@ def test_a_bot_without_the_flag_gets_no_identity_injection(env):
 
 def test_a_missing_identity_file_drops_the_marker_not_the_reply(env, tmp_path):
     """A bot that opted into identity injection is refusing to guess its own
-    look, the same way `doxy-pics die()`s on a missing file — but the marker
+    look, the same way an image CLI dies on a missing file — but the marker
     is dropped, not the reply it arrived in."""
     c = env()
     _set_identity_source("main", str(tmp_path / "does-not-exist.md"))
@@ -2263,32 +2263,38 @@ def test_identity_injection_also_applies_to_the_explicit_endpoint(env, tmp_path)
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
     tid = _thread(c)
-    body = _fire(c, tid, prompt="kneeling by the window").json()
+    body = _fire(c, tid, prompt="reading by the window").json()
     job = c.get(f"/api/image-jobs/{body['job_id']}").json()
-    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window"
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, reading by the window"
 
 
-def test_the_identity_parser_matches_doxy_pics_byte_for_byte():
-    """image_jobs.identity_prompt must stay the SAME parser doxy-pics uses —
-    one file, one regex, one 40-char floor — never a second, diverging copy."""
+def test_the_identity_parser_matches_the_image_cli_byte_for_byte():
+    """image_jobs.identity_prompt must stay the SAME parser an external image
+    CLI uses — one file, one regex, one 40-char floor — never a second,
+    diverging copy. Point DISPATCH_IDENTITY_CLI at that CLI's source to check
+    it; skipped when unset."""
+    import os as _os
     import re as _re
-    doxy_pics_src = Path.home().joinpath(".local/bin/doxy-pics").read_text()
-    m = _re.search(r'PROMPT_BLOCK_RE = re\.compile\(\s*(r".*?")', doxy_pics_src,
+    cli = _os.environ.get("DISPATCH_IDENTITY_CLI", "").strip()
+    if not cli or not Path(cli).expanduser().is_file():
+        pytest.skip("DISPATCH_IDENTITY_CLI not set")
+    cli_src = Path(cli).expanduser().read_text()
+    m = _re.search(r'PROMPT_BLOCK_RE = re\.compile\(\s*(r".*?")', cli_src,
                    _re.S)
     if not m:
-        pytest.skip("doxy-pics not present on this box")
+        pytest.skip("no PROMPT_BLOCK_RE in the image CLI")
     assert eval(m.group(1)) == image_jobs._IDENTITY_BLOCK_RE.pattern
 
 
-def test_identity_injection_for_a_doxy_style_bot(env, tmp_path):
+def test_identity_injection_for_a_curated_bot(env, tmp_path):
     """The real-world case this feature exists for: a companion whose look is
-    curated writes the scene only, and the server prepends her canonical
-    identity block, her curated workflow, and her curated aspect ratio — the
-    same three things live `doxy-pics` config carries for her
-    (`anima-Bits`, `aspect_ratio: "2:3"`)."""
+    curated writes the scene only, and the server prepends its canonical
+    identity block, its curated workflow, and its curated aspect ratio — the
+    same three things an image CLI's config would carry for it
+    (`anima-demo`, `aspect_ratio: "2:3"`)."""
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
-    _set_workflow("anima-Bits")
+    _set_workflow("anima-demo")
     bots = config.load_bots()
     for b in bots:
         if b.id == "main":
@@ -2297,11 +2303,11 @@ def test_identity_injection_for_a_doxy_style_bot(env, tmp_path):
     config._invalidate_bots_cache()
 
     tid = _thread(c)
-    _say(c, tid, "[[pic:kneeling by the window, morning light]]")
+    _say(c, tid, "[[pic:reading by the window, morning light]]")
 
     job = _job_of(c, _placeholders(c, tid)[0])
-    assert job["prompt"] == f"{IDENTITY_PROMPT}, kneeling by the window, morning light"
-    assert job["workflow"] == "anima-Bits"
+    assert job["prompt"] == f"{IDENTITY_PROMPT}, reading by the window, morning light"
+    assert job["workflow"] == "anima-demo"
     assert c.get(f"/api/image-jobs/{job['job_id']}").json()["prompt"].startswith(
         IDENTITY_PROMPT)
     # The ratio isn't echoed by the status route today; the stored spec is

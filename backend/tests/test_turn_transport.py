@@ -233,7 +233,7 @@ async def test_the_request_carries_an_idempotency_key_and_never_delivers():
 
 def test_agent_id_normalization_matches_the_gateways_rule():
     assert openclaw.normalize_agent_id("DS_Flash") == "ds_flash"
-    assert openclaw.normalize_agent_id("Doxy") == "doxy"
+    assert openclaw.normalize_agent_id("Nova") == "nova"
     assert openclaw.normalize_agent_id("a b.c") == "a-b-c"
     assert openclaw.normalize_agent_id("") == "main"
 

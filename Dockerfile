@@ -103,12 +103,12 @@ ARG CREATED
 # These labels name the upstream repository. They only affect image metadata
 # (and the GHCR "linked repository" behaviour) — the build works untouched.
 # To repoint them at your own fork:
-#   grep -rl 'LaserLloyd/dispatch-chat' --exclude-dir=.git . \
-#     | xargs sed -i 's|LaserLloyd/dispatch-chat|myuser/dispatch-chat|g'
+#   grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
+#     | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
 LABEL org.opencontainers.image.title="DisPatch Chat" \
       org.opencontainers.image.description="Self-hosted chat for your household and your AI agents" \
-      org.opencontainers.image.source="https://github.com/LaserLloyd/dispatch-chat" \
-      org.opencontainers.image.documentation="https://github.com/LaserLloyd/dispatch-chat/blob/main/docs/deploy-docker.md" \
+      org.opencontainers.image.source="https://github.com/LaserLloyd/DisPatch_Chat" \
+      org.opencontainers.image.documentation="https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/deploy-docker.md" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \

@@ -3,8 +3,8 @@
 //
 // Background jobs post straight into threads through /api/inject: run reports
 // from runs-deliver ("❌ Run … failed — see report"), box-smoke's NEW FAIL /
-// RECOVERED pair, the watchdog failure notifier, doxy-pics' missed hourly
-// picture, ComfyUI outages, failed image jobs. Each one arrived as a
+// RECOVERED pair, the watchdog failure notifier, an image CLI's missed
+// scheduled picture, ComfyUI outages, failed image jobs. Each one arrived as a
 // full-size message from the bot — avatar, name, bubble, code block — so a
 // bad night of benchmarks buried the actual conversation. They are status,
 // not conversation: still there, one tap to expand, but not shouting.
@@ -77,7 +77,11 @@ export function classifyNotice(msg) {
   // their own, as a sub-details box.
   if (meta.sub) return null;
   if (meta.kind === 'image_job' && meta.status === 'failed') return { level: 'error', headline };
-  if (meta.doxy_pics && meta.doxy_pics.failure) return { level: 'warn', headline };
+  // A sender's own metadata block flagged { failure: true } — an image CLI's
+  // missed scheduled picture, for one — whatever that sender named the key.
+  if (Object.values(meta).some((v) => v && typeof v === 'object' && !Array.isArray(v) && v.failure === true)) {
+    return { level: 'warn', headline };
+  }
   if (meta.source === 'watchdog-failure-notify') return { level: 'error', headline };
 
   if (!m) return null;

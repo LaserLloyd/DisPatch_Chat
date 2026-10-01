@@ -374,15 +374,15 @@ def test_unload_enabled_reads_the_knob(monkeypatch, value, expected):
 
 
 # --------------------------------------------------------------------------- #
-# Backend-down vs VRAM-short (2026-09-02)
+# Backend-down vs VRAM-short
 #
-# On 2026-09-02 the rig's ComfyUI was down from ~00:50 to ~15:00 JST. DisPatch
-# spent fourteen hourly cycles finding that out one wasted `generate_image`
+# During one long ComfyUI outage on the rig, DisPatch spent fourteen hourly
+# cycles finding that out one wasted `generate_image`
 # call at a time, recorded every one of them as a generic "refused", and
 # alerted with a text that GUESSED between "VRAM contention or rig down". Six
-# more refusals the same afternoon were the opposite error: the guard demanded
-# the 10 GB ComfyUI wants when SELECTING a card, from a ComfyUI that had
-# already selected one and was holding 16 GB of warm weights on it.
+# more refusals the same day were the opposite error: the guard demanded the
+# VRAM ComfyUI wants when SELECTING a card, from a ComfyUI that had already
+# selected one and was holding its warm weights on it.
 # --------------------------------------------------------------------------- #
 
 
@@ -659,7 +659,7 @@ def test_a_render_lease_is_never_a_blocker_from_a_third_party_either(
 def test_an_agent_lease_does_not_block(monkeypatch):
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
-                        lambda url: _leases({"holder": "bits", "kind": "agent",
+                        lambda url: _leases({"holder": "scout", "kind": "agent",
                                              "state": "active"}))
     assert pool_guard.rig_lease_holder() is None
 

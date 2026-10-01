@@ -2,7 +2,11 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v137';  // v137: review round — tool fallback
+const CACHE = 'local-chat-v138';  // v138: public-repo scrub — notice.js
+// flags any sender metadata block carrying failure:true (no sender named),
+// about.js points at the DisPatch_Chat repo. notice.js?v=3→4,
+// about.js?v=2→3, main.js?v=113→114, index.html.
+// v137: review round — tool fallback
 // card buttons / menu ↗ / Settings "New window" switch get their CSS, dead
 // locale keys (settings.language_hint, settings.minimal_avatars_hint,
 // pins.theme_hint) removed from all eight locales, an unused variable in

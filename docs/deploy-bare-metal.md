@@ -34,7 +34,7 @@ Best for a desktop or home server you log into, and the right choice if you want
 replies.
 
 ```bash
-git clone https://github.com/LaserLloyd/dispatch-chat.git ~/dispatch
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git ~/dispatch
 cd ~/dispatch/backend
 uv sync --frozen --no-dev
 ```
@@ -94,7 +94,7 @@ sudo install -m 0755 "$(command -v uvx)" /usr/local/bin/uvx
 
 # 3. Code in /opt, owned by that account.
 sudo install -d -o dispatch -g dispatch /opt/dispatch
-sudo git clone https://github.com/LaserLloyd/dispatch-chat.git /opt/dispatch
+sudo git clone https://github.com/LaserLloyd/DisPatch_Chat.git /opt/dispatch
 sudo chown -R dispatch:dispatch /opt/dispatch
 
 # 4. Build the venv at a fixed path as the service user. HOME and UV_CACHE_DIR

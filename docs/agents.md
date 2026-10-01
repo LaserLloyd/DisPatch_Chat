@@ -267,11 +267,11 @@ The full lifecycle from one call:
 curl -X POST http://127.0.0.1:8765/api/jobs/score \
   -H 'Content-Type: application/json' \
   -d '{
-    "url": "https://anthropic.com/careers/staff-swe",
-    "title": "Staff Software Engineer",
-    "company": "Anthropic",
-    "location": "Tokyo, JP",
-    "remote_type": "onsite",
+    "url": "https://example.com/careers/senior-engineer",
+    "title": "Senior Engineer",
+    "company": "Example Corp",
+    "location": "Remote",
+    "remote_type": "remote",
     "salary_min": 220000, "salary_max": 320000,
     "tags": ["python", "ml"]
   }'
@@ -283,11 +283,11 @@ curl -X POST http://127.0.0.1:8765/api/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "bot_id": "jobboard",
-    "url": "https://anthropic.com/careers/staff-swe",
-    "title": "Staff Software Engineer",
-    "company": "Anthropic",
-    "location": "Tokyo, JP",
-    "remote_type": "onsite",
+    "url": "https://example.com/careers/senior-engineer",
+    "title": "Senior Engineer",
+    "company": "Example Corp",
+    "location": "Remote",
+    "remote_type": "remote",
     "salary_min": 220000, "salary_max": 320000,
     "tags": ["python", "ml"],
     "brief": "Inference team; LLM serving.",
@@ -325,7 +325,7 @@ curl -X POST http://127.0.0.1:8765/api/jobs/<job_id>/archive
 Pattern:
 
 ```bash
-dispatch-jobs post --url https://... --title "Staff SWE" --company Anthropic \
+dispatch-jobs post --url https://... --title "Senior Engineer" --company "Example Corp" \
                    --salary-min 220000 --salary-max 320000 --tags python,ml
 dispatch-jobs vote <job_id> --signal yes
 dispatch-jobs list --state pending --source-agent scout

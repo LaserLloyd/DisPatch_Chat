@@ -110,8 +110,8 @@ entirely inside the Linux filesystem:
 
 ```bash
 cd ~                        # /home/<you> — the Linux ext4 disk. NOT /mnt/c.
-git clone https://github.com/LaserLloyd/dispatch-chat.git
-cd dispatch-chat
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
 cp .env.example .env
 docker compose up -d
 ```
@@ -171,7 +171,7 @@ newgrp docker
 sudo systemctl enable --now docker
 
 # 4. Deploy as in Path A.
-cd ~ && git clone https://github.com/LaserLloyd/dispatch-chat.git && cd dispatch-chat
+cd ~ && git clone https://github.com/LaserLloyd/DisPatch_Chat.git && cd DisPatch_Chat
 cp .env.example .env && docker compose up -d
 ```
 

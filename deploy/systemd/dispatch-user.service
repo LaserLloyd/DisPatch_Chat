@@ -33,7 +33,7 @@
 [Unit]
 Description=DisPatch Chat — self-hosted chat server
 # Repoint at your own fork if you are running one.
-Documentation=https://github.com/LaserLloyd/dispatch-chat
+Documentation=https://github.com/LaserLloyd/DisPatch_Chat
 After=network-online.target
 Wants=network-online.target
 # Order after a local agent gateway if you run one. Keep it Wants= (soft):

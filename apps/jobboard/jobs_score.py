@@ -81,24 +81,24 @@ SENIORITY_RANK: dict[str, int] = {
 
 # --------------------------------------------------------------------------- #
 # Location normalization — the v1 bug used string equality on raw location
-# strings, so a vote against "Tokyo, JP" missed "tokyo" in the candidate's
+# strings, so a vote against "Berlin, DE" missed "berlin" in the candidate's
 # location field. The fix: lowercase, strip after the first comma, trim,
-# then match with a word-boundary regex. ``Tokyo, JP`` -> ``tokyo``;
-# matches ``Tokyo, JP`` AND ``tokyo japan`` but NOT ``tokyokot``.
+# then match with a word-boundary regex. ``Berlin, DE`` -> ``berlin``;
+# matches ``Berlin, DE`` AND ``berlin germany`` but NOT ``berlinale``.
 # --------------------------------------------------------------------------- #
 
 def _norm_location(s: str) -> str:
     """Normalise a location string for the blocklist-match predicate.
 
     Two passes:
-      1. ``Tokyo, JP`` -> ``tokyo`` (drop trailing country / state).
+      1. ``Berlin, DE`` -> ``berlin`` (drop trailing country / state).
       2. ``Remote (US)`` -> ``remote`` (drop parenthetical qualifiers —
          a "remote / anywhere" vote is recorded against `remote`, not
          against `remote (us)`).
       3. Collapse internal whitespace.
 
-    The plan's example said `tokyo` matches `Tokyo, JP` but NOT
-    `tokyokot`. The same predicate must also handle the Remote-style
+    The plan's example said `berlin` matches `Berlin, DE` but NOT
+    `berlinale`. The same predicate must also handle the Remote-style
     location — a vote against "Remote (US)" must block subsequent
     `remote` candidates without a country tag.
     """

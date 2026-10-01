@@ -62,8 +62,8 @@ def _payload(url: str, title: str = "Senior SWE", **overrides):
         "bot_id": "jobboard",
         "url": url,
         "title": title,
-        "company": "Anthropic",
-        "location": "Tokyo, JP",
+        "company": "Example Corp",
+        "location": "Berlin, DE",
         "remote_type": "onsite",
         "salary_min": 200000, "salary_max": 320000,
         "salary_currency": "USD",
@@ -96,7 +96,7 @@ async def test_current_month_thread_creates_on_first_post(wired):
     thread and writes one message into it."""
     db = wired["_db"]
     res = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     assert res["duplicate"] is False
     thread_id = res["thread_id"]
     msgs, _ = await db.list_messages(thread_id)
@@ -116,9 +116,9 @@ async def test_two_jobs_same_month_share_thread(wired):
     thread row carrying both jobs."""
     db = wired["_db"]
     res1 = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     res2 = await jobs.create_job_from_dict(_payload(
-        "https://stripe.com/careers/senior-swe",
+        "https://example.org/careers/staff-engineer",
         title="Senior SWE Stripe",
         company="Stripe",
         location="Remote",
@@ -139,9 +139,9 @@ async def test_vote_targets_job_not_thread(wired):
     thread. Each job keeps its own state (the jobs.job_id key)."""
     db = wired["_db"]
     res1 = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     res2 = await jobs.create_job_from_dict(_payload(
-        "https://stripe.com/careers/senior-swe",
+        "https://example.org/careers/staff-engineer",
         title="Senior SWE Stripe", company="Stripe", location="Remote"))
     await jobs._record_vote(res1["job_id"], "yes", None, None, "user")
     j1 = await db.get_job(res1["job_id"])
@@ -156,14 +156,14 @@ async def test_duplicate_returns_existing_job_id(wired):
     first job's id — no second row, no second message."""
     db = wired["_db"]
     res1 = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     res2 = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     assert res2["duplicate"] is True
     assert res2["existing_job_id"] == res1["job_id"]
     rows = await db.list_jobs()
     assert len([r for r in rows if r["url"]
-                == "https://anthropic.com/careers/staff-swe"]) == 1
+                == "https://example.com/careers/senior-engineer"]) == 1
 
 
 @pytest.mark.asyncio
@@ -173,7 +173,7 @@ async def test_message_id_back_patched(wired):
     on it in one hop)."""
     db = wired["_db"]
     res = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     job = await db.get_job(res["job_id"])
     assert job["message_id"] == res["message_id"]
     # The chat panel can verify the message really exists in the
@@ -192,7 +192,7 @@ async def test_list_months_after_creating_jobs(wired):
     """``list_months`` returns a chronological list of monthly
     threads, with parsed (year, month) metadata."""
     res = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     # The wired DB has no PIN installed (auth_gate's no-PIN allow). Build a
     # fake request whose .state.decoy is False.
     req = _FakeRequest(cookie=None)
@@ -208,7 +208,7 @@ async def test_get_month_returns_thread_messages_jobs(wired):
     structured jobs + a per-job score. The chat panel mounts the
     monthly chat from this single response."""
     res = await jobs.create_job_from_dict(_payload(
-        "https://anthropic.com/careers/staff-swe"))
+        "https://example.com/careers/senior-engineer"))
     year, month = database.current_year_month()
     key = database.jobs_month_key(year, month)
     req = _FakeRequest(cookie=None)

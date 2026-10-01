@@ -530,11 +530,12 @@ class Bot:
     # and a caption, nothing else. Empty means the image server's own default.
     image_workflow: str = ""
     # Path to a markdown file holding this bot's canonical appearance, as a
-    # fenced "## Canonical base prompt" block — the SAME file+format the
-    # `doxy-pics` CLI parses on every run (see app/image_jobs.identity_prompt).
+    # fenced "## Canonical base prompt" block — the SAME file+format an
+    # external image CLI can parse on every run (see
+    # app/image_jobs.identity_prompt).
     # When set, an inline `[[pic:…]]` (and an explicit `/api/image-jobs` call)
     # has that prompt prepended SERVER-SIDE before it ever reaches the rig, so
-    # the bot can write just the scene ("kneeling by the window") and never
+    # the bot can write just the scene ("reading by the window") and never
     # has to restate its own appearance. Empty (every shipped bot's default)
     # means no injection at all — behaviour is byte-identical to before this
     # existed. Opt-in per bot, same reasoning as `image_jobs`/`image_workflow`.
@@ -542,7 +543,7 @@ class Bot:
     # This bot's default aspect ratio ("2:3" style), used when a request names
     # none — the same "fills a gap, an explicit one still wins" rule as
     # `image_workflow`, and for the same reason: `[[pic:…]]` has no room to
-    # name one, and a curated look (Doxy's live `doxy-pics` config carries
+    # name one, and a curated look (an image CLI config carrying
     # `aspect_ratio: "2:3"`) should not silently change shape depending on
     # which path asked for the picture. Empty means the image server's own
     # default.

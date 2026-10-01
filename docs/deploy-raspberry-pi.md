@@ -213,7 +213,7 @@ platform. Do not use `apt install docker.io` — it is usually far behind.
 ### 4. Deploy
 
 ```bash
-git clone https://github.com/LaserLloyd/dispatch-chat.git ~/dispatch
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git ~/dispatch
 cd ~/dispatch
 cp .env.example .env
 ```

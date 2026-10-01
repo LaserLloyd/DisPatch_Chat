@@ -64,11 +64,9 @@ SKIP_SUFFIXES = {
     ".pdf", ".lock",
 }
 # NOT skipped, scanned INSIDE: an archive is a directory that happens to be one
-# file, and skipping it by suffix was a hole you could drive a release through.
-# On 2026-08-25 a shipped `dispatch-2026-07.zip` was found to have been serving
-# the maintainer's name, his install path and his tailnet publicly since July —
-# it passed every scan because `.zip` was in the list above and nothing ever
-# opened it. `.whl` and `.jar` are zips too.
+# file, and skipping it by suffix was a hole you could drive a release through:
+# a scan that never opens an archive passes whatever is inside it. `.whl` and
+# `.jar` are zips too.
 ARCHIVE_SUFFIXES = {
     ".zip", ".whl", ".jar", ".egg",
     ".tar", ".tgz", ".gz", ".bz2", ".xz",

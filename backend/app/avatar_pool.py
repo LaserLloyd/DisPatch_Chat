@@ -581,7 +581,7 @@ def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
 #     version: 5
 #     base: "<the character itself, prefixed to every prompt>"
 #     suffix: "<detail fragment carried with `base`>"        # optional
-#     identity_source: bank | bits-prompt   # where the character comes from
+#     identity_source: bank | prompt-helper # where the character comes from
 #     negative: "<negative prompt for the FULL render>"      # optional
 #     ratio / style / workflow: image CLI knobs for the FULL render
 #     crop_size / face_percent / face_y_percent: crop knobs for the face half
@@ -595,20 +595,21 @@ def _update_config_locked(values: dict, bot_id: str) -> AvatarPoolConfig:
 #                the only way a second bot gets its OWN face. An empty `base`
 #                means the bank names nobody, so the composer falls back to
 #                the helper below rather than emitting a bodiless expression.
-#   bits-prompt  shell out to ~/bin/bits-prompt for Tier 1 + Tier 2 + the
-#                negative, ignoring `base`/`suffix`. Opt-in, for a bank whose
-#                `base` holds only part of that helper's output —
-#                avatar-prompts-main.yaml carries Tier 1 alone, so it must set
-#                this key or it silently loses its Tier 2 fragments.
+#   prompt-helper  shell out to the executable named by the
+#                DISPATCH_PROMPT_HELPER environment variable (unset by default)
+#                for Tier 1 + Tier 2 + the negative, ignoring `base`/`suffix`.
+#                Opt-in, for a bank whose `base` holds only part of that
+#                helper's output — such a bank must set this key or it silently
+#                loses its Tier 2 fragments.
 #
 # `base`, `suffix` and `negative` hold up to 2000 characters each — a canonical
 # character description runs to several hundred, and an over-long value is
 # WARNED about, never silently cut mid-word.
 #
 # A composed prompt is `base, suffix, <one expression>, background` on the bank
-# path and `tier1, tier2, <one expression>, background` on the bits-prompt one.
+# path and `tier1, tier2, <one expression>, background` on the prompt-helper one.
 # The negative follows the identity: a bank's own `negative` always wins, and
-# bits-prompt's (which names the wrong hair, eyes and species for anybody else)
+# the helper's (which names the wrong hair, eyes and species for anybody else)
 # is only ever sent along with the identity it belongs to.
 
 # A v5 bank with nothing to generate — bank_load's fallback when a malformed
@@ -630,10 +631,10 @@ _EMPTY_BANK: dict = {
 }
 
 # Who the composer asks for the character. `bank` (the default) reads it from
-# the bank itself; `bits-prompt` is the explicit opt-in to the helper that
+# the bank itself; `prompt-helper` is the explicit opt-in to the helper that
 # predates per-bot banks. Underscores are accepted for the second one — it is a
 # yaml value people type by hand.
-_IDENTITY_SOURCES = {"bank", "bits-prompt"}
+_IDENTITY_SOURCES = {"bank", "prompt-helper"}
 
 _SHOTS = {"", "extreme_close", "close", "wide", "bust", "waist"}
 _LOOKS = {"", "anime", "realistic"}
@@ -759,7 +760,7 @@ def _clean_bank(raw: dict) -> dict | None:
     return {
         "version": 5,
         # The identity keys. Dropping these was the whole defect: without them
-        # every bot's pool composed the SAME character out of bits-prompt.
+        # every bot's pool composed the SAME character out of the helper.
         "base": _capped(raw, "base", _IDENTITY_MAX),
         "suffix": _capped(raw, "suffix", _IDENTITY_MAX),
         "identity_source": src,
@@ -829,21 +830,31 @@ def bank_save(raw: dict, bot_id: str) -> dict:
     return bank_load(bot_id)
 
 
-_BITS_PROMPT = os.path.expanduser("~/bin/bits-prompt")
+def _prompt_helper_path() -> str:
+    """The external prompt helper, from DISPATCH_PROMPT_HELPER. Empty (the
+    default) means no helper is configured."""
+    raw = os.environ.get("DISPATCH_PROMPT_HELPER", "").strip()
+    return os.path.expanduser(raw) if raw else ""
 
 
-def _bits_prompt(*flags: str) -> str | None:
+def _prompt_helper(*flags: str) -> str | None:
     """Shell out to the canonical prompt helper — the source of truth for the
-    Tier 1 / Tier 2 / negative strings (bits-visual-identity.md). Tier
-    constants are NEVER hardcoded here. None (logged) when the helper fails."""
+    Tier 1 / Tier 2 / negative strings of the character it describes. Tier
+    constants are NEVER hardcoded here. None (logged) when no helper is
+    configured or it fails."""
+    helper = _prompt_helper_path()
+    if not helper:
+        log.error("prompt helper not configured (set DISPATCH_PROMPT_HELPER) — "
+                  "cannot compose avatar prompt")
+        return None
     try:
-        proc = subprocess.run([_BITS_PROMPT, *flags], capture_output=True,
+        proc = subprocess.run([helper, *flags], capture_output=True,
                               text=True, timeout=15, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:
-        log.error("bits-prompt unavailable (%s) — cannot compose avatar prompt", e)
+        log.error("prompt helper unavailable (%s) — cannot compose avatar prompt", e)
         return None
     if proc.returncode != 0:
-        log.error("bits-prompt %s failed (rc=%d): %s", " ".join(flags),
+        log.error("prompt helper %s failed (rc=%d): %s", " ".join(flags),
                   proc.returncode, (proc.stderr or "").strip()[:200])
         return None
     return proc.stdout.strip()
@@ -852,13 +863,13 @@ def _bits_prompt(*flags: str) -> str | None:
 def bank_owns_identity(bank: dict) -> bool:
     """Does this bank carry the character itself?
 
-    True when it has a `base` and has not opted back in to the bits-prompt
+    True when it has a `base` and has not opted back in to the prompt
     helper. False means the composer must shell out for Tier 1 / Tier 2 — the
     original behaviour, and still the right one for a bank that holds only
     expression bodies.
     """
     src = str(bank.get("identity_source") or "").strip().lower().replace("_", "-")
-    if src == "bits-prompt":
+    if src == "prompt-helper":
         return False
     return bool(str(bank.get("base") or "").strip())
 
@@ -871,8 +882,8 @@ def compose_prompt(bank_or_id: str | dict) -> str | None:
 
     The character is the bank's own `base`/`suffix`, per bot, the way
     reactions.compose_prompt builds one. Only a bank that names nobody (no
-    `base`) or explicitly asks for it (`identity_source: bits-prompt`) gets the
-    Tier 1 + Tier 2 strings out of ~/bin/bits-prompt — that helper describes one
+    `base`) or explicitly asks for it (`identity_source: prompt-helper`) gets the
+    Tier 1 + Tier 2 strings out of $DISPATCH_PROMPT_HELPER — that helper describes one
     specific character and takes no bot id, so every pool that reached for it
     minted the same face.
     """
@@ -890,8 +901,8 @@ def compose_prompt(bank_or_id: str | dict) -> str | None:
     if bank_owns_identity(bank):
         identity = [str(bank.get("base") or ""), str(bank.get("suffix") or "")]
     else:
-        t1 = _bits_prompt("--tier1")
-        t2 = _bits_prompt("--tier2", "--face", "--neck", "--hands")
+        t1 = _prompt_helper("--tier1")
+        t2 = _prompt_helper("--tier2", "--face", "--neck", "--hands")
         if t1 is None or t2 is None:
             return None
         identity = [t1, t2]
@@ -1052,13 +1063,13 @@ def generate_pair(bot_id: str) -> str | None:
         argv += ["--style", style[:60]]
     if workflow and not workflow.strip().startswith("-"):
         argv += ["--workflow", workflow[:60]]
-    # The bank's own negative wins; bits-prompt's is only fetched for a bank
-    # that took its identity from bits-prompt too. It negates "realistic",
+    # The bank's own negative wins; the helper's is only fetched for a bank
+    # that took its identity from the helper too. It negates "realistic",
     # "dark skin", "short hair" and a list of hair and eye colours — sending it
     # with somebody else's `base` would fight that character every render.
     negative = str(bank.get("negative") or "").strip()
     if not negative and not bank_owns_identity(bank):
-        negative = _bits_prompt("--negative") or ""
+        negative = _prompt_helper("--negative") or ""
     if negative:
         argv += ["--negative", negative]
     # `--` ends option parsing: the composed prompt is a positional, never a flag.

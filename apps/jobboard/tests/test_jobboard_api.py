@@ -41,11 +41,11 @@ from app import auth, config, main  # main import loads the apps
 def sample_job_payload():
     return {
         "bot_id": "jobboard",
-        "thread_title": "Staff SWE — Anthropic Tokyo",
-        "url": "https://anthropic.com/careers/staff-swe",
+        "thread_title": "Senior Engineer — Example Corp",
+        "url": "https://example.com/careers/senior-engineer",
         "title": "Staff Software Engineer",
-        "company": "Anthropic",
-        "location": "Tokyo, JP",
+        "company": "Example Corp",
+        "location": "Berlin, DE",
         "remote_type": "onsite",
         "salary_min": 220000, "salary_max": 320000,
         "salary_currency": "USD",
@@ -54,7 +54,7 @@ def sample_job_payload():
         "source_agent": "scout",
         "source_run_id": "r-001",
         "posted_at": "2026-09-01T00:00:00+00:00",
-        "initial_message": "🎯 New posting — Staff SWE @ Anthropic Tokyo.",
+        "initial_message": "🎯 New posting — Senior Engineer @ Example Corp.",
     }
 
 

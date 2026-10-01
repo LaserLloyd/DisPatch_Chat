@@ -6,6 +6,7 @@ count on their own line, an unterminated block fails closed, and ordinary prose
 """
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
@@ -516,7 +517,7 @@ def test_tool_result_block_and_its_body_are_stripped():
     text = ("Checking the box now.\n\n"
             "[Tool Result for ID call_9fa21c]\n"
             "uid=1000(someuser) gid=1000(someuser) groups=1000(someuser),10(wheel)\n"
-            "/opt/agent-home/.openclaw/gateway.systemd.env\n\n"
+            "/opt/example-agent/.openclaw/gateway.systemd.env\n\n"
             "You're running as someuser, and you're in wheel.")
     out = ot.sanitize_assistant_visible_text(text)
     assert "gateway.systemd.env" not in out
@@ -547,10 +548,10 @@ def test_plain_text_tool_call_blocks_are_stripped():
 
     harmony = ('Let me look.\n'
                '<|channel|>commentary to=read code<|message|>'
-               '{"path": "/opt/agent-home/.openclaw/openclaw.json"}<|call|>\n'
-               'Bits is on deepseek-v4-pro.')
+               '{"path": "/opt/example-agent/.openclaw/openclaw.json"}<|call|>\n'
+               'Scout is on deepseek-v4-pro.')
     assert ot.sanitize_assistant_visible_text(harmony) == (
-        "Let me look.\nBits is on deepseek-v4-pro.")
+        "Let me look.\nScout is on deepseek-v4-pro.")
 
     xmlish = ('Checking.\n'
               '[tool:exec]\n<parameter=cmd>df -h /</parameter>\n'
@@ -617,7 +618,7 @@ def test_minimax_tool_call_xml_is_stripped():
 def test_emoji_trace_lines_are_stripped():
     """A4. The runtime narrating its own tool use, line by line."""
     text = ("\U0001f6e0️ Exec: run systemctl --user restart local-chat\n"
-            "\U0001f4d6 Read: /opt/agent-home/.local/share/local-chat/security.yaml\n"
+            "\U0001f4d6 Read: /opt/example-agent/.local/share/local-chat/security.yaml\n"
             "Restarted, and I did not read your PIN out loud.")
     out = ot.sanitize_assistant_visible_text(text)
     assert out == "Restarted, and I did not read your PIN out loud."
@@ -658,7 +659,10 @@ def test_a_realistic_multi_stage_leak_sanitizes_to_the_reply_alone():
 # Drift tripwire
 # --------------------------------------------------------------------------- #
 
-DIST = pathlib.Path.home() / ".hermes/node/lib/node_modules/openclaw/dist"
+# The installed gateway's dist directory, from OPENCLAW_DIST (e.g.
+# <prefix>/lib/node_modules/openclaw/dist). Unset skips the tripwire.
+_DIST_ENV = os.environ.get("OPENCLAW_DIST", "").strip()
+DIST = pathlib.Path(_DIST_ENV).expanduser() if _DIST_ENV else None
 
 
 @pytest.mark.parametrize("name,anchor", sorted(ot.GATEWAY_DIST_ANCHORS.items()))
@@ -681,11 +685,12 @@ def test_every_ported_pattern_still_exists_in_the_installed_gateway(name, anchor
     because of the file extension, burying the real drift signal under
     false failures.
     """
-    if not DIST.is_dir():
+    if DIST is None or not DIST.is_dir():
         pytest.skip(
-            f"no OpenClaw dist at {DIST} — this box's gateway is the ground "
-            "truth for these ports and it is not installed here, so drift "
-            "cannot be checked (expected on CI; NOT expected on the DisPatch host)")
+            f"no OpenClaw dist at {DIST} — set OPENCLAW_DIST to the installed "
+            "gateway's dist directory; it is the ground truth for these ports, "
+            "so without it drift cannot be checked (expected on CI; NOT "
+            "expected on the DisPatch host)")
     sources = sorted([*DIST.rglob("*.js"), *DIST.rglob("*.mjs")])
     assert sources, f"{DIST} exists but holds no *.js/*.mjs — is the install broken?"
     hits = [p.name for p in sources if anchor in p.read_text(errors="replace")]

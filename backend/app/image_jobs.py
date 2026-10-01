@@ -28,7 +28,7 @@ validate, ingest, edit. A model cannot forget a step of it.
 SHAPE OF THE BACKEND
 --------------------
 The image server is an **MCP server over streamable HTTP** — the same surface
-`doxy-pics` drives, and the same one the reaction and avatar pools use to
+an external image CLI drives, and the same one the reaction and avatar pools use to
 refill themselves. Three calls matter:
 
 * ``generate_image(prompt, workflow, wait=false)`` → ``{"job_id": "..."}``
@@ -1074,25 +1074,24 @@ def image_suffix(data: bytes, files_rel: str = "") -> str:
 # --------------------------------------------------------------------------- #
 # Per-bot identity injection
 #
-# A bot writing `[[pic:kneeling by the window]]` should never have to restate
-# its own appearance — that is what made Doxy's pictures fast-but-wrong the
-# moment she was ever let near `[[pic:]]` unmodified: without a fixed identity
-# block prepended server-side, "kneeling by the window" alone renders SOME
-# dog-girl, not her.
+# A bot writing `[[pic:reading by the window]]` should never have to restate
+# its own appearance — that is what made a curated companion's pictures
+# fast-but-wrong the moment it was let near `[[pic:]]` unmodified: without a
+# fixed identity block prepended server-side, "reading by the window" alone
+# renders SOME character, not that one.
 #
-# This is deliberately the SAME file and the SAME parser `doxy-pics` already
-# uses on every run (`canonical_prompt()` in `~/.local/bin/doxy-pics`): one
-# "## Canonical base prompt" fenced block, one regex, one 40-character sanity
-# floor. A second, silently-diverging parser of the same file would be exactly
-# the kind of drift this house's CLAUDE.md calls out — two things that read
-# the same source and disagree.
+# This is deliberately the SAME file and the SAME parser an external image CLI
+# can use on every run: one "## Canonical base prompt" fenced block, one regex,
+# one 40-character sanity floor. A second, silently-diverging parser of the
+# same file would be exactly the kind of drift the project's contribution
+# guide calls out — two things that read the same source and disagree.
 # --------------------------------------------------------------------------- #
 
-#: Mirrors doxy-pics' PROMPT_BLOCK_RE byte for byte.
+#: Mirrors the image CLI's PROMPT_BLOCK_RE byte for byte.
 _IDENTITY_BLOCK_RE = re.compile(
     r"##\s*Canonical base prompt\s*```[a-z]*\s*(?P<p>.+?)```", re.S | re.I)
 
-#: Same floor doxy-pics uses to catch a truncated/mangled block rather than
+#: Same floor the image CLI uses to catch a truncated/mangled block rather than
 #: silently rendering off three words.
 _IDENTITY_MIN_CHARS = 40
 
@@ -1109,7 +1108,7 @@ def identity_prompt(path: str) -> str:
     identity" — because a bot configured with `image_identity_source` is
     opting INTO server-side identity injection specifically because its look
     must not be guessed; a missing or mangled file is exactly the "refusing
-    to guess" case `doxy-pics die()`s on, and a dropped `[[pic:…]]` marker
+    to guess" case an image CLI dies on, and a dropped `[[pic:…]]` marker
     (the caller's job) is the honest outcome here too.
     """
     p = Path(path)

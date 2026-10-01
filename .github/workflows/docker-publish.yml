@@ -1,7 +1,7 @@
 # =============================================================================
 #  Build and publish multi-arch images to GHCR
 # =============================================================================
-#  Produces linux/amd64 + linux/arm64 at ghcr.io/<owner>/dispatch-chat.
+#  Produces linux/amd64 + linux/arm64 at ghcr.io/<owner>/dispatch_chat (the repository name, lowercased).
 #
 #  Design: one runner per architecture, each pushing an untagged
 #  digest-addressed manifest, then a merge job that assembles the tagged
@@ -245,8 +245,8 @@ jobs:
 #     (OWNER is the placeholder for the GitHub owner — this example is the only
 #     place in this file that needs substituting; the live code uses
 #     ${{ github.repository }} and resolves itself.)
-#       cache-from: type=registry,ref=ghcr.io/LaserLloyd/dispatch-chat:buildcache
-#       cache-to:   type=registry,ref=ghcr.io/LaserLloyd/dispatch-chat:buildcache,mode=max
+#       cache-from: type=registry,ref=ghcr.io/laserlloyd/dispatch_chat:buildcache
+#       cache-to:   type=registry,ref=ghcr.io/laserlloyd/dispatch_chat:buildcache,mode=max
 #
 #  * Caches are only readable from the current branch, its base branch, and
 #    the default branch. A PR cannot read a sibling PR's cache. In practice
@@ -259,7 +259,7 @@ jobs:
 #    way is exposed and must be rotated. Use secret mounts.
 #
 #  * First publish: the GHCR package is private by default. Make it public at
-#    github.com/users/<owner>/packages/container/dispatch-chat/settings, or
+#    github.com/users/<owner>/packages/container/dispatch_chat/settings, or
 #    `docker pull` fails for everyone with "denied" and you will assume the
 #    build is broken.
 # =============================================================================

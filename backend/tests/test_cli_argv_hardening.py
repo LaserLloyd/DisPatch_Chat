@@ -61,12 +61,12 @@ def rig(monkeypatch, tmp_path):
 
 
 def _save_v5_bank(monkeypatch):
-    """A minimal valid v5 avatar bank, with the bits-prompt helper stubbed —
+    """A minimal valid v5 avatar bank, with the prompt helper stubbed —
     compose_prompt shells out to it for the tier strings, and under the rig
     fixtures every subprocess.run is the fake image CLI. The v1
     base+variations shape is refused by bank_save since v5."""
     monkeypatch.setattr(
-        avatar_pool, "_bits_prompt",
+        avatar_pool, "_prompt_helper",
         lambda *flags: "tier1 identity" if "--tier1" in flags else "tier2 detail")
     avatar_pool.bank_save(
         {"categories": {"calm": {"label": "Calm", "prompts": ["a portrait"]}},
@@ -118,7 +118,7 @@ def test_a_banks_own_negative_replaces_the_helpers(rx_env, rig, monkeypatch):
     eyes and species, so sending it with somebody else's `base` would fight
     that character on every render."""
     monkeypatch.setattr(
-        avatar_pool, "_bits_prompt",
+        avatar_pool, "_prompt_helper",
         lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
     avatar_pool.bank_save({"base": "a photoreal instructor", "negative": "blurry, extra limbs",
                            "categories": {"calm": {"label": "Calm",
@@ -131,7 +131,7 @@ def test_a_banks_own_negative_replaces_the_helpers(rx_env, rig, monkeypatch):
 
 def test_a_bank_that_owns_its_identity_sends_no_borrowed_negative(rx_env, rig, monkeypatch):
     monkeypatch.setattr(
-        avatar_pool, "_bits_prompt",
+        avatar_pool, "_prompt_helper",
         lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
     avatar_pool.bank_save({"base": "a photoreal instructor",
                            "categories": {"calm": {"label": "Calm",
@@ -145,7 +145,7 @@ def test_a_bank_identity_is_the_positional_prompt_the_cli_receives(rx_env, rig, 
     """The composed string is asserted in test_avatar_pool; this is the same
     claim one layer down — what actually lands in the process table."""
     monkeypatch.setattr(
-        avatar_pool, "_bits_prompt",
+        avatar_pool, "_prompt_helper",
         lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
     avatar_pool.bank_save({"base": "a lighthouse keeper", "suffix": "85mm lens",
                            "background": "a weathered harbour",
@@ -161,7 +161,7 @@ def test_a_bank_identity_is_the_positional_prompt_the_cli_receives(rx_env, rig, 
 def test_the_helpers_negative_still_rides_with_the_helpers_identity(rx_env, rig, monkeypatch):
     _save_v5_bank(monkeypatch)          # no `base` — the helper owns the face
     monkeypatch.setattr(                # …re-stubbed: _save_v5_bank sets its own
-        avatar_pool, "_bits_prompt",
+        avatar_pool, "_prompt_helper",
         lambda *f: "helper negative" if "--negative" in f else "helper identity")
     _enable_pool()
     assert avatar_pool.generate_pair("main") is not None

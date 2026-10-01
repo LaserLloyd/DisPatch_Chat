@@ -140,7 +140,7 @@ test('an image the AGENT sent is clickable too', () => {
   // Attachments go through mediaThumbEl (which wires data-full); an agent's
   // picture arrives as markdown and was reaching the DOM with no data-full at
   // all, so the delegated listener skipped it and clicking did nothing.
-  // Measured on real family data: 6 of 20 inline images were dead.
+  // Measured on a real install: 6 of 20 inline images were dead.
   const MD = readFileSync(join(HERE, '..', 'static', 'js', 'markdown.js'), 'utf8');
   assert.match(MD, /img\.dataset\.full = norm/,
     'markdown-rendered images no longer carry their full-resolution original');

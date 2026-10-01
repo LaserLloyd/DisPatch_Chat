@@ -321,13 +321,13 @@ def test_an_unservable_filename_is_never_drawn(rx):
 def test_refund_returns_the_actors_own_global_slot(rx):
     lim = reactions.RateLimiter()
     st = reactions.Settings()
-    assert lim.check("bits", st) is None
-    assert lim.check("doxy", st) is None
-    lim.refund("bits")
-    assert [a for _t, a in lim._global] == ["doxy"], \
+    assert lim.check("scout", st) is None
+    assert lim.check("nova", st) is None
+    lim.refund("scout")
+    assert [a for _t, a in lim._global] == ["nova"], \
         "the refund handed back another actor's global slot"
     lim.refund("nobody")                   # unknown actor = no-op
-    assert [a for _t, a in lim._global] == ["doxy"]
+    assert [a for _t, a in lim._global] == ["nova"]
 
 
 # --------------------------------------------------------------------------- #

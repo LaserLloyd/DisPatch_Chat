@@ -35,8 +35,8 @@ test('a RECOVERED alert is an ok notice', () => {
 });
 
 test('metadata-flagged failures are notices whatever the text', () => {
-  assert.ok(classifyNotice(a('⚠️ My hourly picture didn’t go out', { doxy_pics: { failure: true, slot: 'hourly' } })));
-  assert.equal(classifyNotice(a('⚠️ clawforge-watchdog.service FAILED', { source: 'watchdog-failure-notify' })).level, 'error');
+  assert.ok(classifyNotice(a('⚠️ My hourly picture didn’t go out', { image_cli: { failure: true, slot: 'hourly' } })));
+  assert.equal(classifyNotice(a('⚠️ example-watchdog.service FAILED', { source: 'watchdog-failure-notify' })).level, 'error');
   assert.equal(classifyNotice(a('⚠️ image failed: timed out', { kind: 'image_job', status: 'failed' })).level, 'error');
   assert.ok(classifyNotice(a('anything', { notice: true })));
   assert.equal(classifyNotice(a('anything', { notice: { level: 'info' } })).level, 'info');

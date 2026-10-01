@@ -203,8 +203,8 @@ gate, and a permission problem is never fixed by loosening it.
 ## Quick start
 
 ```bash
-git clone https://github.com/LaserLloyd/dispatch-chat.git
-cd dispatch-chat
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
 cp .env.example .env          # optional: every setting in it has a working default
 docker compose up -d
 ```
@@ -213,8 +213,8 @@ If you forked, or are running your own copy, one line repoints every reference
 in the tree at your own fork — image labels, the in-app source link, issue links:
 
 ```bash
-grep -rl 'LaserLloyd/dispatch-chat' --exclude-dir=.git . \
-  | xargs sed -i 's|LaserLloyd/dispatch-chat|myuser/dispatch-chat|g'
+grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
+  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
 ```
 
 There is no secret to generate and no required setting. An empty `.env` starts a
@@ -381,7 +381,7 @@ Translation contributions are very welcome and are the easiest way to help.
 
 ## License
 
-Copyright (c) 2026 Jake Lloyd. <!-- scrub-ok: the copyright holder is named on purpose — MIT is meaningless without an attributable notice, and this line mirrors LICENSE. -->
+Copyright (c) 2026 Laser Lloyd. <!-- scrub-ok: the copyright holder is named on purpose — MIT is meaningless without an attributable notice, and this line mirrors LICENSE. -->
 
 [MIT](LICENSE). You can run, modify, share and sell this freely — keep the
 copyright notice and the licence text with it, and it comes with no warranty.

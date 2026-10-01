@@ -159,9 +159,9 @@ def image_backend_state(status: dict | None = None) -> dict:
 
     This exists because "the rig is short of VRAM" and "the rig's ComfyUI is
     not running" produce the SAME refusal at the generate call, and only the
-    second one is worth skipping the whole round for. On 2026-09-02 the rig's
-    ComfyUI was down from roughly 00:50 to 15:00 JST; DisPatch spent fourteen
-    hourly cycles discovering that one wasted ``generate_image`` call at a
+    second one is worth skipping the whole round for. During one long ComfyUI
+    outage on the rig, DisPatch spent fourteen hourly cycles discovering that
+    one wasted ``generate_image`` call at a
     time, and logged an alert that *guessed* between the two causes rather
     than reading the answer that was sitting in the CLI's own status.
 

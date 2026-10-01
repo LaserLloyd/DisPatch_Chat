@@ -1952,8 +1952,8 @@ async def _canonical_thread_id(thread_id: str) -> str:
 
     The write paths (/api/inject, POST …/messages) have always resolved this
     way because the OpenClaw gateway lowercases whole session keys, so an agent
-    reads its own thread id back as `daily-doxy-…` when the row is
-    `daily-Doxy-…`. The read/verify paths did NOT, which made the asymmetry
+    reads its own thread id back as `daily-nova-…` when the row is
+    `daily-Nova-…`. The read/verify paths did NOT, which made the asymmetry
     worse than either behaviour on its own: an agent could post successfully
     and then 404 on the very next "verify, then stop" step, and a model that
     cannot tell a phantom failure from a real one starts retrying a send that
@@ -2181,7 +2181,7 @@ async def _broadcast_thread_update(thread_id: str) -> None:
 
 # The machine-event collapse convention (2026-09-25). A sender that posts a
 # status line rather than conversation — run reports, watchdogs, box-smoke,
-# backup health, doxy-pics misses — marks it `metadata.notice = {"level": …}`
+# backup health, missed scheduled pictures — marks it `metadata.notice = {"level": …}`
 # and nothing else. The server then implies `sub`, so every server-side rule
 # that already knows collapsed rows (thread preview, LLM history, autopilot,
 # streaming) treats the event correctly without a second flag to remember.
@@ -2243,10 +2243,10 @@ _AUTOPILOT_NIGHT_HOURS = range(7)          # box-local; "never at night"
 # failure notices, each spending a one-shot pool image to celebrate bad news.
 #
 # The first fix was to widen the vocabulary and scan the whole message. Measured
-# against 14 days of real replies, that silenced 89 of Bits' 338 autopilot fires
-# (26%) while only ~12 of them were actual alerts. Nearly every ops report she
+# against 14 days of real replies, that silenced 89 of one bot's 338 autopilot fires
+# (26%) while only ~12 of them were actual alerts. Nearly every ops report a bot
 # writes mentions something that failed on the way to succeeding -- "Box smoke:
-# OK — 0 failing", "Done, sweetheart… ✅" with a ⚠️ inside a status table -- so a
+# OK — 0 failing", "Done… ✅" with a ⚠️ inside a status table -- so a
 # whole-body scan reads a success report as an emergency.
 #
 # What actually separates the two is POSITION, not vocabulary: a real alert
@@ -2459,7 +2459,7 @@ async def _prepare_persist(
         # The word guard above catches the ones that read like alerts, but it
         # cannot catch a neutrally-worded machine post, so gate on the ROUTE
         # too: autopilot exists to fill silence in a bot's own conversational
-        # replies. (doxy-pics deliveries arrive the same way and are excluded
+        # replies. (image-CLI deliveries arrive the same way and are excluded
         # by the same rule -- they already carry a picture.)
         if (not fired and not replaying and bot_id
                 and not (metadata or {}).get("sub")
@@ -3188,7 +3188,7 @@ def _compose_pic_prompt(bot, scene: str, caption: str) -> tuple[str, str]:
     """The rig-bound prompt and the chat-visible caption for one `[[pic:…]]`.
 
     A bot with `image_identity_source` writes the SCENE ONLY — the caller
-    passes exactly what was inside the marker, e.g. "kneeling by the window,
+    passes exactly what was inside the marker, e.g. "reading by the window,
     morning light" — and this prepends the bot's canonical identity block (see
     `image_jobs.identity_prompt`) so the render still looks like the character
     without the bot ever having to restate its own appearance.

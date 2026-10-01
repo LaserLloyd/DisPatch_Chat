@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-Chromium check of the 2026-09 feature wave, end to end.
 
-CLAUDE.md's rule is that tests passing is not verification on this box — you
+The contribution guide's rule is that tests passing is not verification — you
 open the app and look. This is the "look" for the wave that added regenerate
 with alternates, edit-and-rerun, quote/reply, the per-thread model and thinking
 override, the mood-driven header face, scene backdrops, drafts with a persisted

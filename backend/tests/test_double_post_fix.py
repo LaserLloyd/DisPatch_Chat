@@ -459,7 +459,7 @@ async def test_concurrent_turn_reply_and_backfill_post_once(wired, monkeypatch,
                                                             source_first):
     """The turn's own reply (no source_id) and the gateway backfill (with one)
     arriving at the same moment both passed their dedup checks before either
-    had persisted, and an 11,116-char Bits reply posted twice. Deliveries to
+    had persisted, and an 11,116-char reply posted twice. Deliveries to
     one thread are serialised now, so the second sees the first's row."""
     import asyncio
 

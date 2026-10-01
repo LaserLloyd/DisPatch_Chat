@@ -17,7 +17,7 @@
  *  placeholder that the release tooling rewrites repo-wide; a fork must set it
  *  by hand. -->
  */
-export const SOURCE_URL = 'https://github.com/LaserLloyd/dispatch-chat';
+export const SOURCE_URL = 'https://github.com/LaserLloyd/DisPatch_Chat';
 
 /** Kept in step with backend/app/__init__.py `__version__`.
  *

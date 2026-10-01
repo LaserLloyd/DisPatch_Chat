@@ -22,8 +22,8 @@ This is the **primary supported deployment path**. Multi-arch images are publish
 You need Docker Engine 24+ with Compose V2 (`docker compose`, two words).
 
 ```bash
-git clone https://github.com/LaserLloyd/dispatch-chat.git
-cd dispatch-chat
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
 cp .env.example .env
 $EDITOR .env          # optional; the defaults work
 docker compose up -d
@@ -33,8 +33,8 @@ If you are running your own copy, one line repoints every reference in the tree
 at your own fork:
 
 ```bash
-grep -rl 'LaserLloyd/dispatch-chat' --exclude-dir=.git . \
-  | xargs sed -i 's|LaserLloyd/dispatch-chat|myuser/dispatch-chat|g'
+grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
+  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
 ```
 
 With `IMAGE` unset (the default), this **builds the image from the checkout**
@@ -274,7 +274,7 @@ session transcripts; you install it yourself, and the two names below have to
 agree — the `ENV` must point at the binary the `RUN` step actually produced.
 
 ```dockerfile
-FROM ghcr.io/LaserLloyd/dispatch-chat:latest
+FROM ghcr.io/laserlloyd/dispatch_chat:latest
 USER root
 # Install your agent runtime here. This example is Node-based; substitute the
 # real package, and check where it lands (`npm bin -g`) before trusting the path.
@@ -515,7 +515,7 @@ docker run --rm -v dispatch-data:/data -v "$PWD":/out alpine \
 docker compose pull && docker compose up -d
 ```
 
-**Pin a version in production.** `IMAGE=ghcr.io/LaserLloyd/dispatch-chat:1.2.3` in `.env`.
+**Pin a version in production.** `IMAGE=ghcr.io/laserlloyd/dispatch_chat:1.2.3` in `.env`.
 `latest` eventually restarts you onto a release whose notes you did not read.
 
 **The frontend is aggressively cached by a service worker.** After an upgrade, a
@@ -537,7 +537,7 @@ Multi-arch, if you are publishing:
 ```bash
 docker buildx create --use --name dispatch-builder
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/LaserLloyd/dispatch-chat:dev --push .
+  -t ghcr.io/laserlloyd/dispatch_chat:dev --push .
 ```
 
 Notes on the Dockerfile, since a few things in it look changeable but are not:

@@ -243,7 +243,7 @@ async def test_two_markers_fire_once_and_leave_no_refusal_row(rx_env, monkeypatc
 
     The morning brief carried two markers most days; they fired back-to-back,
     DisPatch's own 2 s cooldown refused the second, and a "⚠️ Reaction didn't
-    fire: Slow down" row landed in Bits' daily thread six mornings out of
+    fire: Slow down" row landed in the bot's daily thread six mornings out of
     seven. The second marker is now skipped (logged), not fired and refused.
     """
     await main.db.connect()

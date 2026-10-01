@@ -281,7 +281,12 @@ def test_bad_bot_id_cannot_name_a_path(pool_env):
         avatar_pool.status("../../etc")
 
 
-def test_bank_round_trip_and_compose(pool_env):
+def test_bank_round_trip_and_compose(pool_env, monkeypatch):
+    # A bank with no `base` takes its character from the external helper;
+    # stub it so the test never depends on one being installed on the host.
+    monkeypatch.setattr(avatar_pool, "_prompt_helper",
+                        lambda *f: "masterpiece, best quality, tier1 identity"
+                        if "--tier1" in f else "tier2 detail")
     assert avatar_pool.compose_prompt("main") is None, "an empty bank must not compose"
     avatar_pool.bank_save({"categories": {
                                "neutral": {"label": "Neutral",
@@ -298,12 +303,12 @@ def test_bank_round_trip_and_compose(pool_env):
 
 
 def test_a_bank_with_a_base_is_its_own_character(pool_env, monkeypatch):
-    """The defect this exists for: compose_prompt shelled out to bits-prompt
+    """The defect this exists for: compose_prompt shelled out to the prompt helper
     for EVERY bot, so a second bot's pool minted the first bot's face. A bank
     that names a character composes from that character and never calls out."""
     def _never(*flags):
-        raise AssertionError(f"bits-prompt was called with {flags}")
-    monkeypatch.setattr(avatar_pool, "_bits_prompt", _never)
+        raise AssertionError(f"the prompt helper was called with {flags}")
+    monkeypatch.setattr(avatar_pool, "_prompt_helper", _never)
     avatar_pool.bank_save({"base": "a tall red-haired instructor in a gym",
                            "suffix": "photoreal, 85mm portrait lens",
                            "categories": {"smirk": {"label": "Smirk",
@@ -331,7 +336,7 @@ def test_the_identity_keys_survive_a_bank_round_trip(pool_env):
 def test_a_bank_with_no_base_still_uses_the_prompt_helper(pool_env, monkeypatch):
     """Unchanged behaviour for a bank that names nobody — it holds expression
     bodies only, so the character has to come from somewhere."""
-    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+    monkeypatch.setattr(avatar_pool, "_prompt_helper",
                         lambda *f: "tier1 identity" if "--tier1" in f else "tier2 detail")
     avatar_pool.bank_save({"categories": {"calm": {"label": "Calm",
                                                    "expressions": ["a level gaze"]}},
@@ -344,9 +349,9 @@ def test_identity_source_opts_a_bank_back_in_to_the_helper(pool_env, monkeypatch
     """The escape hatch for a bank whose `base` is only PART of what the helper
     emits: avatar-prompts-main.yaml carries Tier 1 alone, so composing from it
     would silently drop the Tier 2 fragments."""
-    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+    monkeypatch.setattr(avatar_pool, "_prompt_helper",
                         lambda *f: "tier1 identity" if "--tier1" in f else "tier2 detail")
-    avatar_pool.bank_save({"base": "tier1 identity", "identity_source": "bits-prompt",
+    avatar_pool.bank_save({"base": "tier1 identity", "identity_source": "prompt-helper",
                            "categories": {"calm": {"label": "Calm",
                                                    "expressions": ["a level gaze"]}},
                            "background": "clean black background"}, "main")
@@ -358,7 +363,7 @@ def test_identity_source_opts_a_bank_back_in_to_the_helper(pool_env, monkeypatch
 
 def test_an_unknown_identity_source_falls_back_to_the_bank(pool_env, monkeypatch):
     """A typo must not silently hand the bot somebody else's face."""
-    monkeypatch.setattr(avatar_pool, "_bits_prompt",
+    monkeypatch.setattr(avatar_pool, "_prompt_helper",
                         lambda *f: (_ for _ in ()).throw(AssertionError("helper called")))
     avatar_pool.bank_save({"base": "someone specific", "identity_source": "wat",
                            "categories": {"calm": {"label": "Calm",

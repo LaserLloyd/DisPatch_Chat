@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless-Chromium measurement of DisPatch's layout at phone sizes.
 
-CLAUDE.md's rule is that tests passing is not verification on this box — you
+The contribution guide's rule is that tests passing is not verification — you
 open the app and look. This script is the "look" for layout: it drives a real
 DisPatch instance at several phone viewports, measures the *actual* bounding
 boxes of the fixed chrome (composer, mobile tab bar, toasts, modals) against

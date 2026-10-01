@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pull application source out of a running install into this public repo.
 
-The maintainer develops against a live install with real family data in it.
+The maintainer develops against a live install that holds private data.
 This script is the one-way valve between that install and the public tree:
 
     python3 scripts/sync_from_live.py --from ~/my-install          # dry run

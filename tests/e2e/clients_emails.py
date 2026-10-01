@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Headless-Chromium verification of the Emails + Clients tabs, per
-CLAUDE.md's "tests passing is not verification on this box — open the app"
+the contribution guide's "tests passing is not verification — open the app"
 rule. Drives a real DisPatch instance (staging by default, or a live/dev
 instance via --base-url) with Playwright.
 

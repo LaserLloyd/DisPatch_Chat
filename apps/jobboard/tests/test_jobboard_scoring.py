@@ -16,8 +16,8 @@ Per plan §10, every assertion lives here:
   - Location normalization cases.
   - Embedding fallback (deliberately unloadable model, no crash).
   - Blocklist first-vote engagement (a single `no` with reason
-    `wrong_location` on `Tokyo` immediately blocks the next candidate
-    in `Tokyo`, no N-threshold).
+    `wrong_location` on `Berlin` immediately blocks the next candidate
+    in `Berlin`, no N-threshold).
   - URL dedup (identical hash + title within 30d returns the existing
     thread_id with `duplicate: true`; no second thread is created).
 
@@ -44,7 +44,7 @@ _CANDIDATE_FIT = {
     "url": "https://acme.com/careers/staff-swe",
     "title": "Staff Software Engineer",
     "company": "Acme",
-    "location": "Tokyo, JP",
+    "location": "Berlin, DE",
     "remote_type": "onsite",
     "seniority": "staff",
     "salary_min": 200_000, "salary_max": 320_000, "salary_currency": "USD",
@@ -76,36 +76,36 @@ def test_score_clamps_to_zero_to_hundred():
 
 
 def test_blocklist_first_vote_engages():
-    """Plan §6: a SINGLE `no` with reason `wrong_location` on `Tokyo`
-    must IMMEDIATELY block the next candidate in `Tokyo` — no N-threshold.
+    """Plan §6: a SINGLE `no` with reason `wrong_location` on `Berlin`
+    must IMMEDIATELY block the next candidate in `Berlin` — no N-threshold.
 
     Reproduce the write path here (call recompute_profile, then build a
-    candidate in Tokyo and verify the floor).
+    candidate in Berlin and verify the floor).
     """
     feedback = [{
         "id": "f1",
-        "thread_id": "t-tokyo",
+        "thread_id": "t-berlin",
         "signal": "vote_no",
         "reason_tag": "wrong_location",
         "comment": None,
         "actor": "user",
         "created_at": "2026-09-14T10:00:00+00:00",
         "payload": '{"tags": ["python"], "remote_type": "onsite", '
-                   '"company": "Anthropic", "location": "Tokyo, JP", '
+                   '"company": "Example Corp", "location": "Berlin, DE", '
                    '"salary_mid": 250000.0, "seniority": "staff"}',
     }]
     profile = jobs_score.recompute_profile(feedback)
     s = jobs_score.score_candidate(
-        {**_CANDIDATE_FIT, "location": "Tokyo, JP"}, profile)
+        {**_CANDIDATE_FIT, "location": "Berlin, DE"}, profile)
     assert s["blocked"] is True
     assert s["score"] == 0.0
     assert "blocklist" in (s["block_reason"] or "")
 
 
 def test_blocklist_skips_partial_matches():
-    """`tokyo` is a blocklist entry; `tokyokot` is NOT a location that
+    """`berlin` is a blocklist entry; `berlinale` is NOT a location that
     matches it. The v1 string-exact bug was that this returned True.
-    `Tokyo Bay`, on the other hand, DOES match — it's a separate word
+    `Berlin Mitte`, on the other hand, DOES match — it's a separate word
     starting with the blocklist token.
     """
     feedback = [{
@@ -113,22 +113,22 @@ def test_blocklist_skips_partial_matches():
         "reason_tag": "wrong_location", "comment": None, "actor": "user",
         "created_at": "2026-09-14T10:00:00+00:00",
         "payload": '{"tags": [], "remote_type": "unknown", '
-                   '"company": "", "location": "Tokyo, JP", '
+                   '"company": "", "location": "Berlin, DE", '
                    '"salary_mid": null, "seniority": "unknown"}',
     }]
     profile = jobs_score.recompute_profile(feedback)
-    # Word-boundary regex: `tokyokot` shares the leading letters but no
+    # Word-boundary regex: `berlinale` shares the leading letters but no
     # word boundary — it is one token. Should NOT match.
     s1 = jobs_score.score_candidate(
-        {**_CANDIDATE_FIT, "location": "tokyokot"}, profile)
+        {**_CANDIDATE_FIT, "location": "berlinale"}, profile)
     assert s1["blocked"] is False, (
-        "tokyokot must NOT match the Tokyo blocklist — word-boundary regex"
+        "berlinale must NOT match the Berlin blocklist — word-boundary regex"
     )
-    # BUT `Tokyo Bay` is two words. The leading word IS `tokyo` bounded
+    # BUT `Berlin Mitte` is two words. The leading word IS `berlin` bounded
     # on both sides; the regex matches. This is correct: a vote against
-    # Tokyo should also block candidates in the Tokyo metro area.
+    # Berlin should also block candidates in the Berlin metro area.
     s2 = jobs_score.score_candidate(
-        {**_CANDIDATE_FIT, "location": "Tokyo Bay, JP"}, profile)
+        {**_CANDIDATE_FIT, "location": "Berlin Mitte, DE"}, profile)
     # (Normalisation strips after the comma; the bay part remains.)
     assert s2["blocked"] is True
 
@@ -185,11 +185,11 @@ def test_no_vote_without_reason_falls_back_conservative():
         "reason_tag": None, "comment": "just nope", "actor": "user",
         "created_at": "2026-09-14T10:00:00+00:00",
         "payload": '{"tags": ["python", "rust"], "remote_type": "onsite", '
-                   '"company": "Anthropic", "location": "Tokyo, JP", '
+                   '"company": "Example Corp", "location": "Berlin, DE", '
                    '"salary_mid": 250000.0, "seniority": "staff"}',
     }]
     profile = jobs_score.recompute_profile(feedback)
-    assert "tokyo" not in (jobs_score._parse_json(
+    assert "berlin" not in (jobs_score._parse_json(
         profile["location_blocklist"], []) or [])
     assert "anthropic" not in (jobs_score._parse_json(
         profile["company_blocklist"], []) or [])
@@ -209,7 +209,7 @@ def test_recompute_is_byte_deterministic():
          "reason_tag": None, "comment": None, "actor": "user",
          "created_at": "2026-09-14T09:00:00+00:00",
          "payload": '{"tags": ["python"], "remote_type": "remote", '
-                    '"company": "Anthropic", "location": "remote", '
+                    '"company": "Example Corp", "location": "remote", '
                     '"salary_mid": 220000, "seniority": "staff"}'},
         {"id": "b", "thread_id": "t2", "signal": "vote_no",
          "reason_tag": "company", "comment": None, "actor": "user",
@@ -221,7 +221,7 @@ def test_recompute_is_byte_deterministic():
          "reason_tag": "compensation", "comment": None, "actor": "user",
          "created_at": "2026-09-14T09:20:00+00:00",
          "payload": '{"tags": ["python"], "remote_type": "remote", '
-                    '"company": "Anthropic", "location": "remote", '
+                    '"company": "Example Corp", "location": "remote", '
                     '"salary_mid": 60000, "seniority": "staff"}'},
     ]
     p1 = jobs_score.recompute_profile(feedback)
@@ -246,7 +246,7 @@ def test_undo_reverts_prior_signal():
          "reason_tag": None, "comment": None, "actor": "user",
          "created_at": "2026-09-14T09:00:00+00:00",
          "payload": '{"tags": ["python"], "remote_type": "remote", '
-                    '"company": "Anthropic", "location": "remote", '
+                    '"company": "Example Corp", "location": "remote", '
                     '"salary_mid": 220000, "seniority": "staff"}'},
         {"id": "b", "thread_id": "t1", "signal": "undo",
          "reason_tag": None, "comment": None, "actor": "user",
@@ -267,19 +267,19 @@ def test_latest_per_thread_overrides_earlier():
          "reason_tag": None, "comment": None, "actor": "user",
          "created_at": "2026-09-14T09:00:00+00:00",
          "payload": '{"tags": ["python"], "remote_type": "remote", '
-                    '"company": "Anthropic", "location": "remote", '
+                    '"company": "Example Corp", "location": "remote", '
                     '"salary_mid": 220000, "seniority": "staff"}'},
         {"id": "b", "thread_id": "t1", "signal": "vote_no",
          "reason_tag": "wrong_location", "comment": None, "actor": "user",
          "created_at": "2026-09-14T09:10:00+00:00",
          "payload": '{"tags": ["python"], "remote_type": "remote", '
-                    '"company": "Anthropic", "location": "Tokyo, JP", '
+                    '"company": "Example Corp", "location": "Berlin, DE", '
                     '"salary_mid": 220000, "seniority": "staff"}'},
     ]
     profile = jobs_score.recompute_profile(feedback)
-    # Final signal is `no` -> location_blocklist has tokyo.
+    # Final signal is `no` -> location_blocklist has berlin.
     blocklist = jobs_score._parse_json(profile["location_blocklist"], []) or []
-    assert "tokyo" in blocklist
+    assert "berlin" in blocklist
     # Yes count is 0 (the earlier vote_yes was overridden).
     assert int(profile["yes_count"]) == 0
     assert int(profile["no_count"]) == 1

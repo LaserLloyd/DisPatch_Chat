@@ -162,7 +162,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   excludes the just-delivered message, and the health counters count
   deliveries that actually landed rather than offers. Side effect fixed with
   it: the backfill used to deliver the revealing reply first as a `followup`,
-  which is what was suppressing Bits' reaction markers.
+  which is what was suppressing one bot's reaction markers.
 - **`backup_age_s` in `/api/health` could go negative** — the backup stamp was
   naive local time compared against UTC; it is now `datetime.now(UTC)`.
 - **Thread list: a picture-only newest message previews as its caption** (or
@@ -280,5 +280,5 @@ theme rather than by commit.
 - The scrubber gained more pattern classes and now scans commit messages and
   pushes, not just the working tree.
 
-[Unreleased]: https://github.com/LaserLloyd/dispatch-chat/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/LaserLloyd/dispatch-chat/releases/tag/v1.0.0
+[Unreleased]: https://github.com/LaserLloyd/DisPatch_Chat/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/LaserLloyd/DisPatch_Chat/releases/tag/v1.0.0

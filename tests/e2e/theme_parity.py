@@ -61,7 +61,7 @@ PALETTES = ["glacier", "midnight-gold", "forest", "paper", "daylight", "purple"]
 OPT_IN = ["electric-yellow", "laserlloyd", "laserlloyd-light", "night-red"]
 SURFACES = ["chat", "chat-end", "theme", "device", "dashboard", "lock", "minimal", "dialog", "cmdk"]
 VIEWPORTS = [(1280, 800), (390, 844)]
-# 2026-09-23 12:00 JST. Anything after the seeded data works; it only has to be
+# 2026-09-23 03:00 UTC. Anything after the seeded data works; it only has to be
 # the SAME in both runs.
 FIXED_CLOCK_MS = 1790132400000
 DEFAULT_PIN = "246810"
@@ -218,7 +218,7 @@ def run(args) -> int:
                         reduced_motion="reduce",
                         color_scheme="dark",
                         locale="en-US",
-                        timezone_id="Asia/Tokyo",
+                        timezone_id="UTC",
                     )
                     ctx.clock.set_fixed_time(FIXED_CLOCK_MS)
                     ctx.add_init_script(init_script(palette, extra))

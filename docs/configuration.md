@@ -603,6 +603,7 @@ legacy), like everything else in this file.
 |---|---|---|
 | `DISPATCH_IMAGE_CLI` | the image CLI named by `DISPATCH_IMAGE_CLI` | Path to the image-generation CLI used to top up the pools. |
 | `DISPATCH_IMAGE_CLI_TIMEOUT` | `300` | Seconds one generation may take (a cold model load is slow). |
+| `DISPATCH_PROMPT_HELPER` | unset | Executable that prints a character's Tier 1 / Tier 2 / negative prompt strings, for avatar banks set to `identity_source: prompt-helper`. Unset means no helper; such a bank then fails loudly instead of composing. |
 | `DISPATCH_GPU_CLI` | unset (guard off) | A GPU-host companion CLI that answers `status --json`, `models settings --json -- <id>` and `models unload --json -- <id>`. Only needed when the image host's GPUs are shared with an LLM server. Never guessed from PATH — set it explicitly. |
 | `DISPATCH_MINT_MIN_FREE_GB` | `10` | Free VRAM (GiB) the image host must have before a refill is attempted; below it the refill backs off instead of tight-looping refused calls. |
 | `DISPATCH_POOL_FREE_VRAM` | `0` | `1` lets the guard unload non-pinned, idle LLM models on the image host to make room. Leave at `0` when those GPUs belong to someone else — the headroom check and back-off still run, nothing is evicted. |
@@ -623,7 +624,7 @@ needed to change how a bot looks.
 version: 5
 base: "the character itself — prefixed to every prompt"
 suffix: ""                  # optional detail fragment, carried with `base`
-identity_source: bank       # bank (default) | bits-prompt
+identity_source: bank       # bank (default) | prompt-helper
 negative: ""                # optional, for the full render
 workflow: ""                # image-CLI knobs; the pool config's workflow wins
 ratio: "1:1"
@@ -645,7 +646,7 @@ bank change restyles every mood at once.
 `identity_source` says where the character comes from. The default, `bank`,
 reads it from this file, which is the only way each bot gets its own face. A
 bank with an empty `base` names nobody, so it falls back to the external prompt
-helper the pool shipped with; `identity_source: bits-prompt` makes that
+helper named by `DISPATCH_PROMPT_HELPER`; `identity_source: prompt-helper` makes that
 fallback explicit and permanent for banks whose `base` holds only part of what
 the helper emits. A bank's own `negative` always wins, and the helper's — which
 names specific hair, eyes and species — is only ever sent alongside the
