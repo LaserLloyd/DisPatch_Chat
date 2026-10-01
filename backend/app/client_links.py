@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -143,7 +143,7 @@ def set_link(client_id: str, *, live_url: Any = None, repo: Any = None,
         if not any(row.values()):
             data.pop(str(client_id), None)
         else:
-            row["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            row["updated_at"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             data[str(client_id)] = row
         _write(data)
         _cache = data

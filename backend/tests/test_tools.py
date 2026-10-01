@@ -648,12 +648,12 @@ def test_refresh_env_is_scrubbed(tools_env, monkeypatch):
              "WAYLAND_DISPLAY", "DISPLAY")
     for k in capab:
         monkeypatch.setenv(k, "live")
-    names = ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN", "HARMLESS_VALUE") + capab
+    names = ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN", "HARMLESS_VALUE", *capab)
     _refresh_manifest(site, "import os; print(sorted(k for k in os.environ if k in "
                             f"{names!r}))")
     out = make_client().post("/api/tools/bench/refresh").json()["stdout_tail"]
     assert "HARMLESS_VALUE" in out
-    for k in ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN") + capab:
+    for k in ("FOO_TOKEN", "BAR_API_KEY", "BAZ_SECRET", "MCP_PIN", *capab):
         assert f"'{k}'" not in out, k
     env = tools.scrubbed_env()
     assert not set(capab) & set(env)

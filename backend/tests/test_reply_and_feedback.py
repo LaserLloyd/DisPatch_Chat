@@ -36,7 +36,6 @@ from fastapi.testclient import TestClient
 from app import auth, config, main
 from app.database import Database
 
-
 # --------------------------------------------------------------------------- #
 # Fixture — mirrors test_socket_turn_round.py's app_client, except the fake
 # turn recorder accepts the optional 4th TurnOptions argument. The original

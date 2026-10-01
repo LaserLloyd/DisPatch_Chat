@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import stat
 import subprocess
 import tempfile
@@ -6780,7 +6781,7 @@ async def _pending_feedback_lines(thread_id: str) -> list[str]:
 
 
 async def _compose_agent_text(thread_id: str, text: str,
-                              opts: "TurnOptions | None") -> str:
+                              opts: TurnOptions | None) -> str:
     """What the AGENT reads, which is not always what the user typed.
 
     A single chokepoint on purpose. Quoting prepends the quoted passage, and
@@ -6813,7 +6814,7 @@ async def _compose_agent_text(thread_id: str, text: str,
 
 
 async def _with_thread_model_prefs(thread_id: str,
-                                   opts: "TurnOptions | None") -> "TurnOptions":
+                                   opts: TurnOptions | None) -> TurnOptions:
     """Fold a thread's standing model/thinking prefs into its TurnOptions.
 
     The per-thread override (PATCH /api/threads/{id} prefs) is a STANDING
@@ -6839,7 +6840,7 @@ async def _with_thread_model_prefs(thread_id: str,
 
 
 async def run_agent_turn(thread_id: str, bot_id: str, text: str,
-                         opts: "TurnOptions | None" = None) -> None:
+                         opts: TurnOptions | None = None) -> None:
     """Send `text` to the bot for `thread_id`, persist + broadcast the reply.
 
     Serialised per-thread (lock) and globally rate-limited (semaphore).
