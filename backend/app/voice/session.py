@@ -914,7 +914,10 @@ class VoiceSession:
 
     async def _undo(self) -> None:
         t = self._current
-        if (t is None or not t.msg_id or t.abandoned
+        # Once the reply has started (a sentence queued) or the turn is
+        # answered, Undo would delete the question and orphan the stored
+        # answer below it (review M1): too late, like the 8 s window.
+        if (t is None or not t.msg_id or t.abandoned or t.spoke or t.closed
                 or self.clock() - t.at > UNDO_WINDOW_S):
             await self.error("undo_expired", "Too late to take that back.")
             return

@@ -106,12 +106,22 @@ def start_stub_llm(delay: float) -> tuple[int, list]:
 # --------------------------------------------------------------------------- #
 
 def make_speech(text: str, out: Path) -> np.ndarray:
-    """The driver's voice: the configured local TTS engine, in a different
-    built-in voice than the bot uses, resampled to 16 kHz."""
+    """The driver's voice: the configured local TTS engine (dispatch-voice and
+    DISPATCH_VOICE_EXTENSIONS mounted the way the server mounts them), in a
+    different built-in voice than the bot uses when a built-in voice plugin is
+    installed, else the default (stock) voice; resampled to 16 kHz."""
+    from fastapi import FastAPI
+
+    from app.voice import registry, routes
     from app.voice.config import load_settings
     from app.voice.tts import build_engine
-    eng = build_engine(load_settings())
-    pcm, sr = eng.synth(text, "am_michael")
+    if not registry.engine_names():
+        routes.mount_http(FastAPI(), lambda r: None)
+    settings = load_settings()
+    eng = build_engine(settings)
+    voice = "builtin:am_michael" if any(v["id"] == "builtin:am_michael"
+                                        for v in registry.builtin_voices(settings)) else None
+    pcm, sr = eng.synth(text, voice)
     a = pcm.astype(np.float32) / 32768.0
     n = int(len(a) * 16000 / sr)
     y = np.interp(np.linspace(0, len(a) - 1, n), np.arange(len(a)), a).astype(np.float32)
@@ -146,6 +156,9 @@ def start_server(port: int, data: Path, llm_port: int) -> subprocess.Popen:
     }]}, ensure_ascii=False))          # JSON is YAML; ascii escapes of an emoji
                                         # would parse as lone surrogates
     os.chmod(data / "config.yaml", 0o600)
+    # The Voices API (--clone) belongs to the opt-in Voice cloning tool.
+    (data / "tools.yaml").write_text(
+        "tools:\n- {id: voice-cloning, kind: builtin, enabled: true}\n")
     env = dict(os.environ, DISPATCH_DATA_DIR=str(data), DISPATCH_VOICE="1",
                DISPATCH_MIRROR="0", DISPATCH_GATEWAY_WS="0",
                OPENCLAW_BIN="/nonexistent/openclaw")
@@ -354,6 +367,9 @@ def main() -> int:
 
     work = Path(tempfile.mkdtemp(prefix="dispatch-voice-e2e-"))
     data = args.data or (work / "data")
+    # The driver-voice engine below runs in THIS process: keep its profile
+    # store (the stock voice) out of the real data dir.
+    os.environ["DISPATCH_DATA_DIR"] = str(work / "driver-data")
     llm_port, llm_seen = start_stub_llm(args.llm_delay)
     base = f"http://127.0.0.1:{args.port}"
     if args.wav:

@@ -298,6 +298,21 @@ async def test_undo_outside_the_window_is_refused():
     ws.hang_up(); await task
 
 
+async def test_undo_after_the_answer_started_is_refused():
+    """Review M1: an API/advisor reply lands in 1–3 s. Undo after that would
+    delete the question and leave the answer orphaned in the thread."""
+    s, ws, _, calls = make([[utterance()]])
+    task = await start(s, ws)
+    ws.push_audio(); await settle()
+    s.on_app_frame(echo("u1")); s.on_app_frame(started())
+    s.on_app_frame(reply("a1", "Here is the answer."))
+    await settle()
+    ws.push_json({"type": "undo"}); await settle()
+    assert ws.json_of("error")[-1]["code"] == "undo_expired"
+    assert not [c for c in calls if c[0] == "retract"]
+    ws.hang_up(); await task
+
+
 async def test_undo_with_nothing_said_is_refused():
     s, ws, _, _ = make([])
     task = await start(s, ws)

@@ -3399,7 +3399,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    name + one-line explanation on the start side, the control on the end side,
    the Pin pill just before the control. The markup is index.html #dev-group-*;
    rows built in other modules are normalised by main.js tidyRowText(). */
-#spane-device > .modal-hint { padding-inline: 20px; }
+:is(#spane-device, #spane-voice) > .modal-hint { padding-inline: 20px; }
 .dev-group { margin: 16px 18px 0; }
 .dev-group:last-child { margin-bottom: 18px; }
 .dev-group[hidden] { display: none; }
@@ -3456,7 +3456,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    accent/on-accent pair. #spane-device in the selector: the night contrast
    profile redraws every checkbox as a 14px box (bottom of this file), and
    the switch has to outrank that. */
-#spane-device .dev-row > input[type="checkbox"] {
+:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] {
   -webkit-appearance: none; appearance: none;
   width: 44px; height: 26px; margin: 0; flex: none; cursor: pointer;
   border-radius: 999px; box-shadow: none;
@@ -3467,26 +3467,26 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   background-position: 1px center;
   transition: background-color .18s ease, border-color .18s ease, background-position .2s ease;
 }
-#spane-device .dev-row > input[type="checkbox"]:checked {
+:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:checked {
   border-color: var(--accent-text);   /* same reason as .pin-toggle.pinned */
   background-color: var(--accent);
   background-image: radial-gradient(circle closest-side, var(--on-accent) 0 82%, transparent 90%);
   background-position: calc(100% - 1px) center;
   box-shadow: none;
 }
-[dir="rtl"] #spane-device .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
-[dir="rtl"] #spane-device .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
-#spane-device .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[dir="rtl"] :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
+[dir="rtl"] :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
+:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Disabled (the NIM ratchet on a locked device, or Minimal avatars while NIM
    drives it): still reads ON/OFF, just visibly not operable. */
-#spane-device .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
-#spane-device .dev-row:has(> input:disabled) { cursor: default; }
+:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
+:is(#spane-device, #spane-voice) .dev-row:has(> input:disabled) { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
-  #spane-device .dev-row > input[type="checkbox"] { transition: none; }
+  :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] { transition: none; }
 }
 @media (max-width: 768px) {
   .dev-group { margin-inline: 12px; }
-  #spane-device > .modal-hint { padding-inline: 14px; }
+  :is(#spane-device, #spane-voice) > .modal-hint { padding-inline: 14px; }
   .dev-group-body > .dev-row { padding: 12px; gap: 10px; }
   /* Language: the select would squeeze the name to a sliver at 390px. */
   .dev-group-body > .bm-lang { flex-wrap: wrap; }
@@ -3832,6 +3832,10 @@ body.tools-sheet-open::after {
 .clients-tab-btn.active { background: var(--accent-wash); color: var(--accent-text); font-weight: 600; }
 
 .clients-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px; }
+/* Voice tools (js/voice-tools.js): Settings-style groups in a scrolling
+   column the width of a settings pane, centred on a wide screen. */
+.voice-tool-body { display: block; overflow-y: auto; }
+.voice-tool-root { max-width: 760px; margin: 0 auto; padding-bottom: 24px; }
 .clients-root { display: flex; flex-direction: column; gap: 14px; max-width: 720px; margin: 0 auto; }
 
 .clients-view .ov-card {

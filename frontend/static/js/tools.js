@@ -5,9 +5,11 @@
 // serves a static tool's pages at /tools/<id>/ and runs its optional refresh.
 //
 // Four kinds, one rail:
-//   builtin — the four panes main.js already owns (Harness, StudioForge,
-//             Emails, Clients). This module only draws their tile and calls
-//             the opener main.js hands in; their views are untouched.
+//   builtin — the panes main.js already owns (Harness, StudioForge,
+//             Emails, Clients) and the opt-in voice tools (Voice cloning,
+//             Built-in voices, Voice lab — js/voice-tools.js; off unless
+//             tools.yaml switches them on). This module only draws their tile
+//             and calls the opener main.js hands in; their views are untouched.
 //   app     — a trusted package under apps/<id>/ (docs/design/2026-09-25-
 //             apps.md): its page is framed from /apps/<id>/ with NO sandbox —
 //             it is repo code on our own origin and calls its own API with the
@@ -46,11 +48,22 @@ import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
 // the same currentColor line art as the gear row, never a platform emoji.
+// `paths` draws a line icon that is not in RAIL_ICONS (the voice tools carry
+// their own, so util.js — and its dozen importers' ?v — stay put). `optIn`:
+// off unless tools.yaml has a row with `enabled: true`.
+const MIC_PATHS = [
+  'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z',
+  'M19 11a7 7 0 0 1-14 0',
+  'M12 18v3',
+];
 const BUILTINS = [
   { id: 'deepseek-harness', feature: 'harness', icon: 'terminal', name: 'harness.name', aria: 'harness.sidebar_aria' },
   { id: 'studioforge-panel', feature: 'studioforge', icon: 'tools', name: 'studioforge.name', aria: 'studioforge.sidebar_aria' },
   { id: 'mail-panel', feature: 'mail', icon: 'mail', name: 'mail.name', aria: 'mail.sidebar_aria' },
   { id: 'clients-panel', feature: 'practice', icon: 'users', name: 'clients.name', aria: 'clients.sidebar_aria' },
+  { id: 'voice-cloning', feature: 'voice_cloning', icon: 'voice-cloning', paths: MIC_PATHS, name: 'vtools.cloning_name', aria: 'vtools.cloning_aria', optIn: true },
+  { id: 'voice-builtin', feature: 'voice_builtin', icon: 'voice-builtin', paths: ['M4 9.5h3.2L12 5.5v13l-4.8-4H4Z', 'M15.5 9a4.2 4.2 0 0 1 0 6', 'M18.2 6.5a8 8 0 0 1 0 11'], name: 'vtools.builtin_name', aria: 'vtools.builtin_aria', optIn: true },
+  { id: 'voice-lab', feature: 'voice_lab', icon: 'voice-lab', paths: ['M4 11v2', 'M8 7.5v9', 'M12 4.5v15', 'M16 8.5v7', 'M20 10.5v3'], name: 'vtools.lab_name', aria: 'vtools.lab_aria', optIn: true },
 ];
 const BUILTIN_BY_ID = new Map(BUILTINS.map((b) => [b.id, b]));
 const BUILTIN_BY_FEATURE = new Map(BUILTINS.map((b) => [b.feature, b]));
@@ -91,6 +104,8 @@ export function toolIconName(tool) {
 
 /** The glyph node for a tool: a line icon, or the typed emoji as text. */
 export function toolGlyph(tool) {
+  const b = tool && tool.kind === 'builtin' ? builtinOf(tool) : null;
+  if (b && b.paths) return railIcon(b.paths);
   const name = toolIconName(tool);
   if (name && RAIL_ICONS[name]) return railIcon(RAIL_ICONS[name]);
   return el('span', { class: 'tool-glyph-text', text: (tool && String(tool.icon || '').trim()) || DEFAULT_GLYPH });
@@ -235,7 +250,8 @@ function isApp(tool) { return !!tool && tool.kind === 'app'; }
  *  feature probes found, so an older backend loses nothing. */
 function allTools() {
   if (tools) return tools;
-  return BUILTINS.map((b) => ({ id: b.id, kind: 'builtin', enabled: true, builtin_feature: b.feature }));
+  // An opt-in builtin is off until the server's list says otherwise.
+  return BUILTINS.map((b) => ({ id: b.id, kind: 'builtin', enabled: !b.optIn, builtin_feature: b.feature }));
 }
 
 export function findTool(id) {

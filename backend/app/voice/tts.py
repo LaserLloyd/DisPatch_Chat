@@ -20,31 +20,27 @@ the session runs them in a worker thread:
 * ``synth(text, profile_id=None) -> (int16 ndarray, rate)``.
 
 ``profile_id`` is opaque here: it names a voice the engine knows (a cloned
-voice from an extension, or a built-in voice as ``builtin:<kokoro id>``).
-``None`` = the default. An engine that does not know a ``builtin:`` id raises
-``LookupError`` before any audio, which makes :class:`FallbackTTS` hand the
-sentence to Kokoro without putting the primary engine on a cooldown.
+voice profile, or a built-in voice as ``builtin:<id>`` from a plugin's
+built-in voice provider). ``None`` = the default. An engine with a fallback
+behind it that does not know an id raises ``LookupError`` before any audio,
+which makes :class:`FallbackTTS` hand the sentence to the fallback without
+putting the primary engine on a cooldown.
 
-Built in:
+Engines:
 
-* :class:`KokoroTTS` — Kokoro 82M ONNX, fp32 (int8 when that is all there
-  is; fp32 is ~6x faster on x86 CPUs) (Apache-2.0 weights, MIT
-  ``kokoro-onnx`` runtime; its phonemizer/espeak-ng chain is GPL-3.0),
-  ungated, CPU, built-in voices only. The FALLBACK, and the default when the
-  cloned-voice engine is not installed. It does not stream inside a sentence,
-  so first audio = the time to synthesise the first (deliberately short)
-  sentence; see docs/voice-drive-mode.md for numbers.
-* ``chatterbox`` (app/voice/dv.py) — the ``dispatch-voice`` package:
-  Chatterbox-Turbo ONNX (MIT, ungated), cloned voice profiles. The DEFAULT
-  when installed, with Kokoro behind it.
-* :class:`HQTTS` — optional "HQ" engine behind an OpenAI-compatible
+* ``chatterbox`` (app/voice/dv.py): the ``dispatch-voice`` package,
+  Chatterbox-Turbo ONNX (MIT, ungated), cloned voice profiles plus a stock
+  synthetic voice. The DEFAULT when installed.
+* Plugin engines registered through ``app.voice.registry.register_engine``,
+  picked by name with ``DISPATCH_VOICE_TTS``; a ``role="fallback"`` engine
+  sits behind the primary one. The optional, separately installed
+  ``dispatch-voice-kokoro`` plugin (GPL-3.0, because Kokoro's phonemizer is
+  espeak-ng) adds the fast ``kokoro`` engine and its built-in voices this
+  way. DisPatch never imports it by name.
+* :class:`HQTTS`: optional "HQ" engine behind an OpenAI-compatible
   ``/v1/audio/speech``; always wrapped in :class:`FallbackTTS`.
-* :class:`MiniMaxTTS` — MiniMax T2A v2 over HTTPS, opt-in only (network
+* :class:`MiniMaxTTS`: MiniMax T2A v2 over HTTPS, opt-in only (network
   dependency; Token Plan coverage of speech minutes NOT verified).
-
-Other engines (e.g. a voice-cloning engine shipped as an extension) register
-through ``app.voice.registry.register_engine`` and are picked by name with
-``DISPATCH_VOICE_TTS``.
 """
 from __future__ import annotations
 
@@ -252,7 +248,8 @@ class SentenceSplitter:
 # Engines
 # --------------------------------------------------------------------------- #
 
-#: Prefix of a built-in (Kokoro) voice id where a profile id is expected.
+#: Prefix of a built-in voice id (from a plugin's provider) where a profile id
+#: is expected.
 BUILTIN = "builtin:"
 
 
@@ -269,7 +266,7 @@ class _Activity:
     Background renders (acknowledgements, the spoken error lines, start-up
     warm-up) call :meth:`wait_idle` before each line, so they never queue
     ahead of a reply on an engine lock (review M2: six ack renders held the
-    Kokoro lock for ~20 s and starved the first reply)."""
+    engine lock for ~20 s and starved the first reply)."""
 
     def __init__(self) -> None:
         self._n = 0
@@ -317,7 +314,14 @@ def to_pcm16(audio) -> np.ndarray:
 
 
 class TTSEngine(Protocol):
-    """What the session needs from a TTS engine."""
+    """What the session needs from a TTS engine.
+
+    Optional, used when present: ``cache_tag(profile_id) -> str | None``
+    (opt-in disk cache: a tag only when the output for that voice is a pure
+    function of the text), ``apply_settings(settings)`` (voice/speed
+    preferences changed in the app), ``warm()`` (start-up prewarm) and
+    ``has_fallback`` (set by :func:`build_engine` when a fallback engine sits
+    behind it)."""
     sample_rate: int
     sample_format: str        # always "pcm_s16le" today
     channels: int             # always 1
@@ -339,34 +343,6 @@ class _Base:
             return
         pcm, _ = self.synth(text, profile_id)
         yield pcm
-
-
-class KokoroTTS(_Base):
-    sample_rate = 24000
-
-    def __init__(self, model_path, voices_path, voice: str = "af_heart",
-                 speed: float = 1.05, threads: int = 8) -> None:
-        import onnxruntime as ort
-        from kokoro_onnx import Kokoro
-        so = ort.SessionOptions()
-        so.intra_op_num_threads = max(1, threads)
-        so.log_severity_level = 3
-        sess = ort.InferenceSession(str(model_path), sess_options=so,
-                                    providers=["CPUExecutionProvider"])
-        self._k = Kokoro.from_session(sess, str(voices_path))
-        self.voice = voice
-        self.speed = speed
-        self.voices = set(self._k.get_voices())
-        self._lock = threading.Lock()
-
-    def synth(self, text: str, profile_id: str | None = None) -> tuple[np.ndarray, int]:
-        # A profile_id this engine does not know (a cloned voice meant for
-        # another engine) falls back to the default voice rather than failing.
-        want = builtin_id(profile_id) or profile_id
-        voice = want if want in self.voices else self.voice
-        with self._lock:
-            audio, sr = self._k.create(text, voice=voice, speed=self.speed, lang="en-us")
-        return to_pcm16(audio), sr
 
 
 class MiniMaxTTS(_Base):
@@ -428,9 +404,9 @@ class FallbackTTS:
 
     Two uses: a remote "HQ" engine with a local fallback (``cooldown_s`` keeps
     a dead remote from costing one timeout per sentence), and the cloned-voice
-    engine with the built-in voice behind it (no voice profile chosen yet →
-    ``LookupError`` → built-in voice; no cooldown, so the moment a default
-    profile exists it is used). An error after audio has started ends that
+    engine with a plugin's built-in voice behind it (no voice profile chosen
+    yet → ``LookupError`` → built-in voice; no cooldown, so the moment a
+    default profile exists it is used). An error after audio has started ends that
     sentence instead — two voices spliced mid-sentence is worse than a cut.
     Both engines must share the sample rate; a primary that does not is
     treated as failed.
@@ -441,6 +417,10 @@ class FallbackTTS:
 
     def __init__(self, primary, fallback, cooldown_s: float = 120.0) -> None:
         self.primary, self.fallback = primary, fallback
+        if hasattr(primary, "has_fallback"):
+            # Tell the primary it is not the last resort: a voice it does not
+            # know may raise LookupError and the fallback will speak it.
+            primary.has_fallback = True
         self.sample_rate = fallback.sample_rate
         self.streaming = bool(getattr(primary, "streaming", False))
         self.cooldown_s = cooldown_s
@@ -474,11 +454,6 @@ class FallbackTTS:
         return (np.concatenate(parts) if parts else np.zeros(0, "<i2")), self.sample_rate
 
 
-def _kokoro(settings):
-    return KokoroTTS(settings.kokoro_model_path, settings.kokoro_voices_path,
-                     settings.kokoro_voice, settings.kokoro_speed, settings.tts_threads)
-
-
 def walk(engine) -> Iterator:
     """The engine and every engine wrapped inside it (FallbackTTS layers)."""
     seen: set[int] = set()
@@ -492,79 +467,72 @@ def walk(engine) -> Iterator:
         stack += [getattr(e, "primary", None), getattr(e, "fallback", None)]
 
 
-def kokoro_of(engine) -> KokoroTTS | None:
-    return next((e for e in walk(engine) if isinstance(e, KokoroTTS)), None)
+def cache_tag(engine, profile_id) -> str | None:
+    """The disk-cache tag of the engine in this chain that speaks
+    ``profile_id`` deterministically, or None (no disk cache). Engines opt in
+    with a ``cache_tag(profile_id)`` method."""
+    for e in walk(engine):
+        fn = getattr(e, "cache_tag", None)
+        if callable(fn):
+            try:
+                tag = fn(profile_id)
+            except Exception:
+                tag = None
+            if tag:
+                return str(tag)
+    return None
 
 
 def apply_live(settings) -> None:
     """Push the in-app preferences (built-in voice, speed) into every loaded
-    engine — no rebuild, no restart. Kokoro reads both per sentence."""
+    engine that takes them (``apply_settings``): no rebuild, no restart."""
     with _ENGINES_LOCK:
         engines = list(_ENGINES.values())
     for eng in engines:
-        k = kokoro_of(eng)
-        if k is not None:
-            if settings.kokoro_voice in k.voices:
-                k.voice = settings.kokoro_voice
-            k.speed = settings.kokoro_speed
-
-
-_LANGS = {"a": ("en-us", "US"), "b": ("en-gb", "UK")}
-_BUILTIN_CACHE: dict[str, list[dict]] = {}
+        for e in walk(eng):
+            fn = getattr(e, "apply_settings", None)
+            if callable(fn):
+                try:
+                    fn(settings)
+                except Exception:
+                    log.exception("voice: applying settings to %s failed", type(e).__name__)
 
 
 def builtin_voices(settings) -> list[dict]:
-    """The built-in English voices: [{id: "builtin:af_heart", name, lang}].
-
-    Read from the voices file (no model load). Only American and British
-    English: STT and the Kokoro phonemizer are English-only today."""
-    key = str(settings.kokoro_voices_path)
-    if key in _BUILTIN_CACHE:
-        return _BUILTIN_CACHE[key]
-    try:
-        with np.load(settings.kokoro_voices_path) as z:
-            names = sorted(z.files)
-    except Exception:
-        return []
-    out = []
-    for n in names:
-        if len(n) < 4 or n[2] != "_" or n[0] not in _LANGS or n[1] not in "fm":
-            continue
-        lang, region = _LANGS[n[0]]
-        sex = "female" if n[1] == "f" else "male"
-        out.append({"id": BUILTIN + n, "name": f"{n[3:].replace('_', ' ').title()} ({region}, {sex})",
-                    "lang": lang})
-    _BUILTIN_CACHE[key] = out
-    return out
+    """The installed provider's built-in voices ([] without one)."""
+    from . import registry
+    return registry.builtin_voices(settings)
 
 
 def build_engine(settings):
     """The engine DISPATCH_VOICE_TTS names.
 
-    * ``auto`` (default): the cloned-voice engine (``chatterbox``, registered
-      by app.voice.dv when dispatch-voice is installed) with Kokoro behind it,
-      else Kokoro alone.
-    * ``chatterbox`` / any registered name: that engine, Kokoro behind it when
-      Kokoro is installed.
-    * ``kokoro`` / ``minimax``: built in.
+    * ``auto`` (default): ``chatterbox`` (registered by app.voice.dv when
+      dispatch-voice is installed), else the first ready registered primary
+      engine, else the first ready registered fallback engine on its own.
+    * a registered name (``chatterbox``, ``kokoro`` from the optional plugin,
+      anything an extension registered): that engine.
+    * ``minimax``: built in (cloud, opt-in).
 
-    Wrapped with the HQ fallback when DISPATCH_VOICE_HQ_URL is set.
+    A ready registered ``role="fallback"`` engine with the same sample rate
+    goes BEHIND the chosen one. Wrapped with the HQ fallback when
+    DISPATCH_VOICE_HQ_URL is set.
     """
     from . import registry
     name = settings.tts_engine
-    kokoro_ok = settings.kokoro_ready()
     if name == "auto":
-        name = "chatterbox" if registry.engine_factory("chatterbox") else "kokoro"
-    factory = registry.engine_factory(name)
-    if factory is not None:
-        eng = factory(settings)
-        if kokoro_ok and name != "kokoro":
-            eng = FallbackTTS(eng, _kokoro(settings), cooldown_s=30.0)
-    elif name == "kokoro":
-        eng = _kokoro(settings)
+        name = _auto_engine(settings, registry)
+    spec = registry.engine_spec(name)
+    if spec is not None:
+        eng = spec.factory(settings)
+        fb = registry.fallback_for(settings, name, getattr(eng, "sample_rate", None))
+        if fb is not None:
+            eng = _with_fallback(eng, fb.factory(settings))
     elif name == "minimax":
         eng = MiniMaxTTS(os.environ.get("MINIMAX_API_KEY", ""), settings.minimax_model,
                          settings.minimax_voice, settings.minimax_base_url)
+    elif name is None:
+        raise RuntimeError("no TTS engine is installed (see /api/voice/status)")
     else:
         raise RuntimeError(f"unknown TTS engine {name!r}")
     if settings.hq_url:
@@ -573,14 +541,33 @@ def build_engine(settings):
     return eng
 
 
+def _auto_engine(settings, registry) -> str | None:
+    if registry.engine_spec("chatterbox") is not None:
+        return "chatterbox"
+    for spec in registry.primary_engines():
+        if spec.ready(settings):
+            return spec.name
+    for spec in registry._engines.values():
+        if spec.ready(settings):
+            return spec.name
+    return None
+
+
+def _with_fallback(primary, fallback):
+    if getattr(primary, "sample_rate", None) != getattr(fallback, "sample_rate", None):
+        log.warning("voice: fallback engine runs at %s Hz, primary at %s Hz; not paired",
+                    getattr(fallback, "sample_rate", None), getattr(primary, "sample_rate", None))
+        return primary
+    return FallbackTTS(primary, fallback, cooldown_s=30.0)
+
+
 _ENGINES: dict[str, object] = {}
 _ENGINES_LOCK = threading.Lock()
 
 
 def shared_engine(settings):
     from . import registry
-    key = (f"{settings.tts_engine}:{settings.hq_url}:{settings.kokoro_model_path}:"
-           f"{sorted(registry._engines)}")
+    key = f"{settings.tts_engine}:{settings.hq_url}:{registry.engine_names()}"
     with _ENGINES_LOCK:
         if key not in _ENGINES:
             _ENGINES[key] = build_engine(settings)

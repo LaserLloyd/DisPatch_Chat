@@ -9,17 +9,100 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Voice is optional, with an on/off switch.** Settings → Voice opens with
+  *Voice (Drive mode)*, a server-wide switch stored as `enabled` in
+  `<data>/voice.yaml` and applied live. It is **off on a fresh install**, even
+  when every package and model is present: no microphone button, `/ws/voice`
+  refuses with 1013 "Voice is turned off in Settings › Voice", and no speech
+  model is loaded at start-up. Turning it off ends open drives and releases
+  the loaded models; turning it on prewarms them in the background.
+  `DISPATCH_VOICE=1` / `0` still force it on / off (the switch is then locked
+  or hidden, and the API answers 409). **Upgrading an install that uses voice:
+  add `enabled: true` to `<data>/voice.yaml`** (or flip the switch once);
+  `DISPATCH_VOICE=auto` no longer means "on whenever the models are present".
+  While voice is off the tab shows only the switch and what turning it on
+  needs, with the commands.
+- **Settings → Voice holds everyday settings only:** Voice (default voice with
+  preview; speaking speed only when built-in voices are installed), Listening,
+  Replies, This device. The Advanced group and the Voices manager left the
+  tab; *Manage voices* appears only while the Voice cloning tool is on.
+- **Voice tools.** The advanced pieces are three opt-in builtin tools, off
+  unless `tools.yaml` has their row with `enabled: true` (Settings → Tools can
+  switch them), unlocked tier only and never in Safe Mode: **Voice cloning**
+  (the Voices manager; the `/api/voices` API now answers 404 while it is off),
+  **Built-in voices** (status, install steps and voice list of the optional
+  GPL-3.0 `dispatch-voice-kokoro` plugin) and **Voice lab** (engine status,
+  turn-merge window and hard end of turn, thinking level, cloud/rig engine
+  status, *Show timings on the Drive screen*, and a record-3-seconds quick
+  test with latency numbers). A tool whose package is missing opens with
+  "not installed" and how to install it. New routes `GET /api/voice/lab` and
+  `POST /api/voice/lab/test`; new settings keys `enabled`, `merge_window_s`,
+  `hard_silence_s` and `reset`.
+- **dispatch-voice is published on its own** at
+  github.com/LaserLloyd/DisPatch_Voice (MIT). DisPatch finds it when it is
+  simply installed (`uv run --group voice --with "dispatch-voice @
+  git+https://github.com/LaserLloyd/DisPatch_Voice" …`); `DISPATCH_VOICE_PKG`
+  is now only the override for a local checkout and wins over an installed
+  copy. Every setup step in the app and the docs uses that command; the Kokoro
+  plugin stays a separately distributed optional GPL-3.0 plugin.
+- **Review fixes (voice).** Undo is refused once the answer has started
+  (it used to delete the question and orphan a fast API/advisor reply), and
+  the Drive screen hides it on the first reply audio. A cloned or stock voice
+  no longer renders a second set of acknowledgements on every start-up (up to
+  ~25 Chatterbox synths). Without a PIN, voice sockets are counted per browser
+  (`?d=` device id), so a third family member no longer ends the first drive.
+  A hand edit of `enabled` in voice.yaml applies live within 5 s. Switching
+  off returns the memory (`malloc_trim`; measured 1.5 GB → 0.16 GB, steady
+  across off/on cycles) and calls plugins' release hooks. Previews and the
+  lab test wait for idle and run one at a time; a provider's preview failure
+  is a JSON 503. Extension API 3: a built-in voices provider describes itself
+  (name, licence, steps), so the Built-in voices tool hard-codes no plugin;
+  `add_release_hook`. Cache tags are validated and pruned to 8.
+- The stock voice shows as "Stock voice" with a **Stock** badge and cannot be
+  renamed or deleted in the app; a server with no default voice yet shows
+  "Choose a voice" instead of pretending the first one is chosen. The engine
+  line tells cloned voices with a built-in fallback, cloned only, and stock
+  only apart.
+- **Voice licence split.** Drive mode's core install is now entirely
+  permissive, so it never changes DisPatch's MIT licence. The Kokoro built-in
+  voices moved out into a separately installed, optional plugin,
+  **dispatch-voice-kokoro** (GPL-3.0-or-later), because Kokoro's phonemizer
+  and espeak-ng are GPL-3.0 and load into the process. `kokoro-onnx` (with
+  phonemizer and espeakng-loader) left the `voice` dependency group, and so
+  did the unused `soxr`. `python -m app.voice.download` no longer fetches
+  Kokoro, so the core download is ~680 MB. The plugin has its own
+  `fetch-models [--int8]` and still finds files in
+  `$DISPATCH_SPEECH_MODELS/kokoro`. Enable it with
+  `DISPATCH_VOICE_EXTENSIONS=dispatch_voice_kokoro:setup`; with it installed
+  everything behaves as in 2.1.
+- **Default voice without the plugin:** Chatterbox via dispatch-voice speaks
+  everything. When no voice is cloned, it uses dispatch-voice's new **stock
+  voice** (`stock-host`, built from a bundled clip of synthetic speech, not a
+  real person). A `builtin:` voice saved earlier degrades to the default voice
+  instead of failing. With no TTS engine at all, `/api/voice/status` says what
+  to install and nothing crashes.
+- **Engine-neutral extension API (version 2).** `register_engine` takes
+  `role="primary"|"fallback"`, `missing=` and `sample_rate=`; new
+  `set_builtin_voices_provider(list, preview=)`; engines opt in to the disk
+  cache with `cache_tag()` and receive live settings with `apply_settings()`.
+  DisPatch no longer names Kokoro anywhere in code.
+- **Setting names.** `DISPATCH_VOICE_BUILTIN_VOICE` / `DISPATCH_VOICE_SPEED`
+  and `builtin_voice` / `speed` in `voice.yaml` replace the `KOKORO_` names,
+  which still work as aliases. The next save rewrites a 2.1 `voice.yaml`.
+  `/api/voice/status` drops `kokoro_model`; `builtin_voices` is empty without
+  a provider, and `default_voice` can be `""`.
+
 - **Drive mode v2.** The Drive screen follows the active theme and shows the
   bot's avatar inside a state ring, a hint for what a tap does, End drive and
   Pause buttons, live captions with the current sentence highlighted, a
   thinking timer with cancel, and Undo for a misheard sentence. Errors show on
   the Drive screen and failed turns are spoken.
 - **Drive settings in the app.** A quick sheet (gear on the Drive screen) and
-  a Drive mode group under Settings → Device: voice with preview, speaking
+  a Voice tab in Settings: voice with preview, speaking
   speed, pause before replying, interrupt by talking, reply length, follow-up
   questions, microphone, sounds, screen-on. Each bot can have its own voice
   (Bots tab). Voices are recorded, uploaded, tested and managed inside
-  Settings.
+  the app (now the Voice cloning tool, above).
 - **Protocol.** `start` takes `barge_in`, `reply_style`, `follow_up` and can be
   re-sent mid-drive; new `ping`/`pong`, `ready`, `undo`, `cancel`, `duck`,
   `turn_error` frames; `GET/PATCH /api/voice/settings`, `GET /api/voice/preview`.
@@ -31,7 +114,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Drive mode out (newest socket replaces the oldest, heartbeat); a server
   without speech models says so instead of reconnecting forever; first words
   are no longer lost; speech models load at startup; built-in voice uses the
-  fp32 Kokoro model (about 6x faster on CPU than int8).
+  fp32 Kokoro model (about 6x faster on CPU than int8; this raised that
+  download from the ~810 MB stated for 2.1.0 to ~1 GB, until the licence split
+  above moved Kokoro into the plugin).
+
+### Added
+
+- `THIRD_PARTY_NOTICES.md`: attribution for the Drive-mode models (Parakeet
+  CC-BY-4.0 incl. the istupakov ONNX conversion, Silero VAD, Smart Turn,
+  Chatterbox) and the runtime libraries of the `voice` group.
 
 ## [2.1.0] — 2026-10-09
 
@@ -70,7 +161,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/api/voices` for cloning a voice from a short clip. Optional `voice`
   dependency group (`uv sync --group voice`, then
   `uv run python -m app.voice.download` for ~810 MB of pinned, sha256-checked
-  models). Configured by `DISPATCH_VOICE` (`auto` by default: on only when the
+  models, with the int8 Kokoro build this release fetched). Configured by `DISPATCH_VOICE` (`auto` by default: on only when the
   deps and models are present) and the `DISPATCH_VOICE_*` variables. Licence
   note: the Kokoro fallback voice pulls in a **GPL-3.0** phonemizer chain
   (phonemizer + espeak-ng) at runtime through the `voice` group; nothing GPL is

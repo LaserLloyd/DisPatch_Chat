@@ -1,9 +1,10 @@
 """Drive mode v2 against the REAL app: /api/voice/settings, /api/voice/preview,
 /api/voice/status additions, per-bot voice on the Bots save, the abort hook
-(review M3) and the engine-side fixes (Kokoro model choice, M2, L6, H5).
+(review M3) and the engine-side fixes (opt-in disk cache, M2, L6, H5).
 
 Hermetic: throwaway data dir (voice_env from test_voice_ws_route), fake
-engines, no models.
+engines, a fake built-in voice provider (what the optional Kokoro plugin
+registers), no models.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from test_voice_ws_route import FakeTTS, thread_for, unlock, voice_env
 
 from app import auth, config, main
 from app.voice import config as vconfig
+from app.voice import registry
 from app.voice import routes as vroutes
 from app.voice import tts as vtts
 
@@ -30,7 +32,7 @@ BUILTINS = [{"id": "builtin:af_heart", "name": "Heart (US, female)", "lang": "en
 @pytest.fixture
 def app_voice(voice_env, monkeypatch):
     c, turns = voice_env
-    monkeypatch.setattr(vtts, "builtin_voices", lambda settings: BUILTINS)
+    monkeypatch.setattr(registry, "_builtin_list", lambda settings: BUILTINS)
     eng = FakeTTS()
     eng.calls = []
     orig_synth = eng.synth
@@ -54,17 +56,26 @@ def test_settings_round_trip_persist_and_apply_live(app_voice):
     unlock(c)
     r = c.get("/api/voice/settings")
     assert r.status_code == 200
-    assert r.json() == {"default_voice": "builtin:af_heart", "speed": 1.05,
-                        "voice_turn_thinking": "off"}
+    # voice_env forces voice on with DISPATCH_VOICE=1: the switch reads on
+    # and says who decided it.
+    assert r.json() == {"enabled": True, "forced": "on",
+                        "default_voice": "builtin:af_heart", "speed": 1.05,
+                        "voice_turn_thinking": "off", "merge_window_s": 1.8,
+                        "hard_silence_s": 1.4}
     r = c.patch("/api/voice/settings", json={"speed": 1.2, "voice_turn_thinking": "low",
                                              "default_voice": "builtin:am_michael"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"default_voice": "builtin:am_michael", "speed": 1.2,
-                        "voice_turn_thinking": "low"}
+    assert r.json() == {"enabled": True, "forced": "on",
+                        "default_voice": "builtin:am_michael", "speed": 1.2,
+                        "voice_turn_thinking": "low", "merge_window_s": 1.8,
+                        "hard_silence_s": 1.4}
     f = config.DATA_DIR / "voice.yaml"
     assert f.exists() and (f.stat().st_mode & 0o777) == 0o600
     st = vconfig.load_settings()                       # what the next turn reads
-    assert (st.kokoro_voice, st.kokoro_speed, st.voice_turn_thinking) == ("am_michael", 1.2, "low")
+    assert (st.builtin_voice, st.speed, st.voice_turn_thinking) == ("am_michael", 1.2, "low")
+    import yaml
+    assert yaml.safe_load(f.read_text()) == {"builtin_voice": "am_michael", "speed": 1.2,
+                                             "voice_turn_thinking": "low"}
     assert c.get("/api/voice/settings").json()["speed"] == 1.2
 
 
@@ -274,27 +285,14 @@ async def test_gateway_abort_uses_the_agent_seat(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Engines: Kokoro model choice (H4), background renders yield (M2), L6, H5
+# Engines: downloader, background renders yield (M2), opt-in cache, L6, H5
 # --------------------------------------------------------------------------- #
 
-def test_kokoro_prefers_the_faster_fp32_model(tmp_path):
-    d = tmp_path / "kokoro"
-    d.mkdir()
-    s = vconfig.VoiceSettings(models_dir=tmp_path)
-    (d / "kokoro-v1.0.int8.onnx").write_bytes(b"x")
-    assert s.kokoro_model_path.name == "kokoro-v1.0.int8.onnx" and s.kokoro_variant == "int8"
-    (d / "kokoro-v1.0.onnx").write_bytes(b"x")
-    assert s.kokoro_model_path.name == "kokoro-v1.0.onnx" and s.kokoro_variant == "fp32"
-    forced = vconfig.VoiceSettings(models_dir=tmp_path, kokoro_model="int8")
-    assert forced.kokoro_model_path.name == "kokoro-v1.0.int8.onnx"
-
-
-def test_downloader_fetches_fp32_by_default_and_int8_on_request():
+def test_downloader_no_longer_fetches_kokoro(capsys):
     from app.voice import download
-    names = [rel for rel, _, _ in download.files_for(int8=False)]
-    assert "kokoro/kokoro-v1.0.onnx" in names and "kokoro/kokoro-v1.0.int8.onnx" not in names
-    names = [rel for rel, _, _ in download.files_for(int8=True)]
-    assert "kokoro/kokoro-v1.0.int8.onnx" in names and "kokoro/kokoro-v1.0.onnx" not in names
+    names = [rel for rel, _, _ in download.files_for()]
+    assert names and not any("kokoro" in n for n in names)
+    assert {"silero_vad.onnx", "smart-turn-v3.2-cpu.onnx"} <= set(names)
 
 
 def test_background_renders_wait_for_reply_synthesis():
@@ -313,47 +311,52 @@ def test_background_renders_wait_for_reply_synthesis():
     assert done.wait(1.0)
 
 
-def test_kokoro_ack_renders_are_cached_on_disk(voice_env, monkeypatch):
-    class K(vtts.KokoroTTS):
-        def __init__(self):
-            self.voices = {"af_heart"}
-            self.voice = "af_heart"
-            self.speed = 1.05
-            self.n = 0
+class CachedEngine:
+    """An engine that opts in to the disk cache, like the Kokoro plugin."""
+    sample_rate = 24000
 
-        def synth(self, text, profile_id=None):
-            self.n += 1
-            return np.full(10, 7, "<i2"), 24000
+    def __init__(self):
+        self.n = 0
 
-    k = K()
+    def cache_tag(self, profile_id):
+        if profile_id and not vtts.builtin_id(profile_id):
+            return None
+        return f"fake-{vtts.builtin_id(profile_id) or 'default'}-1.050"
+
+    def synth(self, text, profile_id=None):
+        self.n += 1
+        return np.full(10, 7, "<i2"), 24000
+
+
+def test_opt_in_engine_renders_are_cached_on_disk(voice_env):
+    k = CachedEngine()
     st = vconfig.VoiceSettings(flag="1")
     a = vroutes._render_cached(st, k, None, "Got it.", wait_idle=False)
     b = vroutes._render_cached(st, k, None, "Got it.", wait_idle=False)
     assert k.n == 1 and list(a) == list(b) == [7] * 10
     d = vroutes._cache_dir(st, k, None)
+    assert d.name == "fake-default-1.050"
     assert d.is_relative_to(config.DATA_DIR) and list(d.glob("*.npy"))
+    # Found through a FallbackTTS chain too; a cloned profile is never cached.
+    chain = vtts.FallbackTTS(SimpleNamespace(sample_rate=24000), k)
+    assert vroutes._cache_dir(st, chain, "builtin:am_michael").name == "fake-am_michael-1.050"
+    assert vroutes._cache_dir(st, chain, "some-cloned-profile") is None
 
 
-def test_builtin_id_reaches_kokoro_and_is_stripped():
-    class K(vtts.KokoroTTS):
-        def __init__(self):
-            self.voices = {"af_heart", "am_michael"}
-            self.voice = "af_heart"
-            self.speed = 1.0
-            self._lock = threading.Lock()
-            self.used = []
-            outer = self
+def test_engines_without_cache_tag_are_not_cached(voice_env):
+    class Plain:
+        sample_rate = 24000
+        n = 0
 
-            class _K:
-                def create(self, text, voice, speed, lang):
-                    outer.used.append(voice)
-                    return np.zeros(4, np.float32), 24000
-            self._k = _K()
+        def synth(self, text, profile_id=None):
+            Plain.n += 1
+            return np.zeros(4, "<i2"), 24000
 
-    k = K()
-    k.synth("Hi.", "builtin:am_michael")
-    k.synth("Hi.", "some-cloned-profile")
-    assert k.used == ["am_michael", "af_heart"]
+    st = vconfig.VoiceSettings(flag="1")
+    assert vroutes._cache_dir(st, Plain(), None) is None
+    vroutes._render_cached(st, Plain(), None, "Got it.", wait_idle=False)
+    vroutes._render_cached(st, Plain(), None, "Got it.", wait_idle=False)
+    assert Plain.n == 2 and not (config.DATA_DIR / "voice-cache").exists()
 
 
 def test_fallback_with_builtin_or_unknown_voice_has_no_cooldown():
@@ -390,11 +393,11 @@ def test_prewarm_loads_engines_and_runs_a_warm_synthesis(monkeypatch):
             calls.append("stt")
             return ""
 
-    class K(vtts.KokoroTTS):
-        def __init__(self):
-            self.voices = {"af_heart"}
-            self.voice = "af_heart"
-            self.speed = 1.0
+    class K:
+        sample_rate = 24000
+
+        def warm(self):
+            self.synth("Okay.")
 
         def synth(self, text, profile_id=None):
             calls.append(("tts", text))

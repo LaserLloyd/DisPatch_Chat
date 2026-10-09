@@ -3,18 +3,26 @@
 // Three scopes, kept apart on purpose (docs/voice-drive-mode.md, "Settings"):
 //   device  one JSON blob in localStorage (`dispatch-drive`), sent to the
 //           server on every WS `start` frame and re-sent when it changes;
-//   server  the install's voice settings (default voice, speed, thinking),
-//           GET/PATCH /api/voice/settings — unlocked tier only, like every
-//           /api/voice route;
+//   server  the install's voice settings (the on/off switch, default voice,
+//           speed; the Voice lab's thinking and timings), GET/PATCH
+//           /api/voice/settings — unlocked tier only, like every /api/voice
+//           route;
 //   bot     `bots[].voice`, saved with the rest of the Bots tab.
 //
 // The pure half (load/migrate/normalise, the start payload, voice labels) is
 // exported for tests/drive.test.js. The DOM half builds the rows for two
 // surfaces that must look like the rest of the app: the Drive overlay's quick
-// sheet and Settings → Device → Drive mode. Both are plain .dev-row markup.
+// sheet and Settings → Voice (moved out of the Device tab 2026-10-10). Both
+// are plain .dev-row markup.
+//
+// Settings → Voice holds EVERYDAY settings only (2026-10-10): the on/off
+// switch on top, then Voice, Listening, Replies and This device. The
+// advanced pieces are opt-in tools (js/voice-tools.js): Voice cloning,
+// Built-in voices and Voice lab.
 
 import { t, list as listFormat } from './i18n.js?v=3';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { VOICE_REPO_URL } from './about.js?v=6';
 
 export const DRIVE_KEY = 'dispatch-drive';
 export const LEGACY_PATIENCE_KEY = 'dispatch-drive-patience';
@@ -35,9 +43,10 @@ export const DRIVE_DEFAULTS = Object.freeze({
   micId: '',              // '' = system default
   sinkId: '',             // '' = system default (setSinkId browsers only)
   captions: true,         // show what was heard / said on the Drive screen
+  showTimings: false,     // Voice lab: latency numbers on the Drive screen
 });
 
-const BOOL_KEYS = ['bargeIn', 'autoListen', 'sounds', 'followUp', 'screenOn', 'captions'];
+const BOOL_KEYS = ['bargeIn', 'autoListen', 'sounds', 'followUp', 'screenOn', 'captions', 'showTimings'];
 
 /** Any stored value → a complete, valid settings object. Junk falls back. */
 export function normalizeDriveSettings(raw) {
@@ -136,6 +145,7 @@ async function voiceJson(url, opts = {}) {
 }
 
 export const voiceStatus = () => voiceJson('/api/voice/status');
+export const voiceLab = () => voiceJson('/api/voice/lab');
 export const voiceSettings = () => voiceJson('/api/voice/settings');
 export const patchVoiceSettings = (patch) => voiceJson('/api/voice/settings', {
   method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
@@ -166,6 +176,7 @@ export function voiceName(status, value) {
   const p = parseVoice(value);
   const st = status || {};
   if (p.kind === 'profile') {
+    if (st.stock_voice && p.id === st.stock_voice) return t('drive.voice_stock');
     const hit = (st.profiles || []).find((x) => x.id === p.id);
     return hit ? hit.name : p.id;
   }
@@ -182,14 +193,20 @@ export function voiceName(status, value) {
  * The current value is always present, even when the server no longer lists
  * it, so a select never silently shows a different voice than the one saved.
  */
-export function voiceOptions(status, { withDefault = false, current = '' } = {}) {
+export function voiceOptions(status, { withDefault = false, current = '', placeholder = false } = {}) {
   const st = status || {};
   const out = [];
+  // No default voice yet (default_voice ""): a select must not pretend the
+  // first voice is chosen. A neutral first entry says so until one is picked.
+  if (placeholder && !current) out.push({ value: '', label: t('drive.voice_pick'), group: 'none' });
   if (withDefault) {
     const def = st.default_voice ? voiceName(st, st.default_voice) : '';
     out.push({ value: '', label: def ? t('drive.voice_use_default_named', { name: def }) : t('drive.voice_use_default') });
   }
-  for (const p of st.profiles || []) out.push({ value: p.id, label: p.name, group: 'profile' });
+  for (const p of st.profiles || []) {
+    const stock = !!st.stock_voice && p.id === st.stock_voice;
+    out.push({ value: p.id, label: stock ? t('drive.voice_stock') : p.name, group: stock ? 'stock' : 'profile' });
+  }
   for (const b of st.builtin_voices || []) {
     out.push({ value: builtinValue(b.id), label: t('drive.voice_builtin', { name: b.name || b.id }), group: 'builtin' });
   }
@@ -370,7 +387,8 @@ export function buildQuickSheet({ status, bot, onClose, onAllSettings, notify })
   // Voice: the default voice for the install. When this bot speaks with its
   // own voice the default does not reach it, and the row says so.
   const own = bot && bot.voice ? bot.voice : '';
-  const voiceSel = selectInput(t('drive.voice'), voiceOptions(st, { current: st.default_voice || '' }), st.default_voice || '', async (v) => {
+  const voiceSel = selectInput(t('drive.voice'), voiceOptions(st, { current: st.default_voice || '', placeholder: true }), st.default_voice || '', async (v) => {
+    if (!v) return;
     try {
       await patchVoiceSettings({ default_voice: v });
       st.default_voice = v;
@@ -418,16 +436,164 @@ export function buildQuickSheet({ status, bot, onClose, onAllSettings, notify })
   return sheet;
 }
 
-// ------------------------------------------------ Settings → Device group --
+// ------------------------------------------------------ Settings → Voice --
 
 /**
- * Settings → Device → Drive mode. `host` is the #dev-group-voice wrapper.
- * ctx: { status, bots: () => [{id,name,voice?,safe}], openVoices(), toast(msg, err) }
- * Re-callable: it rebuilds from scratch (cheap) when the status changes.
+ * What Settings → Voice shows for this /api/voice/status answer.
+ *
+ *   'none'    no status (locked, network error, or a server whose voice
+ *             package did not import): no tab at all.
+ *   'forced'  DISPATCH_VOICE=0 on the server: no switch, one line that says
+ *             so and who can change it.
+ *   'off'     the switch is off (the default on a fresh install): the switch,
+ *             and what turning it on needs.
+ *   'setup'   the switch is on, but voice can't run yet: the switch, what is
+ *             missing and the commands that fix it.
+ *   'on'      voice works: the switch, then the everyday settings.
+ */
+export function voiceTabState(st) {
+  if (!st || typeof st !== 'object') return 'none';
+  if (st.forced === 'off') return 'forced';
+  const on = typeof st.switch === 'boolean' ? st.switch : !!st.enabled;
+  if (!on) return 'off';
+  const missing = Array.isArray(st.missing) ? st.missing : [];
+  return st.enabled && !missing.length ? 'on' : 'setup';
+}
+
+/** Where a setup command runs. Literal keys so the i18n scan sees them. */
+const WHERE = {
+  backend: 'drive.where_backend',
+  start: 'drive.where_start',
+  plugin: 'drive.where_plugin',
+  env: 'drive.where_env',
+};
+
+/** dispatch-voice (MIT) is published on its own; DisPatch runs with it in
+ *  its environment. The same `--with` on every `uv run` keeps it there. */
+export const DV_REPO = VOICE_REPO_URL;
+export const DV_WITH = `--with "dispatch-voice @ git+${DV_REPO}"`;
+export const DV_STEPS = Object.freeze({
+  models: { where: 'backend', cmd: `uv run --group voice ${DV_WITH} dispatch-voice fetch-models` },
+  start: { where: 'start', cmd: `uv run --group voice ${DV_WITH} uvicorn app.main:app` },
+});
+
+/**
+ * The commands that fix a /api/voice/status `missing` list, in the order
+ * to run them: [{where, cmd}]. Commands are shell, never translated.
+ */
+export function setupSteps(missing) {
+  const m = (Array.isArray(missing) ? missing : []).map(String);
+  const has = (re) => m.some((x) => re.test(x));
+  const steps = [];
+  if (has(/^python package/)) steps.push({ where: 'backend', cmd: 'uv sync --group voice' });
+  if (has(/^model (silero|parakeet|smart-turn)/)) steps.push({ where: 'backend', cmd: 'uv run python -m app.voice.download' });
+  // dispatch-voice: install it into DisPatch's environment and fetch its
+  // models in one go, then start DisPatch with it.
+  const dvPkg = has(/^dispatch-voice package|^a text-to-speech engine/);
+  if (dvPkg || has(/^dispatch-voice models/)) steps.push(DV_STEPS.models);
+  if (dvPkg) steps.push(DV_STEPS.start);
+  if (has(/^MINIMAX_API_KEY/)) steps.push({ where: 'env', cmd: 'MINIMAX_API_KEY=…' });
+  return steps;
+}
+
+/** One "what to run" block: a hint line per step and the command as code. */
+export function stepsBlock(steps) {
+  const box = el('div', { class: 'voice-steps' });
+  for (const s of steps || []) {
+    box.append(
+      el('p', { class: 'dev-row-hint voice-step-where', text: t(WHERE[s.where] || WHERE.backend) }),
+      el('pre', { class: 'voice-cmd', dir: 'ltr' }, [el('code', { text: s.cmd })]),
+    );
+  }
+  return box;
+}
+
+/** The missing list as one note, or null when nothing is missing. */
+function missingNote(missing) {
+  const list = Array.isArray(missing) ? missing.map(String) : [];
+  if (!list.length) return null;
+  return el('p', { class: 'drive-missing', role: 'note' }, [
+    el('strong', { text: t('drive.missing_title') }), ' ',
+    el('span', { text: listFormat(list) }),
+  ]);
+}
+
+function group(titleKey, rows, extraClass = '') {
+  return el('section', { class: 'dev-group drive-group' + (extraClass ? ' ' + extraClass : '') }, [
+    el('h3', { class: 'dev-group-title', text: t(titleKey) }),
+    el('div', { class: 'dev-group-body' }, rows.filter(Boolean)),
+  ]);
+}
+
+/**
+ * The switch on top of Settings → Voice. ctx.setEnabled(on) saves it and
+ * resolves true/false; the caller rebuilds the tab from the fresh status.
+ */
+function switchGroup(st, ctx) {
+  const forced = st.forced || null;
+  if (forced === 'off') {
+    return group('drive.group_switch', [row(t('drive.switch'), t('drive.switch_forced_off'), [], { id: 'drive-switch' })]);
+  }
+  const on = forced === 'on' ? true : !!st.switch;
+  const cb = switchInput(on, t('drive.switch'), async (v) => {
+    cb.disabled = true;
+    const ok = ctx.setEnabled ? await ctx.setEnabled(v) : false;
+    if (!ok) { cb.checked = !v; cb.disabled = false; }
+  });
+  cb.id = 'drive-switch-input';
+  if (forced === 'on') cb.disabled = true;
+  const hint = forced === 'on' ? t('drive.switch_forced_on') : t('drive.switch_hint');
+  return group('drive.group_switch', [row(t('drive.switch'), hint, [cb], { id: 'drive-switch' })]);
+}
+
+/** Below the switch while voice is off or not ready: what it needs. */
+function needsGroup(st, state) {
+  const missing = Array.isArray(st.missing) ? st.missing : [];
+  const r = row(
+    state === 'off' ? t('drive.needs_title_off') : t('drive.setup_title'),
+    state === 'off' ? t('drive.needs_hint_off') : t('drive.setup_hint'),
+    [], { id: 'drive-setup' },
+  );
+  r.classList.add('dev-row-block');
+  const note = missingNote(missing);
+  if (note) r.append(note);
+  const steps = setupSteps(missing);
+  if (steps.length) {
+    r.append(stepsBlock(steps));
+    r.append(el('p', { class: 'dev-row-hint drive-setup-fix', text: t('drive.setup_restart') }));
+  } else if (missing.length) {
+    r.append(el('p', { class: 'dev-row-hint drive-setup-fix', text: t('drive.setup_docs') }));
+  }
+  return group('drive.group_status', [r]);
+}
+
+/**
+ * Settings → Voice. `host` is the #dev-group-voice wrapper. Re-callable: it
+ * rebuilds from scratch (cheap) whenever the status changes.
+ *
+ * ctx: {
+ *   status,                       the last /api/voice/status
+ *   bots: () => [{id,name,voice?,safe,visible}],
+ *   setEnabled(on) → Promise<bool>  save the switch (main.js re-reads status)
+ *   cloning: bool                 the Voice cloning tool is on and installed
+ *   openCloning()                 open that tool
+ *   toast(msg, err)
+ * }
  */
 export function mountDriveSettings(host, ctx) {
   if (!host) return;
   const st = ctx.status || {};
+  const state = voiceTabState(st);
+  const groups = [switchGroup(st, ctx)];
+  if (state !== 'on') {
+    // Off with nothing missing: the switch alone says it all (its hint names
+    // the microphone button). Off with something missing, or on but not
+    // ready: what it needs and how to get it.
+    const missing = Array.isArray(st.missing) ? st.missing : [];
+    if (state === 'setup' || (state === 'off' && missing.length)) groups.push(needsGroup(st, state));
+    host.replaceChildren(...groups);
+    return;
+  }
   const s = loadDriveSettings(storage());
   const set = (patch) => saveDriveSettings(storage(), patch);
   const notify = (m) => ctx.toast && ctx.toast(m, true);
@@ -441,21 +607,22 @@ export function mountDriveSettings(host, ctx) {
       return false;
     }
   };
-  const groups = [];
-  const group = (titleKey, rows) => {
-    const sec = el('section', { class: 'dev-group drive-group' }, [
-      el('h3', { class: 'dev-group-title', text: t(titleKey) }),
-      el('div', { class: 'dev-group-body' }, rows.filter(Boolean)),
-    ]);
-    groups.push(sec);
-  };
 
   // ---- Voice
   const defVoice = st.default_voice || '';
   const voiceRows = [];
+  const builtins = Array.isArray(st.builtin_voices) ? st.builtin_voices : [];
+  const stock = st.stock_voice || null;
+  const own = (st.profiles || []).filter((p) => p.id !== stock);
   if (voiceOptions(st).length) {
-    const sel = selectInput(t('drive.default_voice'), voiceOptions(st, { current: defVoice }), defVoice, async (v) => {
-      if (await save({ default_voice: v })) paintSpeed();
+    const opts = () => voiceOptions(st, { current: st.default_voice || '', placeholder: true });
+    const sel = selectInput(t('drive.default_voice'), opts(), defVoice, async (v) => {
+      if (!v) return;
+      if (await save({ default_voice: v })) {
+        // The placeholder goes once a voice is chosen.
+        fillSelect(sel, opts(), st.default_voice || v);
+        paintSpeed();
+      }
     });
     const r = row(t('drive.default_voice'), t('drive.default_voice_hint'), [sel, previewButton(() => sel.value, notify)]);
     // ONE hint line, written from the roster when it is known: who uses the
@@ -474,12 +641,14 @@ export function mountDriveSettings(host, ctx) {
         : t('drive.voice_users_none');
     };
     paintUsers();
-    if (!(st.profiles || []).length) {
-      r.querySelector('.dev-row-text').append(el('span', { class: 'dev-row-hint drive-note', text: t('drive.voice_builtin_only') }));
-    }
+    // What you hear when you have not added a voice of your own: built-in
+    // voices (the optional plugin), or dispatch-voice's stock voice.
+    const note = !own.length ? (builtins.length ? 'drive.voice_builtin_only' : (stock ? 'drive.voice_stock_only' : null)) : null;
+    if (note) r.querySelector('.dev-row-text').append(el('span', { class: 'dev-row-hint drive-note', text: t(note) }));
     voiceRows.push(r);
 
-    // Speaking speed: Kokoro only — a cloned voice speaks at its own pace.
+    // Speaking speed: built-in voices only (a cloned or the stock voice
+    // speaks at its own pace), so no row at all without the plugin.
     const speed = el('input', {
       type: 'range', class: 'drive-range', min: String(SPEED_MIN), max: String(SPEED_MAX), step: '0.05',
       'aria-label': t('drive.speed'),
@@ -493,27 +662,29 @@ export function mountDriveSettings(host, ctx) {
     showSpeed();
     speed.addEventListener('input', showSpeed);
     speed.addEventListener('change', () => save({ speed: clampSpeed(speed.value) }));
-    const speedRow = row(t('drive.speed'), t('drive.speed_hint'), [speed, out]);
+    const speedRow = row(t('drive.speed'), t('drive.speed_hint'), [speed, out], { id: 'drive-speed' });
     function paintSpeed() {
       const cloned = parseVoice(sel.value).kind === 'profile';
       speedRow.querySelector('.dev-row-hint').textContent = cloned ? t('drive.speed_hint_cloned') : t('drive.speed_hint');
     }
     paintSpeed();
-    voiceRows.push(speedRow);
+    if (builtins.length) voiceRows.push(speedRow);
+  } else {
+    voiceRows.push(row(t('drive.voice_none'), t('drive.voice_none_hint'), [], { id: 'drive-no-voice' }));
   }
-  if (st.voices_ui) {
+  if (ctx.cloning) {
     const open = el('button', { type: 'button', class: 'btn-secondary', id: 'dev-voices-open' }, [
       railIcon(MIC_ICON), document.createTextNode(` ${t('drive.manage_voices_open')}`),
     ]);
-    open.addEventListener('click', () => ctx.openVoices && ctx.openVoices());
+    open.addEventListener('click', () => ctx.openCloning && ctx.openCloning());
     const r = row(t('drive.manage_voices'), t('drive.manage_voices_hint'), [open]);
     r.classList.add('dev-row-action');
     voiceRows.push(r);
   }
-  group('drive.group_voice', voiceRows);
+  groups.push(group('drive.group_voice', voiceRows));
 
   // ---- Listening
-  group('drive.group_listening', [
+  groups.push(group('drive.group_listening', [
     row(t('drive.patience'), t('drive.patience_hint'),
       [segmented(t('drive.patience'), patienceOptions(), s.patience, (v) => set({ patience: v }))], { block: true }),
     row(t('drive.barge_in'), t('drive.barge_in_hint'),
@@ -522,15 +693,15 @@ export function mountDriveSettings(host, ctx) {
       [switchInput(s.autoListen, t('drive.auto_listen'), (v) => set({ autoListen: v }))]),
     row(t('drive.sounds'), t('drive.sounds_hint'),
       [switchInput(s.sounds, t('drive.sounds'), (v) => set({ sounds: v }))]),
-  ]);
+  ]));
 
   // ---- Replies
-  group('drive.group_replies', [
+  groups.push(group('drive.group_replies', [
     row(t('drive.reply_length'), t('drive.reply_length_hint'),
       [segmented(t('drive.reply_length'), replyOptions(), s.replyStyle, (v) => set({ replyStyle: v }))], { block: true }),
     row(t('drive.follow_up'), t('drive.follow_up_hint'),
       [switchInput(s.followUp, t('drive.follow_up'), (v) => set({ followUp: v }))]),
-  ]);
+  ]));
 
   // ---- This device
   const micSel = selectInput(t('drive.mic'), [{ value: '', label: t('drive.device_default') }], s.micId, (v) => set({ micId: v }));
@@ -541,59 +712,41 @@ export function mountDriveSettings(host, ctx) {
     deviceOptions('audiooutput').then((o) => fillSelect(spk, o, o.some((x) => x.value === s.sinkId) ? s.sinkId : ''));
     spkRow = row(t('drive.speaker'), t('drive.speaker_hint'), [spk]);
   }
-  group('drive.group_device', [
+  groups.push(group('drive.group_device', [
     row(t('drive.screen_on'), t('drive.screen_on_hint'),
       [switchInput(s.screenOn, t('drive.screen_on'), (v) => set({ screenOn: v }))]),
     row(t('drive.mic'), t('drive.mic_hint'), [micSel]),
     spkRow,
     row(t('drive.captions'), t('drive.captions_hint'),
       [switchInput(s.captions, t('drive.captions'), (v) => set({ captions: v }))]),
-    advancedRow(st, save),
-  ]);
+  ]));
 
   host.replaceChildren(...groups);
 }
 
-/** Engine status + the one operator knob that is safe in the UI. */
-function advancedRow(st, save) {
-  const det = el('details', { class: 'dev-row dev-row-block drive-advanced' });
-  const sum = el('summary', { class: 'drive-advanced-summary' }, [
-    el('span', { class: 'dev-row-text' }, [
-      el('strong', { text: t('drive.advanced') }),
-      el('span', { class: 'dev-row-hint', text: engineLine(st) }),
-    ]),
-  ]);
-  det.append(sum);
-  const missing = Array.isArray(st.missing) ? st.missing : [];
-  if (missing.length) {
-    det.append(el('p', { class: 'drive-missing', role: 'note' }, [
-      el('strong', { text: t('drive.missing_title') }), ' ',
-      el('span', { text: listFormat(missing.map(String)) }),
-    ]));
-  }
-  if (st.ready === false && !missing.length) {
-    det.append(el('p', { class: 'drive-missing', text: t('drive.engine_not_ready') }));
-  }
-  const thinking = selectInput(t('drive.thinking'), THINKING_LEVELS.map((v) => ({ value: v, label: t(`drive.thinking_${v}`) })),
-    THINKING_LEVELS.includes(st.voice_turn_thinking) ? st.voice_turn_thinking : 'off',
-    (v) => save({ voice_turn_thinking: v }));
-  det.append(el('div', { class: 'drive-advanced-row' }, [
-    el('span', { class: 'dev-row-text' }, [
-      el('strong', { text: t('drive.thinking') }),
-      el('span', { class: 'dev-row-hint', text: t('drive.thinking_hint') }),
-    ]),
-    thinking,
-  ]));
-  return det;
-}
-
-/** "Cloned voices with built-in fallback · Smart Turn on · Parakeet" in the user's words. */
+/**
+ * "Your voices, with a built-in fallback · Smart Turn on · Speech
+ * recognition: parakeet" in the user's words (the Voice lab's engine row).
+ *
+ *   cloud         DISPATCH_VOICE_TTS=minimax
+ *   cloned+fallback  dispatch-voice speaks, the built-in plugin backs it up
+ *   cloned only   dispatch-voice with voices of your own, no plugin
+ *   stock only    dispatch-voice with only its stock voice, no plugin
+ *   built-in      the plugin alone (no dispatch-voice)
+ */
 export function engineLine(st) {
   const s = st || {};
   const parts = [];
   const tts = String(s.tts || 'auto');
-  if ((s.profiles || []).length && (tts === 'auto' || tts === 'chatterbox')) parts.push(t('drive.engine_cloned'));
-  else if (tts === 'minimax') parts.push(t('drive.engine_cloud'));
+  const stock = s.stock_voice || null;
+  const own = (s.profiles || []).filter((p) => p && p.id !== stock);
+  const builtin = (s.builtin_voices || []).length > 0;
+  const dv = !!(s.voices_ui || stock || (s.extensions || []).includes('dispatch-voice'));
+  const cloner = tts === 'auto' || tts === 'chatterbox';
+  if (tts === 'minimax') parts.push(t('drive.engine_cloud'));
+  else if (dv && cloner && builtin) parts.push(t('drive.engine_cloned'));
+  else if (dv && cloner && own.length) parts.push(t('drive.engine_cloned_only'));
+  else if (dv && cloner) parts.push(t('drive.engine_stock'));
   else parts.push(t('drive.engine_builtin'));
   parts.push(s.smart_turn ? t('drive.engine_turn_on') : t('drive.engine_turn_off'));
   if (s.stt) parts.push(t('drive.engine_stt', { name: String(s.stt) }));

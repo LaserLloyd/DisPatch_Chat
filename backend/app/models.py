@@ -72,7 +72,7 @@ class BotOrderItem(BaseModel):
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     # Drive-mode voice: None = leave unchanged, "" = the default voice, else a
-    # voice profile id or "builtin:<kokoro id>" (checked by the route; 422).
+    # voice profile id or "builtin:<id>" (checked by the route; 422).
     voice: str | None = Field(default=None, max_length=80)
 
 

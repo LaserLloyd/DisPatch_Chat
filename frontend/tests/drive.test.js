@@ -15,10 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
-  createAudioPairer, createPlayer, driveAllowed, nextBackoff, pcm16ToFloat, voiceUrl,
+  createAudioPairer, createPlayer, driveAllowed, nextBackoff, pcm16ToFloat, voiceUrl, driveDeviceId,
   reconnectDecision, tapAction, thinkingPhase, hintKey, createMicBuffer, createUndoWindow,
   createHeartbeat, createHeardTracker, turnErrorKey, errorFrameKey, PATIENCE_PRESETS,
-  GIVE_UP_MS, PREBUFFER_FRAMES, UNDO_MS, PING_EVERY_MS, PONG_TIMEOUT_MS, EARCONS,
+  GIVE_UP_MS, PREBUFFER_FRAMES, UNDO_MS, PING_EVERY_MS, PONG_TIMEOUT_MS, EARCONS, timingsLine,
 } from '../static/drive.js';
 import {
   DRIVE_KEY, LEGACY_PATIENCE_KEY, DRIVE_DEFAULTS, loadDriveSettings, saveDriveSettings,
@@ -40,6 +40,16 @@ function memStorage(init = {}) {
 }
 
 // ------------------------------------------------------------- basics ---
+
+test('driveDeviceId: stable per browser, well-formed, survives no storage', () => {
+  const m = new Map();
+  const st = { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) };
+  const a = driveDeviceId(st);
+  assert.match(a, /^[A-Za-z0-9-]{8,64}$/);
+  assert.equal(driveDeviceId(st), a);
+  assert.equal(voiceUrl({ protocol: 'http:', host: 'h' }, 't', a), `ws://h/ws/voice/t?d=${a}`);
+  assert.equal(typeof driveDeviceId(null), 'string');
+});
 
 test('voiceUrl follows the page scheme and escapes the thread id', () => {
   assert.equal(voiceUrl({ protocol: 'https:', host: 'box:8443' }, 't/1'), 'wss://box:8443/ws/voice/t%2F1');
@@ -393,12 +403,31 @@ test('voice values: profile ids, builtin:<id>, and options that never hide the s
 });
 
 test('engine line names the engine the driver will actually hear', () => {
-  const t = (st) => engineLine(st);
-  // The key text is not loaded under node, so compare the three cases to each other.
-  const cloned = t({ tts: 'auto', profiles: [{ id: 'a' }], smart_turn: true, stt: 'parakeet' });
-  const builtin = t({ tts: 'auto', profiles: [], smart_turn: true, stt: 'parakeet' });
-  assert.notEqual(cloned, builtin);
-  assert.equal(cloned.split(' · ').length, 3);
+  // The full case matrix (cloned + fallback / cloned only / stock only /
+  // built-in / cloud) is pinned in voice-tab.test.js; here: three parts.
+  const line = engineLine({ tts: 'auto', profiles: [{ id: 'a' }], voices_ui: '/api/voices/ui', smart_turn: true, stt: 'parakeet' });
+  assert.equal(line.split(' · ').length, 3);
+});
+
+test('reconnectDecision: a 1013 that names the switch is "voice off", not "not set up"', () => {
+  assert.deepEqual(reconnectDecision(1013, 'Voice is turned off in Settings › Voice'), { retry: false, reason: 'voice_off' });
+  assert.deepEqual(reconnectDecision(1013, 'Voice is turned off on this server (DISPATCH_VOICE)'), { retry: false, reason: 'voice_off' });
+  assert.deepEqual(reconnectDecision(1013, 'voice models missing'), { retry: false, reason: 'unavailable' });
+  assert.deepEqual(reconnectDecision(1008, 'Voice is turned off'), { retry: false, reason: 'refused' });
+});
+
+test('timingsLine: what the Drive screen shows from the server metrics', () => {
+  // No dictionary under node (t() answers with the humanised key), so the
+  // shape is pinned here; the words and {t} are in the locales.
+  assert.equal(timingsLine({ heard: null, first: null }), '');
+  assert.equal(timingsLine({ heard: 420, first: null }).split(' · ').length, 1);
+  assert.equal(timingsLine({ heard: 420, first: 1640 }).split(' · ').length, 2);
+});
+
+test('show timings is a device setting, off by default', () => {
+  assert.equal(DRIVE_DEFAULTS.showTimings, false);
+  assert.equal(normalizeDriveSettings({ showTimings: true }).showTimings, true);
+  assert.equal(normalizeDriveSettings({ showTimings: 'yes' }).showTimings, false);
 });
 
 // --------------------------------------------------------------- voices ---

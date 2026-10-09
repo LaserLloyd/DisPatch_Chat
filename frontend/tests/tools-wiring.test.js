@@ -207,9 +207,19 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v145 (Drive mode v2 names)', () => {
+test('the sw.js CACHE is local-chat-v147 (optional voice + voice tools)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v147: voice is optional (Settings → Voice opens with an on/off switch)
+  // and its advanced pieces are opt-in tools — new js/voice-tools.js joins
+  // SHELL; drive-settings.js 3→4, voices.js 3→4, drive.js 5→6, voice.css
+  // 3→4, tools.js 10→11, about.js 5→6, main.js 123→124, app.css 96→97,
+  // index.html, locales.
+  // v146: Drive settings + the Voices manager move from Settings → Device to
+  // their own Voice tab — drive-settings.js 2→3, voices.js 2→3, drive.js 4→5,
+  // voice.css 2→3, main.js 122→123, app.css 95→96, index.html, locales.
+  // v145: neutral example names — drive-settings.js 1→2, voices.js 1→2,
+  // drive.js 3→4, main.js 121→122, index.html, locales.
   // v144: Drive mode v2 — drive.js 2→3, voice-worklet.js 1→2, voice.css 1→2,
   // js/drive-settings.js + js/voices.js join SHELL; main.js 120→121, app.css
   // 94→95, index.html, locales.
@@ -244,7 +254,7 @@ test('the sw.js CACHE is local-chat-v145 (Drive mode v2 names)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v145');
+  assert.equal(m[1], 'local-chat-v147');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

@@ -1,7 +1,13 @@
-// Settings → Device → Drive mode → Voices: the cloned-voice manager, native.
+// The Voice cloning tool: the cloned-voice manager, native.
 //
-// Replaces the link to dispatch-voice's standalone page (/api/voices/ui, still
-// served for `dispatch-voice serve` and CLI use, no longer linked from here).
+// It lives in the opt-in Voice cloning tool (tools.yaml `voice-cloning`,
+// js/voice-tools.js mounts it with `embedded: true`, 2026-10-10); Settings →
+// Voice links to it with "Manage voices" only while that tool is on. Without
+// `embedded` it still takes over a pane in place, with its own ‹ back row.
+//
+// Replaces the link to dispatch-voice's standalone page (/api/voices/ui; in
+// DisPatch it answers only while the Voice cloning tool is on, and
+// `dispatch-voice serve` serves it standalone; never linked from here).
 // Same JSON API as that page, same rules: a voice is built on THIS computer
 // from a 10–20 s clip, and whose voice it is (consent) is a required choice.
 //
@@ -13,17 +19,20 @@
 //   DELETE /api/voices/{id}
 //   GET    /api/voices/{id}/files/audition.wav
 //
-// Built-in (Kokoro) voices are listed too, with ▶ and "Set as default"
-// through /api/voice/settings, so one screen answers "what will I hear".
+// Built-in voices (from an optional plugin, which names itself) are listed
+// too, with ▶ and "Set as default" through /api/voice/settings, so one screen
+// answers "what will I hear". dispatch-voice's stock voice is a profile like
+// any other, but it ships with the package: it carries a "Stock" badge and
+// can't be renamed or deleted here.
 //
-// Rows are the Device tab's .dev-group/.dev-row markup; nothing here has a
+// Rows are the Settings .dev-group/.dev-row markup; nothing here has a
 // look of its own beyond the quality chips and the recording script box.
 
 import { t } from './i18n.js?v=3';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 import {
   voiceJson, voiceStatus, patchVoiceSettings, previewButton, selectInput, row, MIC_ICON, builtinValue,
-} from './drive-settings.js?v=2';
+} from './drive-settings.js?v=4';
 
 const API = '/api/voices';
 const RECORD_LIMIT_S = 40;
@@ -50,10 +59,25 @@ export function voiceMetaLine(v, fmtDate) {
   return parts.join(' · ');
 }
 
+/** {name, licence} of the built-in voices plugin the server suggests. */
+function builtinSuggestion(st) {
+  const sug = (st && st.plugins && st.plugins.builtin && st.plugins.builtin.suggested) || {};
+  return { name: sug.name || '', licence: sug.licence || '' };
+}
+
+/** Is `v` dispatch-voice's stock voice? (`stockId` from /api/voice/status.) */
+export function isStock(v, stockId) {
+  return !!(v && stockId && v.id === stockId);
+}
+
 /**
- * Mount the sub-pane. `pane` is the #spane-device section; the sub-pane
- * takes its place until ‹ Drive mode is pressed. ctx: { toast, confirm(msg,
- * opts), prompt(title, value), onChanged() — repaint the Drive group }.
+ * Mount the manager. ctx: { toast, confirm(msg, opts), prompt(title, value),
+ * onChanged() — repaint whatever shows the voice status, embedded }.
+ *
+ * embedded: false — `pane` is a settings pane; the manager takes the place of
+ *   its contents until ‹ Voice is pressed.
+ * embedded: true — `pane` is the manager's own (empty) host, e.g. the Voice
+ *   cloning tool's body. No back row or title (the tool's header has them).
  */
 export function createVoicesPane(pane, ctx) {
   let host = null;
@@ -80,7 +104,7 @@ export function createVoicesPane(pane, ctx) {
 
   function open() {
     if (host) return;
-    for (const c of pane.children) { c.dataset.voicesHidden = c.hidden ? '1' : '0'; c.hidden = true; }
+    if (!ctx.embedded) for (const c of pane.children) { c.dataset.voicesHidden = c.hidden ? '1' : '0'; c.hidden = true; }
     host = el('div', { class: 'voices-pane', id: 'voices-pane' });
     pane.append(host);
     pane.scrollTop = 0;
@@ -95,6 +119,7 @@ export function createVoicesPane(pane, ctx) {
     host.remove(); host = null;
     for (const c of pane.children) { if (c.dataset.voicesHidden != null) { c.hidden = c.dataset.voicesHidden === '1'; delete c.dataset.voicesHidden; } }
     clip = null; analysis = null;
+    if (ctx.embedded) return;
     ctx.onChanged && ctx.onChanged();
     const btn = document.getElementById('dev-voices-open');
     if (btn) { try { btn.focus(); btn.scrollIntoView({ block: 'center' }); } catch { /* ignore */ } }
@@ -113,16 +138,16 @@ export function createVoicesPane(pane, ctx) {
     const builtinBody = el('div', { class: 'dev-group-body', id: 'voices-builtin' });
     const addBody = el('div', { class: 'dev-group-body', id: 'voices-add' });
     const engine = el('p', { class: 'dev-group-hint voices-engine' });
-    host.replaceChildren(
-      el('div', { class: 'voices-top' }, [back, title]),
+    host.replaceChildren(...[
+      ctx.embedded ? null : el('div', { class: 'voices-top' }, [back, title]),
       el('p', { class: 'dev-group-hint voices-intro', text: t('voices.intro') }),
       el('section', { class: 'dev-group' }, [el('h3', { class: 'dev-group-title', text: t('voices.yours') }), listBody]),
       el('section', { class: 'dev-group' }, [el('h3', { class: 'dev-group-title', text: t('voices.builtin') }), builtinBody]),
       el('section', { class: 'dev-group' }, [el('h3', { class: 'dev-group-title', text: t('voices.add') }), addBody]),
       engine,
-    );
+    ].filter(Boolean));
     renderAdd(addBody);
-    back.focus();
+    if (!ctx.embedded) back.focus();
     await refresh();
   }
 
@@ -141,14 +166,20 @@ export function createVoicesPane(pane, ctx) {
     }
     if (!host) return;
     const defaultVoice = (st && st.default_voice) || (data.default ? data.default : '');
+    const stockId = (st && st.stock_voice) || null;
     const voices = data.voices || [];
-    if (!voices.length) {
-      listBody.replaceChildren(el('div', { class: 'dev-row' }, [el('span', { class: 'dev-row-text' }, [
-        el('strong', { text: t('voices.none') }),
-        el('span', { class: 'dev-row-hint', text: t('voices.none_hint') }),
-      ])]));
+    // The stock voice last: it is the fallback, not one of "yours".
+    const ordered = voices.filter((v) => !isStock(v, stockId)).concat(voices.filter((v) => isStock(v, stockId)));
+    if (!ordered.some((v) => !isStock(v, stockId))) {
+      const builtin = !!(st && (st.builtin_voices || []).length);
+      ordered.unshift(null);
+      listBody.replaceChildren(...ordered.map((v) => (v ? voiceRow(v, defaultVoice, stockId)
+        : el('div', { class: 'dev-row' }, [el('span', { class: 'dev-row-text' }, [
+          el('strong', { text: t('voices.none') }),
+          el('span', { class: 'dev-row-hint', text: builtin ? t('voices.none_hint') : t('voices.none_hint_stock') }),
+        ])]))));
     } else {
-      listBody.replaceChildren(...voices.map((v) => voiceRow(v, defaultVoice)));
+      listBody.replaceChildren(...ordered.map((v) => voiceRow(v, defaultVoice, stockId)));
     }
     renderBuiltin(builtinBody, st, defaultVoice);
     const eng = host.querySelector('.voices-engine');
@@ -161,15 +192,17 @@ export function createVoicesPane(pane, ctx) {
     if (voices.some((v) => v.fillers && v.fillers !== 'ready')) pollTimer = setTimeout(refresh, 4000);
   }
 
-  function voiceRow(v, defaultVoice) {
+  function voiceRow(v, defaultVoice, stockId) {
     const isDefault = defaultVoice ? defaultVoice === v.id : !!v.default;
+    const stock = isStock(v, stockId);
     const base = `${API}/${encodeURIComponent(v.id)}`;
     const text = el('span', { class: 'dev-row-text' }, [
       el('strong', { dir: 'auto' }, [
-        document.createTextNode(v.name),
+        document.createTextNode(stock ? t('drive.voice_stock') : v.name),
+        stock ? el('span', { class: 'pin-toggle voices-stock', text: t('voices.stock_badge') }) : null,
         isDefault ? el('span', { class: 'pin-toggle pinned voices-default', text: t('voices.default_badge') }) : null,
       ]),
-      el('span', { class: 'dev-row-hint', text: voiceMetaLine(v, fmtDate) }),
+      el('span', { class: 'dev-row-hint', text: stock ? t('voices.stock_hint') : voiceMetaLine(v, fmtDate) }),
       v.fillers && v.fillers !== 'ready' ? el('span', { class: 'dev-row-hint', text: t('voices.fillers_pending') }) : null,
     ]);
     const test = el('button', { type: 'button', class: 'btn-secondary' }, [railIcon(['M8 5.5v13l10.5-6.5Z']), document.createTextNode(` ${t('voices.test')}`)]);
@@ -196,8 +229,10 @@ export function createVoicesPane(pane, ctx) {
       try { await voiceJson(base, { method: 'DELETE' }); refresh(); ctx.onChanged && ctx.onChanged(); }
       catch (e) { ctx.toast(e.message, true); }
     });
-    actions.append(ren, del);
-    return el('div', { class: 'dev-row dev-row-block voices-row', dataset: { id: v.id } }, [text, actions]);
+    // The stock voice ships with dispatch-voice: renaming it would not stick
+    // and deleting it only makes the package build it again.
+    if (!stock) actions.append(ren, del);
+    return el('div', { class: 'dev-row dev-row-block voices-row' + (stock ? ' voices-row-stock' : ''), dataset: { id: v.id } }, [text, actions]);
   }
 
   async function setDefault(value, isProfile) {
@@ -220,7 +255,7 @@ export function createVoicesPane(pane, ctx) {
     const list = (st && st.builtin_voices) || [];
     if (!list.length) {
       body.replaceChildren(el('div', { class: 'dev-row' }, [el('span', { class: 'dev-row-text' }, [
-        el('span', { class: 'dev-row-hint', text: t('voices.builtin_unknown') }),
+        el('span', { class: 'dev-row-hint', text: t('voices.builtin_plugin', builtinSuggestion(st)) }),
       ])]));
       return;
     }

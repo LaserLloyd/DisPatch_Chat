@@ -31,9 +31,11 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
-import { initDrive } from '../drive.js?v=4';
-import { mountDriveSettings, botVoicePill, voiceStatus } from './drive-settings.js?v=2';
-import { createVoicesPane } from './voices.js?v=2';
+import { initDrive } from '../drive.js?v=6';
+import { mountDriveSettings, voiceTabState, botVoicePill, voiceStatus, patchVoiceSettings, MIC_ICON } from './drive-settings.js?v=4';
+// Drive mode's advanced pieces as opt-in tools (Voice cloning, Built-in
+// voices, Voice lab). The Voices manager (voices.js) is mounted by it.
+import { mountVoiceTool, unmountVoiceTool, VOICE_TOOLS } from './voice-tools.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -46,8 +48,8 @@ import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
-  onHost, toolOpen,
-} from './tools.js?v=10';
+  onHost, toolOpen, findTool, toolTitle, toolGlyph,
+} from './tools.js?v=11';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';
@@ -56,7 +58,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=5';
-import { aboutRow } from './about.js?v=5';
+import { aboutRow } from './about.js?v=6';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=1';
 import {
@@ -231,9 +233,9 @@ const dom = {};
  // Settings tab container. The panes for Reactions and Health are empty mount
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
- 'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
- // Drive mode (voice): the header button and the Settings → Device voices row.
- 'drive-btn', 'dev-group-voice',
+ 'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-voice', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ // Drive mode (voice): the header button, the Settings → Voice tab and its body.
+ 'drive-btn', 'stab-voice', 'dev-group-voice',
  // Locked-side one-way drop
  'drop-btn', 'drop-backdrop', 'drop-close', 'drop-list', 'drop-input',
  'drop-more', 'drop-done',
@@ -279,6 +281,9 @@ const dom = {};
  // Clients tab pane
  'clients-view', 'clients-back', 'clients-subtitle', 'clients-tabnav', 'clients-root',
  'clients-job-strip',
+ // Voice tools pane (Voice cloning / Built-in voices / Voice lab)
+ 'voice-tool-view', 'voice-tool-back', 'voice-tool-icon', 'voice-tool-title',
+ 'voice-tool-subtitle', 'voice-tool-root',
  // Locked-mode dedicated unlock button
  'unlock-btn',
 ].forEach((id) => { dom[id] = $(id); });
@@ -903,6 +908,7 @@ function builtinOn(feature) {
   if (feature === 'studioforge') return !!state.studioforgeEnabled;
   if (feature === 'mail') return !!state.mailEnabled;
   if (feature === 'practice') return !!state.clientsEnabled;
+  if (VOICE_FEATURES.has(feature)) return voiceToolOn(feature);
   return false;
 }
 
@@ -4056,9 +4062,10 @@ function syncLockNimRow() {
 // leave path has to fire on every way out of the modal, which is why
 // deactivation hangs off a MutationObserver on the backdrop rather than being
 // sprinkled through the seven places that hide it.
-const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'tools', 'theme', 'device', 'security'];
+const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'tools', 'theme', 'device', 'voice', 'security'];
 // The four that live behind the PIN (Tools joined 2026-09-25). `admin-only` in the markup is the class;
-// this is the list applyAuthChrome() walks.
+// this is the list applyAuthChrome() walks. Voice is unlocked-only too, but it
+// also depends on the server (is voice installed?), so applyVoiceTab() owns it.
 const ADMIN_TABS = ['reactions', 'health', 'ai', 'tools'];
 let settingsTab = 'bots';
 
@@ -4074,7 +4081,6 @@ function settingsOpen(id = null) {
 /** Tear down whatever the ACTIVE tab has running. Idempotent by design: it is
  *  called on every tab switch and again when the modal closes. */
 function deactivateSettingsTab() {
-  if (settingsTab === 'device' && voicesPane && voicesPane.isOpen()) voicesPane.close();
   if (settingsTab === 'health') unmountDashboard();
   if (settingsTab === 'reactions') unmountReactionManager();
 }
@@ -4154,6 +4160,12 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       // is on the control shows what is true (avatars are minimal) and refuses
       // to be the thing that changes it.
       syncMinimalAvatarRow();
+      break;
+    case 'voice':
+      // Paint from what we have, then re-read the status: models downloaded
+      // (or a voice added elsewhere) since the last probe should show here.
+      renderDriveSettings();
+      refreshVoiceStatus();
       break;
     case 'security':
       activateSecurityPane();
@@ -5017,6 +5029,7 @@ function closeToolPanes(except) {
   if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
   if (mailOpen && except !== 'mail') closeMailView();
   if (clientsOpen && except !== 'clients') closeClientsView();
+  if (voiceToolOpen && except !== 'voicetool') closeVoiceToolView();
 }
 
 function openHarnessView() {
@@ -6768,6 +6781,12 @@ function modalFocusables(root) {
 }
 function focusIntoModal(backdrop) {
   const foci = modalFocusables(backdrop);
+  // A modal opened straight onto a tab (Settings → Voice from the Drive quick
+  // sheet, → Device from the palette) lands on THAT tab, the roving tabindex's
+  // one stop. Focusing the first tab instead also scrolled the phone's tab
+  // strip back to its start, hiding the tab that had just been opened.
+  const activeTab = foci.find((f) => f.getAttribute('role') === 'tab' && f.getAttribute('aria-selected') === 'true');
+  if (activeTab) { try { activeTab.focus(); } catch { /* ignore */ } return; }
   // Skip a leading Close/Dismiss ✕ so the user doesn't land on "close".
   // aria-label is translated now, so it cannot be string-matched. The element id
   // and the translation KEY are the two identifiers that survive a locale switch.
@@ -6896,6 +6915,9 @@ function wireEvents() {
       studioforge: openStudioForgeView,
       mail: openMailView,
       practice: openClientsPanel,
+      voice_cloning: () => openVoiceToolView('voice-cloning'),
+      voice_builtin: () => openVoiceToolView('voice-builtin'),
+      voice_lab: () => openVoiceToolView('voice-lab'),
     },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
@@ -6929,6 +6951,10 @@ function wireEvents() {
         refreshMailFeature();
         refreshClientsFeature();
       });
+      // A voice tool switched on/off: the rail (builtinOn) and Settings →
+      // Voice's "Manage voices" row follow the new list.
+      refreshVoiceStatus({ force: true });
+      if (voiceToolOpen && !voiceToolOn(VOICE_TOOLS[voiceToolOpen])) leaveToolPanes();
     },
   });
 
@@ -7197,12 +7223,17 @@ function applyAuthChrome() {
 // drive.js owns the overlay, the mic and the /ws/voice socket. This is only
 // the wiring: is voice on (server says so, unlocked tier), which thread, which
 // bot. A locked device never asks — /api/voice is unlocked-only server-side.
+//
+// Voice is optional (2026-10-10): Settings → Voice opens with an on/off
+// switch (server-wide, off on a fresh install). Off = no Drive button, and
+// the tab shows only the switch and what turning it on needs. The advanced
+// pieces are opt-in tools (js/voice-tools.js), opened below like Clients.
 let drive = null;
 let voiceOn = false;
+let voiceTab = 'none';       // voiceTabState(): 'none' | 'forced' | 'off' | 'setup' | 'on'
 let voiceProbe = null;
 let voiceSt = null;          // the last /api/voice/status (unlocked tier only)
 let voiceBots = [];          // /api/bots/all (carries `voice`), fetched once voice is on
-let voicesPane = null;
 
 function refreshDrive() {
   if (!dom['drive-btn']) return;
@@ -7230,69 +7261,196 @@ function refreshDrive() {
   drive.refresh();
 }
 
-/** Settings → Device, scrolled to the Drive mode group. */
+/** Settings → Voice (the Drive quick sheet's "All Drive settings"). */
 async function openDriveSettings() {
   if (state.decoy) return;
-  if (!settingsOpen()) await openBotManager('device');
-  else await setSettingsTab('device');
-  const g = dom['dev-group-voice'];
-  if (g && !g.hidden) { try { g.scrollIntoView({ block: 'start' }); } catch { /* ignore */ } }
+  if (!settingsOpen()) await openBotManager('voice');
+  else await setSettingsTab('voice');
 }
 
-/** (Re)build Settings → Device → Drive mode from the last voice status. */
+/** Show the Settings → Voice tab whenever the server answers the voice
+ *  status (the switch lives there, so it shows while voice is off too),
+ *  never on a locked device. Leaving the tab while it disappears lands on
+ *  Device, its neighbour. */
+function applyVoiceTab() {
+  const b = dom['stab-voice'];
+  if (!b) return;
+  const show = !state.decoy && voiceTab !== 'none';
+  b.classList.toggle('hidden', !show);
+  if (!show) {
+    // Same rule as the admin tabs: never leave the modal parked on a tab that
+    // is gone, open or not (the next open would otherwise start there).
+    if (settingsTab === 'voice') setSettingsTab(state.decoy ? 'bots' : 'device');
+  }
+  updateTabStripEdges();
+}
+
+/** The Voice cloning tool is switched on (tools.yaml) AND installed, so
+ *  Settings → Voice may offer "Manage voices". */
+function cloningToolReady() {
+  const row = findTool('voice-cloning');
+  return !!(row && row.enabled === true && voiceSt && voiceSt.plugins
+    && voiceSt.plugins.cloning && voiceSt.plugins.cloning.ready);
+}
+
+/** Save the switch. True on success; the tab and Drive follow the fresh status. */
+async function setVoiceEnabled(on) {
+  try {
+    await patchVoiceSettings({ enabled: on });
+  } catch (e) {
+    toast(e && e.status === 409 ? t('drive.switch_forced_error') : t('drive.err_save'), true);
+    return false;
+  }
+  toast(on ? t('drive.switched_on') : t('drive.switched_off'));
+  if (!on && drive && drive.close) drive.close();
+  await refreshVoiceStatus({ force: true });
+  return true;
+}
+
+/** (Re)build Settings → Voice from the last voice status. */
 function renderDriveSettings() {
   const g = dom['dev-group-voice'];
   if (!g) return;
-  if (!voiceOn || state.decoy) { g.hidden = true; return; }
-  // The Voices manager stands in for the whole Device pane while it is open;
-  // a status refresh underneath it rebuilds the rows but must not unhide them.
-  if (!(voicesPane && voicesPane.isOpen())) g.hidden = false;
+  applyVoiceTab();
+  if (state.decoy || voiceTab === 'none') { g.replaceChildren(); g.hidden = true; return; }
+  g.hidden = false;
   mountDriveSettings(g, {
     status: voiceSt,
     bots: () => (bmBots.length ? bmBots : state.bots),
-    openVoices: () => {
-      if (!voicesPane) {
-        voicesPane = createVoicesPane(dom['spane-device'], {
-          toast, confirm: uiConfirm, prompt: uiPrompt,
-          onChanged: () => { refreshVoiceStatus(); },
-        });
-      }
-      voicesPane.open();
+    setEnabled: setVoiceEnabled,
+    cloning: cloningToolReady(),
+    openCloning: async () => {
+      if (settingsOpen()) await closeBotManager();
+      if (settingsOpen()) return;          // "keep editing" won the discard prompt
+      openTool('voice-cloning');
     },
     toast,
   });
 }
 
-/** Re-read the voice status after a change (voices added, default moved). */
-function refreshVoiceStatus() {
-  if (state.decoy || !voiceOn) return;
-  voiceStatus().then((st) => { voiceSt = st; renderDriveSettings(); }).catch(() => {});
+/** Re-read the voice status after a change (switch, voices, tools). */
+function refreshVoiceStatus({ force = false } = {}) {
+  if (state.decoy) return Promise.resolve();
+  return voiceStatus().then((st) => {
+    if (state.decoy) return;           // locked while the request was out
+    // Unchanged: keep the rows as they are (a focused control) rather than
+    // rebuilding them under the user's finger.
+    if (!force) { try { if (voiceSt && JSON.stringify(st) === JSON.stringify(voiceSt)) return; } catch { /* rebuild */ } }
+    applyVoiceStatus(st);
+  }).catch(() => {});
+}
+
+function applyVoiceStatus(st) {
+  const was = voiceOn;
+  voiceSt = st;
+  voiceTab = state.decoy ? 'none' : voiceTabState(st);
+  voiceOn = !state.decoy && !!(st && st.enabled);
+  // voice.css also styles Settings → Voice and the voice tools.
+  if (voiceTab !== 'none') loadStyle('/static/voice.css?v=4');
+  renderDriveSettings();
+  if (was !== voiceOn) {
+    // Voice came on since the probe: Drive needs the admin roster too.
+    if (voiceOn) api.allBots().then((r) => { voiceBots = (r.bots || []).slice(); refreshDrive(); }).catch(() => {});
+    if (!voiceOn && drive && drive.close) drive.close();
+    refreshDrive();
+  }
+  renderToolRail();
 }
 
 function probeVoice() {
   if (state.decoy) {
     voiceOn = false;
+    voiceTab = 'none';
     voiceSt = null;
     if (drive && drive.close) drive.close();
-    if (voicesPane && voicesPane.isOpen()) voicesPane.close();
-    if (dom['dev-group-voice']) dom['dev-group-voice'].hidden = true;
+    renderDriveSettings();             // hides the Voice tab and empties its pane
     refreshDrive();
     return;
   }
   if (voiceProbe) return;
   voiceProbe = voiceStatus()
-    .then((st) => {
-      voiceOn = !!(st && st.enabled);
-      voiceSt = voiceOn ? st : null;
-      if (voiceOn) {
-        loadStyle('/static/voice.css?v=2');
-        // Unlocked tier (voice is), so the admin roster is ours to read.
-        api.allBots().then((r) => { voiceBots = (r.bots || []).slice(); refreshDrive(); }).catch(() => {});
-      }
-      renderDriveSettings();
-    })
-    .catch(() => { voiceOn = false; voiceSt = null; renderDriveSettings(); })
+    .then((st) => { if (!state.decoy) applyVoiceStatus(st); })
+    .catch(() => { voiceOn = false; voiceTab = 'none'; voiceSt = null; renderDriveSettings(); })
     .finally(() => { voiceProbe = null; refreshDrive(); });
+}
+
+// ===================== Voice tools =====================
+// The three opt-in builtins (tools.yaml `voice-cloning`, `voice-builtin`,
+// `voice-lab`): one native pane, #voice-tool-view, whose body
+// js/voice-tools.js fills. Same chrome and rules as the Clients pane: unlocked
+// only, never in Safe Mode, `tool-full` on <body> while open. A tool is on
+// when its row says so; the pane itself explains a missing package.
+let voiceToolOpen = null;    // the open voice tool's id, or null
+const VOICE_FEATURES = new Set(Object.values(VOICE_TOOLS));
+
+/** Is the voice tool with this feature switched on for this session? */
+function voiceToolOn(feature) {
+  if (state.decoy) return false;
+  const id = Object.keys(VOICE_TOOLS).find((k) => VOICE_TOOLS[k] === feature);
+  const row = id ? findTool(id) : null;
+  return !!(row && row.enabled === true);
+}
+
+function voiceToolCtx() {
+  return {
+    toast,
+    confirm: uiConfirm,
+    prompt: uiPrompt,
+    onChanged: () => { refreshVoiceStatus(); },
+    openVoiceSettings: () => { openDriveSettings(); },
+  };
+}
+
+function paintVoiceToolHead(id) {
+  const tool = findTool(id) || { id, kind: 'builtin', builtin_feature: VOICE_TOOLS[id] };
+  dom['voice-tool-title'].textContent = toolTitle(tool);
+  dom['voice-tool-subtitle'].textContent = t(id === 'voice-cloning' ? 'vtools.cloning_sub'
+    : id === 'voice-builtin' ? 'vtools.builtin_sub' : 'vtools.lab_sub');
+  dom['voice-tool-icon'].replaceChildren(toolGlyph(tool));
+  return tool;
+}
+
+function openVoiceToolView(id) {
+  if (state.decoy || !voiceToolOn(VOICE_TOOLS[id])) return;
+  closeToolPanes('voicetool');
+  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
+  state.selectedBotId = id;
+  voiceToolOpen = id;
+  renderSidebar();
+  const tool = paintVoiceToolHead(id);
+  // The thread column (phone Chats tab) shows the same placeholder a tool gets.
+  dom['tl-botname'].textContent = toolTitle(tool);
+  dom['tl-model'].textContent = t('tools.session_panel_title');
+  dom['threads'].replaceChildren(el('div', { class: 'empty-list terminal-session-note' }, [
+    el('div', { class: 'empty-emoji' }, [toolGlyph(tool)]),
+    el('p', { text: t('tools.session_panel_body') }),
+  ]));
+  dom['voice-tool-view'].classList.remove('hidden');
+  document.body.classList.add('tool-full');
+  if (isMobile()) navigate('chat');
+  loadStyle('/static/voice.css?v=4');
+  dom['voice-tool-root'].scrollTop = 0;
+  mountVoiceTool(dom['voice-tool-root'], id, voiceToolCtx());
+}
+
+function closeVoiceToolView() {
+  voiceToolOpen = null;
+  unmountVoiceTool();
+  document.body.classList.remove('tool-full');
+  dom['voice-tool-view'].classList.add('hidden');
+  dom['voice-tool-root'].replaceChildren();
+}
+
+/** Language change: the pane's words are built in JS, so rebuild them. */
+function repaintVoiceTool() {
+  if (!voiceToolOpen) return;
+  paintVoiceToolHead(voiceToolOpen);
+  mountVoiceTool(dom['voice-tool-root'], voiceToolOpen, voiceToolCtx());
+}
+
+function wireVoiceToolView() {
+  if (!dom['voice-tool-view']) return;
+  dom['voice-tool-back'].addEventListener('click', () => leaveToolPanes());
 }
 
 // Draw the pinned settings onto the rail. Kept as one call site so every
@@ -7929,6 +8087,7 @@ function iconifyChrome() {
     ['#stab-tools', RAIL_ICONS.tools, '.stab-glyph'],
     ['#stab-theme', RAIL_ICONS.palette, '.stab-glyph'],
     ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
+    ['#stab-voice', MIC_ICON, '.stab-glyph'],
     ['#stab-security', RAIL_ICONS.shield, '.stab-glyph'],
     // Chat header + thread list.
     ['#back-btn', RAIL_ICONS.back, null],
@@ -8701,11 +8860,13 @@ function reRenderForLocale() {
   if (open('botmanager-backdrop')) {
     renderBotManager();
     if (settingsTab === 'device') mountLanguagePicker();
+    if (settingsTab === 'voice') renderDriveSettings();
     if (settingsTab === 'security') renderSecurityStrings();
     // The Health pane is built inside dashboard.js (same story as the Reaction
     // Manager): nothing in `dom` describes its labels, so it repaints itself.
     if (settingsTab === 'health') repaintDashboard();
   }
+  if (voiceToolOpen) repaintVoiceTool();
   if (open('companions-backdrop')) renderCompanions();
   if (open('fileserver-backdrop')) renderFileServer();
   // The Reaction Manager's contents are built inside reactions.js, so nothing
@@ -8771,6 +8932,7 @@ async function init() {
   wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
   wireMailView();
   wireClientsView();
+  wireVoiceToolView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread

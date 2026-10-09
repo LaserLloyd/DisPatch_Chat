@@ -28,7 +28,7 @@ import { el, railIcon, RAIL_ICONS, acquireInert, releaseInert } from './js/util.
 import {
   PATIENCE_PRESETS, loadDriveSettings, onDriveSettings, startPayload,
   buildQuickSheet, MIC_ICON,
-} from './js/drive-settings.js?v=2';
+} from './js/drive-settings.js?v=4';
 
 export { PATIENCE_PRESETS };
 
@@ -52,24 +52,59 @@ export const UNDO_MS = 8000;
 /**
  * What to do after the voice socket closed (contract + amendment B2):
  *   1008  refused (locked / not allowed)      → stop, say why
- *   1013  voice unavailable on the server     → stop, say why (no retry loop)
+ *   1013  voice unavailable on the server     → stop, say why (no retry loop);
+ *         the reason "Voice is turned off …" means the switch is off
  *   4001  replaced by a newer socket          → close quietly
  *   1011  a server-side worker died           → retry with backoff (a fresh
  *         session is fine; the driver is told what happened meanwhile)
  *   1001  heartbeat lost / else the network   → retry with backoff
  */
-export function reconnectDecision(code) {
+export function reconnectDecision(code, why = '') {
   if (code === 1008) return { retry: false, reason: 'refused' };
+  // The server names the switch when voice is simply turned off (app/voice/
+  // routes.py OFF_SETTINGS / OFF_SERVER); the driver gets its own words.
+  if (code === 1013 && /^Voice is turned off/i.test(String(why || ''))) return { retry: false, reason: 'voice_off' };
   if (code === 1013) return { retry: false, reason: 'unavailable' };
   if (code === 4001) return { retry: false, reason: 'replaced' };
   if (code === 1011) return { retry: true, reason: 'internal' };
   return { retry: true, reason: 'network' };
 }
 
+/** "Heard in 420 ms · Reply started in 1.6 s" from the last `metrics`
+ *  frames ({heard, first} in ms, either may be null); '' when nothing yet. */
+export function timingsLine(times) {
+  const fmt = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+  const parts = [];
+  if (times && typeof times.heard === 'number') parts.push(t('drive.timing_heard', { t: fmt(times.heard) }));
+  if (times && typeof times.first === 'number') parts.push(t('drive.timing_first', { t: fmt(times.first) }));
+  return parts.join(' · ');
+}
+
 /** ws(s)://host/ws/voice/<thread> for the page's own origin. */
-export function voiceUrl(loc, threadId) {
+export function voiceUrl(loc, threadId, device = '') {
   const proto = loc.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${loc.host}/ws/voice/${encodeURIComponent(threadId)}`;
+  const q = device ? `?d=${encodeURIComponent(device)}` : '';
+  return `${proto}://${loc.host}/ws/voice/${encodeURIComponent(threadId)}${q}`;
+}
+
+export const DEVICE_KEY = 'dispatch-drive-device';
+
+/**
+ * This browser's Drive device id: random, kept in localStorage. On an install
+ * WITHOUT a PIN there is no session to tell devices apart, so the server
+ * counts voice sockets per device id instead (a newer socket from the same
+ * device replaces its older one; another device never does). Not a secret
+ * and not an identity: with a PIN set the server ignores it.
+ */
+export function driveDeviceId(storage = globalThis.localStorage) {
+  try {
+    let id = storage && storage.getItem(DEVICE_KEY);
+    if (id && /^[A-Za-z0-9-]{8,64}$/.test(id)) return id;
+    const c = globalThis.crypto;
+    id = c && c.randomUUID ? c.randomUUID() : `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    if (storage) storage.setItem(DEVICE_KEY, id);
+    return id;
+  } catch { return ''; }
 }
 
 /** Can Drive mode open for this thread at all? (The server re-checks.) */
@@ -347,7 +382,7 @@ let opening = false;  // set synchronously by openDrive: a double tap opens one
  *   getThread() -> {id, bot_id, title} | null, getBot(id) -> bot | null,
  *   isLocked() -> bool, toast(msg, isError), getAvatar(thread, bot) ->
  *   {src, letter}, voiceStatus() -> /api/voice/status | null,
- *   openDriveSettings() -> Settings → Device → Drive mode.
+ *   openDriveSettings() -> Settings → Voice.
  * Call refresh() whenever the open thread or the lock state changes.
  */
 export function initDrive(button, ctx) {
@@ -465,7 +500,9 @@ export function openDrive(thread, ctx) {
   const stateWord = el('div', { class: 'drive-state', 'aria-hidden': 'true' });
   const hint = el('div', { class: 'drive-hint', 'aria-hidden': 'true' });
   const notice = el('div', { class: 'drive-notice', role: 'alert', hidden: '' });
-  const hero = el('div', { class: 'drive-hero' }, [ring, stateWord, hint, notice]);
+  // Voice lab's "show timings": the server's `metrics` frames, in plain words.
+  const timings = el('div', { class: 'drive-timings', 'aria-hidden': 'true', hidden: '' });
+  const hero = el('div', { class: 'drive-hero' }, [ring, stateWord, hint, notice, timings]);
 
   const you = el('p', { class: 'drive-you', dir: 'auto' });
   const them = el('p', { class: 'drive-them', dir: 'auto' });
@@ -630,6 +667,7 @@ export function openDrive(thread, ctx) {
     const msg = {
       refused: t('drive.err_refused'),
       unavailable: t('drive.err_unavailable'),
+      voice_off: t('drive.err_voice_off'),
       internal: t('drive.err_internal'),
       network: t('drive.err_network'),
       mic_denied: t('drive.err_mic_denied'),
@@ -640,6 +678,16 @@ export function openDrive(thread, ctx) {
     earcon('err');
     setState('stopped');
     showNotice(msg);
+  }
+
+  // ---- timings (Voice lab → "Show timings on the Drive screen") ----------
+  const lastTimes = { heard: null, first: null };
+  function paintTimings(m) {
+    if (typeof m.eot_to_transcript_ms === 'number') { lastTimes.heard = m.eot_to_transcript_ms; lastTimes.first = null; }
+    if (typeof m.eot_to_first_audio_ms === 'number') lastTimes.first = m.eot_to_first_audio_ms;
+    const line = timingsLine(lastTimes);
+    timings.textContent = line;
+    timings.hidden = !settings.showTimings || !line;
   }
 
   // ---- duck: the driver may be talking over the reply --------------------
@@ -734,7 +782,7 @@ export function openDrive(thread, ctx) {
     ready = false;
     player.resetGen();
     pairer.reset();
-    const sock = new WebSocket(voiceUrl(location, thread.id));
+    const sock = new WebSocket(voiceUrl(location, thread.id, driveDeviceId()));
     ws = sock;
     sock.binaryType = 'arraybuffer';
     sock.onopen = () => {
@@ -754,7 +802,7 @@ export function openDrive(thread, ctx) {
       let m; try { m = JSON.parse(e.data); } catch { return; }
       onFrame(m);
     };
-    sock.onclose = (e) => { if (ws === sock) onSocketClosed(e.code); };
+    sock.onclose = (e) => { if (ws === sock) onSocketClosed(e.code, e.reason); };
   }
 
   /** A heartbeat miss: the socket is half-open. Abandon it and reconnect now. */
@@ -765,12 +813,12 @@ export function openDrive(thread, ctx) {
     onSocketClosed(1006);
   }
 
-  function onSocketClosed(code) {
+  function onSocketClosed(code, why = '') {
     hb.stop();
     ready = false;
     pairer.reset();
     if (closed || state === 'stopped' || state === 'locked') return;
-    const d = reconnectDecision(code);
+    const d = reconnectDecision(code, why);
     if (d.reason === 'replaced') {
       // Another tab or device took over this session's voice: leave quietly.
       close({ quiet: true });
@@ -794,6 +842,9 @@ export function openDrive(thread, ctx) {
   // ---- incoming -----------------------------------------------------------
   function onAudio(h, pcm) {
     if (h.message_id && h.kind === 'reply') heard.note(h.message_id);
+    // The answer has started: taking the question back now would leave the
+    // reply orphaned in the thread (the server refuses it too).
+    if (h.kind === 'reply' && !undoBtn.hidden) hideUndo();
     if (h.kind === 'reply' && h.text && settings.captions) {
       const span = el('span', { class: 'drive-sentence', text: `${h.text} ` });
       them.append(span);
@@ -851,6 +902,7 @@ export function openDrive(thread, ctx) {
         break;
       case 'metrics':
         if (globalThis.console && console.debug) console.debug('[drive] metrics', m);
+        paintTimings(m);
         break;
       case 'locked':
         showNotice(t('drive.locked_notice'));
@@ -1041,6 +1093,7 @@ export function openDrive(thread, ctx) {
     settings = next;
     if (listening) sendStart();
     talk.hidden = !settings.captions;
+    if (!settings.showTimings) timings.hidden = true;
     if (prev.screenOn !== next.screenOn) {
       if (next.screenOn) holdWakeLock(); else { try { wakeLock && wakeLock.release(); } catch { /* gone */ } wakeLock = null; }
     }

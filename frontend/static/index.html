@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=95" />
+  <link rel="stylesheet" href="/static/app.css?v=97" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -604,6 +604,25 @@
         <div class="clients-job-strip hidden" id="clients-job-strip" aria-live="polite"></div>
       </div>
 
+      <!-- Voice tools (js/voice-tools.js): Voice cloning, Built-in voices and
+           Voice lab, the opt-in builtins of tools.yaml. One native pane for
+           the three, same terminal-view chrome as Clients; main.js opens it
+           (unlocked only, never in Safe Mode) and voice-tools.js fills the
+           body with Settings-style groups. -->
+      <div class="terminal-view voice-tool-view hidden" id="voice-tool-view">
+        <header class="terminal-head">
+          <button class="back-btn" id="voice-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini tool-avatar-mini" id="voice-tool-icon" aria-hidden="true"></span>
+          <div class="terminal-head-info">
+            <div class="terminal-title" id="voice-tool-title"></div>
+            <div class="muted terminal-subtitle" id="voice-tool-subtitle"></div>
+          </div>
+        </header>
+        <div class="terminal-body voice-tool-body">
+          <div class="voice-tool-root" id="voice-tool-root"></div>
+        </div>
+      </div>
+
       <!-- Generic tool pane (js/tools.js): ONE view, reused for every app /
            static / url tool. Same terminal-view chrome as the builtin panes
            above; opening it puts body.tool-full on, so it fills the content
@@ -683,6 +702,11 @@
         <button class="settings-tab admin-only" id="stab-tools" role="tab" data-tab="tools" aria-selected="false" aria-controls="spane-tools" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="tools.settings_tab">Tools</span></button>
         <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
         <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
+        <!-- Voice (Drive mode): unlocked tier only, and only when the server
+             answers /api/voice/status (the on/off switch lives here, so the
+             tab shows while voice is off too). Starts hidden; main.js
+             applyVoiceTab() shows it and hides it again the moment the device locks. -->
+        <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
       </div>
 
@@ -796,13 +820,6 @@
           <div class="dev-group-body" id="dev-body-bar"></div>
         </section>
 
-        <!-- Drive mode (js/drive-settings.js builds the groups: voice, listening,
-             replies, this device + Advanced). Unlocked only, and hidden unless
-             the server reports voice enabled (main.js probeVoice). The Voices
-             manager opens in place of this pane (js/voices.js); dispatch-voice's
-             standalone /api/voices/ui page stays served for CLI use, unlinked. -->
-        <div class="admin-only drive-settings" id="dev-group-voice" hidden></div>
-
         <section class="dev-group" id="dev-group-files" aria-labelledby="dev-h-files">
           <h3 class="dev-group-title" id="dev-h-files" data-i18n="viewer.settings_title">Local viewer</h3>
           <div class="dev-group-body" id="dev-body-files"></div>
@@ -825,6 +842,19 @@
           <h3 class="dev-group-title" id="dev-h-about" data-i18n="about.title">About</h3>
           <div class="dev-group-body" id="dev-body-about"></div>
         </section>
+      </section>
+
+      <!-- ---- Voice: Drive mode (js/drive-settings.js builds the groups). On
+           top, the on/off switch (server-wide, off on a fresh install). While
+           voice is off or not ready the pane shows only the switch and what
+           turning it on needs; once it works: voice, listening, replies, this
+           device. The advanced pieces (Voice cloning, Built-in voices, Voice
+           lab) are opt-in tools, #voice-tool-view; "Manage voices" links to
+           Voice cloning only while that tool is on. Moved here from the
+           Device tab 2026-10-10. ---- -->
+      <section class="settings-pane hidden" id="spane-voice" role="tabpanel" aria-labelledby="stab-voice" tabindex="0">
+        <p class="muted modal-hint" data-i18n="settings.voice_hint">How Drive mode listens and speaks. The switch, the voice and its speed are shared by everyone on this server; everything else applies to this device only.</p>
+        <div class="drive-settings" id="dev-group-voice" hidden></div>
       </section>
 
       <!-- ---- Security & PIN ---- -->
@@ -1204,6 +1234,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=122"></script>
+  <script type="module" src="/static/js/main.js?v=124"></script>
 </body>
 </html>

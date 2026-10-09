@@ -3,11 +3,15 @@
 Contract: ``docs/design/2026-09-25-tools-plugins.md`` (apps:
 ``docs/design/2026-09-25-apps.md``). Four kinds of row:
 
-  * **builtin** — the four panes that already exist (Harness, StudioForge,
-    Emails, Clients). The manifest only switches them off:
-    ``enabled: false`` makes main's ``*_available()`` false, so their routes
-    404 and their feature flag drops out of ``/api/auth/status``. No entry =
-    behaviour as before.
+  * **builtin** — the panes that ship with DisPatch. Two families:
+    the four that already existed (Harness, StudioForge, Emails, Clients),
+    which the manifest only switches OFF (``enabled: false`` makes main's
+    ``*_available()`` false, so their routes 404 and their feature flag drops
+    out of ``/api/auth/status``; no entry = behaviour as before); and the
+    OPT-IN voice tools (Voice cloning, Built-in voices, Voice lab), which are
+    off until a row says ``enabled: true`` (``OPT_IN`` below; no entry = off,
+    their routes 404). Both are unlocked-tier only and never listed for Safe
+    Mode.
   * **static** — a directory served read-only at ``/tools/<id>/``. This is a
     disk-read surface, so it is written around REFUSING, the same way
     ``localview`` is (and it borrows localview's deny list rather than keeping
@@ -105,11 +109,19 @@ BUILTINS: dict[str, tuple[str, str, str]] = {
     "studioforge-panel": ("studioforge", "StudioForge", "🎛️"),
     "mail-panel": ("mail", "Emails", "✉️"),
     "clients-panel": ("practice", "Clients", "👥"),
+    # Drive mode's advanced pieces (docs/voice-drive-mode.md, "Voice tools").
+    # Opt-in: see OPT_IN.
+    "voice-cloning": ("voice_cloning", "Voice cloning", "🎙️"),
+    "voice-builtin": ("voice_builtin", "Built-in voices", "🔊"),
+    "voice-lab": ("voice_lab", "Voice lab", "🧪"),
     # The Job Board was a builtin here for one day (2026-09-25) and is now an
     # APP (apps/jobboard/, loaded by apps_loader) — its switch is a `kind: app`
     # row, not a builtin one.
 }
 FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
+#: Builtins that are OFF unless the manifest has a row with ``enabled: true``.
+#: A missing row (or a missing tools.yaml) means the tool simply is not there.
+OPT_IN = frozenset({"voice-cloning", "voice-builtin", "voice-lab"})
 
 #: How a tool opens: in the pane, or launched in its own browser tab.
 OPEN_MODES = ("frame", "window")
@@ -531,6 +543,15 @@ def builtin_enabled(tool_id: str) -> bool | None:
     return t.enabled
 
 
+def builtin_switch(tool_id: str) -> bool:
+    """Is this builtin switched on? No entry means on for the original panes
+    (the env flags decide) and OFF for an opt-in tool (``OPT_IN``)."""
+    v = builtin_enabled(tool_id)
+    if tool_id in OPT_IN:
+        return v is True
+    return v is not False
+
+
 def builtin_open(tool_id: str) -> str:
     """How a builtin opens: the manifest's `open`, else its default."""
     t = get_tool(tool_id)
@@ -588,7 +609,7 @@ def _builtin_available(tool_id: str) -> bool:
 
 
 def builtin_resolved(tool_id: str) -> bool:
-    return _builtin_available(tool_id) and builtin_enabled(tool_id) is not False
+    return _builtin_available(tool_id) and builtin_switch(tool_id)
 
 
 def _reset_state() -> None:
@@ -794,7 +815,7 @@ def _builtin_row(tid: str) -> dict:
             # `enabled` is the manifest SWITCH (what a Settings save round-trips),
             # never the resolved value — otherwise saving while a feature is
             # merely unavailable would persist `enabled: false` into tools.yaml.
-            "enabled": builtin_enabled(tid) is not False, "safe": False,
+            "enabled": builtin_switch(tid), "safe": False,
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
             "open": builtin_open(tid)}
@@ -1066,6 +1087,10 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
         validated = validate_tools(cleaned, check_fs=fs_rows)
     except ToolValidationError as e:
         return _err422(e)
+    # An opt-in tool switched off is the same as no row; leave none behind,
+    # so a Settings save never fills tools.yaml with rows nobody wrote.
+    validated = [t for t in validated
+                 if not (t.kind == "builtin" and t.id in OPT_IN and not t.enabled)]
     write_tools(validated)
     return {"tools": list_out(True), "path": str(manifest_path())}
 

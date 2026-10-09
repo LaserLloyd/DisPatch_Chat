@@ -246,7 +246,7 @@ body.drive-open { overflow: hidden; }
 .dev-row > .drive-range-value { order: 3; min-width: 4.5em; font-size: 12.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .drive-note { display: block; }
 
-/* The Device tab's switch, for rows outside #spane-device (the quick sheet). */
+/* The Settings switch, for rows outside #spane-device / #spane-voice (the quick sheet). */
 .dev-row > input.dev-switch {
   -webkit-appearance: none; appearance: none; order: 3;
   width: 44px; height: 26px; margin: 0; flex: none; cursor: pointer;
@@ -274,17 +274,43 @@ body.drive-open { overflow: hidden; }
 .drive-row-link > .rail-icon { width: 18px; height: 18px; flex: none; color: var(--text-secondary); }
 [dir="rtl"] .drive-row-link > .rail-icon { transform: scaleX(-1); }
 
-/* ------------------------------------------ Settings → Device → Drive mode */
+/* ------------------------------------------------------- Settings → Voice */
 .drive-settings[hidden] { display: none; }
-.drive-advanced > summary { display: flex; align-items: center; gap: 12px; cursor: pointer; list-style: none; }
-.drive-advanced > summary::-webkit-details-marker { display: none; }
-.drive-advanced > summary::after { content: "▸"; color: var(--text-secondary); flex: none; }
-.drive-advanced[open] > summary::after { content: "▾"; }
-[dir="rtl"] .drive-advanced > summary::after { content: "◂"; }
-[dir="rtl"] .drive-advanced[open] > summary::after { content: "▾"; }
+/* Voice off or not ready: the status row under the switch (what turning it
+   on needs, and the commands). Also the voice tools' "not installed" card. */
+.drive-setup-fix { display: block; margin: 8px 0 0; }
 .drive-missing { margin: 10px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--warning-text); }
-.drive-advanced-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
-.drive-advanced-row > .drive-select { flex: 0 1 auto; min-width: 150px; }
+.voice-steps { margin-top: 10px; }
+.voice-step-where { display: block; margin: 10px 0 4px; }
+.voice-steps > .voice-step-where:first-child { margin-top: 0; }
+.voice-cmd {
+  margin: 0; padding: 8px 10px; overflow-x: auto;
+  background: var(--bg-input, var(--bg-secondary)); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+  /* Wrapped, not scrolled: a phone shows the whole command, and a copy
+     still gets it in one piece. */
+  white-space: pre-wrap; overflow-wrap: anywhere; text-align: left;
+}
+.voice-cmd > code { font: inherit; background: none; padding: 0; }
+.dev-row-block > .voice-cmd { margin-top: 6px; }
+
+/* ------------------------------------------------------ Voice tools pane */
+.vtool-loading { margin: 18px 20px; }
+.vtool-default { display: block; }
+.vtool-voice-row > .drive-preview:disabled { opacity: .5; cursor: not-allowed; }
+.vtool-heard { margin: 12px 0 0; font-size: 14px; line-height: 1.45; color: var(--text-primary); overflow-wrap: anywhere; }
+.vtool-timings > .drive-chip { background: var(--bg-input, var(--bg-secondary)); color: var(--text-secondary); border: 1px solid var(--border-strong); font-variant-numeric: tabular-nums; }
+.vtool-test-result[hidden] { display: none; }
+.voices-stock {
+  margin-inline-start: 8px; min-height: 22px; padding: 2px 9px; font-size: 11px;
+  vertical-align: middle; cursor: default;
+}
+.voices-stock:hover { background: transparent; color: inherit; }
+
+/* Drive screen: Voice lab's "show timings" line under the state word. */
+.drive-timings { font-size: 12px; line-height: 1.4; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.drive-timings[hidden] { display: none; }
 
 /* The fourth pill on a Bots-tab card: a <select> wearing .bm-safe-btn. */
 .bm-voice-pill { position: relative; max-width: 11em; }

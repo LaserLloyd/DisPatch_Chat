@@ -257,6 +257,14 @@ def test_voices_panel_refuses_locked_devices(voice_env, method, path):
 def test_voices_panel_page_serves_when_unlocked(voice_env):
     c, _ = voice_env
     unlock(c)
+    # The Voices API belongs to the opt-in Voice cloning tool: no tools.yaml
+    # row, no API (404), the same answer a builtin pane gives when it is off.
+    from app import tools
+    tools._reset_state()
+    assert c.get("/api/voices/ui").status_code == 404
+    (config.DATA_DIR / "tools.yaml").write_text(
+        "tools:\n- {id: voice-cloning, kind: builtin, enabled: true}\n")
+    tools._reset_state()
     r = c.get("/api/voices/ui")
     assert r.status_code == 200 and "<html" in r.text.lower()
     assert c.get("/api/voice/status").json()["voices_ui"] == "/api/voices/ui"

@@ -457,6 +457,9 @@ tools:
   - id: deepseek-harness     # builtins: deepseek-harness, studioforge-panel,
     kind: builtin            #   mail-panel, clients-panel
     enabled: false           # switches the builtin OFF (its routes 404)
+  - id: voice-lab            # opt-in builtins: voice-cloning, voice-builtin,
+    kind: builtin            #   voice-lab — OFF without a row like this one
+    enabled: true
   - id: jobboard             # an APP (a package under apps/<id>/)
     kind: app
     enabled: false           # switches the app OFF (its routes and page 404)
@@ -465,8 +468,20 @@ tools:
     trusted: true            # FILE-ONLY: loads its Python into the server
 ```
 
-- **builtin** entries can only switch a pane *off*; no entry (or `enabled:
-  true`) leaves the env flags in charge.
+- **builtin** entries for the four original panes can only switch a pane
+  *off*; no entry (or `enabled: true`) leaves the env flags in charge.
+- **Voice tools** (`voice-cloning`, `voice-builtin`, `voice-lab`) are
+  **opt-in** builtins: a tool is on only with a row saying `enabled: true`;
+  no row, or no `tools.yaml`, means the tool is simply not there and its
+  routes answer 404 (`/api/voices/*` for Voice cloning, `/api/voice/lab*` for
+  Voice lab). Settings → Tools can switch them on and off, and a save never
+  leaves `enabled: false` rows for them behind. Like every builtin they are
+  unlocked-tier only, never listed or served in Safe Mode, and cannot open in
+  a window. A tool whose optional package is missing (`dispatch-voice` for
+  Voice cloning, the GPL-3.0 `dispatch-voice-kokoro` plugin for Built-in
+  voices) is listed with `available: false` ("Not available on this
+  install") and, opened, says how to install it. What each tool does:
+  [voice-drive-mode.md](voice-drive-mode.md#voice-tools).
 - **open**: `frame` (the default) or `window`. `window` opens the tool in a
   new browser tab instead of framing it — for pages that send
   `X-Frame-Options`/`frame-ancestors` and refuse embedding. Allowed on static

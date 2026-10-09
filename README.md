@@ -202,11 +202,15 @@ on a phone, in a few of the ten themes.
 - **Drive mode.** Talk to a thread hands-free: DisPatch hears when you have
   finished, transcribes on the CPU, sends it like a typed message, and reads
   the reply back as it streams. Barge-in, echo rejection and a patience
-  setting for drivers who pause mid-thought. Optional: install the `voice`
-  dependency group and download the models; cloned voices come from the
-  separate `dispatch-voice` package. The Kokoro fallback voice uses a GPL-3.0
-  phonemizer at runtime (not vendored here). Unlocked tier only. See
-  [docs/voice-drive-mode.md](docs/voice-drive-mode.md).
+  setting for drivers who pause mid-thought. Optional, and off until you turn
+  it on in Settings → Voice: install the `voice` dependency group and
+  download the models first. Cloned voices and a stock synthetic voice come
+  from the separate MIT [`dispatch-voice`](https://github.com/LaserLloyd/DisPatch_Voice)
+  package (`uv run --group voice --with "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice" dispatch-voice fetch-models`
+  in `backend/`, then run DisPatch with the same `--with`). The advanced pieces (Voice
+  cloning, the optional GPL-3.0 built-in voices plugin, a Voice lab for
+  timing and a quick test) are opt-in tools you switch on in Settings →
+  Tools. Unlocked tier only. See [docs/voice-drive-mode.md](docs/voice-drive-mode.md).
 
 ## What's new in 2.0
 
@@ -453,3 +457,13 @@ The vendored third-party libraries in `frontend/static/vendor/` keep their own
 licences (MIT, BSD-3-Clause, Apache-2.0/MPL-2.0) — inventory and full licence
 texts in
 [frontend/static/vendor/README.md](frontend/static/vendor/README.md).
+
+**Drive mode (voice).** The core voice feature is MIT-compatible: the `voice`
+dependency group, the downloaded speech models (CC-BY-4.0, MIT, BSD-2) and the
+`dispatch-voice` package are all permissively licensed, so installing them
+does not change DisPatch's licence. Attribution is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Kokoro built-in voices
+are an **optional plugin licensed GPL-3.0-or-later** (`dispatch-voice-kokoro`,
+distributed and installed separately), because Kokoro's phonemizer is espeak-ng. DisPatch
+never imports it by name. See
+[docs/voice-drive-mode.md](docs/voice-drive-mode.md#licence).

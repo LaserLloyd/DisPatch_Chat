@@ -19,6 +19,11 @@
  */
 export const SOURCE_URL = 'https://github.com/LaserLloyd/DisPatch_Chat';
 
+/** Where dispatch-voice (MIT; cloned voices and the stock voice for Drive
+ *  mode) is published. Kept here so every repository URL in the shell lives
+ *  in one file; js/drive-settings.js builds its install commands from it. */
+export const VOICE_REPO_URL = 'https://github.com/LaserLloyd/DisPatch_Voice';
+
 /** Kept in step with backend/app/__init__.py `__version__`.
  *
  *  Deliberately a constant rather than a fetch: the version has to be readable

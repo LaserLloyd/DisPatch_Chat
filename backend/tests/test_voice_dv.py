@@ -50,6 +50,8 @@ def dv_env(tmp_path, monkeypatch):
     fake = FakeChatterbox()
     monkeypatch.setattr(dv.LazyEngine, "_get", lambda self: fake)
     monkeypatch.setattr(dv, "available", lambda: True)
+    # Hermetic: never see a stock voice cached in the real models dir.
+    monkeypatch.setenv("DISPATCH_VOICE_MODELS", str(tmp_path / "dv-models"))
     yield SimpleNamespace(tmp=tmp_path, engine=fake)
     registry.reset()
 
@@ -179,10 +181,90 @@ def test_builtin_or_unknown_voice_falls_back_without_cooldown(dv_env):
 def test_bot_with_a_builtin_voice_resolves_to_it(dv_env, monkeypatch):
     st = dv.store()
     make_profile(st, "real-voice", default=True)
+    registry.set_builtin_voices_provider(lambda s: [{"id": "builtin:am_michael", "name": "Michael"}])
     monkeypatch.setattr(config, "get_bot",
                         lambda b: SimpleNamespace(voice="builtin:am_michael"))
     assert dv.resolve_profile("main") == "builtin:am_michael"
     assert dv.fillers("builtin:am_michael") is None
+
+
+def test_saved_builtin_voice_without_a_provider_degrades_to_the_default(dv_env, monkeypatch):
+    """The Kokoro plugin was uninstalled: a bot saved with a built-in voice
+    speaks in the default profile instead of failing."""
+    st = dv.store()
+    make_profile(st, "real-voice", default=True)
+    monkeypatch.setattr(config, "get_bot",
+                        lambda b: SimpleNamespace(voice="builtin:am_michael"))
+    assert dv.resolve_profile("main") == "real-voice"
+    eng = dv.ChatterboxTTS()                      # last resort: no fallback behind it
+    assert len(list(eng.stream("Hello there.", "builtin:am_michael"))) > 0
+    assert dv_env.engine.calls and dv_env.engine.calls[-1][1] is st.voice("real-voice")
+
+
+# --------------------------------------------------------------------------- #
+# The stock voice (no cloned profile, no built-in voice plugin)
+# --------------------------------------------------------------------------- #
+
+dv_stock = pytest.importorskip("dispatch_voice.stock")
+
+
+class BuildingChatterbox(FakeChatterbox):
+    def build_voice(self, ref):
+        from dispatch_voice.engine import VoiceTensors
+        return VoiceTensors(np.zeros((1, 2, 4), np.float32), np.zeros((1, 3), np.int64),
+                            np.zeros((1, 192), np.float32), np.zeros((1, 5, 80), np.float32))
+
+    def synthesize(self, text, voice, stop=None, seed=None):
+        return np.zeros(2400, np.float32)
+
+
+@pytest.fixture
+def stock_env(dv_env, tmp_path, monkeypatch):
+    fake = BuildingChatterbox()
+    monkeypatch.setattr(dv.LazyEngine, "_get", lambda self: fake)
+    monkeypatch.setattr(dv, "_render_stock_extras", lambda pid: None)
+    dv_env.engine = fake
+    return dv_env
+
+
+def test_last_resort_engine_speaks_the_stock_voice(stock_env):
+    eng = dv.ChatterboxTTS()
+    assert not eng.has_fallback
+    for pid in (None, "builtin:af_heart", "no-such-voice"):
+        out = list(eng.stream("Hello there, how are you?", pid))
+        assert out, pid
+    st = dv.store()
+    assert st.get(dv_stock.STOCK_ID)["stock"] is True
+    assert dv.default_profile() is None                     # never made the default by itself
+    assert dv.resolve_profile(None) == dv_stock.STOCK_ID    # now that it exists
+
+
+def test_with_a_fallback_behind_it_unknown_voices_still_go_to_the_fallback(stock_env):
+    class Kok:
+        sample_rate = 24000
+
+        def stream(self, text, profile_id=None, stop=None):
+            yield np.ones(3, "<i2")
+
+    f = tts.FallbackTTS(dv.ChatterboxTTS(), Kok(), cooldown_s=30.0)
+    assert f.primary.has_fallback
+    for pid in (None, "builtin:af_heart", "no-such-voice"):
+        out = list(f.stream("Hello there.", pid))
+        assert len(out) == 1 and out[0].tolist() == [1, 1, 1], pid
+    assert not (dv.store().root / dv_stock.STOCK_ID).exists()   # 2.1 behaviour, no stock build
+
+
+def test_stock_voice_can_be_chosen_and_made_default(stock_env):
+    assert dv.profile_exists(dv_stock.STOCK_ID)          # built on first use
+    dv.set_default_profile(dv_stock.STOCK_ID)
+    assert dv.default_profile() == dv_stock.STOCK_ID
+    assert dv_stock.STOCK_ID in {p["id"] for p in dv.profiles()}
+
+
+def test_stock_profile_without_build_needs_the_fetched_tensors(stock_env):
+    assert dv.stock_profile(build=False) is None          # nothing cached, nothing built
+    dv_stock.build_tensors(stock_env.engine)              # what fetch-models does
+    assert dv.stock_profile(build=False) == dv_stock.STOCK_ID
 
 
 def test_default_profile_can_be_set_and_cleared(dv_env):

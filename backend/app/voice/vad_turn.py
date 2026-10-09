@@ -342,6 +342,8 @@ def build_detector(settings) -> TurnDetector:
 
 
 _SMART_TURN: dict[str, SmartTurn] = {}
+#: The start-up prewarm and a first session can both ask at once; one load.
+_SMART_TURN_LOCK = __import__("threading").Lock()
 
 
 def _shared_smart_turn(settings) -> SmartTurn | None:
@@ -349,6 +351,7 @@ def _shared_smart_turn(settings) -> SmartTurn | None:
     if not p.exists():
         return None
     key = str(p)
-    if key not in _SMART_TURN:
-        _SMART_TURN[key] = SmartTurn(p, threads=2)
-    return _SMART_TURN[key]
+    with _SMART_TURN_LOCK:
+        if key not in _SMART_TURN:
+            _SMART_TURN[key] = SmartTurn(p, threads=2)
+        return _SMART_TURN[key]

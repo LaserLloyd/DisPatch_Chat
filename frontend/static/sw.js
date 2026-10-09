@@ -2,7 +2,9 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v145';  // v145: neutral example names in drive-settings.js + locales; drive-settings.js?v=1→2, voices.js?v=1→2, drive.js?v=3→4, main.js?v=121→122, index.html.
+const CACHE = 'local-chat-v147';  // v147: voice is optional (Settings → Voice on/off switch) and its advanced pieces are opt-in tools; new js/voice-tools.js joins SHELL; drive-settings.js?v=3→4, voices.js?v=3→4, drive.js?v=5→6, voice.css?v=3→4, tools.js?v=10→11, about.js?v=5→6 (VOICE_REPO_URL), main.js?v=123→124, app.css?v=96→97, index.html, locales.
+// v146: Drive settings move to their own Settings → Voice tab; drive-settings.js?v=2→3, voices.js?v=2→3, drive.js?v=4→5, voice.css?v=2→3, main.js?v=122→123, app.css?v=95→96, index.html, locales.
+// v145: neutral example names in drive-settings.js + locales; drive-settings.js?v=1→2, voices.js?v=1→2, drive.js?v=3→4, main.js?v=121→122, index.html.
 // v144: Drive mode v2 — drive.js?v=2→3, voice-worklet.js?v=1→2, voice.css?v=1→2,
 // new js/drive-settings.js + js/voices.js join SHELL; main.js?v=120→121, app.css?v=94→95, index.html, locales.
 // v143: 2.1.0 — checklist/clients/reactions/tools ?v bumps (api.js v32 import). v142: 2.1.0 RC review — drive.js
@@ -340,7 +342,7 @@ const SHELL = [
   '/static/drive.js', '/static/voice-worklet.js', '/static/voice.css',
   // Drive mode v2 (2026-10-10): the settings rows + quick sheet, and the
   // native Voices manager. Both statically imported (main.js / drive.js).
-  '/static/js/drive-settings.js', '/static/js/voices.js',
+  '/static/js/drive-settings.js', '/static/js/voices.js', '/static/js/voice-tools.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

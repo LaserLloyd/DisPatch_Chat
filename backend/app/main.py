@@ -686,12 +686,19 @@ def _upload_ceiling(path: str) -> int | None:
     # spooled the whole body. Refuse anything bigger here, before that.
     if path in ("/api/voices", "/api/voices/analyse"):
         return VOICE_CLIP_MAX + _MULTIPART_SLACK
+    # Voice lab's quick test: raw 16 kHz PCM16, at most 10 s (the route
+    # checks the exact limit; this stops a big body before it is buffered).
+    if path == "/api/voice/lab/test":
+        return VOICE_LAB_TEST_MAX
     return None
 
 
 #: dispatch_voice.audio.MAX_UPLOAD_BYTES, restated so the ceiling holds even
 #: when that optional package is not installed.
 VOICE_CLIP_MAX = 20 * 1024 * 1024
+#: app.voice.routes.LAB_TEST_MAX_BYTES (10 s of 16 kHz PCM16), restated so the
+#: cap holds even if app/voice failed to import.
+VOICE_LAB_TEST_MAX = 16000 * 2 * 10
 
 
 @app.middleware("http")
@@ -7845,7 +7852,7 @@ async def get_all_bots(request: Request):
 
 def _check_bot_voice(voice: str) -> None:
     """422 unless ``voice`` is "" (use the default), a voice profile id, or a
-    known ``builtin:<kokoro id>``."""
+    known ``builtin:<id>`` from an installed built-in voice provider."""
     if voice == "":
         return
     try:
@@ -11065,11 +11072,35 @@ def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
 # tools.py lists the builtins with `available` = the feature exists on this
 # install regardless of the manifest switch (so the Settings toggle can say
 # "on, but not installed" instead of lying).
+def _voice_tool_installed(feature: str) -> bool:
+    """The optional package behind a voice tool is present (the tool's own
+    pane says how to install it when it is not). Voice lab ships with
+    DisPatch; it only needs app/voice to have imported."""
+    if _voice_serve is None:
+        return False
+    if feature == "voice_lab":
+        return True
+    try:
+        from .voice.config import load_settings as _vs
+        from .voice.routes import _plugins
+        p = _plugins(_vs())
+    except Exception:
+        log.exception("voice: tool probe failed")
+        return False
+    if feature == "voice_cloning":
+        return bool(p["cloning"]["installed"])
+    return bool(p["builtin"]["installed"])
+
+
 tools.set_builtin_probes({
     tools.FEATURE_TO_ID["harness"]: _harness_flag_on,
     tools.FEATURE_TO_ID["studioforge"]: _studioforge_flag_on,
     tools.FEATURE_TO_ID["mail"]: _mail_flag_on,
     tools.FEATURE_TO_ID["practice"]: _practice_flag_on,
+    # Opt-in voice tools: "available" = their package is installed.
+    tools.FEATURE_TO_ID["voice_cloning"]: lambda: _voice_tool_installed("voice_cloning"),
+    tools.FEATURE_TO_ID["voice_builtin"]: lambda: _voice_tool_installed("voice_builtin"),
+    tools.FEATURE_TO_ID["voice_lab"]: lambda: _voice_tool_installed("voice_lab"),
 })
 
 
@@ -12593,8 +12624,12 @@ def _voice_prewarm_start() -> None:
         return
     try:
         from .voice.config import load_settings as _vs
+        from .voice.routes import _APPLIED
         from .voice.routes import prewarm as _prewarm
         st = _vs()
+        # The baseline a later hand edit of voice.yaml is compared against
+        # (routes.sync_switch).
+        _APPLIED["on"] = st.switched_on
         if not (st.prewarm and st.enabled):
             return
     except Exception:
