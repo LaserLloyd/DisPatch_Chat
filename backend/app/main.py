@@ -60,6 +60,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 from . import (
+    advisor,
     apps_loader,
     auth,
     avatar_pool,
@@ -87,6 +88,7 @@ from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
+    AdvisorActionIn,
     DailyThreadIn,
     FireReactionIn,
     GenerateReactionIn,
@@ -445,6 +447,12 @@ async def _lifespan_startup(app: FastAPI) -> None:
     _track(asyncio.create_task(_image_job_loop()))
     # Backstop for answers every live path missed (see _gap_sweep_loop).
     _track(asyncio.create_task(_gap_sweep_loop()))
+    # Advisor bots: say so about requests a restart orphaned, then keep
+    # their knowledge indexes fresh. Only when an advisor is configured.
+    if advisor.advisor_bots():
+        with contextlib.suppress(Exception):
+            await advisor.recover_requests()
+        _track(asyncio.create_task(advisor.background_loop()))
     # Native gateway transport. OFF unless DISPATCH_GATEWAY_WS says otherwise,
     # so nothing about how replies arrive changes without someone deciding it.
     await _gateway_ws_start()
@@ -487,7 +495,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.0.0", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.1.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -664,7 +672,17 @@ def _upload_ceiling(path: str) -> int | None:
         return UPLOAD_MAX_IMAGE + _MULTIPART_SLACK
     if path == "/api/reactions":
         return reactions.UPLOAD_MAX + _MULTIPART_SLACK
+    # Drive mode's Voices panel (optional dispatch-voice package): a reference
+    # clip is capped at 20 MB by the package, but only AFTER the router has
+    # spooled the whole body. Refuse anything bigger here, before that.
+    if path in ("/api/voices", "/api/voices/analyse"):
+        return VOICE_CLIP_MAX + _MULTIPART_SLACK
     return None
+
+
+#: dispatch_voice.audio.MAX_UPLOAD_BYTES, restated so the ceiling holds even
+#: when that optional package is not installed.
+VOICE_CLIP_MAX = 20 * 1024 * 1024
 
 
 @app.middleware("http")
@@ -1815,6 +1833,12 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if (method, path) in _INBOUND_REACTION:
         return True
+    if (method, path) in (("GET", "/api/advisor/status"),
+                          ("POST", "/api/advisor/digest")):
+        # The nightly digest is a cron job on the box; status is what an
+        # agent or a watchdog reads. Approving a handoff is NOT here: an
+        # agent must never be able to press its own Send button.
+        return True
     if method in ("GET", "POST") and _INBOUND_IMAGE_JOB_RE.match(path):
         return True
     if method == "POST" and _INBOUND_IMAGE_JOB_CALLBACK_RE.match(path):
@@ -1881,12 +1905,21 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # discloses that address, so it is operator-only too --
                         # belt-and-braces on top of _require_studioforge.
                         "/api/harness", "/api/studioforge",
+                        # Advisor requests name what the owner asked agents
+                        # to research or do; the corpus status names paths.
+                        "/api/advisor",
                         # Emails tab: launch_url carries MailForge's one-time
                         # launcher key. Clients tab: a same-origin proxy onto
                         # the practice box's client-pipeline API. Both are
                         # unlocked-operator-only features — belt-and-braces on
                         # top of _require_mail / _require_practice.
                         "/api/mail", "/api/practice",
+                        # Drive mode: the status probe names engines, and the
+                        # Voices panel (dispatch-voice) holds recordings of a
+                        # person's voice. Belt-and-braces on top of the
+                        # _require_operator dependency on every route
+                        # (app/voice/routes.py, app/voice/dv.py).
+                        "/api/voice", "/api/voices",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
@@ -2599,6 +2632,7 @@ async def _persist_and_broadcast_message(
     thread_id: str, role: str, content: str,
     media_url: str | None = None, metadata: dict | None = None,
     source_id: str | None = None, created_at: str | None = None,
+    provisional: str | bool | None = None,
 ) -> MessageOut:
     prep = await _prepare_persist(thread_id, role, content, media_url,
                                   metadata, created_at)
@@ -2620,7 +2654,8 @@ async def _persist_and_broadcast_message(
                                metadata=metadata, source_id=source_id,
                                created_at=created_at)
     bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope the frame
-    await manager.broadcast(_landing_frame(thread_id, bot_id, msg))
+    await manager.broadcast(_landing_frame(thread_id, bot_id, msg,
+                                           provisional=provisional))
     if fired:
         await _fire_marker_reactions(fired, thread_id, bot_id,
                                      autopilot=prep.autopilot)
@@ -2631,21 +2666,40 @@ async def _persist_and_broadcast_message(
 
 
 def _landing_frame(thread_id: str, bot_id: str | None,
-                   msg: MessageOut) -> dict:
+                   msg: MessageOut, *,
+                   provisional: str | bool | None = None) -> dict:
     """The frame that announces a newly persisted row.
 
     Normally `message`. When this thread has a provisional bubble open — the
     client has been watching these very words stream in under `run:<id>` — it
     is a `stream_done` naming that bubble instead, so the row REPLACES what is
     on screen rather than landing underneath it as a second copy.
+
+    `provisional` says which delivery may claim the bubble:
+
+    * ``None`` (the default, and what every gateway/CLI path passes) — any
+      non-sub assistant row may claim the thread's open bubble. Those paths
+      deliver the turn's reply under the thread's turn lock, so the row that
+      lands IS the reply that was streaming.
+    * a bubble id — only that bubble may be claimed. A turn that opened its
+      own bubble passes it, so a row landing for some other reason cannot be
+      mistaken for it.
+    * ``False`` — never claim. A BACKGROUND delivery (an advisor's research
+      report arriving half an hour later) is not serialised with the turn
+      that is streaming right now; letting it claim would swap the live,
+      half-written answer for the report and drop the real answer underneath.
     """
     # A sub row (tool chatter, a reaction-fire notice) that lands while the
     # reply is still streaming is NOT the reply — claiming the bubble for it
     # would swap the half-painted answer for a collapsed "working" line and
     # then drop the real answer underneath as a second row.
     meta = msg.metadata if isinstance(getattr(msg, "metadata", None), dict) else {}
-    prov = None if (meta.get("sub") or msg.role != "assistant") \
-        else _take_provisional(thread_id)
+    if meta.get("sub") or msg.role != "assistant" or provisional is False:
+        prov = None
+    elif isinstance(provisional, str):
+        prov = provisional if _close_provisional(thread_id, provisional) else None
+    else:
+        prov = _take_provisional(thread_id)
     if prov is None:
         return {"type": "message", "thread_id": thread_id, "bot_id": bot_id,
                 "message": msg.model_dump()}
@@ -2674,6 +2728,7 @@ async def _persist_and_stream_message(
     thread_id: str, role: str, content: str,
     media_url: str | None = None, metadata: dict | None = None,
     source_id: str | None = None, created_at: str | None = None,
+    provisional: str | bool | None = None,
 ) -> MessageOut:
     """Persist the message, then stream its text to clients.
 
@@ -2712,7 +2767,8 @@ async def _persist_and_stream_message(
     # skipped — one animation per reply, whichever road it came down.
     if (role != "assistant" or is_sub or len(content) < _STREAM_MIN_CHARS
             or thread_id in _provisional_runs):
-        await manager.broadcast(_landing_frame(thread_id, bot_id, msg))
+        await manager.broadcast(_landing_frame(thread_id, bot_id, msg,
+                                               provisional=provisional))
         if fired:
             await _fire_marker_reactions(fired, thread_id, bot_id,
                                          autopilot=prep.autopilot)
@@ -5099,7 +5155,7 @@ async def _deliver_unlocked(
     metadata: dict | None = None, media_url: str | None = None,
     stream: bool = False, source_id: str | None = None,
     created_at: str | None = None, dedup_whole_thread: bool = False,
-    dedup_recent_window: bool = True,
+    dedup_recent_window: bool = True, provisional: str | bool | None = None,
 ) -> MessageOut | None:
     """The single funnel every assistant message passes through.
 
@@ -5119,6 +5175,9 @@ async def _deliver_unlocked(
     paths — the crashed-turn sweep — set it False: restoring a reply lost to
     a crash may legitimately repeat an earlier turn's words, and the window
     would eat the very message being recovered.
+
+    ``provisional`` is passed through to :func:`_landing_frame` and decides
+    which delivery may take over an open streaming bubble (see there).
     """
     # IDENTITY BEATS CONTENT. When the source has a stable id, that is the
     # answer: it does not care how far back the message was (content matching
@@ -5246,11 +5305,12 @@ async def _deliver_unlocked(
             msg = await _persist_and_stream_message(
                 thread_id, "assistant", text, media_url=media_url,
                 metadata=metadata, source_id=source_id,
-                created_at=created_at)
+                created_at=created_at, provisional=provisional)
         else:
             msg = await _persist_and_broadcast_message(
                 thread_id, "assistant", text, media_url=media_url,
-                metadata=metadata, source_id=source_id, created_at=created_at)
+                metadata=metadata, source_id=source_id, created_at=created_at,
+                provisional=provisional)
         # Only once the complete copy is genuinely on disk. `msg` can be an
         # unpersisted placeholder (an all-marker reply), and retiring the old
         # row for one of those would delete a message and post nothing.
@@ -6717,6 +6777,7 @@ class TurnOptions(NamedTuple):
       rewind_entry gateway entry id to cut the session back to before re-running
       replaces     rows this turn supersedes, kept so a failure can put them back
       reply_to     the message being replied to, prepended to what the agent reads
+      voice_hint   Drive mode's "answer for the ear" instruction, prepended too
     """
     user_msg_id: str | None = None
     model: str | None = None
@@ -6724,6 +6785,9 @@ class TurnOptions(NamedTuple):
     rewind_entry: str | None = None
     replaces: tuple = ()
     reply_to: str | None = None
+    #: Drive mode: a spoken-reply instruction prepended to what the agent
+    #: reads (never stored on the user's row). See app/voice/persona.py.
+    voice_hint: str | None = None
 
 
 # A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
@@ -6810,6 +6874,8 @@ async def _compose_agent_text(thread_id: str, text: str,
     notes = await _pending_feedback_lines(thread_id)
     if notes:
         composed = f"{composed}\n\n" + "\n".join(notes)
+    if opts is not None and opts.voice_hint:
+        composed = f"{opts.voice_hint}\n\n{composed}"
     return composed
 
 
@@ -6860,6 +6926,14 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
         async with _thread_locks[thread_id]:
             _forget_thread_delivery(thread_id)
             await llm_api.run_api_turn(thread_id, bot_id, agent_text)
+        return
+    # An advisor is a third backend on the same seam: direct API like the
+    # bot above, plus a knowledge corpus and agent handoffs (app/advisor.py).
+    if bot is not None and bot.advisor:
+        _thread_bot[thread_id] = bot_id
+        async with _thread_locks[thread_id]:
+            _forget_thread_delivery(thread_id)
+            await advisor.run_turn(thread_id, bot_id, agent_text)
         return
 
     # `agent_id` is the OpenClaw seat this turn actually runs on — normally
@@ -7093,6 +7167,58 @@ llm_api.bind(llm_api.Hooks(
     set_status=lambda tid, status: db.update_thread_status(tid, status),
     broadcast=lambda frame: manager.broadcast(frame),
     thread_update=lambda tid: _broadcast_thread_update(tid),
+))
+
+
+async def _advisor_ask_agent(agent_id: str, session_key: str, message: str,
+                               timeout: int) -> str:
+    """One background agent turn for an advisor request; returns its text.
+
+    Always the CLI transport: a research job can run for half an hour, and the
+    gateway socket's turn bookkeeping is built around a thread somebody is
+    watching. The session key (`agent:<id>:advisor-<rid>`) names no thread,
+    so nothing in the mirror or the router ever tries to deliver it anywhere.
+    """
+    reply = await openclaw.send_to_agent(agent_id, session_key, message,
+                                         timeout=timeout)
+    return "\n\n".join(p.text for p in reply.payloads
+                        if p.text and not p.sub).strip()
+
+
+async def _advisor_threads_since(bot_id: str, since_iso: str
+                                   ) -> list[tuple[str, str]]:
+    threads = await db.list_threads(bot_id, include_archived=True)
+    return [(t.id, t.title or "") for t in threads
+            if str(t.updated_at or "") >= since_iso[:19]]
+
+
+async def _advisor_update_card(message_id: str, thread_id: str, req: dict) -> None:
+    """Re-stamp a handoff card's request state so a reload shows Sent/Dismissed."""
+    msg = await db.get_message(message_id)
+    if msg is None:
+        return
+    meta = dict(msg.metadata or {})
+    meta["advisor_handoff"] = req
+    await db.update_message_metadata(message_id, meta)
+    fresh = await db.get_message(message_id)
+    if fresh is not None:
+        await _broadcast_message_update(fresh, thread_id)
+
+
+advisor.bind(advisor.Hooks(
+    list_messages=lambda tid, limit: db.list_messages(tid, limit),
+    deliver=lambda *a, **kw: _deliver_assistant_text(*a, **kw),
+    set_status=lambda tid, status: db.update_thread_status(tid, status),
+    broadcast=lambda frame: manager.broadcast(frame),
+    thread_update=lambda tid: _broadcast_thread_update(tid),
+    open_stream=lambda tid, prov: _open_provisional(tid, prov),
+    close_stream=lambda tid, prov: _close_provisional(tid, prov),
+    sanitize_delta=lambda text: _sanitize_delta(text),
+    ask_agent=_advisor_ask_agent,
+    threads_since=_advisor_threads_since,
+    update_card=_advisor_update_card,
+    track=_track,
+    data_dir=config.DATA_DIR,
 ))
 
 
@@ -7566,6 +7692,66 @@ def _llm_error(e: llm_api.ApiError) -> HTTPException:
     """A configuration mistake is a 400, not a 500 — and the detail is the
     half the operator needs, so it travels with the message."""
     return HTTPException(400, f"{e.message} — {e.detail}".strip(" —"))
+
+
+# --------------------------------------------------------------------------- #
+# Advisor bots (app/advisor.py)
+# --------------------------------------------------------------------------- #
+
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+@app.get("/api/advisor/status", responses=problem.MACHINE)
+async def advisor_status(request: Request):
+    """Each advisor's provider chain, knowledge index and recent requests."""
+    _deny_agent_route_to_browser(request)
+    return await advisor.status()
+
+
+@app.post("/api/advisor/digest", responses=problem.MACHINE)
+async def advisor_digest(request: Request, day: str | None = None,
+                           force: bool = False):
+    """Summarise a day of advisor chat into the corpus (default: yesterday).
+
+    Run by a nightly cron on the box; idempotent unless `force`. `force`
+    (rewrite an existing digest, one cloud call per advisor) is honoured for
+    a real unlocked session only: a machine caller always gets the
+    idempotent behaviour, so a loop on the machine surface cannot burn
+    provider spend or churn the corpus.
+    """
+    _deny_agent_route_to_browser(request)
+    if day is not None and not _DAY_RE.match(day):
+        raise HTTPException(422, "day must be YYYY-MM-DD")
+    full = _session_of(request) is not None or not auth.load().pin_set
+    return {"results": await advisor.digest(day, force=force and full)}
+
+
+@app.post("/api/advisor/requests/{rid}/send",
+          dependencies=[Depends(_require_operator_session)])
+async def advisor_request_send(rid: str, payload: AdvisorActionIn):
+    """The handoff card's Send button. A real unlocked session only: the
+    machine surface must never be able to approve its own handoff."""
+    try:
+        return {"ok": True, "request": await advisor.send_handoff(
+            rid, message_id=payload.message_id)}
+    except KeyError:
+        raise HTTPException(404, "Unknown request")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    except llm_api.ApiError as e:
+        raise HTTPException(500, f"{e.message} — {e.detail}".strip(" —"))
+
+
+@app.post("/api/advisor/requests/{rid}/dismiss",
+          dependencies=[Depends(_require_operator_session)])
+async def advisor_request_dismiss(rid: str, payload: AdvisorActionIn):
+    try:
+        return {"ok": True, "request": await advisor.dismiss_handoff(
+            rid, message_id=payload.message_id)}
+    except KeyError:
+        raise HTTPException(404, "Unknown request")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
 
 @app.get("/api/llm/providers", dependencies=[Depends(_require_operator)])
@@ -9900,6 +10086,22 @@ async def reaction_reseed(request: Request):
             "reactions": reactions.list_for(decoy=False)}
 
 
+#: Metadata keys only the server may write. An `advisor_handoff` stamp is what
+#: makes a message a Send-able card; an inbound caller that could set one
+#: (with a REAL request id and its own body text) would forge a card that
+#: approves somebody else's brief. Matched by prefix so a future advisor_* key
+#: is covered by construction.
+_SERVER_ONLY_META_PREFIXES = ("advisor_",)
+
+
+def _inbound_metadata(meta: Any) -> dict:
+    """Caller-supplied message metadata minus the server-only keys."""
+    if not isinstance(meta, dict):
+        return {}
+    return {k: v for k, v in meta.items()
+            if not (isinstance(k, str) and k.startswith(_SERVER_ONLY_META_PREFIXES))}
+
+
 @app.post("/api/inject", responses=problem.MACHINE)
 async def inject_message(request: Request, payload: InjectIn):
     """Push a message into the chat from OpenClaw (proactive / scheduled).
@@ -9949,7 +10151,7 @@ async def inject_message(request: Request, payload: InjectIn):
         # conversational reply -- see the origin gate in _prepare_persist. A
         # caller cannot spoof its way out of it by omitting metadata, and a
         # caller that sets its own `origin` is overridden here on purpose.
-        metadata={**(payload.metadata or {}), "origin": "inject"},
+        metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
     )
     await _broadcast_thread_update(thread.id)
     return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}
@@ -10094,7 +10296,7 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     msg = await _persist_and_broadcast_message(
         thread_id, role, content,
         media_url=media_url,
-        metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+        metadata=_inbound_metadata(payload.get("metadata")) or None,
     )
     await _broadcast_thread_update(thread_id)
     return msg.model_dump()
@@ -12179,6 +12381,129 @@ def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
     return (isinstance(exc, RuntimeError)
             and (ws.application_state != WebSocketState.CONNECTED
                  or ws.client_state != WebSocketState.CONNECTED))
+
+
+# --------------------------------------------------------------------------- #
+# Drive mode (hands-free voice) — UNLOCKED TIER ONLY. Optional: everything
+# below is inert unless DISPATCH_VOICE resolves on (app/voice/config.py). The
+# gate itself (Origin==Host, live lc_session, non-safe bot) lives in
+# app/voice/routes.py:check_gate and runs inline before accept(), because HTTP
+# middleware never sees a websocket. See docs/voice-drive-mode.md.
+# --------------------------------------------------------------------------- #
+
+
+async def _voice_thread_bot(thread_id: str):
+    thread = await db.get_thread(thread_id)
+    return config.get_bot(thread.bot_id) if thread else None
+
+
+async def _voice_submit(thread_id: str, text: str) -> str | None:
+    """A spoken message, sent exactly like a typed one: same persist, same
+    broadcast, same run_agent_turn — so it lands in the thread and any bot
+    type answers. Tagged ``metadata.voice``; the agent also reads the voice
+    persona hint and (gateway bots) runs with the voice thinking level."""
+    from .voice import registry as _voice_registry
+    from .voice.config import load_settings as _voice_settings
+    from .voice.persona import voice_hint as _voice_hint
+    thread = await db.get_thread(thread_id)
+    if not thread:
+        raise ValueError("thread not found")
+    # A transcript is words; strip anything directive-shaped defensively so a
+    # spoken message can never ingest a local file or reference a doc.
+    text = (_strip_media_text(text) or "").strip()[:MESSAGE_MAX_CHARS]
+    if ":react:" in text.lower():
+        text, _ = reactions.extract_markers(text)
+        text = text.strip()
+    if not text:
+        return None
+    user_msg = await db.add_message(thread_id, "user", text, metadata={"voice": True})
+    await db.set_title_if_empty(thread_id, _truncate(text, 50))
+    frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
+             "message": user_msg.model_dump()}
+    profile_id = _voice_registry.resolve_profile(thread.bot_id)
+    opts = TurnOptions(user_msg_id=user_msg.id,
+                       voice_hint=_voice_hint(thread.bot_id, profile_id),
+                       thinking=_voice_settings().voice_turn_thinking or None)
+
+    async def _publish_then_run() -> None:
+        try:
+            await manager.broadcast(frame)
+            await _broadcast_thread_update(thread_id)
+        except Exception:
+            log.exception("voice: publish failed for thread %s; running the turn anyway",
+                          thread_id)
+        await run_agent_turn(thread_id, thread.bot_id, text, opts)
+
+    _track(asyncio.create_task(_publish_then_run()))
+    return user_msg.id
+
+
+async def _voice_abort(thread_id: str) -> None:
+    with contextlib.suppress(HTTPException):
+        await _abort_thread_turn(thread_id)
+
+
+async def _voice_retract(thread_id: str, message_id: str) -> None:
+    """Turn merge: take back the early half of an utterance the driver
+    finished after a pause. Only a VOICE user row in this thread qualifies."""
+    msg = await db.get_message(message_id)
+    if (msg is None or msg.thread_id != thread_id or msg.role != "user"
+            or not (msg.metadata or {}).get("voice")):
+        return
+    await db.delete_message(message_id)
+    await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
+                             "bot_id": await _bot_of_thread(thread_id),
+                             "message_id": message_id})
+
+
+async def _voice_replies_after(thread_id: str, after_id: str) -> list[tuple[str, str]]:
+    msg = await db.get_message(after_id)
+    if msg is None or msg.thread_id != thread_id:
+        return []
+    rows = await db.messages_after(thread_id, after_id)
+    return [(m.id, m.content) for m in rows
+            if m.role == "assistant" and not (m.metadata or {}).get("sub")]
+
+
+@app.websocket("/ws/voice/{thread_id}")
+async def voice_websocket(ws: WebSocket, thread_id: str):
+    if _voice_serve is None:
+        # The voice package did not import (see _load_voice below): the
+        # endpoint exists but always answers "unavailable", like DISPATCH_VOICE=0.
+        await ws.close(code=1013)
+        return
+    await _voice_serve(ws, thread_id, auth=auth, cookie_name=COOKIE_NAME,
+                      manager=manager, thread_bot=_voice_thread_bot,
+                      submit=_voice_submit, abort=_voice_abort,
+                      retract=_voice_retract, replies_after=_voice_replies_after)
+
+
+# GET /api/voice/status, the dispatch-voice Voices panel at /api/voices (when
+# that optional package is installed; its engine loads lazily) and every
+# DISPATCH_VOICE_EXTENSIONS router, each behind _require_operator: a real
+# unlocked session (or no PIN at all), never Safe Mode, never a decoy, and not
+# the machine-inbound bypass either (voice recordings are not agent business).
+# Never raises: a broken extension is logged and skipped.
+def _load_voice():
+    """(serve_voice, mount_http) or (None, None) when app/voice cannot import.
+
+    Drive mode is optional. A partial deploy (the voice/ subpackage missing) or
+    a broken dependency must cost the owner Drive mode, never the whole app —
+    so the import is guarded here instead of at module top level."""
+    try:
+        from .voice.routes import mount_http, serve_voice
+    except Exception:
+        log.exception("voice: app.voice failed to import; Drive mode disabled")
+        return None, None
+    return serve_voice, mount_http
+
+
+_voice_serve, _voice_mount_http = _load_voice()
+if _voice_mount_http is not None:
+    try:
+        _voice_mount_http(app, _require_operator)
+    except Exception:
+        log.exception("voice: mounting voice routes failed; Drive mode disabled")
 
 
 # --------------------------------------------------------------------------- #

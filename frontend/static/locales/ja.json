@@ -117,7 +117,9 @@
     "thinking_medium": "中",
     "thinking_high": "高",
     "thinking_max": "最大",
-    "thinking_adaptive": "アダプティブ"
+    "thinking_adaptive": "アダプティブ",
+    "drive": "ドライブモード",
+    "drive_aria": "ドライブモード（ハンズフリー音声）"
   },
   "welcome": {
     "with_bot": "{name} とチャット",
@@ -285,7 +287,10 @@
     "recovery_desc": "すべてのメッセージをファイルに書き出すか、保存されなかったメッセージを復元します。",
     "recovery_open": "開く",
     "theme_button": "テーマボタン",
-    "theme_button_desc": "メニューバーから直接テーマ選択を開きます。"
+    "theme_button_desc": "メニューバーから直接テーマ選択を開きます。",
+    "dev_voice": "ドライブモード",
+    "voices": "音声",
+    "voices_desc": "短い音声からボイスを複製し、試聴して、ドライブモードで話す声を選びます。"
   },
   "companions": {
     "title": "コンパニオン",
@@ -1108,5 +1113,16 @@
     "retry": "再試行",
     "col_open": "新しいウィンドウ",
     "open_window_aria": "{name} をパネルではなく新しいウィンドウで開く"
+  },
+  "advisor": {
+    "card_title": "{agent}に任せますか?",
+    "send": "{agent}に送る",
+    "dismiss": "見送る",
+    "state_proposed": "あなたの判断待ち",
+    "state_running": "{agent}に送信済み — 作業中",
+    "state_done": "完了",
+    "state_failed": "{agent}は完了できませんでした",
+    "state_dismissed": "見送り",
+    "send_failed": "送信できませんでした: {error}"
   }
 }

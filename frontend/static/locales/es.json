@@ -119,7 +119,9 @@
     "thinking_medium": "Medio",
     "thinking_high": "Alto",
     "thinking_max": "Máximo",
-    "thinking_adaptive": "Adaptativo"
+    "thinking_adaptive": "Adaptativo",
+    "drive": "Modo conducción",
+    "drive_aria": "Modo conducción (voz manos libres)"
   },
   "welcome": {
     "with_bot": "Chatea con {name}",
@@ -289,7 +291,10 @@
     "recovery_desc": "Exporta todos los mensajes a un archivo o recupera los que no se guardaron.",
     "recovery_open": "Abrir",
     "theme_button": "Botón de tema",
-    "theme_button_desc": "Abre el selector de tema directamente desde la barra de menú."
+    "theme_button_desc": "Abre el selector de tema directamente desde la barra de menú.",
+    "dev_voice": "Modo conducción",
+    "voices": "Voces",
+    "voices_desc": "Clona una voz a partir de un clip corto, escúchala y elige la voz con la que habla el modo conducción."
   },
   "companions": {
     "title": "Acompañantes",
@@ -1158,5 +1163,16 @@
     "retry": "Reintentar",
     "col_open": "Ventana nueva",
     "open_window_aria": "Abrir {name} en una ventana nueva en lugar del panel"
+  },
+  "advisor": {
+    "card_title": "¿Pasarle esto a {agent}?",
+    "send": "Enviar a {agent}",
+    "dismiss": "Descartar",
+    "state_proposed": "Esperando tu respuesta",
+    "state_running": "Enviado a {agent}: en curso",
+    "state_done": "Hecho",
+    "state_failed": "{agent} no pudo terminar",
+    "state_dismissed": "Descartado",
+    "send_failed": "No se pudo enviar: {error}"
   }
 }

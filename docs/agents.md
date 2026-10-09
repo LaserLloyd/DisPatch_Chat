@@ -65,6 +65,12 @@ and remote topologies work.
 
 ## Configuring bots
 
+**Content policy follows the tiers.** Safe Mode (the locked tier: `safe: true`
+bots, devices without the PIN) is where family-friendly rules belong. Bots
+reachable only from an unlocked session get no content framing from DisPatch —
+a direct-API bot with no `system_prompt` gets a neutral default, and only a
+safe bot gets the family-friendly one.
+
 Bots are defined in `config.yaml` in your data directory. It is created on first
 run and hot-reloads — no restart needed.
 
@@ -84,6 +90,11 @@ is enforced on the server: a bot without it is invisible *and* unreachable to a
 Safe-Mode session, not merely hidden. Set it thoughtfully — a bot reachable
 without a password can be talked to by anyone who can reach the port, and each
 message costs you an agent turn.
+
+An **advisor bot** answers from a model API directly, but can delegate research
+and actions to the agents configured here through `[[research:…]]` and
+`[[handoff:…]]` markers, with a Send/Dismiss card for anything that does work.
+See [advisor.md](advisor.md).
 
 ## Running without agents
 

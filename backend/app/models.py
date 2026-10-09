@@ -247,3 +247,13 @@ class MessageFeedbackIn(BaseModel):
     reason: Literal[
         "inaccurate", "unhelpful", "too_long", "off_topic", "tone", "other",
     ] | None = None
+
+
+class AdvisorActionIn(BaseModel):
+    """Body of an advisor handoff card's Send / Dismiss.
+
+    `message_id` is the card the button was pressed on. It is checked against
+    the ledger's `card_message_id`: a button on any OTHER message — a forged
+    card that copied a real request id — is refused.
+    """
+    message_id: str = Field(min_length=1, max_length=64)

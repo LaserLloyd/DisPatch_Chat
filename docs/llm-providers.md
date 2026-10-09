@@ -182,6 +182,12 @@ creating a second one — leaving the key field blank keeps the stored key.
   provider connected to a bot that Safe-Mode devices can reach is a bill with no
   ceiling; the provider's own dashboard is where you set limits.
 
+## Need streaming, fallbacks or a knowledge base?
+
+A "Connect an AI" bot fetches replies whole and uses one provider. For real
+token streaming, a cloud-then-local fallback chain, notes the bot can search and
+handoffs to your agents, configure an advisor bot instead: [advisor.md](advisor.md).
+
 ## Troubleshooting
 
 | Symptom | Cause |

@@ -169,6 +169,10 @@ export const api = {
   // bot's context without removing it from the transcript. Either may be
   // sent alone; the server merges, so one never clears the other.
   editMessage: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  // Advisor handoff cards (Send / Dismiss). Full session only, server-side.
+  // `mid` is the card's own message id; the server refuses any other message.
+  advisorSend: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/send`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
+  advisorDismiss: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/dismiss`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
   // Takes either a row op ({index, checked, list}) or a whole array. The row
   // op is what the widget sends: the server merges it, so a request cannot
   // carry a stale view of rows it does not mention.

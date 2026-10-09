@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=93" />
+  <link rel="stylesheet" href="/static/app.css?v=94" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -311,6 +311,10 @@
           <span class="model-chip-label" id="ch-modelchip-label"></span>
         </button>
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
+        <!-- Drive mode (hands-free voice, drive.js). Unlocked tier only and
+             only when the server reports voice enabled; main.js unhides it.
+             The server re-checks everything on /ws/voice. -->
+        <button class="icon-btn ghost drive-btn" id="drive-btn" title="Drive mode" aria-label="Drive mode (hands-free voice)" data-i18n-attr="title=chat.drive;aria-label=chat.drive_aria" hidden><span aria-hidden="true">🎙</span></button>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking" data-i18n-attr="aria-label=chat.model_chip">
           <div class="mp-row">
@@ -792,6 +796,17 @@
           <div class="dev-group-body" id="dev-body-bar"></div>
         </section>
 
+        <!-- Drive mode voices (dispatch-voice). Unlocked only, and hidden unless
+             the server reports the Voices panel mounted (main.js probeVoice). -->
+        <section class="dev-group admin-only" id="dev-group-voice" aria-labelledby="dev-h-voice" hidden>
+          <h3 class="dev-group-title" id="dev-h-voice" data-i18n="settings.dev_voice">Drive mode</h3>
+          <div class="dev-group-body">
+            <a class="dev-row" id="dev-voices-link" href="/api/voices/ui" target="_blank" rel="noopener">
+              <span class="dev-row-text"><strong data-i18n="settings.voices">Voices</strong><span class="dev-row-hint" data-i18n="settings.voices_desc">Clone a voice from a short clip, audition it, and pick the voice Drive mode speaks with.</span></span>
+            </a>
+          </div>
+        </section>
+
         <section class="dev-group" id="dev-group-files" aria-labelledby="dev-h-files">
           <h3 class="dev-group-title" id="dev-h-files" data-i18n="viewer.settings_title">Local viewer</h3>
           <div class="dev-group-body" id="dev-body-files"></div>
@@ -1193,6 +1208,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=115"></script>
+  <script type="module" src="/static/js/main.js?v=120"></script>
 </body>
 </html>

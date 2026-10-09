@@ -20,6 +20,10 @@ media/
 files/
 logs/
 reactions/
+# Drive mode: voice profiles are recordings of a real person; models are big.
+voices/
+speech-models/
+*.npz
 avatars/*
 !avatars/.gitkeep
 !avatars/README.md

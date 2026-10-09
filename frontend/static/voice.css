@@ -1,0 +1,35 @@
+/* Drive mode. Loaded on demand (main.js loadStyle), so an
+   install without voice never fetches it. Uses the shell's theme tokens with
+   plain fallbacks. */
+
+.drive-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; flex-direction: column; align-items: stretch; gap: 16px;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background: var(--bg, #101214); color: var(--fg, #f2f2f2);
+}
+body.drive-open { overflow: hidden; }
+.drive-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.drive-title { font-size: 1.25rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drive-exit { font-size: 1.1rem; padding: 12px 20px; border-radius: 12px; border: 1px solid currentColor; background: transparent; color: inherit; }
+.drive-big {
+  flex: 1 1 auto; min-height: 40vh; border-radius: 28px; border: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(2rem, 9vw, 4rem); font-weight: 700; color: #fff;
+  background: var(--accent, #2f6fdf); transition: background .2s;
+}
+.drive-overlay[data-state="hearing"] .drive-big { background: #1f9d55; }
+.drive-overlay[data-state="thinking"] .drive-big,
+.drive-overlay[data-state="transcribing"] .drive-big { background: #b7791f; }
+.drive-overlay[data-state="speaking"] .drive-big { background: #6b46c1; }
+.drive-overlay[data-state="paused"] .drive-big,
+.drive-overlay[data-state="offline"] .drive-big,
+.drive-overlay[data-state="locked"] .drive-big { background: #4a5568; }
+.drive-line { font-size: clamp(1.1rem, 4.5vw, 1.6rem); line-height: 1.35; min-height: 1.4em;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.drive-you { opacity: .75; }
+.drive-patience { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drive-patience-label { opacity: .7; margin-inline-end: 4px; }
+.drive-pat { padding: 10px 14px; border-radius: 10px; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 1rem; }
+.drive-pat[aria-pressed="true"] { background: var(--accent, #2f6fdf); border-color: transparent; color: #fff; }
+.drive-metrics { font-size: .85rem; opacity: .55; min-height: 1em; }

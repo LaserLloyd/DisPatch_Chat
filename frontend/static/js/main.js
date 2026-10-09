@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=31';
+import { api, setOnLocked } from './api.js?v=32';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=33';
-import { installChecklists, applyChecklistState } from './checklist.js?v=9';
+import { installChecklists, applyChecklistState } from './checklist.js?v=10';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,9 +21,9 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=22';
+} from './reactions.js?v=23';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=9';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=10';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -31,6 +31,7 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
+import { initDrive } from '../drive.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -44,7 +45,7 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen,
-} from './tools.js?v=9';
+} from './tools.js?v=10';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp } from './app-sdk.js?v=1';
@@ -53,8 +54,9 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=5';
-import { aboutRow } from './about.js?v=4';
+import { aboutRow } from './about.js?v=5';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
+import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=1';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=2';
@@ -228,6 +230,8 @@ const dom = {};
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
  'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ // Drive mode (voice): the header button and the Settings → Device voices row.
+ 'drive-btn', 'dev-group-voice',
  // Locked-side one-way drop
  'drop-btn', 'drop-backdrop', 'drop-close', 'drop-list', 'drop-input',
  'drop-more', 'drop-done',
@@ -1268,6 +1272,7 @@ function renderChatHeader() {
   dom['thread-menu-btn'].hidden = false;
   renderModelChip();
   syncAppHook();
+  refreshDrive();
   // A popout window titles itself after its conversation, so several of them
   // are tellable apart in the task bar / window switcher.
   if (POPOUT) document.title = `${threadTitle(th)} — ${bot ? bot.name : 'DisPatch Chat'}`;
@@ -1857,8 +1862,19 @@ function messageEl(msg) {
       bubble.classList.add('image-job-bubble');
       bubble.append(jobCard);
     } else {
-      bubble.innerHTML = renderMarkdown(msg.content || '', mdOpts);
+      // An advisor's "hand this to an agent?" card renders its brief from the
+      // server-stamped metadata, not the body (see advisor.js), so what you
+      // read is exactly what Send approves.
+      const handoffMd = handoffBodyMarkdown(msg);
+      bubble.innerHTML = renderMarkdown(handoffMd ?? (msg.content || ''), mdOpts);
       enhanceContent(bubble, { noLocal: state.decoy });
+      // ...plus its state and, while it is still a proposal, Send / Dismiss.
+      const handoff = handoffStripEl(msg, {
+        decoy: state.decoy,
+        send: (rid, mid) => api.advisorSend(rid, mid),
+        dismiss: (rid, mid) => api.advisorDismiss(rid, mid),
+      });
+      if (handoff) bubble.append(handoff);
     }
   } else {
     // User / system: plain text with preserved line breaks; attachments
@@ -7154,6 +7170,51 @@ function applyAuthChrome() {
   // every tier change, so a pin that Safe Mode may not have disappears the
   // moment the device locks rather than lingering as a dead button.
   renderPins();
+  // Drive mode follows the tier: probe the server when unlocked, close any
+  // open Drive view and hide the button the moment the device locks.
+  probeVoice();
+}
+
+// ===================== Drive mode (voice) =====================
+// drive.js owns the overlay, the mic and the /ws/voice socket. This is only
+// the wiring: is voice on (server says so, unlocked tier), which thread, which
+// bot. A locked device never asks — /api/voice is unlocked-only server-side.
+let drive = null;
+let voiceOn = false;
+let voiceProbe = null;
+
+function refreshDrive() {
+  if (!dom['drive-btn']) return;
+  if (!drive) {
+    drive = initDrive(dom['drive-btn'], {
+      getThread: () => (voiceOn ? state.activeThread : null),
+      getBot: (id) => botById(id),
+      isLocked: () => state.decoy || !voiceOn,
+      toast,
+    });
+  }
+  drive.refresh();
+}
+
+function probeVoice() {
+  if (state.decoy) {
+    voiceOn = false;
+    if (drive && drive.close) drive.close();
+    if (dom['dev-group-voice']) dom['dev-group-voice'].hidden = true;
+    refreshDrive();
+    return;
+  }
+  if (voiceProbe) return;
+  voiceProbe = fetch('/api/voice/status', { credentials: 'same-origin' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((st) => {
+      voiceOn = !!(st && st.enabled);
+      if (voiceOn) loadStyle('/static/voice.css?v=1');
+      // The Voices panel exists only when dispatch-voice is installed.
+      if (dom['dev-group-voice']) dom['dev-group-voice'].hidden = !(st && st.voices_ui);
+    })
+    .catch(() => { voiceOn = false; })
+    .finally(() => { voiceProbe = null; refreshDrive(); });
 }
 
 // Draw the pinned settings onto the rail. Kept as one call site so every

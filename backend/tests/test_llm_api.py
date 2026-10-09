@@ -1055,3 +1055,17 @@ def test_a_turn_timeout_still_quotes_the_turn_timeout():
     err = llm_api._transport_error(
         httpx.ReadTimeout("slow"), "http://x/v1/chat/completions", local=True)
     assert f"{int(llm_api.READ_TIMEOUT_S)}s" in err.detail
+
+
+def test_default_prompt_is_family_framed_only_for_safe_bots():
+    """Content policy by tier: only a Safe-Mode bot gets the family framing;
+    an unlocked-only bot gets no content framing of ours."""
+    api = {"provider": "custom", "base_url": "http://127.0.0.1:9/v1", "model": "m"}
+    safe = llm_api.resolve(config.Bot(id="s", name="S", safe=True, api=api))
+    private = llm_api.resolve(config.Bot(id="p", name="P", safe=False, api=api))
+    assert "family" in safe.system_prompt
+    assert "family" not in private.system_prompt.lower()
+    # An operator's own prompt always wins, on either tier.
+    own = llm_api.resolve(config.Bot(id="o", name="O", safe=True,
+                                     api={**api, "system_prompt": "Be terse."}))
+    assert own.system_prompt == "Be terse."

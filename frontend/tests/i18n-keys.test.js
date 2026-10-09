@@ -79,6 +79,9 @@ const DYNAMIC = [
   // js/main.js  renderStudioForge():  t(`studioforge.${noteKey}_text` / `_hint`)
   { re: /^studioforge\.(unconfigured|checking|down|unreachable|blocked|insecure)_(text|hint)$/,
     built: 'main.js  t(`studioforge.${noteKey}_text|_hint`)' },
+  // js/advisor.js  handoffStripEl():  t(`advisor.state_${h.state}`)
+  { re: /^advisor\.state_(proposed|running|done|failed|dismissed)$/,
+    built: 'advisor.js  t(`advisor.state_${h.state}`)' },
   // js/i18n.js  fileSize():  t(`unit.${u}`)
   { re: /^unit\.(b|kb|mb|gb|tb|pb)$/, built: 'i18n.js  t(`unit.${u}`)' },
   // js/dashboard.js  paintBanner():  T(`dash.count_${lv}`)

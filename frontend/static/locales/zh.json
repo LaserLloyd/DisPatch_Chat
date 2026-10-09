@@ -117,7 +117,9 @@
     "thinking_medium": "中",
     "thinking_high": "高",
     "thinking_max": "最大",
-    "thinking_adaptive": "自适应"
+    "thinking_adaptive": "自适应",
+    "drive": "驾驶模式",
+    "drive_aria": "驾驶模式（免提语音）"
   },
   "welcome": {
     "with_bot": "和 {name} 聊天",
@@ -285,7 +287,10 @@
     "recovery_desc": "将所有消息导出为文件，或恢复未保存的消息。",
     "recovery_open": "打开",
     "theme_button": "主题按钮",
-    "theme_button_desc": "直接从菜单栏打开主题选择器。"
+    "theme_button_desc": "直接从菜单栏打开主题选择器。",
+    "dev_voice": "驾驶模式",
+    "voices": "声音",
+    "voices_desc": "用一段短音频克隆声音，试听，并选择驾驶模式使用的声音。"
   },
   "companions": {
     "title": "伙伴",
@@ -1108,5 +1113,16 @@
     "retry": "重试",
     "col_open": "新窗口",
     "open_window_aria": "在新窗口而不是面板中打开 {name}"
+  },
+  "advisor": {
+    "card_title": "把这个交给 {agent} 吗?",
+    "send": "发送给 {agent}",
+    "dismiss": "忽略",
+    "state_proposed": "等待你的决定",
+    "state_running": "已发送给 {agent} — 处理中",
+    "state_done": "已完成",
+    "state_failed": "{agent} 未能完成",
+    "state_dismissed": "已忽略",
+    "send_failed": "发送失败：{error}"
   }
 }

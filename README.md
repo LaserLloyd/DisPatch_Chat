@@ -7,7 +7,7 @@
 Runs on your hardware. Your conversations stay in a SQLite file you can read,
 back up, and delete. No account, no cloud, no telemetry.
 
-**Current release: 2.0.0** (October 2026) · [what changed](#whats-new-in-20)
+**Current release: 2.1.0** (October 2026) · [what changed](#whats-new-in-21)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Deployment](#deployment) · [Security](#security) ·
@@ -190,6 +190,23 @@ on a phone, in a few of the ten themes.
   messages (a morning briefing, a finished job, an alert)
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with
   neither configured
+
+## What's new in 2.1
+
+- **Advisor bots.** A bot with an `advisor:` block answers straight from a model
+  API with real token streaming and a cloud-then-local fallback chain, knows you
+  from a folder of Markdown notes (keyword plus optional embedding search), and
+  hands work to your agents: research runs automatically, actions wait for a
+  Send tap. Reports are saved back into the notes and a nightly digest keeps
+  its memory current. See [docs/advisor.md](docs/advisor.md).
+- **Drive mode.** Talk to a thread hands-free: DisPatch hears when you have
+  finished, transcribes on the CPU, sends it like a typed message, and reads
+  the reply back as it streams. Barge-in, echo rejection and a patience
+  setting for drivers who pause mid-thought. Optional: install the `voice`
+  dependency group and download the models; cloned voices come from the
+  separate `dispatch-voice` package. The Kokoro fallback voice uses a GPL-3.0
+  phonemizer at runtime (not vendored here). Unlocked tier only. See
+  [docs/voice-drive-mode.md](docs/voice-drive-mode.md).
 
 ## What's new in 2.0
 

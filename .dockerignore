@@ -56,6 +56,10 @@ media/
 files/
 backups/
 reactions/
+# Drive mode: voice profiles (a person's recorded voice) and speech models.
+voices/
+speech-models/
+**/*.npz
 
 # ------------------------------------------------------------- Dev cruft ----
 .serve.pid

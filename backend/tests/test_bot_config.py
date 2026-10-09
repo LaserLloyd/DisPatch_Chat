@@ -88,6 +88,9 @@ def _non_default(f):
         return 42
     if f.name == "api":
         return {"provider": "openai", "model": "m", "api_key": "k"}
+    if f.name == "advisor":
+        return {"owner": "Sam", "providers": [{"provider": "custom", "model": "m"}],
+                "agents": ["worker"]}
     return f"x-{f.name}"
 
 
@@ -102,18 +105,23 @@ def test_bot_entry_round_trips_every_persistable_field(cfg_env):
     """
     from dataclasses import fields
 
-    values = {f.name: _non_default(f) for f in fields(config.Bot)}
-    bot = config.Bot(**values)
-    for name, want in values.items():
-        assert getattr(bot, name) == want
+    every = {f.name: _non_default(f) for f in fields(config.Bot)}
+    # `safe` and `advisor` cannot both be non-default: an advisor is forced
+    # unsafe (Bot.__post_init__). So the round trip runs twice, once with
+    # each, and between them every field is exercised non-default.
+    for values in ({**every, "advisor": None},
+                   {**every, "safe": False}):
+        bot = config.Bot(**values)
+        for name, want in values.items():
+            assert getattr(bot, name) == want
 
-    config._write_bots([config._bot_entry(bot)])
-    config._invalidate_bots_cache()
-    loaded = [b for b in config.load_bots() if b.id == bot.id]
-    assert loaded, "the round-tripped bot vanished from the roster"
-    assert loaded[0] == bot, (
-        "_bot_entry dropped a field — add it to the serializer, "
-        f"lost: {[n for n in values if getattr(loaded[0], n) != values[n]]}")
+        config._write_bots([config._bot_entry(bot)])
+        config._invalidate_bots_cache()
+        loaded = [b for b in config.load_bots() if b.id == bot.id]
+        assert loaded, "the round-tripped bot vanished from the roster"
+        assert loaded[0] == bot, (
+            "_bot_entry dropped a field — add it to the serializer, "
+            f"lost: {[n for n in values if getattr(loaded[0], n) != values[n]]}")
 
 
 # --------------------------------------------------------------------------- #

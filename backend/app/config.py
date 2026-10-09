@@ -572,6 +572,26 @@ class Bot:
     # (`agent:<agent_id>:<thread_id>`) — see Bot.agent_id and
     # main.run_agent_turn.
     agent: str = ""
+    # Advisor backend: a fast direct-API chat partner with a knowledge
+    # corpus and the ability to hand research/tasks to agents. Shape and
+    # behaviour: app/advisor.py (AdvisorConfig). Like `api`, None means
+    # "not an advisor" and the block is omitted from config.yaml. Provider
+    # entries inside it may carry an `api_key`, so it is redacted the same way.
+    advisor: dict | None = None
+    # Drive mode: the voice profile (dispatch-voice, <data>/voices/<id>/) this
+    # bot speaks with. Empty = the Drive-mode default voice. An id that names
+    # no profile falls back to the default too (app/voice/dv.py).
+    voice: str = ""
+
+    def __post_init__(self) -> None:
+        # An advisor is NEVER a Safe-Mode bot. It reads a private corpus into
+        # every prompt and can dispatch research to agents on its own, so a
+        # locked family device must not be able to reach it — whatever the
+        # file, the Bot Manager toggle (save_bot_order) or any future writer
+        # says. Enforced here, in the constructor, so every path that builds a
+        # Bot (load_bots, dataclasses.replace, upsert_bot) gets it for free.
+        if self.advisor and self.safe:
+            self.safe = False
 
     @property
     def agent_id(self) -> str:
@@ -626,7 +646,23 @@ class Bot:
             "image_ratio": self.image_ratio,
             "api_provider": str((self.api or {}).get("provider") or ""),
             "agent": self.agent,
+            "advisor": bool(self.advisor),
         }
+
+    def advisor_public(self) -> dict | None:
+        """The `advisor` block with provider keys replaced by booleans."""
+        if not self.advisor:
+            return None
+        out = {k: v for k, v in self.advisor.items() if k != "providers"}
+        out["providers"] = [
+            {**{k: v for k, v in p.items() if k != "api_key"},
+             "has_key": bool(p.get("api_key"))}
+            for p in (self.advisor.get("providers") or []) if isinstance(p, dict)]
+        emb = out.get("embeddings")
+        if isinstance(emb, dict) and "api_key" in emb:
+            out["embeddings"] = {**{k: v for k, v in emb.items() if k != "api_key"},
+                                 "has_key": True}
+        return out
 
     def api_public(self) -> dict | None:
         """The `api` block with the secret replaced by a boolean.
@@ -644,7 +680,10 @@ class Bot:
 
     def to_admin_dict(self) -> dict:
         """to_dict() plus the redacted API block (full-session routes only)."""
-        return {**self.to_dict(), "api": self.api_public()}
+        # `voice` (which recorded person a bot speaks as) is admin-only: the
+        # plain dict reaches locked Safe-Mode devices for safe bots.
+        return {**self.to_dict(), "api": self.api_public(),
+                "advisor": self.advisor_public(), "voice": self.voice}
 
 
 # Shipped defaults.
@@ -726,9 +765,12 @@ def _bot_entry(b: Bot) -> dict:
         "image_identity_source": b.image_identity_source,
         "image_ratio": b.image_ratio,
         "agent": b.agent,
+        "voice": b.voice,
     }
     if b.api:
         entry["api"] = dict(b.api)
+    if b.advisor:
+        entry["advisor"] = dict(b.advisor)
     return entry
 
 
@@ -857,9 +899,12 @@ def load_bots() -> list[Bot]:
                 image_ratio=str(e.get("image_ratio",
                                       base.image_ratio if base else "")),
                 agent=str(e.get("agent", base.agent if base else "")).strip(),
+                voice=str(e.get("voice", base.voice if base else "") or "").strip(),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,
+                advisor=(dict(e["advisor"])
+                           if isinstance(e.get("advisor"), dict) else None),
             )
         )
         seen.add(bid)

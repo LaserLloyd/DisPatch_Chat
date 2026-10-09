@@ -118,7 +118,9 @@
     "thinking_medium": "Mittel",
     "thinking_high": "Hoch",
     "thinking_max": "Maximal",
-    "thinking_adaptive": "Adaptiv"
+    "thinking_adaptive": "Adaptiv",
+    "drive": "Fahrmodus",
+    "drive_aria": "Fahrmodus (freihändige Sprache)"
   },
   "welcome": {
     "with_bot": "Chat mit {name}",
@@ -287,7 +289,10 @@
     "recovery_desc": "Alle Nachrichten in eine Datei exportieren oder nicht gespeicherte Nachrichten wiederherstellen.",
     "recovery_open": "Öffnen",
     "theme_button": "Design-Schaltfläche",
-    "theme_button_desc": "Öffnet die Design-Auswahl direkt aus der Menüleiste."
+    "theme_button_desc": "Öffnet die Design-Auswahl direkt aus der Menüleiste.",
+    "dev_voice": "Fahrmodus",
+    "voices": "Stimmen",
+    "voices_desc": "Klone eine Stimme aus einem kurzen Clip, hör sie dir an und wähle die Stimme, mit der der Fahrmodus spricht."
   },
   "companions": {
     "title": "Begleiter",
@@ -1133,5 +1138,16 @@
     "retry": "Erneut versuchen",
     "col_open": "Neues Fenster",
     "open_window_aria": "{name} in einem neuen Fenster statt im Bereich öffnen"
+  },
+  "advisor": {
+    "card_title": "An {agent} übergeben?",
+    "send": "An {agent} senden",
+    "dismiss": "Verwerfen",
+    "state_proposed": "Wartet auf dich",
+    "state_running": "An {agent} gesendet – in Arbeit",
+    "state_done": "Erledigt",
+    "state_failed": "{agent} konnte es nicht abschließen",
+    "state_dismissed": "Verworfen",
+    "send_failed": "Senden fehlgeschlagen: {error}"
   }
 }

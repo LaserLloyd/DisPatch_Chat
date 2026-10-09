@@ -51,6 +51,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -212,8 +213,17 @@ MAX_REDIRECTS = 3
 DEFAULT_HISTORY_CHARS = 24_000
 DEFAULT_MAX_TOKENS = 8192
 
+# The prompt a bot gets when its operator wrote none. The two tiers differ on
+# purpose: a SAFE bot is the one locked (Safe Mode) devices can reach, so it is
+# told it is talking in a family app; every other bot is reachable only from an
+# unlocked session, and gets no content framing of ours at all.
 DEFAULT_SYSTEM_PROMPT = (
+    "You are {name}, an assistant in a private chat app called DisPatch Chat. "
+    "Keep replies conversational."
+)
+SAFE_SYSTEM_PROMPT = (
     "You are {name}, a friendly assistant in a family chat app called DisPatch Chat. "
+    "Anyone in the family may be reading, so keep everything family-friendly. "
     "Keep replies conversational."
 )
 
@@ -611,7 +621,18 @@ def resolve(bot: config.Bot) -> Resolved:
     or a required-but-absent key is a configuration mistake, and the message
     should say so instead of arriving as a provider 400.
     """
-    api = bot.api or {}
+    return resolve_api(bot.api or {}, bot.name, bot.id, safe=bool(bot.safe))
+
+
+def resolve_api(api: dict, name: str, bot_id: str = "", *,
+                safe: bool = False) -> Resolved:
+    """`resolve` for one provider block that need not belong to a bot.
+
+    A companion bot carries a CHAIN of these (cloud first, local second); each
+    link resolves by exactly the rules a single "Connect an AI" bot uses.
+    """
+    # The two attributes the error messages below read.
+    bot = SimpleNamespace(name=name, id=bot_id or name)
     provider = PROVIDER_BY_ID.get(str(api.get("provider") or "").strip())
     if provider is None:
         raise ApiError(
@@ -638,7 +659,7 @@ def resolve(bot: config.Bot) -> Resolved:
     except (TypeError, ValueError):
         budget = DEFAULT_HISTORY_CHARS
     system = str(api.get("system_prompt") or "").strip() or \
-        DEFAULT_SYSTEM_PROMPT.format(name=bot.name)
+        (SAFE_SYSTEM_PROMPT if safe else DEFAULT_SYSTEM_PROMPT).format(name=bot.name)
     return Resolved(provider=provider, base_url=base_url, model=model,
                     api_key=api_key, system_prompt=system,
                     max_history_chars=max(500, budget))

@@ -111,6 +111,11 @@ FORBIDDEN_PATHS = [
     # moods dirs are per-bot since the per-bot pool port: reactions/moods-<bot>/
     (re.compile(r"(^|/)reactions/(pool|spent|moods)(-[A-Za-z0-9_-]+)?/"), "generated reaction blobs"),
     (re.compile(r"\.bak(-|$)"),                "a stray backup file"),
+    # Drive mode voice profiles: a cloned voice is a person's biometric. The
+    # whole directory, its exported generation parameters, and the models.
+    (re.compile(r"(^|/)voices/"),              "a voice profile (a person's recorded voice)"),
+    (re.compile(r"\.npz$"),                    "exported voice parameters"),
+    (re.compile(r"(^|/)speech-models/"),        "downloaded speech models"),
 ]
 
 # Paths that are fine to HAVE (a working install writes them into the tree) but

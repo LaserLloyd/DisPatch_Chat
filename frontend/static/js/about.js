@@ -26,7 +26,7 @@ export const SOURCE_URL = 'https://github.com/LaserLloyd/DisPatch_Chat';
  *  is admin-only by design. frontend/tests/about.test.js fails if the two
  *  numbers drift.
  */
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.1.0';
 
 /** Build the About row for the Device pane.
  *

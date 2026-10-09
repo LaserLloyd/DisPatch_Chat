@@ -2,7 +2,14 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v139';  // v139: release 2.0.0 — about.js shows
+const CACHE = 'local-chat-v143';  // v143: 2.1.0 — checklist/clients/reactions/tools ?v bumps (api.js v32 import). v142: 2.1.0 RC review — drive.js
+// reconnect gives up after repeated 1013s (drive.js?v=1→2), Drive-mode
+// strings localised; main.js?v=118→119, index.html, locales.
+// v141: Drive mode — drive.js,
+// voice-worklet.js and voice.css join SHELL; main.js?v=117→118, index.html.
+// v140: release 2.1.0 — about.js shows
+// APP_VERSION 2.1.0. about.js?v=4→5, main.js?v=116→117, index.html.
+// v139: release 2.0.0 — about.js shows
 // APP_VERSION 2.0.0. about.js?v=3→4, main.js?v=114→115, index.html.
 // v138: public-repo scrub — notice.js
 // flags any sender metadata block carrying failure:true (no sender named),
@@ -295,7 +302,7 @@ const SHELL = [
   '/static/js/reactions.js', '/static/js/i18n.js',
   '/static/js/dashboard.js', '/static/js/privacy.js', '/static/js/llm.js',
   '/static/js/nim.js', '/static/js/about.js', '/static/js/pins.js',
-  '/static/js/imagejobs.js', '/static/js/links.js', '/static/js/viewer.js',
+  '/static/js/imagejobs.js', '/static/js/advisor.js', '/static/js/links.js', '/static/js/viewer.js',
   '/static/js/menubots.js',
   // The app SDK (2026-09-25): statically imported by main.js, so a cold
   // offline start needs it. The apps themselves (/apps/*) are never cached.
@@ -323,6 +330,11 @@ const SHELL = [
   // Tools rail group + generic tool pane + Settings → Tools (2026-09-25).
   // Pure module, statically imported by main.js.
   '/static/js/tools.js',
+  // Drive mode (hands-free voice, 2026-10-09). Kept at the static root,
+  // outside js/: an optional feature with its own tests. drive.js is a static
+  // import of main.js; the worklet is loaded by audioWorklet.addModule and
+  // voice.css by loadStyle, both on demand.
+  '/static/drive.js', '/static/voice-worklet.js', '/static/voice.css',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

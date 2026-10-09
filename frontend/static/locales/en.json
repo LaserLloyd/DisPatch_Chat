@@ -118,7 +118,9 @@
     "thinking_medium": "Medium",
     "thinking_high": "High",
     "thinking_max": "Max",
-    "thinking_adaptive": "Adaptive"
+    "thinking_adaptive": "Adaptive",
+    "drive": "Drive mode",
+    "drive_aria": "Drive mode (hands-free voice)"
   },
   "welcome": {
     "with_bot": "Chat with {name}",
@@ -287,7 +289,10 @@
     "recovery_desc": "Export every message to a file, or restore messages that did not save.",
     "recovery_open": "Open",
     "theme_button": "Theme button",
-    "theme_button_desc": "Opens the theme picker straight from the menu bar."
+    "theme_button_desc": "Opens the theme picker straight from the menu bar.",
+    "dev_voice": "Drive mode",
+    "voices": "Voices",
+    "voices_desc": "Clone a voice from a short clip, audition it, and pick the voice Drive mode speaks with."
   },
   "companions": {
     "title": "Companions",
@@ -1133,5 +1138,16 @@
     "retry": "Try again",
     "col_open": "New window",
     "open_window_aria": "Open {name} in a new window instead of the pane"
+  },
+  "advisor": {
+    "card_title": "Hand this to {agent}?",
+    "send": "Send to {agent}",
+    "dismiss": "Dismiss",
+    "state_proposed": "Waiting for you",
+    "state_running": "Sent to {agent} — working on it",
+    "state_done": "Done",
+    "state_failed": "{agent} couldn't finish",
+    "state_dismissed": "Dismissed",
+    "send_failed": "Couldn't send: {error}"
   }
 }

@@ -13,7 +13,7 @@
 // routing; back/forward inside the panel is handled by the tab buttons +
 // an internal history-less stack (Back always returns to the list).
 
-import { api } from './api.js?v=31';
+import { api } from './api.js?v=32';
 import { t } from './i18n.js?v=3';
 import { acquireInert, releaseInert } from './util.js?v=20';
 

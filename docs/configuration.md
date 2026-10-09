@@ -126,6 +126,10 @@ or the *name* of an environment variable holding one:
 including every provider's defaults and the key-storage trade-off:
 [llm-providers.md](llm-providers.md).
 
+A bot can also carry an `advisor:` block instead: a direct-API chat partner with
+a provider fallback chain, a knowledge corpus and agent handoffs. See
+[advisor.md](advisor.md).
+
 ## Backups
 
 ```

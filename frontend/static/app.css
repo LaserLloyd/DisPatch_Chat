@@ -4373,3 +4373,18 @@ body.tools-sheet-open::after {
 }
 .tools-field span { font-size: 12px; color: var(--text-secondary); }
 .tools-add-actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Advisor handoff card: the brief is the bubble's markdown; this strip under it
+   carries the request's state and, while it is still a proposal, Send. */
+.advisor-handoff {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+  font-size: .9em;
+}
+.advisor-state { opacity: .75; }
+.advisor-done .advisor-state { color: var(--success-text); opacity: 1; }
+.advisor-failed .advisor-state { color: var(--error-text); opacity: 1; }
+.advisor-error { flex-basis: 100%; opacity: .75; font-size: .92em; overflow-wrap: anywhere; }
+.advisor-actions { display: inline-flex; gap: 8px; margin-inline-start: auto; }
+.advisor-actions .busy { opacity: .6; cursor: progress; }

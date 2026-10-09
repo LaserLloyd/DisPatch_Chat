@@ -1,6 +1,6 @@
 [project]
 name = "dispatch-chat"
-version = "2.0.0"
+version = "2.1.0"
 description = "Self-hosted chat for your household and your AI agents"
 license = "MIT"
 requires-python = ">=3.12"
@@ -37,6 +37,25 @@ package = false
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+]
+# Drive mode (app/voice, docs/voice-drive-mode.md). OPTIONAL and CPU-only:
+# `uv sync --group voice`, then `uv run python -m app.voice.download`.
+# numpy + onnxruntime already arrive with rapidocr-onnxruntime above. No torch.
+# NOTE: kokoro-onnx pulls phonemizer + espeak-ng (GPL-3.0) at runtime — they
+# are installed into the environment, never vendored into this MIT tree.
+voice = [
+    "onnx-asr>=0.12",
+    # Built-in fallback voice.
+    "kokoro-onnx>=0.5",
+    # What the optional cloned-voice engine (the `dispatch_voice` package)
+    # needs at runtime. The package itself is NOT a dependency here: point
+    # DISPATCH_VOICE_PKG at its source directory and it is imported from
+    # there when present (see app/voice/dv.py), so a fresh clone still locks.
+    "tokenizers>=0.20",
+    "huggingface_hub>=0.25",
+    "soundfile>=0.12",
+    "soxr>=0.5",
+    "pyloudnorm>=0.1.1",
 ]
 
 [tool.setuptools]

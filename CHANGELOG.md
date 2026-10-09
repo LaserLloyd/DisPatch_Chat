@@ -7,6 +7,63 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-09
+
+### Added
+
+- **Advisor bots.** A bot with an `advisor:` block in `config.yaml` answers
+  directly from a model API with real token streaming, through an ordered
+  provider chain (cloud first, local second; a provider that fails before its
+  first word falls through, and a reasoning-only reply does too). Per-provider
+  `max_tokens`, `extra_body` (for example to disable thinking) and
+  `read_timeout_s`; `<think>` blocks are hidden from the stream.
+- **Knowledge corpus.** A directory of Markdown files is the truth; a SQLite
+  FTS5 index with optional embeddings from any OpenAI-compatible `/embeddings`
+  endpoint gives hybrid ranking. `_profile.md` is always in the prompt, with
+  `profile_fallback` files when it is absent.
+- **Delegation to agents.** `[[research:<agent>|brief]]` dispatches at once;
+  `[[handoff:<agent>|task]]` shows a card with Send and Dismiss and needs a full
+  unlocked session, so an agent can never approve its own handoff. Reports are
+  saved to `research/` and `actions/` in the corpus and posted into the thread.
+  Requests are tracked in `advisor.db` (proposed, running, done, failed,
+  dismissed); requests running at a restart are marked failed.
+- **Nightly digest.** `POST /api/advisor/digest?day=YYYY-MM-DD[&force=true]`
+  writes `conversations/<date>-<bot>.md`; `GET /api/advisor/status` reports
+  providers, index and recent requests. Both are machine-inbound. See
+  [docs/advisor.md](docs/advisor.md).
+- **Drive mode (hands-free voice).** A 🎙 button on a thread opens a voice view:
+  speak, and DisPatch detects the end of your turn (Silero VAD + Smart Turn,
+  with a turn-merge window for mid-sentence pauses), transcribes it on the CPU
+  (Parakeet), sends it through the normal send path tagged `metadata.voice`,
+  and speaks the reply sentence by sentence while it streams. Barge-in, echo
+  rejection, spoken acknowledgements, Wake Lock and Media Session keys.
+  Unlocked tier and non-safe bots only. New endpoints: `/ws/voice/{thread_id}`
+  (inline Origin + session gate), `GET /api/voice/status`, and — when the
+  optional [`dispatch-voice`](docs/voice-drive-mode.md#cloned-voices-dispatch-voice)
+  package is present (`DISPATCH_VOICE_PKG`) — the Voices panel at
+  `/api/voices` for cloning a voice from a short clip. Optional `voice`
+  dependency group (`uv sync --group voice`, then
+  `uv run python -m app.voice.download` for ~810 MB of pinned, sha256-checked
+  models). Configured by `DISPATCH_VOICE` (`auto` by default: on only when the
+  deps and models are present) and the `DISPATCH_VOICE_*` variables. Licence
+  note: the Kokoro fallback voice pulls in a **GPL-3.0** phonemizer chain
+  (phonemizer + espeak-ng) at runtime through the `voice` group; nothing GPL is
+  vendored in this repository. A bot's `voice:` picks its profile. See
+  [docs/voice-drive-mode.md](docs/voice-drive-mode.md).
+
+### Changed
+
+- **Default prompt follows the tier.** A direct-API ("Connect an AI") bot with
+  no `system_prompt` of its own is no longer told it is in a family chat
+  unless it is a Safe-Mode (`safe: true`) bot; unlocked-only bots get a neutral
+  default.
+- `llm_api` gained `resolve_api`, resolving a provider entry without a bot.
+- `config.yaml` bots gain an optional `advisor:` block, omitted when unset;
+  admin output redacts its provider and embeddings keys. They also gain an
+  optional `voice:` (Drive-mode profile id), shown in admin output only.
+- Drive mode is optional at import time: if `app/voice` cannot be imported the
+  app starts without it (logged) and `/ws/voice` answers 1013.
+
 ## [2.0.0] — 2026-10-09
 
 The first tagged release. It rolls up everything since the 1.0.0 source tree

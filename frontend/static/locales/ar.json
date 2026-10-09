@@ -122,7 +122,9 @@
     "thinking_medium": "متوسط",
     "thinking_high": "مرتفع",
     "thinking_max": "أقصى",
-    "thinking_adaptive": "تكيفي"
+    "thinking_adaptive": "تكيفي",
+    "drive": "وضع القيادة",
+    "drive_aria": "وضع القيادة (صوت بدون استخدام اليدين)"
   },
   "welcome": {
     "with_bot": "محادثة مع {name}",
@@ -295,7 +297,10 @@
     "recovery_desc": "صدّر كل الرسائل إلى ملف، أو استعد الرسائل التي لم تُحفظ.",
     "recovery_open": "فتح",
     "theme_button": "زر السمة",
-    "theme_button_desc": "يفتح منتقي السمات مباشرة من شريط القوائم."
+    "theme_button_desc": "يفتح منتقي السمات مباشرة من شريط القوائم.",
+    "dev_voice": "وضع القيادة",
+    "voices": "الأصوات",
+    "voices_desc": "استنسخ صوتًا من مقطع قصير، واستمع إليه، واختر الصوت الذي يتحدث به وضع القيادة."
   },
   "companions": {
     "title": "الرفاق",
@@ -1233,5 +1238,16 @@
     "retry": "إعادة المحاولة",
     "col_open": "نافذة جديدة",
     "open_window_aria": "فتح {name} في نافذة جديدة بدلاً من اللوحة"
+  },
+  "advisor": {
+    "card_title": "هل تُسلِّم هذا إلى {agent}؟",
+    "send": "أرسل إلى {agent}",
+    "dismiss": "تجاهل",
+    "state_proposed": "بانتظار قرارك",
+    "state_running": "أُرسل إلى {agent} — قيد التنفيذ",
+    "state_done": "تم",
+    "state_failed": "لم يتمكن {agent} من الإنهاء",
+    "state_dismissed": "تم التجاهل",
+    "send_failed": "تعذّر الإرسال: {error}"
   }
 }

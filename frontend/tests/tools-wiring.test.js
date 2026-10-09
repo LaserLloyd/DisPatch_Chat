@@ -207,9 +207,16 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v139 (release 2.0.0: about.js)', () => {
+test('the sw.js CACHE is local-chat-v143 (2.1.0)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v143: 2.1.0 — the four modules that import api.js v32 got their own ?v bumps.
+  // v142: 2.1.0 RC review — drive.js 1→2 (reconnect gives up on repeated
+  // 1013), Drive-mode strings localised; main.js 118→119, index.html, locales.
+  // v141: Drive mode — drive.js, voice-worklet.js, voice.css join SHELL;
+  // main.js 117→118, index.html.
+  // v140: release 2.1.0 — about.js 4→5 (APP_VERSION), main.js 116→117,
+  // index.html.
   // v139: release 2.0.0 — about.js 3→4 (APP_VERSION), main.js 114→115,
   // index.html.
   // v138: public-repo scrub — notice.js 3→4, about.js 2→3, main.js 113→114,
@@ -234,7 +241,7 @@ test('the sw.js CACHE is local-chat-v139 (release 2.0.0: about.js)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v139');
+  assert.equal(m[1], 'local-chat-v143');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
