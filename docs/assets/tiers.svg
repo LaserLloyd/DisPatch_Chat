@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" role="img"
-     aria-label="The two access tiers. Every request from either tier hits the same server-side gate. Safe Mode, with no PIN, gets read and send to safe characters only, media stripped server-side, a one-way file drop and daily per-device budgets; every mutating endpoint answers 403. Unlocked, with the PIN, gets full agents, files, settings, deletion, the host dashboard and the coding panes. The gate is enforced on the server, so a hand-crafted request from a locked device gets the same 403 as a button press.">
+     aria-label="The two access tiers. Every request from either tier hits the same server-side gate. Safe Mode, with no PIN, gets read and send to safe characters only, media stripped server-side, a one-way file drop and daily per-device budgets; every mutating endpoint answers 403. Unlocked, with the PIN, gets full agents, files, settings, deletion, the host dashboard, the tools and the coding pane. The gate is enforced on the server, so a hand-crafted request from a locked device gets the same 403 as a button press.">
   <defs>
     <pattern id="g2" width="46" height="46" patternUnits="userSpaceOnUse">
       <path d="M 46 0 H 0 V 46" fill="none" stroke="#18202a" stroke-width="1"/>
@@ -57,7 +57,7 @@
     <rect x="636" y="386" width="500" height="122" rx="14" fill="#10151b" stroke="#2ea8ff" stroke-width="3"/>
     <text x="660" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8" textLength="93.8" lengthAdjust="spacingAndGlyphs">Unlocked</text>
     <text x="660" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="381.1" lengthAdjust="spacingAndGlyphs">Full-power agents, files, settings, deletion, the host</text>
-    <text x="660" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="409.8" lengthAdjust="spacingAndGlyphs">dashboard, and the coding panes if you enabled them.</text>
+    <text x="660" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="409.8" lengthAdjust="spacingAndGlyphs">dashboard, and the tools and coding pane if enabled.</text>
     <text x="660" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#4ade80" textLength="89.8" lengthAdjust="spacingAndGlyphs">everything</text>
   </g>
 </svg>

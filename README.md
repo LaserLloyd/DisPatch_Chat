@@ -7,6 +7,8 @@
 Runs on your hardware. Your conversations stay in a SQLite file you can read,
 back up, and delete. No account, no cloud, no telemetry.
 
+**Current release: 2.0.0** (October 2026) · [what changed](#whats-new-in-20)
+
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Deployment](#deployment) · [Security](#security) ·
 [Documentation](docs/) · [Changelog](CHANGELOG.md) ·
@@ -56,23 +58,37 @@ that keeps an existing install's history.
 
 ## Screenshots
 
-A demo install with three assistants configured — the same app on a desktop and
-on a phone, in both themes.
+A demo install with three fictional assistants — the same app on a desktop and
+on a phone, in a few of the ten themes.
 
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/desktop-light.png"
-           alt="DisPatch Chat on a desktop browser in the light theme: a sidebar of household conversations on the left, and an open thread where the assistant answers with a bulleted plan for the day and a markdown comparison table." />
+      <img src="docs/screenshots/desktop-glacier.png"
+           alt="DisPatch Chat on a desktop browser in the default Glacier theme: a rail of three letter-block bot avatars on the left, the planner bot's thread list, and an open thread where it answers with a day-trip plan as a bulleted list and a sortable comparison table." />
     </td>
     <td width="50%">
-      <img src="docs/screenshots/desktop-dark.png"
-           alt="The same conversation in the dark theme, scrolled down to show a syntax-highlighted console code block with a copy button." />
+      <img src="docs/screenshots/desktop-midnight-gold.png"
+           alt="The same app in the Midnight Gold theme, showing a reply with a console code block that has a language label, a wrap toggle and a copy button." />
     </td>
   </tr>
   <tr>
-    <td align="center"><em>Desktop, light theme — threads and markdown</em></td>
-    <td align="center"><em>Desktop, dark theme — code blocks and tables</em></td>
+    <td align="center"><em>Glacier (default) — markdown and sortable tables</em></td>
+    <td align="center"><em>Midnight Gold — code blocks</em></td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/desktop-checklist.png"
+           alt="A reply in the Forest theme containing an interactive checklist table: four household chores with a checkbox per row and sortable Task, Who and When columns." />
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/settings-theme.png"
+           alt="Settings on the Theme tab: a grid of live miniature previews for the six core themes, a More themes row with four more, and a check mark on the active one." />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><em>Checklist tables — ticks sync to every device</em></td>
+    <td align="center"><em>Settings → Theme — ten skins, live previews</em></td>
   </tr>
 </table>
 
@@ -80,15 +96,15 @@ on a phone, in both themes.
   <tr>
     <td width="33%">
       <img src="docs/screenshots/mobile-chats.png"
-           alt="DisPatch Chat at phone width showing the thread list: eleven conversations with previews and relative timestamps, and a bottom tab bar for Bots, Chats and Messages." />
+           alt="DisPatch Chat at phone width showing one bot's thread list under a Today heading, with previews and relative timestamps, and a bottom tab bar for Bots, Chats and Messages." />
     </td>
     <td width="33%">
       <img src="docs/screenshots/mobile-thread.png"
-           alt="DisPatch Chat at phone width showing an open conversation, with the assistant's bulleted reply rendered as markdown and a message composer pinned to the bottom." />
+           alt="DisPatch Chat at phone width showing an open conversation: a numbered list and a shopping list rendered as markdown, a Copy button and a menu under each message, and the composer pinned above the tab bar." />
     </td>
     <td width="33%">
       <img src="docs/screenshots/bot-manager.png"
-           alt="The Settings dialog on the Bots tab, listing three assistants with drag handles, a Safe Mode toggle, reaction and avatar-pool switches, a Change photo button and a per-bot visibility switch." />
+           alt="The Settings dialog on the Bots tab, listing four bots with drag handles, Safe, React and Pool toggles, a Change photo button and a per-bot visibility switch." />
     </td>
   </tr>
   <tr>
@@ -104,8 +120,14 @@ on a phone, in both themes.
 - Threads per conversation, with pinning, archiving, rename and full-text search
 - Markdown with syntax-highlighted code blocks, copy buttons, and collapsible JSON
 - Image, video and arbitrary file attachments with inline previews
-- Live streaming replies with a collapsible "what the agent is doing" panel
-- Offline-capable PWA — installs to a phone home screen
+- Live streaming replies, a status line naming what the run is doing, a
+  collapsible "what the agent is doing" panel, and a Stop button
+- Regenerate (with the alternates kept), edit-and-rerun, quote/reply, thumbs
+  feedback, and dropping a message from the context
+- Per-thread model and thinking-level override, with a context meter
+- Interactive checklist tables whose ticks persist and sync across devices
+- Drafts per thread, a persisted outbox and offline reading — installs to a
+  phone home screen as a PWA
 
 **Images & media delivery**
 - Agent- and script-posted pictures arrive as an instant placeholder in the
@@ -156,15 +178,39 @@ on a phone, in both themes.
   Studio, Ollama or anything OpenAI-compatible, from a panel in the app. No
   agent runtime, no install — see below
 - Or use a full **agent backend**: ships with an adapter for
-  [OpenClaw](docs/agents.md), where DisPatch spawns its CLI and tails its
-  session transcripts. Both of those are host-filesystem operations, so *that*
-  backend has to live on the same machine — the seam that would make an agent
+  [OpenClaw](docs/agents.md). Turns go over the gateway's WebSocket when it is
+  connected (falling back to spawning its CLI), replies stream in live, and an
+  in-flight table plus a transcript sweep make sure an accepted run's reply
+  lands even after a dropped socket or a restart. The CLI and the transcripts
+  are host-filesystem operations, so *that* backend has to live on the same
+  machine — the seam that would make an agent
   runtime on another host pluggable is designed and not built
   ([docs/design/agent-backend.md](docs/design/agent-backend.md))
 - Agents reply into threads like any other participant, and can push proactive
   messages (a morning briefing, a finished job, an alert)
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with
   neither configured
+
+## What's new in 2.0
+
+2.0.0 is the first tagged release and rolls up everything since the August
+1.0.0 tree. The headlines (the full list is in the [changelog](CHANGELOG.md)):
+
+- **Replies arrive live and are never dropped.** Turns go over the gateway's
+  open socket (about a second faster per reply), text streams as the model
+  writes it, a Stop button aborts a run, and every accepted run is settled even
+  across a restart.
+- **A real conversation toolkit.** Regenerate with alternates, edit-and-rerun,
+  quote/reply, thumbs, per-thread model and thinking overrides, a context meter,
+  drafts and an offline outbox.
+- **Tools and apps.** Embed your own projects as switchable panels — a static
+  folder, a URL, or a trusted app package with its own backend, UI and bot —
+  from one Tools button. The Job Board ships as the first app.
+- **Ten themes** from a shared theme package, replacing the light/dark switch.
+- **Local viewer, image jobs, checklist tables, calmer message rows**, and
+  machine notices that collapse to one muted line.
+- **Removed:** the coding-terminal pane. The
+  licence is **MIT** (it was AGPL-3.0 before 2026-08-30).
 
 ## Why there is a PIN
 
@@ -182,7 +228,7 @@ about which half of the app is behind a door:
 
 <div align="center">
   <img src="docs/assets/tiers.svg" width="100%"
-       alt="Both tiers funnel through one server-side gate. A kitchen tablet with no PIN reaches Safe Mode: read and send to safe characters only, media stripped server-side, a one-way file drop, daily per-device budgets, and 403 on every mutating endpoint. A phone with the PIN entered reaches everything: full-power agents, files, settings, deletion, the host dashboard and the coding panes." />
+       alt="Both tiers funnel through one server-side gate. A kitchen tablet with no PIN reaches Safe Mode: read and send to safe characters only, media stripped server-side, a one-way file drop, daily per-device budgets, and 403 on every mutating endpoint. A phone with the PIN entered reaches everything: full-power agents, files, settings, deletion, the host dashboard, the tools and the coding pane." />
 </div>
 
 **Safe Mode — no PIN.** What a kitchen tablet or a kid's phone gets. Read and

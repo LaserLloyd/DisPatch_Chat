@@ -24,11 +24,15 @@
 # and a real first name. Re-shoot them from synthetic data if the Emails and
 # Clients tabs need documenting.
 
+# Re-shot 2026-10-09 for 2.0.0 from a seeded scratch instance (Nova/Atlas/Scout,
+# letter-block avatars, invented chatter) and opened one by one before listing.
 bot-manager.png
-desktop-dark.png
-desktop-light.png
+desktop-checklist.png
+desktop-glacier.png
+desktop-midnight-gold.png
 mobile-chats.png
 mobile-thread.png
+settings-theme.png
 
 # Safe Mode with an empty roster: no threads, no names, no message text.
 live-locked-1280.png

@@ -2,7 +2,9 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v138';  // v138: public-repo scrub — notice.js
+const CACHE = 'local-chat-v139';  // v139: release 2.0.0 — about.js shows
+// APP_VERSION 2.0.0. about.js?v=3→4, main.js?v=114→115, index.html.
+// v138: public-repo scrub — notice.js
 // flags any sender metadata block carrying failure:true (no sender named),
 // about.js points at the DisPatch_Chat repo. notice.js?v=3→4,
 // about.js?v=2→3, main.js?v=113→114, index.html.

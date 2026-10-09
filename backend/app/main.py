@@ -487,7 +487,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="1.0.0", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.0.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 

@@ -7,8 +7,44 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-09
+
+The first tagged release. It rolls up everything since the 1.0.0 source tree
+of August 2026: a socket-first, drop-proof reply path with live streaming, a
+conversation toolkit, tools and app packages, ten shared themes, and the
+licence change to MIT. Breaking for operators: the coding-terminal pane and its
+`DISPATCH_TERMINAL*` switches are gone, and the light/dark switch is replaced
+by palettes (a stored `data-theme` choice is not carried over).
+
 ### Added
 
+- **Tools and apps.** A Tools group in the rail (one Tools button with a popup
+  menu on desktop, a tile grid and bottom sheet on the phone), full-page tool
+  panes and **Settings → Tools**. Tools are manifest-driven (`tools.yaml`): a
+  static folder, a URL, or a builtin, each switchable, and opening framed or in
+  a new window (`open: frame|window`) for pages that refuse framing. **Trusted
+  app packages** (`apps/<id>/`) add their own backend routes, static UI, bot
+  and thread hook through `AppContext` and the app SDK; the **Job Board** is
+  the first one. See [docs/apps.md](docs/apps.md).
+- **Conversation toolkit.** Regenerate keeps the alternates, a message can be
+  edited and re-run or dropped from the context, quote/reply, thumbs feedback,
+  and a per-thread **model and thinking-level override** with a context meter
+  — all on one shared turn seam (`TurnOptions`).
+- **Drafts, a persisted outbox and offline reading.** An unsent draft is kept
+  per thread, a message sent while offline waits in an outbox that survives a
+  reload, and threads already opened stay readable offline.
+- **Calmer message rows.** Copy and a ⋯ menu, nothing else on screen; machine
+  events carry `metadata.notice` and collapse to one muted line.
+- **Today / Older section headers** in the thread list, on desktop and phone.
+- **Mood-driven header face and a scene backdrop** for bots that have them.
+- **Custom link buttons** on the rail, and thin-stroke SVG rail icons.
+- **DeepSeek Harness live sessions** — launch, watch and stop a `dsh` run from
+  the harness pane (operator-only).
+- **StudioForge control panel** as a builtin tool when the LLM rig is present.
+- **Inline `[[pic:prompt|caption]]` marker** — a bot's reply can fire an image
+  job that lands in place of a placeholder.
+- **Clients site links** (practice integration): editable live/repo/notes links
+  per client, stored in the data directory.
 - **Live reply streaming.** A reply paints as the gateway produces it: the
   OpenClaw `chat` delta events (per-session `sessions.messages.subscribe`)
   drive `stream_start` / `stream_chunk` / `stream_done` frames, coalesced to
@@ -101,7 +137,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rig trips a 15-second breaker so queued jobs fail fast rather than each
   waiting out a connect timeout in series.
 
-- **Appearance is a palette, not a light/dark pair.** `theme.css` now ships six
+- **Appearance is a palette, not a light/dark pair.** `theme.css` first shipped six
   complete skins selected by `data-palette` on `<html>`: **Glacier** (the
   default), Midnight Gold, Forest, Paper, Daylight and Classic Purple (today's
   purple, frozen to the dark values it shipped). Each block redefines the full
@@ -116,6 +152,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `frontend/tests/theme-palettes.test.js` pins the palette ids across
   `theme.css`, `js/theme.js` and `index.html`, and fails if any palette omits a
   token or redefines a structural one.
+  Since 2026-09-22 the palettes come from a shared theme package vendored as
+  the drop-in folder `static/ui-theme/` — **ten themes** (adding Electric
+  Yellow, Night Red and two LaserLloyd skins), with a "More themes" row.
+- **Licence: MIT** (relicensed from AGPL-3.0 on 2026-08-30).
+- **Text responses are gzipped** and the thread-list preview is bounded.
+- **A failed startup exits** instead of lingering as a zombie process.
 
 ### Removed
 
@@ -181,9 +223,9 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   'self'` as a header.** `index.html` said that was the server's job and the
   server never did it, so nothing stopped another site from framing DisPatch.
 
-## [1.0.0] — unreleased
+## [1.0.0] — 2026-08-26
 
-First public release. The history below is the work that produced it, grouped by
+The source tree distributed as a zip in August 2026 (never tagged). The history below is the work that produced it, grouped by
 theme rather than by commit.
 
 ### Added
