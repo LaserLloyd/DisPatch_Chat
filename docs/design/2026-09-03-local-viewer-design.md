@@ -213,8 +213,8 @@ Layout (mobile-first):
   Unknown/other `[[x:]]` remain literal text. Note `[[media:]]` for images is
   untouched and still wins for media extensions in the auto-rewrite path.
 * Markdown links `[label](/abs/path)` / `(~/x)` / `(file:///x)`: in
-  `enhanceContent`, an `<a href>` whose href starts with `/var/ /home/ /tmp/
-  /mnt/ /opt/ /srv/ /Users/ ~/ file://` (i.e. NOT `/api/ /media/ /static/`) is
+  `enhanceContent`, an `<a href>` whose href starts with `/var/, /home/, /tmp/,
+  /mnt/, /opt/, /srv/, /Users/, ~/, file://` (i.e. NOT `/api/ /media/ /static/`) is
   rewritten: href removed, `data-file-path` set, class added.
 * `installMarkdownHandlers(onToast, { onOpenFile })`: the file-link branch
   (markdown.js:1103-1113) calls `onOpenFile(path, line, ev)` when provided;

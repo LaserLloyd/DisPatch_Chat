@@ -225,7 +225,7 @@ async def test_a_directive_split_across_two_deltas_never_half_appears():
 
     bus, rec = _Bus(), _Recorder()
     router = _router(bus, rec, sanitize=main._sanitize_delta)
-    for cumulative in ("See [[media:/var/home/",
+    for cumulative in ("See [[media:/data/ph",
                        "See [[media:/srv/pics/x.png",
                        "See [[media:/srv/pics/x.png|cap]] there"):
         await router.handle("chat", _delta(cumulative))
@@ -233,7 +233,7 @@ async def test_a_directive_split_across_two_deltas_never_half_appears():
     await router.handle("chat", {"state": "final", "runId": "r1",
                                  "sessionKey": "agent:main:t1", "seq": 9})
     every_chunk = "".join(f["text"] for f in bus.of("stream_chunk"))
-    assert "/var/home" not in every_chunk, (
+    assert "/data/ph" not in every_chunk, (
         "a half-written directive must be held back, not streamed and "
         "retracted")
     assert bus.text().strip() == "See  there".strip() or "there" in bus.text()
