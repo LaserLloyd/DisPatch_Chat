@@ -21,7 +21,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
 const JS_DIR = join(STATIC, 'js');
 
-const SOURCE = [readFileSync(join(STATIC, 'index.html'), 'utf8')]
+// drive.js sits at the static root (an optional feature, outside js/), but it
+// asks for its strings like any module, so it is scanned like one.
+const SOURCE = [readFileSync(join(STATIC, 'index.html'), 'utf8'), readFileSync(join(STATIC, 'drive.js'), 'utf8')]
   .concat(readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(join(JS_DIR, f), 'utf8')))
   .join('\n');
@@ -104,6 +106,13 @@ const DYNAMIC = [
   // level set is notice.js's closed vocabulary (error | warn | ok | info).
   { re: /^msg\.notice_level_(error|warn|ok|info)$/,
     built: 'main.js  t(`msg.notice_level_${notice.level}`)' },
+  // drive.js  paint():  t(`drive.state_${state}`) — the states with no
+  // special wording (thinking / offline / stopped have their own literal keys).
+  { re: /^drive\.state_(connecting|listening|hearing|transcribing|speaking|paused|locked)$/,
+    built: 'drive.js  t(`drive.state_${state}`)' },
+  // js/drive-settings.js  advancedRow():  t(`drive.thinking_${v}`), v from THINKING_LEVELS.
+  { re: /^drive\.thinking_(off|low|medium)$/,
+    built: 'drive-settings.js  t(`drive.thinking_${v}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {

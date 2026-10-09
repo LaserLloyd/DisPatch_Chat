@@ -38,8 +38,9 @@ class FakeWS:
     async def accept(self):
         self.accepted = True
 
-    async def close(self, code=1000):
+    async def close(self, code=1000, reason=None):
         self.closed_with = code
+        self.close_reason = reason
 
     async def send_text(self, s):
         self.sent.append(json.loads(s))
@@ -239,13 +240,16 @@ async def test_replace_chunks_do_not_duplicate_speech():
     ws.hang_up(); await task
 
 
-async def test_user_speech_while_speaking_barges_in():
+async def test_user_speech_while_speaking_ducks_then_barges_in_once_words_are_real():
+    """H3: speech over the reply only DUCKS it; the reply is cut (and the run
+    aborted) once the transcript proves it is the driver, not our echo."""
     aborted = []
 
     async def abort(tid):
         aborted.append(tid)
 
-    s, ws, tts, _ = make_session([[SpeechStart()]], abort=abort)
+    s, ws, tts, submitted = make_session([[SpeechStart()], [utterance()]],
+                                         stt_text="stop, what about tomorrow", abort=abort)
     s.settings = settings(barge_abort_turn=True)
     task = asyncio.create_task(s.run())
     ws.push_json({"type": "start"})
@@ -254,17 +258,60 @@ async def test_user_speech_while_speaking_barges_in():
     await settle()
     assert s.speaking
     gen_before = s.gen
-    ws.push_audio()
+    ws.push_audio()                                  # speech starts over the reply
+    await settle()
+    assert ws.json_of("duck") == [{"type": "duck", "on": True, "gen": gen_before}]
+    assert not ws.json_of("barge_in") and aborted == []      # nothing cut yet
+    ws.push_audio()                                  # ...and it was real words
     await settle()
     barge = ws.json_of("barge_in")
     assert barge and barge[0]["gen"] == gen_before + 1
     assert aborted == [THREAD] and not s.speaking
+    assert submitted == [(THREAD, "stop, what about tomorrow")]
     # Late chunks of the barged reply stay silent.
     n = len(tts.said)
     s.on_app_frame({"type": "stream_done", "thread_id": THREAD, "message_id": "m1",
                     "message": {"id": "m1", "role": "assistant", "content": "A long answer. More."}})
     await settle()
     assert len(tts.said) == n
+    ws.hang_up(); await task
+
+
+async def test_echo_over_the_reply_unducks_and_never_aborts():
+    """H3: our own voice leaking into the mic must not kill the reply."""
+    aborted = []
+
+    async def abort(tid):
+        aborted.append(tid)
+
+    s, ws, tts, submitted = make_session([[SpeechStart()], [utterance()]],
+                                         stt_text="A long answer about the weather", abort=abort)
+    task = asyncio.create_task(s.run())
+    ws.push_json({"type": "start"})
+    s.on_app_frame({"type": "message", "thread_id": THREAD, "message": {
+        "id": "m1", "role": "assistant",
+        "content": "A long answer about the weather. And then a second sentence follows."}})
+    await settle()
+    ws.push_audio(); await settle()
+    assert ws.json_of("duck")[-1]["on"] is True
+    ws.push_audio(); await settle()
+    assert ws.json_of("echo_ignored")
+    assert ws.json_of("duck")[-1] == {"type": "duck", "on": False, "gen": 0}
+    assert not ws.json_of("barge_in") and aborted == [] and submitted == []
+    assert {"type": "state", "state": "speaking"} in ws.sent[-3:]
+    ws.hang_up(); await task
+
+
+async def test_barge_in_off_ignores_speech_while_speaking():
+    s, ws, tts, submitted = make_session([[SpeechStart()], [utterance()]])
+    task = asyncio.create_task(s.run())
+    ws.push_json({"type": "start", "barge_in": False})
+    s.on_app_frame({"type": "message", "thread_id": THREAD,
+                    "message": {"id": "m1", "role": "assistant", "content": "A long answer."}})
+    await settle()
+    ws.push_audio(); ws.push_audio(); await settle()
+    assert not ws.json_of("duck") and not ws.json_of("barge_in") and submitted == []
+    assert len(s.detector.script) == 2               # the mic was not even fed
     ws.hang_up(); await task
 
 
@@ -509,7 +556,7 @@ async def test_resume_within_window_merges_into_one_message():
     ws.push_audio(); await settle()            # ...and finishes
     assert calls == [("submit", "Remind me to call the garage"), ("abort", THREAD),
                      ("retract", "u1"), ("submit", "Remind me to call the garage about the brakes")]
-    assert ws.json_of("transcript")[-1] == {"type": "transcript", "merged": True,
+    assert ws.json_of("transcript")[-1] == {"type": "transcript", "merged": True, "message_id": "u2",
                                             "text": "Remind me to call the garage about the brakes"}
     # The abandoned turn never got a word out, even when it finishes late.
     s.on_app_frame({"type": "stream_done", "thread_id": THREAD, "provisional_id": "run:a",
@@ -521,7 +568,10 @@ async def test_resume_within_window_merges_into_one_message():
     s.on_app_frame({"type": "message", "thread_id": THREAD,
                     "message": {"id": "a2", "role": "assistant", "content": "Done, brakes it is."}})
     await asyncio.sleep(1.2); await settle()
-    assert tts.said == ["Done, brakes it is."]
+    # (M1 may have STARTED synthesising the early reply during the hold; it
+    # must never have been sent.)
+    assert [m["text"] for m in ws.json_of("audio") if m["kind"] == "reply" and m["chunk"] == 0] \
+        == ["Done, brakes it is."]
     ws.hang_up(); await task
 
 
@@ -532,9 +582,12 @@ async def test_reply_is_held_during_merge_window_then_spoken():
     s.on_app_frame({"type": "message", "thread_id": THREAD,
                     "message": {"id": "a1", "role": "assistant", "content": "It is three o'clock."}})
     await settle()
-    assert tts.said == []                     # still inside the 1 s window
-    await asyncio.sleep(1.1); await settle()
+    # M1: synthesis starts at once, but nothing is SENT inside the 1 s window.
     assert tts.said == ["It is three o'clock."]
+    assert not [m for m in ws.json_of("audio") if m["kind"] == "reply"]
+    await asyncio.sleep(1.1); await settle()
+    assert [m["text"] for m in ws.json_of("audio") if m["kind"] == "reply" and m["chunk"] == 0] \
+        == ["It is three o'clock."]
     ws.hang_up(); await task
 
 
@@ -707,18 +760,58 @@ async def test_merged_utterance_is_capped():
     ws.hang_up(); await task
 
 
-async def test_voice_sockets_per_session_are_capped(monkeypatch):
+async def test_new_voice_socket_replaces_the_oldest_of_the_session(monkeypatch):
+    """H2: a half-open socket must never lock the driver out. The newest
+    socket wins; the oldest is closed with 4001 "replaced"."""
     from app.voice import routes
-    monkeypatch.setattr(routes, "_OPEN", {"tok": routes.MAX_SOCKETS_PER_SESSION})
-    ws = FakeWS({"host": "h"}, {"lc_session": "tok"})
+    monkeypatch.setattr(routes, "_OPEN", {})
+    sessions = []
+
+    class Mgr:
+        async def connect(self, tap, decoy, token): pass
+        async def disconnect(self, tap): pass
+
+    async def submit(tid, text):
+        return "m"
+
+    async def open_one():
+        ws = FakeWS({"host": "h"}, {"lc_session": "tok"})
+        t = asyncio.create_task(serve_voice(
+            ws, THREAD, auth=FakeAuth(sessions={"tok"}), cookie_name="lc_session",
+            manager=Mgr(), thread_bot=bots(), submit=submit,
+            settings=ready_settings(monkeypatch), engines=(FakeSTT(), FakeTTS()),
+            detector=ScriptedDetector([])))
+        await settle(10)
+        sessions.append((ws, t))
+        return ws, t
+
+    (a, ta), (b, tb) = await open_one(), await open_one()
+    assert a.json_of("ready") and b.json_of("ready")
+    assert len(routes._OPEN["tok"]) == routes.MAX_SOCKETS_PER_SESSION
+    c, tc = await open_one()                 # a third: the oldest (a) goes
+    await asyncio.wait_for(ta, 2)
+    assert a.closed_with == 4001 and a.close_reason == "replaced"
+    assert c.json_of("ready") and not tb.done() and b.closed_with is None
+    for ws, t in ((b, tb), (c, tc)):
+        ws.hang_up()
+        await asyncio.wait_for(t, 2)
+    assert "tok" not in routes._OPEN        # slots freed
+
+
+async def test_unavailable_is_accepted_then_closed_1013_but_only_when_authorised(monkeypatch):
+    """Contract: 1013 reaches an AUTHORISED browser as a real close code
+    (accept first); an unauthorised caller still gets 1008 and no socket."""
+    off = VoiceSettings(flag="0")
 
     class Mgr:
         async def connect(self, *a, **k): raise AssertionError("must not register")
         async def disconnect(self, *a): pass
 
-    await serve_voice(ws, THREAD, auth=FakeAuth(sessions={"tok"}), cookie_name="lc_session",
-                      manager=Mgr(), thread_bot=bots(), submit=None,
-                      settings=ready_settings(monkeypatch), engines=(FakeSTT(), FakeTTS()),
-                      detector=ScriptedDetector([]))
-    # Authorised caller: accepted so the browser sees the real 1013 (not 1006).
-    assert ws.closed_with == 1013
+    ok_ws = FakeWS({"host": "h"}, {"lc_session": "tok"})
+    await serve_voice(ok_ws, THREAD, auth=FakeAuth(sessions={"tok"}), cookie_name="lc_session",
+                      manager=Mgr(), thread_bot=bots(), submit=None, settings=off)
+    assert ok_ws.accepted and ok_ws.closed_with == 1013 and ok_ws.close_reason
+    bad_ws = FakeWS({"host": "h"}, {})
+    await serve_voice(bad_ws, THREAD, auth=FakeAuth(pin_set=True), cookie_name="lc_session",
+                      manager=Mgr(), thread_bot=bots(), submit=None, settings=off)
+    assert not bad_ws.accepted and bad_ws.closed_with == 1008

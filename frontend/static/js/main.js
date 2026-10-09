@@ -31,7 +31,9 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
-import { initDrive } from '../drive.js?v=2';
+import { initDrive } from '../drive.js?v=3';
+import { mountDriveSettings, botVoicePill, voiceStatus } from './drive-settings.js?v=1';
+import { createVoicesPane } from './voices.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -728,6 +730,8 @@ window.addEventListener('popstate', (e) => {
   // Landed on a viewer entry with no viewer open: a stale one left behind by
   // a framed page's own navigations. Step over it instead of painting "bots".
   if (e.state?.viewer) { if (!viewerOpen()) history.back(); return; }
+  // Same for a Drive-mode entry with no Drive view open (forward into it).
+  if (e.state?.drive) { if (!document.body.classList.contains('drive-open')) history.back(); return; }
   // An entry left by a screen that no longer exists (an old app build's own
   // view name) lands on the root instead of on nothing.
   const v = e.state?.view;
@@ -4070,6 +4074,7 @@ function settingsOpen(id = null) {
 /** Tear down whatever the ACTIVE tab has running. Idempotent by design: it is
  *  called on every tab switch and again when the modal closes. */
 function deactivateSettingsTab() {
+  if (settingsTab === 'device' && voicesPane && voicesPane.isOpen()) voicesPane.close();
   if (settingsTab === 'health') unmountDashboard();
   if (settingsTab === 'reactions') unmountReactionManager();
 }
@@ -4226,6 +4231,7 @@ async function openBotManager(tab = 'bots') {
   } catch (e) { toast(e.message, true); return; }
   bmDirty = false;
   renderBotManager();
+  renderDriveSettings();        // its "who uses the default" line reads bmBots
   refreshAvatarPoolPanel();     // async; fills in the Avatar pools section
   dom['botmanager-backdrop'].classList.remove('hidden');
   // After the reveal: setSettingsTab mounts panes, and a pane that measures
@@ -4351,6 +4357,11 @@ function renderBotManager() {
         renderSidebar();
       },
     });
+    // Drive mode voice (unlocked, voice on, never for a Safe-Mode bot — those
+    // cannot open Drive at all). Waits for Save like its neighbours.
+    const voicePill = (voiceOn && voiceSt && !bot.safe && !state.decoy)
+      ? botVoicePill(bot, voiceSt, (v) => { bmBots[idx].voice = v; bmBots[idx]._voiceDirty = true; bmDirty = true; })
+      : null;
     const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx } }, [
       el('span', { class: 'bm-handle', text: '⠿' }),
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
@@ -4359,6 +4370,7 @@ function renderBotManager() {
       safeBtn,
       rxBtn,
       apBtn,
+      voicePill,
       mbBtn,
       // "Change photo" is omitted entirely in No-Image Mode — not disabled,
       // omitted. Offering to set a picture on a device that will not display
@@ -4482,12 +4494,18 @@ function buildAvatarPromptEditor(bid) {
 }
 
 async function saveBotManager() {
-  const payload = bmBots.map((b, i) => ({
-    id: b.id, order: i, visible: b.visible, safe: !!b.safe, reactions: !!b.reactions,
-    avatar_pool: !!b.avatar_pool,
-  }));
+  const payload = bmBots.map((b, i) => {
+    const item = {
+      id: b.id, order: i, visible: b.visible, safe: !!b.safe, reactions: !!b.reactions,
+      avatar_pool: !!b.avatar_pool,
+    };
+    // Only a voice the user actually changed: an absent key leaves it alone.
+    if (b._voiceDirty) item.voice = b.voice || '';
+    return item;
+  });
   try {
     const r = await api.saveOrder(payload);
+    voiceBots = r.bots.slice();            // keeps `voice` current for Drive
     state.bots = r.bots.filter((b) => b.visible);
     const selectedHidden = !botById(state.selectedBotId);
     const activeBotHidden = state.activeThread && !botById(state.activeThread.bot_id);
@@ -7182,38 +7200,98 @@ function applyAuthChrome() {
 let drive = null;
 let voiceOn = false;
 let voiceProbe = null;
+let voiceSt = null;          // the last /api/voice/status (unlocked tier only)
+let voiceBots = [];          // /api/bots/all (carries `voice`), fetched once voice is on
+let voicesPane = null;
 
 function refreshDrive() {
   if (!dom['drive-btn']) return;
   if (!drive) {
     drive = initDrive(dom['drive-btn'], {
       getThread: () => (voiceOn ? state.activeThread : null),
-      getBot: (id) => botById(id),
+      // `voice` is an admin-only field: the sidebar roster never has it, the
+      // Settings copy (bmBots) only once Settings was opened, so voice-on
+      // fetches /api/bots/all itself (voiceBots). The quick sheet's Voice row
+      // reads bot.voice to say "this bot speaks with its own voice" — without
+      // this it claimed the default voice applied when it did not.
+      getBot: (id) => [...bmBots, ...voiceBots].find((b) => b.id === id && typeof b.voice === 'string') || botById(id) || null,
       isLocked: () => state.decoy || !voiceOn,
       toast,
+      // The Drive hero is the thread's own face — the one the chat header
+      // shows — or a letter when No-Image Mode is on (never an <img> then).
+      getAvatar: (thread, bot) => ({
+        src: (bot && !nimEnabled()) ? (threadFaceUrl(thread) || bot.avatar_url || '') : '',
+        letter: botLetter(bot),
+      }),
+      voiceStatus: () => voiceSt,
+      openDriveSettings: () => openDriveSettings(),
     });
   }
   drive.refresh();
 }
 
+/** Settings → Device, scrolled to the Drive mode group. */
+async function openDriveSettings() {
+  if (state.decoy) return;
+  if (!settingsOpen()) await openBotManager('device');
+  else await setSettingsTab('device');
+  const g = dom['dev-group-voice'];
+  if (g && !g.hidden) { try { g.scrollIntoView({ block: 'start' }); } catch { /* ignore */ } }
+}
+
+/** (Re)build Settings → Device → Drive mode from the last voice status. */
+function renderDriveSettings() {
+  const g = dom['dev-group-voice'];
+  if (!g) return;
+  if (!voiceOn || state.decoy) { g.hidden = true; return; }
+  // The Voices manager stands in for the whole Device pane while it is open;
+  // a status refresh underneath it rebuilds the rows but must not unhide them.
+  if (!(voicesPane && voicesPane.isOpen())) g.hidden = false;
+  mountDriveSettings(g, {
+    status: voiceSt,
+    bots: () => (bmBots.length ? bmBots : state.bots),
+    openVoices: () => {
+      if (!voicesPane) {
+        voicesPane = createVoicesPane(dom['spane-device'], {
+          toast, confirm: uiConfirm, prompt: uiPrompt,
+          onChanged: () => { refreshVoiceStatus(); },
+        });
+      }
+      voicesPane.open();
+    },
+    toast,
+  });
+}
+
+/** Re-read the voice status after a change (voices added, default moved). */
+function refreshVoiceStatus() {
+  if (state.decoy || !voiceOn) return;
+  voiceStatus().then((st) => { voiceSt = st; renderDriveSettings(); }).catch(() => {});
+}
+
 function probeVoice() {
   if (state.decoy) {
     voiceOn = false;
+    voiceSt = null;
     if (drive && drive.close) drive.close();
+    if (voicesPane && voicesPane.isOpen()) voicesPane.close();
     if (dom['dev-group-voice']) dom['dev-group-voice'].hidden = true;
     refreshDrive();
     return;
   }
   if (voiceProbe) return;
-  voiceProbe = fetch('/api/voice/status', { credentials: 'same-origin' })
-    .then((r) => (r.ok ? r.json() : null))
+  voiceProbe = voiceStatus()
     .then((st) => {
       voiceOn = !!(st && st.enabled);
-      if (voiceOn) loadStyle('/static/voice.css?v=1');
-      // The Voices panel exists only when dispatch-voice is installed.
-      if (dom['dev-group-voice']) dom['dev-group-voice'].hidden = !(st && st.voices_ui);
+      voiceSt = voiceOn ? st : null;
+      if (voiceOn) {
+        loadStyle('/static/voice.css?v=2');
+        // Unlocked tier (voice is), so the admin roster is ours to read.
+        api.allBots().then((r) => { voiceBots = (r.bots || []).slice(); refreshDrive(); }).catch(() => {});
+      }
+      renderDriveSettings();
     })
-    .catch(() => { voiceOn = false; })
+    .catch(() => { voiceOn = false; voiceSt = null; renderDriveSettings(); })
     .finally(() => { voiceProbe = null; refreshDrive(); });
 }
 

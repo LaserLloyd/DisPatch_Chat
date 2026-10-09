@@ -20,11 +20,15 @@ the session runs them in a worker thread:
 * ``synth(text, profile_id=None) -> (int16 ndarray, rate)``.
 
 ``profile_id`` is opaque here: it names a voice the engine knows (a cloned
-voice from an extension, or a built-in voice name). ``None`` = the default.
+voice from an extension, or a built-in voice as ``builtin:<kokoro id>``).
+``None`` = the default. An engine that does not know a ``builtin:`` id raises
+``LookupError`` before any audio, which makes :class:`FallbackTTS` hand the
+sentence to Kokoro without putting the primary engine on a cooldown.
 
 Built in:
 
-* :class:`KokoroTTS` — Kokoro 82M int8 ONNX (Apache-2.0 weights, MIT
+* :class:`KokoroTTS` — Kokoro 82M ONNX, fp32 (int8 when that is all there
+  is; fp32 is ~6x faster on x86 CPUs) (Apache-2.0 weights, MIT
   ``kokoro-onnx`` runtime; its phonemizer/espeak-ng chain is GPL-3.0),
   ungated, CPU, built-in voices only. The FALLBACK, and the default when the
   cloned-voice engine is not installed. It does not stream inside a sentence,
@@ -122,13 +126,18 @@ class SentenceSplitter:
     full stop is cut at a comma — the first words matter most for latency.
     """
 
-    def __init__(self, first_soft_chars: int = 80, hard_chars: int = 260,
-                 min_words: int = 4) -> None:
+    def __init__(self, first_soft_chars: int = 48, hard_chars: int = 260,
+                 min_words: int = 4, first_max_chars: int = 80) -> None:
         self._buf = ""
         self._held = ""          # a too-short sentence waiting for company
         self._first = True
         self.min_words = min_words
         self.first_soft_chars = first_soft_chars
+        #: The first piece is what the driver waits for: cut it at a comma or
+        #: colon within ``first_soft_chars`` if there is one (synthesis time
+        #: grows with length: a 70-char clause cost ~4 s on the cloned voice),
+        #: else within ``first_max_chars``.
+        self.first_max_chars = max(first_max_chars, first_soft_chars)
         self.hard_chars = hard_chars
 
     def push(self, text: str) -> list[str]:
@@ -182,6 +191,16 @@ class SentenceSplitter:
         spans += [m.span() for m in re.finditer(r"\[\[.*?\]\]", s, re.S)]
         return spans
 
+    def _clause_cut(self, s: str, spans) -> int | None:
+        """End of the first piece's last clause within the first-piece
+        windows (soft, then max), or None."""
+        for limit in (self.first_soft_chars, self.first_max_chars):
+            w = s[:limit]
+            j = max(w.rfind(", "), w.rfind("; "), w.rfind(": "), w.rfind(" — "))
+            if j > 20 and not any(a <= j < b for a, b in spans):
+                return j + 1
+        return None
+
     def _find_cut(self, s: str, final: bool) -> int | None:
         spans = self._protected(s)
         for m in _END_RE.finditer(s):
@@ -193,6 +212,11 @@ class SentenceSplitter:
                 if m.group(1).startswith(".") and (word in _ABBREV or (len(word) == 1 and word.isalpha())):
                     continue
                 # A decimal ("3. 5" never happens; "3.5" has no space) — fine.
+                if self._first and m.end(1) > self.first_max_chars:
+                    # A long first sentence: say its first clause first.
+                    j = self._clause_cut(s, spans)
+                    if j is not None:
+                        return j
                 return m.end(1)
             if m.group(3):
                 return m.end(3)
@@ -205,10 +229,19 @@ class SentenceSplitter:
             if a < limit:
                 return b if len(s) > b and b > 0 and a == 0 else (a if a > 20 else None)
         if len(s) > limit and not final:
-            window = s[:limit]
-            j = max(window.rfind(", "), window.rfind("; "), window.rfind(": "), window.rfind(" — "))
+            def clause_end(window: str) -> int:
+                return max(window.rfind(", "), window.rfind("; "), window.rfind(": "),
+                           window.rfind(" — "))
+            j = clause_end(s[:limit])
             if j > 20:
                 return j + 1
+            if self._first:
+                if len(s) <= self.first_max_chars:
+                    return None             # a clause end may still come
+                j = clause_end(s[:self.first_max_chars])
+                if j > 20:
+                    return j + 1
+            window = s[:limit]
             if len(s) > self.hard_chars:
                 k = window.rfind(" ")
                 return k if k > 0 else limit
@@ -218,6 +251,65 @@ class SentenceSplitter:
 # --------------------------------------------------------------------------- #
 # Engines
 # --------------------------------------------------------------------------- #
+
+#: Prefix of a built-in (Kokoro) voice id where a profile id is expected.
+BUILTIN = "builtin:"
+
+
+def builtin_id(profile_id) -> str | None:
+    """``builtin:af_heart`` → ``af_heart``; anything else → None."""
+    if isinstance(profile_id, str) and profile_id.startswith(BUILTIN):
+        return profile_id[len(BUILTIN):] or None
+    return None
+
+
+class _Activity:
+    """How many REPLY sentences are being synthesised right now.
+
+    Background renders (acknowledgements, the spoken error lines, start-up
+    warm-up) call :meth:`wait_idle` before each line, so they never queue
+    ahead of a reply on an engine lock (review M2: six ack renders held the
+    Kokoro lock for ~20 s and starved the first reply)."""
+
+    def __init__(self) -> None:
+        self._n = 0
+        self._last = 0.0
+        self._cv = threading.Condition()
+
+    def enter(self) -> None:
+        with self._cv:
+            self._n += 1
+
+    def exit(self) -> None:
+        import time
+        with self._cv:
+            self._n = max(0, self._n - 1)
+            self._last = time.monotonic()
+            self._cv.notify_all()
+
+    @property
+    def busy(self) -> bool:
+        return self._n > 0
+
+    def wait_idle(self, quiet_s: float = 0.3, timeout: float | None = None) -> bool:
+        import time
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._cv:
+            while True:
+                now = time.monotonic()
+                gap = quiet_s - (now - self._last)
+                if self._n == 0 and gap <= 0:
+                    return True
+                if deadline is not None and now >= deadline:
+                    return False
+                wait = max(0.02, gap if self._n == 0 else 0.25)
+                if deadline is not None:
+                    wait = min(wait, max(0.0, deadline - now))
+                self._cv.wait(wait)
+
+
+REPLY_ACTIVITY = _Activity()
+
 
 def to_pcm16(audio) -> np.ndarray:
     a = np.clip(np.asarray(audio, np.float32).reshape(-1), -1.0, 1.0)
@@ -270,7 +362,8 @@ class KokoroTTS(_Base):
     def synth(self, text: str, profile_id: str | None = None) -> tuple[np.ndarray, int]:
         # A profile_id this engine does not know (a cloned voice meant for
         # another engine) falls back to the default voice rather than failing.
-        voice = profile_id if profile_id in self.voices else self.voice
+        want = builtin_id(profile_id) or profile_id
+        voice = want if want in self.voices else self.voice
         with self._lock:
             audio, sr = self._k.create(text, voice=voice, speed=self.speed, lang="en-us")
         return to_pcm16(audio), sr
@@ -386,6 +479,65 @@ def _kokoro(settings):
                      settings.kokoro_voice, settings.kokoro_speed, settings.tts_threads)
 
 
+def walk(engine) -> Iterator:
+    """The engine and every engine wrapped inside it (FallbackTTS layers)."""
+    seen: set[int] = set()
+    stack = [engine]
+    while stack:
+        e = stack.pop()
+        if e is None or id(e) in seen:
+            continue
+        seen.add(id(e))
+        yield e
+        stack += [getattr(e, "primary", None), getattr(e, "fallback", None)]
+
+
+def kokoro_of(engine) -> KokoroTTS | None:
+    return next((e for e in walk(engine) if isinstance(e, KokoroTTS)), None)
+
+
+def apply_live(settings) -> None:
+    """Push the in-app preferences (built-in voice, speed) into every loaded
+    engine — no rebuild, no restart. Kokoro reads both per sentence."""
+    with _ENGINES_LOCK:
+        engines = list(_ENGINES.values())
+    for eng in engines:
+        k = kokoro_of(eng)
+        if k is not None:
+            if settings.kokoro_voice in k.voices:
+                k.voice = settings.kokoro_voice
+            k.speed = settings.kokoro_speed
+
+
+_LANGS = {"a": ("en-us", "US"), "b": ("en-gb", "UK")}
+_BUILTIN_CACHE: dict[str, list[dict]] = {}
+
+
+def builtin_voices(settings) -> list[dict]:
+    """The built-in English voices: [{id: "builtin:af_heart", name, lang}].
+
+    Read from the voices file (no model load). Only American and British
+    English: STT and the Kokoro phonemizer are English-only today."""
+    key = str(settings.kokoro_voices_path)
+    if key in _BUILTIN_CACHE:
+        return _BUILTIN_CACHE[key]
+    try:
+        with np.load(settings.kokoro_voices_path) as z:
+            names = sorted(z.files)
+    except Exception:
+        return []
+    out = []
+    for n in names:
+        if len(n) < 4 or n[2] != "_" or n[0] not in _LANGS or n[1] not in "fm":
+            continue
+        lang, region = _LANGS[n[0]]
+        sex = "female" if n[1] == "f" else "male"
+        out.append({"id": BUILTIN + n, "name": f"{n[3:].replace('_', ' ').title()} ({region}, {sex})",
+                    "lang": lang})
+    _BUILTIN_CACHE[key] = out
+    return out
+
+
 def build_engine(settings):
     """The engine DISPATCH_VOICE_TTS names.
 
@@ -427,7 +579,8 @@ _ENGINES_LOCK = threading.Lock()
 
 def shared_engine(settings):
     from . import registry
-    key = f"{settings.tts_engine}:{settings.hq_url}:{sorted(registry._engines)}"
+    key = (f"{settings.tts_engine}:{settings.hq_url}:{settings.kokoro_model_path}:"
+           f"{sorted(registry._engines)}")
     with _ENGINES_LOCK:
         if key not in _ENGINES:
             _ENGINES[key] = build_engine(settings)

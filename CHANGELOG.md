@@ -7,6 +7,32 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Drive mode v2.** The Drive screen follows the active theme and shows the
+  bot's avatar inside a state ring, a hint for what a tap does, End drive and
+  Pause buttons, live captions with the current sentence highlighted, a
+  thinking timer with cancel, and Undo for a misheard sentence. Errors show on
+  the Drive screen and failed turns are spoken.
+- **Drive settings in the app.** A quick sheet (gear on the Drive screen) and
+  a Drive mode group under Settings → Device: voice with preview, speaking
+  speed, pause before replying, interrupt by talking, reply length, follow-up
+  questions, microphone, sounds, screen-on. Each bot can have its own voice
+  (Bots tab). Voices are recorded, uploaded, tested and managed inside
+  Settings.
+- **Protocol.** `start` takes `barge_in`, `reply_style`, `follow_up` and can be
+  re-sent mid-drive; new `ping`/`pong`, `ready`, `undo`, `cancel`, `duck`,
+  `turn_error` frames; `GET/PATCH /api/voice/settings`, `GET /api/voice/preview`.
+
+### Fixed
+
+- Drive mode: echo of the reply no longer cuts it off (talking over a reply
+  ducks it until the words are confirmed); a dropped phone no longer locks
+  Drive mode out (newest socket replaces the oldest, heartbeat); a server
+  without speech models says so instead of reconnecting forever; first words
+  are no longer lost; speech models load at startup; built-in voice uses the
+  fp32 Kokoro model (about 6x faster on CPU than int8).
+
 ## [2.1.0] — 2026-10-09
 
 ### Added

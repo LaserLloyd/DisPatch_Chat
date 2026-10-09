@@ -13,6 +13,13 @@ Model files (VAD, Smart Turn, Parakeet, Kokoro) live in
 ``DISPATCH_SPEECH_MODELS`` (default ``<data>/speech-models``) with the layout
 ``app.voice.download`` produces.
 
+A few choices are PREFERENCES, not install decisions, and are changed from the
+app (``/api/voice/settings``, unlocked only): the built-in voice, the speaking
+speed and the thinking level of voice turns. They live in ``<data>/voice.yaml``
+and override the matching environment defaults; :func:`load_settings` reads
+the file (cached on its mtime), so a change applies to the next turn without a
+restart.
+
 Voice PROFILES (cloned voices, the Voices GUI) are NOT this package's job:
 an extension registers them through ``app.voice.registry``. Here a profile is
 only an opaque ``profile_id`` handed to the TTS engine.
@@ -20,9 +27,13 @@ only an opaque ``profile_id`` handed to the TTS engine.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+
+log = logging.getLogger("dispatch.voice")
 
 
 def _env(name: str, default: str = "") -> str:
@@ -59,6 +70,17 @@ def _default_models_dir() -> Path:
 #: hard-silence fallback). "patient" suits a driver who pauses mid-thought.
 PATIENCE = {"quick": 0.7, "normal": 1.0, "patient": 1.5}
 
+#: How long a spoken reply should be (``start.reply_style``; persona.py).
+REPLY_STYLES = ("short", "normal", "longer")
+#: Allowed thinking levels for voice turns (``voice_turn_thinking``).
+THINKING_LEVELS = ("off", "low", "medium")
+#: Speaking-speed bounds for the built-in voice.
+SPEED_MIN, SPEED_MAX = 0.8, 1.3
+#: Kokoro model files, fastest first. On x86 onnxruntime the fp32 graph runs
+#: ~6x faster than the int8 one (int8 ConvInteger kernels are slow on CPU;
+#: measured RTF 0.32 vs 1.89 on a Ryzen AI 9 365 — docs/voice-drive-mode.md).
+KOKORO_MODELS = {"fp32": "kokoro-v1.0.onnx", "int8": "kokoro-v1.0.int8.onnx"}
+
 
 @dataclass(frozen=True)
 class VoiceSettings:
@@ -70,6 +92,8 @@ class VoiceSettings:
     tts_engine: str = "auto"
     kokoro_voice: str = "af_heart"        # built-in voice when no profile applies
     kokoro_speed: float = 1.05
+    #: auto (fp32 if present, else int8) | fp32 | int8
+    kokoro_model: str = "auto"
     minimax_model: str = "speech-2.8-turbo"
     minimax_voice: str = "Wise_Woman"
     minimax_base_url: str = "https://api.minimax.io"
@@ -93,12 +117,18 @@ class VoiceSettings:
     #: cancelled and the merged utterance re-submitted.
     merge_window_s: float = 1.8
     patience: float = 1.0                 # multiplier; see PATIENCE presets
-    barge_in_speech_s: float = 0.3        # sustained speech while speaking
+    #: Sustained speech needed to count as the driver talking OVER a reply.
+    #: Residual echo of our own voice is short and bursty; a real interruption
+    #: is not. Even then it only DUCKS the reply until the words are checked.
+    barge_in_speech_s: float = 0.35
     ack_after_s: float = 0.7              # "still working" cue if no reply yet
     barge_abort_turn: bool = True         # barge-in also aborts the agent turn
     voice_turn_thinking: str = "off"      # TurnOptions.thinking for voice turns ("" = agent default)
     threads: int = 6                      # onnxruntime intra-op threads (of 20)
     tts_threads: int = 8                  # onnxruntime threads for Kokoro
+    #: Load the speech models in the background at app startup (H5), so the
+    #: first Drive session after a restart does not pay for it.
+    prewarm: bool = True
 
     # ---- derived paths -------------------------------------------------- #
     @property
@@ -115,7 +145,19 @@ class VoiceSettings:
 
     @property
     def kokoro_model_path(self) -> Path:
-        return self.models_dir / "kokoro" / "kokoro-v1.0.int8.onnx"
+        d = self.models_dir / "kokoro"
+        want = (self.kokoro_model or "auto").strip().lower()
+        if want in KOKORO_MODELS:
+            return d / KOKORO_MODELS[want]
+        for name in KOKORO_MODELS.values():          # fastest first
+            if (d / name).exists():
+                return d / name
+        return d / KOKORO_MODELS["fp32"]
+
+    @property
+    def kokoro_variant(self) -> str:
+        name = self.kokoro_model_path.name
+        return next((k for k, v in KOKORO_MODELS.items() if v == name), "?")
 
     @property
     def kokoro_voices_path(self) -> Path:
@@ -178,6 +220,9 @@ class VoiceSettings:
             "smart_turn": self.smart_turn_path.exists(),
             "patience": self.patience,
             "patience_presets": PATIENCE,
+            "speed": self.kokoro_speed,
+            "voice_turn_thinking": self.voice_turn_thinking or "off",
+            "kokoro_model": self.kokoro_variant if self.kokoro_ready() else None,
         }
 
 
@@ -186,15 +231,89 @@ def _dispatch_voice_ready() -> bool:
     return available()
 
 
+def _bool(name: str, default: bool) -> bool:
+    raw = _env(name, "1" if default else "0").strip().lower()
+    return raw in ("1", "true", "on", "yes")
+
+
+# --------------------------------------------------------------------------- #
+# <data>/voice.yaml — the in-app preferences (see the module docstring)
+# --------------------------------------------------------------------------- #
+
+PREF_KEYS = ("kokoro_voice", "kokoro_speed", "voice_turn_thinking")
+_PREFS_CACHE: tuple[float, dict] | None = None
+_PREFS_LOCK = threading.Lock()
+
+
+def prefs_path() -> Path:
+    return _data_dir() / "voice.yaml"
+
+
+def clean_prefs(raw) -> dict:
+    """Only known keys with valid values survive; anything else is dropped."""
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    v = raw.get("kokoro_voice")
+    if isinstance(v, str) and v.strip() and len(v) <= 64 and v.replace("_", "").isalnum():
+        out["kokoro_voice"] = v.strip()
+    sp = raw.get("kokoro_speed")
+    if isinstance(sp, (int, float)) and not isinstance(sp, bool) and SPEED_MIN <= float(sp) <= SPEED_MAX:
+        out["kokoro_speed"] = round(float(sp), 3)
+    th = raw.get("voice_turn_thinking")
+    if isinstance(th, str) and th.strip().lower() in THINKING_LEVELS:
+        out["voice_turn_thinking"] = th.strip().lower()
+    return out
+
+
+def load_prefs() -> dict:
+    """voice.yaml, validated; {} when absent or unreadable. Cached on mtime."""
+    global _PREFS_CACHE
+    p = prefs_path()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return {}
+    with _PREFS_LOCK:
+        if _PREFS_CACHE is not None and _PREFS_CACHE[0] == mtime:
+            return dict(_PREFS_CACHE[1])
+    try:
+        import yaml
+        prefs = clean_prefs(yaml.safe_load(p.read_text()) or {})
+    except Exception:
+        log.warning("voice: %s is unreadable; using the defaults", p)
+        prefs = {}
+    with _PREFS_LOCK:
+        _PREFS_CACHE = (mtime, prefs)
+    return dict(prefs)
+
+
+def save_prefs(update: dict) -> dict:
+    """Merge ``update`` (already validated) into voice.yaml atomically."""
+    global _PREFS_CACHE
+    import yaml
+    prefs = {**load_prefs(), **clean_prefs(update)}
+    p = prefs_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.safe_dump(prefs, sort_keys=True))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, p)
+    with _PREFS_LOCK:
+        _PREFS_CACHE = None
+    return prefs
+
+
 def load_settings() -> VoiceSettings:
     models = _env("SPEECH_MODELS")
-    return VoiceSettings(
+    base = VoiceSettings(
         flag=_env("VOICE", "auto"),
         models_dir=Path(models).expanduser() if models else _default_models_dir(),
         stt_engine=_env("VOICE_STT", "parakeet").strip().lower(),
         tts_engine=_env("VOICE_TTS", "auto").strip().lower(),
         kokoro_voice=_env("VOICE_KOKORO_VOICE", "af_heart"),
         kokoro_speed=_float("VOICE_KOKORO_SPEED", 1.05),
+        kokoro_model=_env("VOICE_KOKORO_MODEL", "auto").strip().lower(),
         minimax_model=_env("VOICE_MINIMAX_MODEL", "speech-2.8-turbo"),
         minimax_voice=_env("VOICE_MINIMAX_VOICE", "Wise_Woman"),
         minimax_base_url=_env("VOICE_MINIMAX_BASE_URL", "https://api.minimax.io"),
@@ -209,4 +328,7 @@ def load_settings() -> VoiceSettings:
         voice_turn_thinking=_env("VOICE_THINKING", "off").strip(),
         threads=_int("VOICE_THREADS", 6),
         tts_threads=_int("VOICE_TTS_THREADS", 8),
+        prewarm=_bool("VOICE_PREWARM", True),
     )
+    prefs = load_prefs()
+    return replace(base, **prefs) if prefs else base

@@ -114,6 +114,10 @@ db = Database(config.DB_PATH)
 # Per-thread locks serialise agent turns; a global semaphore caps concurrent
 # subprocesses so we never overwhelm the local models.
 _thread_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+#: The task that currently holds a thread's turn lock (set on entry). Lets
+#: Drive mode tell a voice turn that is RUNNING from one still queued behind
+#: the lock (app/voice: cancel the queued ones, stop the running one).
+_turn_holder: dict[str, asyncio.Task | None] = {}
 _agent_sem = asyncio.Semaphore(SETTINGS.max_concurrency)
 _background: set[asyncio.Task] = set()
 # Set during lifespan teardown; guards against spawning fresh background work
@@ -453,6 +457,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
         with contextlib.suppress(Exception):
             await advisor.recover_requests()
         _track(asyncio.create_task(advisor.background_loop()))
+    # Drive mode: load the speech models in the background now, so the first
+    # voice session after a restart (every backend deploy restarts us) neither
+    # waits seconds to accept nor pays the TTS engine load on its first reply.
+    # Off-loop, never awaited, no-op when voice is off (app/voice/routes.py).
+    _voice_prewarm_start()
     # Native gateway transport. OFF unless DISPATCH_GATEWAY_WS says otherwise,
     # so nothing about how replies arrive changes without someone deciding it.
     await _gateway_ws_start()
@@ -6924,6 +6933,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     if bot is not None and bot.api:
         _thread_bot[thread_id] = bot_id   # authoritative attribution for redaction
         async with _thread_locks[thread_id]:
+            _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
             await llm_api.run_api_turn(thread_id, bot_id, agent_text)
         return
@@ -6932,6 +6942,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     if bot is not None and bot.advisor:
         _thread_bot[thread_id] = bot_id
         async with _thread_locks[thread_id]:
+            _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
             await advisor.run_turn(thread_id, bot_id, agent_text)
         return
@@ -6950,6 +6961,7 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     _mirror_nudge()                   # someone is chatting → mirror polls fast
     opts = await _with_thread_model_prefs(thread_id, opts)
     async with lock:
+        _turn_holder[thread_id] = asyncio.current_task()
         # Inside the lock: with turns queued, stopping the follower any earlier
         # would let the PREVIOUS turn's finally spawn a fresh follower that
         # tails this turn's transcript concurrently with its watcher.
@@ -7826,16 +7838,36 @@ async def get_bots(request: Request):
 async def get_all_bots(request: Request):
     """All bots including hidden — used by the Bot Manager."""
     _require_full_access(request)      # second lock, see _require_full_access
-    return {"bots": [b.to_dict() for b in config.load_bots()]}
+    # `voice` (which recorded person a bot speaks as) rides only on this
+    # full-access listing, never on the broadcast `bots` frame.
+    return {"bots": [{**b.to_dict(), "voice": b.voice} for b in config.load_bots()]}
+
+
+def _check_bot_voice(voice: str) -> None:
+    """422 unless ``voice`` is "" (use the default), a voice profile id, or a
+    known ``builtin:<kokoro id>``."""
+    if voice == "":
+        return
+    try:
+        from .voice.config import load_settings as _vs
+        from .voice.routes import classify_voice
+        kind = classify_voice(_vs(), voice)
+    except Exception:
+        kind = None
+    if kind not in ("profile", "builtin"):
+        raise HTTPException(422, f"Unknown voice: {voice[:80]}")
 
 
 @app.put("/api/bots/order")
 async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     _require_full_access(request)      # second lock, see _require_full_access
+    for item in payload.bots:
+        if item.voice is not None:
+            await asyncio.to_thread(_check_bot_voice, item.voice)
     bots = config.save_bot_order([i.model_dump() for i in payload.bots])
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
-    return {"bots": data}
+    return {"bots": [{**d, "voice": b.voice} for d, b in zip(data, bots, strict=True)]}
 
 
 @app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
@@ -8759,7 +8791,11 @@ async def _abort_thread_turn(thread_id: str) -> dict:
     client = _gateway_client
     if client is None or not client.connected.is_set():
         raise HTTPException(503, "The agent gateway is not connected")
-    session_key = openclaw.session_key_for(thread.bot_id, thread_id)
+    # The OpenClaw seat, not the DisPatch identity: a bot with `agent:` (e.g.
+    # jobboard -> scout) runs its turns under the agent's session key.
+    bot = config.get_bot(thread.bot_id)
+    agent_id = bot.agent_id if bot is not None else thread.bot_id
+    session_key = openclaw.session_key_for(agent_id, thread_id)
     run_id = next((r.run_id for r in _inflight_runs.values()
                    if r.thread_id == thread_id), None)
     try:
@@ -12397,11 +12433,17 @@ async def _voice_thread_bot(thread_id: str):
     return config.get_bot(thread.bot_id) if thread else None
 
 
-async def _voice_submit(thread_id: str, text: str) -> str | None:
+#: Voice turns in flight per thread: (task, user message id). A turn is the
+#: task that publishes the transcript and then runs it (run_agent_turn).
+_voice_turns: dict[str, list[tuple[asyncio.Task, str]]] = defaultdict(list)
+
+
+async def _voice_submit(thread_id: str, text: str, opts: dict | None = None) -> str | None:
     """A spoken message, sent exactly like a typed one: same persist, same
     broadcast, same run_agent_turn — so it lands in the thread and any bot
     type answers. Tagged ``metadata.voice``; the agent also reads the voice
-    persona hint and (gateway bots) runs with the voice thinking level."""
+    persona hint (with the driver's reply length / follow-up choice) and
+    (gateway bots) runs with the voice thinking level."""
     from .voice import registry as _voice_registry
     from .voice.config import load_settings as _voice_settings
     from .voice.persona import voice_hint as _voice_hint
@@ -12416,50 +12458,95 @@ async def _voice_submit(thread_id: str, text: str) -> str | None:
         text = text.strip()
     if not text:
         return None
+    opts = opts or {}
     user_msg = await db.add_message(thread_id, "user", text, metadata={"voice": True})
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
     profile_id = _voice_registry.resolve_profile(thread.bot_id)
-    opts = TurnOptions(user_msg_id=user_msg.id,
-                       voice_hint=_voice_hint(thread.bot_id, profile_id),
-                       thinking=_voice_settings().voice_turn_thinking or None)
+    thinking = _voice_settings().voice_turn_thinking or None
+    turn_opts = TurnOptions(user_msg_id=user_msg.id,
+                            voice_hint=_voice_hint(thread.bot_id, profile_id,
+                                                   style=opts.get("reply_style", "normal"),
+                                                   follow_up=opts.get("follow_up", True)),
+                            thinking=thinking)
 
-    async def _publish_then_run() -> None:
-        try:
-            await manager.broadcast(frame)
-            await _broadcast_thread_update(thread_id)
-        except Exception:
-            log.exception("voice: publish failed for thread %s; running the turn anyway",
-                          thread_id)
-        await run_agent_turn(thread_id, thread.bot_id, text, opts)
+    # Published BEFORE the turn task exists: cancelling a queued voice turn
+    # (merge, undo, a newer question) must never leave a row that every other
+    # screen missed.
+    try:
+        await manager.broadcast(frame)
+        await _broadcast_thread_update(thread_id)
+    except Exception:
+        log.exception("voice: publish failed for thread %s; running the turn anyway",
+                      thread_id)
 
-    _track(asyncio.create_task(_publish_then_run()))
+    task = asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, text, turn_opts))
+    _track(task)
+    entry = (task, user_msg.id)
+    _voice_turns[thread_id].append(entry)
+
+    def _forget(_t, tid=thread_id, e=entry) -> None:
+        lst = _voice_turns.get(tid)
+        if lst and e in lst:
+            lst.remove(e)
+        if not lst:
+            _voice_turns.pop(tid, None)
+
+    task.add_done_callback(_forget)
     return user_msg.id
 
 
 async def _voice_abort(thread_id: str) -> None:
-    with contextlib.suppress(HTTPException):
-        await _abort_thread_turn(thread_id)
+    """Stop the voice turns this thread is waiting on (barge-in, merge, undo,
+    cancel). Every voice turn still QUEUED behind the thread lock is cancelled
+    outright, so it never runs. The one RUNNING is stopped the way its
+    backend allows: an API or advisor turn by cancelling its task (it sets
+    the thread idle and closes the spinner itself), a gateway turn through the
+    gateway's abort. Without the first two, a merged or replaced question was
+    still answered (review M3)."""
+    holder = _turn_holder.get(thread_id)
+    voice = [t for t, _ in _voice_turns.get(thread_id, []) if not t.done()]
+    running = holder if holder in voice else None
+    for t in voice:
+        if t is not running:
+            t.cancel()
+    thread = await db.get_thread(thread_id)
+    bot = config.get_bot(thread.bot_id) if thread else None
+    direct = bot is not None and (bot.api or bot.advisor)
+    if direct:
+        if running is not None:
+            running.cancel()
+        return
+    if running is not None or holder is None or holder.done():
+        with contextlib.suppress(HTTPException):
+            await _abort_thread_turn(thread_id)
 
 
 async def _voice_retract(thread_id: str, message_id: str) -> None:
-    """Turn merge: take back the early half of an utterance the driver
-    finished after a pause. Only a VOICE user row in this thread qualifies."""
+    """Turn merge / undo: take back a spoken user row. Only a VOICE user row
+    in this thread qualifies. A thread title taken from it is cleared, so the
+    merged utterance (or the next message) names the thread instead."""
     msg = await db.get_message(message_id)
     if (msg is None or msg.thread_id != thread_id or msg.role != "user"
             or not (msg.metadata or {}).get("voice")):
         return
     await db.delete_message(message_id)
+    thread = await db.get_thread(thread_id)
+    if thread is not None and thread.title and thread.title == _truncate(msg.content, 50):
+        await db.rename_thread(thread_id, "")
+        await _broadcast_thread_update(thread_id)
     await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
                              "bot_id": await _bot_of_thread(thread_id),
                              "message_id": message_id})
 
 
-async def _voice_replies_after(thread_id: str, after_id: str) -> list[tuple[str, str]]:
+async def _voice_replies_after(thread_id: str, after_id: str) -> list[tuple[str, str]] | None:
+    """Assistant replies after ``after_id``; None when that id is not a
+    message of this thread (the voice session then tries its next id)."""
     msg = await db.get_message(after_id)
     if msg is None or msg.thread_id != thread_id:
-        return []
+        return None
     rows = await db.messages_after(thread_id, after_id)
     return [(m.id, m.content) for m in rows
             if m.role == "assistant" and not (m.metadata or {}).get("sub")]
@@ -12470,6 +12557,8 @@ async def voice_websocket(ws: WebSocket, thread_id: str):
     if _voice_serve is None:
         # The voice package did not import (see _load_voice below): the
         # endpoint exists but always answers "unavailable", like DISPATCH_VOICE=0.
+        # Pre-accept: with the package gone there is no gate to prove the
+        # caller is allowed a socket, so the browser just sees it close.
         await ws.close(code=1013)
         return
     await _voice_serve(ws, thread_id, auth=auth, cookie_name=COOKIE_NAME,
@@ -12496,6 +12585,23 @@ def _load_voice():
         log.exception("voice: app.voice failed to import; Drive mode disabled")
         return None, None
     return serve_voice, mount_http
+
+
+def _voice_prewarm_start() -> None:
+    """Start-up hook: warm the speech models off the event loop (H5)."""
+    if _voice_serve is None:
+        return
+    try:
+        from .voice.config import load_settings as _vs
+        from .voice.routes import prewarm as _prewarm
+        st = _vs()
+        if not (st.prewarm and st.enabled):
+            return
+    except Exception:
+        log.exception("voice: prewarm could not start")
+        return
+    import threading as _threading
+    _threading.Thread(target=_prewarm, args=(st,), name="voice-prewarm", daemon=True).start()
 
 
 _voice_serve, _voice_mount_http = _load_voice()

@@ -13,6 +13,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+# app.voice.dv puts DISPATCH_VOICE_PKG on sys.path when it is imported, so it
+# has to be imported BEFORE the skip check — otherwise the documented command
+# (env var, no PYTHONPATH) silently skipped this whole file (review M8).
+import app.voice.dv
+
 pytest.importorskip("dispatch_voice")
 
 from fastapi import FastAPI, HTTPException, Request
@@ -151,3 +156,41 @@ def test_not_available_means_nothing_mounted(monkeypatch):
     assert dv.install(a, lambda r: None) is False
     assert not any(getattr(r, "path", "").startswith("/api/voices") for r in a.routes)
     assert registry.engine_factory("chatterbox") is None
+
+
+def test_builtin_or_unknown_voice_falls_back_without_cooldown(dv_env):
+    """L6: a built-in voice id, or a profile id that does not exist, is "not
+    mine" (LookupError) for the cloned engine — never a 30 s engine cooldown."""
+    class Kok:
+        sample_rate = 24000
+
+        def stream(self, text, profile_id=None, stop=None):
+            yield np.ones(3, "<i2")
+
+    st = dv.store()
+    make_profile(st, "real-voice", default=True)
+    f = tts.FallbackTTS(dv.ChatterboxTTS(), Kok(), cooldown_s=30.0)
+    for pid in ("builtin:am_michael", "no-such-voice"):
+        out = list(f.stream("Hello there.", pid))
+        assert len(out) == 1 and f._down_until == 0.0, pid
+    assert dv_env.engine.calls == []
+
+
+def test_bot_with_a_builtin_voice_resolves_to_it(dv_env, monkeypatch):
+    st = dv.store()
+    make_profile(st, "real-voice", default=True)
+    monkeypatch.setattr(config, "get_bot",
+                        lambda b: SimpleNamespace(voice="builtin:am_michael"))
+    assert dv.resolve_profile("main") == "builtin:am_michael"
+    assert dv.fillers("builtin:am_michael") is None
+
+
+def test_default_profile_can_be_set_and_cleared(dv_env):
+    st = dv.store()
+    make_profile(st, "one")
+    make_profile(st, "two", default=True)
+    dv.set_default_profile("one")
+    assert dv.default_profile() == "one"
+    dv.set_default_profile(None)
+    assert dv.default_profile() is None
+    assert {p["id"] for p in dv.profiles()} == {"one", "two"}

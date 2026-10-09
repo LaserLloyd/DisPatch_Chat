@@ -86,6 +86,10 @@ class LazyEngine:
                     log.info("voice: Chatterbox-Turbo ONNX engine loaded")
         return self._eng
 
+    def warm(self) -> None:
+        """Load now (start-up prewarm) instead of on the first reply."""
+        self._get()
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
@@ -132,10 +136,23 @@ class ChatterboxTTS:
     def stream(self, text: str, profile_id: str | None = None,
                stop: threading.Event | None = None):
         from dispatch_voice import speak
+
+        from .tts import builtin_id
+        if builtin_id(profile_id):
+            # A built-in voice was chosen: not ours. LookupError = "use the
+            # fallback for this sentence", with no cooldown (review L6).
+            raise LookupError(f"{profile_id} is a built-in voice")
         st = store()
         # Resolve up front so "no voice chosen" surfaces as LookupError before
-        # any audio, which is what lets FallbackTTS switch engines cleanly.
-        speak.resolve(st, profile_id)
+        # any audio, which is what lets FallbackTTS switch engines cleanly. An
+        # unknown id is the same case, not an engine failure: a bad id must
+        # not put the cloned engine on a 30 s cooldown for everyone.
+        try:
+            speak.resolve(st, profile_id)
+        except LookupError:
+            raise
+        except Exception as e:
+            raise LookupError(f"voice {profile_id!r} is not available: {e}") from e
         for frame in speak.speak(st, [text], profile_id=profile_id, stop=stop):
             yield np.frombuffer(frame, dtype="<i2")
 
@@ -145,11 +162,16 @@ class ChatterboxTTS:
 
 
 def resolve_profile(bot_id: str | None) -> str | None:
-    """bot.voice if that profile exists, else the store default, else None."""
+    """bot.voice if that profile exists (or names a built-in voice), else the
+    store default, else None."""
     from app import config
+
+    from .tts import builtin_id
     st = store()
     bot = config.get_bot(bot_id) if bot_id else None
     want = (getattr(bot, "voice", "") or "").strip()
+    if builtin_id(want):
+        return want
     if want:
         try:
             st.get(want)
@@ -159,9 +181,39 @@ def resolve_profile(bot_id: str | None) -> str | None:
     return st.default_id()
 
 
+def profiles() -> list[dict]:
+    """[{id, name}] of every voice profile (newest first)."""
+    return [{"id": m["id"], "name": m.get("name") or m["id"]} for m in store().list()]
+
+
+def profile_exists(pid: str) -> bool:
+    try:
+        store().get(pid)
+        return True
+    except Exception:
+        return False
+
+
+def default_profile() -> str | None:
+    return store().default_id()
+
+
+def set_default_profile(pid: str | None) -> None:
+    """Make ``pid`` the default profile, or (None) clear the default so the
+    built-in voice speaks."""
+    st = store()
+    if pid:
+        st.update(pid, default=True)
+        return
+    cur = st.default_id()
+    if cur:
+        st.update(cur, default=False)
+
+
 def fillers(profile_id: str | None) -> list[np.ndarray] | None:
     """Every pre-rendered filler of this profile (int16, 24 kHz), or None."""
-    if not profile_id:
+    from .tts import builtin_id
+    if not profile_id or builtin_id(profile_id):
         return None
     import soundfile as sf
     from dispatch_voice.profiles import FILLERS

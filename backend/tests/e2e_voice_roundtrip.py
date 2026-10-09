@@ -179,8 +179,10 @@ async def wire_test(base: str, tid: str, speech1: np.ndarray, speech2: np.ndarra
         return round((t - t0) * 1000)
 
     async with websockets.connect(url, max_size=None, open_timeout=120) as ws:
+        res["connect_ms"] = ms(time.monotonic())
         ready = json.loads(await ws.recv())
         assert ready["type"] == "ready", ready
+        res["connect_to_ready_ms"] = ms(time.monotonic()) - res["connect_ms"]
         await ws.send(json.dumps({"type": "start", "patience": "normal"}))
         pending_hdr = None
         marks: dict = {}
@@ -202,7 +204,9 @@ async def wire_test(base: str, tid: str, speech1: np.ndarray, speech2: np.ndarra
                 res["events"].append({"t_ms": ms(now), **{k: v for k, v in f.items() if k != "type"}, "type": f["type"]})
                 if f["type"] == "audio":
                     pending_hdr = f
-                elif f["type"] in ("eot", "transcript", "barge_in"):
+                elif f["type"] == "duck" and f.get("on"):
+                    marks.setdefault("duck", now)
+                elif f["type"] in ("eot", "transcript", "barge_in", "turn_error"):
                     marks.setdefault(f["type"], now)
                     if f["type"] == "transcript":
                         res.setdefault("transcripts", []).append(f["text"])
@@ -251,6 +255,10 @@ async def wire_test(base: str, tid: str, speech1: np.ndarray, speech2: np.ndarra
         }
     if "barge_in" in marks:
         res["latency_ms"]["speech2_onset_to_barge_in"] = round((marks["barge_in"] - speech2_start) * 1000)
+    if "duck" in marks:
+        # Since v2 the first reaction to talking over the reply is a DUCK
+        # (playback lowered/paused); the hard barge_in waits for the words.
+        res["latency_ms"]["speech2_onset_to_duck"] = round((marks["duck"] - speech2_start) * 1000)
     if reply_pcm:
         a = np.frombuffer(b"".join(reply_pcm), "<i2")
         with wave.open(str(out), "wb") as w:
@@ -287,11 +295,11 @@ def build_voice(base: str, clip: Path) -> dict:
 # Browser test (headless Chromium, fake mic)
 # --------------------------------------------------------------------------- #
 
-def browser_test(base: str, tid: str, wav: Path, shots: Path) -> dict:
+def browser_test(base: str, tid: str, wav: Path, shots: Path, chromium: str | None = None) -> dict:
     from playwright.sync_api import sync_playwright
     out: dict = {}
     with sync_playwright() as p:
-        b = p.chromium.launch(args=[
+        b = p.chromium.launch(executable_path=chromium or None, args=[
             "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
             f"--use-file-for-fake-audio-capture={wav}", "--autoplay-policy=no-user-gesture-required"])
         page = b.new_page(viewport={"width": 1280, "height": 900})
@@ -331,7 +339,14 @@ def main() -> int:
     ap.add_argument("--data", type=Path, default=None, help="scratch data dir (default: a new temp dir)")
     ap.add_argument("--wav", type=Path, default=None, help="16 kHz mono 16-bit driver speech")
     ap.add_argument("--llm-delay", type=float, default=1.5, help="stub LLM 'thinking' seconds")
-    ap.add_argument("--browser", action="store_true", help="also run the headless Chromium fake-mic test")
+    ap.add_argument("--browser", action="store_true",
+                    help="also run the headless Chromium fake-mic test (needs playwright: "
+                         "uv run --group voice --with playwright ...)")
+    ap.add_argument("--chromium", default=None,
+                    help="Chromium executable for --browser (default: Playwright's own)")
+    ap.add_argument("--wait-warm", action="store_true",
+                    help="wait for the start-up model prewarm before the first session "
+                         "(the usual case: a driver opens Drive mode a while after a restart)")
     ap.add_argument("--voice-clip", type=Path, default=None,
                     help="build a cloned-voice profile from this clip through /api/voices (needs "
                          "dispatch-voice) and make it the default, so replies use the cloned voice")
@@ -354,6 +369,14 @@ def main() -> int:
     try:
         import httpx
         st = httpx.get(base + "/api/voice/status").json()
+        if args.wait_warm:
+            t_w = time.monotonic()
+            for _ in range(240):
+                st = httpx.get(base + "/api/voice/status").json()
+                if st.get("warm"):
+                    break
+                time.sleep(0.25)
+            summary["warm_wait_s"] = round(time.monotonic() - t_w, 1)
         summary["status"] = st
         if args.voice_clip:
             summary["voice_profile"] = build_voice(base, args.voice_clip)
@@ -384,7 +407,7 @@ def main() -> int:
             mic = work / "driver1-mic.wav"
             write_wav(mic, np.concatenate([np.zeros(16000, np.float32), s1,
                                            np.zeros(16000 * 40, np.float32)]), 16000)
-            summary["browser"] = browser_test(base, th2, mic, work)
+            summary["browser"] = browser_test(base, th2, mic, work, args.chromium)
             checks["browser_transcript"] = "calendar" in summary["browser"].get("transcript_ui", "").lower()
             checks["browser_reply"] = len(summary["browser"].get("reply_ui", "")) > 3
         summary["checks"] = checks

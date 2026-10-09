@@ -141,14 +141,17 @@ def test_voice_for_bot_prefers_extension_acks_and_renders_defaults_otherwise():
             self.calls = []
 
         def synth(self, text, profile_id=None):
-            self.calls.append(profile_id)
+            self.calls.append(text)
             return np.zeros(4, "<i2"), 24000
 
     registry.set_profile_resolver(lambda bot: "host" if bot == "main" else None)
     registry.set_ack_provider(lambda pid: [np.ones(2, "<i2")] if pid == "host" else None)
     eng = Eng()
     pid, acks = routes._voice_for_bot(VoiceSettings(), eng, "main")
-    assert pid == "host" and len(acks) == 1 and eng.calls == []
+    # The extension's acks are used as they are; only the spoken error lines
+    # may be rendered (in the background) in that voice.
+    assert pid == "host" and len(acks) == 1
+    assert not set(eng.calls) & set(routes.ACK_LINES)
     routes._ACKS.clear()
     pid, acks = routes._voice_for_bot(VoiceSettings(), eng, "other")
     import time

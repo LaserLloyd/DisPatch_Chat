@@ -1,7 +1,15 @@
 """Shared pytest fixtures for the backend test suite."""
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# Drive mode warms its speech models in a background thread at app start-up.
+# Never in the suite: every TestClient start would load ~1 GB of models when
+# DISPATCH_SPEECH_MODELS happens to be set. Tests that want it call
+# app.voice.routes.prewarm() themselves.
+os.environ.setdefault("DISPATCH_VOICE_PREWARM", "0")
 
 from app import config as config_module
 from app import openclaw

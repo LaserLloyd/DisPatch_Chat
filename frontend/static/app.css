@@ -815,6 +815,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   padding: 11px 18px; border-radius: var(--radius-md); z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.5);
   max-width: 90vw; font-size: 14px;
 }
+/* Drive mode's overlay is z 1000 (voice.css). A toast raised from inside it
+   ("Drive ended", a refused open) must land on top, not underneath where
+   nobody can see it. Scoped to the overlay being open so the app's normal
+   stacking (lock screen above toasts) is unchanged. */
+body.drive-open .toast { z-index: 1100; }
 .toast.error { border-color: var(--error); }
 .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: center; z-index: 150; pointer-events: none; }
 .reconnect-card { margin-top: 10px; background: var(--warning); color: var(--on-warning-fill); padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }

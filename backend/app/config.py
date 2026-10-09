@@ -951,6 +951,7 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None
                          else b.avatar_pool),
+            voice=(str(it["voice"]).strip() if it.get("voice") is not None else b.voice),
         )))
 
     # Keep any bots the client didn't mention (defensive).

@@ -7,8 +7,14 @@ else ``<data dir>/speech-models``). Standard library only, so it runs before
 any voice dependency is installed. Every file comes from a public, ungated
 release; nothing here needs an account or a token.
 
-Total on disk: ~810 MB. That is Parakeet int8 (~670 MB), Kokoro int8 (~90 MB),
+Total on disk: ~1 GB. That is Parakeet int8 (~670 MB), Kokoro fp32 (~310 MB),
 the Kokoro voices (~28 MB), Smart Turn (~8 MB) and Silero (~2 MB).
+
+Kokoro comes as fp32 by default: on x86 onnxruntime it synthesises ~6x
+faster than the int8 build (measured RTF 0.32 vs 1.89 on a Ryzen AI 9 365;
+int8 ConvInteger kernels are slow on CPU). ``--kokoro-int8`` fetches the
+small int8 file instead (~90 MB) for a disk-starved install; the server uses
+whichever is present (fp32 first; ``DISPATCH_VOICE_KOKORO_MODEL`` forces one).
 
 Licences: Silero VAD (MIT), Smart Turn v3 (BSD-2), Parakeet TDT 0.6B v2
 (CC-BY-4.0), Kokoro-82M (Apache-2.0). Kokoro's runtime phonemizer chain
@@ -44,9 +50,9 @@ FILES: list[tuple[str, str, str]] = [
     ("smart-turn-v3.2-cpu.onnx",
      f"{_HF}/pipecat-ai/smart-turn-v3/resolve/{_SMART_TURN_REV}/smart-turn-v3.2-cpu.onnx",
      "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"),
-    ("kokoro/kokoro-v1.0.int8.onnx",
-     f"{_GH}/thewh1teagle/kokoro-onnx/releases/download/{_KOKORO_TAG}/kokoro-v1.0.int8.onnx",
-     "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb"),
+    ("kokoro/kokoro-v1.0.onnx",
+     f"{_GH}/thewh1teagle/kokoro-onnx/releases/download/{_KOKORO_TAG}/kokoro-v1.0.onnx",
+     "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"),
     ("kokoro/voices-v1.0.bin",
      f"{_GH}/thewh1teagle/kokoro-onnx/releases/download/{_KOKORO_TAG}/voices-v1.0.bin",
      "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"),
@@ -63,6 +69,21 @@ FILES: list[tuple[str, str, str]] = [
          "a449f49acd68979d418651dd2dcb737cc0f1bf0225e009e29ee326354edbf7d3"),
     )
 ]
+
+
+#: The small Kokoro build, fetched instead of the fp32 one with --kokoro-int8.
+KOKORO_INT8: tuple[str, str, str] = (
+    "kokoro/kokoro-v1.0.int8.onnx",
+    f"{_GH}/thewh1teagle/kokoro-onnx/releases/download/{_KOKORO_TAG}/kokoro-v1.0.int8.onnx",
+    "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb")
+
+
+def files_for(int8: bool = False) -> list[tuple[str, str, str]]:
+    """The download list: fp32 Kokoro by default, the int8 build on request."""
+    if not int8:
+        return list(FILES)
+    return [KOKORO_INT8 if rel == "kokoro/kokoro-v1.0.onnx" else (rel, url, sha)
+            for rel, url, sha in FILES]
 
 
 class ChecksumError(RuntimeError):
@@ -101,11 +122,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--force", action="store_true", help="re-download existing files")
     ap.add_argument("--verify", action="store_true",
                     help="only check the files already on disk against their sha256")
+    ap.add_argument("--kokoro-int8", action="store_true",
+                    help="fetch the small int8 Kokoro (~90 MB, ~6x slower on x86) instead of fp32")
     args = ap.parse_args(argv)
     dest = args.dest or load_settings().models_dir
     print(f"voice models -> {dest}")
     bad = 0
-    for rel, url, sha in FILES:
+    for rel, url, sha in files_for(args.kokoro_int8):
         target = dest / rel
         have = target.exists() and target.stat().st_size > 0
         if args.verify or (have and not args.force):

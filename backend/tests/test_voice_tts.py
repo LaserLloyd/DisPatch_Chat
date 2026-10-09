@@ -153,3 +153,22 @@ def test_speak_seam_streams_frames_in_the_profiles_voice():
 def test_to_pcm16_clips():
     a = to_pcm16(np.array([2.0, -2.0, 0.0], np.float32))
     assert a.tolist() == [32767, -32767, 0]
+
+
+def test_a_long_first_sentence_starts_with_its_first_clause():
+    """Latency: the driver waits for the FIRST piece, and synthesis time grows
+    with its length. A whole reply's long first sentence is cut at a clause."""
+    sp = SentenceSplitter()
+    out = sp.push("You have two things this afternoon: a dentist appointment at three, and a "
+                  "call with the school at four thirty. Want me to remind you? ") + sp.flush()
+    assert out[0] == "You have two things this afternoon:"
+    assert out[1].startswith("a dentist appointment") and out[1].endswith("thirty.")
+    # Streamed, the same cut happens as soon as the clause end is known.
+    sp = SentenceSplitter()
+    got = []
+    for w in "You have two things this afternoon: a dentist appointment at three".split(" "):
+        got += sp.push(w + " ")
+    assert got and got[0] == "You have two things this afternoon:"
+    # Short first sentences are untouched; later sentences are never cut early.
+    sp = SentenceSplitter()
+    assert sp.push("Sure, it is sunny. ") == ["Sure, it is sunny."]

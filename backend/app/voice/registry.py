@@ -73,7 +73,16 @@ def set_persona_provider(fn) -> None:
 
 def resolve_profile(bot_id: str | None) -> str | None:
     if _profile_resolver is None:
-        return None
+        # No profile extension: a bot can still pick a built-in voice.
+        try:
+            from app import config
+
+            from .tts import builtin_id
+            bot = config.get_bot(bot_id) if bot_id else None
+            want = (getattr(bot, "voice", "") or "").strip()
+            return want if builtin_id(want) else None
+        except Exception:
+            return None
     try:
         return _profile_resolver(bot_id) or None
     except Exception:
