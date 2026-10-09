@@ -28,7 +28,7 @@ import { el, railIcon, RAIL_ICONS, acquireInert, releaseInert } from './js/util.
 import {
   PATIENCE_PRESETS, loadDriveSettings, onDriveSettings, startPayload,
   buildQuickSheet, MIC_ICON,
-} from './js/drive-settings.js?v=1';
+} from './js/drive-settings.js?v=2';
 
 export { PATIENCE_PRESETS };
 

@@ -23,7 +23,7 @@ import { t } from './i18n.js?v=3';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 import {
   voiceJson, voiceStatus, patchVoiceSettings, previewButton, selectInput, row, MIC_ICON, builtinValue,
-} from './drive-settings.js?v=1';
+} from './drive-settings.js?v=2';
 
 const API = '/api/voices';
 const RECORD_LIMIT_S = 40;

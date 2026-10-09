@@ -31,9 +31,9 @@ import {
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
-import { initDrive } from '../drive.js?v=3';
-import { mountDriveSettings, botVoicePill, voiceStatus } from './drive-settings.js?v=1';
-import { createVoicesPane } from './voices.js?v=1';
+import { initDrive } from '../drive.js?v=4';
+import { mountDriveSettings, botVoicePill, voiceStatus } from './drive-settings.js?v=2';
+import { createVoicesPane } from './voices.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)

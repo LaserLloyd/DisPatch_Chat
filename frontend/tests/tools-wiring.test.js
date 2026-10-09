@@ -207,7 +207,7 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v144 (Drive mode v2)', () => {
+test('the sw.js CACHE is local-chat-v145 (Drive mode v2 names)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
   // v144: Drive mode v2 — drive.js 2→3, voice-worklet.js 1→2, voice.css 1→2,
@@ -244,7 +244,7 @@ test('the sw.js CACHE is local-chat-v144 (Drive mode v2)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v144');
+  assert.equal(m[1], 'local-chat-v145');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

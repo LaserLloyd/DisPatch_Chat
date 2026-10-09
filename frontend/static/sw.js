@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v144';  // v144: Drive mode v2 — drive.js?v=2→3, voice-worklet.js?v=1→2, voice.css?v=1→2,
+const CACHE = 'local-chat-v145';  // v145: neutral example names in drive-settings.js + locales; drive-settings.js?v=1→2, voices.js?v=1→2, drive.js?v=3→4, main.js?v=121→122, index.html.
+// v144: Drive mode v2 — drive.js?v=2→3, voice-worklet.js?v=1→2, voice.css?v=1→2,
 // new js/drive-settings.js + js/voices.js join SHELL; main.js?v=120→121, app.css?v=94→95, index.html, locales.
 // v143: 2.1.0 — checklist/clients/reactions/tools ?v bumps (api.js v32 import). v142: 2.1.0 RC review — drive.js
 // reconnect gives up after repeated 1013s (drive.js?v=1→2), Drive-mode
