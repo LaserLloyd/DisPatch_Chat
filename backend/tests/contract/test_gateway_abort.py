@@ -59,8 +59,8 @@ SESSION = "agent:main:3f1c2a10-5b7e-4c1d-9e8f-0a1b2c3d4e5f"
 RUN = "7d9c0e2a6b5f4e3d8c1b0a9f8e7d6c5b"
 PARTIAL = "You have two things this afternoon. The dentist is at three,"
 
-#: The last live run (2026-10-10, OpenClaw 2026.9.9, agent ds_flash on
-#: MiniMax-M3), recorded by hand from its DISPATCH_CONTRACT_OUT file:
+#: The last live run (2026-10-10, OpenClaw 2026.9.9, a fast worker agent),
+#: recorded by hand from its DISPATCH_CONTRACT_OUT file:
 #: 62 characters had streamed (M3 thought for ~10 s, then sent text) when
 #: `chat.abort` answered {ok: true, aborted: true}; within 12 ms a `chat`
 #: event {state: "aborted", stopReason: "rpc"} carried those 62 characters;
@@ -176,7 +176,7 @@ def _text(message: dict | None) -> str:
 async def test_live_gateway_abort():
     from app import gateway_ws
 
-    agent = os.environ.get("DISPATCH_CONTRACT_AGENT", "ds_flash")
+    agent = os.environ.get("DISPATCH_CONTRACT_AGENT", "main")
     key = f"agent:{agent}:voice-contract-{uuid.uuid4().hex[:12]}"
     from app import openclaw
     assert openclaw.mirror_kind(key) == "other"          # never mirrored into DisPatch
