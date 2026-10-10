@@ -4383,16 +4383,20 @@ async def _broadcast_pool_state(bot_id: str | None = None) -> None:
 
 
 async def _top_up_pool(max_rounds: int = 8, *, only_low: bool = False,
-                       bot_id: str | None = None) -> int:
+                       bot_id: str | None = None, daily: bool = False) -> int:
     """Generate toward the per-mood targets: spin refill rounds until the
     deficits are gone, the rig stops cooperating, or `max_rounds` is hit (each
     round is capped at max_per_cycle). Broadcasts after every round so the
-    manager panel ticks up while a long fill is running."""
+    manager panel ticks up while a long fill is running. ``daily`` runs the
+    daily freshness quota instead of the deficits (reactions.pool_refill).
+    A pool switched off mid-fill stops here between rounds, and inside
+    pool_refill between images."""
     made = 0
     for _ in range(max_rounds):
-        if _shutting_down:
+        if _shutting_down or not reactions.pool_enabled(bot_id):
             break
-        n = await asyncio.to_thread(reactions.pool_refill, None, bot_id=bot_id, only_low=only_low)
+        n = await asyncio.to_thread(reactions.pool_refill, None, bot_id=bot_id,
+                                    only_low=only_low, daily=daily)
         if n == 0:              # done, rig unreachable, or every prompt failed
             break
         made += n
@@ -4426,13 +4430,15 @@ async def _reaction_pool_cycle() -> None:
                 continue
             status = reactions.pool_status(bot_id)
             if status["due_daily"]:
-                n = await _top_up_pool(max_rounds=12, bot_id=bot_id)
-                if not reactions.pool_deficits(bot_id=bot_id):
-                    reactions.pool_mark_daily(bot_id)
-                    log.info("reaction pool: nightly refill complete for %s (%d generated)", bot_id, n)
+                # Daily freshness run: today's quota (fresh images + fired
+                # replacements), stamped by pool_refill once fully paid off.
+                n = await _top_up_pool(max_rounds=12, bot_id=bot_id, daily=True)
+                if reactions.pool_daily_done(bot_id):
+                    log.info("reaction pool: daily refresh complete for %s (%d generated)", bot_id, n)
                 elif n:
-                    log.info("reaction pool: nightly refill progressed for %s (%d generated, "
-                             "%d still owed)", bot_id, n, reactions.pool_status(bot_id)["deficit"])
+                    log.info("reaction pool: daily refresh progressed for %s (%d generated, "
+                             "%d still owed)", bot_id, n,
+                             sum(reactions.pool_status(bot_id)["daily_owed"].values()))
             elif status["needs_refill"]:
                 n = await _top_up_pool(only_low=True, bot_id=bot_id)
                 if n:

@@ -549,6 +549,12 @@ function renderManager() {
   minMood.value = pool.min_per_mood ?? 5;
   const hour = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '23', step: '1' });
   hour.value = pool.refresh_hour ?? 4;
+  // Daily freshness: new images per mood each day, plus (optionally) one for
+  // every image fired since the last daily run. per_mood above is the ceiling.
+  const dailyAdd = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '100', step: '1' });
+  dailyAdd.value = pool.daily_add_per_mood ?? 10;
+  const refillSpent = el('input', { type: 'checkbox' });
+  refillSpent.checked = pool.refill_spent_today !== false;
   const poolSafe = el('input', { type: 'checkbox' });
   poolSafe.checked = !!pool.safe;
 
@@ -557,6 +563,8 @@ function renderManager() {
     fieldRow(t('reactions.pool_per_mood'), perMood, t('reactions.pool_per_mood_hint')),
     fieldRow(t('reactions.pool_min'), minMood, t('reactions.pool_min_hint')),
     fieldRow(t('reactions.pool_hour'), hour, t('reactions.pool_hour_hint')),
+    fieldRow(t('reactions.pool_daily_add'), dailyAdd, t('reactions.pool_daily_add_hint')),
+    fieldRow(t('reactions.pool_refill_spent'), refillSpent, t('reactions.pool_refill_spent_hint')),
     fieldRow(t('reactions.pool_safe'), poolSafe, t('reactions.pool_safe_hint')),
   );
 
@@ -568,6 +576,8 @@ function renderManager() {
         per_mood: Number(perMood.value || 0),
         min_per_mood: Number(minMood.value || 0),
         refresh_hour: Number(hour.value || 4),
+        daily_add_per_mood: Number(dailyAdd.value || 0),
+        refill_spent_today: refillSpent.checked,
         safe: poolSafe.checked,
       });
       R.pool = r.pool;

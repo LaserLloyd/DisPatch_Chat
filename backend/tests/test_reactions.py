@@ -1397,7 +1397,7 @@ def test_the_refill_cycle_visits_every_reactions_bot(rx_env, monkeypatch):
     monkeypatch.setattr(main, "_shutting_down", False)
     monkeypatch.setattr(reactions, "image_cli_available", lambda: True)
 
-    def _fake_refill(limit=None, *, bot_id=None, only_low=False):
+    def _fake_refill(limit=None, *, bot_id=None, only_low=False, daily=False):
         seen.append(bot_id)
         return 0                        # "rig made nothing" — ends the round
     monkeypatch.setattr(reactions, "pool_refill", _fake_refill)

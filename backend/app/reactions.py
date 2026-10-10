@@ -1777,6 +1777,13 @@ class PoolConfig:
     per_mood_overrides: dict = field(default_factory=dict)
                                     # per-mood target overrides: {mood_id: target}
                                     # falls back to per_mood. Capped 0..100 per mood.
+    # Daily freshness (2026-10-10). Each day at refresh_hour, per bank mood:
+    # mint `daily_add_per_mood` fresh images, plus (with refill_spent_today)
+    # one for every image FIRED since the previous daily run. per_mood (and
+    # its override) is the shelf CEILING: going past it retires the oldest
+    # unfired image of that mood through _retire (kept, never deleted).
+    daily_add_per_mood: int = 10
+    refill_spent_today: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -2277,6 +2284,16 @@ class PoolState:
     config: PoolConfig = field(default_factory=PoolConfig)
     batch_date: str = ""             # local YYYY-MM-DD of the last completed fill
     last_error: str = ""
+    # The FIRE ledger: {mood: images fired since the last daily snapshot}.
+    # Counted in pool_consume — the one path a fire takes — and NOT derived
+    # from spent/<mood>/: spent/ is shared by every bot and also receives the
+    # ceiling retirements and "Replace batch" leftovers, none of which are fires.
+    fired: dict = field(default_factory=dict)
+    # The day's quota, snapshotted when that day's run starts: {mood: images
+    # still owed}. Decremented per image, so an interrupted run resumes where
+    # it stopped instead of recomputing (and double-generating).
+    daily_owed: dict = field(default_factory=dict)
+    daily_date: str = ""             # local YYYY-MM-DD daily_owed was taken
 
 
 _pool_cache: dict[str, tuple[PoolState, float | None]] = {}
@@ -2296,6 +2313,9 @@ def _clamp_pool_config(cfg: PoolConfig) -> PoolConfig:
     cfg.min_per_mood = max(0, min(cfg.per_mood, _int_or(cfg.min_per_mood, d.min_per_mood)))
     cfg.refresh_hour = max(0, min(23, _int_or(cfg.refresh_hour, d.refresh_hour)))
     cfg.max_per_cycle = max(1, min(50, _int_or(cfg.max_per_cycle, d.max_per_cycle)))
+    cfg.daily_add_per_mood = max(0, min(100, _int_or(cfg.daily_add_per_mood,
+                                                     d.daily_add_per_mood)))
+    cfg.refill_spent_today = bool(cfg.refill_spent_today)
     cfg.style = str(cfg.style or "")[:60]
     cfg.workflow = str(cfg.workflow or "")[:60]
     cfg.bot_id = resolve_bot_id(cfg.bot_id)
@@ -2321,6 +2341,22 @@ def _clamp_pool_config(cfg: PoolConfig) -> PoolConfig:
     return cfg
 
 
+def _count_map(raw) -> dict[str, int]:
+    """{mood: non-negative int} from a hand-editable yaml value; junk dropped."""
+    out: dict[str, int] = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        key = str(k or "").strip().lower()
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if key and n > 0:
+            out[key] = min(n, 10_000)
+    return out
+
+
 def _pool_parse(raw: dict, bot_id: str | None = None) -> PoolState:
     cdata = raw.get("config") or {}
     cdata = dict(cdata) if isinstance(cdata, dict) else {}
@@ -2343,6 +2379,9 @@ def _pool_parse(raw: dict, bot_id: str | None = None) -> PoolState:
         config=cfg,
         batch_date=str(raw.get("batch_date") or ""),
         last_error=str(raw.get("last_error") or "")[:300],
+        fired=_count_map(raw.get("fired")),
+        daily_owed=_count_map(raw.get("daily_owed")),
+        daily_date=str(raw.get("daily_date") or ""),
     )
 
 
@@ -2387,7 +2426,9 @@ def _pool_copy(st: PoolState) -> PoolState:
     the parse above.
     """
     return PoolState(config=PoolConfig(**st.config.to_dict()),
-                     batch_date=st.batch_date, last_error=st.last_error)
+                     batch_date=st.batch_date, last_error=st.last_error,
+                     fired=dict(st.fired), daily_owed=dict(st.daily_owed),
+                     daily_date=st.daily_date)
 
 
 def _pool_update(bot_id: str | None = None, **fields) -> PoolState:
@@ -2423,6 +2464,13 @@ def pool_save(state: PoolState, bot_id: str | None = None) -> PoolState:
     }
     if state.last_error:
         body["last_error"] = state.last_error
+    # Daily-freshness telemetry: written only once it exists, so a pool that
+    # has never fired or run a daily fill keeps its pre-2026-10 file shape.
+    if state.fired:
+        body["fired"] = dict(state.fired)
+    if state.daily_date:
+        body["daily_date"] = state.daily_date
+        body["daily_owed"] = dict(state.daily_owed)
     path = _pool_path(bot_id)
     with _yaml_lock:                       # serialise with every other writer
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2551,7 +2599,26 @@ def pool_consume(rid: str, *, bot_id: str | None = None) -> bool:
     hit = _resolve_pool_file(rid, _moods_dir(bot_id))
     if hit is None:
         return False
-    return _retire(hit[1]) is not None
+    if _retire(hit[1]) is None:
+        return False
+    _note_fire(hit[0], bot_id)
+    return True
+
+
+def _note_fire(mood: str, bot_id: str | None = None) -> None:
+    """Count one fire in the bot's ledger (the daily run replaces them).
+
+    Never raises: a fire that already happened must not be failed by its
+    bookkeeping."""
+    try:
+        with _yaml_lock:
+            st = pool_load(bot_id)
+            fired = dict(st.fired)
+            fired[mood] = fired.get(mood, 0) + 1
+            _pool_update(bot_id, fired=fired)
+    except Exception as e:                 # pragma: no cover
+        log.warning("reaction pool: could not record a fire for %s/%s: %s",
+                    bot_id, mood, e)
 
 
 def pool_sweep(bot_id: str | None = None, max_age_s: int = PART_STALE_S) -> int:
@@ -2608,6 +2675,11 @@ def pool_status(bot_id: str | None = None) -> dict:
         moods.setdefault(mood, have[mood])
     return {
         **st.config.to_dict(),
+        # Daily freshness: fires counted toward the next daily run, and what
+        # today's run (daily_date) still owes per mood.
+        "fired_since_daily": dict(st.fired),
+        "daily_owed": dict(st.daily_owed) if st.daily_date else {},
+        "daily_date": st.daily_date,
         "remaining": sum(have.values()),
         "moods": moods,
         "low_moods": [c for c in cats if moods[c] < min_per_mood_for(st.config, c)],
@@ -2759,14 +2831,99 @@ def _pool_generate_one(cfg: PoolConfig, category: str, *, bot_id: str | None = N
     return pool_file_id_for(category, dest)
 
 
+def pool_enabled(bot_id: str | None = None) -> bool:
+    """Is this bot's pool switched on RIGHT NOW? (mtime-cached, so cheap.)
+
+    Every generation loop asks this before each image: a fill in flight used
+    to read ``enabled`` once at the start of a round and keep minting until the
+    round (up to max_per_cycle images, ~38 s each) ran out, so switching the
+    pool off did not stop it."""
+    try:
+        return bool(pool_load(bot_id).config.enabled)
+    except Exception:                      # pragma: no cover — be conservative
+        return False
+
+
+def _daily_snapshot(bot_id: str | None = None) -> PoolState:
+    """Take (once per day) the daily run's quota and return the state.
+
+    Per bank mood: ``daily_add_per_mood`` + (``refill_spent_today``) the fires
+    counted since the previous snapshot + whatever an unfinished earlier day
+    still owed — capped at the mood's ceiling, because minting more than the
+    shelf holds would only retire images minted in the same run. The fire
+    ledger is zeroed in the same write, so fires DURING the run count toward
+    tomorrow. Idempotent within a day: a resumed run reuses the snapshot.
+    """
+    today = time.strftime("%Y-%m-%d")
+    with _yaml_lock:
+        st = pool_load(bot_id)
+        if st.daily_date == today:
+            return st
+        cfg = st.config
+        owed: dict[str, int] = {}
+        for c in bank_categories(bot_id):
+            ceiling = per_mood_for(cfg, c)
+            if ceiling <= 0:
+                continue
+            n = cfg.daily_add_per_mood + st.daily_owed.get(c, 0)
+            if cfg.refill_spent_today:
+                n += st.fired.get(c, 0)
+            n = min(n, ceiling)
+            if n > 0:
+                owed[c] = n
+        log.info("reaction pool: daily quota for %s: %s", resolve_bot_id(bot_id),
+                 owed or "nothing owed")
+        return _pool_update(bot_id, daily_owed=owed, daily_date=today, fired={})
+
+
+def _trim_to_ceiling(bot_id: str | None, mood: str, cfg: PoolConfig) -> int:
+    """Retire the OLDEST unfired images of one mood until it is back at its
+    ceiling. Retired through _retire (kept in spent/, never deleted) and NOT
+    counted as fires — only pool_consume writes the fire ledger."""
+    ceiling = per_mood_for(cfg, mood)
+    d = _moods_dir(bot_id) / mood
+    files = _mood_files(d)
+    extra = len(files) - ceiling
+    if extra <= 0:
+        return 0
+
+    def _age(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return float("inf")
+
+    retired = 0
+    for p in sorted(files, key=_age)[:extra]:
+        if _retire(p) is not None:
+            retired += 1
+    if retired:
+        log.info("reaction pool: %s/%s over its ceiling of %d — retired %d oldest",
+                 resolve_bot_id(bot_id), mood, ceiling, retired)
+    return retired
+
+
+def pool_daily_done(bot_id: str | None = None) -> bool:
+    """True when today's daily quota is fully minted (and batch_date stamped)."""
+    return pool_load(bot_id).batch_date == time.strftime("%Y-%m-%d")
+
+
 def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
-                only_low: bool = False) -> int:
+                only_low: bool = False, daily: bool = False) -> int:
     """Generate toward the per-mood targets for one bot. BLOCKING — call in a thread.
 
     ``only_low`` = the emergency path: only moods under the low-water mark are
     topped up (to their full target). Generates at most `max_per_cycle` images
     per run so one call can't tie up the rig for ten minutes; the caller loops
     until the deficits are gone.
+
+    ``daily`` = the daily freshness run: the plan is today's snapshotted quota
+    (see :func:`_daily_snapshot`) rather than the deficits; each minted image
+    pays one off, and a mood pushed past its ceiling retires its oldest unfired
+    image. When nothing is owed, ``batch_date`` is stamped and 0 returned.
+
+    Whatever the mode, the pool's ``enabled`` switch is re-read before EVERY
+    image, so turning the pool off stops a fill before its next generation.
     """
     st = pool_load(bot_id)
     cfg = st.config
@@ -2783,7 +2940,14 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
         _pool_update(bot_id, last_error="no-prompt-categories")
         return 0
 
-    deficits = pool_deficits(bot_id=bot_id, only_low=only_low)
+    if daily:
+        st = _daily_snapshot(bot_id)
+        deficits = {c: n for c, n in st.daily_owed.items() if n > 0}
+        if not deficits:
+            _pool_update(bot_id, batch_date=time.strftime("%Y-%m-%d"))
+            return 0
+    else:
+        deficits = pool_deficits(bot_id=bot_id, only_low=only_low)
     need = sum(deficits.values())
     # Same reset as the avatar pool: the CLI answered (so a CLI fault on record
     # is disproved) and a pool at target attempted nothing (so nothing failed).
@@ -2829,6 +2993,13 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
 
     made = 0
     for category in plan:
+        # The disable switch is honoured BETWEEN IMAGES, not between rounds.
+        if not pool_enabled(bot_id):
+            log.info("reaction pool: %s switched off mid-fill — stopping "
+                     "(%d of %d made this round)", resolve_bot_id(bot_id),
+                     made, len(plan))
+            break
+        cfg = pool_load(bot_id).config      # a style/workflow edit lands too
         if _pool_generate_one(cfg, category, bot_id=bot_id) is None:
             # Rig-side failure (refusal/timeout) ends the round NOW — the
             # loop's backoff plus the VRAM guard handle the rig. Local
@@ -2837,6 +3008,19 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
                 break
             continue
         made += 1
+        if daily:
+            # Pay the image off the day's quota at once (persisted), so a run
+            # cut short here resumes without minting it again; then hold the
+            # mood at its ceiling by retiring the oldest unfired image.
+            with _yaml_lock:
+                st = pool_load(bot_id)
+                owed = dict(st.daily_owed)
+                owed[category] = max(0, owed.get(category, 0) - 1)
+                if not owed[category]:
+                    del owed[category]
+                _pool_update(bot_id, daily_owed=owed, last_error="")
+            _trim_to_ceiling(bot_id, category, cfg)
+            continue
         # The image itself is already live — its folder IS the manifest — so
         # the yaml only needs touching when the telemetry it holds changes.
         # Re-read + write only our own fields: the operator may have edited the
@@ -2846,7 +3030,11 @@ def pool_refill(limit: int | None = None, *, bot_id: str | None = None,
         if st.last_error or not st.batch_date:
             _pool_update(bot_id, last_error="",
                          batch_date=st.batch_date or time.strftime("%Y-%m-%d"))
-    if made == 0:
+    if daily:
+        st = pool_load(bot_id)
+        if st.daily_date == time.strftime("%Y-%m-%d") and not st.daily_owed:
+            _pool_update(bot_id, batch_date=st.daily_date)
+    if made == 0 and plan and pool_enabled(bot_id):
         _pool_update(bot_id, last_error="generation-failed")
     return made
 
