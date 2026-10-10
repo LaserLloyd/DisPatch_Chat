@@ -125,7 +125,19 @@ test('absent: what it is, three steps with copyable commands, Check again', dom,
   assert.equal(root.dataset.voiceState, 'absent');
   // No markup is ever parsed from a string: the backticked `uv sync` is a <code>.
   assert.ok([...root.querySelectorAll('.dev-row-hint code')].some((c) => c.textContent === 'uv sync'));
+  // ...and every inline command is a left-to-right isolate: in an Arabic
+  // sentence `--offline` otherwise renders as "offline--" (V3, measured).
+  for (const c of root.querySelectorAll('.dev-row-hint code, summary code')) {
+    assert.equal(c.getAttribute('dir'), 'ltr', c.textContent);
+  }
 }));
+
+test('Arabic: "1.x" stays one left-to-right run inside the RTL title', () => {
+  const ar = JSON.parse(readFileSync(join(STATIC, 'locales', 'ar.json'), 'utf8'));
+  // U+2066 LEFT-TO-RIGHT ISOLATE … U+2069 POP DIRECTIONAL ISOLATE: without them
+  // the Unicode bidi algorithm shows "1.x" as "x.1" in a right-to-left line.
+  assert.match(ar.voice_absent.latest_release, /\u20661\.x\u2069/);
+});
 
 test('absent + busy / not found yet', dom, withDom(async (win, root) => {
   const m = await load();
@@ -147,6 +159,14 @@ test('failed: the server detail, the fix, and nothing else to install', dom, wit
   assert.match(root.textContent, /full error is in the server log/);
   assert.equal(root.querySelectorAll('pre.ext-cmd').length, 0);
   assert.ok(root.querySelector('button.ext-check-again'));
+  // The server's own text, exactly as sent (never split on backticks) and
+  // left-to-right even on an Arabic page.
+  const tick = { ...ext, detail: 'ValueError: bad `voice.yaml` key' };
+  m.renderVoiceAbsent(root, m.voiceState([tick]), {});
+  const d = root.querySelector('.ext-detail');
+  assert.equal(d.getAttribute('dir'), 'ltr');
+  assert.equal(d.textContent, 'ValueError: bad `voice.yaml` key');
+  assert.equal(d.querySelector('code'), null);
 }));
 
 test('incompatible: which side to update', dom, withDom(async (win, root) => {

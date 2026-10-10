@@ -70,8 +70,28 @@ def test_uv_run_group_voice_still_boots(tmp_path):
 
 def test_app_imports_and_routes_without_any_extension(tmp_path):
     """Import only (no lifespan): nothing voice-shaped is mounted, the generic
-    host routes are, and the shell is whole."""
+    host routes are, and the shell is whole.
+
+    The child first makes the add-on ABSENT even when this environment has it
+    (DisPatch's suite also runs under `uv run --with-editable DisPatch_Voice`,
+    the live box's line): no `dispatch.extensions` entry points, and
+    `import dispatch_voice` fails as it does on a box that never installed it.
+    Where nothing is installed both shims are no-ops."""
     code = textwrap.dedent("""
+        import importlib.metadata as _md
+        import sys
+        _real_eps = _md.entry_points
+        def _eps(**kw):
+            if kw.get("group") == "dispatch.extensions":
+                return _md.EntryPoints(())
+            return _real_eps(**kw)
+        _md.entry_points = _eps
+        class _NotInstalled:
+            def find_spec(self, name, path=None, target=None):
+                if name == "dispatch_voice" or name.startswith("dispatch_voice."):
+                    raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+                return None
+        sys.meta_path.insert(0, _NotInstalled())
         from app import main, extensions
         paths = {getattr(r, "path", "") for r in main.app.routes}
         assert "/api/voice/status" not in paths and "/api/voices" not in paths
@@ -79,7 +99,6 @@ def test_app_imports_and_routes_without_any_extension(tmp_path):
         assert {"/ws/{name}/{thread_id}", "/api/extensions", "/ext/{ext_id}/{rel:path}"} <= paths
         assert "/api/health" in paths and "/ws" in paths
         assert [e.id for e in extensions.registry() if e.state == "ok"] == []
-        import sys
         assert not any(m == "dispatch_voice" or m.startswith("dispatch_voice.") for m in sys.modules)
         print("OK")
     """)

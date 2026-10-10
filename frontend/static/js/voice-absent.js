@@ -68,14 +68,23 @@ export function voiceState(list, mode, clientFail = null) {
 }
 
 /** `a `code` b` → text and <code> nodes (locale strings carry commands in
- *  backticks; no markup is ever parsed). */
+ *  backticks; no markup is ever parsed). Each <code> is a left-to-right
+ *  isolate: in an Arabic sentence an inline `--offline` otherwise renders as
+ *  "offline--" (the leading hyphens take the paragraph's direction). */
 function withCode(text) {
   const parts = String(text).split('`');
-  return parts.map((p, i) => (i % 2 ? el('code', { text: p }) : document.createTextNode(p)));
+  return parts.map((p, i) => (i % 2 ? el('code', { text: p, dir: 'ltr' }) : document.createTextNode(p)));
 }
 
 function hint(text, extra = '') {
   return el('span', { class: 'dev-row-hint' + (extra ? ' ' + extra : '') }, withCode(text));
+}
+
+/** The server's (or the browser's) own error text: shown exactly as sent —
+ *  never split on backticks — and left-to-right, since it is English with
+ *  punctuation and module names that an RTL paragraph would reorder. */
+function detailLine(text) {
+  return el('span', { class: 'dev-row-hint ext-detail', dir: 'ltr', text: String(text) });
 }
 
 /** One copyable command: the line as typed, with the chat's own code-block
@@ -179,13 +188,13 @@ function stateRow(info, opts) {
   if (info.state === 'incompatible') {
     const addonOld = /update the add-on/i.test(ext.detail || '');
     return row(t('voice_absent.state_incompatible', { name, version }), [
-      ext.detail ? hint(ext.detail, 'ext-detail') : null,
+      ext.detail ? detailLine(ext.detail) : null,
       hint(addonOld ? t('voice_absent.update_addon') : t('voice_absent.update_dispatch')),
     ], [addonOld ? command(COMMANDS.upgrade) : null, again]);
   }
   if (info.state === 'failed') {
     return row(t('voice_absent.state_failed', { name, version }), [
-      ext.detail ? hint(ext.detail, 'ext-detail') : null,
+      ext.detail ? detailLine(ext.detail) : null,
       hint(t('voice_absent.failed_fix')),
     ], [again]);
   }
@@ -196,7 +205,7 @@ function stateRow(info, opts) {
   // client_failed: the server mounted it; this browser could not load its page.
   return row(t('voice_absent.could_not_load_title'), [
     hint(t('voice_absent.could_not_load')),
-    opts.clientDetail ? hint(opts.clientDetail, 'ext-detail') : null,
+    opts.clientDetail ? detailLine(opts.clientDetail) : null,
   ]);
 }
 

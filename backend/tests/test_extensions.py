@@ -31,6 +31,21 @@ def _fake_dist(site: Path, name: str = "fakevoice", version: str = "1.2.3",
     (d / "entry_points.txt").write_text(f"[dispatch.extensions]\n{ep}\n")
 
 
+def _only_site(monkeypatch, site: Path) -> None:
+    """Discovery sees ONLY the entry points of the fake dist under `site`.
+
+    These tests must hold in DisPatch's environment with or without the real
+    add-on installed (the live box runs `uv run --with-editable DisPatch_Voice`,
+    so a real `voice` entry point is normally there): without this filter the
+    real one shows up beside the fake and the counts are off by one."""
+    real = extensions._entry_points
+
+    def mine() -> list:
+        return [ep for ep in real()
+                if str(site) in str(getattr(getattr(ep, "dist", None), "_path", ""))]
+    monkeypatch.setattr(extensions, "_entry_points", mine)
+
+
 def test_entry_point_discovery_names_the_dist_never_a_path(tmp_path, monkeypatch):
     _fake_dist(tmp_path / "site")
     monkeypatch.syspath_prepend(str(tmp_path / "site"))
@@ -48,6 +63,7 @@ def test_entry_point_discovery_names_the_dist_never_a_path(tmp_path, monkeypatch
 def test_off_imports_nothing_and_lists_installed_as_disabled(tmp_path, monkeypatch):
     _fake_dist(tmp_path / "site")
     monkeypatch.syspath_prepend(str(tmp_path / "site"))
+    _only_site(monkeypatch, tmp_path / "site")
     monkeypatch.setenv("DISPATCH_EXTENSIONS", "off")
     mode, cands, disabled = extensions.discover()
     assert mode == "off" and cands == []
@@ -58,6 +74,7 @@ def test_off_imports_nothing_and_lists_installed_as_disabled(tmp_path, monkeypat
 def test_explicit_list_loads_only_those(tmp_path, monkeypatch):
     _fake_dist(tmp_path / "site")
     monkeypatch.syspath_prepend(str(tmp_path / "site"))
+    _only_site(monkeypatch, tmp_path / "site")
     monkeypatch.setenv("DISPATCH_EXTENSIONS", " _extfake:OTHER ")
     mode, cands, disabled = extensions.discover()
     assert mode == "env"
@@ -66,6 +83,8 @@ def test_explicit_list_loads_only_those(tmp_path, monkeypatch):
 
 
 def test_legacy_voice_pkg_is_honoured_once_and_logged(tmp_path, monkeypatch, caplog):
+    # A 2.1 box: the add-on is NOT installed as a package (no entry point).
+    monkeypatch.setattr(extensions, "_entry_points", list)
     monkeypatch.delenv("DISPATCH_EXTENSIONS", raising=False)
     monkeypatch.setenv("DISPATCH_VOICE_PKG", str(tmp_path))
     monkeypatch.setattr("sys.path", list(os.sys.path))
@@ -75,6 +94,22 @@ def test_legacy_voice_pkg_is_honoured_once_and_logged(tmp_path, monkeypatch, cap
     legacy = [c for c in cands if c.target == "dispatch_voice:EXTENSION"]
     assert legacy and legacy[0].source == "DISPATCH_VOICE_PKG (deprecated)"
     assert "deprecated" in caplog.text
+
+
+def test_legacy_voice_pkg_beside_an_installed_add_on_loads_it_once(tmp_path, monkeypatch):
+    """Mid-migration: the unit still sets DISPATCH_VOICE_PKG and the add-on is
+    also installed (`--with-editable`). The entry point wins; the legacy path
+    adds no second candidate for the same target."""
+    _fake_dist(tmp_path / "site", ep="voice = dispatch_voice:EXTENSION")
+    monkeypatch.syspath_prepend(str(tmp_path / "site"))
+    _only_site(monkeypatch, tmp_path / "site")
+    monkeypatch.delenv("DISPATCH_EXTENSIONS", raising=False)
+    monkeypatch.setenv("DISPATCH_VOICE_PKG", str(tmp_path))
+    monkeypatch.setattr("sys.path", list(os.sys.path))
+    mode, cands, _ = extensions.discover()
+    voice = [c for c in cands if c.target == "dispatch_voice:EXTENSION"]
+    assert mode == "entry_points" and len(voice) == 1
+    assert voice[0].source == "entry point (fakevoice 1.2.3)"
 
 
 # --------------------------------------------------------------------------- #

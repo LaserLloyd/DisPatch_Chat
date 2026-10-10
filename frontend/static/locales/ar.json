@@ -1253,7 +1253,7 @@
     "english_only": "الدردشة الصوتية تفهم الإنجليزية وتتحدث بها فقط حاليًا.",
     "steps_title": "إضافة الدردشة الصوتية",
     "step_install": "1. ثبّت {release} في DisPatch",
-    "latest_release": "أحدث إصدار 1.x",
+    "latest_release": "أحدث إصدار \u20661.x\u2069",
     "where_backend": "على الخادم، في مجلد `backend` الخاص بـ DisPatch:",
     "uv_sync_note": "تشغيل `uv sync` يزيل الإضافة من جديد؛ ويخبرك `dispatch-voice doctor` متى حدث ذلك.",
     "checkout_variant": "من نسخة مصدرية تعدّلها",
