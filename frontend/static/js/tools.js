@@ -6,10 +6,12 @@
 //
 // Four kinds, one rail:
 //   builtin — the panes main.js already owns (Harness, StudioForge,
-//             Emails, Clients) and the opt-in voice tools (Voice cloning,
-//             Built-in voices, Voice lab — js/voice-tools.js; off unless
-//             tools.yaml switches them on). This module only draws their tile
-//             and calls the opener main.js hands in; their views are untouched.
+//             Emails, Clients) and the tiles an installed EXTENSION registers
+//             through its shell (js/ext-sdk.js `tools.register` — the voice
+//             add-on's Voice cloning, Built-in voices and Voice lab; opt-in:
+//             off unless tools.yaml switches them on). This module only draws
+//             their tile and calls the opener it was handed; their views are
+//             someone else's.
 //   app     — a trusted package under apps/<id>/ (docs/design/2026-09-25-
 //             apps.md): its page is framed from /apps/<id>/ with NO sandbox —
 //             it is repo code on our own origin and calls its own API with the
@@ -42,31 +44,77 @@
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
 import { api } from './api.js?v=32';
-import { t, relTimeLong } from './i18n.js?v=3';
+import { t, relTimeLong } from './i18n.js?v=4';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
 // the same currentColor line art as the gear row, never a platform emoji.
-// `paths` draws a line icon that is not in RAIL_ICONS (the voice tools carry
-// their own, so util.js — and its dozen importers' ?v — stay put). `optIn`:
-// off unless tools.yaml has a row with `enabled: true`.
-const MIC_PATHS = [
-  'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z',
-  'M19 11a7 7 0 0 1-14 0',
-  'M12 18v3',
-];
+// `paths` draws a line icon that is not in RAIL_ICONS (an extension's tiles
+// carry their own). `optIn`: off unless tools.yaml has a row with
+// `enabled: true`. `owner`/`open`: an extension's tile (registerExtTiles).
 const BUILTINS = [
   { id: 'deepseek-harness', feature: 'harness', icon: 'terminal', name: 'harness.name', aria: 'harness.sidebar_aria' },
   { id: 'studioforge-panel', feature: 'studioforge', icon: 'tools', name: 'studioforge.name', aria: 'studioforge.sidebar_aria' },
   { id: 'mail-panel', feature: 'mail', icon: 'mail', name: 'mail.name', aria: 'mail.sidebar_aria' },
   { id: 'clients-panel', feature: 'practice', icon: 'users', name: 'clients.name', aria: 'clients.sidebar_aria' },
-  { id: 'voice-cloning', feature: 'voice_cloning', icon: 'voice-cloning', paths: MIC_PATHS, name: 'vtools.cloning_name', aria: 'vtools.cloning_aria', optIn: true },
-  { id: 'voice-builtin', feature: 'voice_builtin', icon: 'voice-builtin', paths: ['M4 9.5h3.2L12 5.5v13l-4.8-4H4Z', 'M15.5 9a4.2 4.2 0 0 1 0 6', 'M18.2 6.5a8 8 0 0 1 0 11'], name: 'vtools.builtin_name', aria: 'vtools.builtin_aria', optIn: true },
-  { id: 'voice-lab', feature: 'voice_lab', icon: 'voice-lab', paths: ['M4 11v2', 'M8 7.5v9', 'M12 4.5v15', 'M16 8.5v7', 'M20 10.5v3'], name: 'vtools.lab_name', aria: 'vtools.lab_aria', optIn: true },
 ];
-const BUILTIN_BY_ID = new Map(BUILTINS.map((b) => [b.id, b]));
-const BUILTIN_BY_FEATURE = new Map(BUILTINS.map((b) => [b.feature, b]));
+const BUILTIN_BY_ID = new Map();
+const BUILTIN_BY_FEATURE = new Map();
+function indexBuiltins() {
+  BUILTIN_BY_ID.clear();
+  BUILTIN_BY_FEATURE.clear();
+  for (const b of BUILTINS) { BUILTIN_BY_ID.set(b.id, b); BUILTIN_BY_FEATURE.set(b.feature, b); }
+}
+indexBuiltins();
+
+const TILE_ID_RE = /^[a-z0-9-]{1,40}$/;
+const TILE_FEATURE_RE = /^[a-z][a-z0-9_]{0,40}$/;
+
+/**
+ * An extension's rail tiles (js/ext-sdk.js `shell.tools.register`). Each is
+ * `{ id, feature, iconPaths, nameKey, ariaKey, open(id) }`: the id and feature
+ * of the builtin row the extension's backend registered, the line icon, its
+ * own locale keys, and the opener. Opt-in like every extension tool. Returns
+ * dispose(). An id or feature a core tile owns is refused.
+ */
+export function registerExtTiles(owner, tiles) {
+  const added = [];
+  for (const tile of Array.isArray(tiles) ? tiles : []) {
+    const id = tile && tile.id;
+    const feature = tile && tile.feature;
+    if (!TILE_ID_RE.test(String(id || '')) || !TILE_FEATURE_RE.test(String(feature || ''))) {
+      throw new Error(`tools.register: bad id/feature ${id}/${feature}`);
+    }
+    const cur = BUILTIN_BY_ID.get(id) || BUILTIN_BY_FEATURE.get(feature);
+    if (cur && cur.owner !== owner) throw new Error(`tools.register: ${id} is taken`);
+    if (cur) BUILTINS.splice(BUILTINS.indexOf(cur), 1);
+    const b = {
+      id, feature, icon: id, owner,
+      paths: Array.isArray(tile.iconPaths) && tile.iconPaths.length ? tile.iconPaths.slice(0, 12) : null,
+      name: String(tile.nameKey || ''), aria: String(tile.ariaKey || tile.nameKey || ''),
+      optIn: true, open: typeof tile.open === 'function' ? tile.open : null,
+    };
+    BUILTINS.push(b);
+    added.push(b);
+  }
+  indexBuiltins();
+  if (deps) renderToolRail();
+  return () => {
+    for (const b of added) {
+      const i = BUILTINS.indexOf(b);
+      if (i >= 0) BUILTINS.splice(i, 1);
+    }
+    indexBuiltins();
+    if (deps) renderToolRail();
+  };
+}
+
+/** Is `feature` an extension tile's? (main.js builtinOn asks.) */
+export function isExtFeature(feature) {
+  const b = BUILTIN_BY_FEATURE.get(feature);
+  return !!(b && b.owner);
+}
 
 // A tools.yaml `icon` is what a person typed: usually one emoji. The handful
 // below are the emoji people reach for when they mean a piece of CHROME (a
@@ -963,7 +1011,7 @@ export function openTool(id, { launch = true } = {}) {
   if (b) {
     if (st.decoy) return false;
     if (tool && tool.enabled === false) return false;
-    const opener = deps.openers && deps.openers[b.feature];
+    const opener = b.open ? () => b.open(b.id) : (deps.openers && deps.openers[b.feature]);
     if (typeof opener !== 'function') return false;
     // Only once the pane's own probe found the feature on (the rail's rule):
     // the tab is another way into the SAME unlocked-only page, never a way

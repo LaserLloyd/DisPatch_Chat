@@ -31,6 +31,25 @@ class ConnectionManager:
         self.redactor: Callable[[dict], dict | None] | None = None
         self.is_session_live: Callable[[str], bool] | None = None
         self.pin_set: Callable[[], bool] | None = None
+        # Synchronous observers of every broadcast frame (app/extensions.py:
+        # the open-stream snapshot and per-thread frame subscriptions). Called
+        # in broadcast order before the fan-out; each must be cheap and must
+        # never block — the extensions host only enqueues.
+        self._observers: list[Callable[[dict], None]] = []
+
+    def add_observer(self, fn: Callable[[dict], None]) -> None:
+        if fn not in self._observers:
+            self._observers.append(fn)
+
+    def remove_observer(self, fn: Callable[[dict], None]) -> None:
+        if fn in self._observers:
+            self._observers.remove(fn)
+
+    def frame_for_token(self, token: str | None, message: dict) -> dict | None:
+        """The frame a FULL connection opened under ``token`` would receive
+        right now — redacted (or None = dropped) the instant that session has
+        lapsed, exactly as for a browser tab of the same session."""
+        return self._frame_for({"decoy": False, "token": token}, message)
 
     async def connect(self, ws: WebSocket, decoy: bool = False, token: str | None = None) -> None:
         await ws.accept()
@@ -107,6 +126,11 @@ class ConnectionManager:
             return ws
 
     async def broadcast(self, message: dict) -> None:
+        for fn in tuple(self._observers):
+            try:
+                fn(message)
+            except Exception:  # an observer must never cost the chat a frame
+                pass
         async with self._lock:
             targets = list(self._conns.items())
         sends = []

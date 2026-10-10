@@ -306,6 +306,10 @@ class Hooks:
     # main._track: registers a background task so shutdown cancels it.
     track: Callable[[asyncio.Task], None] | None = None
     data_dir: Path = field(default_factory=lambda: Path("."))
+    # (message_id, patch) -> db.merge_message_metadata. Optional; the voice
+    # cancel path stamps `voice_heard {interrupted}` on a row that was already
+    # being written when the turn was interrupted.
+    merge_metadata: Callable[[str, dict], Awaitable[Any]] | None = None
 
 
 _hooks: Hooks | None = None
@@ -337,6 +341,7 @@ def _embed_config(raw: dict | None) -> knowledge.EmbedConfig | None:
         base_url=str(raw["base_url"]), model=str(raw["model"]),
         api_key=llm_api.resolve_key(raw),
         timeout_s=float(raw.get("timeout_s") or 2.0),
+        voice_timeout_s=float(raw.get("voice_timeout_s") or knowledge.VOICE_TIMEOUT_S),
         extra_body=dict(raw.get("extra_body") or {}))
 
 
@@ -532,9 +537,16 @@ def _read_profile(cfg: AdvisorConfig, idx: knowledge.KnowledgeIndex | None) -> s
 
 
 def build_system_prompt(cfg: AdvisorConfig, profile: str,
-                        open_requests: list[dict], today: str) -> str:
+                        open_requests: list[dict], today: str, *,
+                        voice: Any = None) -> str:
     """Persona, rules, profile and open requests. NOT the retrieved notes:
-    those are data and travel in the user turn (:func:`with_reference`)."""
+    those are data and travel in the user turn (:func:`with_reference`).
+
+    ``voice`` (voice chat, C-§B.2): its ``system`` text — the *Spoken replies*
+    section the add-on composes — goes after the persona and RULES and before
+    the first data block (``## About {owner}``), so it reads as a standing rule
+    of the conversation and the user turn stays the clean transcript.
+    """
     persona = cfg.persona.replace("{name}", cfg.name).replace("{owner}", cfg.owner)
     out = [persona.strip(), f"Today is {today}."]
     if cfg.can_dispatch:
@@ -543,6 +555,9 @@ def build_system_prompt(cfg: AdvisorConfig, profile: str,
             research_agent=cfg.research_agent or cfg.agents[0],
             action_agent=cfg.action_agent or cfg.agents[0],
             agents=", ".join(cfg.agents)))
+    spoken = llm_api.voice_system_text(voice)
+    if spoken:
+        out.append(spoken)
     if profile:
         out.append(
             f"## About {cfg.owner}\n\n<owner-profile>\n"
@@ -773,70 +788,221 @@ async def generate(cfg: AdvisorConfig, messages: list[dict],
     raise last_error or llm_api.ApiError("No provider answered", "")
 
 
-async def run_turn(thread_id: str, bot_id: str, text: str) -> None:
-    """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn."""
+def _advisor_config(bot_id: str) -> AdvisorConfig:
+    bot = config.get_bot(bot_id)
+    if bot is None or not bot.advisor:
+        raise llm_api.ApiError("This bot is not an advisor",
+                               f"{bot_id!r} has no `advisor` block.")
+    if bot.safe:
+        # config.Bot never lets this happen; refuse rather than trust it.
+        raise llm_api.ApiError("This advisor is marked safe",
+                               "Advisors are unlocked-only; clear `safe`.")
+    return AdvisorConfig.from_bot(bot)
+
+
+@dataclass
+class _Prompt:
+    """Everything one advisor call is built from, kept for the post-processing
+    (the echo check reads the same profile, notes and history the model saw)."""
+
+    messages: list[dict]
+    history: list[dict]
+    hits: list[knowledge.Hit]
+    open_reqs: list[dict]
+    profile: str
+
+
+async def _prepare(cfg: AdvisorConfig, thread_id: str, rows: list, text: str, *,
+                   voice: Any, speculative: bool) -> _Prompt:
+    """History, retrieval, open requests and the system prompt for one call.
+
+    `rows` are the thread's stored messages. For a real turn the user's row is
+    the newest of them (and `text` is its composed form); for a speculation
+    it does not exist yet, so `text` is appended as a new user turn.
+    With voice instructions the query embedding gets the voice budget
+    (``EmbedConfig.voice_timeout_s``, 0.3 s) and then keywords only.
+    """
+    idx = index_for(cfg)
+    if idx is not None and not idx.last_scan:
+        with contextlib.suppress(Exception):
+            await idx.scan()
+    base = llm_api.build_history(rows, cfg.history_chars, truncate_heard=True)
+    turns = (llm_api.append_user_turn(base, text) if speculative
+             else llm_api._ensure_trailing_user(base, text))
+    # Earlier rows include agent reports that quote web pages: data, so
+    # every directive in them is defused before the model reads them.
+    history = [{**m, "content": neutralise(m["content"])} for m in turns]
+    if not history:
+        raise llm_api.ApiError("There was nothing to send",
+                               "The thread had no user message to answer.")
+    hits: list[knowledge.Hit] = []
+    if idx is not None:
+        try:
+            hits = await idx.search(_search_query(history),
+                                    budget_chars=cfg.retrieval_chars,
+                                    voice=voice is not None)
+        except Exception:
+            log.exception("advisor %s: knowledge search failed", cfg.bot_id)
+    open_reqs = await asyncio.to_thread(
+        ledger().list, thread_id=thread_id, states=("running", "proposed"), limit=10)
+    profile = _read_profile(cfg, idx)
+    system = build_system_prompt(
+        cfg, profile, open_reqs, datetime.now().strftime("%A %Y-%m-%d"), voice=voice)
+    messages = [{"role": "system", "content": system},
+                *with_reference(history, reference_block(cfg, hits))]
+    return _Prompt(messages=messages, history=history, hits=hits,
+                   open_reqs=open_reqs, profile=profile)
+
+
+class _SpecSink:
+    """The emitter a speculation streams into.
+
+    While nobody has adopted the run it only records (``run.raw``/``run.text``)
+    and broadcasts nothing. ``attach`` hands it the real turn's `_Emitter`: the
+    text buffered so far goes out as the bubble's first chunk and every later
+    delta is forwarded, so the thread sees one ordinary streamed reply.
+
+    ``started`` follows the attached emitter only: before adoption nothing is
+    on anyone's screen, so a provider that fails mid-stream may still fall
+    through to the next one in the chain (``generate``'s splice rule).
+
+    Two tasks push into the attached emitter — the adopting TURN (``attach``'s
+    replay of the buffered text) and the SPECULATION (every later delta) — and
+    ``_Emitter.flush`` awaits the broadcast. Unserialised, a slow client let
+    the speculation's next delta overtake the replay, and the chat and the
+    voice session got the first sentence after the second (review T2 #2).
+    ``_lock`` keeps the two pushers in order.
+    """
+
+    def __init__(self, run: _AdvisorSpeculation) -> None:
+        self.run = run
+        self.target: _Emitter | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def started(self) -> bool:
+        return bool(self.target is not None and self.target.started)
+
+    async def push(self, raw: str, *, force: bool = False) -> None:
+        self.run.raw = raw
+        self.run.text = visible_text(raw)
+        if self.target is not None:
+            async with self._lock:
+                await self.target.push(raw, force=force)
+
+    def restart(self) -> None:
+        self.run.raw = self.run.text = ""
+        if self.target is not None:
+            self.target.restart()
+
+    async def attach(self, emitter: _Emitter) -> None:
+        async with self._lock:
+            self.target = emitter
+            if self.run.raw:
+                # The NEWEST raw at the moment the lock is held: a delta that
+                # arrived while we waited for it is included, not reordered.
+                await emitter.push(self.run.raw, force=True)
+
+
+class _AdvisorSpeculation(llm_api.SpeculativeRun):
+    backend = "advisor"
+
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__(*a, **kw)
+        self.sink = _SpecSink(self)
+        self.prompt: _Prompt | None = None
+
+
+async def speculate(thread_id: str, bot_id: str, text: str, *,
+                    voice: Any = None) -> llm_api.SpeculativeRun:
+    """Start the advisor call a voice turn WILL make, before the turn exists.
+
+    Same system prompt (voice section included), history and retrieval as
+    :func:`run_turn`; streams into the returned handle and nothing else: no
+    row, no ``thinking``/``stream_*`` frame, no status change. The raw reply
+    keeps its markers — they are stripped and acted on only by the turn that
+    adopts the run, so a discarded run never dispatches ``[[research:]]`` or
+    ``[[handoff:]]``. ``head_id`` is the thread's newest message id as the
+    prompt was built; the host adopts only while it is still the newest.
+    """
+    h = _h()
+    cfg = _advisor_config(bot_id)
+    rows, _ = await h.list_messages(thread_id, HISTORY_ROW_LIMIT)
+    run = _AdvisorSpeculation(thread_id, bot_id, text,
+                              head_id=getattr(rows[-1], "id", None) if rows else None)
+
+    async def go() -> tuple[str, str, str]:
+        prompt = await _prepare(cfg, thread_id, rows, text, voice=voice, speculative=True)
+        run.prompt = prompt
+        run.prompt_chars = llm_api.prompt_chars(prompt.messages)
+        return await generate(cfg, prompt.messages, run.sink)   # type: ignore[arg-type]
+
+    run._start(go(), track=h.track)
+    return run
+
+
+async def run_turn(thread_id: str, bot_id: str, text: str, *,
+                   voice: Any = None,
+                   prefetched: llm_api.SpeculativeRun | None = None) -> None:
+    """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn.
+
+    Voice chat (C-§B.2): ``voice.system`` lands in the system prompt (see
+    :func:`build_system_prompt`) and retrieval runs on the voice budget;
+    ``prefetched`` is a run from :func:`speculate` that this turn ADOPTS — its
+    buffered text becomes the bubble's first chunk and the live stream carries
+    on — instead of starting a new call. Cancelled with the keep-partial flag
+    set (``llm_api.cancel_direct_turn``), the text already streamed is
+    persisted as the reply row (``voice_heard {interrupted: true}``) and no
+    marker in it is acted on.
+    """
     h = _h()
     await h.set_status(thread_id, "thinking")
     await h.broadcast({"type": "thinking", "thread_id": thread_id,
                        "bot_id": bot_id, "status": "started"})
     await h.thread_update(thread_id)
     emitter = _Emitter(thread_id, bot_id)
+    deliver_task: asyncio.Future | None = None
     try:
-        bot = config.get_bot(bot_id)
-        if bot is None or not bot.advisor:
-            raise llm_api.ApiError("This bot is not an advisor",
-                                   f"{bot_id!r} has no `advisor` block.")
-        if bot.safe:
-            # config.Bot never lets this happen; refuse rather than trust it.
-            raise llm_api.ApiError("This advisor is marked safe",
-                                   "Advisors are unlocked-only; clear `safe`.")
-        cfg = AdvisorConfig.from_bot(bot)
-        idx = index_for(cfg)
-        if idx is not None and not idx.last_scan:
-            with contextlib.suppress(Exception):
-                await idx.scan()
-        rows, _ = await h.list_messages(thread_id, HISTORY_ROW_LIMIT)
-        # Earlier rows include agent reports that quote web pages: data, so
-        # every directive in them is defused before the model reads them.
-        history = [{**m, "content": neutralise(m["content"])}
-                   for m in llm_api._ensure_trailing_user(
-                       llm_api.build_history(rows, cfg.history_chars), text)]
-        if not history:
-            raise llm_api.ApiError("There was nothing to send",
-                                   "The thread had no user message to answer.")
-        hits: list[knowledge.Hit] = []
-        if idx is not None:
-            try:
-                hits = await idx.search(_search_query(history),
-                                        budget_chars=cfg.retrieval_chars)
-            except Exception:
-                log.exception("advisor %s: knowledge search failed", bot_id)
-        open_reqs = await asyncio.to_thread(
-            ledger().list, thread_id=thread_id, states=("running", "proposed"), limit=10)
-        profile = _read_profile(cfg, idx)
-        system = build_system_prompt(
-            cfg, profile, open_reqs, datetime.now().strftime("%A %Y-%m-%d"))
-        raw, model, provider = await generate(
-            cfg, [{"role": "system", "content": system},
-                  *with_reference(history, reference_block(cfg, hits))], emitter)
+        cfg = _advisor_config(bot_id)
+        run, prefetched = await llm_api.adopt(
+            prefetched, thread_id, bot_id, _AdvisorSpeculation), None
+        if run is not None:
+            assert isinstance(run, _AdvisorSpeculation)
+            await run.sink.attach(emitter)
+            raw, model, provider = await run.result()
+            prompt = run.prompt
+            assert prompt is not None
+        else:
+            rows, _ = await h.list_messages(thread_id, HISTORY_ROW_LIMIT)
+            prompt = await _prepare(cfg, thread_id, rows, text, voice=voice,
+                                    speculative=False)
+            raw, model, provider = await generate(cfg, prompt.messages, emitter)
 
         # Reasoning out first, THEN the markers: visible_text() would strip
         # the markers too, and they are what the next step acts on.
         reply, markers = strip_markers(strip_reasoning(raw))
         markers = drop_echoed_markers(markers, [
-            profile,
-            *(f"{hit.title}\n{hit.text}" for hit in hits),
-            *(m["content"] for m in history if m.get("role") != "user"),
-            *(r["brief"] for r in open_reqs)])
+            prompt.profile,
+            *(f"{hit.title}\n{hit.text}" for hit in prompt.hits),
+            *(m["content"] for m in prompt.history if m.get("role") != "user"),
+            *(r["brief"] for r in prompt.open_reqs)])
         meta: dict[str, Any] = {"model": model, "provider": provider}
-        if hits:
-            meta["knowledge"] = sorted({hit.path for hit in hits})
+        if prompt.hits:
+            meta["knowledge"] = sorted({hit.path for hit in prompt.hits})
         msg = None
         if reply:
             # Only THIS turn's bubble may be claimed by this row (see
             # main._landing_frame): a background report can't take it.
-            msg = await h.deliver(thread_id, reply, metadata=meta, stream=True,
-                                  provisional=emitter.prov)
+            # A fresh source id: the reply is delivered once, so content
+            # dedup (meant for the gateway's twin transports) must not drop
+            # it for resembling an earlier one (llm_api.reply_source_id).
+            # Shielded: an interruption landing mid-write must not leave the
+            # row half-delivered; the cancel path reports it instead.
+            deliver_task = asyncio.ensure_future(h.deliver(
+                thread_id, reply, metadata=meta, stream=True,
+                provisional=emitter.prov, source_id=llm_api.reply_source_id("advisor")))
+            llm_api._track_background(deliver_task)
+            msg = await asyncio.shield(deliver_task)
         # Always retire. When the row landed and claimed the bubble this is a
         # no-op (close_stream answers False). When nothing landed — the reply
         # was empty after stripping, deliver deduplicated it (None) or wrote
@@ -849,7 +1015,7 @@ async def run_turn(thread_id: str, bot_id: str, text: str) -> None:
         await h.set_status(thread_id, "idle")
         if markers:
             try:
-                await _act_on_markers(cfg, thread_id, markers, history)
+                await _act_on_markers(cfg, thread_id, markers, prompt.history)
             except Exception as e:
                 # The reply is already in the thread; a failed dispatch is a
                 # notice, not a failed turn.
@@ -869,9 +1035,18 @@ async def run_turn(thread_id: str, bot_id: str, text: str) -> None:
         await h.broadcast({"type": "error", "thread_id": thread_id,
                            "bot_id": bot_id, "message": e.message, "detail": e.detail})
     except asyncio.CancelledError:
-        with contextlib.suppress(Exception):
-            await emitter.retire()
-            await h.set_status(thread_id, "idle")
+        # Uncancellable (llm_api.finish_uncancellable): a second abort landing
+        # in here used to skip retire()/set_status and leave the thread in
+        # "thinking" with a half-painted bubble (review T2 #1).
+        async def wind_down() -> None:
+            if llm_api.cancel_requested(thread_id):
+                with contextlib.suppress(Exception):
+                    await _keep_partial(thread_id, emitter, deliver_task)
+            with contextlib.suppress(Exception):
+                await emitter.retire()
+            with contextlib.suppress(Exception):
+                await h.set_status(thread_id, "idle")
+        await llm_api.finish_uncancellable(wind_down())
         raise
     except Exception as e:
         log.exception("unexpected advisor turn error (%s/%s)", bot_id, thread_id)
@@ -882,10 +1057,45 @@ async def run_turn(thread_id: str, bot_id: str, text: str) -> None:
                            "bot_id": bot_id, "message": "Something went wrong.",
                            "detail": str(e)[:300]})
     finally:
-        with contextlib.suppress(Exception):
-            await h.broadcast({"type": "thinking", "thread_id": thread_id,
-                               "bot_id": bot_id, "status": "stopped"})
-            await h.thread_update(thread_id)
+        # A run handed to a turn that failed before it could adopt it must
+        # not keep its provider stream open.
+        if prefetched is not None:
+            with contextlib.suppress(Exception):
+                await prefetched.discard()
+        await llm_api.finish_uncancellable(llm_api._stop_thinking(h, thread_id, bot_id))
+
+
+async def _keep_partial(thread_id: str, emitter: _Emitter,
+                        deliver_task: asyncio.Future | None) -> None:
+    """The cancel rule (C-§B.2, A3) for a turn `cancel_direct_turn` stopped.
+
+    * The finished reply was already being written: let that finish and
+      report its row — whatever ``keep_partial`` says, it is in the thread
+      either way (Amendment T2-4). With ``keep_partial`` it is stamped
+      ``voice_heard {interrupted}`` and a ``message_update`` goes out.
+    * Mid-stream, ``keep_partial``: the text the bubble showed
+      (``emitter.sent`` — exactly what a voice session could have spoken)
+      becomes the reply row, claiming the bubble, so every screen sees a
+      normal ``stream_done``.
+    * Mid-stream without ``keep_partial`` (a merge), or nothing shown yet:
+      nothing is persisted; the caller retires the bubble.
+    Markers are never acted on here: half a turn never dispatches anything.
+    """
+    h = _h()
+    if deliver_task is not None:
+        await llm_api.settle_landed_reply(h, thread_id, emitter.bot_id, deliver_task)
+        return
+    if not llm_api.keep_partial_requested(thread_id):
+        return
+    row_id: str | None = None
+    if emitter.started and emitter.sent.strip():
+        msg = await h.deliver(
+            thread_id, emitter.sent,
+            metadata={"voice_heard": {"interrupted": True}}, stream=True,
+            provisional=emitter.prov, source_id=f"advisor:partial:{emitter.prov}",
+            dedup_recent_window=False)
+        row_id = getattr(msg, "id", None) if msg is not None else None
+    llm_api.note_partial_row(thread_id, row_id)
 
 
 # --------------------------------------------------------------------------- #

@@ -7,7 +7,7 @@
 Runs on your hardware. Your conversations stay in a SQLite file you can read,
 back up, and delete. No account, no cloud, no telemetry.
 
-**Current release: 2.1.0** (October 2026) · [what changed](#whats-new-in-21)
+**Current release: 2.2.0** (October 2026) · [what changed](#whats-new-in-22)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Deployment](#deployment) · [Security](#security) ·
@@ -142,6 +142,9 @@ on a phone, in a few of the ten themes.
   (`apps/<id>/`, [docs/apps.md](docs/apps.md))
 - Tools open full-page inside the app — or in a new browser window for pages
   that refuse framing — from one Tools button in the rail
+- Installable **extensions** that plug a whole feature in — voice chat is the
+  DisPatch Voice add-on — with every security gate kept in DisPatch
+  ([docs/extensions.md](docs/extensions.md))
 
 **Access control**
 - A PIN unlocks full access; sessions idle-expire, and a device can be trusted
@@ -191,6 +194,25 @@ on a phone, in a few of the ten themes.
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with
   neither configured
 
+## What's new in 2.2
+
+- **Voice chat is an add-on.** Talking to a thread hands-free now lives in a
+  separate MIT package, [DisPatch Voice](https://github.com/LaserLloyd/DisPatch_Voice):
+  DisPatch itself ships no speech code and installs no speech software.
+  Without the add-on, Settings → Voice explains what voice chat is and gives
+  the three commands to add it (install, fetch the models, restart — then
+  **Check again**). See [docs/extensions.md](docs/extensions.md#voice).
+- **An extension host** any add-on can plug into: discovered through a Python
+  entry point, version-checked, and handed a small context (thread turns, a
+  gated websocket, its own frontend assets, tools rows, per-bot fields) while
+  every security gate stays in DisPatch. A broken add-on is a state in
+  Settings, never a failed boot. See [docs/extensions.md](docs/extensions.md).
+- **Upgrading with voice in use:** install the add-on (or add
+  `--with-editable` to your `uv run` line, with `--offline` and
+  `--ws-max-size 262144`), warm it once, restart. The old
+  `uv run --group voice` line still boots. Details in the
+  [changelog](CHANGELOG.md).
+
 ## What's new in 2.1
 
 - **Advisor bots.** A bot with an `advisor:` block answers straight from a model
@@ -199,18 +221,10 @@ on a phone, in a few of the ten themes.
   hands work to your agents: research runs automatically, actions wait for a
   Send tap. Reports are saved back into the notes and a nightly digest keeps
   its memory current. See [docs/advisor.md](docs/advisor.md).
-- **Drive mode.** Talk to a thread hands-free: DisPatch hears when you have
-  finished, transcribes on the CPU, sends it like a typed message, and reads
-  the reply back as it streams. Barge-in, echo rejection and a patience
-  setting for drivers who pause mid-thought. Optional, and off until you turn
-  it on in Settings → Voice: install the `voice` dependency group and
-  download the models first. Cloned voices and a stock synthetic voice come
-  from the separate MIT [`dispatch-voice`](https://github.com/LaserLloyd/DisPatch_Voice)
-  package (`uv run --group voice --with "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice" dispatch-voice fetch-models`
-  in `backend/`, then run DisPatch with the same `--with`). The advanced pieces (Voice
-  cloning, the optional GPL-3.0 built-in voices plugin, a Voice lab for
-  timing and a quick test) are opt-in tools you switch on in Settings →
-  Tools. Unlocked tier only. See [docs/voice-drive-mode.md](docs/voice-drive-mode.md).
+- **Voice ("Drive mode" in 2.1).** Talk to a thread hands-free: DisPatch
+  hears when you have finished, transcribes on the CPU, sends it like a typed
+  message, and reads the reply back as it streams. Since 2.2 this is the
+  separate DisPatch Voice add-on — see [What's new in 2.2](#whats-new-in-22).
 
 ## What's new in 2.0
 
@@ -458,12 +472,8 @@ licences (MIT, BSD-3-Clause, Apache-2.0/MPL-2.0) — inventory and full licence
 texts in
 [frontend/static/vendor/README.md](frontend/static/vendor/README.md).
 
-**Drive mode (voice).** The core voice feature is MIT-compatible: the `voice`
-dependency group, the downloaded speech models (CC-BY-4.0, MIT, BSD-2) and the
-`dispatch-voice` package are all permissively licensed, so installing them
-does not change DisPatch's licence. Attribution is in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Kokoro built-in voices
-are an **optional plugin licensed GPL-3.0-or-later** (`dispatch-voice-kokoro`,
-distributed and installed separately), because Kokoro's phonemizer is espeak-ng. DisPatch
-never imports it by name. See
-[docs/voice-drive-mode.md](docs/voice-drive-mode.md#licence).
+**Voice chat** is the separate DisPatch Voice add-on (MIT); it carries the
+attribution for the speech models and libraries it installs or downloads.
+Its optional Kokoro built-in voices are a further plugin licensed
+GPL-3.0-or-later. DisPatch itself contains no speech code — see
+[docs/extensions.md](docs/extensions.md#voice).

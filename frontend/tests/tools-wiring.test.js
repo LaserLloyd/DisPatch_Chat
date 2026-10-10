@@ -207,9 +207,15 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v147 (optional voice + voice tools)', () => {
+test('the sw.js CACHE is local-chat-v148 (2.2.0: voice chat is an add-on)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v148: 2.2.0 — voice chat left the shell for the DisPatch Voice add-on:
+  // drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js and
+  // voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js and
+  // js/voice-absent.js join it; /ext/ is network-only; i18n.js 3→4
+  // (mergeBundle) and every importer, tools.js 11→12, about.js 6→7
+  // (APP_VERSION 2.2.0), main.js 124→125, app.css 97→98, index.html, locales.
   // v147: voice is optional (Settings → Voice opens with an on/off switch)
   // and its advanced pieces are opt-in tools — new js/voice-tools.js joins
   // SHELL; drive-settings.js 3→4, voices.js 3→4, drive.js 5→6, voice.css
@@ -254,7 +260,7 @@ test('the sw.js CACHE is local-chat-v147 (optional voice + voice tools)', () => 
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v147');
+  assert.equal(m[1], 'local-chat-v148');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
@@ -262,10 +268,13 @@ test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
   assert.doesNotMatch(SW, /'\/static\/js\/jobs\.js'|'\/static\/js\/job-thread\.js'/);
 });
 
-test('/apps/* is network-only in the service worker', () => {
+test('/apps/* and /ext/* are network-only in the service worker', () => {
   const body = SW.slice(SW.indexOf("self.addEventListener('fetch'"));
-  assert.match(body, /if \(p\.startsWith\('\/apps\/'\)\) return;/);
+  assert.match(body, /if \(p\.startsWith\('\/apps\/'\) \|\| p\.startsWith\('\/ext\/'\)\) return;/);
   assert.ok(body.indexOf("p.startsWith('/apps/')") < body.indexOf('e.respondWith('), 'decided before any cache use');
+  assert.ok(body.indexOf("p.startsWith('/ext/')") < body.indexOf('e.respondWith('), 'decided before any cache use');
+  assert.doesNotMatch(SW.slice(SW.indexOf('const SHELL'), SW.indexOf('];', SW.indexOf('const SHELL'))), /'\/ext\//,
+    'no extension file is ever precached');
 });
 
 test('an app frame gets NO sandbox; every other frame keeps one', () => {
@@ -302,7 +311,7 @@ test('main.js mounts app thread hooks generically', () => {
   assert.match(fnBody(MAIN, 'clearChatView'), /syncAppHook\(\);/);
   assert.match(fnBody(MAIN, 'unmountAppHook'), /h\.unmount\(\)/);
   assert.match(fnBody(MAIN, 'hookUrl'), /url\.startsWith\(`\/apps\/\$\{app\.id\}\/`\)/, 'only the app’s own code is imported');
-  assert.match(MAIN, /import \{ forApp \} from '\.\/app-sdk\.js\?v=\d+';/);
+  assert.match(MAIN, /import \{ forApp(, api as appApi)? \} from '\.\/app-sdk\.js\?v=\d+';/);
   // Live app frames go to the app, never through the shell's own switch.
   assert.match(fnBody(MAIN, 'handleWs'), /data\.type\.startsWith\('app:'\)\) \{ dispatchAppFrame\(data\); return; \}/);
 });

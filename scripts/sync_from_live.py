@@ -39,19 +39,16 @@ REPO = Path(__file__).resolve().parent.parent
 # Those still skip __pycache__, *.pyc and every dot-path (`_wanted`).
 ALLOW: list[tuple[str, str, str]] = [
     ("backend/app",                 "backend/app",                 "*.py"),
-    # Drive mode (2026-10-09). Code only: the speech MODELS (<data>/speech-models)
-    # and the voice PROFILES (<data>/voices, recordings of a real person) live
-    # in the data dir, which no row here can ever reach.
-    ("backend/app/voice",           "backend/app/voice",           "*.py"),
+    # (Voice chat left DisPatch in 2.2.0 — it is the DisPatch Voice add-on, a
+    # package installed beside the app, never part of the install tree. The
+    # 2.1 `backend/app/voice` and static voice rows are gone on purpose: a
+    # 2.1 ghost tree left in an install must never sync back into the repo.)
     ("backend/tests",               "backend/tests",               "*.py"),
     ("backend",                     "backend",                     "pyproject.toml"),
     ("backend",                     "backend",                     "uv.lock"),
     ("frontend/static",             "frontend/static",             "index.html"),
     ("frontend/static",             "frontend/static",             "app.css"),
     ("frontend/static",             "frontend/static",             "sw.js"),
-    ("frontend/static",             "frontend/static",             "drive.js"),
-    ("frontend/static",             "frontend/static",             "voice-worklet.js"),
-    ("frontend/static",             "frontend/static",             "voice.css"),
     # The mark: one SVG, its raster fallbacks, and the .ico. Brand assets,
     # not user data — they were outside every list here until 2026-09-18,
     # which is how a redrawn logo could sit in the repo and never reach a

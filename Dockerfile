@@ -84,6 +84,21 @@ COPY frontend/ /app/frontend/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
+# --- Optional: voice chat (the DisPatch Voice add-on, MIT) -----------------
+# `docker compose build --build-arg VOICE=1`. AFTER the `uv sync` above, which
+# is exact and would remove it again. Installed from the release archive of
+# the add-on's moving `v1` tag (the latest 1.x), so the builder needs no git;
+# pin another release with `--build-arg VOICE_REF=v1.0.0`. The speech models
+# are NOT baked in: fetch them into the data volume once with
+# `docker compose exec app dispatch-voice fetch-models` (docs/extensions.md).
+ARG VOICE=0
+ARG VOICE_REF=v1
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "$VOICE" = "1" ]; then \
+      uv pip install --python /app/.venv/bin/python \
+        "dispatch-voice @ https://github.com/LaserLloyd/DisPatch_Voice/archive/refs/tags/${VOICE_REF}.tar.gz"; \
+    fi
+
 # Strip caches the previous layers created. Saves ~10-20 MB and, more usefully,
 # stops stale .pyc from a different Python landing in the runtime image.
 RUN find /app -name '__pycache__' -type d -prune -exec rm -rf {} + \

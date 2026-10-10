@@ -71,9 +71,11 @@ class BotOrderItem(BaseModel):
     safe: bool | None = None      # None = leave unchanged (Safe-Mode visibility)
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
-    # Drive-mode voice: None = leave unchanged, "" = the default voice, else a
-    # voice profile id or "builtin:<id>" (checked by the route; 422).
+    # Voice chat (the voice add-on): None = leave unchanged, "" = the add-on's
+    # default. Opaque to DisPatch; the add-on's validator checks the value
+    # (422), and without the add-on only "" or the stored value is accepted.
     voice: str | None = Field(default=None, max_length=80)
+    voice_rp: str | None = Field(default=None, max_length=32)
 
 
 class UpdateBotOrderIn(BaseModel):

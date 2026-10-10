@@ -11,6 +11,7 @@ import contextlib
 import contextvars
 import errno
 import fcntl
+import inspect
 import io
 import ipaddress
 import json
@@ -68,6 +69,7 @@ from . import (
     client_links,
     config,
     dashboard_routes,
+    extensions,
     gateway_router,
     gateway_ws,
     harness,
@@ -114,9 +116,10 @@ db = Database(config.DB_PATH)
 # Per-thread locks serialise agent turns; a global semaphore caps concurrent
 # subprocesses so we never overwhelm the local models.
 _thread_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-#: The task that currently holds a thread's turn lock (set on entry). Lets
-#: Drive mode tell a voice turn that is RUNNING from one still queued behind
-#: the lock (app/voice: cancel the queued ones, stop the running one).
+#: The task that currently holds a thread's turn lock (set on entry). Lets an
+#: extension's abort_turn tell a turn that is RUNNING from one still queued
+#: behind the lock (cancel the queued ones, stop the running one), and keeps
+#: speculation off a thread a real turn holds (app/extensions.py).
 _turn_holder: dict[str, asyncio.Task | None] = {}
 _agent_sem = asyncio.Semaphore(SETTINGS.max_concurrency)
 _background: set[asyncio.Task] = set()
@@ -457,11 +460,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
         with contextlib.suppress(Exception):
             await advisor.recover_requests()
         _track(asyncio.create_task(advisor.background_loop()))
-    # Drive mode: load the speech models in the background now, so the first
-    # voice session after a restart (every backend deploy restarts us) neither
-    # waits seconds to accept nor pays the TTS engine load on its first reply.
-    # Off-loop, never awaited, no-op when voice is off (app/voice/routes.py).
-    _voice_prewarm_start()
+    # Extensions (app/extensions.py): each one's on_startup hooks — the voice
+    # add-on warms its speech models here, on a daemon thread, so the first
+    # voice chat after a restart neither waits to accept nor pays the model
+    # load on its first reply. A failing hook is logged, never fatal.
+    await extensions.run_startup()
     # Native gateway transport. OFF unless DISPATCH_GATEWAY_WS says otherwise,
     # so nothing about how replies arrive changes without someone deciding it.
     await _gateway_ws_start()
@@ -470,6 +473,8 @@ async def _lifespan_startup(app: FastAPI) -> None:
 async def _lifespan_shutdown() -> None:
     global _shutting_down
     _shutting_down = True
+    with contextlib.suppress(Exception):
+        await extensions.run_shutdown()
     harness.runner.remove_state_hook(_harness_state_changed)
     with contextlib.suppress(Exception):
         await harness.runner.shutdown()
@@ -504,7 +509,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.1.0", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.2.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -681,24 +686,10 @@ def _upload_ceiling(path: str) -> int | None:
         return UPLOAD_MAX_IMAGE + _MULTIPART_SLACK
     if path == "/api/reactions":
         return reactions.UPLOAD_MAX + _MULTIPART_SLACK
-    # Drive mode's Voices panel (optional dispatch-voice package): a reference
-    # clip is capped at 20 MB by the package, but only AFTER the router has
-    # spooled the whole body. Refuse anything bigger here, before that.
-    if path in ("/api/voices", "/api/voices/analyse"):
-        return VOICE_CLIP_MAX + _MULTIPART_SLACK
-    # Voice lab's quick test: raw 16 kHz PCM16, at most 10 s (the route
-    # checks the exact limit; this stops a big body before it is buffered).
-    if path == "/api/voice/lab/test":
-        return VOICE_LAB_TEST_MAX
-    return None
-
-
-#: dispatch_voice.audio.MAX_UPLOAD_BYTES, restated so the ceiling holds even
-#: when that optional package is not installed.
-VOICE_CLIP_MAX = 20 * 1024 * 1024
-#: app.voice.routes.LAB_TEST_MAX_BYTES (10 s of 16 kHz PCM16), restated so the
-#: cap holds even if app/voice failed to import.
-VOICE_LAB_TEST_MAX = 16000 * 2 * 10
+    # An extension's own uploads (the voice add-on: a reference clip of up to
+    # 20 MiB, a 10 s lab test). It declares exact paths and ceilings through
+    # ctx.include_router(body_limits=…); refused here, before the body spools.
+    return extensions.body_limit(path)
 
 
 @app.middleware("http")
@@ -1818,6 +1809,17 @@ _INBOUND_MESSAGE_ONE_RE = re.compile(r"^/api/messages/[^/]+$")
 
 def _is_inbound(method: str, path: str) -> bool:
     """OpenClaw machine-to-machine endpoints (session-exempt; API-key optional)."""
+    # Never an extension's own routes: they are operator-only, full stop (the
+    # voice add-on's routes hold recordings of a person's voice — not agent
+    # business). Checked first so no rule below can widen it.
+    if extensions.owns_path(path):
+        return False
+    if method == "GET" and path == "/api/extensions":
+        # The installed add-ons and their states: what a deploy check reads
+        # over loopback (a box with a PIN has no operator session in a plain
+        # curl). Names and versions only; `detail` is
+        # for operators (app/extensions.py).
+        return True
     if method == "POST" and path in ("/api/inject", "/api/daily"):
         return True
     if method in ("GET", "POST") and path == "/api/threads":
@@ -1930,17 +1932,21 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # unlocked-operator-only features — belt-and-braces on
                         # top of _require_mail / _require_practice.
                         "/api/mail", "/api/practice",
-                        # Drive mode: the status probe names engines, and the
-                        # Voices panel (dispatch-voice) holds recordings of a
-                        # person's voice. Belt-and-braces on top of the
-                        # _require_operator dependency on every route
-                        # (app/voice/routes.py, app/voice/dv.py).
-                        "/api/voice", "/api/voices",
+                        # Extensions (app/extensions.py): the list of
+                        # installed add-ons, their code under /ext/, and the
+                        # voice add-on's API (its status names engines, its
+                        # Voices manager holds recordings of a person's
+                        # voice). Belt-and-braces on top of the operator
+                        # dependency every extension route carries; other
+                        # extension prefixes are checked just below.
+                        "/api/extensions", "/ext/", "/api/voice",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
                         # of that promise.
                         "/local/", "/api/local")):
+        return True
+    if extensions.owns_path(path):
         return True
     # Apps: /api/apps/*, /apps/* and each mounted app's legacy prefix (the Job
     # Board's /api/jobs). Blocked unless the app is `safe: true` and the method
@@ -6793,7 +6799,13 @@ class TurnOptions(NamedTuple):
       rewind_entry gateway entry id to cut the session back to before re-running
       replaces     rows this turn supersedes, kept so a failure can put them back
       reply_to     the message being replied to, prepended to what the agent reads
-      voice_hint   Drive mode's "answer for the ear" instruction, prepended too
+      voice        an extension's VoiceInstructions {system, trailer} for a
+                   spoken turn (app/extensions.py): `system` goes into the
+                   system slot of the direct backends (advisor, API bots),
+                   `trailer` is appended — never prepended — to what a gateway
+                   agent reads. Never stored on the user's row.
+      prefetched   a SpeculativeRun the direct backend ADOPTS instead of
+                   starting a new call (voice chat's speculative start)
     """
     user_msg_id: str | None = None
     model: str | None = None
@@ -6801,9 +6813,8 @@ class TurnOptions(NamedTuple):
     rewind_entry: str | None = None
     replaces: tuple = ()
     reply_to: str | None = None
-    #: Drive mode: a spoken-reply instruction prepended to what the agent
-    #: reads (never stored on the user's row). See app/voice/persona.py.
-    voice_hint: str | None = None
+    voice: Any = None
+    prefetched: Any = None
 
 
 # A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
@@ -6861,7 +6872,7 @@ async def _pending_feedback_lines(thread_id: str) -> list[str]:
 
 
 async def _compose_agent_text(thread_id: str, text: str,
-                              opts: TurnOptions | None) -> str:
+                              opts: TurnOptions | None, *, gateway: bool = True) -> str:
     """What the AGENT reads, which is not always what the user typed.
 
     A single chokepoint on purpose. Quoting prepends the quoted passage, and
@@ -6872,6 +6883,12 @@ async def _compose_agent_text(thread_id: str, text: str,
 
     Identity today. The features that use it add their branch here, so there is
     exactly one place to read to know what an agent was actually sent.
+
+    ``gateway`` — is the reader a gateway agent? A spoken turn's
+    ``opts.voice.trailer`` is appended for gateway agents ONLY, at the END
+    (a leading bracket reads as the user's own words and got narrated back:
+    "Hands-free mode, got it"); the direct backends take ``opts.voice.system``
+    in their system slot instead (run_agent_turn passes it through).
     """
     composed = text
     if opts is not None and opts.reply_to:
@@ -6887,12 +6904,52 @@ async def _compose_agent_text(thread_id: str, text: str,
                 who = ("your own earlier reply" if quoted.role == "assistant"
                       else "the user")
                 composed = f'[Replying to {who}: "{excerpt}"]\n{composed}'
-    notes = await _pending_feedback_lines(thread_id)
+    # A turn that adopts a speculation sends the speculation's prompt, which
+    # was built without these notes: marking them delivered here would drop
+    # them unsent (review T2 #5). They stay pending for the next turn. (If the
+    # backend refuses the run after all, its fresh call goes without them and
+    # they still stay pending — never lost, at worst one turn late.)
+    adopting = opts is not None and getattr(opts, "prefetched", None) is not None
+    notes = [] if adopting else await _pending_feedback_lines(thread_id)
     if notes:
         composed = f"{composed}\n\n" + "\n".join(notes)
-    if opts is not None and opts.voice_hint:
-        composed = f"{opts.voice_hint}\n\n{composed}"
+    trailer = getattr(opts.voice, "trailer", "") if opts is not None and opts.voice else ""
+    if gateway and isinstance(trailer, str) and trailer.strip():
+        composed = f"{composed}\n\n{trailer.strip()}"
     return composed
+
+
+#: (function, kwarg) → does the direct backend accept it? inspect.signature is
+#: not free, and these never change while the process runs.
+_ACCEPTS: dict[tuple[int, str], bool] = {}
+
+
+def _direct_turn_kwargs(fn, opts: TurnOptions | None) -> dict:
+    """voice= / prefetched= for advisor.run_turn / llm_api.run_api_turn, only
+    when the turn carries them — an ordinary turn calls the backend exactly as
+    before. A backend that does not take one (an older build) is called
+    without it and says so in the log, instead of failing the turn."""
+    kw: dict = {}
+    if opts is None:
+        return kw
+    for name in ("voice", "prefetched"):
+        val = getattr(opts, name, None)
+        if val is None:
+            continue
+        key = (id(fn), name)
+        if key not in _ACCEPTS:
+            try:
+                params = inspect.signature(fn).parameters
+                _ACCEPTS[key] = name in params or any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+            except (TypeError, ValueError):
+                _ACCEPTS[key] = False
+        if _ACCEPTS[key]:
+            kw[name] = val
+        else:
+            log.warning("%s takes no %s= — the spoken turn runs without it",
+                        getattr(fn, "__qualname__", fn), name)
+    return kw
 
 
 async def _with_thread_model_prefs(thread_id: str,
@@ -6934,15 +6991,18 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     # lock (queued turns serialise identically) and still persists through
     # _deliver_assistant_text, so from the UI's side the two are the same thing.
     bot = config.get_bot(bot_id)
-    # Composed ONCE, before the two backends diverge, so an API bot and a
-    # gateway bot are sent the same thing.
-    agent_text = await _compose_agent_text(thread_id, text, opts)
+    direct = bot is not None and bool(bot.api or bot.advisor)
+    # Composed ONCE, before the backends diverge, so an API bot and a gateway
+    # bot are sent the same thing (bar a spoken turn's instructions, which
+    # each backend gets in its own slot — see _compose_agent_text).
+    agent_text = await _compose_agent_text(thread_id, text, opts, gateway=not direct)
     if bot is not None and bot.api:
         _thread_bot[thread_id] = bot_id   # authoritative attribution for redaction
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
-            await llm_api.run_api_turn(thread_id, bot_id, agent_text)
+            await llm_api.run_api_turn(thread_id, bot_id, agent_text,
+                                       **_direct_turn_kwargs(llm_api.run_api_turn, opts))
         return
     # An advisor is a third backend on the same seam: direct API like the
     # bot above, plus a knowledge corpus and agent handoffs (app/advisor.py).
@@ -6951,7 +7011,8 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
-            await advisor.run_turn(thread_id, bot_id, agent_text)
+            await advisor.run_turn(thread_id, bot_id, agent_text,
+                                   **_direct_turn_kwargs(advisor.run_turn, opts))
         return
 
     # `agent_id` is the OpenClaw seat this turn actually runs on — normally
@@ -7186,6 +7247,11 @@ llm_api.bind(llm_api.Hooks(
     set_status=lambda tid, status: db.update_thread_status(tid, status),
     broadcast=lambda frame: manager.broadcast(frame),
     thread_update=lambda tid: _broadcast_thread_update(tid),
+    # The voice-chat cancel path stamps voice_heard {interrupted} on a reply
+    # row that was already persisting when the turn was interrupted.
+    merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
+    # A speculation's provider call joins the app's task set (shutdown order).
+    track=lambda task: _track(task),
 ))
 
 
@@ -7238,6 +7304,7 @@ advisor.bind(advisor.Hooks(
     update_card=_advisor_update_card,
     track=_track,
     data_dir=config.DATA_DIR,
+    merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
 ))
 
 
@@ -7544,6 +7611,10 @@ async def auth_status(request: Request):
                       "mail": mail_available(),
                       "practice": practice_available(),
                       "tools": True,
+                      # Installed add-ons in state `ok` (app/extensions.py).
+                      # The shell asks GET /api/extensions only when this is
+                      # > 0 — a fresh install costs no extra request.
+                      "extensions": extensions.ok_count(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not cfg.pin_set) else {}),
@@ -7845,36 +7916,49 @@ async def get_bots(request: Request):
 async def get_all_bots(request: Request):
     """All bots including hidden — used by the Bot Manager."""
     _require_full_access(request)      # second lock, see _require_full_access
-    # `voice` (which recorded person a bot speaks as) rides only on this
-    # full-access listing, never on the broadcast `bots` frame.
-    return {"bots": [{**b.to_dict(), "voice": b.voice} for b in config.load_bots()]}
+    # `voice` / `voice_rp` (which recorded person a bot speaks as, and how its
+    # role-play text is read aloud) ride only on this full-access listing,
+    # never on the broadcast `bots` frame.
+    return {"bots": [{**b.to_dict(), "voice": b.voice, "voice_rp": b.voice_rp}
+                     for b in config.load_bots()]}
 
 
-def _check_bot_voice(voice: str) -> None:
-    """422 unless ``voice`` is "" (use the default), a voice profile id, or a
-    known ``builtin:<id>`` from an installed built-in voice provider."""
-    if voice == "":
+def _check_bot_field(field: str, bot_id: str, value: str) -> None:
+    """422 unless an extension's validator accepts ``value`` for this
+    extension-owned bot field (``voice``, ``voice_rp``). With no extension
+    validating the field (the voice add-on is not installed) a save may only
+    carry "" or the value the bot already has — so uninstalling the add-on
+    never breaks the Bots tab, and a stale value in config.yaml is preserved
+    rather than replaced by something nothing can check."""
+    fn = extensions.field_validator(field)
+    if fn is None:
+        bot = config.get_bot(bot_id)
+        current = getattr(bot, field, "") if bot is not None else ""
+        if value not in ("", current):
+            raise HTTPException(422, f"{field} needs the voice add-on, which is not installed")
         return
     try:
-        from .voice.config import load_settings as _vs
-        from .voice.routes import classify_voice
-        kind = classify_voice(_vs(), voice)
+        fn(value)
+    except ValueError as e:
+        raise HTTPException(422, (str(e) or f"Unknown {field}")[:200])
     except Exception:
-        kind = None
-    if kind not in ("profile", "builtin"):
-        raise HTTPException(422, f"Unknown voice: {voice[:80]}")
+        log.exception("bot field validator for %s failed", field)
+        raise HTTPException(422, f"Could not check {field}")
 
 
 @app.put("/api/bots/order")
 async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     _require_full_access(request)      # second lock, see _require_full_access
     for item in payload.bots:
-        if item.voice is not None:
-            await asyncio.to_thread(_check_bot_voice, item.voice)
+        for field in extensions.BOT_FIELDS:
+            value = getattr(item, field, None)
+            if value is not None:
+                await asyncio.to_thread(_check_bot_field, field, item.id, value.strip())
     bots = config.save_bot_order([i.model_dump() for i in payload.bots])
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
-    return {"bots": [{**d, "voice": b.voice} for d, b in zip(data, bots, strict=True)]}
+    return {"bots": [{**d, "voice": b.voice, "voice_rp": b.voice_rp}
+                     for d, b in zip(data, bots, strict=True)]}
 
 
 @app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
@@ -11071,36 +11155,13 @@ def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
 
 # tools.py lists the builtins with `available` = the feature exists on this
 # install regardless of the manifest switch (so the Settings toggle can say
-# "on, but not installed" instead of lying).
-def _voice_tool_installed(feature: str) -> bool:
-    """The optional package behind a voice tool is present (the tool's own
-    pane says how to install it when it is not). Voice lab ships with
-    DisPatch; it only needs app/voice to have imported."""
-    if _voice_serve is None:
-        return False
-    if feature == "voice_lab":
-        return True
-    try:
-        from .voice.config import load_settings as _vs
-        from .voice.routes import _plugins
-        p = _plugins(_vs())
-    except Exception:
-        log.exception("voice: tool probe failed")
-        return False
-    if feature == "voice_cloning":
-        return bool(p["cloning"]["installed"])
-    return bool(p["builtin"]["installed"])
-
-
+# "on, but not installed" instead of lying). An extension's rows bring their
+# own probes (ctx.register_tools → tools.register_builtins).
 tools.set_builtin_probes({
     tools.FEATURE_TO_ID["harness"]: _harness_flag_on,
     tools.FEATURE_TO_ID["studioforge"]: _studioforge_flag_on,
     tools.FEATURE_TO_ID["mail"]: _mail_flag_on,
     tools.FEATURE_TO_ID["practice"]: _practice_flag_on,
-    # Opt-in voice tools: "available" = their package is installed.
-    tools.FEATURE_TO_ID["voice_cloning"]: lambda: _voice_tool_installed("voice_cloning"),
-    tools.FEATURE_TO_ID["voice_builtin"]: lambda: _voice_tool_installed("voice_builtin"),
-    tools.FEATURE_TO_ID["voice_lab"]: lambda: _voice_tool_installed("voice_lab"),
 })
 
 
@@ -12451,117 +12512,282 @@ def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Drive mode (hands-free voice) — UNLOCKED TIER ONLY. Optional: everything
-# below is inert unless DISPATCH_VOICE resolves on (app/voice/config.py). The
-# gate itself (Origin==Host, live lc_session, non-safe bot) lives in
-# app/voice/routes.py:check_gate and runs inline before accept(), because HTTP
-# middleware never sees a websocket. See docs/voice-drive-mode.md.
+# Extensions (app/extensions.py, docs/extensions.md) — installed add-ons such
+# as DisPatch Voice. The host itself is generic; below is the part only main
+# can do: a turn submitted, speculated, aborted or annotated on an extension's
+# behalf goes through exactly the persist / broadcast / run_agent_turn path a
+# typed message takes. Voice is UNLOCKED TIER ONLY: the host's gate refuses a
+# locked device, a cross-origin page and a Safe-Mode bot before anything here
+# can run.
 # --------------------------------------------------------------------------- #
 
 
-async def _voice_thread_bot(thread_id: str):
-    thread = await db.get_thread(thread_id)
-    return config.get_bot(thread.bot_id) if thread else None
+#: Extension turns in flight per thread: (task, user message id). A turn is
+#: the task that publishes the transcript and then runs it (run_agent_turn).
+_ext_turns: dict[str, list[tuple[asyncio.Task, str]]] = defaultdict(list)
+#: The live speculative run per thread (advisor / API bots only).
+_speculations: dict[str, Any] = {}
+#: Host-side counters an extension may read (ctx.counters).
+_ext_counters: dict[str, int] = defaultdict(int)
+#: How long abort_turn waits for a cancelled turn to finish persisting the
+#: spoken prefix before it answers without a row id.
+_ABORT_SETTLE_S = 5.0
+#: The gateway path's bound (review T1 L6): the add-on awaits abort_turn before
+#: note_heard, and its "heard ≤ 1.5 s after barge_in" budget needs a short
+#: answer; past it the row id is None and the add-on defers to stream_done.
+_ABORT_GATEWAY_SETTLE_S = 1.5
 
 
-#: Voice turns in flight per thread: (task, user message id). A turn is the
-#: task that publishes the transcript and then runs it (run_agent_turn).
-_voice_turns: dict[str, list[tuple[asyncio.Task, str]]] = defaultdict(list)
-
-
-async def _voice_submit(thread_id: str, text: str, opts: dict | None = None) -> str | None:
-    """A spoken message, sent exactly like a typed one: same persist, same
-    broadcast, same run_agent_turn — so it lands in the thread and any bot
-    type answers. Tagged ``metadata.voice``; the agent also reads the voice
-    persona hint (with the driver's reply length / follow-up choice) and
-    (gateway bots) runs with the voice thinking level."""
-    from .voice import registry as _voice_registry
-    from .voice.config import load_settings as _voice_settings
-    from .voice.persona import voice_hint as _voice_hint
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise ValueError("thread not found")
-    # A transcript is words; strip anything directive-shaped defensively so a
-    # spoken message can never ingest a local file or reference a doc.
+def _clean_spoken_text(text: str) -> str:
+    """A transcript is words: strip anything directive-shaped, so a spoken
+    message can never ingest a local file, reference a doc or fire a reaction."""
     text = (_strip_media_text(text) or "").strip()[:MESSAGE_MAX_CHARS]
     if ":react:" in text.lower():
         text, _ = reactions.extract_markers(text)
         text = text.strip()
+    return text
+
+
+async def _last_message_id(thread_id: str) -> str | None:
+    rows, _ = await db.list_messages(thread_id, limit=1)
+    return rows[-1].id if rows else None
+
+
+def _turn_running(thread_id: str) -> bool:
+    holder = _turn_holder.get(thread_id)
+    return holder is not None and not holder.done()
+
+
+async def _discard_run(run: Any) -> None:
+    try:
+        await run.discard()
+    except Exception:
+        log.exception("ext: discarding a speculative run failed")
+
+
+async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
+                           instructions: Any = None, thinking: str | None = None,
+                           metadata: dict | None = None, prefetched: Any = None) -> str | None:
+    """A spoken (or otherwise extension-made) message, sent exactly like a
+    typed one: same persist, same broadcast, same run_agent_turn — so it lands
+    in the thread and any bot type answers. The user row is broadcast BEFORE
+    the turn task exists: cancelling a queued turn (merge, undo, a newer
+    question) must never leave a row every other screen missed."""
+    thread = await db.get_thread(thread_id)
+    if not thread:
+        raise ValueError("thread not found")
+    text = _clean_spoken_text(text)
     if not text:
+        if prefetched is not None:
+            if _speculations.get(thread_id) is prefetched:
+                _speculations.pop(thread_id, None)
+            await _discard_run(prefetched)
         return None
-    opts = opts or {}
-    user_msg = await db.add_message(thread_id, "user", text, metadata={"voice": True})
+    adopted = None
+    if prefetched is not None:
+        live = _speculations.get(thread_id) is prefetched
+        if live:
+            _speculations.pop(thread_id, None)
+        # Adopt only when nothing moved under the prompt: the thread's last
+        # message is still the one the speculative prompt was built after, no
+        # turn holds the thread, and the run was not discarded meanwhile
+        # (rule 4). Otherwise it answered a stale thread — drop it, submit fresh.
+        usable = getattr(prefetched, "usable", None)
+        if (live and not _turn_running(thread_id)
+                and (usable is None or usable())
+                and await _last_message_id(thread_id) == getattr(prefetched, "head_id", None)):
+            adopted = prefetched
+            _ext_counters["speculation_adopted"] += 1
+        else:
+            _ext_counters["speculation_stale"] += 1
+            with contextlib.suppress(Exception):
+                prefetched.stale = True
+            await _discard_run(prefetched)
+    meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
+    user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
-    profile_id = _voice_registry.resolve_profile(thread.bot_id)
-    thinking = _voice_settings().voice_turn_thinking or None
-    turn_opts = TurnOptions(user_msg_id=user_msg.id,
-                            voice_hint=_voice_hint(thread.bot_id, profile_id,
-                                                   style=opts.get("reply_style", "normal"),
-                                                   follow_up=opts.get("follow_up", True)),
-                            thinking=thinking)
-
-    # Published BEFORE the turn task exists: cancelling a queued voice turn
-    # (merge, undo, a newer question) must never leave a row that every other
-    # screen missed.
+    turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
+                            thinking=thinking or None, prefetched=adopted)
     try:
         await manager.broadcast(frame)
         await _broadcast_thread_update(thread_id)
     except Exception:
-        log.exception("voice: publish failed for thread %s; running the turn anyway",
-                      thread_id)
-
+        log.exception("ext: publish failed for thread %s; running the turn anyway", thread_id)
     task = asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, text, turn_opts))
     _track(task)
     entry = (task, user_msg.id)
-    _voice_turns[thread_id].append(entry)
+    _ext_turns[thread_id].append(entry)
 
     def _forget(_t, tid=thread_id, e=entry) -> None:
-        lst = _voice_turns.get(tid)
+        lst = _ext_turns.get(tid)
         if lst and e in lst:
             lst.remove(e)
         if not lst:
-            _voice_turns.pop(tid, None)
+            _ext_turns.pop(tid, None)
 
     task.add_done_callback(_forget)
     return user_msg.id
 
 
-async def _voice_abort(thread_id: str) -> None:
-    """Stop the voice turns this thread is waiting on (barge-in, merge, undo,
-    cancel). Every voice turn still QUEUED behind the thread lock is cancelled
-    outright, so it never runs. The one RUNNING is stopped the way its
-    backend allows: an API or advisor turn by cancelling its task (it sets
-    the thread idle and closes the spinner itself), a gateway turn through the
-    gateway's abort. Without the first two, a merged or replaced question was
-    still answered (review M3)."""
+async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = None,
+                              thinking: str | None = None) -> Any:
+    """Start the model call before the turn is committed (voice chat's
+    speculative start). Advisor and API bots only — a gateway agent runs
+    tools, and a speculative run must never act. Persists and broadcasts
+    nothing (the backend's own contract); refused while a real turn holds the
+    thread; a second call discards the first."""
+    thread = await db.get_thread(thread_id)
+    bot = config.get_bot(thread.bot_id) if thread else None
+    backend = extensions.bot_backend_of(bot)
+    if bot is None or backend not in ("advisor", "api") or _turn_running(thread_id):
+        return None
+    old = _speculations.pop(thread_id, None)
+    if old is not None:
+        await _discard_run(old)
+    text = _clean_spoken_text(text)
+    fn = getattr(advisor if backend == "advisor" else llm_api, "speculate", None)
+    if not text or fn is None:
+        return None
+    kw = {"voice": instructions} if instructions is not None else {}
+    try:
+        run = await fn(thread_id, bot.id, text, **kw)
+    except Exception:
+        log.exception("ext: speculation failed to start on %s", thread_id)
+        return None
+    if run is None:
+        return None
+    if _turn_running(thread_id):          # a real turn took the thread meanwhile
+        await _discard_run(run)
+        return None
+    _speculations[thread_id] = run
+    return run
+
+
+async def _partial_row_after(thread_id: str, user_msg_id: str | None, *,
+                             interrupted_only: bool) -> str | None:
+    """The assistant row an interrupted turn left behind: the newest one after
+    the user row it answered (marked voice_heard.interrupted when the direct
+    backend persisted it)."""
+    if not user_msg_id:
+        return None
+    rows = await db.messages_after(thread_id, user_msg_id)
+    for m in reversed(rows):
+        if m.role != "assistant" or (m.metadata or {}).get("sub"):
+            continue
+        heard = (m.metadata or {}).get("voice_heard")
+        if interrupted_only and not (isinstance(heard, dict) and heard.get("interrupted")):
+            continue
+        return m.id
+    return None
+
+
+async def _ext_abort_turn(thread_id: str, *, keep_partial: bool = True) -> str | None:
+    """Stop what this thread is waiting on (barge-in, merge, undo, cancel):
+    the live speculation, every extension turn still QUEUED behind the thread
+    lock (cancelled outright, so it never runs) and the one RUNNING — an API
+    or advisor turn by cancelling its task, a gateway turn through the
+    gateway's abort.
+
+    ``keep_partial=True`` (an interruption): the direct backends persist the
+    visible text streamed so far as the assistant row (voice_heard
+    {interrupted: true}) and its id is returned; for a gateway turn, the id of
+    whatever the gateway's abort left in the thread (None when nothing).
+    ``keep_partial=False`` (a merge / addendum): nothing is persisted, None.
+
+    A turn the extension did NOT start (someone typed into the same thread)
+    is stopped only on an interruption (``keep_partial=True``, review T1 L1):
+    the voice session is speaking its reply, so "stop" means it too. A merge
+    never touches a turn it does not own."""
+    run = _speculations.pop(thread_id, None)
+    if run is not None:
+        await _discard_run(run)
     holder = _turn_holder.get(thread_id)
-    voice = [t for t, _ in _voice_turns.get(thread_id, []) if not t.done()]
-    running = holder if holder in voice else None
-    for t in voice:
-        if t is not running:
+    entries = [(t, uid) for t, uid in _ext_turns.get(thread_id, []) if not t.done()]
+    running = next(((t, uid) for t, uid in entries if t is holder), None)
+    for t, _uid in entries:
+        if running is None or t is not running[0]:
             t.cancel()
     thread = await db.get_thread(thread_id)
     bot = config.get_bot(thread.bot_id) if thread else None
-    direct = bot is not None and (bot.api or bot.advisor)
-    if direct:
-        if running is not None:
-            running.cancel()
-        return
-    if running is not None or holder is None or holder.done():
+    foreign = (holder if running is None and keep_partial and holder is not None
+               and not holder.done() else None)
+    if bot is not None and (bot.api or bot.advisor):
+        if running is None and foreign is None:
+            return None
+        task, uid = running if running is not None else (foreign, None)
+        # The backend half of the cancel rule lives with the backends
+        # (llm_api.cancel_direct_turn: sets the keep-partial flag their
+        # CancelledError path reads, cancels, waits, returns the row).
+        cancel = getattr(llm_api, "cancel_direct_turn", None)
+        if cancel is not None:
+            row_id = await cancel(task, thread_id, keep_partial=keep_partial)
+        else:
+            task.cancel()
+            await asyncio.wait({task}, timeout=_ABORT_SETTLE_S)
+            row_id = None
+        if not keep_partial:
+            return None
+        return row_id or await _partial_row_after(thread_id, uid, interrupted_only=True)
+    if running is not None or foreign is not None or holder is None or holder.done():
         with contextlib.suppress(HTTPException):
             await _abort_thread_turn(thread_id)
+    if not keep_partial or running is None:
+        return None
+    task, uid = running
+    await asyncio.wait({task}, timeout=_ABORT_GATEWAY_SETTLE_S)
+    return await _partial_row_after(thread_id, uid, interrupted_only=False)
 
 
-async def _voice_retract(thread_id: str, message_id: str) -> None:
-    """Turn merge / undo: take back a spoken user row. Only a VOICE user row
-    in this thread qualifies. A thread title taken from it is cleared, so the
-    merged utterance (or the next message) names the thread instead."""
+#: The delivery identities of a direct turn's own reply rows (llm_api.
+#: reply_source_id and the advisor's keep-partial row) — never a request's
+#: card, report or notice (``advisor:<rid>:<phase>``), never a gateway row.
+_DIRECT_REPLY_SOURCE_RE = re.compile(
+    r"^(?:api:[0-9a-f]{32}|advisor:[0-9a-f]{32}|advisor:partial:\S+)$")
+
+
+async def _retract_direct_replies(thread_id: str, user_msg_id: str) -> None:
+    """Delete the API/advisor reply rows that answered `user_msg_id` (the
+    assistant rows after it, up to the next user row) and tell the clients."""
+    try:
+        rows = await db.messages_after(thread_id, user_msg_id)
+    except Exception:
+        log.exception("ext: could not list the replies to %s", user_msg_id)
+        return
+    bot_id = None
+    for m in rows:
+        if m.role == "user":
+            break
+        if m.role != "assistant":
+            continue
+        sid = await db.get_message_source_id(m.id)
+        if not sid or not _DIRECT_REPLY_SOURCE_RE.match(sid):
+            continue
+        await db.delete_message(m.id)
+        if bot_id is None:
+            bot_id = await _bot_of_thread(thread_id)
+        await manager.broadcast({"type": "message_deleted", "thread_id": thread_id,
+                                 "bot_id": bot_id, "message_id": m.id})
+
+
+async def _ext_retract(thread_id: str, message_id: str, *,
+                       only_metadata_key: str = "voice") -> None:
+    """Turn merge / undo: take back a user row the extension made. Only a user
+    row of this thread whose metadata carries ``only_metadata_key`` qualifies.
+    A thread title taken from it is cleared, so the merged utterance (or the
+    next message) names the thread instead. An API/advisor reply that already
+    answered it is deleted with it (``_retract_direct_replies``)."""
     msg = await db.get_message(message_id)
     if (msg is None or msg.thread_id != thread_id or msg.role != "user"
-            or not (msg.metadata or {}).get("voice")):
+            or not (msg.metadata or {}).get(only_metadata_key)):
         return
+    # A question taken back takes its direct-backend answer with it (review
+    # T2 #3): a reply that landed before the merge — an API bot's reply is
+    # written whole and then held by the voice session's merge window — would
+    # otherwise stay in the thread answering a deleted question, and the next
+    # prompt's history would present it as heard.
+    await _retract_direct_replies(thread_id, message_id)
     await db.delete_message(message_id)
     thread = await db.get_thread(thread_id)
     if thread is not None and thread.title and thread.title == _truncate(msg.content, 50):
@@ -12572,7 +12798,7 @@ async def _voice_retract(thread_id: str, message_id: str) -> None:
                              "message_id": message_id})
 
 
-async def _voice_replies_after(thread_id: str, after_id: str) -> list[tuple[str, str]] | None:
+async def _ext_replies_after(thread_id: str, after_id: str) -> list[tuple[str, str]] | None:
     """Assistant replies after ``after_id``; None when that id is not a
     message of this thread (the voice session then tries its next id)."""
     msg = await db.get_message(after_id)
@@ -12583,68 +12809,48 @@ async def _voice_replies_after(thread_id: str, after_id: str) -> list[tuple[str,
             if m.role == "assistant" and not (m.metadata or {}).get("sub")]
 
 
-@app.websocket("/ws/voice/{thread_id}")
-async def voice_websocket(ws: WebSocket, thread_id: str):
-    if _voice_serve is None:
-        # The voice package did not import (see _load_voice below): the
-        # endpoint exists but always answers "unavailable", like DISPATCH_VOICE=0.
-        # Pre-accept: with the package gone there is no gate to prove the
-        # caller is allowed a socket, so the browser just sees it close.
-        await ws.close(code=1013)
-        return
-    await _voice_serve(ws, thread_id, auth=auth, cookie_name=COOKIE_NAME,
-                      manager=manager, thread_bot=_voice_thread_bot,
-                      submit=_voice_submit, abort=_voice_abort,
-                      retract=_voice_retract, replies_after=_voice_replies_after)
-
-
-# GET /api/voice/status, the dispatch-voice Voices panel at /api/voices (when
-# that optional package is installed; its engine loads lazily) and every
-# DISPATCH_VOICE_EXTENSIONS router, each behind _require_operator: a real
-# unlocked session (or no PIN at all), never Safe Mode, never a decoy, and not
-# the machine-inbound bypass either (voice recordings are not agent business).
-# Never raises: a broken extension is logged and skipped.
-def _load_voice():
-    """(serve_voice, mount_http) or (None, None) when app/voice cannot import.
-
-    Drive mode is optional. A partial deploy (the voice/ subpackage missing) or
-    a broken dependency must cost the owner Drive mode, never the whole app —
-    so the import is guarded here instead of at module top level."""
+async def _ext_note_heard(thread_id: str, message_id: str, *, heard_upto: int,
+                          heard_text: str, unheard_text: str) -> bool:
+    """Record how much of a spoken reply the listener heard before they
+    interrupted: ``metadata.voice_heard`` {upto (a source offset into the
+    stored content), interrupted, heard ≤ 160, unheard ≤ 240}, merged into
+    what the row already carries, then a ``message_update`` so the chat can
+    mark it. False for an unknown or provisional id (the session retries
+    after stream_done)."""
+    msg = await db.get_message(message_id)
+    if msg is None or msg.thread_id != thread_id or msg.role != "assistant":
+        return False
     try:
-        from .voice.routes import mount_http, serve_voice
-    except Exception:
-        log.exception("voice: app.voice failed to import; Drive mode disabled")
-        return None, None
-    return serve_voice, mount_http
+        upto = int(heard_upto)
+    except (TypeError, ValueError):
+        upto = 0
+    upto = max(0, min(upto, len(msg.content or "")))
+    cur = (msg.metadata or {}).get("voice_heard")
+    merged = {**(cur if isinstance(cur, dict) else {}), "upto": upto, "interrupted": True,
+              "heard": str(heard_text or "")[:160], "unheard": str(unheard_text or "")[:240]}
+    fresh = await db.merge_message_metadata(message_id, {"voice_heard": merged})
+    if fresh is None:
+        return False
+    await _broadcast_message_update(fresh, thread_id)
+    return True
 
 
-def _voice_prewarm_start() -> None:
-    """Start-up hook: warm the speech models off the event loop (H5)."""
-    if _voice_serve is None:
-        return
-    try:
-        from .voice.config import load_settings as _vs
-        from .voice.routes import _APPLIED
-        from .voice.routes import prewarm as _prewarm
-        st = _vs()
-        # The baseline a later hand edit of voice.yaml is compared against
-        # (routes.sync_switch).
-        _APPLIED["on"] = st.switched_on
-        if not (st.prewarm and st.enabled):
-            return
-    except Exception:
-        log.exception("voice: prewarm could not start")
-        return
-    import threading as _threading
-    _threading.Thread(target=_prewarm, args=(st,), name="voice-prewarm", daemon=True).start()
-
-
-_voice_serve, _voice_mount_http = _load_voice()
-if _voice_mount_http is not None:
-    try:
-        _voice_mount_http(app, _require_operator)
-    except Exception:
-        log.exception("voice: mounting voice routes failed; Drive mode disabled")
+EXT_HOOKS = extensions.Hooks(
+    db=lambda: db,
+    manager=lambda: manager,
+    cookie_name=COOKIE_NAME,
+    app_version=app.version,
+    submit_turn=lambda *a, **kw: _ext_submit_turn(*a, **kw),
+    speculate_turn=lambda *a, **kw: _ext_speculate_turn(*a, **kw),
+    abort_turn=lambda *a, **kw: _ext_abort_turn(*a, **kw),
+    retract_message=lambda *a, **kw: _ext_retract(*a, **kw),
+    replies_after=lambda *a, **kw: _ext_replies_after(*a, **kw),
+    note_heard=lambda *a, **kw: _ext_note_heard(*a, **kw),
+    counters=lambda: dict(_ext_counters),
+)
+# Discovery + handshake + setup; never raises (a broken add-on is a state in
+# GET /api/extensions and in Settings → Voice, not a failed boot).
+extensions.mount_all(app, EXT_HOOKS)
 
 
 # --------------------------------------------------------------------------- #

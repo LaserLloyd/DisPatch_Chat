@@ -491,13 +491,10 @@ def test_api_tools_operator_view(tools_env):
     assert bench["has_refresh"] is True
     assert bench["refresh"]["argv"] == ["echo", "hi"]
     feats = {t["id"]: t.get("builtin_feature") for t in body["tools"] if t["kind"] == "builtin"}
+    # The four that ship. (Voice's tools left with voice in 2.2.0: the add-on
+    # registers them — tests/test_extensions.py.)
     assert feats == {"deepseek-harness": "harness", "studioforge-panel": "studioforge",
-                     "mail-panel": "mail", "clients-panel": "practice",
-                     "voice-cloning": "voice_cloning", "voice-builtin": "voice_builtin",
-                     "voice-lab": "voice_lab"}
-    # The voice tools are opt-in: no row in tools.yaml = switched off.
-    for tid in ("voice-cloning", "voice-builtin", "voice-lab"):
-        assert next(t for t in body["tools"] if t["id"] == tid)["enabled"] is False
+                     "mail-panel": "mail", "clients-panel": "practice"}
 
 
 def test_safe_tool_visible_in_safe_mode_stripped(tools_env):

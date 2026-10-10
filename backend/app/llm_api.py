@@ -46,9 +46,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
+import functools
 import json
 import logging
 import os
+import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -670,8 +674,43 @@ def resolve_api(api: dict, name: str, bot_id: str = "", *,
 # --------------------------------------------------------------------------- #
 
 
-def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS) -> list[dict]:
+#: What an interrupted voice reply ends with in the NEXT prompt: the heard
+#: prefix and a dash, the way a transcript marks speech that was cut off
+#: (OpenAI's `conversation.item.truncate`, done at prompt-build time here).
+HEARD_CUT_MARK = " —"
+
+
+def _heard_upto(meta: Any) -> int | None:
+    """`metadata.voice_heard.upto` when it is a usable source offset."""
+    heard = meta.get("voice_heard") if isinstance(meta, dict) else None
+    if not isinstance(heard, dict):
+        return None
+    upto = heard.get("upto")
+    if isinstance(upto, bool) or not isinstance(upto, int) or upto < 0:
+        return None
+    return upto
+
+
+def heard_content(content: str, upto: int) -> str:
+    """`content` cut back to what was heard in voice chat, plus the cut mark.
+
+    `upto` is a source offset at a word boundary (C-§B.3 `source_offset`); an
+    offset past the end means the whole reply was heard and nothing changes.
+    """
+    if upto >= len(content):
+        return content
+    return (content[:upto].rstrip() + HEARD_CUT_MARK).lstrip()
+
+
+def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS, *,
+                  truncate_heard: bool = False) -> list[dict]:
     """Map a thread's stored messages onto provider chat turns.
+
+    ``truncate_heard`` (voice chat, C-§B.2): when the NEWEST assistant row
+    carries ``metadata.voice_heard.upto`` — the reply was interrupted and only
+    that much of it was heard — its content is cut to ``content[:upto] + " —"``
+    for this prompt. Only the newest assistant row, so the model is told once,
+    on the turn right after the interruption; the stored row is never touched.
 
     Rules, in the order they matter:
 
@@ -692,6 +731,7 @@ def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS) -> list[d
     """
     kept: list[dict] = []
     used = 0
+    newest_assistant_seen = False
     for m in reversed(messages or []):
         role = getattr(m, "role", None) or ""
         if role not in ("user", "assistant"):
@@ -702,6 +742,11 @@ def build_history(messages: list, budget: int = DEFAULT_HISTORY_CHARS) -> list[d
         content = (getattr(m, "content", None) or "").strip()
         if not content:
             continue
+        if role == "assistant" and not newest_assistant_seen:
+            newest_assistant_seen = True
+            upto = _heard_upto(meta) if truncate_heard else None
+            if upto is not None:
+                content = heard_content(content, upto)
         if used and used + len(content) > budget:
             break
         used += len(content)
@@ -742,6 +787,24 @@ def _ensure_trailing_user(history: list[dict], text: str) -> list[dict]:
         # provider twice whenever a quote or a pending vote was attached
         # (review 2026-09-24).
         return [*history[:-1], {"role": "user", "content": text}]
+    return [*history, {"role": "user", "content": text}]
+
+
+def append_user_turn(history: list[dict], text: str) -> list[dict]:
+    """`history` plus `text` as the newest user turn, for a prompt built
+    BEFORE the user's row exists (a speculation, C-§B.1).
+
+    Unlike :func:`_ensure_trailing_user` this never replaces anything: the
+    stored rows are all older than `text`, so a trailing user turn there is an
+    earlier message (one that got no answer) and `text` joins it as a new
+    paragraph, the same way :func:`build_history` merges consecutive turns.
+    """
+    text = (text or "").strip()
+    if not text:
+        return history
+    if history and history[-1]["role"] == "user":
+        last = history[-1]
+        return [*history[:-1], {**last, "content": f"{last['content']}\n\n{text}"}]
     return [*history, {"role": "user", "content": text}]
 
 
@@ -989,6 +1052,13 @@ class Hooks:
     broadcast: Callable[[dict], Awaitable[Any]]
     # main._broadcast_thread_update
     thread_update: Callable[[str], Awaitable[None]]
+    # (message_id, patch) -> db.merge_message_metadata. Optional: only the
+    # voice-chat cancel path uses it, to stamp `voice_heard {interrupted}` on
+    # a reply row that was already persisting when the turn was interrupted.
+    merge_metadata: Callable[[str, dict], Awaitable[Any]] | None = None
+    # main._track: registers a background task (a speculation's provider
+    # call) so shutdown cancels it in order. Optional.
+    track: Callable[[asyncio.Task], None] | None = None
 
 
 _hooks: Hooks | None = None
@@ -1006,7 +1076,419 @@ def bind(hooks: Hooks) -> None:
 HISTORY_ROW_LIMIT = 80
 
 
-async def run_api_turn(thread_id: str, bot_id: str, text: str) -> None:
+def reply_source_id(kind: str) -> str:
+    """A fresh delivery identity for one direct-backend reply.
+
+    A direct turn (API bot, advisor) produces its reply ONCE, through one call:
+    there is no second transport that could deliver it again. Without an
+    identity the funnel falls back to CONTENT dedup — built for the gateway's
+    redundant transports — and its 300 s whole-thread window silently dropped
+    a reply that happened to match (or share its first 80 characters with) an
+    earlier one: "Sure, I can do that." to two requests a minute apart, or any
+    stub that answers the same way twice. With an identity, dedup is by
+    identity, which for a fresh id means "deliver".
+    """
+    return f"{kind}:{uuid.uuid4().hex}"
+
+
+# --------------------------------------------------------------------------- #
+# Voice chat (C-§B.1/B.2): instructions, speculation, the cancel rule
+# --------------------------------------------------------------------------- #
+
+
+def voice_system_text(voice: Any) -> str:
+    """The system-slot text of a ``VoiceInstructions``.
+
+    Read by attribute, never ``isinstance`` (Amendment T0-2): the add-on builds
+    its own frozen mirror of the type and never imports DisPatch.
+    """
+    if voice is None:
+        return ""
+    return str(getattr(voice, "system", "") or "").strip()
+
+
+def with_voice_system(system: str, voice: Any) -> str:
+    """`system` with the voice section appended (API bots: after the
+    operator's own prompt, which is the persona; nothing comes after it)."""
+    extra = voice_system_text(voice)
+    return f"{system.rstrip()}\n\n{extra}" if extra else system
+
+
+def prompt_chars(messages: list[dict]) -> int:
+    """Characters billed for a prompt (`SpeculativeRun.prompt_chars`)."""
+    return sum(len(m.get("content") or "") for m in messages
+               if isinstance(m.get("content"), str))
+
+
+#: Longest an un-adopted speculation may keep its provider call open. The
+#: add-on's Speculator gives up after 20 s; this is the backstop for a run it
+#: forgot about, so a stream can never stay open for a whole reply nobody wants.
+SPECULATION_TTL_S = 60.0
+#: How long `discard()` waits for the provider stream to be closed.
+DISCARD_WAIT_S = 1.0
+
+_live_runs: set[asyncio.Task] = set()
+
+
+async def _shepherd(task: asyncio.Task) -> None:
+    """Wait for a speculation; cancelled (shutdown), close it first."""
+    try:
+        await asyncio.wait({task})
+    except asyncio.CancelledError:
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.wait({task}, timeout=DISCARD_WAIT_S)
+        raise
+
+
+class SpeculativeRun:
+    """A model call started before the turn was committed (C-§B.1).
+
+    Persists nothing and broadcasts nothing until a real turn ADOPTS it
+    (``run_api_turn(..., prefetched=run)`` / ``advisor.run_turn``). ``discard``
+    closes the provider stream and never persists — it is not an abort.
+
+    Public fields (the contract): ``text`` (visible text buffered so far),
+    ``done``, ``head_id`` (the thread's last message id when the prompt was
+    built), ``prompt_chars``. The rest is this module's bookkeeping.
+    """
+
+    backend = "api"
+
+    def __init__(self, thread_id: str, bot_id: str, text: str, *,
+                 head_id: str | None, prompt_chars: int = 0) -> None:
+        self.thread_id, self.bot_id, self.text_in = thread_id, bot_id, text
+        self.text = ""
+        self.raw = ""
+        self.done = False
+        self.head_id = head_id
+        self.prompt_chars = prompt_chars
+        self.error: BaseException | None = None
+        self.adopted = False
+        self.discarded = False
+        self.started_at = time.monotonic()
+        self._task: asyncio.Task | None = None
+        self._ttl: asyncio.TimerHandle | None = None
+
+    # -- lifecycle -------------------------------------------------------- #
+
+    def _start(self, coro: Awaitable[Any], *,
+               track: Callable[[asyncio.Task], None] | None = None) -> None:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(coro, name=f"speculate:{self.backend}:{self.thread_id}")
+        self._task = task
+        _live_runs.add(task)
+        task.add_done_callback(self._finished)
+        if track is not None:
+            # Registered with the app's task set through a shepherd, so that
+            # shutdown cancels (and awaits) the provider call in order instead
+            # of leaving it to loop teardown — and a provider error, which is
+            # the adopting turn's to report, is never logged as "background
+            # task died".
+            with contextlib.suppress(Exception):
+                track(loop.create_task(_shepherd(task),
+                                       name=f"speculate-watch:{self.thread_id}"))
+        self._ttl = loop.call_later(SPECULATION_TTL_S, self._expire)
+
+    def _finished(self, task: asyncio.Task) -> None:
+        self.done = True
+        _live_runs.discard(task)
+        if self._ttl is not None:
+            self._ttl.cancel()
+        if task.cancelled():
+            return
+        exc = task.exception()          # retrieved: never "exception never retrieved"
+        if exc is not None:
+            self.error = exc
+            log.info("speculation on %s ended with %s: %s", self.thread_id,
+                     type(exc).__name__, getattr(exc, "message", exc))
+
+    def _expire(self) -> None:
+        if not self.adopted and self._task is not None and not self._task.done():
+            log.info("speculation on %s expired un-adopted after %.0fs; closing it",
+                     self.thread_id, SPECULATION_TTL_S)
+            self.discarded = True
+            self._task.cancel()
+
+    def usable(self) -> bool:
+        """Can a turn still adopt this run? (A method: the host calls
+        ``run.usable()`` before adopting, C-§B.1 rule 4.)"""
+        task = self._task
+        if task is None or self.adopted or self.discarded or task.cancelled():
+            return False
+        return not (task.done() and task.exception() is not None)
+
+    def claim(self, thread_id: str, bot_id: str) -> bool:
+        """Adopt the run for a real turn in `thread_id` (once)."""
+        if not self.usable() or thread_id != self.thread_id or bot_id != self.bot_id:
+            return False
+        self.adopted = True
+        if self._ttl is not None:
+            self._ttl.cancel()
+        return True
+
+    async def result(self) -> Any:
+        """The call's result. Cancelling the awaiting turn cancels the call."""
+        assert self._task is not None
+        return await self._task
+
+    async def discard(self) -> None:
+        """Close the provider stream. Idempotent. Never persists anything.
+
+        A run a turn has already adopted belongs to that turn: discarding it
+        is a no-op (the turn's own cancel path decides what happens to it).
+        """
+        if self.adopted or self.discarded:
+            return
+        self.discarded = True
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait({task}, timeout=DISCARD_WAIT_S)
+
+
+async def adopt(run: Any, thread_id: str, bot_id: str,
+                kind: type[SpeculativeRun]) -> SpeculativeRun | None:
+    """Claim `run` for this turn, or close it and return None.
+
+    Anything that is not a live run of this backend for this thread (another
+    backend's run, a discarded or failed one, a foreign thread) is discarded
+    so its stream never outlives the decision, and the turn starts its own call.
+    """
+    if run is None:
+        return None
+    if isinstance(run, kind) and run.claim(thread_id, bot_id):
+        return run
+    discard = getattr(run, "discard", None)
+    if discard is not None:
+        with contextlib.suppress(Exception):
+            await discard()
+    return None
+
+
+class _CancelPolicy:
+    """What the running direct turn of a thread does when it is cancelled."""
+
+    __slots__ = ("keep_partial", "row_id", "task")
+
+    def __init__(self, keep_partial: bool, task: asyncio.Task) -> None:
+        self.keep_partial = keep_partial
+        self.row_id: str | None = None
+        self.task = task
+
+
+_cancel_policy: dict[str, _CancelPolicy] = {}
+_background: set[asyncio.Future] = set()
+#: How long a cancelled direct turn waits for a reply row that was already
+#: being written to land: an advisor partial is one instant delivery; an API
+#: reply that was mid-way through its simulated stream needs at most ~2.5 s.
+CANCEL_WAIT_S = 3.0
+#: How long `cancel_direct_turn` waits for the cancelled turn to wind down
+#: (the landed-row wait above plus the status/frames that follow it).
+CANCEL_TURN_WAIT_S = CANCEL_WAIT_S + 1.0
+#: The longest a cancelled turn's wind-down may hold its task once a SECOND
+#: cancel arrived (see :func:`finish_uncancellable`).
+WIND_DOWN_MAX_S = CANCEL_WAIT_S + 3.0
+
+
+def cancel_requested(thread_id: str) -> bool:
+    """Was the running turn of this thread cancelled by `cancel_direct_turn`
+    (a voice-chat abort) rather than by shutdown?"""
+    return thread_id in _cancel_policy
+
+
+def keep_partial_requested(thread_id: str) -> bool:
+    """Read by a direct backend's cancel path (the flag `abort_turn` sets)."""
+    policy = _cancel_policy.get(thread_id)
+    return bool(policy and policy.keep_partial)
+
+
+def note_partial_row(thread_id: str, row_id: str | None) -> None:
+    """A direct backend's cancel path reports the row its turn left."""
+    policy = _cancel_policy.get(thread_id)
+    if policy is not None and row_id:
+        policy.row_id = row_id
+
+
+def _drop_policy(thread_id: str, policy: _CancelPolicy, _task: asyncio.Task) -> None:
+    if _cancel_policy.get(thread_id) is policy:
+        del _cancel_policy[thread_id]
+
+
+async def cancel_direct_turn(task: asyncio.Task, thread_id: str, *,
+                             keep_partial: bool,
+                             timeout: float = CANCEL_TURN_WAIT_S) -> str | None:
+    """Cancel a running API/advisor turn and return the row it left, if any.
+
+    This is the backend half of ``ExtensionContext.abort_turn`` (C-§B.1, A3):
+    `task` is the turn task (``run_agent_turn``) holding the thread.
+
+    * ``keep_partial=True`` (a real interruption): the turn persists what was
+      already shown — the advisor's streamed text so far, or an API reply that
+      was already being delivered — as a normal assistant row carrying
+      ``metadata.voice_heard = {"interrupted": True}`` (and a
+      ``message_update`` so every screen sees the stamp), and its id is
+      returned. Nothing shown yet → nothing persisted → None.
+    * ``keep_partial=False`` (a merge / addendum): nothing new is persisted,
+      None. A reply row that was ALREADY being written when the cancel landed
+      cannot be un-written by the backend: the turn waits for it so that it is
+      in the thread before this returns (Amendment T2-4) — retracting the
+      question it answered (``ExtensionContext.retract_message``) then takes
+      it back too, instead of it landing after the retraction as an orphan.
+
+    Idempotent per turn: a second call while the first cancel is still winding
+    the turn down (barge-in, then hang-up a moment later) does NOT cancel the
+    task again — that would land inside its cleanup and skip it (review T2
+    #1). It waits for the same outcome and keeps the FIRST call's
+    ``keep_partial``: a later ``False`` cannot un-persist what an earlier
+    ``True`` is persisting, nor a later ``True`` revive what ``False`` dropped.
+
+    Markers in a cancelled advisor reply are never acted on either way.
+    """
+    policy = _cancel_policy.get(thread_id)
+    if policy is None or policy.task is not task:
+        if task.done():
+            return None
+        policy = _CancelPolicy(keep_partial, task)
+        _cancel_policy[thread_id] = policy
+        # Dropped when the TURN ends, not when this call returns: a call that
+        # times out must not let a second call cancel the task again.
+        task.add_done_callback(functools.partial(_drop_policy, thread_id, policy))
+        task.cancel()
+    if not task.done():
+        await asyncio.wait({task}, timeout=timeout)
+        if not task.done():
+            log.warning("cancelled turn on %s did not finish within %.1fs",
+                        thread_id, timeout)
+    return policy.row_id if policy.keep_partial else None
+
+
+async def finish_uncancellable(coro: Awaitable[Any], *,
+                               limit: float = WIND_DOWN_MAX_S) -> None:
+    """Run a cancelled turn's wind-down to the end, even if the turn's task is
+    cancelled AGAIN while it runs.
+
+    ``contextlib.suppress(Exception)`` does not stop a second
+    ``CancelledError``, and one landing inside the keep-partial delivery or
+    ``set_status("idle")`` left the thread in "thinking" with a half-painted
+    bubble (review T2 #1). The wind-down runs in its own task; further cancels
+    of the caller are absorbed while it finishes, for at most `limit` seconds
+    (after that it carries on in the background). A cancel absorbed here is
+    re-raised once the wind-down is over, so the task still ends cancelled.
+    Exceptions inside `coro` are logged, never raised: the wind-down is best
+    effort by design.
+    """
+    loop = asyncio.get_running_loop()
+    fut = asyncio.ensure_future(coro)
+    _track_background(fut)
+    fut.add_done_callback(_log_wind_down_error)
+    deadline = loop.time() + limit
+    absorbed = False
+    while not fut.done():
+        left = deadline - loop.time()
+        if left <= 0:
+            log.warning("turn wind-down still running after %.1fs; leaving it "
+                        "to finish in the background", limit)
+            break
+        try:
+            await asyncio.wait({fut}, timeout=left)
+        except asyncio.CancelledError:
+            absorbed = True
+    if absorbed:
+        raise asyncio.CancelledError
+
+
+def _log_wind_down_error(fut: asyncio.Future) -> None:
+    if fut.cancelled():
+        return
+    exc = fut.exception()
+    if exc is not None:
+        log.warning("turn wind-down failed: %s: %s", type(exc).__name__, exc)
+
+
+async def settle_landed_reply(hooks: Any, thread_id: str, bot_id: str,
+                              deliver_task: asyncio.Future) -> str | None:
+    """A direct turn was cancelled while its reply row was being written.
+
+    Let that delivery finish (at most ``CANCEL_WAIT_S``), report the row to
+    the cancel policy and — for a keep-partial interruption — stamp it
+    ``voice_heard {interrupted: true}`` and broadcast a ``message_update``, so
+    connected screens learn about the interruption even when no ``note_heard``
+    follows (review T2 #4). `hooks` is either backend's Hooks (both carry
+    ``merge_metadata`` and ``broadcast``). Returns the row id or None.
+    """
+    try:
+        msg = await asyncio.wait_for(asyncio.shield(deliver_task), CANCEL_WAIT_S)
+    except (Exception, asyncio.CancelledError):
+        return None
+    row_id = getattr(msg, "id", None) if msg is not None else None
+    # An all-marker reply comes back as an unpersisted placeholder: no row.
+    if not row_id or not (getattr(msg, "content", "") or "").strip():
+        return None
+    note_partial_row(thread_id, row_id)
+    merge = getattr(hooks, "merge_metadata", None)
+    if keep_partial_requested(thread_id) and merge is not None:
+        with contextlib.suppress(Exception):
+            fresh = await merge(row_id, {"voice_heard": {"interrupted": True}})
+            dump = getattr(fresh, "model_dump", None)
+            if dump is not None:
+                await hooks.broadcast({"type": "message_update", "thread_id": thread_id,
+                                       "bot_id": bot_id, "message_id": row_id,
+                                       "message": dump()})
+    return row_id
+
+
+def _track_background(fut: asyncio.Future) -> None:
+    _background.add(fut)
+    fut.add_done_callback(_background.discard)
+
+
+class _ApiSpeculation(SpeculativeRun):
+    backend = "api"
+    reply: Reply | None = None
+
+
+async def speculate(thread_id: str, bot_id: str, text: str, *,
+                    voice: Any = None) -> SpeculativeRun:
+    """Start the API call a voice turn WILL make, before the turn exists.
+
+    Same system prompt (with the voice section), same history and the same
+    provider as :func:`run_api_turn`; the call runs in the background and
+    nothing is persisted or broadcast. API bots do not stream (see the module
+    docstring), so ``text`` stays empty until the whole reply is in and then
+    holds it; adoption gets the reply the instant it exists.
+    """
+    hooks = _hooks
+    if hooks is None:                            # pragma: no cover - wiring bug
+        raise RuntimeError("llm_api.bind() was never called")
+    bot = config.get_bot(bot_id)
+    if bot is None or not bot.api:
+        raise ApiError("This bot is not connected to a provider",
+                       f"{bot_id!r} has no `api` block in config.yaml.")
+    base = resolve(bot)
+    cfg = dataclasses.replace(base, system_prompt=with_voice_system(base.system_prompt, voice))
+    rows, _ = await hooks.list_messages(thread_id, HISTORY_ROW_LIMIT)
+    head_id = getattr(rows[-1], "id", None) if rows else None
+    history = append_user_turn(
+        build_history(rows, cfg.max_history_chars, truncate_heard=True), text)
+    if not history:
+        raise ApiError("There was nothing to send", "The speculation had no text.")
+    run = _ApiSpeculation(thread_id, bot_id, text, head_id=head_id, prompt_chars=prompt_chars(
+        [{"content": cfg.system_prompt}, *history]))
+
+    async def call() -> Reply:
+        reply = await complete(cfg, history)
+        run.reply = reply
+        run.raw = run.text = reply.text
+        return reply
+
+    run._start(call(), track=hooks.track)
+    return run
+
+
+async def run_api_turn(thread_id: str, bot_id: str, text: str, *,
+                       voice: Any = None,
+                       prefetched: SpeculativeRun | None = None) -> None:
     """Answer `text` in `thread_id` using the bot's direct provider.
 
     Contract-identical to ``main.run_agent_turn``: the thread goes to
@@ -1015,11 +1497,19 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str) -> None:
     broadcasts an error frame and still stops the spinner. A silent hang here
     would leave a family member watching a thinking dot forever, which is worse
     than any error message.
+
+    Voice chat (C-§B.2): ``voice.system`` is appended to the system prompt and
+    the user turn stays the clean transcript; ``prefetched`` is a run started
+    by :func:`speculate` that this turn adopts instead of making a new call.
+    Cancelled with the keep-partial flag set (:func:`cancel_direct_turn`), a
+    reply that was already being delivered is finished and its row reported.
     """
     hooks = _hooks
     if hooks is None:                            # pragma: no cover - wiring bug
         raise RuntimeError("llm_api.bind() was never called")
 
+    deliver_task: asyncio.Future | None = None
+    run = None
     await hooks.set_status(thread_id, "thinking")
     await hooks.broadcast({"type": "thinking", "thread_id": thread_id,
                            "bot_id": bot_id, "status": "started"})
@@ -1029,20 +1519,32 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str) -> None:
         if bot is None or not bot.api:
             raise ApiError("This bot is not connected to a provider",
                            f"{bot_id!r} has no `api` block in config.yaml.")
-        cfg = resolve(bot)
-        rows, _ = await hooks.list_messages(thread_id, HISTORY_ROW_LIMIT)
-        history = _ensure_trailing_user(
-            build_history(rows, cfg.max_history_chars), text)
-        if not history:
-            raise ApiError("There was nothing to send",
-                           "The thread had no user message to answer.")
-        reply = await complete(cfg, history)
+        run, prefetched = await adopt(prefetched, thread_id, bot_id, _ApiSpeculation), None
+        if run is not None:
+            reply = await run.result()
+        else:
+            base = resolve(bot)
+            cfg = dataclasses.replace(
+                base, system_prompt=with_voice_system(base.system_prompt, voice))
+            rows, _ = await hooks.list_messages(thread_id, HISTORY_ROW_LIMIT)
+            history = _ensure_trailing_user(
+                build_history(rows, cfg.max_history_chars, truncate_heard=True), text)
+            if not history:
+                raise ApiError("There was nothing to send",
+                               "The thread had no user message to answer.")
+            reply = await complete(cfg, history)
         meta: dict[str, Any] = {"model": reply.model, "provider": reply.provider}
         if reply.tokens is not None:
             meta["tokens"] = reply.tokens
         # stream=True routes through the app's simulated streaming, so a direct
-        # API reply appears exactly like an agent one.
-        await hooks.deliver(thread_id, reply.text, metadata=meta, stream=True)
+        # API reply appears exactly like an agent one. Shielded: once the row
+        # is being written, an interruption must not leave it half-delivered
+        # (the cancel path below decides whether to wait for it).
+        deliver_task = asyncio.ensure_future(hooks.deliver(
+            thread_id, reply.text, metadata=meta, stream=True,
+            source_id=reply_source_id("api")))
+        _track_background(deliver_task)
+        await asyncio.shield(deliver_task)
         await hooks.set_status(thread_id, "idle")
     except ApiError as e:
         log.warning("api turn failed (%s/%s): %s — %s",
@@ -1052,10 +1554,20 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str) -> None:
                                "bot_id": bot_id, "message": e.message,
                                "detail": e.detail})
     except asyncio.CancelledError:
-        # Shutdown. Don't leave the thread stuck in 'thinking' for the next boot
-        # to clean up, but don't pretend it was an error either.
-        with contextlib.suppress(Exception):
-            await hooks.set_status(thread_id, "idle")
+        # An interruption (voice chat) or shutdown. Don't leave the thread
+        # stuck in 'thinking' for the next boot to clean up, but don't pretend
+        # it was an error either. Uncancellable: a second abort landing in
+        # here must not skip the status reset (review T2 #1).
+        async def wind_down() -> None:
+            # A voice abort (not shutdown) waits for a reply that was already
+            # being delivered, whatever keep_partial says: it is in the thread
+            # either way, and the caller must know it is there before this
+            # turn counts as stopped (Amendment T2-4).
+            if deliver_task is not None and cancel_requested(thread_id):
+                await settle_landed_reply(hooks, thread_id, bot_id, deliver_task)
+            with contextlib.suppress(Exception):
+                await hooks.set_status(thread_id, "idle")
+        await finish_uncancellable(wind_down())
         raise
     except Exception as e:
         log.exception("unexpected api turn error (%s/%s)", bot_id, thread_id)
@@ -1064,15 +1576,27 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str) -> None:
                                "bot_id": bot_id, "message": "Something went wrong.",
                                "detail": str(e)[:300]})
     finally:
+        # A run handed to a turn that failed before it could adopt it must
+        # not keep its provider call open.
+        if prefetched is not None:
+            with contextlib.suppress(Exception):
+                await prefetched.discard()
         # Suppressed, and only for Exception: stopping the spinner is the
         # promise this block exists to keep, but on shutdown the database is
         # closing underneath us and a failure HERE would replace the real
         # reason the turn ended with a "background task died" traceback.
         # CancelledError is deliberately not caught — it still propagates.
-        with contextlib.suppress(Exception):
-            await hooks.broadcast({"type": "thinking", "thread_id": thread_id,
-                                   "bot_id": bot_id, "status": "stopped"})
-            await hooks.thread_update(thread_id)
+        await finish_uncancellable(_stop_thinking(hooks, thread_id, bot_id))
+
+
+async def _stop_thinking(hooks: Any, thread_id: str, bot_id: str) -> None:
+    """The ``thinking: stopped`` frame + thread update every direct turn ends
+    with, run through :func:`finish_uncancellable` so a cancel landing at the
+    very end cannot leave a typing dot on every screen."""
+    with contextlib.suppress(Exception):
+        await hooks.broadcast({"type": "thinking", "thread_id": thread_id,
+                               "bot_id": bot_id, "status": "stopped"})
+        await hooks.thread_update(thread_id)
 
 
 # --------------------------------------------------------------------------- #

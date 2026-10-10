@@ -1,21 +1,16 @@
 """Release wiring: what a deploy carries, and what the app survives without.
 
 2.1.0 review, finding C1: the deploy allowlist globbed backend/app/*.py
-non-recursively, so the new app/voice/ subpackage would not have been
-deployed — and main.py imported it at module load, which would have taken the
-whole app down. These tests pin both halves: every runtime file is on the
-allowlist, and a missing voice package costs Drive mode, not the app.
+non-recursively, so a new subpackage would not have been deployed — and
+main.py imported it at module load, which would have taken the whole app
+down. These tests pin that every runtime file is on the allowlist. (Since
+2.2.0 voice is a separate add-on; tests/test_no_voice_install.py proves the
+app without it.)
 """
 from __future__ import annotations
 
 import importlib.util
-import os
-import subprocess
-import sys
-import textwrap
 from pathlib import Path
-
-from app import main
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -49,52 +44,40 @@ def test_every_backend_module_is_on_the_allowlist():
     assert not missing, f"runtime modules a deploy would not carry: {missing}"
 
 
-def test_drive_mode_static_files_are_on_the_allowlist():
-    """The static-root files Drive mode loads (main.js imports drive.js, which
-    loads the worklet and the stylesheet) must travel with a deploy."""
+def test_voice_rows_left_the_allowlist_with_voice():
+    """2.2.0: voice chat is the DisPatch Voice add-on. Its 2.1 files must not be
+    on the allowlist — a 2.1 ghost tree left in an install (SPEC §11 step 6b)
+    would otherwise sync straight back into the repo — while the shell's new
+    extension modules travel like every other js/ module."""
     allow = _allow()
-    for name in ("drive.js", "voice-worklet.js", "voice.css"):
-        assert (REPO / "frontend" / "static" / name).is_file()
-        assert _covered(f"frontend/static/{name}", allow), name
-
-
-def test_app_imports_and_serves_without_the_voice_package(tmp_path):
-    """Drive mode is optional: with app.voice unimportable the app still
-    loads, the voice socket answers 1013 and /api/voice simply is not there.
-    (Import only — no lifespan, so nothing starts and nothing is written.)"""
-    code = textwrap.dedent("""
-        import sys
-        sys.modules["app.voice.routes"] = None      # import of it now fails
-        from app import main
-        assert main._voice_serve is None and main._voice_mount_http is None
-        paths = {getattr(r, "path", "") for r in main.app.routes}
-        assert "/ws/voice/{thread_id}" in paths          # answers 1013
-        assert "/api/voice/status" not in paths
-        assert "/api/health" in paths and "/ws" in paths  # the app itself is whole
-        print("OK")
-    """)
-    env = {**os.environ, "DISPATCH_DATA_DIR": str(tmp_path), "DISPATCH_VOICE": "0",
-           "DISPATCH_GATEWAY_WS": "0", "DISPATCH_MIRROR": "0"}
-    r = subprocess.run([sys.executable, "-c", code], cwd=REPO / "backend", env=env,
-                       capture_output=True, text=True, timeout=120)
-    assert r.returncode == 0 and "OK" in r.stdout, r.stderr[-3000:]
-
-
-def test_voice_clip_uploads_have_a_ceiling():
-    """M5: the Voices panel's uploads are refused by declared size before the
-    body is spooled."""
-    for path in ("/api/voices", "/api/voices/analyse"):
-        assert main._upload_ceiling(path) == main.VOICE_CLIP_MAX + main._MULTIPART_SLACK
-    assert main.VOICE_CLIP_MAX == 20 * 1024 * 1024
+    for rel in ("frontend/static/drive.js", "frontend/static/voice-worklet.js",
+                "frontend/static/voice.css", "backend/app/voice/routes.py"):
+        assert not _covered(rel, allow), rel
+    for name in ("extensions.js", "ext-sdk.js", "voice-absent.js"):
+        assert (REPO / "frontend" / "static" / "js" / name).is_file(), name
+        assert _covered(f"frontend/static/js/{name}", allow), name
+    assert _covered("backend/app/extensions.py", allow)
 
 
 def test_release_notes_cover_drive_mode():
-    """M8: the 2.1.0 notes name what ships, including the optional voice stack."""
+    """M8: the 2.1.0 notes name what shipped then, including the optional voice stack."""
     changelog = (REPO / "CHANGELOG.md").read_text()
     section = changelog.split("## [2.1.0]", 1)[1].split("\n## [", 1)[0]
     for needle in ("Drive mode", "/ws/voice", "/api/voices", "--group voice",
                    "GPL-3.0", "DISPATCH_VOICE", "docs/voice-drive-mode.md"):
         assert needle in section, needle
+
+
+def test_release_notes_cover_the_voice_split():
+    """2.2.0: the notes and the README say where voice went and how to get it
+    back, and keep the operator-facing traps (the empty group, the unit flags)."""
+    changelog = (REPO / "CHANGELOG.md").read_text()
+    section = changelog.split("## [2.2.0]", 1)[1].split("\n## [", 1)[0]
+    for needle in ("DisPatch Voice", "docs/extensions.md", "/api/extensions", "/ext/",
+                   "DISPATCH_EXTENSIONS", "--group voice", "--offline", "--ws-max-size 262144",
+                   "Voice chat", "dormant"):
+        assert needle in section, needle
     readme = (REPO / "README.md").read_text()
-    whats_new = readme.split("## What's new in 2.1", 1)[1].split("\n## ", 1)[0]
-    assert "Drive mode" in whats_new and "docs/voice-drive-mode.md" in whats_new
+    whats_new = readme.split("## What's new in 2.2", 1)[1].split("\n## ", 1)[0]
+    assert "DisPatch Voice" in whats_new and "docs/extensions.md" in whats_new
+    assert "Drive mode" not in whats_new

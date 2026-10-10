@@ -578,10 +578,13 @@ class Bot:
     # "not an advisor" and the block is omitted from config.yaml. Provider
     # entries inside it may carry an `api_key`, so it is redacted the same way.
     advisor: dict | None = None
-    # Drive mode: the voice profile (dispatch-voice, <data>/voices/<id>/) this
-    # bot speaks with. Empty = the Drive-mode default voice. An id that names
-    # no profile falls back to the default too (app/voice/dv.py).
+    # Voice chat (the DisPatch Voice add-on, app/extensions.py): which voice
+    # this bot speaks with, and how its role-play text is read aloud. Both are
+    # OPAQUE to DisPatch — stored here, validated by the add-on when it is
+    # installed (ctx.set_bot_field_validator), preserved untouched when it is
+    # not. Empty = the add-on's default.
     voice: str = ""
+    voice_rp: str = ""
 
     def __post_init__(self) -> None:
         # An advisor is NEVER a Safe-Mode bot. It reads a private corpus into
@@ -683,7 +686,8 @@ class Bot:
         # `voice` (which recorded person a bot speaks as) is admin-only: the
         # plain dict reaches locked Safe-Mode devices for safe bots.
         return {**self.to_dict(), "api": self.api_public(),
-                "advisor": self.advisor_public(), "voice": self.voice}
+                "advisor": self.advisor_public(), "voice": self.voice,
+                "voice_rp": self.voice_rp}
 
 
 # Shipped defaults.
@@ -766,6 +770,7 @@ def _bot_entry(b: Bot) -> dict:
         "image_ratio": b.image_ratio,
         "agent": b.agent,
         "voice": b.voice,
+        "voice_rp": b.voice_rp,
     }
     if b.api:
         entry["api"] = dict(b.api)
@@ -899,7 +904,8 @@ def load_bots() -> list[Bot]:
                 image_ratio=str(e.get("image_ratio",
                                       base.image_ratio if base else "")),
                 agent=str(e.get("agent", base.agent if base else "")).strip(),
-                voice=str(e.get("voice", base.voice if base else "") or "").strip(),
+                voice=str(e.get("voice", base.voice if base else "") or "").strip()[:80],
+                voice_rp=str(e.get("voice_rp", base.voice_rp if base else "") or "").strip()[:32],
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,
@@ -952,6 +958,8 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None
                          else b.avatar_pool),
             voice=(str(it["voice"]).strip() if it.get("voice") is not None else b.voice),
+            voice_rp=(str(it["voice_rp"]).strip() if it.get("voice_rp") is not None
+                      else b.voice_rp),
         )))
 
     # Keep any bots the client didn't mention (defensive).

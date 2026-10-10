@@ -815,10 +815,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   padding: 11px 18px; border-radius: var(--radius-md); z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.5);
   max-width: 90vw; font-size: 14px;
 }
-/* Drive mode's overlay is z 1000 (voice.css). A toast raised from inside it
-   ("Drive ended", a refused open) must land on top, not underneath where
-   nobody can see it. Scoped to the overlay being open so the app's normal
-   stacking (lock screen above toasts) is unchanged. */
+/* The voice chat overlay (the voice add-on's voice.css; it sets
+   body.drive-open) is z 1000. A toast raised from inside it ("Voice chat
+   ended", a refused open) must land on top, not underneath where nobody can
+   see it. Scoped to the overlay being open so the app's normal stacking
+   (lock screen above toasts) is unchanged. */
 body.drive-open .toast { z-index: 1100; }
 .toast.error { border-color: var(--error); }
 .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: center; z-index: 150; pointer-events: none; }
@@ -3832,10 +3833,11 @@ body.tools-sheet-open::after {
 .clients-tab-btn.active { background: var(--accent-wash); color: var(--accent-text); font-weight: 600; }
 
 .clients-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px; }
-/* Voice tools (js/voice-tools.js): Settings-style groups in a scrolling
-   column the width of a settings pane, centred on a wide screen. */
-.voice-tool-body { display: block; overflow-y: auto; }
-.voice-tool-root { max-width: 760px; margin: 0 auto; padding-bottom: 24px; }
+/* An extension's tool pane (js/ext-sdk.js tools.openPane — the voice add-on's
+   tools): Settings-style groups in a scrolling column the width of a
+   settings pane, centred on a wide screen. */
+.ext-tool-body { display: block; overflow-y: auto; }
+.ext-tool-root { max-width: 760px; margin: 0 auto; padding-bottom: 24px; }
 .clients-root { display: flex; flex-direction: column; gap: 14px; max-width: 720px; margin: 0 auto; }
 
 .clients-view .ov-card {
@@ -4397,3 +4399,38 @@ body.tools-sheet-open::after {
 .advisor-error { flex-basis: 100%; opacity: .75; font-size: .92em; overflow-wrap: anywhere; }
 .advisor-actions { display: inline-flex; gap: 8px; margin-inline-start: auto; }
 .advisor-actions .busy { opacity: .6; cursor: progress; }
+
+/* ---------------------------------------------------------------------------
+   Extensions (2.2.0). The chat-header slot an add-on's action lands in, and
+   the Settings → Voice page shown while the voice add-on is absent
+   (js/voice-absent.js). Rows are the modal's own .dev-group/.dev-row; what is
+   new here is only the shell command block, its Copy button and the two
+   collapsed variants — all on existing tokens.
+   --------------------------------------------------------------------------- */
+.chat-actions-ext { display: contents; }
+.chat-actions-ext[hidden] { display: none; }
+#ext-pane-voice { padding-bottom: 18px; }
+.ext-row .dev-row-text code,
+.ext-details code { font-family: var(--font-mono); font-size: 0.92em; }
+.ext-cmd-row { position: relative; margin-top: 8px; }
+.ext-cmd {
+  margin: 0; padding: 8px 64px 8px 10px;
+  background: var(--bg-input, var(--bg-secondary)); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+  /* Wrapped, not scrolled: a phone shows the whole command, and a copy
+     still gets it in one piece. */
+  white-space: pre-wrap; overflow-wrap: anywhere; text-align: left;
+}
+.ext-cmd > code { font: inherit; background: none; padding: 0; }
+/* The chat's code-block Copy button, always shown here (there is no hover
+   reveal on a settings page). */
+.ext-cmd-row > .copy-btn { opacity: 1; }
+.ext-note { display: block; margin-top: 8px; }
+.ext-detail { display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; color: var(--text-primary); }
+.ext-actions { margin-top: 10px; }
+.ext-details { margin-top: 12px; }
+.ext-details > summary { cursor: pointer; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.ext-details > .dev-row-hint { display: block; margin-top: 6px; }
+.ext-links { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.ext-link { color: var(--accent-text); font-size: 13px; font-weight: 600; }

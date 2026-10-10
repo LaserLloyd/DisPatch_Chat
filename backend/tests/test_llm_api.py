@@ -18,6 +18,7 @@ Run: cd backend && uv run pytest tests/test_llm_api.py.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import types
 
@@ -1069,3 +1070,702 @@ def test_default_prompt_is_family_framed_only_for_safe_bots():
     own = llm_api.resolve(config.Bot(id="o", name="O", safe=True,
                                      api={**api, "system_prompt": "Be terse."}))
     assert own.system_prompt == "Be terse."
+
+
+# --------------------------------------------------------------------------- #
+# Repeated replies (T2 investigation: "an API bot only answered the first
+# message on a scratch stub")
+# --------------------------------------------------------------------------- #
+
+
+def test_a_repeated_reply_in_a_later_turn_still_lands(db_env, monkeypatch):
+    """Two turns, the provider says the same thing twice ("Sure." to two
+    different requests a minute apart). Each turn is ONE delivery with no
+    redundant transport behind it, so the content dedup that exists for the
+    gateway's twin deliveries must not eat the second reply: it did (the
+    300 s recent window), and the family saw a turn that never answered."""
+    db = db_env
+    _api_bot()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": "Sure, I can do that."}}]}))
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        for ask in ("turn the porch light on", "and the kitchen one"):
+            await db.add_message(thread.id, "user", ask)
+            main._forget_thread_delivery(thread.id)     # as run_agent_turn does
+            await llm_api.run_api_turn(thread.id, "llm-custom", ask)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return msgs
+
+    msgs = asyncio.run(go())
+    assert [m.content for m in msgs if m.role == "assistant"] == [
+        "Sure, I can do that.", "Sure, I can do that."]
+
+
+# --------------------------------------------------------------------------- #
+# Voice chat (C-§B.1/B.2): system slot, speculation + adoption, the cancel
+# rule, heard truncation
+# --------------------------------------------------------------------------- #
+
+import time as _time  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+from voice_stub_llm import StubLLM  # noqa: E402
+
+VOICE = _NS(system="## Spoken replies\nAt most two short sentences.",
+            trailer="[voice chat] (app note …)")
+
+
+def _voice_env(monkeypatch, db, frames=None, *, merge=True):
+    """Real main.py delivery funnel; frames captured; optional merge hook."""
+    frames = [] if frames is None else frames
+
+    async def capture(frame):
+        frames.append(frame)
+
+    monkeypatch.setattr(main.manager, "broadcast", capture)
+    hooks = llm_api._hooks
+    assert hooks is not None
+    monkeypatch.setattr(llm_api, "_hooks", llm_api.Hooks(
+        list_messages=hooks.list_messages, deliver=hooks.deliver,
+        set_status=hooks.set_status, broadcast=hooks.broadcast,
+        thread_update=hooks.thread_update,
+        merge_metadata=(lambda mid, patch: db.merge_message_metadata(mid, patch))
+        if merge else None))
+    return frames
+
+
+def test_voice_section_goes_in_the_system_prompt_and_the_user_turn_stays_clean(
+        db_env, monkeypatch):
+    db = db_env
+    _api_bot(system_prompt="You are Captain Hook, a pirate.")
+    seen: dict = {}
+    _mock_http(monkeypatch, lambda req: (
+        seen.update(body=json.loads(req.content))
+        or httpx.Response(200, json={"choices": [{"message": {"content": "Arr."}}]})))
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "what's the weather")
+        await llm_api.run_api_turn(thread.id, "llm-custom", "what's the weather", voice=VOICE)
+
+    asyncio.run(go())
+    msgs = seen["body"]["messages"]
+    assert msgs[0]["content"] == ("You are Captain Hook, a pirate.\n\n"
+                                  "## Spoken replies\nAt most two short sentences.")
+    assert msgs[-1] == {"role": "user", "content": "what's the weather"}
+    assert "voice chat" not in json.dumps(msgs[1:])        # never the trailer
+
+
+def test_no_voice_means_no_change_to_the_prompt(db_env, monkeypatch):
+    db = db_env
+    _api_bot(system_prompt="Be terse.")
+    seen: dict = {}
+    _mock_http(monkeypatch, lambda req: (
+        seen.update(body=json.loads(req.content))
+        or httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})))
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "hi")
+        await llm_api.run_api_turn(thread.id, "llm-custom", "hi",
+                                   voice=_NS(system="", trailer="x"))
+
+    asyncio.run(go())
+    assert seen["body"]["messages"][0]["content"] == "Be terse."
+
+
+def _rows(*spec):
+    return [MessageOut(id=f"m{i}", thread_id="t", role=r, content=c, created_at="x",
+                       metadata=meta or {})
+            for i, (r, c, meta) in enumerate(spec)]
+
+
+def test_history_truncates_the_newest_interrupted_reply_to_what_was_heard():
+    reply = "You have two things this afternoon: a dentist at three, and a school call."
+    upto = reply.index(" and a school")
+    heard = {"voice_heard": {"upto": upto, "interrupted": True,
+                             "heard": reply[:upto], "unheard": reply[upto:]}}
+    rows = _rows(("user", "what's on today", None), ("assistant", reply, heard),
+                 ("user", "skip that, weather?", None))
+    hist = llm_api.build_history(rows, truncate_heard=True)
+    assert hist[1] == {"role": "assistant",
+                       "content": "You have two things this afternoon: a dentist at three, —"}
+    # Off by default (every non-voice caller), and the stored row is untouched.
+    assert llm_api.build_history(rows)[1]["content"] == reply
+    assert rows[1].content == reply
+
+
+def test_history_truncation_is_for_the_next_prompt_only():
+    reply = "First reply that was cut off half way through the second clause."
+    heard = {"voice_heard": {"upto": 11, "interrupted": True}}
+    rows = _rows(("user", "a", None), ("assistant", reply, heard),
+                 ("user", "b", None), ("assistant", "A later reply.", None),
+                 ("user", "c", None))
+    assert llm_api.build_history(rows, truncate_heard=True)[1]["content"] == reply
+
+
+@pytest.mark.parametrize("meta,expect", [
+    ({"voice_heard": {"interrupted": True}}, None),          # no upto yet
+    ({"voice_heard": {"upto": "12"}}, None),                 # wrong type
+    ({"voice_heard": {"upto": True}}, None),                 # a bool is not an offset
+    ({"voice_heard": {"upto": -1}}, None),
+    ({"voice_heard": {"upto": 999}}, "full"),                # past the end: all heard
+    ({"voice_heard": {"upto": 0}}, "—"),                     # nothing heard
+])
+def test_history_truncation_tolerates_odd_metadata(meta, expect):
+    reply = "Some reply text."
+    rows = _rows(("user", "a", None), ("assistant", reply, meta))
+    got = llm_api.build_history(rows, truncate_heard=True)[1]["content"]
+    assert got == (reply if expect in (None, "full") else expect)
+
+
+def test_append_user_turn_never_replaces_an_earlier_message():
+    hist = [{"role": "user", "content": "an unanswered question"}]
+    assert llm_api.append_user_turn(hist, "the spoken one") == [
+        {"role": "user", "content": "an unanswered question\n\nthe spoken one"}]
+    assert llm_api.append_user_turn([], "x") == [{"role": "user", "content": "x"}]
+    assert llm_api.append_user_turn(hist, "  ") == hist
+
+
+def test_speculate_persists_and_broadcasts_nothing_then_adoption_reuses_the_call(
+        db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    calls: list[dict] = []
+    _mock_http(monkeypatch, lambda req: (
+        calls.append(json.loads(req.content))
+        or httpx.Response(200, json={"choices": [{"message": {"content": "On it."}}]})))
+    frames = _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "earlier question")
+        head = (await db.list_messages(thread.id, 5))[0][-1].id
+        run = await llm_api.speculate(thread.id, "llm-custom", "lights on", voice=VOICE)
+        await asyncio.wait({run._task}, timeout=2)
+        snap = (list(frames), (await db.list_messages(thread.id, 50))[0],
+                (await db.get_thread(thread.id)).status)
+        # The real turn: the user's row lands, then the run is adopted.
+        await db.add_message(thread.id, "user", "lights on")
+        await llm_api.run_api_turn(thread.id, "llm-custom", "lights on", prefetched=run)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return run, head, snap, msgs
+
+    run, head, (frames_before, rows_before, status_before), msgs = asyncio.run(go())
+    assert run.head_id == head and run.done and run.text == "On it."
+    assert run.prompt_chars > len("lights on")
+    assert frames_before == [] and len(rows_before) == 1 and status_before != "thinking"
+    # One provider call in total; its prompt had the voice section and the
+    # spoken text as a NEW user turn after the unanswered one.
+    assert len(calls) == 1
+    assert calls[0]["messages"][0]["content"].endswith("At most two short sentences.")
+    assert calls[0]["messages"][-1] == {
+        "role": "user", "content": "earlier question\n\nlights on"}
+    assert [m.content for m in msgs if m.role == "assistant"] == ["On it."]
+
+
+def test_a_foreign_or_dead_run_is_discarded_and_the_turn_calls_afresh(db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    calls: list[int] = []
+    _mock_http(monkeypatch, lambda req: (
+        calls.append(1)
+        or httpx.Response(200, json={"choices": [{"message": {"content": f"r{len(calls)}"}}]})))
+    _voice_env(monkeypatch, db)
+
+    async def go():
+        t1 = await db.create_thread("llm-custom")
+        t2 = await db.create_thread("llm-custom")
+        await db.add_message(t1.id, "user", "x")
+        await db.add_message(t2.id, "user", "y")
+        foreign = await llm_api.speculate(t1.id, "llm-custom", "x")
+        await asyncio.wait({foreign._task}, timeout=2)
+        await llm_api.run_api_turn(t2.id, "llm-custom", "y", prefetched=foreign)
+        other = _NS(discarded=False)
+
+        async def discard():
+            other.discarded = True
+        other.discard = discard
+        await llm_api.run_api_turn(t2.id, "llm-custom", "y", prefetched=other)
+        return foreign, other, (await db.list_messages(t2.id, 50))[0]
+
+    foreign, other, msgs = asyncio.run(go())
+    assert foreign.discarded and other.discarded
+    assert len(calls) == 3                       # the speculation + two fresh calls
+    assert [m.content for m in msgs if m.role == "assistant"] == ["r2", "r3"]
+
+
+def test_a_failed_speculation_is_not_adopted(db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    answers = iter([httpx.Response(500, text="boom"),
+                    httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})])
+    _mock_http(monkeypatch, lambda req: next(answers))
+    _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "x")
+        run = await llm_api.speculate(thread.id, "llm-custom", "x")
+        await asyncio.wait({run._task}, timeout=2)
+        assert run.error is not None and not run.usable()
+        await llm_api.run_api_turn(thread.id, "llm-custom", "x", prefetched=run)
+        return (await db.list_messages(thread.id, 50))[0], await db.get_thread(thread.id)
+
+    msgs, thread = asyncio.run(go())
+    assert [m.content for m in msgs if m.role == "assistant"] == ["ok"]
+    assert thread.status == "idle"
+
+
+def test_discard_closes_the_provider_call_within_a_second(db_env, monkeypatch):
+    db = db_env
+    with StubLLM(delay_s=1.5) as stub:
+        _api_bot(base_url=stub.base_url)
+        _voice_env(monkeypatch, db)
+
+        async def go():
+            thread = await db.create_thread("llm-custom")
+            await db.add_message(thread.id, "user", "x")
+            run = await llm_api.speculate(thread.id, "llm-custom", "x")
+            for _ in range(100):
+                if stub.chat_requests():
+                    break
+                await asyncio.sleep(0.01)
+            t0 = _time.monotonic()
+            await run.discard()
+            took = _time.monotonic() - t0
+            # Checked INSIDE the loop: asyncio.run() cancels leftover tasks
+            # on exit, which would make a discard that never closed anything
+            # look closed afterwards.
+            cancelled = run._task.cancelled()
+            await run.discard()                      # idempotent
+            # The server notices the hang-up when it tries to answer (1.5 s).
+            deadline = _time.monotonic() + 3
+            while not stub.chat_requests()[0]["aborted"] and _time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            return run, took, cancelled, (await db.list_messages(thread.id, 50))[0]
+
+        run, took, cancelled, msgs = asyncio.run(go())
+        assert took < 1.0 and cancelled
+        assert not run.usable() and run.text == ""
+        assert [m for m in msgs if m.role == "assistant"] == []
+        assert stub.chat_requests()[0]["aborted"], "the server saw the hang-up"
+
+
+def test_an_unadopted_run_expires(db_env, monkeypatch):
+    db = db_env
+    monkeypatch.setattr(llm_api, "SPECULATION_TTL_S", 0.2)
+    with StubLLM(delay_s=3.0) as stub:
+        _api_bot(base_url=stub.base_url)
+        _voice_env(monkeypatch, db)
+
+        async def go():
+            thread = await db.create_thread("llm-custom")
+            run = await llm_api.speculate(thread.id, "llm-custom", "x")
+            await asyncio.sleep(0.6)
+            return run, run._task.cancelled()
+
+        run, cancelled = asyncio.run(go())
+        assert run.discarded and cancelled
+
+
+def _long_reply() -> str:
+    return " ".join(f"Sentence number {i} of a long spoken reply." for i in range(12))
+
+
+def test_cancel_keep_partial_mid_delivery_reports_the_row(db_env, monkeypatch):
+    """An API reply is persisted whole and then simulated-streamed; an
+    interruption during that stream finishes the delivery and returns the row,
+    stamped `voice_heard {interrupted: true}` (F.6)."""
+    db = db_env
+    _api_bot()
+    reply = _long_reply()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": reply}}]}))
+    frames = _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "talk")
+        task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
+        for _ in range(300):
+            if any(f["type"] == "stream_chunk" for f in frames):
+                break
+            await asyncio.sleep(0.01)
+        row_id = await llm_api.cancel_direct_turn(task, thread.id, keep_partial=True)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return row_id, msgs, task, await db.get_thread(thread.id)
+
+    row_id, msgs, task, thread = asyncio.run(go())
+    assistant = [m for m in msgs if m.role == "assistant"]
+    assert len(assistant) == 1 and assistant[0].id == row_id
+    assert assistant[0].content == reply
+    assert assistant[0].metadata["voice_heard"] == {"interrupted": True}
+    assert task.cancelled() and thread.status == "idle"
+    assert any(f["type"] == "stream_done" and f["message_id"] == row_id for f in frames)
+    assert llm_api._cancel_policy == {}
+
+
+@pytest.mark.parametrize("keep", [True, False])
+def test_cancel_before_the_reply_exists_persists_nothing(db_env, monkeypatch, keep):
+    db = db_env
+    with StubLLM(delay_s=3.0) as stub:
+        _api_bot(base_url=stub.base_url)
+        _voice_env(monkeypatch, db)
+
+        async def go():
+            thread = await db.create_thread("llm-custom")
+            await db.add_message(thread.id, "user", "x")
+            task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "x"))
+            for _ in range(200):
+                if stub.chat_requests():
+                    break
+                await asyncio.sleep(0.01)
+            row_id = await llm_api.cancel_direct_turn(task, thread.id, keep_partial=keep)
+            return row_id, (await db.list_messages(thread.id, 50))[0], \
+                await db.get_thread(thread.id)
+
+        row_id, msgs, thread = asyncio.run(go())
+        assert row_id is None
+        assert [m for m in msgs if m.role == "assistant"] == []
+        assert thread.status == "idle"
+
+
+def test_cancel_of_a_finished_turn_is_a_no_op(db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": "done"}}]}))
+    _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "x")
+        task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "x"))
+        await task
+        return await llm_api.cancel_direct_turn(task, thread.id, keep_partial=True)
+
+    assert asyncio.run(go()) is None
+
+
+def test_an_api_turn_after_an_interruption_sees_only_what_was_heard(db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    seen: dict = {}
+    _mock_http(monkeypatch, lambda req: (
+        seen.update(body=json.loads(req.content))
+        or httpx.Response(200, json={"choices": [{"message": {"content": "Sunny."}}]})))
+    reply = "You have two things this afternoon. The dentist is at three, and the school call."
+    upto = reply.index(" The dentist")
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "what's on")
+        await db.add_message(thread.id, "assistant", reply, metadata={"voice_heard": {
+            "upto": upto, "interrupted": True, "heard": reply[:upto],
+            "unheard": reply[upto:]}})
+        await db.add_message(thread.id, "user", "weather?")
+        await llm_api.run_api_turn(thread.id, "llm-custom", "weather?", voice=VOICE)
+
+    asyncio.run(go())
+    turns = seen["body"]["messages"][1:]
+    assert turns[1] == {"role": "assistant", "content": "You have two things this afternoon. —"}
+
+
+# -- review T2 fixes: repeated aborts, merge after landing, the stamp frame -- #
+
+
+def _wait_for(frames, kind, n=300):
+    async def go():
+        for _ in range(n):
+            if any(f["type"] == kind for f in frames):
+                return True
+            await asyncio.sleep(0.01)
+        return False
+    return go()
+
+
+@pytest.mark.parametrize("second_keep", [True, False])
+def test_a_second_cancel_waits_for_the_first_instead_of_cancelling_again(
+        db_env, monkeypatch, second_keep):
+    """Barge-in then hang-up a moment later (review T2 #1): the second call must
+    not cancel the turn again (that landed inside its cleanup and stranded the
+    thread in 'thinking'); it waits for the same outcome, keeps the first
+    call's flag, and the turn task is cancelled exactly once."""
+    db = db_env
+    _api_bot()
+    reply = _long_reply()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": reply}}]}))
+    frames = _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "talk")
+        task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
+        assert await _wait_for(frames, "stream_chunk")
+        cancels = 0
+        real_cancel = task.cancel
+
+        def counting_cancel(*a, **kw):
+            nonlocal cancels
+            cancels += 1
+            return real_cancel(*a, **kw)
+
+        task.cancel = counting_cancel        # type: ignore[method-assign]
+        first = asyncio.create_task(
+            llm_api.cancel_direct_turn(task, thread.id, keep_partial=True))
+        await asyncio.sleep(0.005)
+        second = asyncio.create_task(
+            llm_api.cancel_direct_turn(task, thread.id, keep_partial=second_keep))
+        r1, r2 = await asyncio.gather(first, second)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return r1, r2, cancels, msgs, task, await db.get_thread(thread.id)
+
+    r1, r2, cancels, msgs, task, thread = asyncio.run(go())
+    assistant = [m for m in msgs if m.role == "assistant"]
+    assert cancels == 1
+    assert len(assistant) == 1 and r1 == assistant[0].id
+    assert r2 == r1                      # the first call's keep_partial holds
+    assert assistant[0].metadata["voice_heard"] == {"interrupted": True}
+    assert task.cancelled() and thread.status == "idle"
+    assert [f["status"] for f in frames if f["type"] == "thinking"][-1] == "stopped"
+    assert len([f for f in frames if f["type"] == "stream_done"]) == 1
+    assert llm_api._cancel_policy == {}
+
+
+def test_the_interrupted_stamp_reaches_every_screen(db_env, monkeypatch):
+    """review T2 #4: the `voice_heard {interrupted}` stamp on a landed API row
+    goes out as a message_update, not only into the database."""
+    db = db_env
+    _api_bot()
+    reply = _long_reply()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": reply}}]}))
+    frames = _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "talk")
+        task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
+        assert await _wait_for(frames, "stream_chunk")
+        return await llm_api.cancel_direct_turn(task, thread.id, keep_partial=True)
+
+    row_id = asyncio.run(go())
+    updates = [f for f in frames if f["type"] == "message_update"]
+    assert len(updates) == 1 and updates[0]["message_id"] == row_id
+    assert updates[0]["bot_id"] == "llm-custom"
+    assert updates[0]["message"]["metadata"]["voice_heard"] == {"interrupted": True}
+
+
+def test_a_merge_waits_for_a_reply_that_was_already_landing(db_env, monkeypatch):
+    """Amendment T2-4: keep_partial=False cannot un-write a reply whose
+    delivery had begun, so the turn waits for it — it is in the thread, with
+    no interrupted stamp, before abort returns (and a retraction of its
+    question then finds it). None is still the answer."""
+    db = db_env
+    _api_bot()
+    reply = _long_reply()
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": reply}}]}))
+    frames = _voice_env(monkeypatch, db)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        await db.add_message(thread.id, "user", "talk")
+        task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
+        assert await _wait_for(frames, "stream_chunk")
+        got = await llm_api.cancel_direct_turn(task, thread.id, keep_partial=False)
+        done_at_return = any(f["type"] == "stream_done" for f in frames)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return got, done_at_return, msgs, task, await db.get_thread(thread.id)
+
+    got, done_at_return, msgs, task, thread = asyncio.run(go())
+    assistant = [m for m in msgs if m.role == "assistant"]
+    assert got is None
+    assert done_at_return                                # landed before the return
+    assert len(assistant) == 1 and "voice_heard" not in (assistant[0].metadata or {})
+    assert not [f for f in frames if f["type"] == "message_update"]
+    assert task.cancelled() and thread.status == "idle"
+
+
+def _ext_env(monkeypatch, db, frames):
+    async def capture(frame):
+        frames.append(frame)
+    monkeypatch.setattr(main.manager, "broadcast", capture)
+    main._ext_turns.clear()
+    main._speculations.clear()
+
+
+@pytest.mark.parametrize("phase", ["landing", "landed"])
+def test_retracting_a_merged_question_takes_its_api_answer_with_it(
+        db_env, monkeypatch, phase):
+    """review T2 #3 end to end through the extension seam: the voice session's
+    merge (abort keep_partial=False, then retract the first user row) leaves
+    no assistant row answering the deleted question — whether the reply was
+    still being simulated-streamed or had fully landed and the turn ended."""
+    db = db_env
+    _api_bot()
+    reply = _long_reply() if phase == "landing" else "Short answer."
+    _mock_http(monkeypatch, lambda req: httpx.Response(
+        200, json={"choices": [{"message": {"content": reply}}]}))
+    frames: list[dict] = []
+    _ext_env(monkeypatch, db, frames)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        uid = await main._ext_submit_turn("voice", thread.id, "what's on")
+        if phase == "landing":
+            assert await _wait_for(frames, "stream_chunk")
+        else:
+            for _ in range(300):
+                if (await db.get_thread(thread.id)).status == "idle" and any(
+                        f["type"] in ("message", "stream_done")
+                        and (f.get("message") or {}).get("role") == "assistant"
+                        for f in frames):
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
+        assert await main._ext_abort_turn(thread.id, keep_partial=False) is None
+        await main._ext_retract(thread.id, uid)
+        await asyncio.sleep(0.1)
+        msgs, _ = await db.list_messages(thread.id, 50)
+        return uid, msgs, await db.get_thread(thread.id)
+
+    uid, msgs, thread = asyncio.run(go())
+    assert msgs == []
+    deleted = {f["message_id"] for f in frames if f["type"] == "message_deleted"}
+    assert uid in deleted and len(deleted) == 2
+    assert thread.status == "idle"
+
+
+def test_retraction_spares_rows_that_are_not_the_direct_answer(db_env, monkeypatch):
+    """Only the direct backend's own reply rows (api:/advisor:<uuid>, the
+    advisor's keep-partial row) go with a retracted question: a request card,
+    a gateway row, a source-less row and anything after the next user row
+    stay."""
+    db = db_env
+    _api_bot()
+    frames: list[dict] = []
+    _ext_env(monkeypatch, db, frames)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        tid = thread.id
+        q = await db.add_message(tid, "user", "first", metadata={"voice": True})
+        gone_a = await db.add_message(tid, "assistant", "a", source_id=llm_api.reply_source_id("api"))
+        gone_b = await db.add_message(tid, "assistant", "b",
+                                      source_id=llm_api.reply_source_id("advisor"))
+        gone_c = await db.add_message(tid, "assistant", "c",
+                                      source_id="advisor:partial:run:advisor-abc123")
+        card = await db.add_message(tid, "assistant", "card",
+                                    source_id="advisor:3f2a9c:card")
+        gw = await db.add_message(tid, "assistant", "gw", source_id="gw:agent:main:x:1")
+        plain = await db.add_message(tid, "assistant", "plain")
+        await db.add_message(tid, "user", "second")
+        later = await db.add_message(tid, "assistant", "later",
+                                     source_id=llm_api.reply_source_id("api"))
+        await main._ext_retract(tid, q.id)
+        left = [m.id for m in (await db.list_messages(tid, 50))[0]]
+        return left, {gone_a.id, gone_b.id, gone_c.id, q.id}, [card.id, gw.id, plain.id,
+                                                              later.id]
+
+    left, gone, kept = asyncio.run(go())
+    assert not gone & set(left)
+    assert all(k in left for k in kept)
+    assert {f["message_id"] for f in frames if f["type"] == "message_deleted"} == gone
+
+
+def test_retract_of_a_typed_row_deletes_nothing(db_env, monkeypatch):
+    db = db_env
+    _api_bot()
+    frames: list[dict] = []
+    _ext_env(monkeypatch, db, frames)
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        q = await db.add_message(thread.id, "user", "typed")
+        await db.add_message(thread.id, "assistant", "a",
+                             source_id=llm_api.reply_source_id("api"))
+        await main._ext_retract(thread.id, q.id)
+        return len((await db.list_messages(thread.id, 50))[0])
+
+    assert asyncio.run(go()) == 2
+    assert frames == []
+
+
+def test_a_speculation_is_tracked_and_its_failure_is_not_a_dead_task(
+        db_env, monkeypatch, caplog):
+    """review T2 #6: the provider call joins the app's task set (shutdown
+    order) through a shepherd, and a failed call — the adopting turn's to
+    report — is never logged as a background task dying."""
+    db = db_env
+    _api_bot()
+    _mock_http(monkeypatch, lambda req: httpx.Response(500, json={"error": "boom"}))
+    tracked: list[asyncio.Task] = []
+    _voice_env(monkeypatch, db)
+    monkeypatch.setattr(llm_api, "_hooks", dataclasses.replace(
+        llm_api._hooks, track=lambda t: (tracked.append(t), main._track(t))))
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        run = await llm_api.speculate(thread.id, "llm-custom", "hi")
+        await asyncio.wait({run._task})
+        await asyncio.wait(set(tracked), timeout=1)
+        return run
+
+    with caplog.at_level("ERROR"):
+        run = asyncio.run(go())
+    assert len(tracked) == 1 and tracked[0].done() and not tracked[0].cancelled()
+    assert run.error is not None and not run.usable()
+    assert "died" not in caplog.text
+
+
+def test_shutdown_cancels_a_tracked_speculation_in_order(db_env, monkeypatch):
+    db = db_env
+    tracked: list[asyncio.Task] = []
+    with StubLLM(delay_s=3.0) as stub:
+        _api_bot(base_url=stub.base_url)
+        _voice_env(monkeypatch, db)
+        monkeypatch.setattr(llm_api, "_hooks", dataclasses.replace(
+            llm_api._hooks, track=tracked.append))
+
+        async def go():
+            thread = await db.create_thread("llm-custom")
+            run = await llm_api.speculate(thread.id, "llm-custom", "hi")
+            for _ in range(200):
+                if stub.chat_requests():
+                    break
+                await asyncio.sleep(0.01)
+            tracked[0].cancel()                  # what shutdown does to _background
+            await asyncio.wait(set(tracked), timeout=2)
+            return run
+
+        run = asyncio.run(go())
+        assert run._task.cancelled() and not run.usable()
+
+
+def test_an_adopting_turn_leaves_feedback_notes_pending(db_env, monkeypatch):
+    """review T2 #5: the adopted prompt never carried the notes, so they must
+    not be marked delivered by the turn that adopts it."""
+    db = db_env
+    _api_bot()
+
+    async def go():
+        thread = await db.create_thread("llm-custom")
+        rated = await db.add_message(thread.id, "assistant", "An earlier answer.",
+                                     metadata={"feedback": {"vote": "down",
+                                                            "pending": True}})
+        adopted = await main._compose_agent_text(
+            thread.id, "hi", main.TurnOptions(prefetched=object()), gateway=False)
+        still = (await db.get_message(rated.id)).metadata["feedback"]["pending"]
+        fresh = await main._compose_agent_text(
+            thread.id, "hi", main.TurnOptions(), gateway=False)
+        after = (await db.get_message(rated.id)).metadata["feedback"]["pending"]
+        return adopted, still, fresh, after
+
+    adopted, still, fresh, after = asyncio.run(go())
+    assert adopted == "hi" and still is True
+    assert "[[feedback]]" in fresh and after is False

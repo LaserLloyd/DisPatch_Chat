@@ -21,8 +21,8 @@
 // state is checkbox state + check order, exactly what the feature promises to
 // survive a reload.
 import { api } from './api.js?v=32';
-import { t } from './i18n.js?v=3';
-import { cellSortValue, compareCells } from './markdown.js?v=33';
+import { t } from './i18n.js?v=4';
+import { cellSortValue, compareCells } from './markdown.js?v=34';
 
 // The checkbox column is always column 0; data columns start at 1.
 const CHECK_COL = 0;

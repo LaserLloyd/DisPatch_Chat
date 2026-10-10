@@ -17,7 +17,7 @@
 // through the normal thread machinery; nothing here is a scratch playground.
 
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
-import { t, applyDom } from './i18n.js?v=3';
+import { t, applyDom } from './i18n.js?v=4';
 
 // ===================== State =====================
 

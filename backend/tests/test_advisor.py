@@ -1168,3 +1168,464 @@ def test_bot_voice_is_admin_only():
     b = config.Bot(id="alpha", name="A", safe=True, voice="grandma")
     assert "voice" not in b.to_dict()
     assert b.to_admin_dict()["voice"] == "grandma"
+
+
+# --------------------------------------------------------------------------- #
+# Voice chat (C-§B.1/B.2): the system slot, speculation + adoption, the
+# keep-partial cancel rule, heard truncation, repeated replies
+# --------------------------------------------------------------------------- #
+
+import dataclasses  # noqa: E402
+import time  # noqa: E402
+
+from voice_stub_llm import StubLLM  # noqa: E402
+
+VOICE = SimpleNamespace(system="## Spoken replies\nSam hears your reply read aloud.",
+                        trailer="[voice chat] (app note …)")
+
+
+def test_voice_section_sits_after_the_rules_and_before_the_profile():
+    cfg = advisor.AdvisorConfig.from_bot(config.Bot(id="adv", name="Sage", advisor={
+        "owner": "Sam", "providers": [{"provider": "custom", "model": "m"}],
+        "research_agent": "worker"}))
+    reqs = [{"kind": "research", "agent": "worker", "state": "running", "brief": "rebates"}]
+    prompt = advisor.build_system_prompt(cfg, "Sam likes hiking.", reqs, "today", voice=VOICE)
+    rules, spoken = prompt.index("How you work:"), prompt.index("## Spoken replies")
+    about, still = prompt.index("## About Sam"), prompt.index("## Still in progress")
+    assert rules < spoken < about < still
+    # No agents: no RULES, the section still precedes every data block.
+    bare = advisor.AdvisorConfig.from_bot(config.Bot(id="b", name="B", advisor={
+        "providers": [{"provider": "custom", "model": "m"}]}))
+    p2 = advisor.build_system_prompt(bare, "profile", [], "today", voice=VOICE)
+    assert p2.index("Today is today.") < p2.index("## Spoken replies") < p2.index("## About")
+    # Absent / empty instructions change nothing.
+    plain = advisor.build_system_prompt(cfg, "Sam likes hiking.", reqs, "today")
+    assert advisor.build_system_prompt(cfg, "Sam likes hiking.", reqs, "today",
+                                       voice=SimpleNamespace(system="", trailer="x")) == plain
+    assert "voice chat" not in prompt                   # never the gateway trailer
+
+
+def test_a_voice_turn_sends_the_clean_transcript(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    seen = _run_with_reply(monkeypatch, "Yes, mostly.")
+    asyncio.run(advisor.run_turn("t1", "adv", "Is rooftop solar worth it?", voice=VOICE))
+    assert "## Spoken replies" in seen["system"]
+    last = seen["messages"][-1]
+    assert last["role"] == "user" and last["content"].endswith("Is rooftop solar worth it?")
+    assert "Spoken replies" not in last["content"] and "voice chat" not in last["content"]
+
+
+class _Gate:
+    """A provider stream the test drives: the first piece goes out at once,
+    the rest only after `release()`. Records whether the stream was closed."""
+
+    def __init__(self, *pieces: str) -> None:
+        self.pieces = pieces
+        self.calls = 0
+        self.closed = False
+        self.messages: list[dict] = []
+        self._go: asyncio.Event | None = None
+
+    def release(self) -> None:
+        assert self._go is not None
+        self._go.set()
+
+    async def stream(self, res, entry, messages, on_text):
+        self.calls += 1
+        self.messages = messages
+        self._go = self._go or asyncio.Event()
+        raw = ""
+        try:
+            for i, p in enumerate(self.pieces):
+                if i == 1:
+                    await self._go.wait()
+                raw += p
+                await on_text(raw)
+            return raw
+        finally:
+            self.closed = True
+
+
+async def _until(cond, timeout=3.0):
+    t0 = time.monotonic()
+    while not cond():
+        if time.monotonic() - t0 > timeout:
+            raise AssertionError("condition never became true")
+        await asyncio.sleep(0.01)
+
+
+def test_speculate_is_silent_and_records_the_thread_head(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    rows = [SimpleNamespace(id="u1", role="user", content="unanswered", metadata=None)]
+    hooks, log = _rec_hooks(tmp_path, rows=rows)
+    advisor.bind(hooks)
+    gate = _Gate("Two things today. ", "The dentist at three.\n"
+                 "[[research:worker|Find the dentist's address]]")
+    monkeypatch.setattr(advisor, "_stream_openai", gate.stream)
+
+    async def go():
+        run = await advisor.speculate("t1", "adv", "what's on today", voice=VOICE)
+        await _until(lambda: run.text)
+        partial = run.text
+        gate.release()
+        await asyncio.wait({run._task}, timeout=2)
+        return run, partial
+
+    run, partial = asyncio.run(go())
+    assert run.head_id == "u1" and partial == "Two things today. "
+    assert run.done and run.prompt_chars > 100
+    assert "[[research" in run.raw and "[[research" not in run.text   # visible text only
+    assert "## Spoken replies" in gate.messages[0]["content"]
+    assert gate.messages[-1]["content"].endswith("unanswered\n\nwhat's on today")
+    # Nothing reached the thread: no frame, no status, no row, no request.
+    assert log.frames == [] and log.statuses == [] and log.delivered == []
+    assert advisor.ledger().list() == []
+
+
+def test_adoption_replays_the_buffer_then_streams_on(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    gate = _Gate("Two things today. ", "The dentist at three.\n",
+                 "[[research:worker|Find the dentist's address]]")
+    monkeypatch.setattr(advisor, "_stream_openai", gate.stream)
+
+    async def go():
+        run = await advisor.speculate("t1", "adv", "what's on today", voice=VOICE)
+        await _until(lambda: run.text)
+        turn = asyncio.create_task(advisor.run_turn("t1", "adv", "what's on today",
+                                                    prefetched=run))
+        await _until(lambda: any(f["type"] == "stream_chunk" for f in log.frames))
+        gate.release()
+        await turn
+        await _drain()
+        return run
+
+    run = asyncio.run(go())
+    assert gate.calls == 1 and run.adopted
+    kinds = [f["type"] for f in log.frames]
+    assert kinds[0] == "thinking" and "stream_start" in kinds
+    chunks = [f for f in log.frames if f["type"] == "stream_chunk"]
+    assert chunks[0]["text"] == "Two things today. "          # the buffered text first
+    assert "".join(c["text"] for c in chunks).strip() == "Two things today. The dentist at three."
+    reply = log.delivered[0]
+    assert reply[1] == "Two things today. The dentist at three."
+    assert reply[2]["provisional"] == chunks[0]["message_id"]
+    # The adopting turn acts on the markers (it is a real turn now).
+    assert [r["kind"] for r in advisor.ledger().list()] == ["research"]
+
+
+def test_a_discarded_run_closes_its_stream_and_dispatches_nothing(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    gate = _Gate("Let me check. ", "[[research:worker|Look up the rebate rules]]")
+    monkeypatch.setattr(advisor, "_stream_openai", gate.stream)
+
+    async def go():
+        run = await advisor.speculate("t1", "adv", "rebates?")
+        await _until(lambda: run.text)
+        t0 = time.monotonic()
+        await run.discard()
+        # Inside the loop: asyncio.run() would cancel a leftover task anyway.
+        return run, time.monotonic() - t0, gate.closed, run._task.cancelled()
+
+    run, took, closed, cancelled = asyncio.run(go())
+    assert took < 1.0 and closed and cancelled
+    assert log.delivered == [] and log.frames == [] and advisor.ledger().list() == []
+
+
+def test_a_finished_but_discarded_run_never_acts_on_its_markers(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    _run_with_reply(monkeypatch, "On it.\n[[handoff:lead|Book the boiler service]]")
+
+    async def go():
+        run = await advisor.speculate("t1", "adv", "book the boiler")
+        await asyncio.wait({run._task}, timeout=2)
+        await run.discard()
+        await _drain()
+        return run
+
+    run = asyncio.run(go())
+    assert run.done and "[[handoff" in run.raw
+    assert log.delivered == [] and advisor.ledger().list() == []
+
+
+def test_a_run_from_another_thread_is_discarded_not_adopted(adv_env, monkeypatch):
+    tmp_path, _ = adv_env
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    gate = _Gate("Reply one. ", "More.")
+    monkeypatch.setattr(advisor, "_stream_openai", gate.stream)
+
+    async def go():
+        run = await advisor.speculate("t-other", "adv", "x")
+        await _until(lambda: run.text)
+        gate.release()
+        await advisor.run_turn("t1", "adv", "x", prefetched=run)
+        return run
+
+    run = asyncio.run(go())
+    assert run.discarded and not run.adopted
+    assert gate.calls == 2                       # the turn made its own call
+
+
+def test_a_speculation_may_still_fall_back_before_anyone_sees_it(monkeypatch):
+    """Nothing of a speculation is on screen, so a provider that dies after
+    some text may still fall through to the next one (unlike a live turn)."""
+    async def flaky(res, entry, messages, on_text):
+        if res.model == "m0":
+            await on_text("Half a")
+            raise advisor.StreamFailed(llm_api.ApiError("cut off", ""), started=True)
+        await on_text("Whole reply")
+        return "Whole reply"
+
+    monkeypatch.setattr(advisor, "_stream_openai", flaky)
+    run = advisor._AdvisorSpeculation("t", "b", "x", head_id=None)
+    raw, model, _ = asyncio.run(advisor.generate(_cfg(), [], run.sink))
+    assert (raw, model, run.text) == ("Whole reply", "m1", "Whole reply")
+
+
+# -- the real delivery funnel ------------------------------------------------- #
+
+
+@pytest.fixture
+async def funnel(tmp_path, monkeypatch):
+    """main.py's real funnel + Database, frames captured, advisor on a stub."""
+    from app.database import Database
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    config._invalidate_bots_cache()
+    frames: list[dict] = []
+
+    async def capture(frame):
+        frames.append(frame)
+
+    monkeypatch.setattr(main.manager, "broadcast", capture)
+    db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", db)
+    main._delivered.clear()
+    main._provisional_runs.clear()
+    monkeypatch.setattr(advisor, "_ledger", None)
+    advisor._indexes.clear()
+    real = advisor._hooks
+    assert real is not None
+    advisor.bind(dataclasses.replace(
+        real, data_dir=tmp_path,
+        merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch)))
+    await db.connect()
+    stub = StubLLM(delay_s=0.0, words_per_s=25).__enter__()
+    config.upsert_bot(config.Bot(id="adv", name="Sage", advisor={
+        "owner": "Sam",
+        "providers": [{"provider": "custom", "base_url": stub.base_url, "model": "m"}],
+        "research_agent": "worker", "action_agent": "lead"}))
+    try:
+        yield SimpleNamespace(db=db, frames=frames, stub=stub)
+    finally:
+        stub.__exit__(None, None, None)
+        advisor._hooks = real
+        main._provisional_runs.clear()
+        await db.close()
+
+
+async def _assistant_rows(db, thread_id):
+    return [m for m in (await db.list_messages(thread_id, 100))[0] if m.role == "assistant"]
+
+
+async def test_interrupting_mid_stream_keeps_exactly_the_shown_prefix(funnel):
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    stub.replies = ["You have two things this afternoon. The dentist is at three, "
+                    "and the school call is at four thirty. "
+                    "[[research:worker|Find the dentist's phone number]]"]
+    thread = await db.create_thread(bot_id="adv")
+    await db.add_message(thread.id, "user", "what's on this afternoon")
+    task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on this afternoon",
+                                                voice=VOICE))
+    await _until(lambda: "".join(f.get("text", "") for f in frames
+                                 if f["type"] == "stream_chunk").count(" ") >= 6)
+    row_id = await llm_api.cancel_direct_turn(task, thread.id, keep_partial=True)
+    shown = "".join(f["text"] for f in frames if f["type"] == "stream_chunk")
+
+    rows = await _assistant_rows(db, thread.id)
+    assert len(rows) == 1 and rows[0].id == row_id
+    assert rows[0].content == shown.strip()
+    assert "school call" not in rows[0].content          # the unshown rest is not stored
+    assert rows[0].metadata["voice_heard"] == {"interrupted": True}
+    # The bubble became that row; the turn ended idle; nothing was dispatched.
+    prov = next(f["message_id"] for f in frames if f["type"] == "stream_start")
+    done = [f for f in frames if f["type"] == "stream_done"]
+    assert done and done[-1]["provisional_id"] == prov and done[-1]["message"]["id"] == row_id
+    assert (await db.get_thread(thread.id)).status == "idle"
+    assert advisor.ledger().list() == []
+    assert task.cancelled()
+    await _until(lambda: stub.chat_requests()[0]["aborted"])
+
+    # The next prompt is truncated to what was heard (note_heard's metadata).
+    upto = rows[0].content.index("afternoon.") + len("afternoon.")
+    await db.merge_message_metadata(row_id, {"voice_heard": {
+        "upto": upto, "interrupted": True, "heard": rows[0].content[:upto],
+        "unheard": rows[0].content[upto:]}})
+    stub.replies = ["Sunny, around twenty degrees."]
+    await db.add_message(thread.id, "user", "skip that, weather tomorrow?")
+    await advisor.run_turn(thread.id, "adv", "skip that, weather tomorrow?", voice=VOICE)
+    sent = stub.chat_requests()[-1]["messages"]
+    assistant_turns = [m["content"] for m in sent if m["role"] == "assistant"]
+    assert assistant_turns == ["You have two things this afternoon. —"]
+    stored = await db.get_message(row_id)
+    assert stored.content == rows[0].content              # the row is untouched
+
+
+async def test_interrupting_for_a_merge_keeps_nothing(funnel):
+    db, frames = funnel.db, funnel.frames
+    thread = await db.create_thread(bot_id="adv")
+    await db.add_message(thread.id, "user", "what's on")
+    task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on"))
+    await _until(lambda: any(f["type"] == "stream_chunk" for f in frames))
+    assert await llm_api.cancel_direct_turn(task, thread.id, keep_partial=False) is None
+    assert await _assistant_rows(db, thread.id) == []
+    done = [f for f in frames if f["type"] == "stream_done"]
+    assert done and done[-1]["message"] is None          # the bubble was retired
+
+
+async def test_interrupting_before_any_text_keeps_nothing(funnel):
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    stub.delay_s = 2.0
+    thread = await db.create_thread(bot_id="adv")
+    await db.add_message(thread.id, "user", "what's on")
+    task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on"))
+    await _until(lambda: stub.chat_requests())
+    assert await llm_api.cancel_direct_turn(task, thread.id, keep_partial=True) is None
+    assert await _assistant_rows(db, thread.id) == []
+    assert not [f for f in frames if f["type"] == "stream_start"]
+
+
+async def test_an_adopted_run_lands_as_one_ordinary_reply(funnel):
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    stub.words_per_s = 15
+    thread = await db.create_thread(bot_id="adv")
+    await db.add_message(thread.id, "user", "earlier")
+    run = await advisor.speculate(thread.id, "adv", "what's on", voice=VOICE)
+    await _until(lambda: len(run.text.split()) >= 3)
+    assert frames == []                                  # silent until adopted
+    await db.add_message(thread.id, "user", "what's on")
+    await advisor.run_turn(thread.id, "adv", "what's on", prefetched=run)
+    rows = await _assistant_rows(db, thread.id)
+    assert len(stub.chat_requests()) == 1
+    assert len(rows) == 1 and rows[0].content == stub.chat_requests()[0]["reply"]
+    starts = [f for f in frames if f["type"] == "stream_start"]
+    assert len(starts) == 1
+
+
+async def test_two_advisor_turns_with_the_same_reply_both_land(funnel):
+    """The T2 investigation: content dedup ate a direct backend's second
+    identical reply. Each turn's reply now carries its own identity."""
+    db, stub = funnel.db, funnel.stub
+    stub.replies = ["Sure, done.", "Sure, done."]
+    thread = await db.create_thread(bot_id="adv")
+    for ask in ("lights on", "and the porch"):
+        await db.add_message(thread.id, "user", ask)
+        main._forget_thread_delivery(thread.id)
+        await advisor.run_turn(thread.id, "adv", ask)
+    assert [m.content for m in await _assistant_rows(db, thread.id)] == [
+        "Sure, done.", "Sure, done."]
+
+
+# -- review T2 fixes ----------------------------------------------------------- #
+
+
+def _slow_frames(monkeypatch, frames, *, kinds, delay):
+    """manager.broadcast that takes `delay` for `kinds` — a stalled phone."""
+    async def slow(frame):
+        frames.append(frame)
+        if frame.get("type") in kinds:
+            await asyncio.sleep(delay)
+    monkeypatch.setattr(main.manager, "broadcast", slow)
+
+
+@pytest.mark.parametrize("via_ext", [False, True])
+@pytest.mark.parametrize("second_keep,gap", [(True, 0.0), (True, 0.02),
+                                             (False, 0.005), (False, 0.02)])
+async def test_a_second_abort_during_the_keep_partial_wind_down(
+        funnel, monkeypatch, via_ext, second_keep, gap):
+    """review T2 #1: barge-in, then hang-up / another abort while the partial
+    row is being written. The thread ends idle with the bubble closed, exactly
+    one row and one stream_done, whatever the second call asked for."""
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    _slow_frames(monkeypatch, frames, kinds={"stream_done", "message_update"}, delay=0.05)
+    stub.replies = ["You have two things this afternoon. The dentist is at three, and "
+                    "the school call is at four thirty. Want a reminder before each one?"]
+    thread = await db.create_thread(bot_id="adv")
+    tid = thread.id
+    main._ext_turns.clear()
+    if via_ext:
+        uid = await main._ext_submit_turn("voice", tid, "what's on", instructions=VOICE)
+        task = next(t for t, u in main._ext_turns[tid] if u == uid)
+        abort = lambda keep: main._ext_abort_turn(tid, keep_partial=keep)  # noqa: E731
+    else:
+        await db.add_message(tid, "user", "what's on")
+        task = asyncio.create_task(advisor.run_turn(tid, "adv", "what's on", voice=VOICE))
+        abort = lambda keep: llm_api.cancel_direct_turn(task, tid, keep_partial=keep)  # noqa: E731
+    await _until(lambda: "".join(f.get("text", "") for f in frames
+                                 if f["type"] == "stream_chunk").count(" ") >= 6)
+    a1 = asyncio.create_task(abort(True))
+    await asyncio.sleep(gap)
+    a2 = asyncio.create_task(abort(second_keep))
+    r1, r2 = await asyncio.gather(a1, a2)
+    rows = await _assistant_rows(db, tid)
+    assert len(rows) == 1 and r1 == rows[0].id
+    assert rows[0].metadata["voice_heard"] == {"interrupted": True}
+    assert r2 in (r1, None)
+    assert (await db.get_thread(tid)).status == "idle"
+    assert tid not in main._provisional_runs
+    assert len([f for f in frames if f["type"] == "stream_done"]) == 1
+    assert [f["status"] for f in frames if f["type"] == "thinking"][-1] == "stopped"
+    assert task.done() and llm_api._cancel_policy == {}
+
+
+@pytest.mark.parametrize("delay", [0.0, 0.08, 0.2])
+async def test_adoption_under_a_slow_broadcast_keeps_the_chunks_in_order(
+        funnel, monkeypatch, delay):
+    """review T2 #2: the replay of the buffered text and the speculation's
+    live deltas share one emitter; with a broadcast slower than the emit
+    interval they must still arrive in reply order (the voice session speaks
+    `stream_chunk` deltas in arrival order)."""
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    _slow_frames(monkeypatch, frames, kinds={"stream_start", "stream_chunk"}, delay=delay)
+    stub.words_per_s = 80
+    reply = " ".join(f"w{i:02d}" for i in range(60)) + "."
+    stub.replies = [reply]
+    thread = await db.create_thread(bot_id="adv")
+    await db.add_message(thread.id, "user", "earlier")
+    run = await advisor.speculate(thread.id, "adv", "what's on", voice=VOICE)
+    await _until(lambda: len(run.text.split()) >= 5)
+    await db.add_message(thread.id, "user", "what's on")
+    await advisor.run_turn(thread.id, "adv", "what's on", prefetched=run)
+    rebuilt = ""
+    for f in frames:
+        if f["type"] == "stream_chunk":
+            rebuilt = f["text"] if f.get("replace") else rebuilt + f["text"]
+    assert rebuilt.strip() == reply
+    assert len([f for f in frames if f["type"] == "stream_start"]) == 1
+    rows = await _assistant_rows(db, thread.id)
+    assert len(rows) == 1 and rows[0].content == reply
+
+
+async def test_a_merge_after_a_short_advisor_reply_landed_leaves_no_orphan(funnel):
+    """review T2 #3 for the advisor: a short reply finished inside the merge
+    window; the merge (abort keep_partial=False + retract of the first user
+    row) leaves nothing answering the deleted question."""
+    db, frames, stub = funnel.db, funnel.frames, funnel.stub
+    stub.replies = ["Two things."]
+    thread = await db.create_thread(bot_id="adv")
+    main._ext_turns.clear()
+    uid = await main._ext_submit_turn("voice", thread.id, "what's on", instructions=VOICE)
+    await _until(lambda: any(f["type"] == "stream_done" and f.get("message") for f in frames))
+    await _until(lambda: not main._ext_turns.get(thread.id))
+    assert len(await _assistant_rows(db, thread.id)) == 1
+    assert await main._ext_abort_turn(thread.id, keep_partial=False) is None
+    await main._ext_retract(thread.id, uid)
+    assert (await db.list_messages(thread.id, 50))[0] == []

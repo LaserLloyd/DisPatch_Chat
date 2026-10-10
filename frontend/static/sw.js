@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v147';  // v147: voice is optional (Settings → Voice on/off switch) and its advanced pieces are opt-in tools; new js/voice-tools.js joins SHELL; drive-settings.js?v=3→4, voices.js?v=3→4, drive.js?v=5→6, voice.css?v=3→4, tools.js?v=10→11, about.js?v=5→6 (VOICE_REPO_URL), main.js?v=123→124, app.css?v=96→97, index.html, locales.
+const CACHE = 'local-chat-v148';  // v148: 2.2.0 — voice chat is an add-on. drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js, voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js, js/voice-absent.js join it; /ext/ is network-only; i18n.js?v=3→4 (mergeBundle) and every importer's ?v, tools.js?v=11→12, about.js?v=6→7 (APP_VERSION 2.2.0), main.js, app.css, index.html, locales.
+// v147: voice is optional (Settings → Voice on/off switch) and its advanced pieces are opt-in tools; new js/voice-tools.js joins SHELL; drive-settings.js?v=3→4, voices.js?v=3→4, drive.js?v=5→6, voice.css?v=3→4, tools.js?v=10→11, about.js?v=5→6 (VOICE_REPO_URL), main.js?v=123→124, app.css?v=96→97, index.html, locales.
 // v146: Drive settings move to their own Settings → Voice tab; drive-settings.js?v=2→3, voices.js?v=2→3, drive.js?v=4→5, voice.css?v=2→3, main.js?v=122→123, app.css?v=95→96, index.html, locales.
 // v145: neutral example names in drive-settings.js + locales; drive-settings.js?v=1→2, voices.js?v=1→2, drive.js?v=3→4, main.js?v=121→122, index.html.
 // v144: Drive mode v2 — drive.js?v=2→3, voice-worklet.js?v=1→2, voice.css?v=1→2,
@@ -335,14 +336,11 @@ const SHELL = [
   // Tools rail group + generic tool pane + Settings → Tools (2026-09-25).
   // Pure module, statically imported by main.js.
   '/static/js/tools.js',
-  // Drive mode (hands-free voice, 2026-10-09). Kept at the static root,
-  // outside js/: an optional feature with its own tests. drive.js is a static
-  // import of main.js; the worklet is loaded by audioWorklet.addModule and
-  // voice.css by loadStyle, both on demand.
-  '/static/drive.js', '/static/voice-worklet.js', '/static/voice.css',
-  // Drive mode v2 (2026-10-10): the settings rows + quick sheet, and the
-  // native Voices manager. Both statically imported (main.js / drive.js).
-  '/static/js/drive-settings.js', '/static/js/voices.js', '/static/js/voice-tools.js',
+  // Extensions (2.2.0): the loader, the SDK shell object and the page the
+  // Voice tab shows while the voice add-on is absent, all statically imported
+  // by main.js. An add-on (/ext/<id>/…) is NEVER cached here: see the fetch
+  // handler. (Voice chat itself left the shell in 2.2.0.)
+  '/static/js/extensions.js', '/static/js/ext-sdk.js', '/static/js/voice-absent.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.
@@ -383,7 +381,10 @@ self.addEventListener('fetch', (e) => {
   // Apps (/apps/<id>/…) are network-only, always: an app is served with its
   // own caching rules and its data is gated per session, and a precached
   // copy would outlive an app that was switched off in tools.yaml.
-  if (p.startsWith('/apps/')) return;
+  // Extensions (/ext/<id>/…) likewise: an add-on's code is operator-only,
+  // content-hashed (`?v=`) by the server and must never outlive its install
+  // — or reach a device after it locked — through a cached copy.
+  if (p.startsWith('/apps/') || p.startsWith('/ext/')) return;
   const isShell = p === '/' ||
     (p.startsWith('/static/') && !p.startsWith('/static/avatars/'));
   if (!isShell) return;

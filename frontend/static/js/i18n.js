@@ -113,6 +113,11 @@ const state = {
 
 const cache = new Map();    // lang -> dictionary (avoids refetching on switch)
 const listeners = new Set();
+// Installed extensions' strings (js/extensions.js → mergeBundle): extension id
+// -> { lang, dict, en }. Consulted AFTER the shell's own dictionaries, so an
+// extension can never override a shell key; a key the extension's active
+// bundle lacks falls back to its own English bundle, then to the key itself.
+const extBundles = new Map();
 
 // Intl instances are expensive to construct; build once per locale+shape.
 const intlCache = new Map();
@@ -323,6 +328,33 @@ export function onChange(fn) {
 // Lookup + translation
 // ---------------------------------------------------------------------------
 
+/**
+ * Merge an installed extension's locale strings (js/extensions.js).
+ * `dict` is its bundle for `lang` (null when it has none), `en` its English
+ * bundle. Re-merging the same id replaces the previous bundle. Lookup order
+ * in t(): shell active → shell English → extension active → extension
+ * English → the key, humanized.
+ */
+export function mergeBundle(extId, { lang, dict, en } = {}) {
+  if (!extId) return;
+  const ok = (d) => (d && typeof d === 'object' && !Array.isArray(d) ? d : null);
+  extBundles.set(String(extId), { lang: String(lang || DEFAULT_LANG), dict: ok(dict), en: ok(en) });
+}
+
+/** Forget an extension's strings (it unmounted — lock, logout, failure). */
+export function removeBundle(extId) {
+  extBundles.delete(String(extId));
+}
+
+function extLookup(key, { activeOnly = false } = {}) {
+  for (const b of extBundles.values()) {
+    let v = b.lang === state.lang ? walk(b.dict, key) : undefined;
+    if (v == null && !activeOnly) v = walk(b.en, key);
+    if (v != null) return v;
+  }
+  return undefined;
+}
+
 function walk(dict, key) {
   if (!dict) return undefined;
   // Flat key wins (locale files may use either shape; ours are nested).
@@ -390,6 +422,7 @@ export function t(key, vars) {
   if (!key) return '';
   let raw = pick(walk(state.dict, key), vars);
   if (raw == null) raw = pick(walk(state.fallback, key), vars);
+  if (raw == null && extBundles.size) raw = pick(extLookup(key), vars);
   if (raw == null) raw = CRITICAL_EN[key];
   if (raw == null) {
     if (!state.warned.has(key)) {
@@ -404,8 +437,12 @@ export function t(key, vars) {
 
 /** True when a key exists in the active locale (not just the fallback). */
 export function has(key) {
-  return walk(state.dict, key) != null;
+  return walk(state.dict, key) != null
+    || (extBundles.size > 0 && extLookup(key, { activeOnly: true }) != null);
 }
+
+/** The active language code ('en', 'ar', …). */
+export function lang() { return state.lang; }
 
 /** Translate a key whose value carries markup WE own, for an innerHTML sink.
  *
@@ -678,7 +715,7 @@ export function languageSelect({ className = 'lang-select', id } = {}) {
 // ---------------------------------------------------------------------------
 
 export const i18n = {
-  t, has, init, setLocale, applyDom, applyTo, onChange, languageSelect,
+  t, has, init, setLocale, applyDom, applyTo, onChange, languageSelect, mergeBundle, removeBundle,
   n, percent, clockTime, dayLabel, dayKey, relTime, relTimeLong, fullTimestamp,
   fileSize, list, isRtl, resolveLang, hasDictionary, localeLoadFailed, LANGUAGES,
   get lang() { return state.lang; },

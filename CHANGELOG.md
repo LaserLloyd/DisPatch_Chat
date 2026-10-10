@@ -7,7 +7,121 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-10-10
+
+Voice chat leaves DisPatch and becomes an add-on: **DisPatch Voice**, a
+separate MIT package (github.com/LaserLloyd/DisPatch_Voice). DisPatch itself
+ships no speech code and no speech dependency any more; it gains a small,
+stable **extension host** that the add-on (and any later one) plugs into.
+Guide: [docs/extensions.md](docs/extensions.md).
+
+### Upgrading an install that used voice
+
+- Install the add-on into DisPatch's environment and fetch its models once —
+  the Settings → Voice tab shows the exact commands, and
+  [docs/extensions.md](docs/extensions.md#voice) has every install mode. With
+  `uv run` as the service's start line: add
+  `--with-editable /path/to/DisPatch_Voice` to it, plus `--offline` (boot must
+  never need the network) and `--ws-max-size 262144` (the voice socket's frame
+  cap; the main `/ws` never sends more than a 65,536-character message).
+  Warm the overlay online once before the restart.
+- The `voice` dependency group is still declared, **empty**, so a 2.1 unit
+  drop-in that runs `uv run --group voice …` keeps booting (without the group
+  uv exits 2 and the restart loop takes the app down). It is removed in 2.3.0.
+- `DISPATCH_VOICE_PKG=<src dir>` (the 2.1 way to find dispatch-voice) is
+  honoured for 2.2.x only, logged as deprecated.
+- `<data>/voice.yaml`, `<data>/voices/`, the speech-model directories and each
+  bot's `voice` keep their names and paths: the add-on reads them as they are.
+- `tools.yaml` rows for the voice tools are kept untouched while the add-on is
+  missing (see *dormant rows* below) and work again the moment it is back.
+
+### Added
+
+- **Extension host** (`backend/app/extensions.py`). Installed add-ons are found
+  through the `dispatch.extensions` entry point group (or
+  `DISPATCH_EXTENSIONS=off | module:attr,…`), version-checked against
+  `EXT_API = 1` before any of their code beyond the metadata is imported, and
+  set up with an `ExtensionContext`: thread turns (submit, speculate, abort
+  with or without keeping the spoken part, retract, replies after, heard
+  notes), the frame stream of one thread (bounded, never inside a broadcast,
+  with a snapshot of any reply still streaming), a gated thread websocket,
+  static assets, tools rows, bot-field validators and lifecycle hooks. A
+  failing add-on is a state, never a failed boot: its routes are rolled back.
+- **Every gate stays in DisPatch.** `/ws/<name>/{thread}` runs Origin==Host →
+  an unlocked session → the thread and a non-Safe-Mode bot → per-session
+  slots (the oldest is replaced, 4001) → a server-wide cap (`busy`, 1013), all
+  before `accept`; refusals are 1008 pre-accept. A name no extension provides
+  runs the same gate and answers 1013 "No extension provides …" instead of a
+  bare 1006 a client would retry (so does a handler that never accepts). A
+  replaced socket is closed in the background, so a phone reconnecting from a
+  half-open link is never held up by its own stale socket. An add-on's HTTP
+  routes (API routes only — no mounts) all carry the
+  operator dependency, live under `/api/<id>`, join the Safe-Mode block list,
+  never join the machine-inbound surface, and may declare body ceilings that
+  are enforced before the body is read.
+- `GET /api/extensions` (operator, or an authenticated on-box machine — the
+  deploy check): names, versions, states (`ok` / `incompatible` / `failed` /
+  `disabled`), the assets hash — never a path; `detail` for operators only,
+  with the home directory shown as `~`. `/api/auth/status.features.extensions`
+  counts the `ok` ones, so a fresh install costs no extra request.
+- `/ext/<id>/<path>`: an add-on's frontend files, operator only (403 for a
+  locked device), an allowlist of asset types (no HTML, SVG or XML document
+  is ever served: 404), `nosniff`, a deny-all CSP, `immutable` caching when
+  `?v=` matches the content hash and `no-cache` + ETag otherwise. The service
+  worker never caches `/ext/`.
+- **Frontend loader and SDK** (`js/extensions.js`, `js/ext-sdk.js`): an
+  add-on's strings are merged under the shell's (`i18n.mergeBundle` — it can
+  never override a shell key), its CSS loaded, its module imported and
+  handshaken, then mounted with a frozen `shell` object: the chat-header
+  action slot, a Settings pane, a control on each Bots-tab row, rail tiles and
+  a native tool pane, Back-button entries that stack (Settings opened over an
+  add-on's overlay takes its own Back, so Back never hangs up a call that
+  Settings covered). Everything an add-on registered is torn down when the
+  device locks or the add-on fails.
+- **Settings → Voice without the add-on** (`js/voice-absent.js`): what voice
+  chat is, and the three steps to add it (install the latest 1.x release —
+  the add-on's moving `v1` tag — fetch the models, restart and **Check
+  again**, which mounts it without a reload), with copyable commands, the
+  Docker and `uv run` variants and the optional Kokoro plugin; or, when it is
+  installed but cannot run, why (incompatible, failed with the server's
+  reason, disabled by `DISPATCH_EXTENSIONS`). Eight languages.
+- Bots: `voice_rp` (how role-play text is read aloud) joins `voice` as a bot
+  field DisPatch stores and the add-on validates. Without the add-on a save
+  may only keep a value or clear it.
+- Docker: `--build-arg VOICE=1` (or `VOICE=1` in `.env`) builds the image with
+  the add-on.
+- `scripts/local-chat-launch`: an optional start wrapper that runs DisPatch
+  with the add-on overlay offline and falls back to DisPatch without it when
+  that overlay cannot be resolved, so a cold cache costs voice chat, not the
+  app.
+
 ### Changed
+
+- **Instructions for a spoken turn** reach the model in its own slot: the
+  system prompt of advisor and API bots, a short note appended at the END of
+  what a gateway agent reads — never prepended to the user's words (which is
+  what made bots answer "Hands-free mode, got it").
+- **Dormant tools rows.** A `tools.yaml` builtin row whose id no installed
+  extension provides is kept verbatim through load and save, never listed and
+  logged once. Before, one such row invalidated the whole manifest.
+- The user-facing name is **Voice chat** (it was Drive mode).
+
+### Removed
+
+- The in-tree voice code: `backend/app/voice/`, `drive.js`,
+  `voice-worklet.js`, `voice.css`, `js/drive-settings.js`, `js/voices.js`,
+  `js/voice-tools.js`, their tests and 306 locale keys per language — all of it
+  moved, unchanged, to DisPatch Voice. The voice section of
+  `THIRD_PARTY_NOTICES.md` moved with it. `/api/voices` is gone (the add-on
+  serves its voice profiles under `/api/voice/profiles`).
+
+### Voice work after 2.1.0, never released in DisPatch
+
+The notes below describe voice changes made after 2.1.0 that were never part
+of a DisPatch release. They ship in DisPatch Voice 1.0.0, together with the
+code; they are kept here as history.
+
+#### Changed
 
 - **Voice is optional, with an on/off switch.** Settings → Voice opens with
   *Voice (Drive mode)*, a server-wide switch stored as `enabled` in
@@ -107,7 +221,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-sent mid-drive; new `ping`/`pong`, `ready`, `undo`, `cancel`, `duck`,
   `turn_error` frames; `GET/PATCH /api/voice/settings`, `GET /api/voice/preview`.
 
-### Fixed
+#### Fixed
 
 - Drive mode: echo of the reply no longer cuts it off (talking over a reply
   ducks it until the words are confirmed); a dropped phone no longer locks
@@ -118,7 +232,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   download from the ~810 MB stated for 2.1.0 to ~1 GB, until the licence split
   above moved Kokoro into the plugin).
 
-### Added
+#### Added
 
 - `THIRD_PARTY_NOTICES.md`: attribution for the Drive-mode models (Parakeet
   CC-BY-4.0 incl. the istupakov ONNX conversion, Silero VAD, Smart Turn,

@@ -8,10 +8,13 @@ Contract: ``docs/design/2026-09-25-tools-plugins.md`` (apps:
     which the manifest only switches OFF (``enabled: false`` makes main's
     ``*_available()`` false, so their routes 404 and their feature flag drops
     out of ``/api/auth/status``; no entry = behaviour as before); and the
-    OPT-IN voice tools (Voice cloning, Built-in voices, Voice lab), which are
-    off until a row says ``enabled: true`` (``OPT_IN`` below; no entry = off,
-    their routes 404). Both are unlocked-tier only and never listed for Safe
-    Mode.
+    rows an EXTENSION registers (``register_builtins``, app/extensions.py —
+    the voice add-on's Voice cloning, Built-in voices and Voice lab), which
+    are usually OPT-IN: off until a row says ``enabled: true`` (``OPT_IN``;
+    no entry = off). Both are unlocked-tier only and never listed for Safe
+    Mode. A builtin row whose id nobody provides — the add-on was uninstalled
+    — is a DORMANT row: kept verbatim through load and save, never listed,
+    logged once. (Until 2.2.0 it invalidated the whole manifest.)
   * **static** — a directory served read-only at ``/tools/<id>/``. This is a
     disk-read surface, so it is written around REFUSING, the same way
     ``localview`` is (and it borrows localview's deny list rather than keeping
@@ -103,25 +106,31 @@ TAIL_BYTES = 2048
 NOT_FOUND = {"detail": "Not found"}
 DECOY_BODY = {"detail": "Unlock for full access", "decoy": True}
 
-#: builtin id → (feature key main uses, default rail title, default icon)
-BUILTINS: dict[str, tuple[str, str, str]] = {
+#: builtin id → (feature key main uses, default rail title, default icon).
+#: The panes that ship with DisPatch. (The Job Board was a builtin here for
+#: one day, 2026-09-25, and is now an APP — apps/jobboard/ — whose switch is
+#: a `kind: app` row. The voice tools left with voice in 2.2.0: the voice
+#: add-on registers them through register_builtins.)
+CORE_BUILTINS: dict[str, tuple[str, str, str]] = {
     "deepseek-harness": ("harness", "DeepSeek Harness", "🐋"),
     "studioforge-panel": ("studioforge", "StudioForge", "🎛️"),
     "mail-panel": ("mail", "Emails", "✉️"),
     "clients-panel": ("practice", "Clients", "👥"),
-    # Drive mode's advanced pieces (docs/voice-drive-mode.md, "Voice tools").
-    # Opt-in: see OPT_IN.
-    "voice-cloning": ("voice_cloning", "Voice cloning", "🎙️"),
-    "voice-builtin": ("voice_builtin", "Built-in voices", "🔊"),
-    "voice-lab": ("voice_lab", "Voice lab", "🧪"),
-    # The Job Board was a builtin here for one day (2026-09-25) and is now an
-    # APP (apps/jobboard/, loaded by apps_loader) — its switch is a `kind: app`
-    # row, not a builtin one.
 }
+#: The live set: CORE_BUILTINS plus what extensions registered. Mutated in
+#: place (other modules hold references to these objects).
+BUILTINS: dict[str, tuple[str, str, str]] = dict(CORE_BUILTINS)
 FEATURE_TO_ID = {feat: tid for tid, (feat, _t, _i) in BUILTINS.items()}
 #: Builtins that are OFF unless the manifest has a row with ``enabled: true``.
 #: A missing row (or a missing tools.yaml) means the tool simply is not there.
-OPT_IN = frozenset({"voice-cloning", "voice-builtin", "voice-lab"})
+OPT_IN: set[str] = set()
+#: builtin id → the extension that registered it (register_builtins).
+_EXT_OWNER: dict[str, str] = {}
+#: builtin id → "installed on this box" probe, for extension rows. Kept apart
+#: from _builtin_probes so main's set_builtin_probes() never clobbers them.
+_ext_probes: dict[str, Callable[[], bool]] = {}
+#: Dormant ids already logged (once per id per process).
+_dormant_logged: set[str] = set()
 
 #: How a tool opens: in the pane, or launched in its own browser tab.
 OPEN_MODES = ("frame", "window")
@@ -375,8 +384,15 @@ def _check_open(row: dict, kind: str, tid: str, index: int) -> str:
     return v
 
 
-def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[Tool]:
+def validate_tools(rows: list, check_fs: bool | Collection[int] = True, *,
+                   dormant_ok: bool = False) -> list[Tool]:
     """Raw manifest rows → Tools. Raises ToolValidationError(index, field, msg).
+
+    ``dormant_ok`` — a builtin row whose id no core pane and no installed
+    extension provides is kept as a DORMANT row instead of refused. True when
+    reading the file (and for the stored rows a PUT round-trips), so a
+    manifest holding an uninstalled add-on's rows is never "no tools at all";
+    False (the default) for anything a caller is introducing.
 
     ``check_fs`` — True: every static root / refresh cwd must exist now; False:
     shape only (used when READING the file, so a root that vanished makes that
@@ -406,9 +422,25 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True) -> list[
             raise ToolValidationError(i, "id", f"duplicate id {tid!r}")
         seen.add(tid)
         if kind == "builtin":
-            if tid not in BUILTINS:
+            if tid not in BUILTINS and not dormant_ok:
                 raise ToolValidationError(i, "id", "not a builtin id: "
                                           + ", ".join(BUILTINS))
+            if tid not in BUILTINS:
+                # A DORMANT row: an extension provided this tool once and is
+                # not installed now. Kept verbatim (it comes back the day the
+                # add-on does), never listed, never an error — a manifest
+                # holding voice rows must not become "no tools at all" the
+                # moment the add-on is uninstalled.
+                if tid not in _dormant_logged:
+                    _dormant_logged.add(tid)
+                    log.info("tool %s: no extension provides it; row kept", tid)
+                enabled = _check_bool(row, "enabled", True, i)
+                open_ = row.get("open")
+                if open_ not in OPEN_MODES:
+                    open_ = "frame"
+                out.append(Tool(id=tid, kind="builtin", title=tid, icon=DEFAULT_ICON,
+                                enabled=enabled, open=open_))
+                continue
             out.append(Tool(id=tid, kind="builtin", title=BUILTINS[tid][1],
                             icon=BUILTINS[tid][2],
                             enabled=_check_bool(row, "enabled", True, i),
@@ -501,7 +533,7 @@ def load_tools() -> list[Tool]:
             for k in doc:
                 if k != "tools":
                     raise ToolValidationError(None, str(k), "unknown top-level key")
-            result = validate_tools(doc.get("tools") or [], check_fs=False)
+            result = validate_tools(doc.get("tools") or [], check_fs=False, dormant_ok=True)
         except (yaml.YAMLError, OSError, ValueError) as e:
             log.error("tools.yaml cannot be used (%s) — no tools until it is fixed: %s",
                       e, path)
@@ -597,8 +629,64 @@ def set_builtin_probes(probes: dict[str, Callable[[], bool]]) -> None:
     _builtin_probes.update(probes)
 
 
+def builtin_owner(tool_id: str) -> str | None:
+    """The extension that registered this builtin, or None (core / unknown)."""
+    return _EXT_OWNER.get(tool_id)
+
+
+def is_dormant(tool: Tool) -> bool:
+    return tool.kind == "builtin" and tool.id not in BUILTINS
+
+
+def register_builtins(ext_id: str, rows) -> None:
+    """An extension's tools rows (app/extensions.py ``ctx.register_tools``).
+    Rows are read by ATTRIBUTE (id, feature, title, icon, opt_in, probe) —
+    the extension builds its own objects and never imports DisPatch."""
+    staged = []
+    for r in rows:
+        tid, feat = str(r.id), str(r.feature)
+        if tid in CORE_BUILTINS or _EXT_OWNER.get(tid, ext_id) != ext_id:
+            raise ValueError(f"tool id {tid!r} is already taken")
+        other = FEATURE_TO_ID.get(feat)
+        if other is not None and other != tid:
+            raise ValueError(f"tool feature {feat!r} is already {other!r}'s")
+        title = str(getattr(r, "title", "") or tid)[:80]
+        icon = str(getattr(r, "icon", "") or DEFAULT_ICON)[:16]
+        staged.append((tid, feat, title, icon, bool(getattr(r, "opt_in", True)), r.probe))
+    for tid, feat, title, icon, opt_in, probe in staged:
+        BUILTINS[tid] = (feat, title, icon)
+        FEATURE_TO_ID[feat] = tid
+        _EXT_OWNER[tid] = ext_id
+        _ext_probes[tid] = probe
+        if opt_in:
+            OPT_IN.add(tid)
+        else:
+            OPT_IN.discard(tid)
+        _dormant_logged.discard(tid)
+    _drop_cache()
+
+
+def unregister_builtins(ext_id: str) -> None:
+    """Tests / rollback: forget every row ``ext_id`` registered."""
+    for tid in [t for t, owner in _EXT_OWNER.items() if owner == ext_id]:
+        feat = BUILTINS.pop(tid, ("",))[0]
+        if FEATURE_TO_ID.get(feat) == tid:
+            FEATURE_TO_ID.pop(feat, None)
+        _EXT_OWNER.pop(tid, None)
+        _ext_probes.pop(tid, None)
+        OPT_IN.discard(tid)
+    _drop_cache()
+
+
+def _drop_cache() -> None:
+    """A registered (or dropped) builtin changes how tools.yaml validates."""
+    global _cache
+    with _lock:
+        _cache = None
+
+
 def _builtin_available(tool_id: str) -> bool:
-    fn = _builtin_probes.get(tool_id)
+    fn = _builtin_probes.get(tool_id) or _ext_probes.get(tool_id)
     if fn is None:
         return False
     try:
@@ -1052,6 +1140,17 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
             sent_ids.add(row["id"])
         if row.get("kind") == "builtin":
             row = {k: row[k] for k in ("id", "kind", "enabled", "open") if k in row}
+            tid = row.get("id")
+            stored = current.get(tid) if isinstance(tid, str) else None
+            # Only the file (or an installed extension) introduces a builtin:
+            # a NEW unknown id from a client is refused, a stored dormant one
+            # round-trips untouched.
+            if isinstance(tid, str) and tid not in BUILTINS:
+                if stored is None or stored.kind != "builtin":
+                    return _err422(ToolValidationError(
+                        i, "id", "not a builtin id: " + ", ".join(BUILTINS)))
+                cleaned.append(stored.to_manifest())
+                continue
         if row.get("kind") == "app":
             try:
                 row = _clean_app_row(i, row, current.get(row.get("id")))
@@ -1083,8 +1182,13 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
     # client did not send back is kept, `trusted` and all.
     cleaned += [t.to_manifest() for t in current.values()
                 if t.kind == "app" and t.id not in sent_ids]
+    # Dormant builtin rows are never listed, so the client never sends them
+    # back; keep them, or a Settings save would delete the operator's voice
+    # rows while the add-on is uninstalled.
+    cleaned += [t.to_manifest() for t in current.values()
+                if is_dormant(t) and t.id not in sent_ids]
     try:
-        validated = validate_tools(cleaned, check_fs=fs_rows)
+        validated = validate_tools(cleaned, check_fs=fs_rows, dormant_ok=True)
     except ToolValidationError as e:
         return _err422(e)
     # An opt-in tool switched off is the same as no row; leave none behind,

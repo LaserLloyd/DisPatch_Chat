@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""local-chat-launch — start DisPatch with its add-on overlay, or without it.
+
+An optional belt for a systemd unit that runs DisPatch through `uv run` with
+the voice add-on as an editable overlay (docs/extensions.md#voice):
+
+    WorkingDirectory=<install>/backend
+    ExecStart=<install>/scripts/local-chat-launch \\
+        --with-editable %h/Projects/dispatch-voice \\
+        --with-editable %h/Projects/dispatch-voice-kokoro \\
+        -- uvicorn app.main:app --host 0.0.0.0 --port 8765 --no-access-log \\
+           --ws-ping-timeout 60 --ws-max-size 262144
+
+Why: `uv run --offline --with-editable <checkout>` resolves the overlay from
+uv's cache. After an add-on release adds a dependency, a restart before the
+overlay was warmed online exits 2 in 0.1 s ("…not found in the cache") and
+the unit's restart loop would keep the whole family app down. This launcher
+first asks uv to resolve the overlay (offline, importing only the add-on's
+metadata module, ~0.1 s warm); if that works it `exec`s the real command with
+the overlay, otherwise it says why on stderr (the journal) and `exec`s the
+same command WITHOUT the overlay — DisPatch comes up voice-less and
+Settings → Voice explains how to add it back.
+
+Fixed argv only (never a shell), and the final process replaces this one
+(`os.execv`), so systemd's main PID, signals and exit codes are uvicorn's.
+
+    --with-editable PATH   an add-on checkout (repeatable)
+    --probe MODULE         what to import to prove the overlay resolves
+                           (default: dispatch_voice)
+    --uv PATH              the uv binary (default: $UV, then PATH)
+    --dry-run              print the command it would exec, and exit
+    -- ARGV…               the command uv runs (e.g. uvicorn app.main:app …)
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+
+
+def main(argv: list[str]) -> int:
+    if "--" not in argv:
+        print("local-chat-launch: give the command after --", file=sys.stderr)
+        return 2
+    cut = argv.index("--")
+    p = argparse.ArgumentParser(prog="local-chat-launch", add_help=True)
+    p.add_argument("--with-editable", action="append", default=[], dest="editables")
+    p.add_argument("--probe", default="dispatch_voice")
+    p.add_argument("--uv", default=os.environ.get("UV") or shutil.which("uv") or "uv")
+    p.add_argument("--dry-run", action="store_true")
+    opts = p.parse_args(argv[:cut])
+    command = argv[cut + 1:]
+    if not command:
+        print("local-chat-launch: empty command after --", file=sys.stderr)
+        return 2
+    if not opts.probe.replace("_", "").replace(".", "").isalnum():
+        print("local-chat-launch: --probe must be a module name", file=sys.stderr)
+        return 2
+
+    base = [opts.uv, "run", "--quiet", "--offline"]
+    overlay: list[str] = []
+    for path in opts.editables:
+        overlay += ["--with-editable", path]
+
+    chosen = base + overlay + command
+    if overlay:
+        probe = base + overlay + ["python", "-c", f"import {opts.probe}"]
+        try:
+            r = subprocess.run(probe, capture_output=True, text=True, timeout=120, check=False)
+            ok, why = r.returncode == 0, (r.stderr or r.stdout or "").strip()[-600:]
+        except (OSError, subprocess.TimeoutExpired) as e:
+            ok, why = False, f"{type(e).__name__}: {e}"
+        if not ok:
+            print("local-chat-launch: the add-on overlay does not resolve offline — starting "
+                  "DisPatch WITHOUT it (Settings → Voice will say voice chat is absent). "
+                  "Warm it online once: `uv run --with-editable <checkout> python -c "
+                  f"'import {opts.probe}'` in backend/, then restart. uv said: {why}",
+                  file=sys.stderr, flush=True)
+            chosen = base + command
+    if opts.dry_run:
+        print(" ".join(chosen))
+        return 0
+    os.execv(chosen[0] if os.path.isabs(chosen[0]) else shutil.which(chosen[0]) or chosen[0], chosen)
+    return 1          # pragma: no cover - execv does not return
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

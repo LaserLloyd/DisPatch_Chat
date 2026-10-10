@@ -25,10 +25,9 @@ const STATIC = join(HERE, '..', 'static');
 const JS_DIR = join(STATIC, 'js');
 
 const sources = () => {
-  const out = [['index.html', readFileSync(join(STATIC, 'index.html'), 'utf8')],
-    // drive.js lives at the static root but imports js/ modules by ?v= like
-    // any other module — a version split there is the same two-instances bug.
-    ['drive.js', readFileSync(join(STATIC, 'drive.js'), 'utf8')]];
+  // (Until 2.2.0 drive.js lived at the static root and was scanned here too;
+  // voice chat is an add-on now and its files are served from /ext/voice/.)
+  const out = [['index.html', readFileSync(join(STATIC, 'index.html'), 'utf8')]];
   for (const f of readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))) {
     out.push([`js/${f}`, readFileSync(join(JS_DIR, f), 'utf8')]);
   }

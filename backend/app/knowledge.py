@@ -79,6 +79,22 @@ class Hit:
     score: float = 0.0
 
 
+#: The query-embedding budget on a voice turn. A typed turn can afford
+#: ``timeout_s`` (2 s) for better recall; someone listening cannot: the
+#: embedder on the rig unloads after ten idle minutes and takes ~1.7 s to come
+#: back, which would sit in front of the first spoken word. Past this budget
+#: the voice turn searches by keywords only (and the call carries on in the
+#: background, so the embedder is warm for the next turn).
+VOICE_TIMEOUT_S = 0.3
+
+
+def _consume_result(fut: asyncio.Future) -> None:
+    """Retrieve a background embedding's outcome so a failure is never
+    reported as "exception was never retrieved"."""
+    if not fut.cancelled():
+        fut.exception()
+
+
 @dataclass
 class EmbedConfig:
     """Where to get vectors. Any OpenAI-compatible `/embeddings` endpoint."""
@@ -89,6 +105,7 @@ class EmbedConfig:
     timeout_s: float = 2.0          # budget for a QUERY embedding
     batch_timeout_s: float = 120.0  # budget for a background batch
     extra_body: dict = field(default_factory=dict)
+    voice_timeout_s: float = VOICE_TIMEOUT_S   # budget for a VOICE turn's query
 
 
 def parse_front_matter(text: str) -> tuple[dict[str, str], str]:
@@ -217,6 +234,9 @@ class KnowledgeIndex:
         self._vectors: list[tuple[int, list[float]]] | None = None  # cache
         self.last_scan: float = 0.0
         self.last_error: str = ""
+        # A voice turn's query embedding left running past its budget (it
+        # warms a cold embedder for the next turn); see _query_vector.
+        self._warming: asyncio.Future | None = None
 
     # -- storage ----------------------------------------------------------- #
 
@@ -412,21 +432,58 @@ class KnowledgeIndex:
         scored.sort(reverse=True)
         return [cid for _, cid in scored[:k]]
 
-    async def search(self, query: str, *, k: int = 6, budget_chars: int = 6000,
-                     exclude: tuple[str, ...] = (PROFILE_NAME,)) -> list[Hit]:
-        """Best chunks for `query`, within `budget_chars` of text in total."""
-        query = (query or "").strip()
-        if not query:
-            return []
-        qvec: list[float] | None = None
-        if self.embed is not None:
+    async def _query_vector(self, query: str, *, voice: bool) -> list[float] | None:
+        """The query's embedding, or None when it cannot be had in budget.
+
+        Typed turns wait up to ``timeout_s`` (+0.5 s slack). Voice turns wait
+        ``voice_timeout_s`` and no longer; the request is NOT cancelled at
+        that point but left to finish (bounded by ``timeout_s``) so a cold
+        embedder is loading for the next turn. While such a warm-up is still
+        running, the next voice turn does not queue a second request behind
+        it — it goes straight to keywords.
+        """
+        cfg = self.embed
+        if cfg is None:
+            return None
+        text = query[:2000]
+        if not voice:
             try:
-                qvec = (await asyncio.wait_for(
-                    self._embed_texts([query[:2000]], self.embed.timeout_s),
-                    self.embed.timeout_s + 0.5))[0]
+                return (await asyncio.wait_for(
+                    self._embed_texts([text], cfg.timeout_s), cfg.timeout_s + 0.5))[0]
             except Exception as e:      # slow/asleep/misconfigured: keywords only
                 self.last_error = f"query embedding skipped: {str(e)[:160]}"
                 log.debug(self.last_error)
+                return None
+        if self._warming is not None and not self._warming.done():
+            self.last_error = "query embedding skipped: the embedder is still warming up"
+            log.debug(self.last_error)
+            return None
+        task = asyncio.ensure_future(self._embed_texts([text], cfg.timeout_s))
+        task.add_done_callback(_consume_result)
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, cfg.voice_timeout_s))
+        if task in done and not task.cancelled() and task.exception() is None:
+            return task.result()[0]
+        if task not in done:
+            self._warming = task
+            self.last_error = (f"query embedding skipped: over the voice budget "
+                               f"({cfg.voice_timeout_s:.1f}s); keywords only")
+        else:
+            self.last_error = f"query embedding skipped: {str(task.exception())[:160]}"
+        log.debug(self.last_error)
+        return None
+
+    async def search(self, query: str, *, k: int = 6, budget_chars: int = 6000,
+                     exclude: tuple[str, ...] = (PROFILE_NAME,),
+                     voice: bool = False) -> list[Hit]:
+        """Best chunks for `query`, within `budget_chars` of text in total.
+
+        ``voice``: a voice-chat turn — the query embedding gets the voice
+        budget (``EmbedConfig.voice_timeout_s``) and then keywords only.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        qvec = await self._query_vector(query, voice=voice)
 
         def run() -> list[Hit]:
             with self._lock:

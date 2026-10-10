@@ -19,9 +19,9 @@
  */
 export const SOURCE_URL = 'https://github.com/LaserLloyd/DisPatch_Chat';
 
-/** Where dispatch-voice (MIT; cloned voices and the stock voice for Drive
- *  mode) is published. Kept here so every repository URL in the shell lives
- *  in one file; js/drive-settings.js builds its install commands from it. */
+/** Where the voice chat add-on (DisPatch Voice, MIT) is published. Kept here
+ *  so every repository URL in the shell lives in one file; js/voice-absent.js
+ *  builds the Settings → Voice install commands from it. */
 export const VOICE_REPO_URL = 'https://github.com/LaserLloyd/DisPatch_Voice';
 
 /** Kept in step with backend/app/__init__.py `__version__`.
@@ -31,7 +31,7 @@ export const VOICE_REPO_URL = 'https://github.com/LaserLloyd/DisPatch_Voice';
  *  is admin-only by design. frontend/tests/about.test.js fails if the two
  *  numbers drift.
  */
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 
 /** Build the About row for the Device pane.
  *

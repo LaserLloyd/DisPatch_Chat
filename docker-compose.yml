@@ -36,6 +36,8 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
+        # 1 = include the voice chat add-on (DisPatch Voice) in the image.
+        VOICE: ${VOICE:-0}
     container_name: dispatch
     hostname: dispatch
 

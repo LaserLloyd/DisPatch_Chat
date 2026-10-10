@@ -145,12 +145,12 @@
        import graph resolves would add a serial round-trip behind the boot veil.
        English is ALWAYS loaded (it is the per-key fallback), hence en.json here
        and not the active locale — that one is fetched in parallel by init(). -->
-  <link rel="modulepreload" href="/static/js/i18n.js?v=3" />
+  <link rel="modulepreload" href="/static/js/i18n.js?v=4" />
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=97" />
+  <link rel="stylesheet" href="/static/app.css?v=98" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -158,7 +158,7 @@
        ui-theme-base.css: DisPatch keeps its own element layer. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
   <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-compat.css" />
-  <script type="module" src="/static/js/theme.js?v=18"></script>
+  <script type="module" src="/static/js/theme.js?v=19"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -311,10 +311,10 @@
           <span class="model-chip-label" id="ch-modelchip-label"></span>
         </button>
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
-        <!-- Drive mode (hands-free voice, drive.js). Unlocked tier only and
-             only when the server reports voice enabled; main.js unhides it.
-             The server re-checks everything on /ws/voice. -->
-        <button class="icon-btn ghost drive-btn" id="drive-btn" title="Drive mode" aria-label="Drive mode (hands-free voice)" data-i18n-attr="title=chat.drive;aria-label=chat.drive_aria" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 11a7 7 0 0 1-14 0"/><path d="M12 18v3"/></svg></button>
+        <!-- Extension actions (js/ext-sdk.js chatHeader.addAction): an installed
+             add-on puts its header button here — the voice add-on's
+             microphone. Empty and hidden without one; unlocked tier only. -->
+        <span class="chat-actions-ext" id="chat-actions-ext" hidden></span>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking" data-i18n-attr="aria-label=chat.model_chip">
           <div class="mp-row">
@@ -604,22 +604,21 @@
         <div class="clients-job-strip hidden" id="clients-job-strip" aria-live="polite"></div>
       </div>
 
-      <!-- Voice tools (js/voice-tools.js): Voice cloning, Built-in voices and
-           Voice lab, the opt-in builtins of tools.yaml. One native pane for
-           the three, same terminal-view chrome as Clients; main.js opens it
-           (unlocked only, never in Safe Mode) and voice-tools.js fills the
-           body with Settings-style groups. -->
-      <div class="terminal-view voice-tool-view hidden" id="voice-tool-view">
+      <!-- Extension tool pane (js/ext-sdk.js tools.openPane): ONE native pane an
+           installed add-on fills with Settings-style groups (the voice add-on's
+           Voice cloning, Built-in voices and Voice lab). Same terminal-view
+           chrome as Clients; unlocked only, never in Safe Mode. -->
+      <div class="terminal-view ext-tool-view hidden" id="ext-tool-view">
         <header class="terminal-head">
-          <button class="back-btn" id="voice-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
-          <span class="terminal-avatar-mini tool-avatar-mini" id="voice-tool-icon" aria-hidden="true"></span>
+          <button class="back-btn" id="ext-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <span class="terminal-avatar-mini tool-avatar-mini" id="ext-tool-icon" aria-hidden="true"></span>
           <div class="terminal-head-info">
-            <div class="terminal-title" id="voice-tool-title"></div>
-            <div class="muted terminal-subtitle" id="voice-tool-subtitle"></div>
+            <div class="terminal-title" id="ext-tool-title"></div>
+            <div class="muted terminal-subtitle" id="ext-tool-subtitle"></div>
           </div>
         </header>
-        <div class="terminal-body voice-tool-body">
-          <div class="voice-tool-root" id="voice-tool-root"></div>
+        <div class="terminal-body ext-tool-body">
+          <div class="ext-tool-root" id="ext-tool-root"></div>
         </div>
       </div>
 
@@ -702,11 +701,10 @@
         <button class="settings-tab admin-only" id="stab-tools" role="tab" data-tab="tools" aria-selected="false" aria-controls="spane-tools" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="tools.settings_tab">Tools</span></button>
         <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
         <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
-        <!-- Voice (Drive mode): unlocked tier only, and only when the server
-             answers /api/voice/status (the on/off switch lives here, so the
-             tab shows while voice is off too). Starts hidden; main.js
-             applyVoiceTab() shows it and hides it again the moment the device locks. -->
-        <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
+        <!-- Voice: voice chat is an add-on. Always present for an unlocked user
+             (the add-on's own settings when it is installed, otherwise how to
+             add it); hidden in Safe Mode like the other admin tabs. -->
+        <button class="settings-tab admin-only hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
       </div>
 
@@ -844,17 +842,13 @@
         </section>
       </section>
 
-      <!-- ---- Voice: Drive mode (js/drive-settings.js builds the groups). On
-           top, the on/off switch (server-wide, off on a fresh install). While
-           voice is off or not ready the pane shows only the switch and what
-           turning it on needs; once it works: voice, listening, replies, this
-           device. The advanced pieces (Voice cloning, Built-in voices, Voice
-           lab) are opt-in tools, #voice-tool-view; "Manage voices" links to
-           Voice cloning only while that tool is on. Moved here from the
-           Device tab 2026-10-10. ---- -->
+      <!-- ---- Voice. The voice chat add-on (DisPatch Voice) renders its own
+           settings into #ext-pane-voice once it is mounted (js/ext-sdk.js
+           settings.pane); until then js/voice-absent.js explains what voice chat
+           is and exactly how to add it (absent / incompatible / failed /
+           disabled). ---- -->
       <section class="settings-pane hidden" id="spane-voice" role="tabpanel" aria-labelledby="stab-voice" tabindex="0">
-        <p class="muted modal-hint" data-i18n="settings.voice_hint">How Drive mode listens and speaks. The switch, the voice and its speed are shared by everyone on this server; everything else applies to this device only.</p>
-        <div class="drive-settings" id="dev-group-voice" hidden></div>
+        <div class="ext-pane" id="ext-pane-voice"></div>
       </section>
 
       <!-- ---- Security & PIN ---- -->
@@ -1234,6 +1228,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=124"></script>
+  <script type="module" src="/static/js/main.js?v=125"></script>
 </body>
 </html>

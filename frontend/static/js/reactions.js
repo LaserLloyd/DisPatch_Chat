@@ -22,7 +22,7 @@
 
 import { api } from './api.js?v=32';
 import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
-import { t } from './i18n.js?v=3';
+import { t } from './i18n.js?v=4';
 import { nimEnabled } from './nim.js?v=5';
 
 // ===================== State =====================

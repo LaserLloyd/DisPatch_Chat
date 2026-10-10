@@ -4,8 +4,8 @@
 
 import { api, setOnLocked } from './api.js?v=32';
 import { ChatSocket } from './ws.js?v=9';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=33';
-import { installChecklists, applyChecklistState } from './checklist.js?v=10';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
+import { installChecklists, applyChecklistState } from './checklist.js?v=11';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -14,28 +14,32 @@ import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loa
 import {
   t, tHtml, init as i18nInit, onChange as onI18nChange, languageSelect, localeLoadFailed, hasDictionary,
   relTime, clockTime, dayLabel, dayKey, fileSize,
-  n as fmtNumber, percent as fmtPercent,
-} from './i18n.js?v=3';
+  n as fmtNumber, percent as fmtPercent, mergeBundle, removeBundle, lang as i18nLang,
+} from './i18n.js?v=4';
 import {
   initReactions, loadReactions, resetReactions, handleReactionFrame, handlePoolFrame,
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=23';
+} from './reactions.js?v=24';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=10';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=11';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=7';
+} from './llm.js?v=8';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
-import { initDrive } from '../drive.js?v=6';
-import { mountDriveSettings, voiceTabState, botVoicePill, voiceStatus, patchVoiceSettings, MIC_ICON } from './drive-settings.js?v=4';
-// Drive mode's advanced pieces as opt-in tools (Voice cloning, Built-in
-// voices, Voice lab). The Voices manager (voices.js) is mounted by it.
-import { mountVoiceTool, unmountVoiceTool, VOICE_TOOLS } from './voice-tools.js?v=1';
+// Extensions (docs/extensions.md): installed add-ons — voice chat is the
+// DisPatch Voice add-on — mounted into the shell by the loader, through the
+// SDK's frozen shell object. With none installed, Settings → Voice explains
+// how to add it (voice-absent.js).
+import { createLoader, createPaneHost } from './extensions.js?v=1';
+import {
+  EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
+} from './ext-sdk.js?v=1';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -48,19 +52,19 @@ import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
-  onHost, toolOpen, findTool, toolTitle, toolGlyph,
-} from './tools.js?v=11';
+  onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
+} from './tools.js?v=12';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp } from './app-sdk.js?v=1';
+import { forApp, api as appApi } from './app-sdk.js?v=1';
 import { renderLinkRail, linksSection } from './links.js?v=7';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=5';
-import { aboutRow } from './about.js?v=6';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
+import { aboutRow } from './about.js?v=7';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
-import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=1';
+import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=2';
@@ -234,8 +238,8 @@ const dom = {};
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
  'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-voice', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
- // Drive mode (voice): the header button, the Settings → Voice tab and its body.
- 'drive-btn', 'stab-voice', 'dev-group-voice',
+ // Extensions: the chat-header action slot, the Settings → Voice tab and its body.
+ 'chat-actions-ext', 'stab-voice', 'ext-pane-voice',
  // Locked-side one-way drop
  'drop-btn', 'drop-backdrop', 'drop-close', 'drop-list', 'drop-input',
  'drop-more', 'drop-done',
@@ -281,9 +285,9 @@ const dom = {};
  // Clients tab pane
  'clients-view', 'clients-back', 'clients-subtitle', 'clients-tabnav', 'clients-root',
  'clients-job-strip',
- // Voice tools pane (Voice cloning / Built-in voices / Voice lab)
- 'voice-tool-view', 'voice-tool-back', 'voice-tool-icon', 'voice-tool-title',
- 'voice-tool-subtitle', 'voice-tool-root',
+ // An extension's tool pane (shell.tools.openPane — the voice add-on's tools)
+ 'ext-tool-view', 'ext-tool-back', 'ext-tool-icon', 'ext-tool-title',
+ 'ext-tool-subtitle', 'ext-tool-root',
  // Locked-mode dedicated unlock button
  'unlock-btn',
 ].forEach((id) => { dom[id] = $(id); });
@@ -735,8 +739,8 @@ window.addEventListener('popstate', (e) => {
   // Landed on a viewer entry with no viewer open: a stale one left behind by
   // a framed page's own navigations. Step over it instead of painting "bots".
   if (e.state?.viewer) { if (!viewerOpen()) history.back(); return; }
-  // Same for a Drive-mode entry with no Drive view open (forward into it).
-  if (e.state?.drive) { if (!document.body.classList.contains('drive-open')) history.back(); return; }
+  // An extension's entry (its overlay pushed one): js handles it below.
+  if (e.state?.ext) return;
   // An entry left by a screen that no longer exists (an old app build's own
   // view name) lands on the root instead of on nothing.
   const v = e.state?.view;
@@ -908,7 +912,7 @@ function builtinOn(feature) {
   if (feature === 'studioforge') return !!state.studioforgeEnabled;
   if (feature === 'mail') return !!state.mailEnabled;
   if (feature === 'practice') return !!state.clientsEnabled;
-  if (VOICE_FEATURES.has(feature)) return voiceToolOn(feature);
+  if (isExtFeature(feature)) return extToolOn(feature);
   return false;
 }
 
@@ -1210,6 +1214,7 @@ function clearChatView() {
   state.activeThreadId = null;
   state.activeThread = null;
   syncAppHook();
+  emitThreadChange(null);
   state.messages = [];
   state.hasMoreOlder = false;
   clearAttachments();
@@ -1282,7 +1287,7 @@ function renderChatHeader() {
   dom['thread-menu-btn'].hidden = false;
   renderModelChip();
   syncAppHook();
-  refreshDrive();
+  emitThreadChange(th);
   // A popout window titles itself after its conversation, so several of them
   // are tellable apart in the task bar / window switcher.
   if (POPOUT) document.title = `${threadTitle(th)} — ${bot ? bot.name : 'DisPatch Chat'}`;
@@ -4063,10 +4068,10 @@ function syncLockNimRow() {
 // deactivation hangs off a MutationObserver on the backdrop rather than being
 // sprinkled through the seven places that hide it.
 const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'tools', 'theme', 'device', 'voice', 'security'];
-// The four that live behind the PIN (Tools joined 2026-09-25). `admin-only` in the markup is the class;
-// this is the list applyAuthChrome() walks. Voice is unlocked-only too, but it
-// also depends on the server (is voice installed?), so applyVoiceTab() owns it.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'tools'];
+// The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
+// voice chat is unlocked-only, and so is the page explaining how to add it).
+// `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'tools', 'voice'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
@@ -4083,6 +4088,7 @@ function settingsOpen(id = null) {
 function deactivateSettingsTab() {
   if (settingsTab === 'health') unmountDashboard();
   if (settingsTab === 'reactions') unmountReactionManager();
+  if (settingsTab === 'voice' && voicePaneHost) voicePaneHost.hide();
 }
 
 /** Bring `id` on screen: swap the tablist state, swap the panes, swap the
@@ -4162,10 +4168,9 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       syncMinimalAvatarRow();
       break;
     case 'voice':
-      // Paint from what we have, then re-read the status: models downloaded
-      // (or a voice added elsewhere) since the last probe should show here.
-      renderDriveSettings();
-      refreshVoiceStatus();
+      // The voice add-on's own pane when it is mounted; otherwise the page
+      // that says how to add it, from a fresh read of /api/extensions.
+      showVoiceTab();
       break;
     case 'security':
       activateSecurityPane();
@@ -4243,7 +4248,6 @@ async function openBotManager(tab = 'bots') {
   } catch (e) { toast(e.message, true); return; }
   bmDirty = false;
   renderBotManager();
-  renderDriveSettings();        // its "who uses the default" line reads bmBots
   refreshAvatarPoolPanel();     // async; fills in the Avatar pools section
   dom['botmanager-backdrop'].classList.remove('hidden');
   // After the reveal: setSettingsTab mounts panes, and a pane that measures
@@ -4369,11 +4373,17 @@ function renderBotManager() {
         renderSidebar();
       },
     });
-    // Drive mode voice (unlocked, voice on, never for a Safe-Mode bot — those
-    // cannot open Drive at all). Waits for Save like its neighbours.
-    const voicePill = (voiceOn && voiceSt && !bot.safe && !state.decoy)
-      ? botVoicePill(bot, voiceSt, (v) => { bmBots[idx].voice = v; bmBots[idx]._voiceDirty = true; bmDirty = true; })
-      : null;
+    // Extensions' per-bot controls (the voice add-on's Voice pill): unlocked
+    // only, never for a Safe-Mode bot. A change waits for Save like its
+    // neighbours, and only the extension-owned fields can be set this way.
+    const extras = state.decoy ? [] : botRowExtrasFor(bmBots[idx], (patch) => {
+      for (const [k, v] of Object.entries(patch || {})) {
+        if (!EXT_BOT_FIELDS.includes(k) || typeof v !== 'string') continue;
+        bmBots[idx][k] = v;
+        (bmBots[idx]._extDirty ||= new Set()).add(k);
+        bmDirty = true;
+      }
+    });
     const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx } }, [
       el('span', { class: 'bm-handle', text: '⠿' }),
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
@@ -4382,7 +4392,7 @@ function renderBotManager() {
       safeBtn,
       rxBtn,
       apBtn,
-      voicePill,
+      ...extras,
       mbBtn,
       // "Change photo" is omitted entirely in No-Image Mode — not disabled,
       // omitted. Offering to set a picture on a device that will not display
@@ -4511,13 +4521,15 @@ async function saveBotManager() {
       id: b.id, order: i, visible: b.visible, safe: !!b.safe, reactions: !!b.reactions,
       avatar_pool: !!b.avatar_pool,
     };
-    // Only a voice the user actually changed: an absent key leaves it alone.
-    if (b._voiceDirty) item.voice = b.voice || '';
+    // Only an extension field the user actually changed: an absent key leaves
+    // it alone (and without the add-on the server accepts only "" or the
+    // stored value, so nothing here can break a save).
+    for (const f of (b._extDirty || [])) item[f] = b[f] || '';
     return item;
   });
   try {
     const r = await api.saveOrder(payload);
-    voiceBots = r.bots.slice();            // keeps `voice` current for Drive
+    for (const b of bmBots) delete b._extDirty;
     state.bots = r.bots.filter((b) => b.visible);
     const selectedHidden = !botById(state.selectedBotId);
     const activeBotHidden = state.activeThread && !botById(state.activeThread.bot_id);
@@ -5029,7 +5041,7 @@ function closeToolPanes(except) {
   if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
   if (mailOpen && except !== 'mail') closeMailView();
   if (clientsOpen && except !== 'clients') closeClientsView();
-  if (voiceToolOpen && except !== 'voicetool') closeVoiceToolView();
+  if (extToolOpen && except !== 'exttool') closeExtToolView();
 }
 
 function openHarnessView() {
@@ -6781,8 +6793,8 @@ function modalFocusables(root) {
 }
 function focusIntoModal(backdrop) {
   const foci = modalFocusables(backdrop);
-  // A modal opened straight onto a tab (Settings → Voice from the Drive quick
-  // sheet, → Device from the palette) lands on THAT tab, the roving tabindex's
+  // A modal opened straight onto a tab (Settings → Voice from the voice chat
+  // quick sheet, → Device from the palette) lands on THAT tab, the roving tabindex's
   // one stop. Focusing the first tab instead also scrolled the phone's tab
   // strip back to its start, hiding the tab that had just been opened.
   const activeTab = foci.find((f) => f.getAttribute('role') === 'tab' && f.getAttribute('aria-selected') === 'true');
@@ -6915,9 +6927,6 @@ function wireEvents() {
       studioforge: openStudioForgeView,
       mail: openMailView,
       practice: openClientsPanel,
-      voice_cloning: () => openVoiceToolView('voice-cloning'),
-      voice_builtin: () => openVoiceToolView('voice-builtin'),
-      voice_lab: () => openVoiceToolView('voice-lab'),
     },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
@@ -6951,10 +6960,8 @@ function wireEvents() {
         refreshMailFeature();
         refreshClientsFeature();
       });
-      // A voice tool switched on/off: the rail (builtinOn) and Settings →
-      // Voice's "Manage voices" row follow the new list.
-      refreshVoiceStatus({ force: true });
-      if (voiceToolOpen && !voiceToolOn(VOICE_TOOLS[voiceToolOpen])) leaveToolPanes();
+      // An extension's tool switched off while its pane is open: close it.
+      if (extToolOpen && !extToolStillOn(extToolOpen.id)) leaveToolPanes();
     },
   });
 
@@ -7214,244 +7221,337 @@ function applyAuthChrome() {
   // every tier change, so a pin that Safe Mode may not have disappears the
   // moment the device locks rather than lingering as a dead button.
   renderPins();
-  // Drive mode follows the tier: probe the server when unlocked, close any
-  // open Drive view and hide the button the moment the device locks.
-  probeVoice();
+  // Extensions follow the tier: mounted while unlocked, unmounted (and every
+  // slot they filled emptied) the moment the device locks.
+  syncExtensions();
 }
 
-// ===================== Drive mode (voice) =====================
-// drive.js owns the overlay, the mic and the /ws/voice socket. This is only
-// the wiring: is voice on (server says so, unlocked tier), which thread, which
-// bot. A locked device never asks — /api/voice is unlocked-only server-side.
-//
-// Voice is optional (2026-10-10): Settings → Voice opens with an on/off
-// switch (server-wide, off on a fresh install). Off = no Drive button, and
-// the tab shows only the switch and what turning it on needs. The advanced
-// pieces are opt-in tools (js/voice-tools.js), opened below like Clients.
-let drive = null;
-let voiceOn = false;
-let voiceTab = 'none';       // voiceTabState(): 'none' | 'forced' | 'off' | 'setup' | 'on'
-let voiceProbe = null;
-let voiceSt = null;          // the last /api/voice/status (unlocked tier only)
-let voiceBots = [];          // /api/bots/all (carries `voice`), fetched once voice is on
+// ===================== Extensions =====================
+// Installed add-ons (docs/extensions.md). The loader (js/extensions.js) mounts
+// each one's frontend through its own frozen shell (js/ext-sdk.js); this is
+// the shell's implementation: the slots an add-on may fill, and the Voice
+// tab, which shows the voice add-on's own pane once it is mounted and
+// js/voice-absent.js (what voice chat is, how to add it) until then.
+// Everything here is unlocked-only: a locked device never asks the server
+// and never mounts anything (the server 403s /api/extensions and /ext/ too).
 
-function refreshDrive() {
-  if (!dom['drive-btn']) return;
-  if (!drive) {
-    drive = initDrive(dom['drive-btn'], {
-      getThread: () => (voiceOn ? state.activeThread : null),
-      // `voice` is an admin-only field: the sidebar roster never has it, the
-      // Settings copy (bmBots) only once Settings was opened, so voice-on
-      // fetches /api/bots/all itself (voiceBots). The quick sheet's Voice row
-      // reads bot.voice to say "this bot speaks with its own voice" — without
-      // this it claimed the default voice applied when it did not.
-      getBot: (id) => [...bmBots, ...voiceBots].find((b) => b.id === id && typeof b.voice === 'string') || botById(id) || null,
-      isLocked: () => state.decoy || !voiceOn,
-      toast,
-      // The Drive hero is the thread's own face — the one the chat header
-      // shows — or a letter when No-Image Mode is on (never an <img> then).
-      getAvatar: (thread, bot) => ({
-        src: (bot && !nimEnabled()) ? (threadFaceUrl(thread) || bot.avatar_url || '') : '',
-        letter: botLetter(bot),
-      }),
-      voiceStatus: () => voiceSt,
-      openDriveSettings: () => openDriveSettings(),
-    });
+/** Bot fields an extension may set from its Bots-tab control (F.5). */
+const EXT_BOT_FIELDS = ['voice', 'voice_rp'];
+const MIC_ICON = [
+  'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z',
+  'M19 11a7 7 0 0 1-14 0',
+  'M12 18v3',
+];
+
+// Pane id -> its host (js/extensions.js createPaneHost). The Voice tab is the
+// one pane an extension may take over; until it does, the absent page shows.
+let voicePaneHost = null;
+function paneHost(id) {
+  if (id !== 'voice') return null;
+  if (!voicePaneHost && dom['ext-pane-voice']) {
+    voicePaneHost = createPaneHost(dom['ext-pane-voice'], () => paintVoiceAbsent());
   }
-  drive.refresh();
+  return voicePaneHost;
+}
+const botRowExtras = [];            // { owner, fn }
+const extHistory = [];              // { seq, onBack, active }
+let extHistorySeq = 0;
+let extToolOpen = null;             // { id, owner, title, subtitle, iconPaths, render }
+const extTileIds = new Set();       // tool ids extensions registered rail tiles for
+let voiceCheck = { busy: false, notYet: false };
+
+const extLoader = createLoader({
+  EXT_API,
+  fetchJson: (path) => appApi(path),
+  importModule: (url) => import(url),
+  loadStyle,
+  mergeBundle,
+  removeBundle,
+  lang: () => i18nLang(),
+  features: () => state.auth.features || {},
+  isLocked: () => !!state.decoy,
+  shellFor: (id) => createShell(id),
+  disposeExtension,
+  emitLocale,
+  onChange: () => renderVoicePane(),
+});
+
+/** Is the extension tool with this feature switched on (tools.yaml) and
+ *  installed (its probe) for this session? */
+function extToolOn(feature) {
+  if (state.decoy) return false;
+  const row = findToolByFeature(feature);
+  return !!(row && row.enabled === true && row.available !== false);
 }
 
-/** Settings → Voice (the Drive quick sheet's "All Drive settings"). */
-async function openDriveSettings() {
-  if (state.decoy) return;
-  if (!settingsOpen()) await openBotManager('voice');
-  else await setSettingsTab('voice');
-}
-
-/** Show the Settings → Voice tab whenever the server answers the voice
- *  status (the switch lives there, so it shows while voice is off too),
- *  never on a locked device. Leaving the tab while it disappears lands on
- *  Device, its neighbour. */
-function applyVoiceTab() {
-  const b = dom['stab-voice'];
-  if (!b) return;
-  const show = !state.decoy && voiceTab !== 'none';
-  b.classList.toggle('hidden', !show);
-  if (!show) {
-    // Same rule as the admin tabs: never leave the modal parked on a tab that
-    // is gone, open or not (the next open would otherwise start there).
-    if (settingsTab === 'voice') setSettingsTab(state.decoy ? 'bots' : 'device');
+function findToolByFeature(feature) {
+  for (const id of extTileIds) {
+    const row = findTool(id);
+    if (row && row.builtin_feature === feature) return row;
   }
-  updateTabStripEdges();
+  return null;
 }
 
-/** The Voice cloning tool is switched on (tools.yaml) AND installed, so
- *  Settings → Voice may offer "Manage voices". */
-function cloningToolReady() {
-  const row = findTool('voice-cloning');
-  return !!(row && row.enabled === true && voiceSt && voiceSt.plugins
-    && voiceSt.plugins.cloning && voiceSt.plugins.cloning.ready);
+function extToolStillOn(id) {
+  const row = findTool(id);
+  return !row || row.kind !== 'builtin' || (row.enabled === true && row.available !== false);
 }
 
-/** Save the switch. True on success; the tab and Drive follow the fresh status. */
-async function setVoiceEnabled(on) {
-  try {
-    await patchVoiceSettings({ enabled: on });
-  } catch (e) {
-    toast(e && e.status === 409 ? t('drive.switch_forced_error') : t('drive.err_save'), true);
-    return false;
+/** Mount (unlocked) or unmount (locked) every extension. */
+function syncExtensions() {
+  if (state.decoy || !state.started) {
+    if (state.decoy) {
+      emitLocked();
+      extLoader.unmountAll();
+      closeExtToolView();
+    }
+    renderVoicePane();
+    return;
   }
-  toast(on ? t('drive.switched_on') : t('drive.switched_off'));
-  if (!on && drive && drive.close) drive.close();
-  await refreshVoiceStatus({ force: true });
-  return true;
+  extLoader.refresh().catch(() => {});
 }
 
-/** (Re)build Settings → Voice from the last voice status. */
-function renderDriveSettings() {
-  const g = dom['dev-group-voice'];
-  if (!g) return;
-  applyVoiceTab();
-  if (state.decoy || voiceTab === 'none') { g.replaceChildren(); g.hidden = true; return; }
-  g.hidden = false;
-  mountDriveSettings(g, {
-    status: voiceSt,
-    bots: () => (bmBots.length ? bmBots : state.bots),
-    setEnabled: setVoiceEnabled,
-    cloning: cloningToolReady(),
-    openCloning: async () => {
-      if (settingsOpen()) await closeBotManager();
-      if (settingsOpen()) return;          // "keep editing" won the discard prompt
-      openTool('voice-cloning');
-    },
-    toast,
+/** The Voice tab came on screen. */
+function showVoiceTab() {
+  const host = paneHost('voice');
+  if (!host) return;
+  host.show();
+  if (host.owned()) return;
+  // A fresh read every time the tab opens: the add-on may have been
+  // installed (and DisPatch restarted) since the last look.
+  extLoader.refresh({ force: true }).catch(() => {}).finally(renderVoicePane);
+}
+
+/** Paint the absent page into the Voice pane — unless the add-on owns it. */
+function renderVoicePane() {
+  const host = paneHost('voice');
+  if (host) host.showAbsent();
+}
+
+function paintVoiceAbsent() {
+  const root = dom['ext-pane-voice'];
+  if (!root) return;
+  if (state.decoy) { root.replaceChildren(); return; }
+  const snap = extLoader.snapshot();
+  const cl = snap.client.get('voice');
+  const info = voiceState(snap.list, snap.mode,
+    cl && (cl.state === 'failed' || cl.state === 'incompatible') ? cl : null);
+  renderVoiceAbsent(root, info, {
+    busy: voiceCheck.busy, notYet: voiceCheck.notYet,
+    clientDetail: cl && cl.detail,
+    onCheckAgain: checkVoiceAgain,
   });
 }
 
-/** Re-read the voice status after a change (switch, voices, tools). */
-function refreshVoiceStatus({ force = false } = {}) {
-  if (state.decoy) return Promise.resolve();
-  return voiceStatus().then((st) => {
-    if (state.decoy) return;           // locked while the request was out
-    // Unchanged: keep the rows as they are (a focused control) rather than
-    // rebuilding them under the user's finger.
-    if (!force) { try { if (voiceSt && JSON.stringify(st) === JSON.stringify(voiceSt)) return; } catch { /* rebuild */ } }
-    applyVoiceStatus(st);
-  }).catch(() => {});
+/** "Check again": re-read /api/extensions and mount the add-on without a
+ *  reload (after the operator installed it and restarted DisPatch). */
+async function checkVoiceAgain() {
+  if (voiceCheck.busy) return;
+  voiceCheck = { busy: true, notYet: false };
+  renderVoicePane();
+  try {
+    state.auth.features = null;          // the count may have changed
+    await ensureFeatures();
+    await extLoader.refresh({ force: true });
+  } catch { /* the page says what it can */ }
+  voiceCheck = { busy: false, notYet: !extLoader.isMounted('voice') };
+  renderVoicePane();
 }
 
-function applyVoiceStatus(st) {
-  const was = voiceOn;
-  voiceSt = st;
-  voiceTab = state.decoy ? 'none' : voiceTabState(st);
-  voiceOn = !state.decoy && !!(st && st.enabled);
-  // voice.css also styles Settings → Voice and the voice tools.
-  if (voiceTab !== 'none') loadStyle('/static/voice.css?v=4');
-  renderDriveSettings();
-  if (was !== voiceOn) {
-    // Voice came on since the probe: Drive needs the admin roster too.
-    if (voiceOn) api.allBots().then((r) => { voiceBots = (r.bots || []).slice(); refreshDrive(); }).catch(() => {});
-    if (!voiceOn && drive && drive.close) drive.close();
-    refreshDrive();
-  }
-  renderToolRail();
-}
 
-function probeVoice() {
-  if (state.decoy) {
-    voiceOn = false;
-    voiceTab = 'none';
-    voiceSt = null;
-    if (drive && drive.close) drive.close();
-    renderDriveSettings();             // hides the Voice tab and empties its pane
-    refreshDrive();
-    return;
-  }
-  if (voiceProbe) return;
-  voiceProbe = voiceStatus()
-    .then((st) => { if (!state.decoy) applyVoiceStatus(st); })
-    .catch(() => { voiceOn = false; voiceTab = 'none'; voiceSt = null; renderDriveSettings(); })
-    .finally(() => { voiceProbe = null; refreshDrive(); });
-}
+// ---- The shell's implementation (js/ext-sdk.js installShell) ----
 
-// ===================== Voice tools =====================
-// The three opt-in builtins (tools.yaml `voice-cloning`, `voice-builtin`,
-// `voice-lab`): one native pane, #voice-tool-view, whose body
-// js/voice-tools.js fills. Same chrome and rules as the Clients pane: unlocked
-// only, never in Safe Mode, `tool-full` on <body> while open. A tool is on
-// when its row says so; the pane itself explains a missing package.
-let voiceToolOpen = null;    // the open voice tool's id, or null
-const VOICE_FEATURES = new Set(Object.values(VOICE_TOOLS));
-
-/** Is the voice tool with this feature switched on for this session? */
-function voiceToolOn(feature) {
-  if (state.decoy) return false;
-  const id = Object.keys(VOICE_TOOLS).find((k) => VOICE_TOOLS[k] === feature);
-  const row = id ? findTool(id) : null;
-  return !!(row && row.enabled === true);
-}
-
-function voiceToolCtx() {
-  return {
-    toast,
-    confirm: uiConfirm,
-    prompt: uiPrompt,
-    onChanged: () => { refreshVoiceStatus(); },
-    openVoiceSettings: () => { openDriveSettings(); },
+function addHeaderAction(owner, node, { before = 'thread-menu-btn' } = {}) {
+  const slot = dom['chat-actions-ext'];
+  if (!slot || !(node instanceof Node)) return () => {};
+  void before;   // one slot today, placed before #thread-menu-btn in the markup
+  node.dataset.extOwner = owner || '';
+  slot.append(node);
+  slot.hidden = false;
+  return () => {
+    node.remove();
+    slot.hidden = !slot.childElementCount;
   };
 }
 
-function paintVoiceToolHead(id) {
-  const tool = findTool(id) || { id, kind: 'builtin', builtin_feature: VOICE_TOOLS[id] };
-  dom['voice-tool-title'].textContent = toolTitle(tool);
-  dom['voice-tool-subtitle'].textContent = t(id === 'voice-cloning' ? 'vtools.cloning_sub'
-    : id === 'voice-builtin' ? 'vtools.builtin_sub' : 'vtools.lab_sub');
-  dom['voice-tool-icon'].replaceChildren(toolGlyph(tool));
-  return tool;
+function extSettingsPane(owner, id, spec = {}) {
+  const host = paneHost(id);
+  if (!host) throw new Error(`settings.pane: no extension pane "${id}"`);
+  if (host.owned() && host.ownerId() !== owner) throw new Error(`settings.pane: "${id}" is taken`);
+  return host.claim(owner, spec);
 }
 
-function openVoiceToolView(id) {
-  if (state.decoy || !voiceToolOn(VOICE_TOOLS[id])) return;
-  closeToolPanes('voicetool');
+function botRowExtra(owner, fn) {
+  if (typeof fn !== 'function') return () => {};
+  const entry = { owner, fn };
+  botRowExtras.push(entry);
+  if (settingsOpen('bots')) renderBotManager();
+  return () => {
+    const i = botRowExtras.indexOf(entry);
+    if (i >= 0) botRowExtras.splice(i, 1);
+    if (settingsOpen('bots')) renderBotManager();
+  };
+}
+
+function botRowExtrasFor(bot, onChange) {
+  if (!bot || bot.safe) return [];
+  const out = [];
+  for (const { fn } of botRowExtras) {
+    try {
+      const node = fn({ ...bot }, onChange);
+      if (node instanceof Node) out.push(node);
+    } catch (e) { console.warn('[ext] bots.rowExtra failed', e); }
+  }
+  return out;
+}
+
+function registerTools(owner, tiles) {
+  const dispose = registerExtTiles(owner, tiles);
+  const ids = (Array.isArray(tiles) ? tiles : []).map((x) => x.id);
+  ids.forEach((id) => extTileIds.add(id));
+  renderToolRail();
+  return () => {
+    dispose();
+    ids.forEach((id) => extTileIds.delete(id));
+    if (extToolOpen && ids.includes(extToolOpen.id)) leaveToolPanes();
+    renderToolRail();
+  };
+}
+
+function openToolPane(owner, { id, title, subtitle, iconPaths, render, onClose } = {}) {
+  if (state.decoy || typeof render !== 'function') return () => {};
+  closeToolPanes('exttool');
   rememberPrev();   // before the selection changes: ✕ in a later tool lands here
-  state.selectedBotId = id;
-  voiceToolOpen = id;
+  // `onClose` (optional, amendment T7a-2): told whenever the shell closes the
+  // pane for any reason — back, ✕, another tool, lock — so a tool can stop
+  // its recording or its poll.
+  const entry = { id: String(id || ''), owner, title, subtitle, iconPaths, render,
+                  onClose: typeof onClose === 'function' ? onClose : null };
+  extToolOpen = entry;
+  if (findTool(entry.id)) state.selectedBotId = entry.id;
   renderSidebar();
-  const tool = paintVoiceToolHead(id);
-  // The thread column (phone Chats tab) shows the same placeholder a tool gets.
-  dom['tl-botname'].textContent = toolTitle(tool);
+  paintExtToolHead(entry);
+  dom['tl-botname'].textContent = String(title || '');
   dom['tl-model'].textContent = t('tools.session_panel_title');
   dom['threads'].replaceChildren(el('div', { class: 'empty-list terminal-session-note' }, [
-    el('div', { class: 'empty-emoji' }, [toolGlyph(tool)]),
+    el('div', { class: 'empty-emoji' }, [extToolGlyph(entry)]),
     el('p', { text: t('tools.session_panel_body') }),
   ]));
-  dom['voice-tool-view'].classList.remove('hidden');
+  dom['ext-tool-view'].classList.remove('hidden');
   document.body.classList.add('tool-full');
   if (isMobile()) navigate('chat');
-  loadStyle('/static/voice.css?v=4');
-  dom['voice-tool-root'].scrollTop = 0;
-  mountVoiceTool(dom['voice-tool-root'], id, voiceToolCtx());
+  dom['ext-tool-root'].scrollTop = 0;
+  dom['ext-tool-root'].replaceChildren();
+  try { render(dom['ext-tool-root']); } catch (e) { console.warn('[ext] tool pane render failed', e); }
+  return () => { if (extToolOpen === entry) leaveToolPanes(); };
 }
 
-function closeVoiceToolView() {
-  voiceToolOpen = null;
-  unmountVoiceTool();
+function extToolGlyph(entry) {
+  const tool = findTool(entry.id);
+  if (tool) return toolGlyph(tool);
+  return railIcon(Array.isArray(entry.iconPaths) && entry.iconPaths.length ? entry.iconPaths : RAIL_ICONS.tools);
+}
+
+function paintExtToolHead(entry) {
+  dom['ext-tool-title'].textContent = String(entry.title || '');
+  dom['ext-tool-subtitle'].textContent = String(entry.subtitle || '');
+  dom['ext-tool-icon'].replaceChildren(extToolGlyph(entry));
+}
+
+function closeExtToolView() {
+  if (!extToolOpen) return;
+  const entry = extToolOpen;
+  extToolOpen = null;
   document.body.classList.remove('tool-full');
-  dom['voice-tool-view'].classList.add('hidden');
-  dom['voice-tool-root'].replaceChildren();
+  dom['ext-tool-view'].classList.add('hidden');
+  dom['ext-tool-root'].replaceChildren();
+  if (entry.onClose) {
+    try { entry.onClose(); } catch (e) { console.warn('[ext] tool pane onClose failed', e); }
+  }
 }
 
-/** Language change: the pane's words are built in JS, so rebuild them. */
-function repaintVoiceTool() {
-  if (!voiceToolOpen) return;
-  paintVoiceToolHead(voiceToolOpen);
-  mountVoiceTool(dom['voice-tool-root'], voiceToolOpen, voiceToolCtx());
+function wireExtToolView() {
+  if (!dom['ext-tool-view']) return;
+  dom['ext-tool-back'].addEventListener('click', () => leaveToolPanes());
 }
 
-function wireVoiceToolView() {
-  if (!dom['voice-tool-view']) return;
-  dom['voice-tool-back'].addEventListener('click', () => leaveToolPanes());
+function historyPush(owner, tag, onBack) {
+  const entry = { seq: ++extHistorySeq, onBack, active: true, owner };
+  history.pushState({ ...(history.state || {}), ext: String(tag || owner || 'ext'), extSeq: entry.seq }, '');
+  extHistory.push(entry);
+  return () => {
+    if (!entry.active) return;
+    entry.active = false;
+    const i = extHistory.indexOf(entry);
+    if (i >= 0) extHistory.splice(i, 1);
+    if (history.state && history.state.extSeq === entry.seq) history.back();
+  };
 }
+
+// Back (any width): the newest active extension entry that is no longer the
+// current history entry was popped — tell its owner. Landing FORWARD onto a
+// stale extension entry (its overlay is long closed) steps back over it.
+window.addEventListener('popstate', (e) => {
+  const cur = e.state && e.state.extSeq;
+  for (let i = extHistory.length - 1; i >= 0; i--) {
+    const entry = extHistory[i];
+    if (entry.seq === cur) break;
+    if (entry.seq > (cur || 0)) {
+      extHistory.splice(i, 1);
+      entry.active = false;
+      try { entry.onBack && entry.onBack(); } catch (err) { console.warn('[ext] onBack failed', err); }
+    }
+  }
+  if (cur && !extHistory.some((x) => x.seq === cur)) history.back();
+});
+
+// Settings opened OVER an extension's overlay (voice chat's "All settings…")
+// takes a history entry of its own, so the phone's Back closes Settings and
+// leaves the overlay — and its call — alone (amendment T7a-2). Back routes to
+// the topmost entry only; with no overlay open Settings adds no entry, as
+// before.
+let settingsHistoryPop = null;
+function syncSettingsHistory() {
+  const open = !!dom['botmanager-backdrop'] && !dom['botmanager-backdrop'].classList.contains('hidden');
+  if (open && !settingsHistoryPop && extHistory.some((x) => x.active && x.owner)) {
+    settingsHistoryPop = historyPush(null, 'settings', async () => {
+      settingsHistoryPop = null;
+      await closeBotManager();
+      // Kept open (unsaved edits, "Keep editing"): the entry comes back.
+      syncSettingsHistory();
+    });
+  } else if (!open && settingsHistoryPop) {
+    const pop = settingsHistoryPop;
+    settingsHistoryPop = null;
+    pop();
+  }
+}
+if (dom['botmanager-backdrop']) {
+  new MutationObserver(syncSettingsHistory)
+    .observe(dom['botmanager-backdrop'], { attributes: true, attributeFilter: ['class'] });
+}
+
+installShell({
+  isMobile: () => isMobile(),
+  activeThread: () => state.activeThread || null,
+  bots: () => state.bots.slice(),
+  botById: (id) => botById(id) || null,
+  allBots: () => api.allBots().then((r) => (r && r.bots) || []),
+  isLocked: () => !!state.decoy,
+  features: () => ({ ...(state.auth.features || {}) }),
+  threadFace: (thread, bot) => ({
+    src: (bot && !nimEnabled()) ? (threadFaceUrl(thread) || bot.avatar_url || '') : '',
+    letter: botLetter(bot),
+  }),
+  toast: (text, isError) => toast(text, isError),
+  confirm: (text) => uiConfirm(text),
+  prompt: (text, def) => uiPrompt(text, def),
+  navigate: (view) => navigate(view),
+  openSettings: (id) => openSettingsTab(id),
+  closeSettings: () => { if (settingsOpen()) closeBotManager(); },
+  addHeaderAction, settingsPane: extSettingsPane, botRowExtra, registerTools, openToolPane,
+  historyPush,
+});
 
 // Draw the pinned settings onto the rail. Kept as one call site so every
 // path that changes a pinned setting, pins one, or crosses the lock boundary
@@ -8205,6 +8305,9 @@ async function startApp() {
       // The app rows are in now: a thread already on screen that belongs to
       // an app's bot gets its name and its hook.
       if (state.activeThread) renderChatHeader();
+      // The feature inventory is in: mount the installed extensions (their
+      // tiles join the rail, so before a #tool= deep link resolves).
+      await extLoader.refresh().catch(() => {});
       if (!state.decoy) openFromHash();
     });
   } else {
@@ -8860,13 +8963,16 @@ function reRenderForLocale() {
   if (open('botmanager-backdrop')) {
     renderBotManager();
     if (settingsTab === 'device') mountLanguagePicker();
-    if (settingsTab === 'voice') renderDriveSettings();
+    if (settingsTab === 'voice') renderVoicePane();
     if (settingsTab === 'security') renderSecurityStrings();
     // The Health pane is built inside dashboard.js (same story as the Reaction
     // Manager): nothing in `dom` describes its labels, so it repaints itself.
     if (settingsTab === 'health') repaintDashboard();
   }
-  if (voiceToolOpen) repaintVoiceTool();
+  // Extensions: re-merge their strings for the new language, then let each
+  // repaint what it built; the Voice tab's absent page is ours to repaint.
+  extLoader.onLanguage(i18nLang()).catch(() => {});
+  if (extToolOpen) paintExtToolHead(extToolOpen);
   if (open('companions-backdrop')) renderCompanions();
   if (open('fileserver-backdrop')) renderFileServer();
   // The Reaction Manager's contents are built inside reactions.js, so nothing
@@ -8932,7 +9038,7 @@ async function init() {
   wireStudioForgeView();      // sister: studioforge-back button. same regression. wired here so neither pane is read-only.
   wireMailView();
   wireClientsView();
-  wireVoiceToolView();
+  wireExtToolView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
