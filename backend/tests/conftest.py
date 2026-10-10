@@ -11,6 +11,13 @@ import pytest
 # app.voice.routes.prewarm() themselves.
 os.environ.setdefault("DISPATCH_VOICE_PREWARM", "0")
 
+# Importing app.main mounts the installed extensions at IMPORT time, before any
+# fixture can redirect config.DATA_DIR: the extension host's crash-loop marker
+# (<data>/ext/.booting) must never be written by a test run — with the voice
+# add-on installed it would land in the real data directory and count a "failed
+# start" there. Tests that exercise the marker turn it on themselves.
+os.environ.setdefault("DISPATCH_EXT_BOOT_MARKER", "0")
+
 from app import config as config_module
 from app import openclaw
 

@@ -212,7 +212,9 @@
     "feedback_reason_too_long": "Too long",
     "feedback_reason_off_topic": "Off topic",
     "feedback_reason_tone": "Tone",
-    "feedback_reason_other": "Other"
+    "feedback_reason_other": "Other",
+    "not_heard": "Not heard in voice chat",
+    "voice_cut": "Cut off in voice chat"
   },
   "progress": {
     "hint_show": "show work ▸",

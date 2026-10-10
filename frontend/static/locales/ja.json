@@ -210,7 +210,9 @@
     "feedback_reason_too_long": "長すぎる",
     "feedback_reason_off_topic": "話題がずれている",
     "feedback_reason_tone": "口調",
-    "feedback_reason_other": "その他"
+    "feedback_reason_other": "その他",
+    "not_heard": "音声チャットでは聞かれていません",
+    "voice_cut": "音声チャットで途中で止められました"
   },
   "progress": {
     "hint_show": "途中経過を表示 ▸",

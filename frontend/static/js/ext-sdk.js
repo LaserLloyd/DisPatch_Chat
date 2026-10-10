@@ -21,6 +21,8 @@
 //   tools.register([{ id, feature, iconPaths, nameKey, ariaKey, open }]) → dispose()
 //   tools.openPane({ id, title, subtitle, iconPaths, render, onClose })   → close()
 //   history.push(tag, onBack)                           → pop()
+//   activity()                                          the person is using the app
+//                                                        (re-arms the idle auto-lock)
 //
 // Additive growth never bumps EXT_API (an extension feature-tests with
 // `'x' in shell`); a removed or changed member does. Additions so far
@@ -28,6 +30,11 @@
 // open chat; `onThreadChange` is the same function under its first name),
 // `settings.close()`, `tools.openPane({ onClose })`, and history entries that
 // stack — Settings opened over an extension's overlay takes its own Back.
+// 2.2.0 (amendment FINAL-FIX-3): `activity()` — an extension whose use makes no
+// touches (a voice chat) tells the shell the person is active, so the idle
+// auto-lock does not lock the device mid-conversation. It only re-arms the
+// timer the shell already runs: it never unlocks, never extends a lapsed server
+// session, and does nothing on a locked or remembered device.
 //
 // main.js installs the implementations once (installShell). Each extension gets
 // its OWN frozen shell (createShell(id)) so everything it registered can be
@@ -149,6 +156,8 @@ export function createShell(owner = null) {
     }),
     tools: Object.freeze({ register: own('registerTools'), openPane: own('openToolPane') }),
     history: Object.freeze({ push: own('historyPush') }),
+    // activity
+    activity: () => { if (impl && typeof impl.activity === 'function') impl.activity(); },
   });
 }
 

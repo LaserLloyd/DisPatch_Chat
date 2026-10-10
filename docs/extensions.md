@@ -60,7 +60,16 @@ release instead (`…DisPatch_Voice@v1.0.0`).
 **A service that starts DisPatch with `uv run`** (the systemd units in
 [deploy-bare-metal.md](deploy-bare-metal.md) do): add the add-on to that line
 instead — `uv sync` then leaves it alone, and an editable checkout is live on
-the next restart:
+the next restart. That is also its risk: **point the overlay at a release
+checkout that nobody develops in**, never at the checkout you work in —
+whatever is in that folder goes live at the next restart, and a dependency a
+work-in-progress adds makes the offline overlay fail to resolve:
+
+```bash
+git -C /path/to/DisPatch_Voice worktree add --detach /path/to/voice-release v1.0.0
+# a later release: git -C /path/to/voice-release checkout --detach v1.1.0, warm, restart
+```
+
 
 ```bash
 uv run --offline --with-editable /path/to/DisPatch_Voice \
@@ -80,17 +89,24 @@ Two flags are load-bearing:
   never needs more, and the chat's own `/ws` never sends more than a
   65,536-character message (≤ 196 KB of UTF-8), so nothing legitimate is cut.
 
-Optional belt: `scripts/local-chat-launch` runs that line, but first checks
-that the overlay resolves offline and, when it does not, starts DisPatch
-**without** it (and says why in the journal) — a cold cache then costs voice
-chat, not the app:
+**Recommended service command:** `scripts/local-chat-launch` runs that line,
+but first proves, in a throwaway process, that the overlay resolves offline and
+that the add-on's host package and its native libraries import (numpy,
+onnxruntime). When that fails — a cold cache, a broken wheel, even a native
+crash of the probe — it starts DisPatch **without** the add-on and says why in
+the journal: voice chat is lost, the app is not.
 
 ```
 WorkingDirectory=/path/to/dispatch/backend
-ExecStart=/path/to/dispatch/scripts/local-chat-launch \
-    --with-editable /path/to/DisPatch_Voice -- \
-    uvicorn app.main:app --host 0.0.0.0 --port 8765 --no-access-log --ws-max-size 262144
+ExecStart=/path/to/dispatch/scripts/local-chat-launch --uv /path/to/uv \
+    --with-editable /path/to/voice-release -- \
+    uvicorn app.main:app --host 0.0.0.0 --port 8765 --no-access-log \
+    --ws-ping-timeout 60 --ws-max-size 262144
 ```
+
+`--ws-ping-timeout 60` lets a 20–60 s cellular stall be judged by voice chat's
+own heartbeat rules instead of uvicorn's 20 s keepalive. `dispatch-voice doctor
+--unit <unit>` checks the add-on with the unit's own settings.
 
 **Docker**: build the image with the add-on, then fetch the models into the
 data volume (they are never baked into the image):
@@ -119,7 +135,12 @@ add-on's own model directory (`DISPATCH_VOICE_MODELS`).
 Restart the service, open **Settings → Voice** and press **Check again** (or
 just reload). The add-on's own settings replace the install page; turn voice
 chat on there. The journal shows `ext voice: DisPatch Voice 1.x.y ok (api 1)`,
-and `curl -s 127.0.0.1:8765/api/extensions` lists `voice` as `ok`.
+and `curl -s 127.0.0.1:8765/api/extensions` lists `voice` as `ok` (loopback is
+the machine tier for that one route). `/api/voice/*` is operator-only: with a
+PIN set, `curl` it with an unlocked session's cookie, e.g.
+`curl -s -c jar -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json'
+-d '{"pin":"…"}' 127.0.0.1:8765/api/auth/unlock` and then `curl -s -b jar
+127.0.0.1:8765/api/voice/status`.
 
 ### Optional: Kokoro built-in voices
 
@@ -208,7 +229,11 @@ home directory shown as `~`. `GET /api/auth/status` carries
 ## Writing an extension: the backend
 
 `setup(ctx)` runs once, synchronously, during startup. Registration methods
-work only inside it (the context is sealed afterwards).
+work only inside it (the context is sealed afterwards). **Keep it fast**: it
+only registers things — load models and warm caches in
+`on_startup(fn, thread=True)`. A `setup` that has not returned after 60 s is
+abandoned (the extension is `failed`, its routes rolled back, its context
+sealed so a late registration raises) and DisPatch boots without it.
 
 ```python
 def setup(ctx):
@@ -225,7 +250,10 @@ def setup(ctx):
 **Context** (`app/extensions.py ExtensionContext`): `api_version`,
 `app_version`, `ext_id`, `log` (`local-chat.ext.<id>`), `env` (only the names
 you declared), `bots` (`get(id)` / `all()` → `BotView {id, name, safe, voice,
-voice_rp, backend}` — never a provider block), `paths` (`ExtPaths`: your files
+voice_rp, backend, owner, has_persona}` — never a provider block or a prompt;
+`owner` is how an advisor's persona names its user, `has_persona` is False for
+an API bot on DisPatch's default system prompt and None for a gateway agent;
+both added in 2.2.0, read them with `getattr`), `paths` (`ExtPaths`: your files
 by name — `voice_yaml`, `acks_yaml`, `voices_dir`, `cache_dir`, `models_dir`,
 and `state_dir` = `<data>/ext/<id>/`, 0700 — never the data directory itself),
 `db()`, `is_operator(request)`, `require_operator(request)`,
@@ -237,7 +265,13 @@ and `state_dir` = `<data>/ext/<id>/`, 0700 — never the data directory itself),
 unlocked session, or anyone when no PIN exists — never Safe Mode, never the
 machine-inbound tier), the prefix joins the Safe-Mode block list and is kept
 off the machine-inbound surface, and `body_limits` (exact path → bytes) are
-enforced from `Content-Length` before the body is read. A router carrying any
+enforced from `Content-Length` before the body is read. A request that can
+change something (anything but GET, HEAD and OPTIONS) must also come from
+DisPatch's own page: a present `Origin` must equal the `Host` and
+`Sec-Fetch-Site` must not be `cross-site` or `same-site` — else 403 "cross-origin
+request refused". A raw-body or multipart POST is a CORS "simple" request a page
+on another port of the same host name could otherwise send with the unlocked
+cookie. A router carrying any
 websocket route, `Mount` or plain Starlette `Route` is refused (`ValueError` →
 `failed`): those take no dependencies, so the operator check could not run on
 them. Static files go through `serve_static`.
@@ -248,8 +282,8 @@ never downloads a byte), only `js mjs css json map wasm onnx wav mp3 ogg png
 jpg webp woff2` (anything else — HTML, SVG and XML documents in particular —
 is a 404: an extension renders into the shell's DOM and never ships a page),
 `X-Content-Type-Options: nosniff`, a deny-all CSP, a strong ETag, `no-cache`
-— and `immutable` for a year when the request's `?v=` equals the current
-assets hash. Locale bundles live at `<static>/locales/<lang>.json`.
+— and `private, immutable` for a year when the request's `?v=` equals the
+current assets hash. Locale bundles live at `<static>/locales/<lang>.json`.
 
 **The thread websocket** — `thread_websocket(name, handler, max_per_session=2,
 max_total=3)` mounts `/ws/<name>/{thread_id}` (the name is your id or starts
@@ -261,7 +295,9 @@ socket **not yet accepted**:
 3. the thread exists and its bot is not a Safe-Mode bot — else **1008** before accept;
 4. at most `max_total` open sockets under the name — beyond it
    accept-then-**1013** "Voice is busy on this server (3 chats open)" (a
-   session that already holds one is never "busy": its oldest is replaced);
+   session that already holds one is never "busy": its oldest is replaced;
+   the replacement is counted before the old socket's eviction is awaited, so
+   another session's handshake meanwhile still sees the cap);
 5. at most `max_per_session` per session (per `?d=` device id without a PIN):
    the oldest is closed **4001** "replaced". Its `on_replaced` callbacks get
    up to 1 s to run before the new socket reaches your handler; the close
@@ -386,7 +422,10 @@ spelled `onThreadChange`), `api(path, {method, body, query,
 signal})` (same-origin JSON; `DecoyError` on a Safe-Mode 403),
 `activeThread()`, `bots()`, `botById(id)`, `allBots()`, `isLocked()`,
 `language()`, `features()`, `threadFace(thread, bot)` (honours No-Image Mode),
-`toast`, `confirm`, `prompt`, `navigate`, and the slots:
+`toast`, `confirm`, `prompt`, `navigate`, `activity()` (2.2.0: the person is
+using the app — re-arms the idle auto-lock the way a touch does; call it while
+your feature is in use without touches, e.g. a voice chat; it never unlocks
+anything and does nothing on a locked or remembered device), and the slots:
 
 | Slot | What it does |
 |---|---|
@@ -424,8 +463,17 @@ Every gate stays in DisPatch; an extension only ever receives what passed it.
 - Static: an asset-type allowlist, no documents, `nosniff`, a deny-all CSP.
 - Data: the context exposes `BotView`s and named paths — never provider blocks,
   API keys or the data directory holding `security.yaml`.
-- Boot: a failing extension is a state with its routes rolled back; the shell
-  never fails to start because of one.
+- HTTP writes: an extension route that can change something refuses a
+  cross-origin browser request (Origin ≠ Host, or `Sec-Fetch-Site` cross-site /
+  same-site), so another service on the same host name cannot drive it with the
+  unlocked cookie.
+- Boot: a failing extension is a state with its routes rolled back; a `setup`
+  that hangs is abandoned after 60 s; the shell never fails to start because of
+  one. A start-up that never settles (a native crash or a hang killed by the
+  service manager while extensions load or warm up) is counted in
+  `<data>/ext/.booting`; after two in a row DisPatch starts **without**
+  extensions, Settings → Voice says why, and the next restart after DisPatch has
+  run for a minute (or stopped cleanly) tries them again.
 
 ## Versioning
 

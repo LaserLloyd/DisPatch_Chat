@@ -38,7 +38,8 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost } from './extensions.js?v=1';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=1';
+} from './ext-sdk.js?v=2';
+import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -1881,8 +1882,17 @@ function messageEl(msg) {
       // server-stamped metadata, not the body (see advisor.js), so what you
       // read is exactly what Send approves.
       const handoffMd = handoffBodyMarkdown(msg);
-      bubble.innerHTML = renderMarkdown(handoffMd ?? (msg.content || ''), mdOpts);
-      enhanceContent(bubble, { noLocal: state.decoy });
+      // A reply the listener talked over in a voice chat shows what they never
+      // heard, muted behind a mic-off mark (js/voice-heard.js, SPEC §4.8).
+      const drewVoice = handoffMd == null && renderVoiceHeard(bubble, msg.content || '', msg.metadata, {
+        render: (md) => renderMarkdown(md, mdOpts),
+        enhance: (node) => enhanceContent(node, { noLocal: state.decoy }),
+        el, railIcon, t,
+      });
+      if (!drewVoice) {
+        bubble.innerHTML = renderMarkdown(handoffMd ?? (msg.content || ''), mdOpts);
+        enhanceContent(bubble, { noLocal: state.decoy });
+      }
       // ...plus its state and, while it is still a proposal, Send / Dismiss.
       const handoff = handoffStripEl(msg, {
         decoy: state.decoy,
@@ -7551,6 +7561,10 @@ installShell({
   closeSettings: () => { if (settingsOpen()) closeBotManager(); },
   addHeaderAction, settingsPane: extSettingsPane, botRowExtra, registerTools, openToolPane,
   historyPush,
+  // An extension whose use makes no touches (a voice chat) keeps the idle
+  // auto-lock from firing mid-conversation; bumpIdle's own rules apply (only
+  // while unlocked, never on a remembered device, throttled to once per 5 s).
+  activity: () => bumpIdle(),
 });
 
 // Draw the pinned settings onto the rail. Kept as one call site so every

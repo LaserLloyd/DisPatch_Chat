@@ -619,11 +619,15 @@ class Bot:
         if not self.avatar:
             return ""
         # mtime cache-buster so a re-uploaded avatar replaces the cached one.
+        # A named file that is not there (the "default.png" a roster entry
+        # without an avatar gets, an app bot's face that ships nowhere) is the
+        # same as no picture: "" and the letter block, never a URL that 404s
+        # on every render.
         try:
             v = int((AVATAR_DIR / self.avatar).stat().st_mtime)
-            return f"/static/avatars/{self.avatar}?v={v}"
         except OSError:
-            return f"/static/avatars/{self.avatar}"
+            return ""
+        return f"/static/avatars/{self.avatar}?v={v}"
 
     def to_dict(self) -> dict:
         """The public bot record. Reachable by a Safe-Mode session, so it

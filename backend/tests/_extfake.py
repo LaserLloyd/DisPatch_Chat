@@ -43,6 +43,7 @@ class Knobs:
     max_total: int = 3
     max_per_session: int = 2
     async_setup: bool = False
+    block_setup: threading.Event | None = None   # setup() waits on it (a hung setup)
     with_tools: bool = True
     handler_mode: str = "echo"          # echo | unavailable | hold | noaccept | slow_replaced
     ctx: Any = None
@@ -111,6 +112,9 @@ async def handler(ws, sock) -> None:
 
 
 def setup(ctx) -> None:
+    if KNOBS.block_setup is not None:
+        KNOBS.block_setup.wait(10)
+        return                               # "hung", then gave up quietly (the host moved on)
     if KNOBS.async_setup:
         async def nope():
             return None

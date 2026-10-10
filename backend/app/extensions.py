@@ -110,7 +110,9 @@ STATIC_TYPES: dict[str, str] = {
 }
 STATIC_MAX_BYTES = 64 * 1024 * 1024
 STATIC_CSP = "default-src 'none'; frame-ancestors 'self'"
-CACHE_IMMUTABLE = "public, max-age=31536000, immutable"
+#: ``private``: an operator-only resource is never for a shared cache, even
+#: though the content is the public add-on (FR-hardening I1).
+CACHE_IMMUTABLE = "private, max-age=31536000, immutable"
 
 #: WebSocket close codes the gate uses (the same ones /ws and the 2.1 voice
 #: route used, so a client needs no new vocabulary).
@@ -118,6 +120,23 @@ POLICY = 1008
 UNAVAILABLE = 1013
 REPLACED = 4001
 INTERNAL = 1011
+
+#: ``setup(ctx)`` only registers things (slow work belongs in
+#: ``on_startup(thread=True)``). One that has not returned after this long is
+#: abandoned — the extension is ``failed``, its routes rolled back, its context
+#: sealed so a late registration raises — and DisPatch boots without it
+#: (FR-hardening L4: a 20 s setup delayed the boot 23 s; a real hang would never
+#: have bound the port, and systemd does not restart a live process).
+SETUP_TIMEOUT_S = 60.0
+#: ``<data>/ext/.booting`` counts start-ups that never got going: written before
+#: the extensions load, removed by a clean shutdown or after SETTLE_S of uptime.
+#: A native crash (segfault, abort, the OOM killer) during an extension's import,
+#: setup or start-up prewarm leaves it behind; at BOOT_FAILS_MAX the next start
+#: mounts NO extension, so a crash loop ends with DisPatch up and Settings › Voice
+#: saying why. A restart after the box has settled tries the extensions again.
+BOOT_MARKER = ".booting"
+BOOT_FAILS_MAX = 2
+SETTLE_S = 60.0
 
 #: subscribe_frames: per-subscriber queue bound (overflow drops the oldest).
 FRAME_QUEUE_MAX = 256
@@ -167,6 +186,15 @@ class BotView:
     voice: str
     voice_rp: str
     backend: Backend | None
+    #: Additive (2.2.0, amendment FINAL-FIX-1; an extension reads them with
+    #: ``getattr``): how the bot's persona names the person it talks to (an
+    #: advisor's ``owner``; "" when DisPatch does not know) …
+    owner: str = ""
+    #: … and whether the bot has a persona of its own: False for an API bot on
+    #: DisPatch's default system prompt, True for an API bot with its own prompt
+    #: and for an advisor, None for a gateway agent (its persona lives in the
+    #: agent runtime, which DisPatch cannot see).
+    has_persona: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -216,13 +244,29 @@ def bot_backend_of(bot) -> Backend | None:
     return "gateway"
 
 
+def _persona_facts(bot, backend: Backend | None) -> tuple[str, bool | None]:
+    """(owner, has_persona) for :class:`BotView` — names and a flag only, never
+    the prompt text or a provider block."""
+    if backend == "advisor":
+        conf = getattr(bot, "advisor", None)
+        owner = str(conf.get("owner") or "").strip() if isinstance(conf, dict) else ""
+        return owner[:40], True
+    if backend == "api":
+        api = getattr(bot, "api", None)
+        prompt = str(api.get("system_prompt") or "").strip() if isinstance(api, dict) else ""
+        return "", bool(prompt)
+    return "", None
+
+
 def bot_view(bot) -> BotView | None:
     if bot is None:
         return None
+    backend = bot_backend_of(bot)
+    owner, has_persona = _persona_facts(bot, backend)
     return BotView(id=bot.id, name=bot.name, safe=bool(bot.safe),
                    voice=str(getattr(bot, "voice", "") or ""),
                    voice_rp=str(getattr(bot, "voice_rp", "") or ""),
-                   backend=bot_backend_of(bot))
+                   backend=backend, owner=owner, has_persona=has_persona)
 
 
 class BotRegistryView:
@@ -673,9 +717,27 @@ def _static_files(root: Path, *, all_types: bool = False) -> list[tuple[str, Pat
     return out
 
 
+#: Methods a browser may send cross-site without a preflight are only these
+#: "safe" ones when the route is a pure read; everything else is checked below.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
 def require_operator(request: Request) -> None:
     """The dependency on every extension route: a live PIN session, or anyone
-    when no PIN exists. Never Safe Mode, never the machine-inbound tier."""
+    when no PIN exists. Never Safe Mode, never the machine-inbound tier.
+
+    For every method that can change something (POST, PUT, PATCH, DELETE) a
+    browser request must also come from DisPatch's own page: a present Origin
+    must equal the Host — the same rule as the websocket gate — and
+    ``Sec-Fetch-Site`` must not say ``cross-site`` or ``same-site``. A raw-body or
+    multipart POST is a CORS "simple" request that a page on another port of the
+    same host name sends with the unlocked cookie and no preflight (FR-hardening
+    L1: a cross-origin ``POST /api/voice/lab/test`` loaded the speech models).
+    Non-browser callers send neither header and are judged by the session alone."""
+    if request.method not in SAFE_METHODS:
+        if not origin_ok(request.headers) or \
+                request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site"):
+            raise HTTPException(403, "cross-origin request refused")
     if not tools._is_operator(request):
         raise HTTPException(403, "Unlock for full access")
 
@@ -835,7 +897,7 @@ def load_one(app: FastAPI, cand: Candidate) -> Extension:
     ctx = ExtensionContext(ext, app, env)
     before = list(app.router.routes)
     try:
-        res = setup(ctx)
+        res = _run_setup(setup, ctx, SETUP_TIMEOUT_S)
         if inspect.isawaitable(res):
             with contextlib.suppress(Exception):
                 res.close()                  # type: ignore[union-attr]
@@ -858,6 +920,73 @@ def load_one(app: FastAPI, cand: Candidate) -> Extension:
     ext.detail = ""
     log.info("ext %s: %s %s ok (api %d)", ext.id, ext.name, ext.version, EXT_API)
     return ext
+
+
+def _run_setup(setup: Callable[[Any], Any], ctx: ExtensionContext, timeout: float) -> Any:
+    """``setup(ctx)`` on a daemon thread, joined for at most ``timeout`` seconds.
+    A setup still running then is abandoned: the context is sealed (a late
+    registration raises inside that thread) and TimeoutError goes to the caller,
+    which rolls back and marks the extension failed. Whatever it raised is
+    re-raised here, KeyboardInterrupt/SystemExit included."""
+    box: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            box["res"] = setup(ctx)
+        except BaseException as e:            # handed to the caller as is
+            box["exc"] = e
+
+    t = threading.Thread(target=run, name=f"ext-{ctx.ext_id}-setup", daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        ctx._sealed = True
+        raise TimeoutError(f"setup(ctx) did not return within {timeout:.0f} s "
+                           "(slow work belongs in on_startup(thread=True))")
+    if "exc" in box:
+        raise box["exc"]
+    return box.get("res")
+
+
+def _boot_marker_on() -> bool:
+    """``DISPATCH_EXT_BOOT_MARKER=0`` turns the crash-loop breaker off (the test
+    suite does: it imports the app with no data directory of its own)."""
+    return os.environ.get("DISPATCH_EXT_BOOT_MARKER", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def _boot_marker() -> Path:
+    return Path(config.DATA_DIR) / "ext" / BOOT_MARKER
+
+
+def boot_fails() -> int:
+    """How many start-ups in a row never settled (0 when the marker is absent)."""
+    if not _boot_marker_on():
+        return 0
+    try:
+        return max(0, int(_boot_marker().read_text().strip() or 0))
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_boot_marker(n: int) -> None:
+    if not _boot_marker_on():
+        return
+    p = _boot_marker()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(p.parent, 0o700)
+        p.write_text(f"{n}\n")
+    except OSError:
+        log.warning("ext: cannot write %s (the crash-loop breaker is off this run)", p)
+
+
+def clear_boot_marker() -> None:
+    """This start settled (or shut down cleanly): it does not count as a failure."""
+    if not _boot_marker_on():
+        return
+    with contextlib.suppress(OSError):
+        _boot_marker().unlink()
 
 
 def _reset_registrations(ext: Extension) -> None:
@@ -900,6 +1029,24 @@ def mount_all(app: FastAPI, hooks: Hooks) -> list[Extension]:
     for row in disabled:
         _register(row)
         out.append(row)
+    fails = boot_fails() if cands else 0
+    if cands and fails >= BOOT_FAILS_MAX:
+        # The last starts died before they settled (FR-hardening L4): keep the
+        # family app up without extensions this time. The marker stays until
+        # this start settles, so a restart after that tries them again.
+        log.error("ext: DisPatch failed to start %d times in a row with its extensions loaded; "
+                  "starting WITHOUT them this time (see the log above that crash). "
+                  "Restart DisPatch once it is up to try them again.", fails)
+        for c in cands:
+            ext = Extension(id=_guess_id(c), source=c.source, state="failed",
+                            detail=("Not loaded: DisPatch failed to start twice in a row with it "
+                                    "(a crash or hang during start-up; see the server log). "
+                                    "Restart DisPatch to try again."))
+            _register(ext)
+            out.append(ext)
+        return out
+    if cands:
+        _write_boot_marker(fails + 1)
     for c in cands:
         ext = load_one(app, c)
         _register(ext)
@@ -934,7 +1081,12 @@ def unload_all(app: FastAPI | None = None) -> None:
 
 async def run_startup() -> None:
     """Lifespan start: each extension's on_startup hooks. A raising hook is
-    logged; ``thread=True`` runs it on a daemon thread, never awaited."""
+    logged; ``thread=True`` runs it on a daemon thread, never awaited. After
+    SETTLE_S of uptime this start no longer counts towards the crash-loop
+    breaker (a prewarm that crashes the process natively does, within it)."""
+    if _boot_marker_on() and _boot_marker().exists():
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().call_later(SETTLE_S, clear_boot_marker)
     for e in _ok():
         for fn, in_thread in e.startup:
             if in_thread:
@@ -959,6 +1111,7 @@ def _safe_call(ext_id: str, fn: Callable[[], Any]) -> None:
 
 
 async def run_shutdown() -> None:
+    clear_boot_marker()                  # a clean stop is not a crash
     for e in _ok():
         for fn in e.shutdown:
             try:
@@ -1303,12 +1456,15 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             ws, UNAVAILABLE,
             f"{name.capitalize()} is busy on this server ({spec.max_total} chats open)")
         return
+    # Take the older sockets out of the count AND count this one with no await
+    # in between: the eviction below yields for up to EVICT_CALLBACK_WAIT_S, and
+    # another session's handshake landing in that window must see the cap as it
+    # will be — not one short (FR-hardening L2: 3 open with max_total 2).
+    evicted: list[_Slot] = []
     while slots and (len(slots) >= spec.max_per_session
                      or _open_total.get(name, 0) >= spec.max_total):
-        old = slots.pop(0)
+        evicted.append(slots.pop(0))
         _open_total[name] = max(0, _open_total.get(name, 0) - 1)
-        log.info("ext: /ws/%s/ — a newer socket of the same session replaces an older one", name)
-        await _evict_detached(old)
     me = _Slot(ws)
     slots.append(me)
     _open_total[name] = _open_total.get(name, 0) + 1
@@ -1324,6 +1480,11 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
         on_replaced=me.replaced.append)
     try:
+        # Inside the try: a handshake cancelled mid-eviction (shutdown) still
+        # gives its slot back in the finally below.
+        for old in evicted:
+            log.info("ext: /ws/%s/ — a newer socket of the same session replaces an older one", name)
+            await _evict_detached(old)
         await spec.handler(ws, sock)
         if getattr(ws, "client_state", None) == WebSocketState.CONNECTING:
             # The handler returned without accepting (review T1 L4): a close

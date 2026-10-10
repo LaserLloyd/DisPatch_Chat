@@ -214,7 +214,9 @@
     "feedback_reason_too_long": "Trop longue",
     "feedback_reason_off_topic": "Hors sujet",
     "feedback_reason_tone": "Ton",
-    "feedback_reason_other": "Autre"
+    "feedback_reason_other": "Autre",
+    "not_heard": "Non entendu dans le chat vocal",
+    "voice_cut": "Coupé dans le chat vocal"
   },
   "progress": {
     "hint_show": "voir le travail ▸",

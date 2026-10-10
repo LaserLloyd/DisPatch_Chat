@@ -210,7 +210,9 @@
     "feedback_reason_too_long": "太长",
     "feedback_reason_off_topic": "偏离主题",
     "feedback_reason_tone": "语气",
-    "feedback_reason_other": "其他"
+    "feedback_reason_other": "其他",
+    "not_heard": "语音聊天中未听到",
+    "voice_cut": "在语音聊天中被打断"
   },
   "progress": {
     "hint_show": "显示过程 ▸",

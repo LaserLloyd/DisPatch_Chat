@@ -212,7 +212,9 @@
     "feedback_reason_too_long": "Zu lang",
     "feedback_reason_off_topic": "Nicht zum Thema",
     "feedback_reason_tone": "Tonfall",
-    "feedback_reason_other": "Sonstiges"
+    "feedback_reason_other": "Sonstiges",
+    "not_heard": "Im Sprachchat nicht gehört",
+    "voice_cut": "Im Sprachchat unterbrochen"
   },
   "progress": {
     "hint_show": "Arbeit zeigen ▸",

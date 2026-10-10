@@ -359,3 +359,87 @@ def test_a_65536_char_cjk_send_passes_under_the_unit_frame_cap(live_server):
         with pytest.raises(ConnectionClosed) as e:
             ws.recv(timeout=10)
         assert e.value.rcvd is not None and e.value.rcvd.code == 1009
+
+
+# --------------------------------------------------------------------------- #
+# The global cap while an eviction is in flight (FR-hardening L2)
+# --------------------------------------------------------------------------- #
+
+
+def test_max_total_holds_while_a_replacement_is_evicting(monkeypatch):
+    """The gate used to take the old socket out of the count, then await its
+    eviction (up to 1 s), and only then count the new one: another session's
+    handshake landing in that window was admitted — 3 open with max_total 2."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from starlette.websockets import WebSocketState
+
+    from app import extensions as X
+
+    class WS:
+        def __init__(self, dev):
+            self.headers = {"origin": "http://h", "host": "h"}
+            self.cookies = {}
+            self.query_params = {"d": dev}
+            self.client_state = WebSocketState.CONNECTING
+            self.closed = None
+
+        async def accept(self):
+            self.client_state = WebSocketState.CONNECTED
+
+        async def close(self, code=1000, reason=None):
+            self.closed = (code, reason)
+            self.client_state = WebSocketState.DISCONNECTED
+
+    release = None
+    admitted = []
+
+    async def handler(ws, sock):
+        async def slow_replaced():
+            await asyncio.sleep(0.6)             # the old session winds down
+        sock.on_replaced(slow_replaced)
+        await ws.accept()
+        admitted.append(ws)
+        await release.wait()
+
+    spec = X._WsSpec("voice", "voice", handler, max_per_session=1, max_total=2)
+    monkeypatch.setattr(X, "websocket_spec", lambda name: spec)
+    monkeypatch.setattr(X.auth, "load", lambda: SimpleNamespace(pin_set=False))
+    monkeypatch.setattr(X.config, "get_bot", lambda bid: SimpleNamespace(id="b", name="B", safe=False, voice="",
+                                                                       voice_rp="", advisor=None, api=None))
+
+    class DB:
+        async def get_thread(self, tid):
+            return SimpleNamespace(id=tid, bot_id="b")
+
+    monkeypatch.setattr(X, "_hooks", X.Hooks(db=lambda: DB()))
+    X._slots.clear()
+    X._open_total.clear()
+
+    async def scenario():
+        nonlocal release
+        release = asyncio.Event()
+        a1, b1, a2, c1 = WS("device-aaaa"), WS("device-bbbb"), WS("device-aaaa"), WS("device-cccc")
+        tasks = [asyncio.create_task(X.thread_websocket_endpoint(a1, "voice", "t1")),
+                 asyncio.create_task(X.thread_websocket_endpoint(b1, "voice", "t1"))]
+        await asyncio.sleep(0.05)
+        assert X._open_total["voice"] == 2
+        tasks.append(asyncio.create_task(X.thread_websocket_endpoint(a2, "voice", "t1")))   # evicts a1
+        await asyncio.sleep(0.1)                                                       # mid-eviction
+        tasks.append(asyncio.create_task(X.thread_websocket_endpoint(c1, "voice", "t1")))
+        await asyncio.sleep(0.1)
+        assert c1.closed is not None and c1.closed[0] == X.UNAVAILABLE, c1.closed
+        assert "busy" in c1.closed[1]
+        assert X._open_total["voice"] <= 2
+        await asyncio.sleep(0.8)                                                       # eviction done
+        assert X._open_total["voice"] == 2 and a2 in admitted and c1 not in admitted
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 5)
+        assert X._open_total.get("voice", 0) == 0
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        X._slots.clear()
+        X._open_total.clear()

@@ -348,3 +348,18 @@ test('main.js implements the optional T7a-2 members: closeSettings, openPane onC
   assert.match(src, /extHistory\.some\(\(x\) => x\.active && x\.owner\)/);
   assert.match(src, /new MutationObserver\(syncSettingsHistory\)/);
 });
+
+test('activity() (2.2.0, amendment FINAL-FIX-3) re-arms the shell idle lock and is a no-op without one', dom, withDom(async () => {
+  const sdk = await import(`../static/js/ext-sdk.js?t=${Math.random()}`);
+  const shell = sdk.createShell('voice');
+  assert.equal(typeof shell.activity, 'function');
+  assert.doesNotThrow(() => shell.activity(), 'no implementation installed yet: nothing happens');
+  let n = 0;
+  sdk.installShell({ activity: () => { n += 1; } });
+  shell.activity();
+  shell.activity();
+  assert.equal(n, 2);
+  // main.js wires it to the idle timer, with bumpIdle's own rules.
+  const src = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
+  assert.match(src, /activity: \(\) => bumpIdle\(\),/);
+}));

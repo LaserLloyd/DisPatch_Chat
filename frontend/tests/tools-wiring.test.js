@@ -207,9 +207,12 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v148 (2.2.0: voice chat is an add-on)', () => {
+test('the sw.js CACHE is local-chat-v149 (2.2.0: voice chat is an add-on)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the "not heard in
+  // voice chat" marker), ext-sdk.js 1→2 (shell.activity), main.js 125→126,
+  // app.css 98→99, index.html, locales.
   // v148: 2.2.0 — voice chat left the shell for the DisPatch Voice add-on:
   // drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js and
   // voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js and
@@ -260,7 +263,7 @@ test('the sw.js CACHE is local-chat-v148 (2.2.0: voice chat is an add-on)', () =
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v148');
+  assert.equal(m[1], 'local-chat-v149');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

@@ -344,7 +344,7 @@ def test_ext_static_caching_keys_on_the_assets_hash(ext_env):
     install()
     v = c.get("/api/extensions").json()["extensions"][0]["assets_version"]
     r = c.get(f"/ext/voice/index.js?v={v}")
-    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert r.headers["cache-control"] == "private, max-age=31536000, immutable"
     assert c.get("/ext/voice/index.js?v=0000").headers["cache-control"] == "no-cache"
     # An edit changes the hash (an editable checkout is never served stale).
     (KNOBS.static_dir / "index.js").write_text("export const EXT = { id: 'voice', api: [1, 1] }; // 2\n")
@@ -598,3 +598,153 @@ def test_the_thread_websocket_and_unclaimed_routes_exist_without_extensions():
     paths = {getattr(r, "path", "") for r in main.app.routes}
     assert {"/ws/{name}/{thread_id}", "/api/extensions", "/ext/{ext_id}/{rel:path}"} <= paths
     assert thread_for  # imported helper used by sibling modules
+
+
+# --------------------------------------------------------------------------- #
+# Final review (2.2.0): Origin rule on extension routes, a hung setup, the
+# crash-loop breaker, persona facts on BotView
+# --------------------------------------------------------------------------- #
+
+
+def test_unsafe_extension_requests_must_come_from_dispatch_itself(ext_env):
+    """FR-hardening L1: a raw-body / no-body POST is a CORS "simple" request: a page
+    on another port of the same host name sent it with the unlocked cookie and no
+    preflight (a cross-origin POST /api/voice/lab/test loaded the speech models)."""
+    c, _ = ext_env
+    install()
+    unlock(c)
+    same = {"origin": "http://testserver"}
+    assert c.post("/api/voice/upload", content=b"x", headers=same).status_code == 200
+    assert c.post("/api/voice/upload", content=b"x").status_code == 200          # no Origin: not a browser
+    for headers in ({"origin": "http://testserver:8446"},                        # same site, other port
+                    {"origin": "https://evil.example"},
+                    {"origin": "null"},
+                    {"origin": "http://testserver", "sec-fetch-site": "same-site"},
+                    {"sec-fetch-site": "cross-site"}):
+        r = c.post("/api/voice/upload", content=b"x", headers=headers)
+        assert r.status_code == 403 and r.json()["detail"] == "cross-origin request refused", headers
+    # A read stays a read: GET is judged by the session alone (nothing can be read back without CORS).
+    assert c.get("/api/voice/status", headers={"origin": "https://evil.example"}).status_code == 200
+    assert c.get("/api/voice/status", headers={"sec-fetch-site": "same-origin"}).status_code == 200
+
+
+def test_a_setup_that_never_returns_is_abandoned_and_boot_goes_on(ext_env, monkeypatch):
+    """FR-hardening L4: load_one had no timeout — a hung setup would never bind the port."""
+    import time as _time
+    c, _ = ext_env
+    monkeypatch.setattr(extensions, "SETUP_TIMEOUT_S", 0.3)
+    KNOBS.block_setup = threading.Event()
+    before = {getattr(r, "path", "") for r in main.app.routes}
+    t0 = _time.monotonic()
+    ext = install()
+    try:
+        assert _time.monotonic() - t0 < 2.0
+        assert ext.state == "failed" and "did not return within" in ext.detail
+        assert {getattr(r, "path", "") for r in main.app.routes} == before
+        assert extensions.get("voice") is None
+        assert c.get("/api/extensions").json()["extensions"][0]["state"] == "failed"
+    finally:
+        KNOBS.block_setup.set()
+
+
+def test_crash_loop_breaker_starts_without_extensions_after_two_unsettled_starts(ext_env, monkeypatch):
+    """FR-hardening L4: a native crash in an add-on (import, setup or the start-up
+    prewarm) left a restart loop. Each start that never settled is counted in
+    <data>/ext/.booting; at two the next start mounts nothing and says why."""
+    import dataclasses
+    c, tmp = ext_env
+    # mount_all replaces the module's hooks and mode: put them back afterwards, and
+    # give it no manager so it adds no second broadcast observer.
+    monkeypatch.setattr(extensions, "_hooks", extensions._hooks)
+    monkeypatch.setattr(extensions, "_mode", extensions._mode)
+    hooks = dataclasses.replace(extensions._hooks, manager=lambda: None)
+    monkeypatch.setenv("DISPATCH_EXTENSIONS", "_extfake:EXTENSION")
+    monkeypatch.setenv("DISPATCH_EXT_BOOT_MARKER", "1")      # the suite runs with it off
+    marker = Path(config.DATA_DIR) / "ext" / ".booting"
+    assert not marker.exists()
+    extensions.unload_all(main.app)
+    extensions.mount_all(main.app, hooks)
+    assert extensions.get("voice") is not None and marker.read_text().strip() == "1"
+    # A clean stop is not a crash.
+    c.portal.call(extensions.run_shutdown)
+    assert not marker.exists()
+    # Two starts that died before settling (the marker survived them both).
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("2\n")
+    extensions.unload_all(main.app)
+    out = extensions.mount_all(main.app, hooks)
+    # (With the real add-on installed, its entry point is listed too, as `disabled`:
+    # DISPATCH_EXTENSIONS names another module. The breaker is about the candidates.)
+    cands = [e for e in out if e.state != "disabled"]
+    assert [e.state for e in cands] == ["failed"]
+    assert "failed to start twice in a row" in cands[0].detail
+    assert extensions.get("voice") is None
+    assert marker.read_text().strip() == "2", "kept until this start settles"
+    # Settled (or a clean stop): the next start tries the extension again.
+    extensions.clear_boot_marker()
+    extensions.unload_all(main.app)
+    extensions.mount_all(main.app, hooks)
+    assert extensions.get("voice") is not None
+    # No extension configured: no marker at all.
+    extensions.clear_boot_marker()
+    monkeypatch.setenv("DISPATCH_EXTENSIONS", "off")
+    extensions.unload_all(main.app)
+    extensions.mount_all(main.app, hooks)
+    assert not marker.exists()
+
+
+def test_settling_clears_the_boot_marker(ext_env, monkeypatch):
+    c, _ = ext_env
+    monkeypatch.setenv("DISPATCH_EXT_BOOT_MARKER", "1")
+    monkeypatch.setattr(extensions, "SETTLE_S", 0.05)
+    marker = Path(config.DATA_DIR) / "ext" / ".booting"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("1\n")
+    c.portal.call(extensions.run_startup)
+    for _ in range(100):
+        if not marker.exists():
+            break
+        threading.Event().wait(0.02)
+    assert not marker.exists()
+
+
+def test_bot_views_carry_the_persona_facts_and_nothing_else(ext_env):
+    """FR-works 12: the add-on names an advisor's owner and gives a persona-less API
+    bot the conversational default; no prompt text or provider block crosses over."""
+    from types import SimpleNamespace
+    adv = SimpleNamespace(id="sage", name="Sage", safe=False, voice="", voice_rp="",
+                          advisor={"owner": "Sam", "providers": [{"api_key": "x"}]}, api=None)
+    api_plain = SimpleNamespace(id="plain", name="Plain", safe=False, voice="", voice_rp="",
+                                advisor=None, api={"provider": "openai", "api_key": "x"})
+    api_own = SimpleNamespace(id="own", name="Own", safe=False, voice="", voice_rp="",
+                              advisor=None, api={"provider": "openai", "system_prompt": "You are a pirate."})
+    gw = SimpleNamespace(id="gw", name="Gw", safe=False, voice="", voice_rp="", advisor=None, api=None)
+    v = extensions.bot_view(adv)
+    assert (v.backend, v.owner, v.has_persona) == ("advisor", "Sam", True)
+    assert (extensions.bot_view(api_plain).has_persona, extensions.bot_view(api_plain).owner) == (False, "")
+    assert extensions.bot_view(api_own).has_persona is True
+    assert extensions.bot_view(gw).has_persona is None
+    assert not any("pirate" in str(x) or "api_key" in str(x) for x in vars(extensions.bot_view(api_own)).values())
+
+
+def test_a_missing_avatar_file_is_no_picture_not_a_404_url(ext_env):
+    """V2 #3 / V3 #5: a roster entry without an avatar gets "default.png", and an app
+    bot names a face that ships nowhere; both 404'd on every render. A named file
+    that is not there is the letter block (avatar_url "")."""
+    from app.config import Bot
+    b = Bot(id="x", name="X", avatar="default.png", emoji="🤖")
+    assert b.avatar_url == ""
+    (config.AVATAR_DIR).mkdir(parents=True, exist_ok=True)
+    (config.AVATAR_DIR / "x.png").write_bytes(b"\x89PNG")
+    b2 = Bot(id="x", name="X", avatar="x.png", emoji="🤖")
+    assert b2.avatar_url.startswith("/static/avatars/x.png?v=")
+
+
+
+def test_the_test_suite_never_writes_a_boot_marker(ext_env, monkeypatch):
+    """The suite imports the app with no data dir of its own: with the marker on, an
+    installed add-on would count "failed starts" in the real data directory."""
+    assert os.environ.get("DISPATCH_EXT_BOOT_MARKER") == "0"
+    extensions._write_boot_marker(5)
+    assert not (Path(config.DATA_DIR) / "ext" / ".booting").exists()
+    assert extensions.boot_fails() == 0

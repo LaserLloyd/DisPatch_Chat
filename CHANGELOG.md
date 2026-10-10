@@ -7,7 +7,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.2.0] — 2026-10-10
+## [2.2.0] — 2026-10-11
 
 Voice chat leaves DisPatch and becomes an add-on: **DisPatch Voice**, a
 separate MIT package (github.com/LaserLloyd/DisPatch_Voice). DisPatch itself
@@ -21,10 +21,13 @@ Guide: [docs/extensions.md](docs/extensions.md).
   the Settings → Voice tab shows the exact commands, and
   [docs/extensions.md](docs/extensions.md#voice) has every install mode. With
   `uv run` as the service's start line: add
-  `--with-editable /path/to/DisPatch_Voice` to it, plus `--offline` (boot must
-  never need the network) and `--ws-max-size 262144` (the voice socket's frame
-  cap; the main `/ws` never sends more than a 65,536-character message).
-  Warm the overlay online once before the restart.
+  `--with-editable /path/to/a-release-checkout-of-DisPatch_Voice` to it (a `git
+  worktree` at the release tag — never the checkout you develop in), plus
+  `--offline` (boot must never need the network), `--ws-max-size 262144` (the
+  voice socket's frame cap; the main `/ws` never sends more than a
+  65,536-character message) and `--ws-ping-timeout 60`; better, start it
+  through `scripts/local-chat-launch`. Warm the overlay online once before the
+  restart.
 - The `voice` dependency group is still declared, **empty**, so a 2.1 unit
   drop-in that runs `uv run --group voice …` keeps booting (without the group
   uv exits 2 and the restart loop takes the app down). It is removed in 2.3.0.
@@ -90,10 +93,44 @@ Guide: [docs/extensions.md](docs/extensions.md).
   may only keep a value or clear it.
 - Docker: `--build-arg VOICE=1` (or `VOICE=1` in `.env`) builds the image with
   the add-on.
-- `scripts/local-chat-launch`: an optional start wrapper that runs DisPatch
-  with the add-on overlay offline and falls back to DisPatch without it when
-  that overlay cannot be resolved, so a cold cache costs voice chat, not the
-  app.
+- `scripts/local-chat-launch`: the recommended start command for a `uv run`
+  service. It runs DisPatch with the add-on overlay offline after proving, in a
+  throwaway process, that the overlay resolves and its host package and native
+  libraries import, and falls back to DisPatch without it when they do not (a
+  native crash of that probe included), so a cold cache or a broken wheel costs
+  voice chat, not the app.
+- **The chat shows what a voice-chat listener did not hear.** When someone talks
+  over a spoken reply, the part they never heard is drawn muted behind a mic-off
+  mark titled "Not heard in voice chat" (`metadata.voice_heard.upto`, cut at a
+  markdown-safe point); a reply stored only up to the cut says "Cut off in voice
+  chat" (`js/voice-heard.js`, eight languages).
+- `shell.activity()` (extension SDK, additive): an extension whose use makes no
+  touches — a voice chat — re-arms the shell's idle auto-lock. Before, DisPatch
+  locked itself in the middle of a hands-free conversation.
+- `BotView.owner` / `BotView.has_persona` (additive): how an advisor's persona
+  names its user, and whether a bot has a persona of its own — names and a flag,
+  never prompt text.
+
+### Security and robustness (final review)
+
+- An extension route that can change something (any method but GET, HEAD,
+  OPTIONS) refuses a cross-origin browser request: a present `Origin` must equal
+  the `Host` and `Sec-Fetch-Site` must not be cross-site or same-site. A
+  raw-body or multipart POST is a CORS "simple" request, so another service on
+  the same host name could drive one with the unlocked cookie (a cross-origin
+  `POST /api/voice/lab/test` loaded the speech models).
+- The thread websocket's server-wide cap holds while a reconnect is evicting
+  its predecessor (another session's handshake in that second was admitted:
+  three open with a cap of two).
+- An extension `setup` that has not returned after 60 s is abandoned (failed,
+  routes rolled back, context sealed) instead of keeping the port unbound for
+  ever; a start-up that never settles is counted in `<data>/ext/.booting`, and
+  after two in a row DisPatch starts without extensions (Settings → Voice says
+  why) — the next restart once it has run a minute tries them again.
+- `/ext/` assets are cached `private, immutable` (operator-only resources).
+- `DISPATCH_EXT_BOOT_MARKER=0` turns the crash-loop marker off; the test suite
+  does, so a run with the add-on installed never counts "failed starts" in a
+  real data directory.
 
 ### Changed
 
@@ -105,6 +142,13 @@ Guide: [docs/extensions.md](docs/extensions.md).
   extension provides is kept verbatim through load and save, never listed and
   logged once. Before, one such row invalidated the whole manifest.
 - The user-facing name is **Voice chat** (it was Drive mode).
+- Keyboard focus on a language/voice `<select>` shows the app's focus ring (the
+  accent border alone was fainter than the resting border on the default
+  palette).
+- A bot whose avatar file is missing (a roster entry without one gets
+  `default.png`; an app bot's face that ships nowhere) is drawn with its letter
+  instead of requesting a picture that 404s on every render.
+- Service worker cache `local-chat-v149`.
 
 ### Removed
 
