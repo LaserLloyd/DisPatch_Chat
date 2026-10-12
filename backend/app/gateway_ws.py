@@ -49,6 +49,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -176,8 +177,48 @@ def gateway_token(config_path: Path | None = None) -> str | None:
         return None
     gw = cfg.get("gateway") or {}
     auth = gw.get("auth") or {}
-    tok = auth.get("token")
-    return tok if isinstance(tok, str) and tok else None
+    return _resolve_secret_input(auth.get("token"), cfg)
+
+
+def _resolve_secret_input(value, cfg: dict) -> str | None:
+    """A config credential as a plain string, whether literal or a SecretRef.
+
+    OpenClaw 2026.10 lets ``gateway.auth.token`` be a SecretRef object
+    ``{source, provider, id}``. Only the sources this box can resolve without
+    the gateway are handled: ``env`` and ``file`` (singleValue or json
+    pointer). ``exec`` / ``store`` refs return None (caller falls back to the
+    CLI transport), and so does any read problem -- never raise from here.
+    """
+    if isinstance(value, str):
+        m = re.fullmatch(r"\$\{?([A-Z][A-Z0-9_]*)\}?", value)
+        if m:
+            return os.environ.get(m.group(1)) or None
+        return value or None
+    if not isinstance(value, dict):
+        return None
+    source, ref_id = value.get("source"), value.get("id")
+    if not isinstance(ref_id, str):
+        return None
+    if source == "env":
+        return os.environ.get(ref_id) or None
+    if source != "file":
+        return None
+    secrets = cfg.get("secrets") or {}
+    prov = (secrets.get("providers") or {}).get(value.get("provider") or "")
+    if not isinstance(prov, dict) or prov.get("source") != "file":
+        return None
+    try:
+        raw = Path(str(prov.get("path", ""))).expanduser().read_text()
+        if prov.get("mode") == "singleValue":
+            out = raw.rstrip("\r\n") if ref_id == "value" else None
+        else:
+            node = json.loads(raw)
+            for seg in ref_id.lstrip("/").split("/"):
+                node = node[seg.replace("~1", "/").replace("~0", "~")]
+            out = node
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+    return out if isinstance(out, str) and out else None
 
 
 class _AgentCall:
