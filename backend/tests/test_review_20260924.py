@@ -367,11 +367,12 @@ async def test_an_api_bot_is_sent_the_users_message_once(wired, monkeypatch):
         await db.add_message(th.id, "user", "follow up please")
         seen: dict = {}
 
-        async def fake_complete(cfg, history):
+        async def fake_complete(cfg, history, api, on_text):
             seen["history"] = history
-            return llm_api.Reply(text="ok", model="m", provider="custom")
+            return llm_api.Reply(text="ok", model="m", provider="custom"), False
 
-        monkeypatch.setattr(llm_api, "complete", fake_complete)
+        # The turn's provider call (streamed since the api: path went live).
+        monkeypatch.setattr(llm_api, "complete_streaming", fake_complete)
         await main.run_agent_turn(th.id, "llm-custom", "follow up please",
                                   main.TurnOptions(reply_to=ans.id))
         last = seen["history"][-1]
