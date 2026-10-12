@@ -362,12 +362,25 @@ async def lifespan(app: FastAPI):
             await _lifespan_shutdown()
         with contextlib.suppress(BaseException):
             await db.close()
+        _release_instance_lock(app)
         _arm_failed_startup_exit()
         raise
     try:
         yield
     finally:
-        await _lifespan_shutdown()
+        try:
+            await _lifespan_shutdown()
+        finally:
+            _release_instance_lock(app)
+
+
+def _release_instance_lock(app: FastAPI) -> None:
+    """Close the instance-lock handle (closing also releases the lock)."""
+    fh = getattr(app.state, "instance_lock", None)
+    app.state.instance_lock = None
+    if fh is not None:
+        with contextlib.suppress(OSError):
+            fh.close()
 
 
 async def _lifespan_startup(app: FastAPI) -> None:
