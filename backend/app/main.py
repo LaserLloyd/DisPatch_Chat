@@ -388,6 +388,10 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # Bound to the app, not a local, to make the lifetime obvious: the flock is
     # held for exactly as long as the process serves, and released by the OS if
     # it dies. Dropping this reference would close the fd and free the lock.
+    # A second lifespan on the same app object (tests run several) closes the
+    # previous handle FIRST: lockf locks belong to the process, so closing any
+    # fd on the file after re-claiming would drop the new lock with it.
+    _release_instance_lock(app)
     app.state.instance_lock = _claim_single_instance()
     _warn_if_wide_open()
     config.load_bots()  # materialises config.yaml on first run
