@@ -83,6 +83,7 @@ from . import (
     pool_guard,
     practice_bridge,
     problem,
+    push,
     reactions,
     tools,
 )
@@ -1961,7 +1962,11 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
                         # of that promise.
-                        "/local/", "/api/local")):
+                        "/local/", "/api/local",
+                        # Web Push: subscribing binds a remembered device to
+                        # pings about every thread. Unlocked only; the routes
+                        # re-check for themselves (_push_device_key).
+                        "/api/push")):
         return True
     if extensions.owns_path(path):
         return True
@@ -3888,6 +3893,7 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
         return
     await _rewrite_image_job_message(job, content, meta)
     log.info("image job %s delivered (%d bytes)", job["id"], len(data))
+    _notify_push("image", job["thread_id"], "Image ready")
 
 
 def _image_job_expired(job: dict) -> bool:
@@ -7010,8 +7016,17 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
                          opts: TurnOptions | None = None) -> None:
     """Send `text` to the bot for `thread_id`, persist + broadcast the reply.
 
-    Serialised per-thread (lock) and globally rate-limited (semaphore).
+    Serialised per-thread (lock) and globally rate-limited (semaphore). When
+    the turn ends with a new bot reply in the thread, remembered devices get a
+    "<bot> replied" push (every backend ends here, so this is the one hook).
     """
+    before = await _newest_message_id(thread_id)
+    await _run_agent_turn(thread_id, bot_id, text, opts)
+    await _push_if_replied(thread_id, bot_id, before)
+
+
+async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
+                          opts: TurnOptions | None = None) -> None:
     # Two backends, one entry point. A bot carrying an `api` block was set up
     # through "Connect an AI" and talks straight to an LLM provider: no CLI to
     # spawn, no session transcript to tail, so none of the watcher / follower /
@@ -7604,6 +7619,143 @@ def _issue_cookie_response(body: dict, persistent: bool = False,
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", path="/",
                     max_age=max_age, secure=_request_is_https(request))
     return resp
+
+
+# --------------------------------------------------------------------------- #
+# Web Push (app/push.py): pings only — kind, thread id and a name-only title
+# --------------------------------------------------------------------------- #
+
+
+def _bot_display_name(bot_id: str | None) -> str:
+    bot = config.get_bot(bot_id) if bot_id else None
+    return (bot.name if bot is not None and bot.name else "") or "DisPatch"
+
+
+def _notify_push(kind: str, thread_id: str, title: str) -> None:
+    """Fire-and-forget a ping. Never blocks or fails the caller."""
+    if _shutting_down or not thread_id:
+        return
+    try:
+        if not push.has_subscriptions():
+            return
+        _track(asyncio.create_task(push.notify(kind, thread_id, title),
+                                   name=f"push:{kind}:{thread_id}"))
+    except Exception:
+        log.exception("could not schedule a push")
+
+
+async def _newest_message_id(thread_id: str) -> str | None:
+    with contextlib.suppress(Exception):
+        rows, _ = await db.list_messages(thread_id, 1)
+        if rows:
+            return rows[-1].id
+    return None
+
+
+_pushed_replies: dict[str, None] = {}
+
+
+async def _push_if_replied(thread_id: str, bot_id: str, before: str | None) -> None:
+    """After a turn: did a new, visible bot reply land? Then ping."""
+    try:
+        if not push.has_subscriptions():
+            return
+        rows, _ = await db.list_messages(thread_id, 5)
+        for m in reversed(rows):
+            if m.id == before:
+                return
+            meta = m.metadata if isinstance(m.metadata, dict) else {}
+            if (m.role == "assistant" and (m.content or "").strip()
+                    and not meta.get("sub") and not meta.get("notice")):
+                # Once per reply: a queued turn that ends with nothing new of
+                # its own must not re-announce the previous turn's answer.
+                if m.id in _pushed_replies:
+                    return
+                _pushed_replies[m.id] = None
+                while len(_pushed_replies) > 256:
+                    _pushed_replies.pop(next(iter(_pushed_replies)))
+                _notify_push("reply", thread_id, f"{_bot_display_name(bot_id)} replied")
+                return
+    except Exception:
+        log.exception("push: reply check failed for %s", thread_id)
+
+
+def _push_device_key(request: Request) -> str | None:
+    """Which device a push subscription belongs to, or 403.
+
+    A REMEMBERED device's token hash (so revoking the device revokes its
+    pushes), or — on an install with no PIN at all — None, meaning "key it by
+    endpoint". Safe Mode, a machine caller and a plain idle-expiring session
+    are all refused: a ping about every thread is unlocked-tier state, and an
+    ordinary session dies after ten idle minutes, long before any push.
+    """
+    if getattr(request.state, "decoy", False):
+        raise HTTPException(403, "Unlock for full access")
+    from urllib.parse import urlparse
+    origin = request.headers.get("origin")
+    if origin and urlparse(origin).netloc != request.headers.get("host", ""):
+        raise HTTPException(403, "Cross-origin request refused")
+    if not auth.load().pin_set:
+        return None
+    session = _session_of(request)
+    if session is None:
+        raise HTTPException(403, "Unlock for full access")
+    if not session.persistent:
+        raise HTTPException(
+            403, "Notifications need a remembered device: lock, then unlock "
+                 "with \"Remember this device\" ticked.")
+    return auth.device_hash(session.token)
+
+
+def _push_device_alive(key: str) -> bool:
+    if key.startswith("open:"):
+        return not auth.load().pin_set
+    return auth.trusted_device_live(key)
+
+
+push.bind(_push_device_alive)
+
+
+@app.get("/api/push/vapid")
+async def push_vapid(request: Request):
+    """The VAPID public key + whether THIS device is subscribed."""
+    key = _push_device_key(request)
+    sub_key = key
+    endpoint = request.query_params.get("endpoint") or ""
+    if key is None:
+        sub_key = push.open_key(endpoint) if endpoint else None
+    return {"public_key": await asyncio.to_thread(push.vapid_public_key),
+            "subscribed": bool(sub_key) and push.is_subscribed(sub_key)}
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: Request):
+    key = _push_device_key(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "Expected a JSON push subscription") from None
+    sub = body.get("subscription", body) if isinstance(body, dict) else None
+    try:
+        clean = push.validate(sub)
+        if key is None:
+            key = push.open_key(clean["endpoint"])
+        await asyncio.to_thread(push.vapid_public_key)     # keypair exists
+        push.subscribe(key, clean, ua=request.headers.get("user-agent", ""))
+    except push.PushError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"ok": True}
+
+
+@app.delete("/api/push/subscribe")
+async def push_unsubscribe(request: Request):
+    key = _push_device_key(request)
+    if key is None:
+        endpoint = request.query_params.get("endpoint") or ""
+        if not endpoint:
+            raise HTTPException(400, "endpoint is required")
+        key = push.open_key(endpoint)
+    return {"ok": True, "removed": push.unsubscribe(key)}
 
 
 @app.get("/api/auth/status")
@@ -10345,6 +10497,12 @@ async def inject_message(request: Request, payload: InjectIn):
         metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
     )
     await _broadcast_thread_update(thread.id)
+    if payload.notify and msg.content:
+        # A machine post the family should hear about (a morning brief). The
+        # title is the caller's string, or "<bot> posted" — never the content.
+        title = (payload.notify if isinstance(payload.notify, str)
+                 else f"{_bot_display_name(thread.bot_id)} posted")
+        _notify_push("post", thread.id, title)
     return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}
 
 

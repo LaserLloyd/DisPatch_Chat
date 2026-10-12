@@ -117,8 +117,20 @@ class InjectIn(BaseModel):
     date: str | None = Field(default=None, pattern=_DATE_RE)  # YYYY-MM-DD; defaults to today
     title: str | None = Field(default=None, max_length=200)
     metadata: dict[str, Any] | None = None
+    # Web Push: ping remembered devices about this post. `true` titles it
+    # "<bot> posted"; a string is the title ("Morning brief posted"). The
+    # push never carries the content.
+    notify: bool | str | None = Field(default=None)
 
     _validate_date = field_validator("date")(_check_real_date)
+
+    @field_validator("notify")
+    @classmethod
+    def _short_notify(cls, v: bool | str | None) -> bool | str | None:
+        if isinstance(v, str):
+            v = " ".join(v.split())[:80]
+            return v or None
+        return v
 
     @model_validator(mode="after")
     def _text_alias_and_nonempty(self) -> InjectIn:

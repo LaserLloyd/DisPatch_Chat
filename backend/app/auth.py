@@ -554,6 +554,24 @@ def _trusted_entry(token: str, days: int) -> dict | None:
     return e
 
 
+def device_hash(token: str) -> str:
+    """The identity a remembered device is stored under (trusted-devices.yaml
+    key). Other per-device state (push subscriptions) keys on the same value,
+    so it dies with the trust."""
+    return _token_hash(token)
+
+
+def trusted_device_live(token_hash: str) -> bool:
+    """Is this hash a remembered device that is still trusted right now?
+    False when the feature is off, the device was forgotten, or it expired."""
+    days = load().remember_days
+    if days <= 0 or not token_hash:
+        return False
+    with _lock:
+        e = _trusted_store().get(token_hash)
+        return e is not None and (time.time() - e["last_seen"]) <= days * 86400
+
+
 def trusted_count() -> int:
     with _lock:
         return len(_trusted_store())

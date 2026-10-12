@@ -812,6 +812,14 @@
           <div class="dev-group-body" id="dev-body-pictures"></div>
         </section>
 
+        <!-- Notifications (Web Push): unlocked devices only; js/push.js builds
+             the row, mountLanguagePicker() mounts it and hides the card in
+             Safe Mode. -->
+        <section class="dev-group" id="dev-group-notify" aria-labelledby="dev-h-notify" hidden>
+          <h3 class="dev-group-title" id="dev-h-notify" data-i18n="push.group">Notifications</h3>
+          <div class="dev-group-body" id="dev-body-notify"></div>
+        </section>
+
         <section class="dev-group" id="dev-group-bar" aria-labelledby="dev-h-bar">
           <h3 class="dev-group-title" id="dev-h-bar" data-i18n="settings.dev_bar">Menu bar shortcuts</h3>
           <p class="dev-group-hint" data-i18n="settings.dev_bar_hint">A pinned setting gets its own button on the menu bar, one tap away. Use the Pin button on any row.</p>
@@ -1231,6 +1239,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=127"></script>
+  <script type="module" src="/static/js/main.js?v=128"></script>
 </body>
 </html>

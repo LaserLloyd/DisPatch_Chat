@@ -1189,5 +1189,17 @@
     "state_disabled": "`DISPATCH_EXTENSIONS` turns them off. Remove the setting, or add `dispatch_voice:EXTENSION` to it, then restart DisPatch.",
     "could_not_load_title": "The voice chat page could not load",
     "could_not_load": "The add-on is running on the server, but its page did not load in this browser. Reload the app to try again."
+  },
+  "push": {
+    "group": "Notifications",
+    "title": "Push notifications",
+    "hint": "A ping on this device when a bot replies, a picture is ready or a scheduled post lands. It never shows what was said.",
+    "needs_https": "Needs the https address. Open DisPatch at its https:// address (not http://…:8765) on this device to turn this on.",
+    "unsupported": "This browser cannot receive push notifications. On an iPhone, add DisPatch to the Home Screen first.",
+    "needs_remember": "Needs a remembered device: lock, then unlock with “Remember this device” ticked.",
+    "denied": "Notifications are blocked for this site in the browser settings.",
+    "on": "Push notifications on for this device",
+    "off": "Push notifications off for this device",
+    "failed": "Could not change push notifications. Try again."
   }
 }

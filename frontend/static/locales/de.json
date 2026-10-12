@@ -1189,5 +1189,17 @@
     "state_disabled": "`DISPATCH_EXTENSIONS` schaltet sie aus. Entferne die Einstellung oder füge `dispatch_voice:EXTENSION` hinzu und starte DisPatch dann neu.",
     "could_not_load_title": "Die Sprachchat-Seite konnte nicht geladen werden",
     "could_not_load": "Das Add-on läuft auf dem Server, aber seine Seite wurde in diesem Browser nicht geladen. Lade die App neu, um es noch einmal zu versuchen."
+  },
+  "push": {
+    "group": "Benachrichtigungen",
+    "title": "Push-Benachrichtigungen",
+    "hint": "Ein Hinweis auf diesem Gerät, wenn ein Bot antwortet, ein Bild fertig ist oder ein geplanter Beitrag eintrifft. Der Inhalt wird nie angezeigt.",
+    "needs_https": "Braucht die https-Adresse. Öffne DisPatch auf diesem Gerät über seine https://-Adresse (nicht http://…:8765), um das einzuschalten.",
+    "unsupported": "Dieser Browser kann keine Push-Benachrichtigungen empfangen. Auf dem iPhone DisPatch zuerst zum Home-Bildschirm hinzufügen.",
+    "needs_remember": "Braucht ein gemerktes Gerät: sperren, dann mit „Dieses Gerät merken“ entsperren.",
+    "denied": "Benachrichtigungen sind für diese Seite in den Browser-Einstellungen blockiert.",
+    "on": "Push-Benachrichtigungen auf diesem Gerät an",
+    "off": "Push-Benachrichtigungen auf diesem Gerät aus",
+    "failed": "Push-Benachrichtigungen konnten nicht geändert werden. Bitte erneut versuchen."
   }
 }

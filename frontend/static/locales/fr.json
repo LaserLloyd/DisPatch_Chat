@@ -1214,5 +1214,17 @@
     "state_disabled": "`DISPATCH_EXTENSIONS` les désactive. Retirez le réglage, ou ajoutez-y `dispatch_voice:EXTENSION`, puis redémarrez DisPatch.",
     "could_not_load_title": "La page du chat vocal n’a pas pu se charger",
     "could_not_load": "Le module tourne sur le serveur, mais sa page ne s’est pas chargée dans ce navigateur. Rechargez l’application pour réessayer."
+  },
+  "push": {
+    "group": "Notifications",
+    "title": "Notifications push",
+    "hint": "Un signal sur cet appareil quand un bot répond, qu’une image est prête ou qu’une publication programmée arrive. Le contenu n’est jamais affiché.",
+    "needs_https": "Nécessite l’adresse https. Ouvrez DisPatch sur cet appareil via son adresse https:// (pas http://…:8765) pour l’activer.",
+    "unsupported": "Ce navigateur ne peut pas recevoir de notifications push. Sur iPhone, ajoutez d’abord DisPatch à l’écran d’accueil.",
+    "needs_remember": "Nécessite un appareil mémorisé : verrouillez, puis déverrouillez avec « Mémoriser cet appareil » coché.",
+    "denied": "Les notifications de ce site sont bloquées dans les réglages du navigateur.",
+    "on": "Notifications push activées sur cet appareil",
+    "off": "Notifications push désactivées sur cet appareil",
+    "failed": "Impossible de modifier les notifications push. Réessayez."
   }
 }

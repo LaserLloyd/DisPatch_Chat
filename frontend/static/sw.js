@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v150';  // v150: password fields wrapped in <form data-no-submit> (Chromium form warning), advisor bots hide the thinking row; main.js?v=126→127, index.html.
+const CACHE = 'local-chat-v151';  // v151: Web Push — js/push.js joins SHELL (Settings → Device → Notifications), this worker gains push + notificationclick (ping only: a title, never message text); main.js?v=127→128, index.html, locales (push.*).
+// v150: password fields wrapped in <form data-no-submit> (Chromium form warning), advisor bots hide the thinking row; main.js?v=126→127, index.html.
 // v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the chat marks what a voice-chat listener did not hear); ext-sdk.js?v=1→2 (shell.activity), main.js?v=125→126, app.css?v=98→99, index.html, locales (msg.not_heard, msg.voice_cut).
 // v148: 2.2.0 — voice chat is an add-on. drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js, voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js, js/voice-absent.js join it; /ext/ is network-only; i18n.js?v=3→4 (mergeBundle) and every importer's ?v, tools.js?v=11→12, about.js?v=6→7 (APP_VERSION 2.2.0), main.js, app.css, index.html, locales.
 // v147: voice is optional (Settings → Voice on/off switch) and its advanced pieces are opt-in tools; new js/voice-tools.js joins SHELL; drive-settings.js?v=3→4, voices.js?v=3→4, drive.js?v=5→6, voice.css?v=3→4, tools.js?v=10→11, about.js?v=5→6 (VOICE_REPO_URL), main.js?v=123→124, app.css?v=96→97, index.html, locales.
@@ -346,6 +347,9 @@ const SHELL = [
   // What a voice-chat listener did not hear of a reply (2.2.0): pure module,
   // statically imported by the message renderer in main.js.
   '/static/js/voice-heard.js',
+  // Web Push settings row (2026-10-12): pure module, statically imported by
+  // main.js.
+  '/static/js/push.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.
@@ -421,4 +425,45 @@ self.addEventListener('fetch', (e) => {
         { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
       )))
   );
+});
+
+
+// ---------------------------------------------------------------------------
+// Web Push (2026-10-12). The server sends a PING — {kind, thread_id, title},
+// e.g. "Bits replied" — and never message text, so a lock screen shows that
+// something arrived and nothing of what it says. Opening the app decides what
+// this device may see, by the usual session rules.
+// ---------------------------------------------------------------------------
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = {}; }
+  const title = (typeof d.title === 'string' && d.title.trim()) ? d.title.slice(0, 80) : 'DisPatch';
+  const thread = typeof d.thread_id === 'string' ? d.thread_id.slice(0, 200) : '';
+  e.waitUntil((async () => {
+    // The app is open and in front: it is already showing the reply.
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (wins.some((c) => c.focused && c.visibilityState === 'visible')) return;
+    await self.registration.showNotification(title, {
+      // One notification per thread: a newer ping replaces the older one.
+      tag: thread ? `thread:${thread}` : 'dispatch',
+      icon: '/static/icon-192.png',
+      badge: '/static/icon-192.png',
+      data: { thread_id: thread },
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const thread = (e.notification.data && e.notification.data.thread_id) || '';
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = wins.find((c) => new URL(c.url).origin === location.origin);
+    if (win) {
+      await win.focus();
+      if (thread) win.postMessage({ type: 'dispatch:open-thread', thread_id: thread });
+      return;
+    }
+    await self.clients.openWindow(thread ? `/?thread=${encodeURIComponent(thread)}` : '/');
+  })());
 });

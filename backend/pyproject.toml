@@ -28,6 +28,10 @@ dependencies = [
     # PDF text extraction for image-only PDFs (scans, app screenshots).
     # Optional at import time — `_pdf_ocr_head_text` skips OCR when missing.
     "rapidocr-onnxruntime>=1.4.4",
+    # Web Push (app/push.py): VAPID signing + aes128gcm payload encryption.
+    # Pure-python itself; its deps (cryptography, aiohttp, requests) ship
+    # wheels. Nothing is fetched at runtime.
+    "pywebpush>=2.5.0",
 ]
 
 [tool.uv]

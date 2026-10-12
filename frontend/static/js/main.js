@@ -64,6 +64,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
 import { aboutRow } from './about.js?v=7';
+import { pushRow } from './push.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
 import {
@@ -3824,6 +3825,14 @@ function mountLanguagePicker() {
   // survive Safe Mode sit on their rows above), so the whole card goes.
   const barGroup = document.getElementById('dev-group-bar');
   if (barGroup) barGroup.hidden = !!state.decoy;
+
+  // Notifications (Web Push): unlocked only, like the bar group above — in
+  // Safe Mode the row is not built and the card goes.
+  document.getElementById('push-row')?.remove();
+  const notifyGroup = document.getElementById('dev-group-notify');
+  if (notifyGroup) notifyGroup.hidden = !!state.decoy;
+  const pushEl = pushRow(t, { decoy: !!state.decoy, onToast: toast });
+  if (pushEl) document.getElementById('dev-body-notify')?.append(pushEl);
 
   // Local viewer roots: same rules, rebuilt on every open so its contents
   // reflect the current session and server config. Unlocked only.
@@ -8365,7 +8374,23 @@ async function startApp() {
     // Back from deeper views never leaves the app in one step.
     history.replaceState({ view: 'bots' }, '');
     if (isMobile()) setView('bots');
+    // /?thread=<id>: a tapped push notification opening a fresh window. Drop
+    // the query from the address bar, then open the thread by the same rules
+    // an app's open-thread uses (Safe Mode: only a thread it may see).
+    const linked = POPOUT_PARAMS.get('thread');
+    if (linked) {
+      history.replaceState({ view: 'bots' }, '', '/');
+      openThreadFromApp(linked);
+    }
   }
+  // A tapped notification while the app is already open (sw.js
+  // notificationclick focuses this window and posts the thread id).
+  navigator.serviceWorker?.addEventListener('message', (ev) => {
+    const d = ev.data;
+    if (d && d.type === 'dispatch:open-thread' && typeof d.thread_id === 'string') {
+      openThreadFromApp(d.thread_id);
+    }
+  });
   try { setThreadListCollapsed(localStorage.getItem('tl-collapsed') === '1'); } catch {}
   refreshUnread();
   armIdleTimer();

@@ -1164,5 +1164,17 @@
     "state_disabled": "`DISPATCH_EXTENSIONS` 关闭了它们。请删除该设置，或在其中加入 `dispatch_voice:EXTENSION`，然后重启 DisPatch。",
     "could_not_load_title": "无法加载语音聊天页面",
     "could_not_load": "附加组件正在服务器上运行，但它的页面未能在此浏览器中加载。请重新加载应用后重试。"
+  },
+  "push": {
+    "group": "通知",
+    "title": "推送通知",
+    "hint": "当机器人回复、图片生成完毕或定时帖子送达时，在此设备上提醒。从不显示具体内容。",
+    "needs_https": "需要 https 地址。请在此设备上用 https:// 地址（而不是 http://…:8765）打开 DisPatch 后再开启。",
+    "unsupported": "此浏览器无法接收推送通知。在 iPhone 上，请先将 DisPatch 添加到主屏幕。",
+    "needs_remember": "需要已记住的设备：先锁定，再勾选“记住此设备”解锁。",
+    "denied": "浏览器设置中已阻止此网站的通知。",
+    "on": "已在此设备上开启推送通知",
+    "off": "已在此设备上关闭推送通知",
+    "failed": "无法更改推送通知，请重试。"
   }
 }

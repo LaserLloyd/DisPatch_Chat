@@ -1214,5 +1214,17 @@
     "state_disabled": "`DISPATCH_EXTENSIONS` desliga-as. Retira a definição, ou junta-lhe `dispatch_voice:EXTENSION`, e reinicia o DisPatch.",
     "could_not_load_title": "Não foi possível carregar a página do chat de voz",
     "could_not_load": "O complemento está a correr no servidor, mas a página dele não carregou neste navegador. Recarrega a app para tentar outra vez."
+  },
+  "push": {
+    "group": "Notificações",
+    "title": "Notificações push",
+    "hint": "Um aviso neste dispositivo quando um bot responde, uma imagem fica pronta ou chega uma publicação agendada. Nunca mostra o que foi dito.",
+    "needs_https": "Precisa do endereço https. Abra o DisPatch neste dispositivo pelo endereço https:// (não http://…:8765) para ativar.",
+    "unsupported": "Este navegador não recebe notificações push. No iPhone, adicione primeiro o DisPatch à Tela de Início.",
+    "needs_remember": "Precisa de um dispositivo lembrado: bloqueie e desbloqueie com “Lembrar este dispositivo” marcado.",
+    "denied": "As notificações deste site estão bloqueadas nas definições do navegador.",
+    "on": "Notificações push ativadas neste dispositivo",
+    "off": "Notificações push desativadas neste dispositivo",
+    "failed": "Não foi possível alterar as notificações push. Tente novamente."
   }
 }

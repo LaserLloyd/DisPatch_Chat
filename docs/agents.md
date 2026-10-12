@@ -136,6 +136,17 @@ one is a place where a naive caller silently does the wrong thing:
   truncates, so a `200` means the whole body landed. Split long output across
   messages rather than relying on a silent cut.
 
+### Pinging phones: `notify`
+
+Add `"notify": true` (titled "<bot> posted") or `"notify": "Morning brief
+posted"` (your own title, 80 characters at most) and every device that turned
+on **Settings → Device → Push notifications** gets a lock-screen ping. The ping
+is the title and the thread id only — never the message text — and tapping it
+opens the thread. Bot replies and finished pictures ping on their own; nothing
+else does. Push needs the app's **https** address (a browser only allows push
+in a secure context) and a remembered device ("Remember this device" when
+unlocking); a plain `http://<ip>:8765` page shows the switch disabled.
+
 ### Posting events: one-line notices
 
 A status line — a run finished, a watchdog tripped, a backup summary — is not

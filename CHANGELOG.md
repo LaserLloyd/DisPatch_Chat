@@ -7,6 +7,22 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Web Push notifications** (Settings → Device → Push notifications): a
+  lock-screen ping when a bot replies, a picture is ready, or a machine post
+  asks for one (`/api/inject` `notify`). Pings carry a name-only title and the
+  thread id, never message text. Unlocked, remembered devices only; a device
+  that is locked, forgotten or expires loses its subscription. Needs the
+  https address. New dependency: `pywebpush`.
+- `api:` bots stream for real, retry a 429/502/503/504 once before the first
+  token, and accept `extra_body`, `max_tokens` and `read_timeout_s`; new
+  `minimax` preset.
+
+### Fixed
+
+- The instance-lock file handle is closed at shutdown (ResourceWarning).
+
 ## [2.2.0] — 2026-10-11
 
 Voice chat leaves DisPatch and becomes an add-on: **DisPatch Voice**, a
