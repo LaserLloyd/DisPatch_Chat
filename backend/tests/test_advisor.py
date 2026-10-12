@@ -422,6 +422,9 @@ def test_send_needs_a_real_session(llm_env):  # noqa: F811
 
 def test_unknown_request_is_404_for_an_unlocked_session(llm_env, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(advisor, "_ledger", None)
+    # The app's real hooks carry an import-time snapshot of the LIVE data dir;
+    # the route under test must open its ledger in scratch space instead.
+    monkeypatch.setattr(advisor._hooks, "data_dir", tmp_path)
     client = llm_env()
     _unlock(client)
     assert client.post("/api/advisor/requests/nope/send",
@@ -1075,6 +1078,8 @@ def test_profile_and_open_requests_are_delimited_reference_data():
 
 def test_status_hides_context_excerpts_and_corpus_root(adv_env):
     """M3: the machine surface gets counts and public request fields only."""
+    tmp_path, _root = adv_env
+    advisor.bind(_hooks(tmp_path, [], []))
     advisor.ledger().add(bot_id="adv", thread_id="t1", kind="research", agent="worker",
                          brief="b", state="running", context="PRIVATE EXCERPT")
     out = asyncio.run(advisor.status())["advisors"][0]

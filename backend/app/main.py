@@ -7014,11 +7014,16 @@ async def run_agent_turn(thread_id: str, bot_id: str, text: str,
     # bot above, plus a knowledge corpus and agent handoffs (app/advisor.py).
     if bot is not None and bot.advisor:
         _thread_bot[thread_id] = bot_id
+        # The thread's model pref (header chip) picks which chain entry goes
+        # first; the rest of the chain stays behind it as the fallback.
+        opts = await _with_thread_model_prefs(thread_id, opts)
+        kw = _direct_turn_kwargs(advisor.run_turn, opts)
+        if opts.model:
+            kw["model"] = opts.model
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
-            await advisor.run_turn(thread_id, bot_id, agent_text,
-                                   **_direct_turn_kwargs(advisor.run_turn, opts))
+            await advisor.run_turn(thread_id, bot_id, agent_text, **kw)
         return
 
     # `agent_id` is the OpenClaw seat this turn actually runs on — normally
@@ -8323,6 +8328,15 @@ def _normalize_model_entries(raw: list) -> list[dict]:
     return out
 
 
+def _advisor_chain_models(bot: config.Bot) -> list[dict]:
+    """An advisor bot's provider chain as picker entries; [] when the block
+    is unusable (no providers) — the chip then offers only the default."""
+    try:
+        return advisor.AdvisorConfig.from_bot(bot).chain_models()
+    except llm_api.ApiError:
+        return []
+
+
 # agent_id -> (fetched_at, models). The gateway round trip is real network
 # work the header chip would otherwise repeat on every open of the picker;
 # a short TTL is "briefly", not "forever" — a newly-allowed model shows up
@@ -8351,6 +8365,12 @@ async def bot_models(request: Request, bot_id: str):
         model = str((bot.api or {}).get("model") or "").strip()
         models = [{"id": model, "label": model}] if model else []
         return {"bot_id": bot.id, "models": models, "source": "api"}
+    if bot.advisor:
+        # An advisor has no OpenClaw seat either — asking the gateway for one
+        # failed every open of the chip ("unknown agent id"). Its models are
+        # its own provider chain; a pick moves that entry to the front.
+        return {"bot_id": bot.id, "models": _advisor_chain_models(bot),
+                "source": "advisor"}
 
     agent_id = bot.agent_id
     now = asyncio.get_event_loop().time()
@@ -8837,6 +8857,18 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
                 raise HTTPException(
                     400, f"prefs.{key} must be a short identifier "
                          "(letters, digits, . _ : / @ -; not starting with -)")
+        # An advisor answers only with its own provider chain: a model that
+        # is not in it would be stored, shown on the chip, and never used.
+        want = prefs_patch.get("model")
+        if want is not None:
+            thread = await db.get_thread(thread_id)
+            tbot = config.get_bot(thread.bot_id) if thread else None
+            if tbot is not None and tbot.advisor:
+                allowed = {m["id"] for m in _advisor_chain_models(tbot)}
+                if want not in allowed:
+                    raise HTTPException(
+                        400, "prefs.model must be one of this advisor's models: "
+                             f"{', '.join(sorted(allowed)) or '(none configured)'}")
     if title is not None:
         await db.rename_thread(thread_id, title[:120])
     if "pinned" in payload:

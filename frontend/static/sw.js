@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v149';  // v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the chat marks what a voice-chat listener did not hear); ext-sdk.js?v=1→2 (shell.activity), main.js?v=125→126, app.css?v=98→99, index.html, locales (msg.not_heard, msg.voice_cut).
+const CACHE = 'local-chat-v150';  // v150: password fields wrapped in <form data-no-submit> (Chromium form warning), advisor bots hide the thinking row; main.js?v=126→127, index.html.
+// v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the chat marks what a voice-chat listener did not hear); ext-sdk.js?v=1→2 (shell.activity), main.js?v=125→126, app.css?v=98→99, index.html, locales (msg.not_heard, msg.voice_cut).
 // v148: 2.2.0 — voice chat is an add-on. drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js, voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js, js/voice-absent.js join it; /ext/ is network-only; i18n.js?v=3→4 (mergeBundle) and every importer's ?v, tools.js?v=11→12, about.js?v=6→7 (APP_VERSION 2.2.0), main.js, app.css, index.html, locales.
 // v147: voice is optional (Settings → Voice on/off switch) and its advanced pieces are opt-in tools; new js/voice-tools.js joins SHELL; drive-settings.js?v=3→4, voices.js?v=3→4, drive.js?v=5→6, voice.css?v=3→4, tools.js?v=10→11, about.js?v=5→6 (VOICE_REPO_URL), main.js?v=123→124, app.css?v=96→97, index.html, locales.
 // v146: Drive settings move to their own Settings → Voice tab; drive-settings.js?v=2→3, voices.js?v=2→3, drive.js?v=4→5, voice.css?v=2→3, main.js?v=122→123, app.css?v=95→96, index.html, locales.

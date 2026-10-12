@@ -3657,11 +3657,11 @@ async function openModelPicker() {
   modelSel.disabled = true;
   modelSel.replaceChildren(el('option', { value: '', text: t('common.loading') }));
 
-  // An API bot (Connect an AI) has no reasoning-effort concept — the OpenClaw
+  // An API bot (Connect an AI) or an advisor has no reasoning-effort concept — the OpenClaw
   // gateway is what "thinking" means, and a direct-provider bot never talks
   // to it. Hiding the row rather than disabling it: an option nothing will
   // ever read is worse than one that is not offered.
-  const isApiBot = !!bot.api_provider;
+  const isApiBot = !!bot.api_provider || !!bot.advisor;
   dom['mp-thinking-row'].hidden = isApiBot;
 
   thinkingSel.replaceChildren(
@@ -7051,6 +7051,10 @@ function wireEvents() {
     }));
   document.addEventListener('click', () => toggleThreadMenu(false));
   wireModelChip();
+  // The password fields' wrapper <form>s exist only so the browser treats them
+  // as form fields; Enter in one must never submit (= reload) the page.
+  document.querySelectorAll('form[data-no-submit]').forEach((f) =>
+    f.addEventListener('submit', (e) => e.preventDefault()));
 
   dom['attach-btn'].addEventListener('click', () => dom['file-input'].click());
   // ⚡ pack curation, 🩺 host dashboard and 🔌 Connect an AI are Settings tabs

@@ -876,7 +876,7 @@ async def create_job(payload: JobIn):
     test suite calls directly to avoid the FastAPI Pydantic layer for
     storage round-trip tests).
     """
-    return await create_job_from_dict(payload.dict())
+    return await create_job_from_dict(payload.model_dump())
 
 
 async def create_job_from_dict(payload: dict) -> dict:

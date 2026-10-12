@@ -739,13 +739,13 @@
             <input type="url" id="llm-base-url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:1234/v1" />
             <p class="sec-note muted" id="llm-base-note" data-i18n="llm.base_url_hint">The API endpoint. Most OpenAI-compatible servers end in /v1.</p>
           </div>
-          <div class="sec-field" id="llm-key-field">
+          <form class="sec-field" id="llm-key-field" data-no-submit>
             <label for="llm-key" data-i18n="llm.api_key">API key</label>
             <input type="password" id="llm-key" autocomplete="off" spellcheck="false" placeholder="Paste your key" data-i18n-attr="placeholder=llm.api_key_placeholder" />
             <p class="sec-note muted" data-i18n="llm.api_key_hint">Stored in config.yaml in your data directory, which is owner-readable only.</p>
             <label class="llm-sublabel" for="llm-key-env" data-i18n="llm.key_env_label">…or read it from an environment variable</label>
             <input type="text" id="llm-key-env" autocomplete="off" spellcheck="false" placeholder="OPENAI_API_KEY" />
-          </div>
+          </form>
           <div class="llm-test-row">
             <button class="btn-secondary" id="llm-test" data-i18n="llm.test">Test connection</button>
             <span class="llm-result" id="llm-result" role="status" aria-live="polite"></span>
@@ -858,18 +858,21 @@
       <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
         <p class="muted modal-hint" id="sec-status-line"></p>
         <div class="sec-body">
-          <div class="sec-field" id="sec-current-wrap" hidden>
+          <!-- Each password field sits in its own <form> (Chromium warns about a
+               password input outside one). data-no-submit: main.js cancels the
+               submit, so Enter never reloads the page; no buttons live inside. -->
+          <form class="sec-field" id="sec-current-wrap" data-no-submit hidden>
             <label for="sec-current" data-i18n="security.current_pin">Current PIN</label>
             <input type="password" inputmode="numeric" id="sec-current" autocomplete="off" />
-          </div>
-          <div class="sec-field">
+          </form>
+          <form class="sec-field" data-no-submit>
             <label for="sec-new" id="sec-new-label" data-i18n="security.new_pin">New PIN</label>
             <input type="password" inputmode="numeric" id="sec-new" autocomplete="off" />
-          </div>
-          <div class="sec-field">
+          </form>
+          <form class="sec-field" data-no-submit>
             <label for="sec-confirm" data-i18n="security.confirm_pin">Confirm PIN</label>
             <input type="password" inputmode="numeric" id="sec-confirm" autocomplete="off" />
-          </div>
+          </form>
           <div class="lock-error" id="sec-error" role="alert" aria-live="assertive" hidden></div>
           <!-- The day count and the device count are interpolated, not wrapped in
                their own <span>: a translation is free to move the number anywhere
@@ -1228,6 +1231,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=126"></script>
+  <script type="module" src="/static/js/main.js?v=127"></script>
 </body>
 </html>

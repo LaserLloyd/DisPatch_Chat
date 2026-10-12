@@ -45,7 +45,7 @@ import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -262,6 +262,38 @@ class AdvisorConfig:
     @property
     def can_dispatch(self) -> bool:
         return bool(self.agents)
+
+    def chain_models(self) -> list[dict]:
+        """The provider chain as {id, label} entries for the model picker.
+
+        The id is the entry's configured model name (what a thread pref
+        stores and :meth:`preferring` matches); the label says where in the
+        chain it sits. An entry with no model, or a repeat, is left out.
+        """
+        out: list[dict] = []
+        seen: set[str] = set()
+        for i, entry in enumerate(self.providers):
+            mid = str(entry.get("model") or "").strip()
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            role = "primary" if i == 0 else "fallback"
+            out.append({"id": mid, "label": f"{mid} ({role})"})
+        return out
+
+    def preferring(self, model: str | None) -> AdvisorConfig:
+        """This config with `model`'s chain entry tried FIRST, the rest kept
+        behind it in their configured order as the fallback. A model that is
+        not in the chain changes nothing: a stale thread pref never strands a
+        turn without a provider."""
+        want = str(model or "").strip()
+        if not want:
+            return self
+        first = [p for p in self.providers if str(p.get("model") or "").strip() == want]
+        if not first:
+            return self
+        rest = [p for p in self.providers if p is not first[0]]
+        return replace(self, providers=[first[0], *rest])
 
 
 def safe_agent_ids() -> set[str]:
@@ -943,7 +975,8 @@ async def speculate(thread_id: str, bot_id: str, text: str, *,
 
 async def run_turn(thread_id: str, bot_id: str, text: str, *,
                    voice: Any = None,
-                   prefetched: llm_api.SpeculativeRun | None = None) -> None:
+                   prefetched: llm_api.SpeculativeRun | None = None,
+                   model: str | None = None) -> None:
     """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn.
 
     Voice chat (C-§B.2): ``voice.system`` lands in the system prompt (see
@@ -954,6 +987,9 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
     set (``llm_api.cancel_direct_turn``), the text already streamed is
     persisted as the reply row (``voice_heard {interrupted: true}``) and no
     marker in it is acted on.
+
+    ``model`` is the thread's model pref (the header chip): that chain entry
+    is tried first, the rest stay behind it as the fallback.
     """
     h = _h()
     await h.set_status(thread_id, "thinking")
@@ -963,7 +999,7 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
     emitter = _Emitter(thread_id, bot_id)
     deliver_task: asyncio.Future | None = None
     try:
-        cfg = _advisor_config(bot_id)
+        cfg = _advisor_config(bot_id).preferring(model)
         run, prefetched = await llm_api.adopt(
             prefetched, thread_id, bot_id, _AdvisorSpeculation), None
         if run is not None:

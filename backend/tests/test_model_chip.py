@@ -469,6 +469,91 @@ def test_models_route_503s_when_the_gateway_is_not_connected(env, monkeypatch):
     assert r.status_code == 503
 
 
+_ADVISOR_BLOCK = {
+    "owner": "Sam",
+    "providers": [
+        {"provider": "custom", "base_url": "http://127.0.0.1:9/v1", "model": "MiniMax-M3"},
+        {"provider": "custom", "base_url": "http://127.0.0.1:8/v1", "model": "Qwen3.8-27B"},
+    ],
+}
+
+
+class _ExplodingGatewayClient(_FakeGatewayClient):
+    async def models_list(self, agent_id):
+        raise AssertionError(f"an advisor must never ask the gateway (got {agent_id!r})")
+
+
+def test_models_route_for_an_advisor_is_its_provider_chain(env, monkeypatch):
+    """Regression 2026-10-11: an advisor fell through to the gateway's
+    models.list and every chip open 502'd with 'unknown agent id'."""
+    client = env()
+    auth.set_pin("1234")
+    _unlock(client)
+    monkeypatch.setattr(main, "_gateway_client", _ExplodingGatewayClient([]), raising=False)
+    config.upsert_bot(config.Bot(id="advisor", name="Sage", advisor=_ADVISOR_BLOCK))
+    r = client.get("/api/bots/advisor/models")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"] == "advisor"
+    assert body["models"] == [
+        {"id": "MiniMax-M3", "label": "MiniMax-M3 (primary)"},
+        {"id": "Qwen3.8-27B", "label": "Qwen3.8-27B (fallback)"},
+    ]
+
+
+def test_prefs_model_for_an_advisor_must_be_in_its_chain(env, monkeypatch):
+    client = env()
+    auth.set_pin("1234")
+    _unlock(client)
+    monkeypatch.setattr(main, "_gateway_client", _ExplodingGatewayClient([]), raising=False)
+    config.upsert_bot(config.Bot(id="advisor", name="Sage", advisor=_ADVISOR_BLOCK))
+    tid = client.post("/api/threads", json={"bot_id": "advisor"}).json()["id"]
+
+    r = client.patch(f"/api/threads/{tid}", json={"prefs": {"model": "gpt-elsewhere"}})
+    assert r.status_code == 400 and "MiniMax-M3" in r.text
+    assert not client.get(f"/api/threads/{tid}").json().get("prefs"), \
+        "a refused model must not be half-applied"
+
+    r = client.patch(f"/api/threads/{tid}", json={"prefs": {"model": "Qwen3.8-27B"}})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/threads/{tid}").json()["prefs"] == {"model": "Qwen3.8-27B"}
+    # null still means "back to the default" for an advisor too.
+    r = client.patch(f"/api/threads/{tid}", json={"prefs": {"model": None}})
+    assert r.status_code == 200, r.text
+
+
+def test_an_advisor_turn_gets_the_thread_model_pref(turn_env, monkeypatch, tmp_path):
+    """The pref reaches advisor.run_turn, and preferring() puts that entry
+    first with the rest of the chain kept behind it as the fallback."""
+    from app import advisor
+    db, _frames = turn_env
+    # turn_env does not move the config file; this test writes a bot, so it
+    # must (conftest's guard backs this up — see _no_writes_outside_tmp).
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    config._invalidate_bots_cache()
+    config.upsert_bot(config.Bot(id="advisor", name="Sage", advisor=_ADVISOR_BLOCK))
+    seen: dict = {}
+
+    async def fake_run_turn(thread_id, bot_id, text, **kw):
+        seen.update(kw)
+
+    monkeypatch.setattr(advisor, "run_turn", fake_run_turn)
+
+    async def go():
+        t = await db.create_thread(bot_id="advisor", title="t")
+        await db.update_thread_prefs(t.id, {"model": "Qwen3.8-27B"})
+        await main.run_agent_turn(t.id, "advisor", "hi")
+
+    asyncio.run(go())
+    assert seen.get("model") == "Qwen3.8-27B"
+
+    cfg = advisor.AdvisorConfig.from_bot(config.get_bot("advisor"))
+    assert [p["model"] for p in cfg.preferring("Qwen3.8-27B").providers] == [
+        "Qwen3.8-27B", "MiniMax-M3"]
+    assert cfg.preferring("not-in-chain").providers == cfg.providers
+    assert cfg.preferring(None) is cfg
+
+
 # --------------------------------------------------------------------------- #
 # 6: openclaw._parse_reply keeps usage in/out + contextBudgetStatus
 # --------------------------------------------------------------------------- #

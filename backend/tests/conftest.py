@@ -246,6 +246,14 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
         monkeypatch.setattr(_config, "DATA_DIR", tmp_path / "data")
     if not is_disposable(_config.AVATAR_DIR, basetemp):
         monkeypatch.setattr(_config, "AVATAR_DIR", tmp_path / "avatars")
+    # CONFIG_PATH is computed from DATA_DIR at IMPORT time, so moving DATA_DIR
+    # alone leaves it on the live config.yaml: a test whose own fixture forgot
+    # it (turn_env-style) and called config.upsert_bot() rewrote the family
+    # app's bot roster (2026-10-12: the live advisor block was replaced by a
+    # test fixture's). Follow DATA_DIR unless the test already chose a path.
+    if not is_disposable(_config.CONFIG_PATH, basetemp):
+        monkeypatch.setattr(_config, "CONFIG_PATH", _config.DATA_DIR / "config.yaml")
+        _config._invalidate_bots_cache()
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     (tmp_path / "avatars").mkdir(parents=True, exist_ok=True)
 
@@ -254,11 +262,48 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     # the rule above is ever wrong again, every test errors here instead of
     # quietly editing the live install.
     for label, value in (("DATA_DIR", _config.DATA_DIR),
-                         ("AVATAR_DIR", _config.AVATAR_DIR)):
+                         ("AVATAR_DIR", _config.AVATAR_DIR),
+                         ("CONFIG_PATH", _config.CONFIG_PATH)):
         assert is_disposable(value, basetemp), (
             f"config.{label} points at {value}, which is not inside pytest's "
             f"scratch space ({basetemp}). Refusing to run: a test writing "
             f"there would edit a real installation.")
+
+    # The advisor's hooks are bound at app.main IMPORT time with
+    # data_dir=config.DATA_DIR -- a snapshot of the REAL directory, taken
+    # before this fixture could redirect anything. advisor.ledger() and
+    # advisor.index_for() derive advisor.db / knowledge-<tag>.db from that
+    # snapshot, so a test that forgot to bind its own hooks wrote ledger rows
+    # into the live advisor.db and left a stray knowledge-<tag>.db behind on
+    # every run (48 rows and 37 files before this guard existed). Point the
+    # bound hooks at this test's data dir and drop the cached ledger/indexes.
+    from app import advisor as _advisor
+    from app import knowledge as _knowledge
+    if _advisor._hooks is not None and not is_disposable(_advisor._hooks.data_dir,
+                                                         basetemp):
+        monkeypatch.setattr(_advisor._hooks, "data_dir", _config.DATA_DIR)
+    if _advisor._ledger is not None and not is_disposable(_advisor._ledger.path,
+                                                          basetemp):
+        monkeypatch.setattr(_advisor, "_ledger", None)
+    for key, idx in list(_advisor._indexes.items()):
+        if not is_disposable(idx.db_path, basetemp):
+            _advisor._indexes.pop(key, None)
+
+    # ...and fail LOUDLY if anything still opens an advisor ledger or a
+    # knowledge index outside scratch space, whatever path it took to get there.
+    def _guarded(cls, label):
+        real_init = cls.__init__
+
+        def init(self, *a, **kw):
+            real_init(self, *a, **kw)
+            path = getattr(self, "path", None) or getattr(self, "db_path", None)
+            assert path is None or is_disposable(Path(path), basetemp), (
+                f"{label} opened at {path}, outside pytest's scratch space "
+                f"({basetemp}). Bind the advisor to tmp hooks in this test.")
+        monkeypatch.setattr(cls, "__init__", init)
+
+    _guarded(_advisor.Ledger, "advisor.Ledger")
+    _guarded(_knowledge.KnowledgeIndex, "knowledge.KnowledgeIndex")
 
     # The media-origins ledger caches in-process and is keyed off DATA_DIR,
     # which this fixture (and most suites) just moved -- drop the cache so one
