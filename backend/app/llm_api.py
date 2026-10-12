@@ -23,16 +23,18 @@ Where it plugs in
 ``main.run_agent_turn`` checks ``bot.api`` first and routes here. Replies are
 persisted through the SAME funnel every other assistant message uses
 (``_deliver_assistant_text``), so the sanitizers, the reaction-marker stripping,
-the dedup and the simulated streaming all still apply — see :func:`bind`.
+the dedup and the reaction-marker stripping all still apply — see :func:`bind`.
 
 Streaming
 ---------
-v1 does NOT stream from the provider. The reply is fetched whole and then
-delivered through the app's existing simulated-streaming seam (the same one the
-agent path uses for its final reply), so on screen it looks identical. Real
-token streaming would need a second delivery protocol for partial messages that
-the WS layer does not have today; adding one to make a two-second reply arrive
-in pieces is not worth the surface area yet.
+OpenAI-shape providers stream for real (:func:`stream_chat`): deltas go out
+through the same provisional-bubble protocol the gateway transport and the
+advisor use (:class:`StreamEmitter`), and the finished row claims the bubble.
+A server that ignores ``stream: true`` and answers with one JSON body still
+works — that reply is delivered through the simulated-streaming seam, as is
+every Anthropic reply (the SDK path is not streamed). One retry with a short
+backoff covers a 429/502/503/504 that arrives BEFORE any text; nothing is ever
+retried once a token has been shown.
 
 Keys
 ----
@@ -54,7 +56,8 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -96,6 +99,10 @@ class Provider:
     local: bool = False             # runs on the operator's own machine
     models: tuple[str, ...] = ()    # suggestions; first is the default
     editable_base_url: bool = False  # is the URL the thing you configure?
+    # Merged into every chat-completions body for this preset (a bot's own
+    # `api.extra_body` is applied after it and wins). Excluded from hashing:
+    # the dataclass is frozen, the dict is not.
+    extra_body: dict | None = field(default=None, hash=False, compare=False)
 
 
 # Suggested models are only listed where the id is stable and the vendor is
@@ -150,6 +157,12 @@ PROVIDERS: tuple[Provider, ...] = (
     Provider(
         id="together", label="Together AI", bot_name="Together", base_url="https://api.together.xyz/v1",
         key_env="TOGETHER_API_KEY", docs="https://api.together.xyz/settings/api-keys",
+    ),
+    Provider(
+        id="minimax", label="MiniMax", bot_name="MiniMax", base_url="https://api.minimax.io/v1",
+        key_env="MINIMAX_API_KEY", docs="https://platform.minimax.io/",
+        models=("MiniMax-M3",),
+        extra_body={"thinking": {"type": "disabled"}, "reasoning_split": True},
     ),
     Provider(
         # No docs link: the panel's link is worded "Where do I get a key?", and
@@ -322,7 +335,21 @@ async def _read_capped(resp: httpx.Response) -> bytes:
 async def _request(client: httpx.AsyncClient, method: str, url: str, *,
                    headers: dict[str, str],
                    json_body: dict | None = None) -> tuple[int, bytes]:
-    """One request, following redirects by hand so each hop is re-validated.
+    """One request, buffered (capped). Redirects as in :func:`_send_following`."""
+    resp = await _send_following(client, method, url, headers=headers,
+                                 json_body=json_body)
+    try:
+        return resp.status_code, await _read_capped(resp)
+    finally:
+        await resp.aclose()
+
+
+async def _send_following(client: httpx.AsyncClient, method: str, url: str, *,
+                          headers: dict[str, str],
+                          json_body: dict | None = None) -> httpx.Response:
+    """Send, following redirects by hand so each hop is re-validated.
+
+    Returns the final response OPEN (streamed); the caller closes it.
 
     httpx's own `follow_redirects=True` would happily walk us anywhere the
     remote server points, including at a scheme we have deliberately refused to
@@ -340,32 +367,29 @@ async def _request(client: httpx.AsyncClient, method: str, url: str, *,
     for _ in range(MAX_REDIRECTS + 1):
         req = client.build_request(method, url, headers=hop_headers, json=json_body)
         resp = await client.send(req, stream=True)
-        try:
-            if resp.status_code in (301, 302, 303, 307, 308):
-                location = resp.headers.get("location") or ""
-                if not location:
-                    raise ApiError("The provider sent an empty redirect",
-                                   f"{url} answered {resp.status_code} with no "
-                                   "Location header.")
-                url = normalize_base_url(str(httpx.URL(url).join(location)))
-                if _origin_of(url) != origin:
-                    dropped = [h for h in list(hop_headers)
-                               if h.lower() in _CREDENTIAL_HEADERS]
-                    for h in dropped:
-                        hop_headers.pop(h, None)
-                    if dropped:
-                        log.warning("dropping %s across a redirect to a new "
-                                    "origin (%s)", ", ".join(sorted(dropped)),
-                                    _origin_of(url))
-                    origin = _origin_of(url)
-                # 303 (and, in practice, 302 on a POST) means "GET the other
-                # thing" — but an API that answers a chat request that way is
-                # misconfigured, and silently downgrading the method would hide
-                # it. Re-issue as-is and let the next hop speak for itself.
-                continue
-            return resp.status_code, await _read_capped(resp)
-        finally:
-            await resp.aclose()
+        if resp.status_code not in (301, 302, 303, 307, 308):
+            return resp
+        location = resp.headers.get("location") or ""
+        status = resp.status_code
+        await resp.aclose()
+        if not location:
+            raise ApiError("The provider sent an empty redirect",
+                           f"{url} answered {status} with no Location header.")
+        url = normalize_base_url(str(httpx.URL(url).join(location)))
+        if _origin_of(url) != origin:
+            dropped = [h for h in list(hop_headers)
+                       if h.lower() in _CREDENTIAL_HEADERS]
+            for h in dropped:
+                hop_headers.pop(h, None)
+            if dropped:
+                log.warning("dropping %s across a redirect to a new "
+                            "origin (%s)", ", ".join(sorted(dropped)),
+                            _origin_of(url))
+            origin = _origin_of(url)
+        # 303 (and, in practice, 302 on a POST) means "GET the other
+        # thing" — but an API that answers a chat request that way is
+        # misconfigured, and silently downgrading the method would hide
+        # it. Re-issue as-is and let the next hop speak for itself.
     raise ApiError("The provider redirected too many times",
                    f"Gave up after {MAX_REDIRECTS} redirects from {url}.")
 
@@ -835,6 +859,7 @@ async def _complete_openai(cfg: Resolved, history: list[dict]) -> Reply:
         "messages": [{"role": "system", "content": cfg.system_prompt}, *history],
         "stream": False,
     }
+    body.update(cfg.provider.extra_body or {})
     async with http_client() as client:
         try:
             status, raw = await _request(client, "POST", url,
@@ -847,7 +872,13 @@ async def _complete_openai(cfg: Resolved, history: list[dict]) -> Reply:
     if status >= 400:
         raise _status_error(status, _decode_json_lenient(raw), url=url,
                             model=cfg.model, key_used=bool(cfg.api_key))
-    payload = _decode_json(raw, url)
+    res = _whole_reply(_decode_json(raw, url), url, status, cfg)
+    return _require_text(res, cfg)
+
+
+def _whole_reply(payload: Any, url: str, status: int, cfg: Resolved) -> StreamResult:
+    """A non-streamed chat-completions body, read. Empty text is NOT an error
+    here — the caller decides (the advisor chain falls through on it)."""
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if not isinstance(choices, list) or not choices:
         raise ApiError(
@@ -855,22 +886,313 @@ async def _complete_openai(cfg: Resolved, history: list[dict]) -> Reply:
             f"{url} answered {status} with no `choices`. "
             f"{_provider_message(payload) or 'Response: ' + str(payload)[:200]}")
     message = (choices[0] or {}).get("message") or {}
-    text = _openai_message_text(message)
+    return StreamResult(
+        text=_openai_message_text(message),
+        model=str(payload.get("model") or cfg.model),
+        tokens=_total_tokens(payload.get("usage")),
+        finish_reason=str((choices[0] or {}).get("finish_reason") or ""),
+        streamed=False)
+
+
+def _total_tokens(usage: Any) -> int | None:
+    if isinstance(usage, dict) and isinstance(usage.get("total_tokens"), int):
+        return usage["total_tokens"]
+    return None
+
+
+def _require_text(res: StreamResult, cfg: Resolved) -> Reply:
+    """A Reply, or the error an empty one deserves."""
+    text = res.text.strip()
     if not text:
         # A finish_reason of "length" with empty content is the classic
         # symptom of a reasoning model whose whole budget went to thinking.
-        reason = (choices[0] or {}).get("finish_reason") or "unknown"
         raise ApiError(
             "The model replied with nothing",
-            f"The response was empty (finish_reason: {reason}). If this is a "
-            "reasoning model, it may have spent its whole output budget "
-            "thinking — try a different model.")
-    usage = payload.get("usage") if isinstance(payload, dict) else None
-    tokens = None
-    if isinstance(usage, dict) and isinstance(usage.get("total_tokens"), int):
-        tokens = usage["total_tokens"]
-    return Reply(text=text, model=str(payload.get("model") or cfg.model),
-                 provider=cfg.provider.id, tokens=tokens)
+            f"The response was empty (finish_reason: {res.finish_reason or 'unknown'}). "
+            "If this is a reasoning model, it may have spent its whole output "
+            "budget thinking — try a different model.")
+    return Reply(text=text, model=res.model or cfg.model,
+                 provider=cfg.provider.id, tokens=res.tokens)
+
+
+# --------------------------------------------------------------------------- #
+# Real streaming (OpenAI-compatible) — shared with the advisor
+# --------------------------------------------------------------------------- #
+
+
+class StreamFailed(Exception):
+    """A provider failed. `started` says whether the provider had produced any
+    raw text (reasoning included) — informational only: whether a turn may
+    still fall back is decided by what is ON SCREEN (`StreamEmitter.started`)."""
+
+    def __init__(self, error: ApiError, started: bool) -> None:
+        super().__init__(error.message)
+        self.error = error
+        self.started = started
+
+
+@dataclass
+class StreamResult:
+    text: str
+    model: str = ""
+    tokens: int | None = None
+    finish_reason: str = ""
+    streamed: bool = True       # False: the server answered with one JSON body
+
+
+#: Statuses worth one more try: rate limit and the gateway/overload family.
+#: Everything else (401, 404, 500 …) is a configuration or provider fault
+#: that a second identical request will only repeat.
+RETRY_STATUSES = frozenset({429, 502, 503, 504})
+RETRY_DEFAULT_DELAY_S = 1.0
+#: A Retry-After longer than this is honoured by NOT retrying: the turn fails
+#: now with the provider's message instead of a family member watching a
+#: spinner for a minute.
+RETRY_MAX_DELAY_S = 5.0
+
+
+def _retry_delay(headers: httpx.Headers) -> float | None:
+    """Seconds to wait before the one retry, or None when the provider asked
+    for longer than we are willing to keep a turn waiting."""
+    value = (headers.get("retry-after") or "").strip()
+    if not value:
+        return RETRY_DEFAULT_DELAY_S
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            delay = parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return RETRY_DEFAULT_DELAY_S
+    delay = max(0.0, delay)
+    return delay if delay <= RETRY_MAX_DELAY_S else None
+
+
+def _delta_text(delta: Any) -> str:
+    content = delta.get("content") if isinstance(delta, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text") or "" for b in content
+                       if isinstance(b, dict) and b.get("type") in (None, "text"))
+    return ""
+
+
+async def stream_chat(cfg: Resolved, messages: list[dict],
+                      on_text: Callable[[str], Awaitable[None]] | None = None, *,
+                      max_tokens: int | None = None, extra_body: dict | None = None,
+                      read_timeout: float = READ_TIMEOUT_S) -> StreamResult:
+    """Stream one OpenAI-compatible chat completion.
+
+    ``messages`` is the full list (system first). ``on_text`` gets the
+    CUMULATIVE raw text after every delta. Failures raise :class:`StreamFailed`
+    wrapping the same :class:`ApiError` a whole-reply call would have raised.
+
+    One retry, before any text: a 429/502/503/504 answer is retried once after
+    ``Retry-After`` (or ``RETRY_DEFAULT_DELAY_S``), unless the provider asked
+    for longer than ``RETRY_MAX_DELAY_S``. Once a delta has been passed on
+    nothing is retried — the bubble would otherwise splice two replies.
+    Redirects are followed by hand with the credential rules of `_request`.
+    """
+    url = _join(cfg.base_url, "chat/completions")
+    body: dict[str, Any] = {"model": cfg.model, "messages": messages, "stream": True}
+    if max_tokens:
+        body["max_tokens"] = int(max_tokens)
+    body.update(cfg.provider.extra_body or {})
+    if isinstance(extra_body, dict):
+        body.update(extra_body)
+    raw = ""
+    for attempt in (0, 1):
+        retry_in: float | None = None
+        try:
+            async with http_client(read_timeout) as client:
+                resp = await _send_following(client, "POST", url,
+                                             headers=_auth_headers(cfg.api_key),
+                                             json_body=body)
+                try:
+                    if resp.status_code >= 400:
+                        payload = _decode_json_lenient(await _read_capped(resp))
+                        if attempt == 0 and resp.status_code in RETRY_STATUSES:
+                            retry_in = _retry_delay(resp.headers)
+                        if retry_in is None:
+                            raise StreamFailed(_status_error(
+                                resp.status_code, payload, url=url, model=cfg.model,
+                                key_used=bool(cfg.api_key)), started=False)
+                        log.info("provider %s answered %s; retrying once in %.1fs",
+                                 cfg.provider.id, resp.status_code, retry_in)
+                    elif "json" in (resp.headers.get("content-type") or "").lower():
+                        # The server ignored `stream: true`. Still a reply.
+                        return _whole_reply(_decode_json(await _read_capped(resp), url),
+                                            url, resp.status_code, cfg)
+                    else:
+                        model, tokens, reason, seen = cfg.model, None, "", 0
+                        async for line in resp.aiter_lines():
+                            seen += len(line) + 1
+                            if seen > MAX_RESPONSE_BYTES:
+                                raise ApiError(
+                                    "The provider sent far too much data",
+                                    f"The stream passed {MAX_RESPONSE_BYTES // (1024 * 1024)}MB "
+                                    "and was abandoned.")
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                obj = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            if not isinstance(obj, dict):
+                                continue
+                            if obj.get("error"):
+                                raise StreamFailed(ApiError(
+                                    "The provider reported an error mid-reply",
+                                    str(obj["error"])[:300]), started=bool(raw))
+                            model = str(obj.get("model") or model)
+                            tokens = _total_tokens(obj.get("usage")) or tokens
+                            for ch in obj.get("choices") or []:
+                                if not isinstance(ch, dict):
+                                    continue
+                                reason = str(ch.get("finish_reason") or reason)
+                                piece = _delta_text(ch.get("delta"))
+                                if piece:
+                                    raw += piece
+                                    if on_text is not None:
+                                        await on_text(raw)
+                        return StreamResult(text=raw, model=model, tokens=tokens,
+                                            finish_reason=reason)
+                finally:
+                    await resp.aclose()
+        except StreamFailed:
+            raise
+        except ApiError as e:
+            raise StreamFailed(e, started=bool(raw)) from e
+        except httpx.HTTPError as e:
+            raise StreamFailed(_transport_error(
+                e, url, local=cfg.provider.local, read_timeout=read_timeout),
+                started=bool(raw)) from e
+        await asyncio.sleep(retry_in or 0)
+    raise AssertionError("unreachable")              # pragma: no cover
+
+
+async def stream_openai(cfg: Resolved, entry: dict, messages: list[dict],
+                        on_text: Callable[[str], Awaitable[None]]) -> str:
+    """:func:`stream_chat` with the knobs read from a provider block (an
+    advisor chain entry or a bot's `api`); returns the raw text."""
+    res = await stream_chat(
+        cfg, messages, on_text, max_tokens=_int_or_none(entry.get("max_tokens")),
+        extra_body=entry.get("extra_body") if isinstance(entry.get("extra_body"), dict) else None,
+        read_timeout=float(entry.get("read_timeout_s") or 60))
+    return res.text
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+#: How often a live bubble is repainted; deltas in between are coalesced.
+STREAM_EMIT_INTERVAL_S = 0.05
+
+
+class StreamEmitter:
+    """Turns cumulative raw text into provisional-bubble frames, throttled.
+
+    ``hooks`` must offer broadcast / open_stream / close_stream /
+    sanitize_delta (main.py's provisional-bubble registry and delta sanitizer);
+    subclasses may resolve them lazily (:meth:`_stream_hooks`) and decide what
+    part of the raw text is visible (:meth:`_visible`).
+    """
+
+    prefix = "api"
+
+    def __init__(self, thread_id: str, bot_id: str, hooks: Any = None) -> None:
+        self.thread_id, self.bot_id = thread_id, bot_id
+        self._hooks_obj = hooks
+        self.prov = f"run:{self.prefix}-{uuid.uuid4().hex[:12]}"
+        self.started = False
+        self.sent = ""
+        self.pending: str | None = None
+        self.last = 0.0
+        self.replace_next = False
+
+    def _stream_hooks(self) -> Any:
+        return self._hooks_obj
+
+    def _visible(self, raw: str) -> str:
+        return raw
+
+    def _interval(self) -> float:
+        return STREAM_EMIT_INTERVAL_S
+
+    async def push(self, raw: str, *, force: bool = False) -> None:
+        self.pending = raw
+        now = time.monotonic()
+        if force or now - self.last >= self._interval():
+            self.last = now
+            await self.flush()
+
+    async def flush(self) -> None:
+        if self.pending is None:
+            return
+        raw, self.pending = self.pending, None
+        h = self._stream_hooks()
+        clean = h.sanitize_delta(self._visible(raw))
+        if not clean.strip() or clean == self.sent:
+            return
+        extra: dict = {}
+        if self.replace_next or not clean.startswith(self.sent):
+            chunk, extra = clean, {"replace": True}
+            self.replace_next = False
+        else:
+            chunk = clean[len(self.sent):]
+        self.sent = clean
+        if not self.started:
+            self.started = True
+            h.open_stream(self.thread_id, self.prov)
+            await h.broadcast({"type": "stream_start", "thread_id": self.thread_id,
+                               "bot_id": self.bot_id, "message_id": self.prov})
+        await h.broadcast({"type": "stream_chunk", "thread_id": self.thread_id,
+                           "bot_id": self.bot_id, "message_id": self.prov,
+                           "text": chunk, **extra})
+
+    def restart(self) -> None:
+        """A fallback provider is about to write over what is on screen."""
+        self.replace_next = True
+        self.pending = None
+
+    async def retire(self) -> None:
+        """Close the bubble when no row is coming (the turn failed)."""
+        h = self._stream_hooks()
+        if self.started and h.close_stream(self.thread_id, self.prov):
+            await h.broadcast({"type": "stream_done", "thread_id": self.thread_id,
+                               "bot_id": self.bot_id, "message_id": self.prov,
+                               "message": None, "provisional_id": self.prov})
+
+
+def _can_stream_live(hooks: Any) -> bool:
+    return all(getattr(hooks, n, None) is not None
+               for n in ("open_stream", "close_stream", "sanitize_delta"))
+
+
+async def complete_streaming(cfg: Resolved, history: list[dict], api: dict,
+                             on_text: Callable[[str], Awaitable[None]] | None
+                             ) -> tuple[Reply, bool]:
+    """A turn's call: streamed for OpenAI-shape providers, whole for Anthropic.
+    Returns the reply and whether it actually arrived as a stream."""
+    if cfg.provider.kind == "anthropic":
+        return await _complete_anthropic(cfg, history), False
+    try:
+        res = await stream_chat(
+            cfg, [{"role": "system", "content": cfg.system_prompt}, *history], on_text,
+            max_tokens=_int_or_none(api.get("max_tokens")),
+            extra_body=api.get("extra_body") if isinstance(api.get("extra_body"), dict) else None,
+            read_timeout=float(api.get("read_timeout_s") or READ_TIMEOUT_S))
+    except StreamFailed as e:
+        raise e.error from e
+    return _require_text(res, cfg), res.streamed
 
 
 async def _complete_anthropic(cfg: Resolved, history: list[dict]) -> Reply:
@@ -1059,6 +1381,12 @@ class Hooks:
     # main._track: registers a background task (a speculation's provider
     # call) so shutdown cancels it in order. Optional.
     track: Callable[[asyncio.Task], None] | None = None
+    # The provisional-bubble registry and delta sanitizer (main.
+    # _open_provisional / _close_provisional / _sanitize_delta). Optional: with
+    # any of them missing a reply is delivered whole (simulated streaming).
+    open_stream: Callable[[str, str], None] | None = None
+    close_stream: Callable[[str, str], bool] | None = None
+    sanitize_delta: Callable[[str], str] | None = None
 
 
 _hooks: Hooks | None = None
@@ -1454,9 +1782,10 @@ async def speculate(thread_id: str, bot_id: str, text: str, *,
 
     Same system prompt (with the voice section), same history and the same
     provider as :func:`run_api_turn`; the call runs in the background and
-    nothing is persisted or broadcast. API bots do not stream (see the module
-    docstring), so ``text`` stays empty until the whole reply is in and then
-    holds it; adoption gets the reply the instant it exists.
+    nothing is persisted or broadcast. A speculation fetches the reply whole
+    (no live bubble exists to stream into), so ``text`` stays empty until the
+    whole reply is in and then holds it; adoption gets the reply the instant
+    it exists.
     """
     hooks = _hooks
     if hooks is None:                            # pragma: no cover - wiring bug
@@ -1510,6 +1839,7 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str, *,
 
     deliver_task: asyncio.Future | None = None
     run = None
+    emitter: StreamEmitter | None = None
     await hooks.set_status(thread_id, "thinking")
     await hooks.broadcast({"type": "thinking", "thread_id": thread_id,
                            "bot_id": bot_id, "status": "started"})
@@ -1532,23 +1862,38 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str, *,
             if not history:
                 raise ApiError("There was nothing to send",
                                "The thread had no user message to answer.")
-            reply = await complete(cfg, history)
+            if _can_stream_live(hooks):
+                emitter = StreamEmitter(thread_id, bot_id, hooks)
+            reply, _streamed = await complete_streaming(
+                cfg, history, bot.api, emitter.push if emitter else None)
+            if emitter is not None and emitter.started:
+                await emitter.push(reply.text, force=True)
         meta: dict[str, Any] = {"model": reply.model, "provider": reply.provider}
         if reply.tokens is not None:
             meta["tokens"] = reply.tokens
-        # stream=True routes through the app's simulated streaming, so a direct
-        # API reply appears exactly like an agent one. Shielded: once the row
-        # is being written, an interruption must not leave it half-delivered
-        # (the cancel path below decides whether to wait for it).
+        # A reply that streamed live lands as the row that claims ITS bubble
+        # (only that bubble); one that arrived whole goes through the app's
+        # simulated streaming (stream=True), so it appears like an agent one.
+        # Shielded: once the row is being written, an interruption must not
+        # leave it half-delivered (the cancel path decides whether to wait).
+        live = emitter.prov if emitter is not None and emitter.started else None
         deliver_task = asyncio.ensure_future(hooks.deliver(
             thread_id, reply.text, metadata=meta, stream=True,
-            source_id=reply_source_id("api")))
+            source_id=reply_source_id("api"),
+            **({"provisional": live} if live else {})))
         _track_background(deliver_task)
         await asyncio.shield(deliver_task)
+        if emitter is not None:
+            # No-op when the row claimed the bubble; otherwise (deduplicated,
+            # all-marker reply) the only thing that closes it.
+            await emitter.retire()
         await hooks.set_status(thread_id, "idle")
     except ApiError as e:
         log.warning("api turn failed (%s/%s): %s — %s",
                     bot_id, thread_id, e.message, e.detail)
+        if emitter is not None:
+            with contextlib.suppress(Exception):
+                await emitter.retire()
         await hooks.set_status(thread_id, "error")
         await hooks.broadcast({"type": "error", "thread_id": thread_id,
                                "bot_id": bot_id, "message": e.message,
@@ -1565,12 +1910,20 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str, *,
             # turn counts as stopped (Amendment T2-4).
             if deliver_task is not None and cancel_requested(thread_id):
                 await settle_landed_reply(hooks, thread_id, bot_id, deliver_task)
+            if emitter is not None:
+                # A half-streamed reply that never became a row: close the
+                # bubble rather than leave it half-typed until a reload.
+                with contextlib.suppress(Exception):
+                    await emitter.retire()
             with contextlib.suppress(Exception):
                 await hooks.set_status(thread_id, "idle")
         await finish_uncancellable(wind_down())
         raise
     except Exception as e:
         log.exception("unexpected api turn error (%s/%s)", bot_id, thread_id)
+        if emitter is not None:
+            with contextlib.suppress(Exception):
+                await emitter.retire()
         await hooks.set_status(thread_id, "error")
         await hooks.broadcast({"type": "error", "thread_id": thread_id,
                                "bot_id": bot_id, "message": "Something went wrong.",

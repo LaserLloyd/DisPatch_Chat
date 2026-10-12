@@ -160,6 +160,9 @@ Everything the `api` block accepts:
 | `api_key_env` | no | Name of an environment variable holding the key. Wins over `api_key` |
 | `system_prompt` | no | Replaces the default ("You are `<name>`, a friendly assistant in a family chat app called DisPatch Chat…") |
 | `max_history_chars` | no | Context budget, default `24000` |
+| `extra_body` | no | Extra fields merged into every chat-completions request (OpenAI-shape providers), e.g. `{thinking: {type: disabled}}`. Applied after the preset's own (the `minimax` preset sends `thinking: {type: disabled}` and `reasoning_split: true`) |
+| `max_tokens` | no | Output cap sent with each request (OpenAI-shape providers) |
+| `read_timeout_s` | no | Seconds to wait for the provider between bytes, default `120` |
 
 You can hand-edit this file; DisPatch re-reads it when the mtime changes. Run
 the panel again for the same provider and it **updates** that bot rather than
@@ -172,9 +175,14 @@ creating a second one — leaving the key field blank keeps the stored key.
   are excluded; consecutive same-role turns are merged.
 - **Timeouts.** 10 s to connect, 120 s to answer. A local model loading for the
   first time can exceed that — it usually succeeds on the retry, once warm.
-- **Streaming.** The reply is fetched whole and then delivered through the app's
-  existing simulated-streaming path, so it appears the same way an agent's reply
-  does. Token-by-token streaming from the provider is not implemented.
+- **Streaming.** OpenAI-compatible providers stream token by token into the
+  chat. A server that ignores `stream: true` and answers with one JSON body
+  still works (the reply is typed out by the app's simulated streaming), and so
+  does Anthropic, whose SDK path is fetched whole.
+- **One retry.** A `429`, `502`, `503` or `504` that arrives before any text is
+  retried once after a short pause (the provider's `Retry-After` if it sent one
+  of 5 s or less; a longer one fails the turn straight away). Nothing is
+  retried once a word is on screen.
 - **Errors are always visible.** A bad key, a missing model, an unreachable
   server, an Anthropic refusal — each produces an error in the thread naming the
   cause. Nothing fails silently, and the thread never stays stuck "thinking".
@@ -184,8 +192,7 @@ creating a second one — leaving the key field blank keeps the stored key.
 
 ## Need streaming, fallbacks or a knowledge base?
 
-A "Connect an AI" bot fetches replies whole and uses one provider. For real
-token streaming, a cloud-then-local fallback chain, notes the bot can search and
+A "Connect an AI" bot uses one provider. For a cloud-then-local fallback chain, notes the bot can search and
 handoffs to your agents, configure an advisor bot instead: [advisor.md](advisor.md).
 
 ## Troubleshooting

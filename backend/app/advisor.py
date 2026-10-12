@@ -37,20 +37,16 @@ import asyncio
 import contextlib
 import functools
 import hashlib
-import json
 import logging
 import re
 import sqlite3
 import threading
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-
-import httpx
 
 from . import config, knowledge, llm_api
 
@@ -643,64 +639,11 @@ def _search_query(history: list[dict]) -> str:
 # --------------------------------------------------------------------------- #
 
 
-class StreamFailed(Exception):
-    """A provider failed. `started` says whether the provider had produced any
-    raw text (reasoning included) — informational only: whether the turn may
-    still fall back is decided by what is ON SCREEN (`_Emitter.started`)."""
-
-    def __init__(self, error: llm_api.ApiError, started: bool) -> None:
-        super().__init__(error.message)
-        self.error = error
-        self.started = started
-
-
-async def _stream_openai(cfg: llm_api.Resolved, entry: dict, messages: list[dict],
-                         on_text: Callable[[str], Awaitable[None]]) -> str:
-    """Stream one OpenAI-compatible chat completion; return the raw text."""
-    url = llm_api._join(cfg.base_url, "chat/completions")
-    body: dict[str, Any] = {"model": cfg.model, "messages": messages, "stream": True}
-    if entry.get("max_tokens"):
-        body["max_tokens"] = int(entry["max_tokens"])
-    if isinstance(entry.get("extra_body"), dict):
-        body.update(entry["extra_body"])
-    raw = ""
-    timeout = httpx.Timeout(connect=llm_api.CONNECT_TIMEOUT_S,
-                            read=float(entry.get("read_timeout_s") or 60),
-                            write=30, pool=10)
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream("POST", url, json=body,
-                                     headers=llm_api._auth_headers(cfg.api_key)) as resp:
-                if resp.status_code >= 400:
-                    payload = llm_api._decode_json_lenient(await resp.aread())
-                    raise StreamFailed(llm_api._status_error(
-                        resp.status_code, payload, url=url, model=cfg.model,
-                        key_used=bool(cfg.api_key)), started=False)
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(obj, dict) and obj.get("error"):
-                        raise StreamFailed(llm_api.ApiError(
-                            "The provider reported an error mid-reply",
-                            str(obj["error"])[:300]), started=bool(raw))
-                    for ch in (obj.get("choices") or []) if isinstance(obj, dict) else []:
-                        piece = ((ch or {}).get("delta") or {}).get("content")
-                        if isinstance(piece, str) and piece:
-                            raw += piece
-                            await on_text(raw)
-    except StreamFailed:
-        raise
-    except httpx.HTTPError as e:
-        raise StreamFailed(llm_api._transport_error(
-            e, url, local=cfg.provider.local), started=bool(raw)) from e
-    return raw
+# The streaming call and its failure type live in llm_api (shared with the
+# "Connect an AI" bots); `generate` looks `_stream_openai` up here so tests can
+# swap it.
+StreamFailed = llm_api.StreamFailed
+_stream_openai = llm_api.stream_openai
 
 
 async def _complete_whole(cfg: llm_api.Resolved, messages: list[dict],
@@ -725,60 +668,25 @@ async def _complete_whole(cfg: llm_api.Resolved, messages: list[dict],
 # --------------------------------------------------------------------------- #
 
 
-class _Emitter:
-    """Turns cumulative raw text into provisional-bubble frames, throttled."""
+class _Emitter(llm_api.StreamEmitter):
+    """Turns cumulative raw text into provisional-bubble frames, throttled.
+
+    The advisor's flavour of :class:`llm_api.StreamEmitter`: hooks resolved at
+    use (``bind`` may come later), and reasoning + markers never shown."""
+
+    prefix = "advisor"
 
     def __init__(self, thread_id: str, bot_id: str) -> None:
-        self.thread_id, self.bot_id = thread_id, bot_id
-        self.prov = f"run:advisor-{uuid.uuid4().hex[:12]}"
-        self.started = False
-        self.sent = ""
-        self.pending: str | None = None
-        self.last = 0.0
-        self.replace_next = False
+        super().__init__(thread_id, bot_id)
 
-    async def push(self, raw: str, *, force: bool = False) -> None:
-        self.pending = raw
-        now = time.monotonic()
-        if force or now - self.last >= STREAM_EMIT_INTERVAL_S:
-            self.last = now
-            await self.flush()
+    def _stream_hooks(self) -> Any:
+        return _h()
 
-    async def flush(self) -> None:
-        if self.pending is None:
-            return
-        raw, self.pending = self.pending, None
-        h = _h()
-        clean = h.sanitize_delta(visible_text(raw))
-        if not clean.strip() or clean == self.sent:
-            return
-        extra: dict = {}
-        if self.replace_next or not clean.startswith(self.sent):
-            chunk, extra = clean, {"replace": True}
-            self.replace_next = False
-        else:
-            chunk = clean[len(self.sent):]
-        self.sent = clean
-        if not self.started:
-            self.started = True
-            h.open_stream(self.thread_id, self.prov)
-            await h.broadcast({"type": "stream_start", "thread_id": self.thread_id,
-                               "bot_id": self.bot_id, "message_id": self.prov})
-        await h.broadcast({"type": "stream_chunk", "thread_id": self.thread_id,
-                           "bot_id": self.bot_id, "message_id": self.prov,
-                           "text": chunk, **extra})
+    def _visible(self, raw: str) -> str:
+        return visible_text(raw)
 
-    def restart(self) -> None:
-        """A fallback provider is about to write over what is on screen."""
-        self.replace_next = True
-        self.pending = None
-
-    async def retire(self) -> None:
-        """Close the bubble when no row is coming (the turn failed)."""
-        if self.started and _h().close_stream(self.thread_id, self.prov):
-            await _h().broadcast({"type": "stream_done", "thread_id": self.thread_id,
-                                  "bot_id": self.bot_id, "message_id": self.prov,
-                                  "message": None, "provisional_id": self.prov})
+    def _interval(self) -> float:
+        return STREAM_EMIT_INTERVAL_S
 
 
 async def generate(cfg: AdvisorConfig, messages: list[dict],

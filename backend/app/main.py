@@ -7281,6 +7281,10 @@ llm_api.bind(llm_api.Hooks(
     merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
     # A speculation's provider call joins the app's task set (shutdown order).
     track=lambda task: _track(task),
+    # Live token streaming into a provisional bubble (same as the advisor).
+    open_stream=lambda tid, prov: _open_provisional(tid, prov),
+    close_stream=lambda tid, prov: _close_provisional(tid, prov),
+    sanitize_delta=lambda text: _sanitize_delta(text),
 ))
 
 
