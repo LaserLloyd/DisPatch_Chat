@@ -37,6 +37,7 @@ package = false
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-timeout>=2.3.0",
 ]
 # Kept EMPTY on purpose: voice chat left DisPatch in 2.2.0 and is the separate
 # DisPatch Voice add-on (docs/extensions.md). The group stays declared so a
@@ -53,6 +54,7 @@ packages = ["app"]
 # apps/conftest.py hands them this suite's fixtures and hermetic guards.
 testpaths = ["tests", "../apps"]
 asyncio_mode = "auto"
+timeout = 600
 pythonpath = ["."]
 
 # --------------------------------------------------------------------------- #

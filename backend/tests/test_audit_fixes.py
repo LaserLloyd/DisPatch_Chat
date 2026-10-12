@@ -289,6 +289,25 @@ def test_prune_preserves_pinned_good_snapshot_and_caps_corrupt(tmp_path, monkeyp
     assert len(corrupt) == 2, "corrupt snapshots must be capped at 2"
 
 
+def test_prune_ignores_hand_made_snapshots(tmp_path, monkeypatch):
+    bdir = tmp_path / "backups"
+    bdir.mkdir(parents=True)
+    monkeypatch.setattr(config, "BACKUP_DIR", bdir)
+    monkeypatch.setattr(main, "SETTINGS", replace(config.SETTINGS, backup_keep=2))
+    monkeypatch.setattr(main, "_last_good_backup", None)
+    manual = bdir / "chats-before-repair-20260101-000000.db"
+    manual.write_bytes(b"x")
+    snaps = []
+    for i in range(4):
+        p = bdir / f"chats-2026070{i}-000000.db"
+        p.write_bytes(b"x")
+        snaps.append(p)
+    main._prune_backups()
+    # The manual file neither takes a keep slot nor is rotated away.
+    assert sorted(bdir.glob("chats-2*.db")) == snaps[2:]
+    assert manual.exists()
+
+
 # --------------------------------------------------------------------------- #
 # Crash-recovery import: a lost reply repeating earlier text is still recovered
 # --------------------------------------------------------------------------- #

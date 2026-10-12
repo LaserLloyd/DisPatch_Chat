@@ -6272,7 +6272,12 @@ _last_good_backup: Path | None = None     # newest verified-good snapshot (pinne
 
 def _prune_backups() -> None:
     keep = max(1, SETTINGS.backup_keep)
-    snaps = sorted(config.BACKUP_DIR.glob("chats-*.db"))
+    # Only the rotation's own stamped files (chats-YYYYMMDD-HHMMSS.db) count.
+    # A hand-made "chats-before-<thing>-<stamp>.db" sorts AFTER every digit
+    # stamp, so under a bare chats-*.db glob it counted as "newest": it took a
+    # keep slot (shrinking the real window) and was never itself rotated.
+    snaps = sorted(p for p in config.BACKUP_DIR.glob("chats-*.db")
+                   if re.fullmatch(r"chats-\d{8}-\d{6}\.db", p.name))
     for p in snaps[:-keep]:
         # Never rotate away the newest verified-good snapshot: if the live DB
         # goes corrupt, every later snapshot fails verification and would
