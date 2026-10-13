@@ -43,9 +43,9 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=2';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=3';
+} from './ext-sdk.js?v=4';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=2';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=3';
 import { mountPluginsSettings } from './plugins.js?v=1';
 import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.

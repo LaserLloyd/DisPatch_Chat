@@ -2,8 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v153';  // v153: 2.3.1 — about.js?v=8→9 (version 2.3.1; extension websockets accept a safe bot's thread, voice for Safe-Mode bots).
-// v152: 2.3.0 — quick actions (js/quick-actions.js), Settings → Plugins (js/plugins.js) and Bots-tab editing (js/bots-edit.js) join SHELL; the Tools tab folds into Plugins; add-in tabs; main.js?v=129→129, api.js?v=33→33, extensions.js?v=2→2, ext-sdk.js?v=3→3, voice-absent.js?v=2→2, app.css?v=100→100, index.html, locales (quick.*, plugins.*, bots_edit.*).
+const CACHE = 'local-chat-v153';  // v153: 2.3.1 — about.js?v=8→9 and its importers ext-sdk.js?v=3→4, voice-absent.js?v=2→3, main.js?v=129→130 (version 2.3.1; extension websockets accept a safe bot's thread, voice for Safe-Mode bots).
+// v152: 2.3.0 — quick actions (js/quick-actions.js), Settings → Plugins (js/plugins.js) and Bots-tab editing (js/bots-edit.js) join SHELL; the Tools tab folds into Plugins; add-in tabs; main.js?v=130→129, api.js?v=33→33, extensions.js?v=2→2, ext-sdk.js?v=4→3, voice-absent.js?v=3→2, app.css?v=100→100, index.html, locales (quick.*, plugins.*, bots_edit.*).
 // v151: Web Push — js/push.js joins SHELL (Settings → Device → Notifications), this worker gains push + notificationclick (ping only: a title, never message text); main.js?v=127→128, index.html, locales (push.*).
 // v150: password fields wrapped in <form data-no-submit> (Chromium form warning), advisor bots hide the thinking row; main.js?v=126→127, index.html.
 // v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the chat marks what a voice-chat listener did not hear); ext-sdk.js?v=1→2 (shell.activity), main.js?v=125→126, app.css?v=98→99, index.html, locales (msg.not_heard, msg.voice_cut).
