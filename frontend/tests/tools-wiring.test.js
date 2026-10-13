@@ -211,9 +211,10 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v152 (2.3.0 platform round)', () => {
+test('the sw.js CACHE is local-chat-v153 (2.3.1)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v153: 2.3.1 — about.js 8→9 (safe bots get voice).
   // v152: 2.3.0 — quick-actions.js, plugins.js and bots-edit.js join SHELL,
   // the Tools tab folds into Plugins, add-in tabs (main.js 128→129, api.js
   // 32→33, extensions.js 1→2, ext-sdk.js 2→3, voice-absent.js 1→2, app.css
@@ -275,7 +276,7 @@ test('the sw.js CACHE is local-chat-v152 (2.3.0 platform round)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v152');
+  assert.equal(m[1], 'local-chat-v153');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
