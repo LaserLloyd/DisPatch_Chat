@@ -75,5 +75,11 @@ def test_the_guard_actually_redirected_this_test(tmp_path, tmp_path_factory):
     basetemp = tmp_path_factory.getbasetemp()
     assert is_disposable(config.DATA_DIR, basetemp), config.DATA_DIR
     assert is_disposable(config.AVATAR_DIR, basetemp), config.AVATAR_DIR
+    # The blob stores and the backup dir are bound at import time too. A test
+    # that patched only BACKUP_DIR and called _make_backup() rsynced the live
+    # media store (2.4 GB) into tmp on every run and filled the tmpfs quota
+    # (2026-10-13). They must follow DATA_DIR like CONFIG_PATH does.
+    for name in ("CONFIG_PATH", "MEDIA_DIR", "FILES_DIR", "BACKUP_DIR"):
+        assert is_disposable(getattr(config, name), basetemp), (name, getattr(config, name))
     # And specifically not THIS machine's real store.
     assert config.DATA_DIR != Path.home() / ".local" / "share" / "local-chat"

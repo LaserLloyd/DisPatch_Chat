@@ -254,6 +254,15 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     if not is_disposable(_config.CONFIG_PATH, basetemp):
         monkeypatch.setattr(_config, "CONFIG_PATH", _config.DATA_DIR / "config.yaml")
         _config._invalidate_bots_cache()
+    # Same import-time binding for the blob stores and the backup dir. Left on
+    # the live store, a test that patched only BACKUP_DIR and called
+    # _make_backup() rsynced the family's 2.4 GB media dir into tmp on every
+    # run (2026-10-13: two runs filled the tmpfs quota and took the OpenClaw
+    # gateway's SQLite worker down with it).
+    for name, sub in (("MEDIA_DIR", "media"), ("FILES_DIR", "files"),
+                      ("BACKUP_DIR", "backups")):
+        if not is_disposable(getattr(_config, name), basetemp):
+            monkeypatch.setattr(_config, name, _config.DATA_DIR / sub)
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     (tmp_path / "avatars").mkdir(parents=True, exist_ok=True)
 
