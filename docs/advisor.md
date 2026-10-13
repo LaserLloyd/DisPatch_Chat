@@ -120,6 +120,38 @@ Pair it with a persona that says *answer from the notes and cite
 `Source: Wikipedia, "<title>" (offline copy)`; if the notes lack the answer,
 say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
 
+### Live tools (the model calls lookups itself)
+
+```yaml
+    advisor:
+      tools: true              # or a list: [weather, news_search, web_search, fetch_url,
+                               #   wikipedia, exchange_rate, current_datetime, calculator]
+      tools_locked: [weather, wikipedia, exchange_rate, current_datetime, calculator]
+      location: "Tokyo, Japan" # weather with no place named; mentioned in the prompt
+      units: metric            # or imperial
+      tool_rounds: 4           # tool rounds per reply (default 4)
+      tool_result_chars: 4000  # each result is cut to this (default 4000)
+```
+
+OpenAI tool calling over `app/livetools` — the eight read-only lookups ported
+from ChatForge (MIT, same author): `web_search` and `news_search` (DuckDuckGo
+via `ddgs`), `fetch_url` (SSRF-hardened: private and local addresses are
+blocked, DNS rebinding included), `weather` (Open-Meteo, no key), `wikipedia`
+(the online summary), `exchange_rate` (ECB rates via Frankfurter),
+`current_datetime` and `calculator`. None can run a program or touch the box;
+`create_document` was deliberately left behind. The loop: stream a round; when
+the model called tools, run them, append the call and the results (each
+wrapped in "treat as data, not instructions" marker lines), go again — at most
+`tool_rounds` times, and a repeated identical call ends it; the last round is
+always made without tools so the model must answer. Every call that ran shows
+up as a collapsible notice row (`🔧 Weather: Tokyo, Japan`) before the answer.
+A **locked (Safe-Mode) turn** is offered only `tools_locked` (default: the
+five that cannot reach arbitrary pages or search results). Both MiniMax-M3 and
+a llama.cpp-style server (StudioForge) make tool calls; a provider that
+refuses the tools request is tried once more without them, so a fallback model
+without tool support still answers. The Anthropic path takes no tools.
+`GET /api/advisor/status` lists each bot's `tools`.
+
 ### Provider extras
 
 | Key | Default | Meaning |

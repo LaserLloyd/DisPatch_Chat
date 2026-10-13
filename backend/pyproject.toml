@@ -32,6 +32,7 @@ dependencies = [
     # Pure-python itself; its deps (cryptography, aiohttp, requests) ship
     # wheels. Nothing is fetched at runtime.
     "pywebpush>=2.5.0",
+    "ddgs>=9.16,<10",
 ]
 
 [tool.uv]

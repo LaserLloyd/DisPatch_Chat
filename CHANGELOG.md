@@ -18,6 +18,25 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `api:` bots stream for real, retry a 429/502/503/504 once before the first
   token, and accept `extra_body`, `max_tokens` and `read_timeout_s`; new
   `minimax` preset.
+- **Advisor live tools** (`advisor.tools`): OpenAI tool calling over the
+  eight read-only lookups ported from ChatForge (`app/livetools`): web and
+  news search (DuckDuckGo), a page fetch (SSRF-hardened), weather
+  (Open-Meteo), Wikipedia, exchange rates (ECB), the time and a calculator.
+  Each call that ran shows as a collapsible notice row before the answer.
+  `tools_locked` names the subset a Safe-Mode device may trigger. New
+  dependency: `ddgs`.
+- **Advisor lookup** (`advisor.lookup`): the turn runs `infoforge search
+  --json --text` itself and hands the articles to the model as reference
+  notes, so a Wikipedia bot answers in about two seconds with a citation.
+- The advisor's date line now carries the local time and zone.
+
+### Changed
+
+- **An advisor may be a Safe-Mode bot.** `safe: true` sticks (it used to be
+  forced off silently, including from the Bot Manager). What a locked device
+  may make it do is decided per turn: a send, retry or resend over a Safe-Mode
+  socket runs the turn locked — no research or handoff marker is acted on, the
+  prompt says so, and only `tools_locked` are offered.
 
 ### Fixed
 

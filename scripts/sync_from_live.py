@@ -39,11 +39,16 @@ REPO = Path(__file__).resolve().parent.parent
 # Those still skip __pycache__, *.pyc and every dot-path (`_wanted`).
 ALLOW: list[tuple[str, str, str]] = [
     ("backend/app",                 "backend/app",                 "*.py"),
+    # The live-tools package (2026-10-13): the ChatForge lookups an advisor
+    # bot calls itself. A sub-package needs its own row — `*.py` on
+    # backend/app does not descend.
+    ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
     # (Voice chat left DisPatch in 2.2.0 — it is the DisPatch Voice add-on, a
     # package installed beside the app, never part of the install tree. The
     # 2.1 `backend/app/voice` and static voice rows are gone on purpose: a
     # 2.1 ghost tree left in an install must never sync back into the repo.)
     ("backend/tests",               "backend/tests",               "*.py"),
+    ("backend/tests/livetools",      "backend/tests/livetools",     "*.py"),
     ("backend",                     "backend",                     "pyproject.toml"),
     ("backend",                     "backend",                     "uv.lock"),
     ("frontend/static",             "frontend/static",             "index.html"),

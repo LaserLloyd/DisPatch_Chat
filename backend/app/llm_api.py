@@ -891,7 +891,8 @@ def _whole_reply(payload: Any, url: str, status: int, cfg: Resolved) -> StreamRe
         model=str(payload.get("model") or cfg.model),
         tokens=_total_tokens(payload.get("usage")),
         finish_reason=str((choices[0] or {}).get("finish_reason") or ""),
-        streamed=False)
+        streamed=False,
+        tool_calls=_message_tool_calls(message) if isinstance(message, dict) else [])
 
 
 def _total_tokens(usage: Any) -> int | None:
@@ -938,6 +939,61 @@ class StreamResult:
     tokens: int | None = None
     finish_reason: str = ""
     streamed: bool = True       # False: the server answered with one JSON body
+    #: Tool calls the model made, each ``{id, name, arguments}`` with the
+    #: arguments as the JSON text the model wrote (advisor tool loop,
+    #: 2026-10-13). Empty for a plain reply.
+    tool_calls: list = field(default_factory=list)
+
+
+# Adapted from ChatForge llm/client.py (MIT, LaserLloyd), itself from CrucibleForge.
+def merge_tool_call_deltas(raw_deltas: list[dict]) -> list[dict]:
+    """The streamed ``delta.tool_calls`` fragments as whole calls.
+
+    MiniMax sends each call whole in one fragment; llama.cpp-style servers
+    (StudioForge) stream the arguments a few characters at a time under one
+    ``index``; some servers send no index at all, where a new ``id`` starts a
+    new call and an id-less fragment continues the one before it."""
+    calls: dict[int, dict] = {}
+    last: int | None = None
+    for d in raw_deltas:
+        if not isinstance(d, dict):
+            continue
+        idx = d.get("index")
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            new_id = d.get("id")
+            if last is None or (new_id and calls[last]["id"] and new_id != calls[last]["id"]):
+                idx = max(calls) + 1 if calls else 0
+            else:
+                idx = last
+        last = idx
+        slot = calls.setdefault(idx, {"id": None, "name": "", "arguments": ""})
+        if d.get("id"):
+            slot["id"] = d["id"]
+        fn = d.get("function") or {}
+        name = fn.get("name")
+        if name and name != slot["name"]:      # some servers repeat the full name
+            slot["name"] += name
+        if fn.get("arguments"):
+            slot["arguments"] += fn["arguments"]
+    return [{"id": calls[k]["id"] or f"call_{i}", "name": calls[k]["name"],
+             "arguments": calls[k]["arguments"]}
+            for i, k in enumerate(sorted(calls))]
+
+
+def _message_tool_calls(message: dict) -> list[dict]:
+    """``message.tool_calls`` of a non-streamed reply in the same shape."""
+    out = []
+    for i, c in enumerate(message.get("tool_calls") or []):
+        if not isinstance(c, dict):
+            continue
+        fn = c.get("function") or {}
+        name = str(fn.get("name") or "")
+        if not name:
+            continue
+        args = fn.get("arguments")
+        out.append({"id": str(c.get("id") or f"call_{i}"), "name": name,
+                    "arguments": args if isinstance(args, str) else json.dumps(args or {})})
+    return out
 
 
 #: Statuses worth one more try: rate limit and the gateway/overload family.
@@ -981,7 +1037,8 @@ def _delta_text(delta: Any) -> str:
 async def stream_chat(cfg: Resolved, messages: list[dict],
                       on_text: Callable[[str], Awaitable[None]] | None = None, *,
                       max_tokens: int | None = None, extra_body: dict | None = None,
-                      read_timeout: float = READ_TIMEOUT_S) -> StreamResult:
+                      read_timeout: float = READ_TIMEOUT_S,
+                      tools: list[dict] | None = None) -> StreamResult:
     """Stream one OpenAI-compatible chat completion.
 
     ``messages`` is the full list (system first). ``on_text`` gets the
@@ -998,6 +1055,11 @@ async def stream_chat(cfg: Resolved, messages: list[dict],
     body: dict[str, Any] = {"model": cfg.model, "messages": messages, "stream": True}
     if max_tokens:
         body["max_tokens"] = int(max_tokens)
+    if tools:
+        # OpenAI tool calling; the model decides (`auto`). The calls come back
+        # as `delta.tool_calls` fragments, merged in `merge_tool_call_deltas`.
+        body["tools"] = list(tools)
+        body["tool_choice"] = "auto"
     body.update(cfg.provider.extra_body or {})
     if isinstance(extra_body, dict):
         body.update(extra_body)
@@ -1026,6 +1088,7 @@ async def stream_chat(cfg: Resolved, messages: list[dict],
                                             url, resp.status_code, cfg)
                     else:
                         model, tokens, reason, seen = cfg.model, None, "", 0
+                        tool_deltas: list[dict] = []
                         async for line in resp.aiter_lines():
                             seen += len(line) + 1
                             if seen > MAX_RESPONSE_BYTES:
@@ -1054,13 +1117,18 @@ async def stream_chat(cfg: Resolved, messages: list[dict],
                                 if not isinstance(ch, dict):
                                     continue
                                 reason = str(ch.get("finish_reason") or reason)
-                                piece = _delta_text(ch.get("delta"))
+                                delta = ch.get("delta")
+                                if isinstance(delta, dict) and isinstance(
+                                        delta.get("tool_calls"), list):
+                                    tool_deltas.extend(delta["tool_calls"])
+                                piece = _delta_text(delta)
                                 if piece:
                                     raw += piece
                                     if on_text is not None:
                                         await on_text(raw)
                         return StreamResult(text=raw, model=model, tokens=tokens,
-                                            finish_reason=reason)
+                                            finish_reason=reason,
+                                            tool_calls=merge_tool_call_deltas(tool_deltas))
                 finally:
                     await resp.aclose()
         except StreamFailed:
@@ -1084,6 +1152,18 @@ async def stream_openai(cfg: Resolved, entry: dict, messages: list[dict],
         extra_body=entry.get("extra_body") if isinstance(entry.get("extra_body"), dict) else None,
         read_timeout=float(entry.get("read_timeout_s") or 60))
     return res.text
+
+
+async def stream_round(cfg: Resolved, entry: dict, messages: list[dict],
+                       on_text: Callable[[str], Awaitable[None]], *,
+                       tools: list[dict] | None = None) -> StreamResult:
+    """:func:`stream_openai` for one round of a tool loop: the same knobs, an
+    optional ``tools`` list, and the whole :class:`StreamResult` back (the
+    advisor needs ``tool_calls``, not just the text)."""
+    return await stream_chat(
+        cfg, messages, on_text, max_tokens=_int_or_none(entry.get("max_tokens")),
+        extra_body=entry.get("extra_body") if isinstance(entry.get("extra_body"), dict) else None,
+        read_timeout=float(entry.get("read_timeout_s") or 60), tools=tools)
 
 
 def _int_or_none(value: Any) -> int | None:

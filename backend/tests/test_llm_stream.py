@@ -285,3 +285,73 @@ def test_api_turn_that_fails_mid_stream_retires_its_bubble(db_env, monkeypatch):
     assert any(f["type"] == "error" for f in frames)
     assert main._provisional_runs.get(start["thread_id"]) is None
     config._invalidate_bots_cache()
+
+
+# --------------------------------------------------------------------------- #
+# Tool calls (advisor live tools, 2026-10-13)
+# --------------------------------------------------------------------------- #
+
+
+def test_tool_call_fragments_merge_into_whole_calls():
+    whole = [{"index": 0, "id": "a", "type": "function",
+              "function": {"name": "weather", "arguments": '{"location":"Tokyo"}'}}]
+    assert llm_api.merge_tool_call_deltas(whole) == [
+        {"id": "a", "name": "weather", "arguments": '{"location":"Tokyo"}'}]
+    # llama.cpp style: the arguments arrive a few characters at a time.
+    frags = [{"index": 0, "id": "b", "function": {"name": "weather", "arguments": ""}},
+             {"index": 0, "function": {"arguments": '{"loc'}},
+             {"index": 0, "function": {"arguments": 'ation":"Tokyo"}'}},
+             {"index": 1, "id": "c", "function": {"name": "calculator",
+                                                  "arguments": '{"expression":"1+1"}'}}]
+    assert llm_api.merge_tool_call_deltas(frags) == [
+        {"id": "b", "name": "weather", "arguments": '{"location":"Tokyo"}'},
+        {"id": "c", "name": "calculator", "arguments": '{"expression":"1+1"}'}]
+    # No index at all: a new id starts a call, an id-less fragment continues it.
+    noidx = [{"id": "x", "function": {"name": "weather", "arguments": '{"a"'}},
+             {"function": {"arguments": ':1}'}},
+             {"id": "y", "function": {"name": "clock", "arguments": "{}"}}]
+    assert [c["arguments"] for c in llm_api.merge_tool_call_deltas(noidx)] == ['{"a":1}', "{}"]
+    assert llm_api.merge_tool_call_deltas([{"function": {"arguments": "{}"}}])[0]["id"] == "call_0"
+
+
+def test_a_streamed_tool_call_comes_back_on_the_result(monkeypatch):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        chunks = [
+            {"choices": [{"delta": {"content": "</think>\n\n", "role": "assistant",
+                                    "tool_calls": [{"id": "c1", "type": "function", "index": 0,
+                                                    "function": {"name": "weather",
+                                                                 "arguments": '{"location":"Tokyo"}'}}]}}]},
+            {"choices": [{"finish_reason": "tool_calls", "index": 0, "delta": {"role": "assistant"}}]},
+        ]
+        body = "".join("data: " + json.dumps(c) + "\n\n" for c in chunks) + "data: [DONE]\n\n"
+        return _sse_response(body.encode())
+    _mock_http(monkeypatch, handler)
+    schemas = [{"type": "function", "function": {"name": "weather", "parameters": {}}}]
+    res = asyncio.run(llm_api.stream_chat(_cfg(), [{"role": "user", "content": "hi"}],
+                                          tools=schemas))
+    assert res.tool_calls == [{"id": "c1", "name": "weather", "arguments": '{"location":"Tokyo"}'}]
+    assert res.text == "</think>\n\n" and res.finish_reason == "tool_calls"
+    assert bodies[0]["tools"] == schemas and bodies[0]["tool_choice"] == "auto"
+    # Without tools the body carries neither key — the old request unchanged.
+    asyncio.run(llm_api.stream_chat(_cfg(), [{"role": "user", "content": "hi"}]))
+    assert "tools" not in bodies[1] and "tool_choice" not in bodies[1]
+
+
+def test_a_non_streamed_reply_with_tool_calls_is_read_too(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "z", "type": "function",
+                            "function": {"name": "calculator",
+                                         "arguments": {"expression": "2*3"}}}]},
+            "finish_reason": "tool_calls"}]})
+    _mock_http(monkeypatch, handler)
+    res = asyncio.run(llm_api.stream_chat(_cfg(), [{"role": "user", "content": "hi"}],
+                                          tools=[{"type": "function",
+                                                  "function": {"name": "calculator"}}]))
+    assert res.streamed is False
+    assert res.tool_calls == [{"id": "z", "name": "calculator",
+                               "arguments": '{"expression": "2*3"}'}]
