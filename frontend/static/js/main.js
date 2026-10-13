@@ -2,10 +2,10 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=32';
+import { api, setOnLocked } from './api.js?v=33';
 import { ChatSocket } from './ws.js?v=9';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
-import { installChecklists, applyChecklistState } from './checklist.js?v=11';
+import { installChecklists, applyChecklistState } from './checklist.js?v=12';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,26 +21,33 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=24';
+} from './reactions.js?v=25';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=11';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=12';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=8';
+} from './llm.js?v=9';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
+import {
+  loadActions as loadQuickActions, currentAction as currentQuickAction,
+  clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
+  wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
+} from './quick-actions.js?v=1';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
 // how to add it (voice-absent.js).
-import { createLoader, createPaneHost } from './extensions.js?v=1';
+import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=2';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=2';
+} from './ext-sdk.js?v=3';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=1';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=2';
+import { mountPluginsSettings } from './plugins.js?v=1';
+import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -54,7 +61,7 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
-} from './tools.js?v=12';
+} from './tools.js?v=13';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=1';
@@ -63,7 +70,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=7';
+import { aboutRow } from './about.js?v=8';
 import { pushRow } from './push.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
@@ -229,7 +236,7 @@ const dom = {};
  'mp-thinking', 'mp-context', 'mp-warning', 'mp-reset', 'mp-apply',
  'char-count', 'waiting', 'attach-btn', 'file-input', 'attach-preview', 'mobile-tabs',
  'app-thread-host',
- 'retry-chip', 'retry-chip-btn',
+ 'retry-chip', 'retry-chip-btn', 'quick-btn',
  'reply-chip', 'reply-chip-label', 'reply-chip-excerpt', 'reply-chip-cancel',
  'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
  'collapse-threads', 'expand-threads', 'crop-backdrop', 'crop-img', 'crop-box',
@@ -239,7 +246,7 @@ const dom = {};
  // Settings tab container. The panes for Reactions and Health are empty mount
  // points; their modules build what goes inside.
  'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
- 'spane-ai', 'spane-tools', 'spane-theme', 'spane-device', 'spane-voice', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ 'spane-ai', 'spane-plugins', 'spane-theme', 'spane-device', 'spane-voice', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
  // Extensions: the chat-header action slot, the Settings → Voice tab and its body.
  'chat-actions-ext', 'stab-voice', 'ext-pane-voice',
  // Locked-side one-way drop
@@ -1836,6 +1843,12 @@ function messageEl(msg) {
   if (msg.metadata && msg.metadata.reply_to && msg.metadata.reply_excerpt) {
     col.append(quoteBlockEl(msg.metadata));
   }
+  // Quick action: the message went out with one ("Proof this"); the bubble
+  // keeps the typed text and carries the action's label above it.
+  if (role === 'user') {
+    const tag = actionTagEl(msg.metadata);
+    if (tag) col.append(tag);
+  }
   // dir="auto" on the bubble, not on the app: message text is CONTENT and picks
   // its own direction. In an Arabic session English prose was being reordered by
   // the bidi algorithm — trailing periods jumped to the front (".Server's up"),
@@ -2105,6 +2118,13 @@ function isGrouped(prev, msg) {
   return Math.abs(new Date(msg.created_at) - new Date(prev.created_at)) <= 5 * 60 * 1000;
 }
 
+function refreshQuickActions() {
+  loadQuickActions(api.quickActions).then(() => {
+    if (dom['messages'] && dom['messages'].querySelector('.empty-state.welcome')
+        && state.activeThreadId && !state.messages.length) renderMessages(false);
+  });
+}
+
 function prefillComposer(text) {
   const inp = dom['input'];
   if (!inp) return;
@@ -2147,7 +2167,13 @@ function renderMessages(stick = true) {
     ]);
     // Suggestion chips prefill the composer (no auto-send — consistent with the
     // no-slash-command design); suppressed in Safe Mode.
-    if (!state.decoy) {
+    // Desktop shows the quick actions instead (js/quick-actions.js; a click
+    // puts the action's pill in the composer). Mobile, Safe Mode and a server
+    // that served no actions keep the three suggestions.
+    const quick = (!state.decoy && !isMobile()) ? quickWelcomeChips() : [];
+    if (quick.length) {
+      welcome.append(el('div', { class: 'welcome-quick' }, quick));
+    } else if (!state.decoy) {
       // welcome.chip_search keeps a TRAILING SPACE on purpose: the chip prefills
       // the composer and leaves the caret after it, ready for the query.
       const chips = [t('welcome.chip_help'), t('welcome.chip_summary'), t('welcome.chip_search')];
@@ -2514,8 +2540,10 @@ function reflectComposerState() {
   dom['composer'].classList.toggle('no-thread', noThread);
   dom['attach-btn'].disabled = noThread;
   dom['input'].setAttribute(
-    'placeholder', t(noThread ? 'composer.placeholder_no_thread' : 'composer.placeholder'),
+    'placeholder',
+    (!noThread && quickPlaceholder()) || t(noThread ? 'composer.placeholder_no_thread' : 'composer.placeholder'),
   );
+  dom['quick-btn'].disabled = noThread;
   dom['waiting'].hidden = !thinking && !offline;
   dom['waiting'].textContent = t(offline ? 'composer.offline' : 'composer.waiting');
   dom['waiting'].classList.toggle('offline-note', offline && !thinking);
@@ -2604,6 +2632,11 @@ function sendMessage() {
   // Included in the frame itself (not a separate call) so a reconnect replay
   // — which resends this exact object unchanged — carries the quote too.
   if (state.replyTarget) frame.reply_to = state.replyTarget.id;
+  // Quick action picked in the composer: the id rides in the frame (so a
+  // reconnect replay carries it); the server expands it into the prompt and
+  // stores the typed text with metadata.action.
+  const quickAction = currentQuickAction();
+  if (quickAction) frame.action = quickAction.id;
   const ok = !!(socket && socket.send(frame));
   if (!ok) { toast(t('toast.offline'), true); return; }
   trackPendingSend(frame);
@@ -2611,7 +2644,8 @@ function sendMessage() {
   // nothing appeared until the server's broadcast came back — on a slow link
   // (or a stalled turn) that reads as "my message was eaten", and the Retry
   // chip fired 20s later against a chat that showed no trace of it.
-  showOptimisticSend(frame.client_msg_id, state.activeThreadId, full);
+  showOptimisticSend(frame.client_msg_id, state.activeThreadId, full,
+    quickAction ? { action: { id: quickAction.id, label: quickAction.label } } : {});
 
   dom['input'].value = '';
   // The words are in the outbox now, so the draft copy of them is no longer a
@@ -2620,6 +2654,7 @@ function sendMessage() {
   clearDraftFor(draftThread);
   clearAttachments();
   clearReplyTarget();
+  clearQuickAction();
   autosize();
   // Optimistic "thinking" — shows the typing bubble + waiting label right away
   // (the composer itself stays usable for queued follow-up messages).
@@ -2858,13 +2893,13 @@ function socketOpen() {
 // ever find it.
 const optimisticSends = new Map();
 
-function showOptimisticSend(cmid, threadId, text) {
+function showOptimisticSend(cmid, threadId, text, metadata = {}) {
   if (!cmid || !threadId) return;
   const box = dom['messages'];
   if (!box) return;
   const node = messageEl({
     id: '', thread_id: threadId, role: 'user', content: text,
-    created_at: new Date().toISOString(), metadata: {},
+    created_at: new Date().toISOString(), metadata,
   });
   // NIM returns null for a picture-only message — it has no row when it is
   // persisted either, so there is nothing to preview.
@@ -3396,6 +3431,7 @@ async function openThread(id, { background = false, botId = null } = {}) {
   if (switching && !background) {
     clearAttachments();
     clearReplyTarget();
+    clearQuickAction();
     // The composer belongs to a thread now. Empty it and put this thread's own
     // draft back (asynchronously — a slow disk must not delay the first paint,
     // and restoreDraft re-checks that we are still here and still empty).
@@ -4086,15 +4122,18 @@ function syncLockNimRow() {
 // leave path has to fire on every way out of the modal, which is why
 // deactivation hangs off a MutationObserver on the backdrop rather than being
 // sprinkled through the seven places that hide it.
-const SETTINGS_TABS = ['bots', 'reactions', 'health', 'ai', 'tools', 'theme', 'device', 'voice', 'security'];
+// Order = the tab strip (2.3): day-to-day first, setup after, rare last. Add-in
+// tabs (shell.settings.pane with a new id) are spliced in before 'plugins'.
+const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'security'];
+const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
 // voice chat is unlocked-only, and so is the page explaining how to add it).
 // `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'tools', 'voice'];
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
-const settingsPane = (id) => dom[`spane-${id}`];
+const settingsPane = (id) => dom[`spane-${id}`] || document.getElementById(`spane-${id}`);
 
 /** Is the Settings modal open, on tab `id` (or on any tab, if `id` is null)? */
 function settingsOpen(id = null) {
@@ -4108,6 +4147,8 @@ function deactivateSettingsTab() {
   if (settingsTab === 'health') unmountDashboard();
   if (settingsTab === 'reactions') unmountReactionManager();
   if (settingsTab === 'voice' && voicePaneHost) voicePaneHost.hide();
+  const addin = addinTabs && addinTabs.host(settingsTab);
+  if (addin) addin.hide();
 }
 
 /** Bring `id` on screen: swap the tablist state, swap the panes, swap the
@@ -4167,9 +4208,13 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
     case 'ai':
       await activateLlmPanel(llmCtx());
       break;
-    case 'tools':
-      // tools.js owns the table, the draft and the Save (PUT /api/tools).
-      await mountToolsSettings(pane);
+    case 'plugins':
+      // plugins.js builds the three groups; the Tools table inside it is still
+      // tools.js's (the draft and the Save, PUT /api/tools).
+      await mountPluginsSettings(pane, {
+        mountTools: (host) => mountToolsSettings(host),
+        toast, openTab: (tab) => setSettingsTab(tab),
+      });
       break;
     case 'device':
       mountLanguagePicker();
@@ -4194,6 +4239,11 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
     case 'security':
       activateSecurityPane();
       break;
+    default: {
+      // An add-in's own tab: its pane host fires the add-in's onShow.
+      const addin = addinTabs && addinTabs.host(id);
+      if (addin) addin.show();
+    }
   }
 }
 
@@ -4221,6 +4271,7 @@ function updateTabStripEdges() {
 
 function wireSettingsTabs() {
   const list = dom['settings-tabs'];
+  wireAddinTabs();
   list.querySelectorAll('.settings-tab').forEach((b) => {
     b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
   });
@@ -4403,14 +4454,21 @@ function renderBotManager() {
         bmDirty = true;
       }
     });
+    // 2.3 inline editing (js/bots-edit.js): backend badge, "not connected"
+    // link, Lookups pill, rename/model editor, Remove. These act at once —
+    // they are server facts, not part of the Save-button draft.
+    const ctl = state.decoy ? null : rowControls(bot, botEditCtx());
     const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx } }, [
       el('span', { class: 'bm-handle', text: '⠿' }),
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
       avatarImg,
       el('span', { class: 'bm-name', text: bot.name }),
+      ctl && ctl.badge,
+      ctl && ctl.notConnected,
       safeBtn,
       rxBtn,
       apBtn,
+      ctl && ctl.lookups,
       ...extras,
       mbBtn,
       // "Change photo" is omitted entirely in No-Image Mode — not disabled,
@@ -4433,10 +4491,60 @@ function renderBotManager() {
         lbl.append(cb, el('span', { class: 'slider' }));
         return lbl;
       })(),
+      ctl && ctl.edit,
+      ctl && ctl.remove,
+      ctl && ctl.panel,
     ]);
+    // Firefox cannot select text inside an input whose ancestor is draggable:
+    // the row stops being draggable while a field in it has focus.
+    if (ctl) {
+      ctl.panel.addEventListener('focusin', () => { row.draggable = false; });
+      ctl.panel.addEventListener('focusout', () => { row.draggable = true; });
+    }
     wireDrag(row);
     list.append(row);
   });
+  if (!state.decoy) list.append(addBotRow(botEditCtx()));
+}
+
+/** What js/bots-edit.js reports back through: the roster (bmBots) and the
+ *  sidebar (state.bots) follow the server at once, leaving any unsaved
+ *  order / visibility / Safe edits alone. */
+const BOT_ROW_FIELDS = ['name', 'emoji', 'model_hint', 'tools', 'backend', 'connected'];
+function botEditCtx() {
+  return {
+    toast,
+    confirm: (msg, opts) => uiConfirm(msg, opts),
+    openAi: () => setSettingsTab('ai'),
+    onPatched: (id, row) => {
+      for (const list of [bmBots, state.bots]) {
+        const b = list.find((x) => x.id === id);
+        if (!b || !row) continue;
+        for (const k of BOT_ROW_FIELDS) if (row[k] !== undefined) b[k] = row[k];
+      }
+      renderBotManager();
+      renderSidebar();
+      updateThreadListHeader();
+    },
+    onRemoved: async (id) => {
+      bmBots = bmBots.filter((x) => x.id !== id);
+      state.bots = state.bots.filter((x) => x.id !== id);
+      renderBotManager();
+      renderSidebar();
+      const gone = state.selectedBotId === id || (state.activeThread && state.activeThread.bot_id === id);
+      if (gone) {
+        if (state.bots.length) await selectBot(state.bots[0].id);
+        else { state.threads = []; renderThreads(); clearChatView(); }
+      }
+    },
+    onAdded: (row) => {
+      if (!row || bmBots.some((x) => x.id === row.id)) return;
+      bmBots.push(row);
+      if (row.visible !== false && !state.bots.some((x) => x.id === row.id)) state.bots.push(row);
+      renderBotManager();
+      renderSidebar();
+    },
+  };
 }
 let dragIdx = null;
 function wireDrag(row) {
@@ -6532,6 +6640,14 @@ function handleWs(data) {
       break;
     }
     case 'error':
+      if (data.code === 'bad_action') {
+        // The action was hidden or renamed since this tab loaded the list.
+        clearQuickAction();
+        refreshQuickActions();
+        toast(t('quick.rejected'), true);
+        announce(t('quick.rejected'), true);
+        break;
+      }
       toast(data.message + (data.detail ? ` (${data.detail})` : ''), true);
       announce(data.message, true);
       // AgentRefused — a verdict on the thread's model/thinking choice, not
@@ -7060,6 +7176,7 @@ function wireEvents() {
     }));
   document.addEventListener('click', () => toggleThreadMenu(false));
   wireModelChip();
+  wireQuickActions({ announce });
   // The password fields' wrapper <form>s exist only so the browser treats them
   // as form fields; Enter in one must never submit (= reload) the page.
   document.querySelectorAll('form[data-no-submit]').forEach((f) =>
@@ -7276,6 +7393,35 @@ function paneHost(id) {
   }
   return voicePaneHost;
 }
+// Add-in Settings tabs (js/extensions.js createAddinTabs), built once the DOM
+// is there (wireSettingsTabs). Null before that: no extension mounts earlier.
+let addinTabs = null;
+function wireAddinTabs() {
+  addinTabs = createAddinTabs({
+    doc: document,
+    tablist: dom['settings-tabs'],
+    beforeTab: document.getElementById('stab-plugins'),
+    beforePane: document.getElementById('spane-plugins'),
+    reserved: CORE_SETTINGS_TABS,
+    t,
+    isLocked: () => !!state.decoy,
+    onTab: (id) => setSettingsTab(id),
+    onAdd: (id, { public: isPublic }) => {
+      const at = SETTINGS_TABS.indexOf('plugins');
+      SETTINGS_TABS.splice(at < 0 ? SETTINGS_TABS.length : at, 0, id);
+      if (!isPublic) ADMIN_TABS.push(id);
+      updateTabStripEdges();
+    },
+    onRemove: (id) => {
+      const i = SETTINGS_TABS.indexOf(id);
+      if (i >= 0) SETTINGS_TABS.splice(i, 1);
+      const j = ADMIN_TABS.indexOf(id);
+      if (j >= 0) ADMIN_TABS.splice(j, 1);
+      if (settingsTab === id) setSettingsTab('bots');
+      updateTabStripEdges();
+    },
+  });
+}
 const botRowExtras = [];            // { owner, fn }
 const extHistory = [];              // { seq, onBack, active }
 let extHistorySeq = 0;
@@ -7399,7 +7545,9 @@ function addHeaderAction(owner, node, { before = 'thread-menu-btn' } = {}) {
 
 function extSettingsPane(owner, id, spec = {}) {
   const host = paneHost(id);
-  if (!host) throw new Error(`settings.pane: no extension pane "${id}"`);
+  // Not a pre-declared pane: the shell makes the tab (docs/extensions.md,
+  // "Settings panes"). A core tab id, or a malformed one, throws.
+  if (!host) return addinTabs.claim(owner, id, spec);
   if (host.owned() && host.ownerId() !== owner) throw new Error(`settings.pane: "${id}" is taken`);
   return host.claim(owner, spec);
 }
@@ -8211,7 +8359,7 @@ function iconifyChrome() {
     ['#stab-reactions', RAIL_ICONS.bolt, '.stab-glyph'],
     ['#stab-health', RAIL_ICONS.pulse, '.stab-glyph'],
     ['#stab-ai', RAIL_ICONS.chip, '.stab-glyph'],
-    ['#stab-tools', RAIL_ICONS.tools, '.stab-glyph'],
+    ['#stab-plugins', RAIL_ICONS.tools, '.stab-glyph'],
     ['#stab-theme', RAIL_ICONS.palette, '.stab-glyph'],
     ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
     ['#stab-voice', MIC_ICON, '.stab-glyph'],
@@ -8305,6 +8453,10 @@ async function startApp() {
       toast(t('toast.bots_failed', { error: e.message }), true);
     }
   }
+  // Quick actions (public route, Safe Mode too). Non-blocking; when the list
+  // lands over an empty-thread welcome block, repaint that block so its chips
+  // appear without waiting for a thread switch.
+  refreshQuickActions();
   // Feature flag: skip entirely for a Safe-Mode landing (would just 403) —
   // reboot() re-runs startApp() after a real unlock. NON-BLOCKING: the status
   // probe shells out to systemctl server-side and can take seconds on a slow
@@ -8996,6 +9148,7 @@ function reRenderForLocale() {
   if (state.activeThreadId) { renderChatHeader(); renderMessages(false); }
   else clearChatView();
   reflectComposerState();
+  repaintQuickActions();
   updateDropBusy();
   // And an open app page gets the new language (and theme) posted to it.
   syncAppFrame();

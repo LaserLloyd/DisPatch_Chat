@@ -20,7 +20,7 @@
 // and 403s the image of anything else. The `safe` re-check here is the same
 // belt-and-suspenders layer the message renderer uses for media.
 
-import { api } from './api.js?v=32';
+import { api } from './api.js?v=33';
 import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { nimEnabled } from './nim.js?v=5';
@@ -552,7 +552,7 @@ function renderManager() {
   // Daily freshness: new images per mood each day, plus (optionally) one for
   // every image fired since the last daily run. per_mood above is the ceiling.
   const dailyAdd = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '100', step: '1' });
-  dailyAdd.value = pool.daily_add_per_mood ?? 10;
+  dailyAdd.value = pool.daily_add_per_mood ?? 2;
   const refillSpent = el('input', { type: 'checkbox' });
   refillSpent.checked = pool.refill_spent_today !== false;
   const poolSafe = el('input', { type: 'checkbox' });

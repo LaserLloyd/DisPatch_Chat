@@ -123,3 +123,17 @@ def test_lookup_runs_the_real_runner_with_a_fixed_argv(tmp_path):
     rc, out, err = asyncio.run(advisor._run_lookup(
         [str(script), "search", "--json", "--text", "--max-articles", "a b; echo pwned"], 5))
     assert rc == 0 and out.strip() == "5:a b; echo pwned" and err.strip() == "warn"
+
+
+def test_a_quick_action_turn_searches_the_typed_words_not_the_template(adv_env, monkeypatch):
+    """Review 2.3.0 LOW-5: `query` names the words to look up when `text` is an
+    expanded quick-action prompt."""
+    tmp_path, _ = adv_env
+    _with_lookup()
+    calls = _capture_runner(monkeypatch)
+    advisor.bind(_rec_hooks(tmp_path)[0])
+    seen = _run_with_reply(monkeypatch, "Leonardo.")
+    template = "Task: Summarize\nStart with a TL;DR.\n<text>\nWho painted the Mona Lisa?\n</text>"
+    asyncio.run(advisor.run_turn("t1", "adv", template, query="Who painted the Mona Lisa?"))
+    assert calls and calls[0][0][-1] == "Who painted the Mona Lisa?", calls
+    assert "### Mona Lisa" in seen["messages"][-1]["content"]

@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v151';  // v151: Web Push — js/push.js joins SHELL (Settings → Device → Notifications), this worker gains push + notificationclick (ping only: a title, never message text); main.js?v=127→128, index.html, locales (push.*).
+const CACHE = 'local-chat-v152';  // v152: 2.3.0 — quick actions (js/quick-actions.js), Settings → Plugins (js/plugins.js) and Bots-tab editing (js/bots-edit.js) join SHELL; the Tools tab folds into Plugins; add-in tabs; main.js?v=129→129, api.js?v=33→33, extensions.js?v=2→2, ext-sdk.js?v=3→3, voice-absent.js?v=2→2, app.css?v=100→100, index.html, locales (quick.*, plugins.*, bots_edit.*).
+// v151: Web Push — js/push.js joins SHELL (Settings → Device → Notifications), this worker gains push + notificationclick (ping only: a title, never message text); main.js?v=127→128, index.html, locales (push.*).
 // v150: password fields wrapped in <form data-no-submit> (Chromium form warning), advisor bots hide the thinking row; main.js?v=126→127, index.html.
 // v149: 2.2.0 final review — js/voice-heard.js joins SHELL (the chat marks what a voice-chat listener did not hear); ext-sdk.js?v=1→2 (shell.activity), main.js?v=125→126, app.css?v=98→99, index.html, locales (msg.not_heard, msg.voice_cut).
 // v148: 2.2.0 — voice chat is an add-on. drive.js, voice-worklet.js, voice.css, drive-settings.js, voices.js, voice-tools.js leave SHELL; js/extensions.js, js/ext-sdk.js, js/voice-absent.js join it; /ext/ is network-only; i18n.js?v=3→4 (mergeBundle) and every importer's ?v, tools.js?v=11→12, about.js?v=6→7 (APP_VERSION 2.2.0), main.js, app.css, index.html, locales.
@@ -344,12 +345,13 @@ const SHELL = [
   // by main.js. An add-on (/ext/<id>/…) is NEVER cached here: see the fetch
   // handler. (Voice chat itself left the shell in 2.2.0.)
   '/static/js/extensions.js', '/static/js/ext-sdk.js', '/static/js/voice-absent.js',
+  '/static/js/plugins.js', '/static/js/bots-edit.js',
   // What a voice-chat listener did not hear of a reply (2.2.0): pure module,
   // statically imported by the message renderer in main.js.
   '/static/js/voice-heard.js',
   // Web Push settings row (2026-10-12): pure module, statically imported by
   // main.js.
-  '/static/js/push.js',
+  '/static/js/push.js', '/static/js/quick-actions.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

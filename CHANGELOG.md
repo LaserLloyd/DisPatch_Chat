@@ -7,8 +7,35 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-10-14
+
+DisPatch becomes a platform: a default bot that only needs a key, chats that
+explain the app on first run, and a Settings dialog that reads in the order you
+use it. Voice stays an add-on; tools can now be add-ons too.
+
 ### Added
 
+- **Atlas, the default bot.** A fresh install starts with Atlas, a direct-API
+  assistant with lookups (Safe-Mode safe), instead of the two agent-CLI bots.
+  On an empty database DisPatch seeds two chats on him: "Meet Atlas" and "How
+  DisPatch works".
+- **Connect an AI connects a bot.** Settings → AI models writes the provider,
+  model and key into the chosen bot's `advisor.providers` (Atlas by default, any
+  direct-API bot, or a new one), with a Lookups switch. The previous behaviour
+  stays available as the legacy `api:` backend.
+- **Bots tab editing.** Rename a bot, change its emoji and model hint, switch
+  lookups, add a direct-API or agent bot, remove a bot (its threads are kept).
+- **Quick actions** (desktop): ChatForge's twelve canned prompts as chips on an
+  empty thread and a composer pill that applies one to your next message, for
+  every backend. Override or hide them in `quick-actions.yaml`.
+- **Plugins tab** in Settings: installed add-ons with an install-wide on/off
+  switch (`extensions.yaml`), apps and tools (the old Tools tab), and a switch
+  for the built-in lookups (`livetools: {enabled}` in `tools.yaml`).
+- **Add-in Settings tabs.** An extension may create a Settings tab of its own
+  with any new pane id.
+- **`register_live_tools`** on the extension context: a package adds lookups to
+  the live-tools registry, usable by the per-bot `tools` and `tools_locked`
+  lists.
 - **Web Push notifications** (Settings → Device → Push notifications): a
   lock-screen ping when a bot replies, a picture is ready, or a machine post
   asks for one (`/api/inject` `notify`). Pings carry a name-only title and the
@@ -32,6 +59,15 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Settings order** is now Bots, Theme, Device, Voice, Plugins, AI models,
+  Reactions, Health, Security.
+- The **Tools tab is folded into Plugins**; the Tools popup is unchanged.
+- **Default roster:** Atlas replaces the `quick` and `smart` agent bots. Existing
+  installs keep their own `config.yaml` roster.
+- Safe-Mode lookups default to the whole set (`tools_locked` narrows them).
+- The reaction pool's daily add defaults to 2 images per mood (was 10: on a full
+  shelf that was ~320 renders a day to replace a handful, each retiring an unused
+  image).
 - **An advisor may be a Safe-Mode bot.** `safe: true` sticks (it used to be
   forced off silently, including from the Bot Manager). What a locked device
   may make it do is decided per turn: a send, retry or resend over a Safe-Mode
@@ -40,6 +76,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Re-connecting an API bot no longer drops its other fields.
 - The instance-lock file handle is closed at shutdown (ResourceWarning).
 
 ## [2.2.0] — 2026-10-11

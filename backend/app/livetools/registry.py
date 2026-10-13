@@ -11,11 +11,13 @@ come back as ``ToolResult(ok=False)`` so the model can see and correct them. Onl
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import re
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+import threading
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 log = logging.getLogger("dispatch.livetools")
@@ -61,6 +63,11 @@ class ToolSpec:
     label: str
     schema: dict
     local: bool
+    #: Extension tools only (``register_extension``): the callable and the
+    #: UI-label callable. Built-ins dispatch through ``ToolRegistry._handlers``.
+    fn: Callable[..., Any] | None = field(default=None, compare=False)
+    summary: Callable[[dict], str] | None = field(default=None, compare=False)
+    ext_id: str = ""
 
 
 def _spec(
@@ -163,9 +170,137 @@ LOCAL_TOOL_NAMES: tuple[str, ...] = tuple(n for n, s in _SPECS.items() if s.loca
 DEFAULT_ENABLED: tuple[str, ...] = TOOL_NAMES
 
 
+# --------------------------------------------------------------------------- #
+# Tools from extension packages (ctx.register_live_tools)
+# --------------------------------------------------------------------------- #
+
+NAME_RE = re.compile(r"\A[a-z][a-z0-9_]{1,30}\Z")
+MAX_DESCRIPTION = 1000
+
+_ext_lock = threading.Lock()
+_EXT_SPECS: dict[str, ToolSpec] = {}
+_generation = 0
+
+
+@dataclass
+class LiveTool:
+    """What an extension hands to ``ctx.register_live_tools`` (a plain dict with
+    the same keys works too). ``fn(args: dict)`` is an async callable returning a
+    string or a :class:`ToolResult`; ``summary(args)`` labels the notice row."""
+
+    name: str
+    description: str
+    parameters: dict
+    fn: Callable[..., Any]
+    summary: Callable[[dict], str] | None = None
+
+
+def validate_live_tools(specs: Any, ext_id: str, *, pending: Iterable[str] = ()) -> list[ToolSpec]:
+    """Check an extension's specs and return ready ``ToolSpec`` rows. Raises
+    ``ValueError`` with a message fit for the extension's ``detail``. Names may
+    not collide with a built-in, another extension's tool, or ``pending`` (this
+    extension's earlier calls)."""
+    if isinstance(specs, LiveTool | Mapping):
+        specs = [specs]
+    if not isinstance(specs, list | tuple):
+        raise ValueError("register_live_tools takes a list of tool specs")
+    taken = set(pending)
+    out: list[ToolSpec] = []
+    for raw in specs:
+        def get(key: str, default: Any = None, _r: Any = raw) -> Any:
+            return _r.get(key, default) if isinstance(_r, Mapping) else getattr(_r, key, default)
+
+        name = get("name")
+        if not isinstance(name, str) or not NAME_RE.match(name):
+            raise ValueError(f"live tool name {name!r} must match [a-z][a-z0-9_]{{1,30}}")
+        if name in _SPECS:
+            raise ValueError(f"live tool {name!r} collides with a built-in lookup")
+        owner = _EXT_SPECS.get(name)
+        if name in taken or (owner is not None and owner.ext_id != ext_id):
+            who = f"extension {owner.ext_id!r}" if owner is not None else "this extension"
+            raise ValueError(f"live tool {name!r} is already registered by {who}")
+        desc = get("description")
+        if not isinstance(desc, str) or not desc.strip() or len(desc) > MAX_DESCRIPTION:
+            raise ValueError(f"live tool {name!r}: description must be 1-{MAX_DESCRIPTION} characters")
+        params = get("parameters")
+        if params is None:
+            params = {}
+        if not isinstance(params, Mapping):
+            raise ValueError(f"live tool {name!r}: parameters must be a JSON-schema dict")
+        try:
+            params = json.loads(json.dumps(params))       # a private, JSON-clean copy
+        except (TypeError, ValueError):
+            raise ValueError(f"live tool {name!r}: parameters must be JSON-serialisable") from None
+        params.setdefault("type", "object")
+        params.setdefault("properties", {})
+        if params["type"] != "object" or not isinstance(params["properties"], dict):
+            raise ValueError(f"live tool {name!r}: parameters must be an object schema")
+        fn = get("fn")
+        if not callable(fn):
+            raise ValueError(f"live tool {name!r}: fn must be callable")
+        summary = get("summary")
+        if summary is not None and not callable(summary):
+            raise ValueError(f"live tool {name!r}: summary must be callable")
+        taken.add(name)
+        out.append(ToolSpec(
+            name, name.replace("_", " ").capitalize(),
+            {"type": "function",
+             "function": {"name": name, "description": desc.strip(), "parameters": params}},
+            False, fn=fn, summary=summary, ext_id=ext_id))
+    return out
+
+
+def register_extension(ext_id: str, specs: list[ToolSpec]) -> None:
+    """Commit validated specs to the live registry (the host does this once the
+    extension's setup succeeded). Re-checks collisions under the lock."""
+    global _generation
+    with _ext_lock:
+        for s in specs:
+            owner = _EXT_SPECS.get(s.name)
+            if s.name in _SPECS or (owner is not None and owner.ext_id != ext_id):
+                raise ValueError(f"live tool {s.name!r} is already registered")
+        for s in specs:
+            _EXT_SPECS[s.name] = s
+        if specs:
+            _generation += 1
+
+
+def unregister_extension(ext_id: str) -> None:
+    global _generation
+    with _ext_lock:
+        gone = [n for n, s in _EXT_SPECS.items() if s.ext_id == ext_id]
+        for n in gone:
+            del _EXT_SPECS[n]
+        if gone:
+            _generation += 1
+
+
+def generation() -> int:
+    """Bumps whenever the set of extension tools changes (cache invalidation)."""
+    return _generation
+
+
+def all_tool_names() -> tuple[str, ...]:
+    """Built-ins in canonical order, then extension tools in registration order."""
+    return TOOL_NAMES + tuple(_EXT_SPECS)
+
+
+def find_spec(name: str) -> ToolSpec | None:
+    return _SPECS.get(name) or _EXT_SPECS.get(name)
+
+
+def extension_tool_names(ext_id: str) -> list[str]:
+    return [n for n, s in _EXT_SPECS.items() if s.ext_id == ext_id]
+
+
 def tool_catalog() -> list[dict[str, Any]]:
-    """``[{name, label, local}]`` in canonical order, for Settings."""
-    return [{"name": s.name, "label": s.label, "local": s.local} for s in _SPECS.values()]
+    """``[{name, label, local}]`` in canonical order, for Settings. Extension
+    tools follow, tagged with their ``extension`` id."""
+    rows: list[dict[str, Any]] = [
+        {"name": s.name, "label": s.label, "local": s.local} for s in _SPECS.values()]
+    rows += [{"name": s.name, "label": s.label, "local": s.local, "extension": s.ext_id}
+             for s in _EXT_SPECS.values()]
+    return rows
 
 
 def assert_tool_allowed(name: str, enabled: Iterable[str]) -> None:
@@ -285,16 +420,22 @@ class ToolRegistry:
         """OpenAI ``tools`` array for the enabled tools (canonical order, unknown names
         ignored). ``local`` keeps only the tools offered to the small local model."""
         wanted = set(enabled)
-        names = LOCAL_TOOL_NAMES if local else TOOL_NAMES
-        return [_SCHEMAS[name] for name in names if name in wanted]
+        names = LOCAL_TOOL_NAMES if local else all_tool_names()
+        out = []
+        for name in names:
+            spec = find_spec(name)
+            if spec is not None and name in wanted:
+                out.append(spec.schema)
+        return out
 
     async def call(
         self, name: str, arguments_json: str, *, enabled: Iterable[str], max_chars: int
     ) -> ToolResult:
-        if name not in _SCHEMAS:
+        spec = find_spec(name)
+        if spec is None:
             return ToolResult(
                 False,
-                f"Unknown tool '{name}'. Available tools: {', '.join(TOOL_NAMES)}.",
+                f"Unknown tool '{name}'. Available tools: {', '.join(all_tool_names())}.",
                 f"unknown tool {name}",
             )
         assert_tool_allowed(name, enabled)  # the only exception that may escape
@@ -306,12 +447,42 @@ class ToolRegistry:
                 f"Invalid arguments for {name}: {exc}. Send a JSON object.",
                 f"bad arguments for {name}",
             )
+        if spec.fn is not None:
+            return await self._call_extension(spec, args, max_chars)
         try:
             result = await self._dispatch(name, args, max_chars)
         except Exception as exc:  # a tool bug must not kill the chat turn
             # The model only sees the exception type; the log keeps the traceback.
             log.warning("livetools: %s crashed (%s)", name, type(exc).__name__, exc_info=True)
             return ToolResult(False, f"Tool {name} failed: {type(exc).__name__}.", f"{name} failed")
+        result.content = _clip(result.content, max_chars)
+        return result
+
+    async def _call_extension(self, spec: ToolSpec, args: dict[str, Any],
+                              max_chars: int) -> ToolResult:
+        """Run an extension's tool. Same contract as the built-ins: never raises;
+        a crash (or a bad return value) becomes a generic failed result, with
+        nothing of the exception's message or type shown to the model."""
+        name = spec.name
+        try:
+            out = spec.fn(args)
+            if inspect.isawaitable(out):
+                out = await out
+            if isinstance(out, str):
+                result = ToolResult(True, out, _label(spec, args))
+            elif isinstance(out, ToolResult):
+                result = out
+                if not isinstance(result.content, str):
+                    raise TypeError("ToolResult.content must be a string")
+                if not result.summary:
+                    result.summary = _label(spec, args)
+            else:
+                raise TypeError(f"tool returned {type(out).__name__}")
+        except Exception:
+            log.warning("livetools: extension tool %s (%s) crashed", name, spec.ext_id,
+                        exc_info=True)
+            return ToolResult(False, f"Tool {name} failed.", f"{name} failed")
+        result.document = None            # an extension tool cannot hand out files
         result.content = _clip(result.content, max_chars)
         return result
 
@@ -389,6 +560,17 @@ class ToolRegistry:
         return await currency.run(
             args.get("from"), args.get("to"), args.get("amount", 1), transport=self._transport
         )
+
+
+def _label(spec: ToolSpec, args: dict[str, Any]) -> str:
+    if spec.summary is not None:
+        try:
+            text = spec.summary(args)
+            if isinstance(text, str) and text.strip():
+                return text.strip()[:120]
+        except Exception:
+            log.debug("livetools: summary for %s failed", spec.name, exc_info=True)
+    return spec.label
 
 
 def _missing(tool: str, field: str) -> ToolResult:

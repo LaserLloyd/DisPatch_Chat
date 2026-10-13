@@ -398,7 +398,8 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
   routes['GET /static/locales/en.json'] = () => [200, en];
   const i18n = await import('../static/js/i18n.js?v=4');
   await i18n.init('en');
-  const pane = doc.getElementById('spane-tools');
+  const pane = doc.createElement('div');   // the Tools table's host inside Settings → Plugins
+  doc.getElementById('spane-plugins').append(pane);
   await mod.mountToolsSettings(pane);
 
   const rows = [...pane.querySelectorAll('.tools-row')];
@@ -621,7 +622,8 @@ test('Settings → Tools: an app is a row with a switch, no remove, no editable 
   const win = setup();
   const mod = await freshTools();
   wire(mod);
-  const pane = win.document.getElementById('spane-tools');
+  const pane = win.document.createElement('div');   // host inside Settings → Plugins
+  win.document.getElementById('spane-plugins').append(pane);
   await mod.mountToolsSettings(pane);
   const rows = [...pane.querySelectorAll('.tools-row')];
   const appRow = rows.find((r) => r.querySelector('.tools-id')?.textContent === 'jobboard');

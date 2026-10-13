@@ -186,7 +186,7 @@ def test_anthropic_preset_uses_the_official_sdk_shape():
 LLM_ROUTES = [
     ("GET", "/api/llm/providers", None),
     ("POST", "/api/llm/test", {"provider": "lmstudio"}),
-    ("POST", "/api/llm/connect", {"provider": "lmstudio", "model": "x"}),
+    ("POST", "/api/llm/connect", {"backend": "legacy-api", "provider": "lmstudio", "model": "x"}),
 ]
 
 
@@ -321,7 +321,7 @@ def test_probe_rejects_an_unknown_provider(llm_env):
 
 def test_connect_creates_a_bot_that_round_trips_through_load_bots(llm_env):
     client = llm_env()
-    r = client.post("/api/llm/connect", json={
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-secret-123",
         "name": "Nova", "system_prompt": "Be brief."})
     assert r.status_code == 200, r.text
@@ -345,9 +345,9 @@ def test_connect_creates_a_bot_that_round_trips_through_load_bots(llm_env):
 def test_connect_updates_the_same_bot_instead_of_making_a_second_one(llm_env):
     client = llm_env()
     before = len(config.load_bots())
-    client.post("/api/llm/connect", json={
+    client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-one"})
-    r = client.post("/api/llm/connect", json={
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-two"})
     assert r.status_code == 200
     assert len(config.load_bots()) == before + 1, "re-running the panel adds no duplicate"
@@ -359,15 +359,15 @@ def test_reconnecting_without_a_key_keeps_the_stored_one(llm_env):
     """Changing the model must not require re-pasting the credential — the
     panel sends a blank key field when the operator leaves it alone."""
     client = llm_env()
-    client.post("/api/llm/connect", json={
+    client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-keep"})
-    client.post("/api/llm/connect", json={"provider": "openai", "model": "gpt-4o"})
+    client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "openai", "model": "gpt-4o"})
     assert config.get_bot("llm-openai").api["api_key"] == "sk-keep"
 
 
 def test_connect_refuses_to_hijack_an_existing_agent_bot(llm_env):
     client = llm_env()
-    r = client.post("/api/llm/connect", json={
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-x",
         "bot_id": "alpha"})
     assert r.status_code == 400
@@ -377,7 +377,7 @@ def test_connect_refuses_to_hijack_an_existing_agent_bot(llm_env):
 
 def test_connect_requires_a_key_for_a_provider_that_needs_one(llm_env):
     client = llm_env()
-    r = client.post("/api/llm/connect", json={"provider": "openai", "model": "gpt-4o"})
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "openai", "model": "gpt-4o"})
     assert r.status_code == 400
     assert "key" in r.json()["detail"].lower()
     assert config.get_bot("llm-openai") is None
@@ -386,7 +386,7 @@ def test_connect_requires_a_key_for_a_provider_that_needs_one(llm_env):
 def test_connect_accepts_an_env_var_instead_of_a_stored_key(llm_env, monkeypatch):
     monkeypatch.setenv("MY_TEST_KEY", "sk-from-env")
     client = llm_env()
-    r = client.post("/api/llm/connect", json={
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o", "api_key_env": "MY_TEST_KEY"})
     assert r.status_code == 200
     stored = config.get_bot("llm-openai").api
@@ -397,14 +397,14 @@ def test_connect_accepts_an_env_var_instead_of_a_stored_key(llm_env, monkeypatch
 
 def test_local_provider_needs_no_key(llm_env):
     client = llm_env()
-    r = client.post("/api/llm/connect", json={"provider": "lmstudio", "model": "any"})
+    r = client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "lmstudio", "model": "any"})
     assert r.status_code == 200
     assert config.get_bot("llm-lmstudio").api["base_url"] == "http://127.0.0.1:1234/v1"
 
 
 def test_public_bot_list_exposes_the_provider_but_no_url_or_key(llm_env):
     client = llm_env()
-    client.post("/api/llm/connect", json={
+    client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-secret-abc"})
     body = client.get("/api/bots").text
     assert "sk-secret-abc" not in body
@@ -417,7 +417,7 @@ def test_public_bot_list_exposes_the_provider_but_no_url_or_key(llm_env):
 def test_config_yaml_is_owner_only_once_it_can_hold_a_key(llm_env):
     import stat
     client = llm_env()
-    client.post("/api/llm/connect", json={
+    client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-secret"})
     mode = stat.S_IMODE(config.CONFIG_PATH.stat().st_mode)
     assert mode == 0o600, f"config.yaml is {oct(mode)} but now holds credentials"
@@ -426,7 +426,7 @@ def test_config_yaml_is_owner_only_once_it_can_hold_a_key(llm_env):
 def test_auth_status_reports_the_api_bot_count(llm_env):
     client = llm_env()
     assert client.get("/api/auth/status").json()["features"]["api_bots"] == 0
-    client.post("/api/llm/connect", json={"provider": "lmstudio", "model": "m"})
+    client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "lmstudio", "model": "m"})
     assert client.get("/api/auth/status").json()["features"]["api_bots"] == 1
 
 
@@ -887,7 +887,7 @@ def test_other_writers_preserve_the_api_block(llm_env):
     out by hand drops whatever it forgot. `api` is the field whose loss costs
     the operator their key."""
     client = llm_env()
-    client.post("/api/llm/connect", json={
+    client.post("/api/llm/connect", json={"backend": "legacy-api", 
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-precious"})
     # Reorder through the Bot Manager…
     config.save_bot_order([{"id": "llm-openai", "order": 0},
@@ -911,10 +911,10 @@ def test_the_default_bot_name_is_short_enough_for_a_sidebar(llm_env):
     <select>. Using it as the character's name wraps to three lines in the bot
     rail, so presets carry a separate short name."""
     client = llm_env()
-    client.post("/api/llm/connect", json={"provider": "custom", "model": "m",
+    client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "custom", "model": "m",
                                           "base_url": "http://127.0.0.1:9/v1"})
     assert config.get_bot("llm-custom").name == "Assistant"
-    client.post("/api/llm/connect", json={"provider": "anthropic",
+    client.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "anthropic",
                                           "model": "claude-opus-5",
                                           "api_key": "sk-ant-x"})
     assert config.get_bot("llm-anthropic").name == "Claude"

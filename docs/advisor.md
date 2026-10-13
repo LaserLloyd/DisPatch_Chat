@@ -1,6 +1,11 @@
-# Advisor bots
+# Advisor bots: the direct-API backend
 
-An **advisor** is a bot that answers straight from a model API, streams its
+This page documents the direct-API backend, configured by a bot's `advisor:`
+block. The Settings UI calls it "Direct API"; the YAML key keeps its original
+name. Atlas, the default bot of a fresh install, is a direct-API bot, and
+Settings → AI models fills in its first provider.
+
+A **direct-API bot** (the `advisor:` block) answers straight from a model API, streams its
 reply token by token, knows you from a folder of Markdown notes, and can hand
 work to your agents. It is meant for the "quick, informed chat partner" role:
 advice, planning, thinking out loud, with a way to say "go and find out" or
@@ -74,6 +79,11 @@ bots:
 
 Only `providers` is required. DisPatch re-reads the file when it changes.
 
+The defaults are made for a plain assistant: no `owner` (the bot says "the
+user"), no corpus, no agents to hand work to, and `tools: true` for a bot made
+in the UI. A bot with just `providers` therefore needs no notes folder and no
+agent runtime to be useful. The rest of this page describes what you can add.
+
 ### Keys
 
 | Key | Default | Meaning |
@@ -126,7 +136,7 @@ say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
     advisor:
       tools: true              # or a list: [weather, news_search, web_search, fetch_url,
                                #   wikipedia, exchange_rate, current_datetime, calculator]
-      tools_locked: true       # what a Safe-Mode device may trigger (default: all of them)
+      tools_locked: true       # what a Safe-Mode device may trigger (default: the eight built-ins; name add-on tools to allow them)
       location: "Tokyo, Japan" # weather with no place named; mentioned in the prompt
       units: metric            # or imperial
       tool_rounds: 4           # tool rounds per reply (default 4)
@@ -152,6 +162,21 @@ a llama.cpp-style server (StudioForge) make tool calls; a provider that
 refuses the tools request is tried once more without them, so a fallback model
 without tool support still answers. The Anthropic path takes no tools.
 `GET /api/advisor/status` lists each bot's `tools`.
+
+**Tools from extension packages.** An installed extension can add lookups of
+its own with `ctx.register_live_tools` (see "Live tools from a package" in
+[extensions.md](extensions.md)). They join the eight above: `tools: true`
+offers them too, and a `tools:` list may name them; the default `tools_locked`
+does NOT include them — name an extension tool there to allow it on locked
+devices. They run
+under the same rules as the built-ins: a crash becomes a plain "Tool X failed"
+result, output is cut to `tool_result_chars` and marked as data, and each call
+shows a `🔧` notice row.
+
+**Install-wide switch.** `<data>/tools.yaml` takes `livetools: {enabled: false}`
+(default `true`). Off, no bot is offered any live tool, built-in or from an
+extension, and the prompt no longer mentions them; the file is read on every
+turn, so it takes effect at once. The status endpoint reports it as `livetools`.
 
 ### Provider extras
 

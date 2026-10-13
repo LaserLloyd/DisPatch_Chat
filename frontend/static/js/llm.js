@@ -24,6 +24,7 @@ import { t, applyDom } from './i18n.js?v=4';
 const L = {
   providers: [],       // preset table from the server
   connected: [],       // bots that already have an api block (key redacted)
+  bots: [],            // /api/bots/all rows: the direct-API bots this panel can connect (2.3.0)
   models: [],          // model ids from the last successful Test
   testing: false,
   saving: false,
@@ -107,8 +108,71 @@ export async function activateLlmPanel(next = {}) {
     closeLlmPanel();
     return;
   }
+  // The roster, for "Bot to connect": a direct-API bot (Atlas on a fresh install,
+  // or any the owner added) or a new one. A failure here only loses the picker.
+  try {
+    const r = await json('/api/bots/all');
+    L.bots = (r.bots || []).filter((b) => b && b.backend === 'direct');
+  } catch { L.bots = []; }
+  renderTargets();
   renderProviders();
+  applyTarget();
+}
+
+// ===================== Bot to connect (2.3.0) =====================
+
+export const NEW_BOT = '__new__';
+
+/** The direct-API bot rows, with "New bot…" last. The default is the first
+ *  bot that is not connected yet (Atlas on a fresh install), else the first. */
+function renderTargets() {
+  const sel = $('llm-target');
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const b of L.bots) {
+    const status = b.connected
+      ? t('llm.target_connected', { provider: providerLabel(b.provider), model: b.model || '' })
+      : t('llm.target_unconnected');
+    sel.append(el('option', { value: b.id, text: `${b.name} — ${status}` }));
+  }
+  sel.append(el('option', { value: NEW_BOT, text: t('llm.target_new') }));
+  const first = L.bots.find((b) => !b.connected) || L.bots[0];
+  sel.value = first ? first.id : NEW_BOT;
+}
+
+function providerLabel(id) {
+  const p = providerById(id);
+  return p ? p.label : (id || '');
+}
+
+/** The bot picked in "Bot to connect": its row, or null for "New bot…". */
+function targetBot() {
+  const sel = $('llm-target');
+  const id = sel ? sel.value : NEW_BOT;
+  return id === NEW_BOT ? null : (L.bots.find((b) => b.id === id) || null);
+}
+
+/** Everything that follows the picked bot: the provider it already uses, its
+ *  model, whether a key is saved, the lookups switch, and the name field. */
+function applyTarget() {
+  const b = targetBot();
+  const sel = $('llm-provider');
+  if (b && b.connected && b.provider && providerById(b.provider)) sel.value = b.provider;
+  const tools = $('llm-tools');
+  if (tools) tools.checked = b ? b.tools !== false : true;
+  const adv = $('llm-advanced');
+  if (adv && !b) adv.open = true;       // a new bot wants a name
   applyProvider();
+  if (b && b.connected && b.model) {
+    renderModels(L.models.length ? L.models : [b.model], b.model);
+    $('llm-key').placeholder = t('llm.api_key_saved');
+  }
+}
+
+/** The id a new bot gets from its name: lowercase, [a-z0-9_-], 1–32 chars. */
+export function slugForBot(name) {
+  const s = String(name || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+  return s || 'assistant';
 }
 
 /** "I am done with this screen" — which now means closing Settings, because
@@ -202,7 +266,8 @@ function applyProvider() {
   docs.hidden = !p.docs;
   if (p.docs) docs.href = p.docs;
 
-  $('llm-name').value = (existing && existing.name) || '';
+  const target = targetBot();
+  $('llm-name').value = target ? target.name : ((existing && existing.name) || '');
   $('llm-name').placeholder = p.bot_name || p.label;
   $('llm-system').value = api.system_prompt || '';
 
@@ -321,11 +386,19 @@ async function save() {
   if (!p) { showResult(t('llm.need_provider'), 'bad'); return; }
   const model = chosenModel();
   if (!model) { showResult(t('llm.need_model'), 'bad'); $('llm-model-text').focus(); return; }
+  const target = targetBot();
+  const name = $('llm-name').value.trim();
+  if (!target && !name) { showResult(t('llm.need_name'), 'bad'); $('llm-advanced').open = true; $('llm-name').focus(); return; }
   L.saving = true;
   $('llm-save').disabled = true;
   showResult(t('llm.saving'), '');
   try {
     const r = await post('/api/llm/connect', {
+      // 2.3.0: the connection lands on a bot (the advisor backend = "direct
+      // API"): the one picked above, or a new one named in Advanced.
+      backend: 'direct',
+      target: target ? target.id : slugForBot(name),
+      tools: !!($('llm-tools') && $('llm-tools').checked),
       provider: p.id,
       base_url: $('llm-base-url').value.trim(),
       // Blank means "keep the key already saved" — the server only overwrites
@@ -334,7 +407,7 @@ async function save() {
       api_key: $('llm-key').value,
       api_key_env: $('llm-key-env').value.trim(),
       model,
-      name: $('llm-name').value.trim(),
+      name,
       system_prompt: $('llm-system').value.trim(),
     });
     const bot = (r && r.bot) || null;
@@ -382,6 +455,7 @@ export function initLlmPanel(next = {}) {
   // owns all three, and a "Cancel" that only repeated the header ✕ would be a
   // dead button on a tab.
   $('llm-provider').addEventListener('change', applyProvider);
+  if ($('llm-target')) $('llm-target').addEventListener('change', applyTarget);
   $('llm-test').addEventListener('click', runTest);
   $('llm-save').addEventListener('click', save);
   // Enter in any single-line field tests rather than submitting nothing —

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date as _date
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class BotOut(BaseModel):
@@ -80,6 +80,83 @@ class BotOrderItem(BaseModel):
 
 class UpdateBotOrderIn(BaseModel):
     bots: list[BotOrderItem]
+
+
+# --------------------------------------------------------------------------- #
+# Bot management (POST /api/bots, PATCH /api/bots/{id})
+# --------------------------------------------------------------------------- #
+
+#: A bot id minted by the API. Hand-written ids in config.yaml may be anything
+#: (the shipped test roster has `AI_Sage`); the API only ever creates these.
+BOT_ID_PATTERN = r"^[a-z0-9_-]{1,32}$"
+#: An agent id on the agent backend: whatever the agent runtime calls it.
+AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"
+
+
+def _clean_text(v: str | None) -> str | None:
+    return None if v is None else v.strip()
+
+
+class BotCreateIn(BaseModel):
+    """Body of POST /api/bots. Strict: an unknown key is a 422."""
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = Field(default=None, pattern=BOT_ID_PATTERN)
+    name: str = Field(min_length=1, max_length=40)
+    emoji: str = Field(default="", max_length=8)
+    backend: Literal["direct", "agent"] = "direct"
+    agent: str | None = Field(default=None, pattern=AGENT_ID_PATTERN)
+    model_hint: str = Field(default="", max_length=60)
+    safe: bool = False
+    visible: bool = True
+    tools: bool | None = None        # direct-API bots only; default on
+
+    @field_validator("name", "emoji", "model_hint")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+    @model_validator(mode="after")
+    def _shape(self) -> BotCreateIn:
+        if not self.name:
+            raise ValueError("name must not be blank")
+        if self.backend == "direct" and self.agent:
+            raise ValueError("agent is only for backend 'agent'")
+        if self.backend == "agent" and self.tools is not None:
+            raise ValueError("tools is only for direct-API bots")
+        return self
+
+
+class BotPatchIn(BaseModel):
+    """Body of PATCH /api/bots/{id}: present keys are set, absent ones left
+    alone. Strict: an unknown key is a 422."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    emoji: str | None = Field(default=None, max_length=8)
+    model_hint: str | None = Field(default=None, max_length=60)
+    visible: bool | None = None
+    safe: bool | None = None
+    reactions: bool | None = None
+    avatar_pool: bool | None = None
+    tools: bool | None = None
+
+    @field_validator("name", "emoji", "model_hint")
+    @classmethod
+    def _strip(cls, v: str | None) -> str | None:
+        return _clean_text(v)
+
+    @model_validator(mode="after")
+    def _something(self) -> BotPatchIn:
+        if not self.model_fields_set:
+            raise ValueError("nothing to change")
+        if "name" in self.model_fields_set and not self.name:
+            raise ValueError("name must not be blank")
+        # An explicit null is not "leave alone": it would be ambiguous.
+        for k in self.model_fields_set:
+            if getattr(self, k) is None:
+                raise ValueError(f"{k} must not be null")
+        return self
 
 
 _DATE_RE = r"^\d{4}-\d{2}-\d{2}$"

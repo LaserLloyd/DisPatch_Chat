@@ -531,8 +531,9 @@ def load_tools() -> list[Tool]:
             if not isinstance(doc, dict):
                 raise ValueError(f"expected a mapping, got {type(doc).__name__}")
             for k in doc:
-                if k != "tools":
+                if k not in ("tools", "livetools"):
                     raise ToolValidationError(None, str(k), "unknown top-level key")
+            _check_livetools_block(doc.get("livetools"))
             result = validate_tools(doc.get("tools") or [], check_fs=False, dormant_ok=True)
         except (yaml.YAMLError, OSError, ValueError) as e:
             log.error("tools.yaml cannot be used (%s) — no tools until it is fixed: %s",
@@ -542,9 +543,81 @@ def load_tools() -> list[Tool]:
         return result
 
 
+#: ((path, mtime_ns, size), enabled) for livetools_enabled(): the advisor asks
+#: once per turn, so a stat is all an unchanged file costs.
+_live_cache: tuple[tuple[str, int, int], bool] | None = None
+
+
+def _check_livetools_block(block) -> None:
+    if block is None:
+        return
+    if (not isinstance(block, dict) or set(block) - {"enabled"}
+            or not isinstance(block.get("enabled", True), bool)):
+        raise ToolValidationError(None, "livetools", "must be {enabled: true|false}")
+
+
+def _raw_doc() -> dict:
+    """tools.yaml as a plain mapping ({} when absent). Raises ValueError when
+    the file cannot be read as one."""
+    try:
+        doc = yaml.safe_load(manifest_path().read_text())
+    except FileNotFoundError:
+        return {}
+    except (yaml.YAMLError, OSError) as e:
+        raise ValueError(str(e)) from e
+    if doc is None:
+        return {}
+    if not isinstance(doc, dict):
+        raise ValueError(f"expected a mapping, got {type(doc).__name__}")
+    return doc
+
+
+def livetools_enabled() -> bool:
+    """Is the built-in lookup set (``app/livetools``: web search, weather, ...)
+    switched on install-wide? Default True. ``livetools: {enabled: false}`` in
+    tools.yaml (Settings -> Plugins) turns it off for every bot at once; the
+    advisor must offer no tools while this is False. An unreadable file reads
+    as the default (on) -- a typo must not silently strip every bot's tools."""
+    global _live_cache
+    path = manifest_path()
+    try:
+        st = path.stat()
+    except OSError:
+        return True
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if _live_cache and _live_cache[0] == key:
+        return _live_cache[1]
+    try:
+        block = _raw_doc().get("livetools")
+    except ValueError:
+        return True
+    on = not (isinstance(block, dict) and block.get("enabled") is False)
+    _live_cache = (key, on)
+    return on
+
+
+def set_livetools_enabled(enabled: bool) -> None:
+    """Persist the switch, keeping every other key in tools.yaml as it is.
+    Raises ValueError when the file is unreadable (never overwrite what we
+    could not parse)."""
+    doc = _raw_doc()
+    doc["livetools"] = {"enabled": bool(enabled)}
+    _write_doc(doc)
+
+
 def write_tools(tool_list: list[Tool]) -> None:
     """Atomic 0600 write: a torn file reads as malformed = no tools."""
-    doc = {"tools": [t.to_manifest() for t in tool_list]}
+    doc: dict = {"tools": [t.to_manifest() for t in tool_list]}
+    try:
+        block = _raw_doc().get("livetools")
+    except ValueError:
+        block = None
+    if block is not None:
+        doc["livetools"] = block
+    _write_doc(doc)
+
+
+def _write_doc(doc: dict) -> None:
     text = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
     path = manifest_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -558,9 +631,10 @@ def write_tools(tool_list: list[Tool]) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
-    global _cache
+    global _cache, _live_cache
     with _lock:
         _cache = None
+        _live_cache = None
 
 
 def get_tool(tool_id: str) -> Tool | None:
@@ -702,9 +776,10 @@ def builtin_resolved(tool_id: str) -> bool:
 
 def _reset_state() -> None:
     """Tests: drop every cache and the in-memory refresh/ticket bookkeeping."""
-    global _cache
+    global _cache, _live_cache
     with _lock:
         _cache = None
+        _live_cache = None
     with _ticket_lock:
         _tickets.clear()
     _last_refresh.clear()

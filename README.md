@@ -1,16 +1,13 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="DisPatch Chat — a self-hosted chat app for your household and your AI agents. MIT-licensed, one process, one SQLite file, no cloud." width="100%" />
+<img src="docs/assets/hero.svg" alt="DisPatch Chat: a self-hosted chat app for your household and your AI. MIT-licensed, one process, one SQLite file, no cloud." width="100%" />
 
-**A self-hosted chat app for you, your household, and your AI agents.**
+**Your own AI, in a chat app the whole family can use.**
 
-Runs on your hardware. Your conversations stay in a SQLite file you can read,
-back up, and delete. No account, no cloud, no telemetry.
-
-**Current release: 2.2.0** (October 2026) · [what changed](#whats-new-in-22)
+**Current release: 2.3.0** (October 2026) · [what changed](#whats-new-in-23)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
-[Deployment](#deployment) · [Security](#security) ·
+[Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
 [Documentation](docs/) · [Changelog](CHANGELOG.md) ·
 [Contributing](CONTRIBUTING.md)
 
@@ -18,45 +15,97 @@ back up, and delete. No account, no cloud, no telemetry.
 
 ---
 
-## What it is
+DisPatch is one private chat app for the whole family and every device, with any
+AI you like behind it. Voice, pictures, tools and apps are add-ons you switch on
+when you want them. It is yours, on your own box: one process, one SQLite file,
+no account, no cloud, no telemetry.
 
-DisPatch Chat is a small, fast application you host yourself. It looks and feels
-like a normal messaging app — threads, avatars, markdown, file sharing, search,
-a phone-installable PWA — and it can talk to AI agents running on your own
-machine as well as to the other people in your household.
+## What you get out of the box
 
-It is deliberately **one process and one SQLite file**. No Redis, no Postgres,
-no message broker, no build step. It runs comfortably on a Raspberry Pi.
+- **Atlas**, a general assistant who works as soon as you give him an API key or
+  point him at a local model server, with lookups built in: web and news search,
+  a page fetch, weather, Wikipedia, exchange rates, the time and a calculator.
+- **Two first-run chats** that explain the app: one introduces Atlas, one tours
+  how DisPatch works.
+- **Quick actions** on desktop: summarise, translate, fix grammar and other
+  ready-made prompts, for any bot.
+- **A PIN and a Safe Mode.** Unlocked devices can do everything; locked family
+  devices can only talk to the bots you mark safe.
+- **Ten themes**, eight languages, and a phone-installable PWA with push pings.
+- **Reactions and pictures** when you connect an image server (for example the
+  author's ClawForge).
+- **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
+  is installed.
 
-**Not** a Slack replacement. **Not** end-to-end encrypted (see
-[Security](#security) for exactly what that means). It is a private chat you own.
+## Add-ons
 
-### The shape of it, honestly
+- **Voice chat**: talk to a thread hands-free. The separate package
+  [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice); a GPU machine
+  for the speech work is optional ([docs/extensions.md](docs/extensions.md#voice)).
+- **Tool packages**: a package can register more lookups for the bots through
+  `register_live_tools` ([docs/extensions.md](docs/extensions.md)).
+- **Apps**: trusted packages in `apps/<id>/` with their own page, routes and bot
+  ([docs/apps.md](docs/apps.md)).
+- **Settings tabs**: an add-on can add a tab of its own to Settings.
 
-A whole household can use one install, and everyone who unlocks it sees the same
-threads, so people really can talk to each other in here. That works, and some
-families use it that way.
+## Quick start
 
-But it was built first as a **front door to an AI backend** — originally an
-agent runtime like [OpenClaw](docs/agents.md) running on your own machine — that
-happens to look and feel like the messaging app everyone already knows. The
-bots are participants in the threads, not a feature bolted onto a chat app.
-If what you want is a private person-to-person messenger, there are better
-tools; if what you want is for your family to be able to talk to the thing
-running on the box in the cupboard, this is the one.
+```bash
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat/backend && uv sync
+uv run uvicorn app.main:app --port 8765
+```
 
-You no longer need an agent stack for that: **Connect an AI** (below) points a
-bot at a model provider's API directly. The agent path is still what you want
-if you need a thing that can *use tools and act on the machine*, and it is
-still the one that has to run on the same host.
-
-It is also **single-account today**. One PIN, one shared view of everything.
-Per-person accounts with separate identities, roles and per-conversation access
-are designed in detail and not built — the design is in
-[docs/design/multi-user.md](docs/design/multi-user.md), including the migration
-that keeps an existing install's history.
+Open <http://localhost:8765>, set a PIN under **Settings → Security**, then go to
+**Settings → AI models** and connect Atlas to a provider. Prefer a container, a
+Raspberry Pi or a systemd service? See [Run it in Docker](#run-it-in-docker) and
+[Deployment](#deployment).
 
 ## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/welcome.png"
+           alt="The first screen of a new install: two chats, Meet Atlas and How DisPatch works, ready to open." />
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/ai-models.png"
+           alt="Settings on the AI models tab: choose a provider, paste a key, test it, and connect Atlas." />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><em>First run: two chats that explain the app</em></td>
+    <td align="center"><em>Settings → AI models: connect Atlas in a minute</em></td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/quick-actions.png"
+           alt="An empty desktop thread showing a row of quick-action chips." />
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/plugins-tab.png"
+           alt="Settings on the Plugins tab: add-ons, apps and tools, and the built-in lookups." />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><em>Quick actions on desktop</em></td>
+    <td align="center"><em>Settings → Plugins</em></td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/voice-screen.png"
+           alt="The voice chat screen of the DisPatch_Voice add-on." />
+    </td>
+    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Voice chat (add-on)</em></td>
+    <td></td>
+  </tr>
+</table>
+
+### The rest of the app
 
 A demo install with three fictional assistants — the same app on a desktop and
 on a phone, in a few of the ten themes.
@@ -113,6 +162,57 @@ on a phone, in a few of the ten themes.
     <td align="center"><em>Settings — the bot roster</em></td>
   </tr>
 </table>
+
+## What's new in 2.3
+
+- **A default bot that just needs a key.** Atlas is the new first bot: a direct-API
+  assistant with lookups. Two chats on first run explain Atlas and the app.
+- **Connect an AI now connects a bot.** The AI models tab writes the provider into
+  Atlas (or any direct-API bot, or a new one); the Bots tab can add, edit and
+  remove bots.
+- **Quick actions** on desktop, and a **Plugins tab** with room for add-ons' own
+  Settings tabs. Settings is reordered by how often you use each tab.
+- **Tool packages**: add-ons can register their own lookups.
+- Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
+  arrived on the way; the [changelog](CHANGELOG.md) has all of it.
+
+## What it is
+
+DisPatch Chat is a small, fast application you host yourself. It looks and feels
+like a normal messaging app — threads, avatars, markdown, file sharing, search,
+a phone-installable PWA — and it can talk to AI agents running on your own
+machine as well as to the other people in your household.
+
+It is deliberately **one process and one SQLite file**. No Redis, no Postgres,
+no message broker, no build step. It runs comfortably on a Raspberry Pi.
+
+**Not** a Slack replacement. **Not** end-to-end encrypted (see
+[Security](#security) for exactly what that means). It is a private chat you own.
+
+### The shape of it, honestly
+
+A whole household can use one install, and everyone who unlocks it sees the same
+threads, so people really can talk to each other in here. That works, and some
+families use it that way.
+
+But it was built first as a **front door to an AI backend** — originally an
+agent runtime like [OpenClaw](docs/agents.md) running on your own machine — that
+happens to look and feel like the messaging app everyone already knows. The
+bots are participants in the threads, not a feature bolted onto a chat app.
+If what you want is a private person-to-person messenger, there are better
+tools; if what you want is for your family to be able to talk to the thing
+running on the box in the cupboard, this is the one.
+
+You no longer need an agent stack for that: **Connect an AI** (below) points a
+bot at a model provider's API directly. The agent path is still what you want
+if you need a thing that can *use tools and act on the machine*, and it is
+still the one that has to run on the same host.
+
+It is also **single-account today**. One PIN, one shared view of everything.
+Per-person accounts with separate identities, roles and per-conversation access
+are designed in detail and not built — the design is in
+[docs/design/multi-user.md](docs/design/multi-user.md), including the migration
+that keeps an existing install's history.
 
 ## Features
 
@@ -281,7 +381,7 @@ crafts the request by hand gets the same 403 as one that presses the button.
 That is the invariant to protect if you contribute: new endpoints inherit the
 gate, and a permission problem is never fixed by loosening it.
 
-## Quick start
+## Run it in Docker
 
 ```bash
 git clone https://github.com/LaserLloyd/DisPatch_Chat.git
@@ -314,17 +414,19 @@ Not using Docker? See [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
 
 ## Bring your own AI
 
-DisPatch will not answer you out of the box, because it ships with no model and
-talks to no cloud until you tell it to. Making it answer takes about a minute
-and needs no agent stack:
+DisPatch ships with no model and talks to no cloud until you tell it to. Making
+it answer takes about a minute and needs no agent stack:
 
-1. Open **⚙ Settings → 🔌 AI models** (a fresh install also offers it as a
-   card in the empty chat area).
-2. Pick a provider, paste a key if it needs one, press **Test connection**, pick
-   a model from the list it comes back with, press **Save & chat**.
+1. Open **⚙ Settings → 🔌 AI models**.
+2. Choose the bot to connect (Atlas by default, any other direct-API bot, or a
+   new one), pick a provider, paste a key if it needs one, press **Test**, pick a
+   model from the list, press **Connect**.
 
-That is it. The provider becomes a bot in your sidebar with its own threads and
-history, and it works like every other conversation in the app.
+That is it. The bot keeps its threads and history and works like every other
+conversation in the app. Behind the scenes this fills in the bot's `advisor:`
+block, the direct-API backend: a provider chain with fallback, live lookups and
+real streaming ([docs/advisor.md](docs/advisor.md)). Bots that still use the
+older `api:` block keep working as they did.
 
 Supported out of the box: **LM Studio** and **Ollama** (on your own machine, no
 key, nothing leaves the box), **OpenAI**, **Anthropic**, **DeepSeek**, **Groq**,
@@ -340,8 +442,9 @@ Two honest caveats:
   backups has it. If you would rather it were not on disk at all, name an
   environment variable instead and DisPatch reads the key from there; the
   environment always wins over the file.
-- **This is a conversational assistant, not an agent.** No tools, no file
-  access, nothing that can act on your machine. For that you want an
+- **A direct-API bot is an assistant, not an agent.** Its lookups only read
+  (search, weather, a page, and so on); it cannot touch files or run anything
+  on your machine. For that you want an
   [agent backend](docs/agents.md), which is a bigger commitment and has to run
   on the same host.
 

@@ -295,7 +295,7 @@ def test_new_fields_are_clamped_and_round_trip(rx):
         "daily_add_per_mood: 0", "daily_add_per_mood: lots")
     path.write_text(text, encoding="utf-8")
     reactions._pool_cache.clear()
-    assert reactions.pool_load().config.daily_add_per_mood == 10
+    assert reactions.pool_load().config.daily_add_per_mood == 2
     # Status exposes them for the manager.
     s = reactions.pool_status()
     for k in ("daily_add_per_mood", "refill_spent_today", "fired_since_daily",

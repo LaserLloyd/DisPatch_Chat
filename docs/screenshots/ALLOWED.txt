@@ -36,3 +36,10 @@ settings-theme.png
 
 # Safe Mode with an empty roster: no threads, no names, no message text.
 live-locked-1280.png
+# 2.3.0 (2026-10-14), captured on a fresh scratch install (Atlas + the two
+# seeded chats, no real roster, no address or path in frame):
+welcome.png
+ai-models.png
+quick-actions.png
+plugins-tab.png
+voice-screen.png

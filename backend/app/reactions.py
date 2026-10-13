@@ -1782,7 +1782,11 @@ class PoolConfig:
     # one for every image FIRED since the previous daily run. per_mood (and
     # its override) is the shelf CEILING: going past it retires the oldest
     # unfired image of that mood through _retire (kept, never deleted).
-    daily_add_per_mood: int = 10
+    # The default was 10 until 2026-10-14: on a full shelf with 32 moods that
+    # is ~320 renders a day (about five GPU hours) to replace a handful that
+    # were used, every one of them retiring an unused image. 2 keeps the
+    # rotation visible and costs a few minutes; the owner raises it per bot.
+    daily_add_per_mood: int = 2
     refill_spent_today: bool = True
 
     def to_dict(self) -> dict:

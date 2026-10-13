@@ -1796,6 +1796,70 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .welcome-chip:hover { border-color: var(--accent); color: var(--text-primary); transform: translateY(-1px); }
 
+/* ---- Quick actions (js/quick-actions.js): welcome chips, composer pill,
+   the bolt menu and the tag over a sent bubble ---- */
+.welcome-quick { display: flex; flex-direction: column; align-items: center; margin-top: 14px; max-width: 560px; }
+.qa-intro { margin: 0 0 8px; font-size: 12.5px; color: var(--text-muted); }
+.qa-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.qa-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-tertiary); border: 1px solid var(--border-strong); color: var(--text-secondary);
+  padding: 7px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+  transition: border-color .15s, color .15s, transform .12s var(--easing);
+}
+.qa-chip .rail-icon { width: 14px; height: 14px; color: var(--accent); flex: none; }
+.qa-chip:hover, .qa-chip:focus-visible { border-color: var(--accent); color: var(--text-primary); transform: translateY(-1px); outline: none; }
+
+.qa-bar { display: flex; margin: 0 2px 8px; }
+.qa-bar[hidden] { display: none; }
+.qa-pill {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 3px 4px 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--accent-wash); color: var(--accent-text);
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+}
+.qa-pill .rail-icon { width: 14px; height: 14px; flex: none; }
+.qa-pill-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qa-pill-remove {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border: none; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; padding: 0;
+}
+.qa-pill-remove .rail-icon { width: 11px; height: 11px; }
+.qa-pill-remove:hover, .qa-pill-remove:focus-visible { background: var(--bg-hover); color: var(--text-primary); outline: none; }
+
+.quick-wrap { position: relative; display: flex; align-self: flex-end; flex-shrink: 0; }
+.quick-btn[hidden] { display: none; }
+.quick-btn .rail-icon { width: 18px; height: 18px; }
+.quick-btn.active, .quick-btn[aria-expanded="true"] { color: var(--accent-text); background: var(--accent-wash); }
+.menu.quick-menu {
+  inset-inline-end: auto; inset-inline-start: 0; top: auto; bottom: calc(100% + 10px);
+  min-width: 220px; max-width: min(300px, calc(100vw - 24px)); max-height: min(60vh, 420px);
+  overflow-y: auto; padding: 4px; z-index: 70;
+}
+.menu.quick-menu[hidden] { display: none; }
+.qm-head { padding: 6px 10px 4px; font-size: 11.5px; font-weight: 700; color: var(--text-muted); }
+.menu.quick-menu .qm-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  border-radius: var(--radius-sm); font-size: 14px; color: inherit;
+}
+.menu.quick-menu .qm-item:hover, .menu.quick-menu .qm-item:focus-visible { background: var(--bg-hover); outline: none; }
+.menu.quick-menu .qm-item.is-current { color: var(--accent-text); font-weight: 600; }
+.qm-check { width: 14px; flex: none; text-align: center; }
+.qm-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qm-tag {
+  font-size: 10.5px; padding: 1px 6px; border-radius: 999px; color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+}
+.qm-empty { padding: 10px; font-size: 13px; color: var(--text-muted); }
+
+.msg-action {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; margin: 0 0 4px;
+  padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  background: var(--accent-wash); color: var(--accent-text); max-width: 100%;
+}
+.msg-action .rail-icon { width: 12px; height: 12px; flex: none; }
+.msg-action-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- Message actions: visible on touch + focus, bigger taps (F6) ---- */
 .msg-act-btn { transition: background .12s, color .12s, transform .1s; }
 .msg-act-btn:active { transform: scale(.94); }
@@ -2212,6 +2276,9 @@ body.tool-full #collapse-threads { display: none; }
   padding: 10px 12px; color: var(--text-primary); font-size: 15px; width: 100%;
 }
 .llm-body select:focus { outline: none; border-color: var(--accent); }
+/* The Lookups switch (2.3.0): a plain checkbox on one line with its word. */
+.llm-check { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer; }
+.llm-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 .llm-body textarea {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px;
   padding: 10px 12px; color: var(--text-primary); font-size: 14px;
@@ -3404,7 +3471,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    name + one-line explanation on the start side, the control on the end side,
    the Pin pill just before the control. The markup is index.html #dev-group-*;
    rows built in other modules are normalised by main.js tidyRowText(). */
-:is(#spane-device, #spane-voice) > .modal-hint { padding-inline: 20px; }
+:is(#spane-device, #spane-voice, #spane-plugins) > .modal-hint { padding-inline: 20px; }
 .dev-group { margin: 16px 18px 0; }
 .dev-group:last-child { margin-bottom: 18px; }
 .dev-group[hidden] { display: none; }
@@ -3461,7 +3528,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    accent/on-accent pair. #spane-device in the selector: the night contrast
    profile redraws every checkbox as a 14px box (bottom of this file), and
    the switch has to outrank that. */
-:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] {
+:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] {
   -webkit-appearance: none; appearance: none;
   width: 44px; height: 26px; margin: 0; flex: none; cursor: pointer;
   border-radius: 999px; box-shadow: none;
@@ -3472,26 +3539,26 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   background-position: 1px center;
   transition: background-color .18s ease, border-color .18s ease, background-position .2s ease;
 }
-:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:checked {
+:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:checked {
   border-color: var(--accent-text);   /* same reason as .pin-toggle.pinned */
   background-color: var(--accent);
   background-image: radial-gradient(circle closest-side, var(--on-accent) 0 82%, transparent 90%);
   background-position: calc(100% - 1px) center;
   box-shadow: none;
 }
-[dir="rtl"] :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
-[dir="rtl"] :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
-:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[dir="rtl"] :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
+[dir="rtl"] :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
+:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Disabled (the NIM ratchet on a locked device, or Minimal avatars while NIM
    drives it): still reads ON/OFF, just visibly not operable. */
-:is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
-:is(#spane-device, #spane-voice) .dev-row:has(> input:disabled) { cursor: default; }
+:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
+:is(#spane-device, #spane-voice, #spane-plugins) .dev-row:has(> input:disabled) { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
-  :is(#spane-device, #spane-voice) .dev-row > input[type="checkbox"] { transition: none; }
+  :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] { transition: none; }
 }
 @media (max-width: 768px) {
   .dev-group { margin-inline: 12px; }
-  :is(#spane-device, #spane-voice) > .modal-hint { padding-inline: 14px; }
+  :is(#spane-device, #spane-voice, #spane-plugins) > .modal-hint { padding-inline: 14px; }
   .dev-group-body > .dev-row { padding: 12px; gap: 10px; }
   /* Language: the select would squeeze the name to a sliver at 390px. */
   .dev-group-body > .bm-lang { flex-wrap: wrap; }
@@ -4415,6 +4482,7 @@ body.tools-sheet-open::after {
 .chat-actions-ext[hidden] { display: none; }
 #ext-pane-voice { padding-bottom: 18px; }
 .ext-row .dev-row-text code,
+.plugins-voice-missing .dev-row-text code,
 .ext-details code { font-family: var(--font-mono); font-size: 0.92em; }
 .ext-cmd-row { position: relative; margin-top: 8px; }
 .ext-cmd {
@@ -4448,3 +4516,56 @@ body.tools-sheet-open::after {
 .msg-unheard-mark .rail-icon { width: 1em; height: 1em; }
 .msg-voice-cut { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12.5px; color: var(--text-secondary); }
 .msg-voice-cut .rail-icon { width: 14px; height: 14px; flex: none; }
+
+/* ---------------------------------------------------------------------------
+   2.3 — Settings -> Plugins (js/plugins.js) and the Bots tab's inline editing
+   (js/bots-edit.js). Rows are the modal's own .dev-group / .dev-row; this is
+   only what is new, on existing theme tokens.
+   --------------------------------------------------------------------------- */
+#spane-plugins { padding-bottom: 18px; }
+.plugins-state { font-weight: 600; }
+.plugins-state-ok { color: var(--accent-text); }
+.plugins-state-failed, .plugins-state-incompatible { color: var(--error-text, var(--text-primary)); }
+.plugins-restart { color: var(--warning-text, var(--text-secondary)); font-weight: 600; }
+.plugins-names { display: flex; flex-wrap: wrap; gap: 6px; }
+.plugins-chip {
+  padding: 2px 8px; border-radius: 999px; font-family: var(--font-mono); font-size: 12px;
+  background: var(--bg-input, var(--bg-secondary)); color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+.plugins-tools-host { padding: 0; }
+.plugins-tools-host > .modal-hint { padding-inline: 0; }
+
+/* Bots tab: backend badge, "not connected" link, inline editor, add-bot form. */
+.bm-backend {
+  flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--bg-input, var(--bg-secondary)); color: var(--text-secondary);
+  border: 1px solid var(--border-strong); white-space: nowrap;
+}
+.bm-backend-direct { color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
+.bm-notconnected {
+  flex: none; background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  color: var(--warning-text, var(--accent-text)); font: inherit; font-size: 12px; font-weight: 600;
+  text-decoration: underline;
+}
+.bm-notconnected:focus-visible, .bm-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.bm-remove:hover { border-color: var(--error, var(--accent)); }
+.bm-edit-panel, .bm-add-form {
+  flex: 1 0 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+  padding-top: 8px; border-top: 1px solid var(--border-strong);
+}
+.bm-edit-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.bm-edit-field input, .bm-edit-field select {
+  padding: 7px 9px; font: inherit; font-size: 14px; color: var(--text-primary);
+  background: var(--bg-input, var(--bg-secondary)); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.bm-edit-field input:focus-visible, .bm-edit-field select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.bm-edit-emoji { max-width: 6ch; }
+.bm-edit-actions, .bm-add-hint { grid-column: 1 / -1; }
+.bm-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.bm-add-hint { margin: 0; font-size: 12.5px; }
+.bm-add { margin-top: 4px; padding: 9px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
+.bm-add .bm-add-open { display: inline-flex; align-items: center; gap: 6px; }
+.bm-add .bm-add-form { border-top: 0; padding-top: 0; }
+.bm-instant-hint { padding-top: 0; }

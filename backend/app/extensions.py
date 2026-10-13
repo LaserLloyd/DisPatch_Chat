@@ -63,13 +63,14 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 
+import yaml
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocketState
 
-from . import auth, config, tools
+from . import auth, config, livetools, tools
 
 log = logging.getLogger("local-chat.ext")
 
@@ -345,6 +346,7 @@ class Extension:
     routes: list = field(default_factory=list)
     websockets: dict[str, _WsSpec] = field(default_factory=dict)
     tools: list[Any] = field(default_factory=list)
+    live_tools: list[Any] = field(default_factory=list)   # livetools.ToolSpec rows
     validators: dict[str, Callable[[str], None]] = field(default_factory=dict)
     startup: list[tuple[Callable[[], Any], bool]] = field(default_factory=list)
     shutdown: list[Callable[[], Any]] = field(default_factory=list)
@@ -386,6 +388,7 @@ class Extension:
             "css": list(self.css) if self.ok else [],
             "locales": bool(self.locales) if self.ok else False,
             "tools": [getattr(t, "id", "") for t in self.tools] if self.ok else [],
+            "live_tools": [t.name for t in self.live_tools] if self.ok else [],
         }
         if operator:
             d["detail"] = scrub_detail(self.detail)
@@ -646,6 +649,18 @@ class ExtensionContext:
                 raise ValueError(f"tool {tid!r} needs a probe()")
             self._ext.tools.append(r)
 
+    def register_live_tools(self, specs) -> None:
+        """Add model-callable lookups to the advisor live-tools registry. Each
+        spec is a dict (or ``livetools.LiveTool``): ``name`` (``[a-z][a-z0-9_]{1,30}``,
+        not a built-in's, not another extension's), ``description``,
+        ``parameters`` (JSON schema), ``fn`` (``async fn(args: dict) -> str |
+        ToolResult``) and optionally ``summary`` (``fn(args) -> str``, the
+        notice-row label). A bad spec raises ``ValueError`` and the extension
+        fails to load."""
+        self._check_open("register_live_tools")
+        pending = [t.name for t in self._ext.live_tools]
+        self._ext.live_tools += livetools.validate_live_tools(specs, self.ext_id, pending=pending)
+
     def on_startup(self, fn: Callable[[], Any], *, thread: bool = False) -> None:
         self._check_open("on_startup")
         self._ext.startup.append((fn, bool(thread)))
@@ -769,6 +784,44 @@ def _ep_source(ep) -> str:
     return "entry point"
 
 
+USER_OFF_FILE = "extensions.yaml"
+USER_OFF_DETAIL = "Switched off in Settings -> Plugins; it loads again after you switch it on and restart."
+
+
+def user_disabled() -> set[str]:
+    """Ids the operator switched off (``<data>/extensions.yaml``,
+    ``{disabled: [ids]}``, written by Settings -> Plugins). An unreadable file
+    switches nothing off."""
+    try:
+        doc = yaml.safe_load((config.DATA_DIR / USER_OFF_FILE).read_text())
+    except (OSError, yaml.YAMLError):
+        return set()
+    ids = doc.get("disabled") if isinstance(doc, dict) else None
+    return {i for i in (ids or []) if isinstance(i, str)}
+
+
+def _split_user_disabled(cands: list[Candidate], eps: list) -> tuple[list[Candidate], list[Extension]]:
+    """Candidates the operator switched off become `disabled` rows (never
+    imported); the rest still load."""
+    off = user_disabled()
+    if not off:
+        return cands, []
+    keep: list[Candidate] = []
+    rows: list[Extension] = []
+    for c in cands:
+        cid = _guess_id(c)
+        if cid not in off:
+            keep.append(c)
+            continue
+        ep = next((e for e in eps if e.value == c.target), None)
+        dist = getattr(ep, "dist", None) if ep is not None else None
+        rows.append(Extension(
+            id=cid, name=(dist.metadata["Name"] if dist is not None else cid),
+            version=(dist.version if dist is not None else ""), state="disabled",
+            detail=USER_OFF_DETAIL, source=c.source))
+    return keep, rows
+
+
 def discover() -> tuple[str, list[Candidate], list[Extension]]:
     """(mode, candidates to load, installed-but-disabled rows)."""
     spec = os.environ.get("DISPATCH_EXTENSIONS", "").strip()
@@ -793,7 +846,8 @@ def discover() -> tuple[str, list[Candidate], list[Extension]]:
         by_value = {ep.value: ep for ep in eps}
         cands = [Candidate(t, "DISPATCH_EXTENSIONS",
                            by_value[t].name if t in by_value else None) for t in targets]
-        return "env", cands, disabled_rows(set(targets))
+        cands, off_rows = _split_user_disabled(cands, eps)
+        return "env", cands, disabled_rows(set(targets)) + off_rows
     cands = [Candidate(ep.value, _ep_source(ep), ep.name) for ep in eps]
     legacy = os.environ.get("DISPATCH_VOICE_PKG", "").strip()
     if legacy:
@@ -804,7 +858,8 @@ def discover() -> tuple[str, list[Candidate], list[Extension]]:
         if not any(c.target == "dispatch_voice:EXTENSION" for c in cands):
             cands.append(Candidate("dispatch_voice:EXTENSION", "DISPATCH_VOICE_PKG (deprecated)",
                                    "voice"))
-    return "entry_points", cands, []
+    cands, off_rows = _split_user_disabled(cands, eps)
+    return "entry_points", cands, off_rows
 
 
 def _guess_id(c: Candidate) -> str:
@@ -912,6 +967,11 @@ def load_one(app: FastAPI, cand: Candidate) -> Extension:
     ext.ctx = ctx
     try:
         tools.register_builtins(ext.id, ext.tools)
+        try:
+            livetools.register_extension(ext.id, ext.live_tools)
+        except Exception:
+            tools.unregister_builtins(ext.id)
+            raise
     except Exception as e:
         app.router.routes[:] = [r for r in app.router.routes if any(r is b for b in before)]
         _reset_registrations(ext)
@@ -999,6 +1059,7 @@ def _reset_registrations(ext: Extension) -> None:
     ext.routes = []
     ext.websockets = {}
     ext.tools = []
+    ext.live_tools = []
     ext.validators = {}
     ext.startup = []
     ext.shutdown = []
@@ -1069,6 +1130,7 @@ def unload_all(app: FastAPI | None = None) -> None:
                                     if not any(r is o for o in e.routes)]
         with contextlib.suppress(Exception):
             tools.unregister_builtins(e.id)
+        livetools.unregister_extension(e.id)
     _all.clear()
     _by_id.clear()
     _open_total.clear()

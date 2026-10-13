@@ -692,45 +692,41 @@ class Bot:
                 "voice_rp": self.voice_rp}
 
 
-# Shipped defaults.
-DEFAULT_BOTS: list[Bot] = [
+def shipped_default_bots() -> list[Bot]:
+    """The roster a fresh install gets, as new objects (tests patch DEFAULT_BOTS)."""
+    return [
     # The starter roster a fresh install gets, and what a lost config.yaml
-    # falls back to. Deliberately small and generic: two assistants, one of
-    # which is reachable WITHOUT the PIN so the limited tier has something to
-    # talk to out of the box, and one that is not so the distinction is visible
-    # from the first minute.
+    # falls back to: ONE bot, Atlas, a direct-API chat partner (the `advisor`
+    # backend, see docs/advisor.md) with the built-in lookups switched on and
+    # no provider yet. It is on the roster so that the moment someone pastes an
+    # API key (Settings -> AI models) there is already a bot that answers; until
+    # then a message to it is answered with a one-line "not connected yet"
+    # notice rather than an error.
     #
-    # No `avatar` filenames: the repo ships no avatar images, so naming one
-    # here would mean a fresh clone requesting a file that does not exist. With
-    # the field empty the UI draws a coloured letter block instead — which is a
-    # deliberate fallback, not a broken image. Drop your own PNG/SVG into
-    # frontend/static/avatars/ and set the name here or in config.yaml.
+    # `safe: true` so the limited tier (Safe Mode, family devices) has something
+    # to talk to out of the box. A Safe-Mode turn on an advisor runs "locked":
+    # no delegation, and only the `tools_locked` subset of the lookups.
     #
-    # `id` is the identifier handed to the agent backend. If you have no agent
-    # configured these are still perfectly good conversation threads; they just
-    # will not answer.
-    # Two, because the first question anyone has is "which one do I ask?" and
-    # the honest answer is a speed/quality trade — so the roster says that out
-    # loud instead of shipping two identical "Assistant" entries.
+    # No `avatar`: the repo ships no avatar images, so naming one would mean a
+    # fresh clone requesting a file that does not exist. With the field empty
+    # the UI draws a coloured letter block instead -- a deliberate fallback, not
+    # a broken image. Drop your own PNG/SVG into the avatar directory and set it
+    # here or in config.yaml.
     #
-    #   Quick  — a small fast model. Most messages are small and fast.
-    #   Smart  — a large capable model, for the ones that are not.
+    # model_hint is a LABEL, not a setting -- it renders as the badge under the
+    # name and the runtime value wins when there is one.
     #
-    # The safe flags are NOT decoration and are the other half of why there are
-    # exactly two: Quick is reachable WITHOUT the PIN so the limited tier has
-    # something to talk to out of the box, Smart is not. A new operator sees the
-    # two-tier model working from the first minute rather than reading about it.
-    #
-    # model_hint is a LABEL, not a setting — it renders as the badge under the
-    # name and the runtime value wins when there is one. It is deliberately
-    # provider-neutral: pick the actual models in Settings → Connect an AI (or
-    # point them at an agent CLI). Naming a vendor's model here would be a
-    # guess about someone else's account, and would age badly.
-    Bot(id="quick", name="Quick", emoji="⚡", model_hint="fast model",
-        order=0, safe=True),
-    Bot(id="smart", name="Smart", emoji="🧠", model_hint="capable model",
-        order=1, safe=False),
-]
+    # Existing installs are untouched: this list only seeds a first run (and the
+    # fall-back for a config.yaml with no usable entries). Nothing here is ever
+    # merged into a roster that already exists.
+    Bot(id="atlas", name="Atlas", emoji="🌍", model_hint="Direct API",
+        order=0, visible=True, safe=True, reactions=False, avatar_pool=False,
+        advisor={"providers": [], "tools": True}),
+    ]
+
+
+# Shipped defaults.
+DEFAULT_BOTS: list[Bot] = shipped_default_bots()
 
 
 def _bot_entry(b: Bot) -> dict:
@@ -1032,11 +1028,71 @@ def upsert_bot(bot: Bot) -> Bot:
     return get_bot(bot.id)  # type: ignore[return-value]
 
 
+def remove_bot(bot_id: str) -> bool:
+    """Drop ONE bot from config.yaml. False when no such bot.
+
+    Threads and messages are not touched: they live in the database and keep
+    rendering with the bot's last name and avatar. Refuses (ValueError) to
+    remove the last bot -- an empty roster makes load_bots() fall back to the
+    shipped defaults, which would silently bring a bot back that the operator
+    just removed.
+    """
+    bots = load_bots()
+    if not any(b.id == bot_id for b in bots):
+        return False
+    rest = [b for b in bots if b.id != bot_id]
+    if not rest:
+        raise ValueError("A DisPatch install needs at least one bot")
+    _write_bots([_bot_entry(b) for b in rest])
+    return True
+
+
+def derive_bot_id(name: str, taken: set[str]) -> str:
+    """A fresh bot id from a display name: ``[a-z0-9_-]{1,32}``, never one that
+    is in ``taken`` (compared case-insensitively -- the agent runtime lowercases
+    session keys, so two ids that differ only by case would share history)."""
+    import re
+    base = re.sub(r"[^a-z0-9_-]+", "-", (name or "").lower()).strip("-_")[:28] or "bot"
+    low = {t.lower() for t in taken}
+    if base not in low:
+        return base
+    n = 2
+    while f"{base}-{n}" in low:
+        n += 1
+    return f"{base}-{n}"
+
+
+def is_direct(bot: Bot) -> bool:
+    """A direct-API bot = the advisor backend (docs/advisor.md) with no `api`."""
+    return bool(bot.advisor) and not bot.api
+
+
+def direct_connected(bot: Bot) -> bool:
+    """A direct-API bot with at least one provider entry."""
+    if not is_direct(bot):
+        return False
+    return any(isinstance(p, dict) for p in (bot.advisor or {}).get("providers") or [])
+
+
+def direct_tools_on(bot: Bot) -> bool:
+    """Are the built-in lookups on for this direct-API bot?
+
+    Mirrors advisor._parse_tools: true or a non-empty list = on; absent,
+    false or [] = off."""
+    raw = (bot.advisor or {}).get("tools")
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (list, tuple, str)):
+        return bool(raw)
+    return False
+
+
 def api_bot_count() -> int:
-    """How many bots have a direct-provider backend configured.
+    """How many bots have a direct-provider backend configured: legacy `api:`
+    bots plus direct-API (advisor-backend) bots with at least one provider.
 
     Cheap (load_bots is mtime-cached) and used by /api/auth/status so the
     frontend can decide whether to show the first-run setup card without
     probing anything.
     """
-    return sum(1 for b in load_bots() if b.api)
+    return sum(1 for b in load_bots() if b.api or direct_connected(b))

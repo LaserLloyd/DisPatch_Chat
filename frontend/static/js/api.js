@@ -64,7 +64,7 @@ async function j(url, opts = {}) {
     const err = new Error(`${r.status}: ${detail}`);
     err.status = r.status;
     // The parsed body rides along for callers that need more than a message —
-    // Settings → Tools reads a 422's offending row index out of it.
+    // Settings → Plugins reads a 422's offending row index out of it.
     err.body = body;
     throw err;
   }
@@ -143,7 +143,13 @@ export const api = {
   recover: (code) => j('/api/auth/recover', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ code }) }),
 
   bots: () => j('/api/bots'),
+  // Quick actions in use (public; Safe Mode too): {actions: [{id, label, hint, tools}]}.
+  quickActions: () => j('/api/quick-actions'),
   allBots: () => j('/api/bots/all'),
+  // Per-bot editing (docs/design/platform-2-3.md section 3). Operator only.
+  addBot: (body) => j('/api/bots', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  patchBot: (id, patch) => j(`/api/bots/${encodeURIComponent(id)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) }),
+  deleteBot: (id) => j(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveOrder: (bots) => j('/api/bots/order', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ bots }) }),
 
   threads: (botId) => j(`/api/threads?bot_id=${encodeURIComponent(botId)}`),
@@ -293,6 +299,10 @@ export const api = {
   // Refresh runs a real command, so it gets the tool's own ceiling (max
   // 3600 s server-side) instead of the 20 s default.
   tools: () => j('/api/tools'),
+  // Settings -> Plugins (app/plugins_api.py): the aggregate and its two switches.
+  plugins: () => j('/api/plugins'),
+  setPluginExtension: (id, enabled) => j(`/api/plugins/extensions/${encodeURIComponent(id)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ enabled: !!enabled }) }),
+  setPluginLivetools: (enabled) => j('/api/plugins/livetools', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ enabled: !!enabled }) }),
   toolStatus: (id) => j(`/api/tools/${encodeURIComponent(id)}/status`),
   toolRefresh: (id) => j(`/api/tools/${encodeURIComponent(id)}/refresh`, { method: 'POST', timeoutMs: 3600 * 1000 }),
   toolsSave: (list) => j('/api/tools', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ tools: list }) }),

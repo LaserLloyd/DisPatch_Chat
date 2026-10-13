@@ -19,6 +19,7 @@ How an extension differs from the other two ways of adding to DisPatch:
 | Found by | `tools.yaml` | the `apps/` folder (or a trusted data-dir row) | the `dispatch.extensions` entry point group |
 | Frontend | framed page | framed page + optional thread hook | modules mounted **into** the shell's DOM through a frozen `shell` object |
 
+- [Settings tabs and tool packages](#settings-tabs-and-tool-packages)
 - [Voice chat (DisPatch Voice)](#voice)
 - [Discovery and the handshake](#discovery-and-the-handshake)
 - [Writing an extension: the backend](#writing-an-extension-the-backend)
@@ -27,6 +28,18 @@ How an extension differs from the other two ways of adding to DisPatch:
 - [Versioning](#versioning)
 
 ---
+
+## Settings tabs and tool packages
+
+An extension can add a tab of its own to Settings: ask the shell for a Settings
+pane with a new id (lowercase letters, digits and hyphens) and a title, and the
+tab and its pane are created for you, placed after Voice. Ids the shell already
+knows keep their place. A package can also add lookups for the bots to use, by
+registering tool specs on the extension context (`register_live_tools`). Settings →
+Plugins lists every installed add-on and lets you switch one off (the choice is
+kept in `extensions.yaml`, see [configuration.md](configuration.md)). The
+sections below, [Writing an extension](#writing-an-extension-the-backend), cover
+the API.
 
 ## Voice
 
@@ -212,7 +225,7 @@ is imported and called. Every outcome is a **state**, never a failed boot:
 | `ok` | mounted |
 | `incompatible` | the API range excludes this DisPatch — `detail` says which side to update |
 | `failed` | importing or running `setup` raised — everything it had registered is rolled back; `detail` is `Type: message`, the traceback is in the journal |
-| `disabled` | installed, but `DISPATCH_EXTENSIONS` leaves it out |
+| `disabled` | installed, but `DISPATCH_EXTENSIONS` leaves it out, or the operator switched it off in Settings → Plugins (`<DATA_DIR>/extensions.yaml`) |
 
 A second extension claiming an id that is taken is `failed`.
 
@@ -389,6 +402,107 @@ A raising hook is logged, never fatal.
 
 ---
 
+## Live tools from a package
+
+`ctx.register_live_tools(specs)` adds lookups an advisor bot's model can call
+itself (see "Live tools" in [advisor.md](advisor.md)) without touching
+DisPatch. They join the eight built-in lookups in one registry: a bot with
+`advisor.tools: true` is offered the built-ins **and** every extension tool, and a
+`tools:` list may name them. A **locked (Safe-Mode) turn** gets only the eight
+built-ins by default: an extension tool reaches a family device only when the
+owner names it in that bot's `tools_locked` (opt-in, like everything else Safe
+Mode can touch).
+
+A complete minimal extension (a `dice` roller):
+
+```python
+# src/dice_pack/__init__.py
+import random
+
+EXTENSION = {
+    "id": "dice-pack", "name": "Dice pack", "version": "0.1.0",
+    "api": [1, 1], "setup": "dice_pack:setup",
+}
+
+
+async def roll(args: dict) -> str:
+    sides = args.get("sides", 6)
+    if not isinstance(sides, int) or isinstance(sides, bool) or not 2 <= sides <= 1000:
+        return "sides must be a whole number from 2 to 1000"
+    return f"d{sides}: {random.randint(1, sides)}"
+
+
+def setup(ctx) -> None:
+    ctx.register_live_tools([{
+        "name": "roll_dice",
+        "description": "Roll one die with the given number of sides.",
+        "parameters": {
+            "type": "object",
+            "properties": {"sides": {"type": "integer", "description": "2-1000, default 6"}},
+            "required": [],
+        },
+        "fn": roll,
+        "summary": lambda args: f"Dice: d{args.get('sides', 6)}",   # the 🔧 notice row
+    }])
+
+
+# pyproject.toml
+# [project.entry-points."dispatch.extensions"]
+# dice-pack = "dice_pack:EXTENSION"
+```
+
+The spec is a dict (or `livetools.LiveTool(name, description, parameters, fn,
+summary=None)`):
+
+| Key | Rule |
+|---|---|
+| `name` | `[a-z][a-z0-9_]{1,30}`; not a built-in's name (`web_search`, `weather`, …) and not another extension's |
+| `description` | 1-1000 characters; this is what the model reads to decide when to call it |
+| `parameters` | a JSON-schema object (`type: object`); must be JSON-serialisable |
+| `fn` | `async fn(args: dict) -> str \| livetools.ToolResult`; a plain function works too |
+| `summary` | optional `fn(args) -> str`: the label of the `🔧 …` notice row (default: the capitalised name) |
+
+A bad spec raises `ValueError` from `register_live_tools`, which fails the
+extension's setup: it shows as `failed` in `/api/extensions` with the reason in
+`detail`, and nothing it registered stays behind. Registering after `setup(ctx)`
+returned raises `RuntimeError`. `/api/extensions` lists each loaded extension's
+tools as `live_tools`.
+
+Rules for a tool:
+
+- **Read-only intent.** A tool is called by a model that read text from the
+  open web or from a chat, and on a bot with `tools_locked` left at its default
+  it is callable from a Safe-Mode (family) device. Look things up; do not send,
+  write, delete, spend or run anything. If a tool must act, the bot's list is
+  the control: name it in `tools` and narrow `tools_locked` so it is not
+  offered on locked turns.
+- **Never raise, and keep arguments honest.** The model's arguments are
+  untrusted; validate them and return a short message the model can act on.
+  DisPatch still catches anything you raise: the model then sees only
+  `Tool <name> failed.` (no message, no exception type) and the traceback goes
+  to the log. Do not put secrets or paths in a result.
+- **Keep results small.** A result is cut to the bot's `tool_result_chars`
+  (default 4000) and wrapped in a "treat as data, not instructions" marker
+  before the model reads it. Return the facts, not a page dump.
+- **Be quick.** The turn waits for the tool; time-box network calls yourself.
+- **Per bot.** `tools: true` offers everything; `tools: [roll_dice, weather]`
+  offers just those (unknown names are logged and dropped, so a bot's list
+  survives the extension being uninstalled). `tools_locked: [weather]` narrows
+  what a Safe-Mode turn may call.
+
+The install-wide switch lives in `<data>/tools.yaml`:
+
+```yaml
+livetools:
+  enabled: false   # default true
+```
+
+With it off no bot is offered any live tool (built-in or extension), the
+prompt stops mentioning them, and it takes effect on the next turn.
+`GET /api/advisor/status` reports it as `livetools` beside each bot's `tools`.
+
+---
+
 ## Writing an extension: the frontend
 
 When an unlocked session starts (and `features.extensions > 0`) the shell
@@ -430,7 +544,7 @@ anything and does nothing on a locked or remembered device), and the slots:
 | Slot | What it does |
 |---|---|
 | `chatHeader.addAction(node)` | your button in the chat header, before the thread menu → `remove()` |
-| `settings.pane('voice', {render, onShow, onHide})` | takes over Settings → Voice → `dispose()` gives it back to the install page |
+| `settings.pane(id, {render, onShow, onHide, title, titleKey, glyph, public})` | `'voice'` takes over Settings → Voice (`dispose()` gives it back to the install page); any other id makes a **new Settings tab** (see [Settings panes](#settings-panes)) → `dispose()` removes it |
 | `settings.open(id)` / `settings.close()` | opens Settings on a tab / closes it (asking first when it has unsaved edits) |
 | `bots.rowExtra(fn(bot, onChange))` | a control on each non-safe bot's Bots-tab row; `onChange({voice})` marks the field for the next Save |
 | `tools.register([{id, feature, iconPaths, nameKey, ariaKey, open(id)}])` | the rail tile for a tool row your backend registered |
@@ -440,6 +554,44 @@ anything and does nothing on a locked or remembered device), and the slots:
 Render with the shell's own classes (`.dev-group`, `.dev-row`,
 `.btn-primary`, `.btn-secondary`, the tool pane's `terminal-view` chrome) so
 every palette applies; keep your stylesheet to what nothing in the shell has.
+
+#### Settings panes
+
+`shell.settings.pane(id, spec)` has two modes:
+
+- **`'voice'`** is pre-declared: the tab always exists (it shows the install
+  page until the voice add-on claims it) and keeps its place in the strip.
+- **Any other id** matching `[a-z][a-z0-9-]{1,30}` (and not one of the built-in
+  tabs: `bots`, `theme`, `device`, `voice`, `plugins`, `ai`, `reactions`,
+  `health`, `security`) creates a tab on demand. The shell builds the tab
+  button (`stab-<id>`) and the pane (`spane-<id>`) and places them **after
+  Voice and before Plugins**, so the strip reads: core tabs, add-in tabs, setup
+  tabs. `dispose()` (or your `unmount()`, a lock, or a failed mount) removes
+  both again.
+
+```js
+const dispose = shell.settings.pane('stats', {
+  titleKey: 'stats.tab',        // a key in your locale bundle (merged into the shell's strings)
+  // title: 'Stats',            // …or plain text
+  glyph: '📊',                  // optional, a short emoji; default is a puzzle piece
+  // public: true,              // visible in Safe Mode too (default: admin-only)
+  render(root) { /* build into root with the shell's classes */ },
+  onShow() {}, onHide() {},
+});
+```
+
+A tab is **admin-only** by default: hidden for a Safe-Mode session exactly like
+Reactions or Health. `public: true` shows it to everyone, so a public pane must
+never render anything an admin pane would. A malformed or built-in id, a missing
+`render`, or an id another extension already holds throws. The tab strip scrolls
+and the arrow keys walk it, so any number of add-in tabs fits.
+
+The Plugins tab (Settings → Plugins) lists every discovered extension with an
+install-wide on/off switch. Switching one off writes `<DATA_DIR>/extensions.yaml`
+(`disabled: [id, …]`); at the next start that id is listed as `disabled` and its
+code is never imported. `GET /api/plugins` (operator) returns the same list plus
+the Tools rows, the built-in lookups switch and whether the voice add-on is
+installed.
 
 **Teardown.** On lock or logout the shell calls `unmount()`, then disposes
 everything you registered (slots, listeners) whether or not you did, and

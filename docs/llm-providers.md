@@ -10,21 +10,31 @@ assistant.
 
 ## The two-step version
 
-1. Unlock DisPatch, open **⚙ Settings → 🔌 AI models** (or the **Connect an AI**
-   card the empty chat area shows on a fresh install).
-2. Pick a provider, paste a key if it needs one, press **Test connection**, pick
-   a model from the list it returns, press **Save & chat**.
+1. Unlock DisPatch, open **⚙ Settings → 🔌 AI models**. Choose which bot to
+   connect: Atlas (the default), any other direct-API bot, or a new one.
+2. Pick a provider, paste a key if it needs one (or enter a local server's
+   address), press **Test**, pick a model from the list it returns, press
+   **Connect**.
 
-That writes a new bot into `config.yaml` and opens a conversation with it. It is
-a real bot: it appears in the sidebar, keeps history, is searchable, and obeys
-the same PIN rules as everything else.
+That writes the provider, model and key into the chosen bot's `advisor:` block in
+`config.yaml`. The bot keeps its threads, history and PIN rules; connecting a
+bot a second time updates it and leaves its other settings alone. A **Lookups**
+switch next to the button turns the bot's web, weather and other lookups on or
+off.
+
+Since 2.3 this is the *direct-API* backend, the same one described in
+[advisor.md](advisor.md), so a connected bot streams, can use lookups and can
+take a second provider as a fallback. The older `api:` block described in the
+rest of this page still works for bots that already have one.
 
 ## What you get, and what you do not
 
 A connected provider gives you a **conversational assistant**. It sees the
-recent messages in the thread and replies.
+recent messages in the thread and replies. A direct-API bot can also use the
+built-in read-only lookups (search, weather, a page, and so on); a legacy `api:`
+bot cannot.
 
-It is not an agent. There are no tools, no file access, no shell, no ability to
+It is not an agent. There is no file access, no shell, no ability to
 act on your machine — and no attachments or images sent to the model (v1). If
 you want a thing that can *do* something, you want an agent backend
 ([agents.md](agents.md)); if you want something to talk to, this is simpler,
@@ -83,7 +93,9 @@ Two things to know:
 ## Where the API key is stored
 
 In **`config.yaml` in the data directory** (`~/.local/share/local-chat` by
-default, `/data` in the container images), under the bot's `api` block:
+default, `/data` in the container images). A bot connected from the AI models
+tab holds it in its `advisor.providers` list (same fields, same rules); the
+example below shows a legacy `api` block:
 
 ```yaml
 - id: llm-openai
@@ -192,8 +204,9 @@ creating a second one — leaving the key field blank keeps the stored key.
 
 ## Need streaming, fallbacks or a knowledge base?
 
-A "Connect an AI" bot uses one provider. For a cloud-then-local fallback chain, notes the bot can search and
-handoffs to your agents, configure an advisor bot instead: [advisor.md](advisor.md).
+The AI models tab connects one provider. For a cloud-then-local fallback chain,
+notes the bot can search and handoffs to your agents, add more entries to the
+bot's `advisor:` block: [advisor.md](advisor.md).
 
 ## Troubleshooting
 
@@ -209,3 +222,11 @@ handoffs to your agents, configure an advisor bot instead: [advisor.md](advisor.
 
 The host dashboard's **Agent backend** card shows a *Direct providers* row when
 any of these are configured — see [dashboard.md](dashboard.md).
+
+## Direct API (the default) and the legacy backend
+
+`POST /api/llm/connect` takes `target` (a bot id, default `atlas`; a new id creates the bot) and
+`backend`: `direct` (the default) writes the provider into the bot's `advisor.providers` and
+`advisor.tools` (lookups on/off), so the bot streams, falls back across providers and can use the
+built-in lookups; `legacy-api` is the older no-tools `api:` backend described above, keyed by
+`bot_id`. `/api/llm/test` takes the same body. A key stored in `config.yaml` is never returned.

@@ -684,6 +684,14 @@ def unload(app: FastAPI, app_id: str) -> None:
 # Bot provisioning (startup)
 # --------------------------------------------------------------------------- #
 
+def owns_bot(bot_id: str) -> bool:
+    """Is ``bot_id`` the roster bot of a mounted app (case-insensitive)? Such a
+    bot belongs to the app: the Bots tab may edit it but must not remove it."""
+    low = (bot_id or "").lower()
+    return any(la.manifest.bot is not None and la.manifest.bot.id.lower() == low
+               for la in mounted())
+
+
 def provision_bots() -> list[str]:
     """Append each mounted app's ``bot:`` to the roster if absent — through the
     one serializer (``config._bot_entry`` / ``_write_bots``). A present row is

@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { domSkip } from './_require-dom.js';
-import { createLoader, createPaneHost } from '../static/js/extensions.js';
+import { createLoader, createPaneHost, createAddinTabs, ADDIN_TAB_ID } from '../static/js/extensions.js';
 
 const require = createRequire(import.meta.url);
 let jsdom = null;
@@ -299,7 +299,7 @@ test('the shell object is frozen and carries the contract members', dom, withDom
   const shell = sdk.createShell('voice');
   assert.ok(Object.isFrozen(shell));
   assert.equal(shell.EXT_API, 1);
-  assert.equal(shell.version, '2.2.0');
+  assert.equal(shell.version, '2.3.0');
   for (const k of ['el', 'railIcon', 'RAIL_ICONS', 'loadStyle', 'acquireInert', 'releaseInert', 'isMobile',
     'onLocale', 'onLocked', 'onThread', 'onThreadChange', 'api', 'activeThread', 'bots', 'botById', 'allBots',
     'isLocked', 'language', 'features', 'threadFace', 'toast', 'confirm', 'prompt', 'navigate']) {
@@ -363,3 +363,144 @@ test('activity() (2.2.0, amendment FINAL-FIX-3) re-arms the shell idle lock and 
   const src = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
   assert.match(src, /activity: \(\) => bumpIdle\(\),/);
 }));
+
+// --------------------------------------------------------------------------
+// 2.3: add-in Settings tabs — shell.settings.pane(id) with a new id.
+// --------------------------------------------------------------------------
+
+const TABS_HTML = `<!doctype html><html><body>
+  <div id="settings-tabs">
+    <button id="stab-bots" data-tab="bots"></button><button id="stab-voice" data-tab="voice"></button>
+    <button id="stab-plugins" data-tab="plugins"></button><button id="stab-ai" data-tab="ai"></button>
+  </div>
+  <section id="spane-bots"></section><section id="spane-voice"></section>
+  <section id="spane-plugins"></section><section id="spane-ai"></section>
+</body></html>`;
+
+function tabsEnv(over = {}) {
+  const win = new jsdom.JSDOM(TABS_HTML).window;
+  const doc = win.document;
+  const log = [];
+  const tabs = createAddinTabs({
+    doc,
+    tablist: doc.getElementById('settings-tabs'),
+    beforeTab: doc.getElementById('stab-plugins'),
+    beforePane: doc.getElementById('spane-plugins'),
+    reserved: new Set(['bots', 'voice', 'plugins', 'ai']),
+    t: (k) => `T(${k})`,
+    isLocked: () => false,
+    onAdd: (id, o) => log.push(['add', id, o.public]),
+    onRemove: (id) => log.push(['remove', id]),
+    onTab: (id) => log.push(['tab', id]),
+    ...over,
+  });
+  return { win, doc, tabs, log };
+}
+const tabOrder = (doc) => [...doc.querySelectorAll('#settings-tabs > button')].map((b) => b.dataset.tab);
+const paneOrder = (doc) => [...doc.querySelectorAll('section')].map((s) => s.id.replace('spane-', ''));
+
+test('add-in tab ids: lower-case letters, digits, hyphen, 2-31 characters', () => {
+  for (const ok of ['ab', 'stats', 'my-addon', 'a1', 'x'.padEnd(31, 'y')]) assert.ok(ADDIN_TAB_ID.test(ok), ok);
+  for (const bad of ['a', '', '1abc', 'Abc', 'a_b', 'a b', 'x'.padEnd(32, 'y'), '-ab', 'a.b']) assert.ok(!ADDIN_TAB_ID.test(bad), bad);
+});
+
+test('a new pane id creates a tab and a pane after Voice, before Plugins, titled from the spec', dom, () => {
+  const { doc, tabs, log } = tabsEnv();
+  const seen = [];
+  tabs.claim('stats-addon', 'stats', {
+    title: 'Stats', glyph: '📊', render: (r) => { r.textContent = 'HELLO'; },
+    onShow: () => seen.push('show'), onHide: () => seen.push('hide'),
+  });
+  assert.deepEqual(tabOrder(doc), ['bots', 'voice', 'stats', 'plugins', 'ai']);
+  assert.deepEqual(paneOrder(doc), ['bots', 'voice', 'stats', 'plugins', 'ai']);
+  const btn = doc.getElementById('stab-stats');
+  assert.equal(btn.getAttribute('role'), 'tab');
+  assert.equal(btn.getAttribute('aria-controls'), 'spane-stats');
+  assert.equal(btn.querySelector('.stab-label').textContent, 'Stats');
+  assert.equal(btn.querySelector('.stab-glyph').textContent, '📊');
+  assert.ok(btn.classList.contains('admin-only'), 'admin-only by default');
+  const pane = doc.getElementById('spane-stats');
+  assert.equal(pane.getAttribute('role'), 'tabpanel');
+  assert.equal(pane.getAttribute('aria-labelledby'), 'stab-stats');
+  assert.ok(pane.classList.contains('hidden'));
+  assert.equal(pane.textContent, 'HELLO');
+  assert.deepEqual(log, [['add', 'stats', false]]);
+  btn.click();
+  assert.deepEqual(log.at(-1), ['tab', 'stats']);
+  // The pane host fires the add-on's show/hide as the tab comes and goes.
+  tabs.host('stats').show();
+  tabs.host('stats').hide();
+  assert.deepEqual(seen, ['show', 'hide']);
+});
+
+test('titleKey is looked up in the i18n bundle and tagged data-i18n for language changes', dom, () => {
+  const { doc, tabs } = tabsEnv();
+  tabs.claim('a-b', 'stats', { titleKey: 'stats.tab', render() {} });
+  const label = doc.querySelector('#stab-stats .stab-label');
+  assert.equal(label.textContent, 'T(stats.tab)');
+  assert.equal(label.getAttribute('data-i18n'), 'stats.tab');
+});
+
+test('public: true drops admin-only; a locked session starts an admin tab hidden', dom, () => {
+  const { doc, tabs, log } = tabsEnv({ isLocked: () => true });
+  tabs.claim('x1', 'secret', { title: 'S', render() {} });
+  tabs.claim('x2', 'open-tab', { title: 'O', public: true, render() {} });
+  const secret = doc.getElementById('stab-secret');
+  const open = doc.getElementById('stab-open-tab');
+  assert.ok(secret.classList.contains('admin-only') && secret.classList.contains('hidden'));
+  assert.ok(!open.classList.contains('admin-only') && !open.classList.contains('hidden'));
+  assert.deepEqual(log.filter((e) => e[0] === 'add'), [['add', 'secret', false], ['add', 'open-tab', true]]);
+});
+
+test('dispose removes the tab and the pane and tells the shell', dom, () => {
+  const { doc, tabs, log } = tabsEnv();
+  const dispose = tabs.claim('o', 'stats', { title: 'S', render() {} });
+  assert.ok(tabs.has('stats'));
+  dispose();
+  assert.equal(doc.getElementById('stab-stats'), null);
+  assert.equal(doc.getElementById('spane-stats'), null);
+  assert.ok(!tabs.has('stats'));
+  assert.deepEqual(log.at(-1), ['remove', 'stats']);
+  dispose();                                   // idempotent
+  assert.equal(log.filter((e) => e[0] === 'remove').length, 1);
+  // The id is free again.
+  tabs.claim('o2', 'stats', { title: 'S2', render() {} });
+  assert.equal(doc.querySelector('#stab-stats .stab-label').textContent, 'S2');
+});
+
+test('invalid, built-in and taken ids are refused, and nothing is left behind', dom, () => {
+  const { doc, tabs, log } = tabsEnv();
+  assert.throws(() => tabs.claim('o', 'Bad Id', { render() {} }), /not a valid tab id/);
+  assert.throws(() => tabs.claim('o', 'x', { render() {} }), /not a valid tab id/);
+  assert.throws(() => tabs.claim('o', 'bots', { render() {} }), /built-in tab/);
+  assert.throws(() => tabs.claim('o', 'ai', { render() {} }), /built-in tab/);
+  assert.throws(() => tabs.claim('o', 'stats', {}), /render/);
+  tabs.claim('o', 'stats', { title: 'S', render() {} });
+  assert.throws(() => tabs.claim('someone-else', 'stats', { render() {} }), /taken/);
+  assert.deepEqual(tabOrder(doc), ['bots', 'voice', 'stats', 'plugins', 'ai']);
+  assert.equal(log.filter((e) => e[0] === 'add').length, 1);
+});
+
+test('the same owner claiming its tab again re-renders into the existing pane', dom, () => {
+  const { doc, tabs } = tabsEnv();
+  tabs.claim('o', 'stats', { title: 'S', render: (r) => { r.textContent = 'ONE'; } });
+  tabs.claim('o', 'stats', { title: 'S', render: (r) => { r.textContent = 'TWO'; } });
+  assert.equal(doc.querySelectorAll('#stab-stats').length, 1);
+  assert.equal(doc.getElementById('spane-stats').textContent, 'TWO');
+});
+
+test('main.js routes an unknown shell.settings.pane id to the add-in tabs and keeps its lists in step', () => {
+  const src = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(!host\) return addinTabs\.claim\(owner, id, spec\);/);
+  assert.match(src, /SETTINGS_TABS\.splice\(at < 0 \? SETTINGS_TABS\.length : at, 0, id\)/);
+  assert.match(src, /if \(!isPublic\) ADMIN_TABS\.push\(id\);/);
+  assert.match(src, /reserved: CORE_SETTINGS_TABS/);
+  // The strip is walked live by the keyboard handler, so add-in tabs get arrows for free.
+  assert.match(src, /list\.querySelectorAll\('\.settings-tab'\)/);
+});
+
+test('the SDK documents the new pane ids', () => {
+  const sdk = readFileSync(new URL('../static/js/ext-sdk.js', import.meta.url), 'utf8');
+  assert.match(sdk, /\[a-z\]\[a-z0-9-\]\{1,30\}/);
+  assert.match(sdk, /titleKey/);
+});

@@ -94,6 +94,10 @@ DECOY_BLOCKED = [
     ("GET", "/api/recover/transcript"),
     ("GET", "/api/openclaw/sessions?bot_id=main"),
     ("GET", "/api/bots/all"),
+    # Bot management (add / edit / remove): operator-only, every method.
+    ("POST", "/api/bots"),
+    ("PATCH", "/api/bots/alpha"),
+    ("DELETE", "/api/bots/alpha"),
     # Code-execution surfaces. Each route has its own gate; these entries are
     # the structural belt-and-braces in the middleware.
     ("GET", "/api/harness/status"),
@@ -114,6 +118,10 @@ DECOY_BLOCKED = [
     ("POST", "/api/tools/x/refresh"),
     ("GET", "/tools/x/"),
     ("GET", "/api/tools/x/status"),
+    # Settings -> Plugins (app/plugins_api.py): operator only, reads included.
+    ("GET", "/api/plugins"),
+    ("PUT", "/api/plugins/extensions/voice"),
+    ("PUT", "/api/plugins/livetools"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
     # Apps (docs/design/2026-09-25-apps.md). An unknown app id is not on the
     # machine surface, so a sessionless caller is plain Safe Mode; a known,

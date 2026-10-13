@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=99" />
+  <link rel="stylesheet" href="/static/app.css?v=100" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -373,9 +373,18 @@
           </div>
           <button type="button" class="reply-chip-cancel" id="reply-chip-cancel" aria-label="Cancel reply" data-i18n-attr="aria-label=composer.reply_cancel">×</button>
         </div>
+        <!-- Quick actions: the picked action's pill (js/quick-actions.js).
+             Hidden while nothing is picked. -->
+        <div class="qa-bar" id="qa-bar" hidden></div>
         <div class="attach-preview hidden" id="attach-preview"></div>
         <div class="composer-row">
           <button class="icon-btn ghost attach-btn" id="attach-btn" title="Attach file" aria-label="Attach file" data-i18n-attr="title=composer.attach;aria-label=composer.attach">＋</button>
+          <!-- Quick actions menu: the bolt opens the list (hidden until the
+               server has served at least one action). -->
+          <span class="quick-wrap">
+            <button class="icon-btn ghost quick-btn" id="quick-btn" type="button" hidden title="Quick actions" aria-label="Quick actions" aria-haspopup="menu" aria-expanded="false" aria-controls="quick-menu" data-i18n-attr="title=quick.title;aria-label=quick.title"><span class="icn" data-icon="bolt" aria-hidden="true"></span></button>
+            <div class="menu quick-menu" id="quick-menu" role="menu" aria-label="Quick actions" data-i18n-attr="aria-label=quick.title" hidden></div>
+          </span>
           <!-- No reaction button here on purpose: firing reactions is a bot
                trait (agents only). Curation lives in the gear rail (⚡). -->
           <!-- dir="auto" so what you TYPE picks its own direction: an Arabic UI
@@ -695,16 +704,16 @@
            buttons they replace were. -->
       <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
         <button class="settings-tab active" id="stab-bots" role="tab" data-tab="bots" aria-selected="true" aria-controls="spane-bots" tabindex="0"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="settings.tab_bots">Bots</span></button>
-        <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
-        <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
-        <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
-        <button class="settings-tab admin-only" id="stab-tools" role="tab" data-tab="tools" aria-selected="false" aria-controls="spane-tools" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="tools.settings_tab">Tools</span></button>
         <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
         <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
         <!-- Voice: voice chat is an add-on. Always present for an unlocked user
              (the add-on's own settings when it is installed, otherwise how to
              add it); hidden in Safe Mode like the other admin tabs. -->
         <button class="settings-tab admin-only hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
+        <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="plugins.tab">Plugins</span></button>
+        <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
+        <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
+        <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
       </div>
 
@@ -713,61 +722,11 @@
         <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar.
           <strong>Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed.
           Order, visibility and Safe changes apply when you press <strong>Save</strong>.</p>
+        <p class="muted modal-hint bm-instant-hint" data-i18n="bots_edit.instant_hint">Renaming, adding and removing a bot, and the Lookups switch, apply at once.</p>
         <div class="bm-list" id="bm-list"></div>
         <!-- Avatar pools: status + prompt banks for pool-enabled bots
              (main.js renders; hidden while no bot has a pool). -->
         <div id="avatar-pool-panel" class="ap-panel hidden"></div>
-      </section>
-
-      <!-- ---- Reactions: reactions.js mounts the pack manager here ---- -->
-      <section class="settings-pane hidden" id="spane-reactions" role="tabpanel" aria-labelledby="stab-reactions" tabindex="0"></section>
-
-      <!-- ---- Health: dashboard.js mounts the host dashboard here ---- -->
-      <section class="settings-pane hidden" id="spane-health" role="tabpanel" aria-labelledby="stab-health" tabindex="0"></section>
-
-      <!-- ---- AI models (js/llm.js) ---- -->
-      <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
-        <p class="muted modal-hint" data-i18n="llm.hint">Point DisPatch at a model provider. It becomes a bot in your sidebar — no agent stack needed.</p>
-        <div class="llm-body">
-          <div class="sec-field">
-            <label for="llm-provider" data-i18n="llm.provider">Provider</label>
-            <select id="llm-provider"></select>
-            <a class="llm-docs" id="llm-docs" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="llm.docs_link">Where do I get a key?</a>
-          </div>
-          <div class="sec-field">
-            <label for="llm-base-url" data-i18n="llm.base_url">Base URL</label>
-            <input type="url" id="llm-base-url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:1234/v1" />
-            <p class="sec-note muted" id="llm-base-note" data-i18n="llm.base_url_hint">The API endpoint. Most OpenAI-compatible servers end in /v1.</p>
-          </div>
-          <form class="sec-field" id="llm-key-field" data-no-submit>
-            <label for="llm-key" data-i18n="llm.api_key">API key</label>
-            <input type="password" id="llm-key" autocomplete="off" spellcheck="false" placeholder="Paste your key" data-i18n-attr="placeholder=llm.api_key_placeholder" />
-            <p class="sec-note muted" data-i18n="llm.api_key_hint">Stored in config.yaml in your data directory, which is owner-readable only.</p>
-            <label class="llm-sublabel" for="llm-key-env" data-i18n="llm.key_env_label">…or read it from an environment variable</label>
-            <input type="text" id="llm-key-env" autocomplete="off" spellcheck="false" placeholder="OPENAI_API_KEY" />
-          </form>
-          <div class="llm-test-row">
-            <button class="btn-secondary" id="llm-test" data-i18n="llm.test">Test connection</button>
-            <span class="llm-result" id="llm-result" role="status" aria-live="polite"></span>
-          </div>
-          <div class="sec-field">
-            <label for="llm-model" data-i18n="llm.model">Model</label>
-            <select id="llm-model" hidden></select>
-            <input type="text" id="llm-model-text" autocomplete="off" spellcheck="false" placeholder="Type a model name" data-i18n-attr="placeholder=llm.model_placeholder" />
-            <p class="sec-note muted" id="llm-model-note" data-i18n="llm.model_pick">Run Test connection to list the models this provider offers.</p>
-          </div>
-          <details class="llm-advanced" id="llm-advanced">
-            <summary data-i18n="llm.advanced">Advanced</summary>
-            <div class="sec-field">
-              <label for="llm-name" data-i18n="llm.name_label">Display name</label>
-              <input type="text" id="llm-name" autocomplete="off" placeholder="Assistant" data-i18n-attr="placeholder=llm.name_placeholder" />
-            </div>
-            <div class="sec-field">
-              <label for="llm-system" data-i18n="llm.system_prompt">System prompt</label>
-              <textarea id="llm-system" rows="3" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
-            </div>
-          </details>
-        </div>
       </section>
 
       <!-- ---- Theme: the palette picker (js/theme.js builds the grid) ----
@@ -859,10 +818,72 @@
         <div class="ext-pane" id="ext-pane-voice"></div>
       </section>
 
-      <!-- ---- Security & PIN ---- -->
-      <!-- ---- Tools (admin-only; js/tools.js builds the table) ---- -->
-      <section class="settings-pane hidden tools-pane" id="spane-tools" role="tabpanel" aria-labelledby="stab-tools" tabindex="0"></section>
+      <!-- ---- Plugins (admin-only; js/plugins.js builds it): add-ons, the Tools
+           table (js/tools.js mounts into #plugins-tools-host) and the built-in
+           lookups switch. ---- -->
+      <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
 
+      <!-- ---- AI models (js/llm.js) ---- -->
+      <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
+        <p class="muted modal-hint" data-i18n="llm.hint">Connect a bot to a model provider or a local model server. Atlas is ready for a key; any direct-API bot, or a new one, works the same way.</p>
+        <div class="llm-body">
+          <div class="sec-field">
+            <label for="llm-target" data-i18n="llm.target">Bot to connect</label>
+            <select id="llm-target"></select>
+            <p class="sec-note muted" id="llm-target-note" data-i18n="llm.target_hint">The provider, model and key below become this bot's connection.</p>
+          </div>
+          <div class="sec-field">
+            <label for="llm-provider" data-i18n="llm.provider">Provider</label>
+            <select id="llm-provider"></select>
+            <a class="llm-docs" id="llm-docs" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="llm.docs_link">Where do I get a key?</a>
+          </div>
+          <div class="sec-field">
+            <label for="llm-base-url" data-i18n="llm.base_url">Base URL</label>
+            <input type="url" id="llm-base-url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:1234/v1" />
+            <p class="sec-note muted" id="llm-base-note" data-i18n="llm.base_url_hint">The API endpoint. Most OpenAI-compatible servers end in /v1.</p>
+          </div>
+          <form class="sec-field" id="llm-key-field" data-no-submit>
+            <label for="llm-key" data-i18n="llm.api_key">API key</label>
+            <input type="password" id="llm-key" autocomplete="off" spellcheck="false" placeholder="Paste your key" data-i18n-attr="placeholder=llm.api_key_placeholder" />
+            <p class="sec-note muted" data-i18n="llm.api_key_hint">Stored in config.yaml in your data directory, which is owner-readable only.</p>
+            <label class="llm-sublabel" for="llm-key-env" data-i18n="llm.key_env_label">…or read it from an environment variable</label>
+            <input type="text" id="llm-key-env" autocomplete="off" spellcheck="false" placeholder="OPENAI_API_KEY" />
+          </form>
+          <div class="llm-test-row">
+            <button class="btn-secondary" id="llm-test" data-i18n="llm.test">Test connection</button>
+            <span class="llm-result" id="llm-result" role="status" aria-live="polite"></span>
+          </div>
+          <div class="sec-field">
+            <label for="llm-model" data-i18n="llm.model">Model</label>
+            <select id="llm-model" hidden></select>
+            <input type="text" id="llm-model-text" autocomplete="off" spellcheck="false" placeholder="Type a model name" data-i18n-attr="placeholder=llm.model_placeholder" />
+            <p class="sec-note muted" id="llm-model-note" data-i18n="llm.model_pick">Run Test connection to list the models this provider offers.</p>
+          </div>
+          <div class="sec-field llm-tools-field" id="llm-tools-field">
+            <label class="llm-check"><input type="checkbox" id="llm-tools" checked /> <span data-i18n="llm.tools">Lookups</span></label>
+            <p class="sec-note muted" data-i18n="llm.tools_hint">Web and news search, a page fetch, weather, Wikipedia, exchange rates, the time and a calculator — the bot calls them itself and says when it did.</p>
+          </div>
+          <details class="llm-advanced" id="llm-advanced">
+            <summary data-i18n="llm.advanced">Advanced</summary>
+            <div class="sec-field">
+              <label for="llm-name" data-i18n="llm.name_label">Display name</label>
+              <input type="text" id="llm-name" autocomplete="off" placeholder="Assistant" data-i18n-attr="placeholder=llm.name_placeholder" />
+            </div>
+            <div class="sec-field">
+              <label for="llm-system" data-i18n="llm.system_prompt">System prompt</label>
+              <textarea id="llm-system" rows="3" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <!-- ---- Reactions: reactions.js mounts the pack manager here ---- -->
+      <section class="settings-pane hidden" id="spane-reactions" role="tabpanel" aria-labelledby="stab-reactions" tabindex="0"></section>
+
+      <!-- ---- Health: dashboard.js mounts the host dashboard here ---- -->
+      <section class="settings-pane hidden" id="spane-health" role="tabpanel" aria-labelledby="stab-health" tabindex="0"></section>
+
+      <!-- ---- Security & PIN ---- -->
       <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
         <p class="muted modal-hint" id="sec-status-line"></p>
         <div class="sec-body">
@@ -927,7 +948,7 @@
         <div class="settings-actions hidden" data-tab="ai">
           <button class="btn-primary" id="llm-save" data-i18n="llm.save">Save &amp; chat</button>
         </div>
-        <div class="settings-actions hidden" data-tab="tools">
+        <div class="settings-actions hidden" data-tab="plugins">
           <button class="btn-primary" id="tools-save" data-i18n="tools.save">Save tools</button>
         </div>
         <div class="settings-actions hidden" data-tab="security">
@@ -1239,6 +1260,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=128"></script>
+  <script type="module" src="/static/js/main.js?v=129"></script>
 </body>
 </html>

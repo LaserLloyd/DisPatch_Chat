@@ -173,6 +173,38 @@ image-server workflow its pictures use when a request names none; empty means
 the server's own default), and an `api:` block for a
 direct LLM provider. See [agents.md](agents.md) and [llm-providers.md](llm-providers.md).
 
+## Quick actions
+
+One-tap prompt templates for the composer (ported from ChatForge): twelve
+built in (`proof`, `improve`, `check`, `insight`, `summarize`, `reply`,
+`explain`, `factcheck`, `shorter`, `professional`, `todo`, `translate`). On
+desktop they are chips on an empty chat; everywhere, the bolt button in the
+composer opens them as a menu. Picking one puts a pill in the composer, and the
+next message goes out with that action: the chat keeps what you typed (with a
+small tag showing the action), while the bot is sent the action's instructions
+plus your text between `<text>` tags. Every backend gets the same prompt.
+
+Customise them in `<DATA_DIR>/quick-actions.yaml` (read by modification time, no
+restart):
+
+```yaml
+hidden: [insight, translate]        # built-in ids to remove
+actions:
+  - id: proof                       # a built-in id overrides that action;
+    label: Proofread                #   empty fields keep the built-in's
+    instructions: Fix only spelling and grammar.
+  - label: Haiku                    # any other entry is a custom action
+    instructions: Rewrite the text as a haiku.
+    hint: Paste the text...         # placeholder once picked (optional)
+    tools: false                    # informational: the action may use lookups
+```
+
+Limits: at most 50 entries, label 40 characters, instructions 4000, hint 120.
+An entry over a limit is skipped with a log line; an unreadable file means the
+defaults. Custom ids are `custom-<slug>`. `GET /api/quick-actions` returns the
+list in use (public, Safe Mode included). A send, retry or resend with an
+unknown or hidden `action` id is refused with `bad_action`.
+
 ## Posting in from outside
 
 ```bash
@@ -468,12 +500,19 @@ tools:
     trusted: true            # FILE-ONLY: loads its Python into the server
 ```
 
+- **livetools** (top-level key, beside `tools:`): `livetools: {enabled: false}`
+  switches the lookups — the eight built-in ones (web and news search, page fetch,
+  weather, Wikipedia, exchange rates, the time, a calculator) and any an add-on
+  registered — off for every bot at once.
+  Absent or `enabled: true` leaves each bot's own `advisor.tools` setting in
+  charge. Settings → Plugins → Built-in lookups writes it, and saving the
+  Tools table never drops it.
 - **builtin** entries for the four original panes can only switch a pane
   *off*; no entry (or `enabled: true`) leaves the env flags in charge.
 - **Extension tools** (the voice add-on's `voice-cloning`, `voice-builtin`,
   `voice-lab` — see [extensions.md](extensions.md#voice)) are builtins an
   installed extension registers, and usually **opt-in**: a tool is on only
-  with a row saying `enabled: true`. Settings → Tools can switch them on and
+  with a row saying `enabled: true`. Settings → Plugins (Apps & tools) can switch them on and
   off, and a save never leaves `enabled: false` rows for them behind. Like
   every builtin they are unlocked-tier only and never listed or served in
   Safe Mode. When the extension is NOT installed, its rows are **dormant**:
@@ -673,3 +712,45 @@ A category needs at least one non-empty `expressions` or `prompts` entry, and a
 bank with no usable category is refused (`400`) rather than saved as something
 that would generate base-only output. No value may start with `-`: it would be
 read as an option by the image CLI.
+
+## Files for the platform features
+
+Three small files in the data directory switch the 2.3 platform features. Each
+is optional; a missing file means the defaults.
+
+### `extensions.yaml`
+
+Turns installed add-ons off without uninstalling them. Settings → Plugins writes
+it for you.
+
+```yaml
+disabled: [voice]     # extension ids; takes effect at the next restart
+```
+
+### `tools.yaml`: `livetools`
+
+An install-wide switch for the lookups — the eight built-in ones (web and news
+search, page fetch, weather, Wikipedia, exchange rates, time, calculator) and any
+an add-on registered — next to the `tools:` list
+described above:
+
+```yaml
+livetools:
+  enabled: false      # default true; false offers no lookups to any bot, at once
+```
+
+### `quick-actions.yaml`
+
+Hides or changes the desktop quick actions, or adds your own.
+
+```yaml
+hidden: [translate]               # built-in ids to leave out
+actions:
+  - id: eli5                      # a built-in id overrides that action
+    label: Explain simply
+    instructions: Explain the following as if to a ten-year-old.
+    hint: Paste something you want explained
+    tools: false                  # true = this action may use lookups
+```
+
+Up to 50 entries; a label is at most 40 characters and instructions at most 4000.

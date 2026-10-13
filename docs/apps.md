@@ -15,6 +15,9 @@ loaded as an app (see [Where apps come from](#where-apps-come-from)).
 The Job Board (`apps/jobboard/`) is the first app and the reference example.
 The design contract is `docs/design/2026-09-25-apps.md`.
 
+Apps are listed in **Settings → Plugins**, under "Apps & tools", together with
+your other tools, and each has the same on/off switch as in `tools.yaml`.
+
 ## Package layout
 
 ```
@@ -41,7 +44,7 @@ apps/<id>/                      # repo-shipped apps live here (deployed with Dis
 - **Data-dir apps** — a package in `<DATA_DIR>/apps/<id>/` is loaded **only**
   when `tools.yaml` has `{id: <id>, kind: app, trusted: true}`. Loading one
   runs its Python in the server, so that grant lives in the operator's own file:
-  `PUT /api/tools` (the Settings → Tools tab) can switch an app on and off but
+  `PUT /api/tools` (the Apps & tools table in Settings → Plugins) can switch an app on and off but
   can never introduce or change `trusted`. A data-dir package can never shadow
   a repo app of the same id.
 

@@ -49,7 +49,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import config, knowledge, livetools, llm_api
+from . import config, knowledge, livetools, llm_api, tools as tools_mod
 
 log = logging.getLogger("dispatch.advisor")
 
@@ -211,6 +211,22 @@ def strip_reasoning(raw: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+class NotConnected(llm_api.ApiError):
+    """The bot has an ``advisor`` block but no provider yet -- the state the
+    shipped default bot (Atlas) is in until someone adds a key. Not a
+    misconfiguration: run_turn answers it in the thread, in the bot's voice."""
+
+    def __init__(self, name: str) -> None:
+        self.bot_name = name
+        super().__init__(
+            f"{name} isn't connected to an AI yet",
+            "Open Settings → AI models to add a key.")
+
+    @property
+    def thread_text(self) -> str:
+        return f"{self.bot_name} isn't connected to an AI yet. {self.detail}"
+
+
 @dataclass
 class AdvisorConfig:
     """A bot's ``advisor`` block after defaults.
@@ -256,9 +272,13 @@ class AdvisorConfig:
     # dispatch, the rules leave the prompt and the bot is told why. Set by
     # locked_down(), never from config.yaml.
     locked: bool = False
-    # Live tools the model may call (names from livetools.TOOL_NAMES; [] =
+    # Live tools the model may call (livetools.all_tool_names(): built-ins and
+    # extension tools; [] =
     # none), the subset a locked turn may still use, and the loop's limits.
     tools: list[str] = field(default_factory=list)
+    # A locked (Safe-Mode) turn is offered only the BUILT-IN lookups unless the
+    # owner names an add-on tool here: add-on code reaching a family device is
+    # opt-in, like everything else Safe Mode can touch (release review 2.3.0).
     tools_locked: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_TOOLS))
     tool_rounds: int = DEFAULT_TOOL_ROUNDS
     tool_result_chars: int = DEFAULT_TOOL_RESULT_CHARS
@@ -276,9 +296,7 @@ class AdvisorConfig:
         c = bot.advisor or {}
         providers = [p for p in (c.get("providers") or []) if isinstance(p, dict)]
         if not providers:
-            raise llm_api.ApiError(
-                "This advisor has no model configured",
-                f"Add at least one entry under advisor.providers for {bot.id!r}.")
+            raise NotConnected(bot.name or bot.id)
         kd = str(c.get("knowledge_dir") or "").strip()
         research = str(c.get("research_agent") or "").strip().lower()
         action = str(c.get("action_agent") or "").strip().lower()
@@ -339,7 +357,10 @@ class AdvisorConfig:
     def offered_tools(self) -> list[str]:
         """The tool names this turn may call: the bot's list, narrowed to
         ``tools_locked`` on a locked turn."""
-        names = [n for n in self.tools if n in livetools.TOOL_NAMES]
+        if not tools_mod.livetools_enabled():   # the install-wide switch, read per turn
+            return []
+        known = set(livetools.all_tool_names())
+        names = [n for n in self.tools if n in known]
         if self.locked:
             allowed = set(self.tools_locked)
             names = [n for n in names if n in allowed]
@@ -403,7 +424,7 @@ def _parse_tools(raw: Any, default: tuple[str, ...], bot_id: str = "") -> list[s
     if raw is None:
         return list(default)
     if raw is True:
-        return list(livetools.TOOL_NAMES)
+        return list(livetools.all_tool_names())
     if raw is False:
         return []
     if isinstance(raw, str):
@@ -411,18 +432,25 @@ def _parse_tools(raw: Any, default: tuple[str, ...], bot_id: str = "") -> list[s
     if not isinstance(raw, list | tuple):
         return list(default)
     wanted = {str(n).strip().lower() for n in raw if str(n).strip()}
-    unknown = sorted(wanted - set(livetools.TOOL_NAMES))
+    known = livetools.all_tool_names()
+    unknown = sorted(wanted - set(known))
     if unknown:
         log.warning("advisor %s: unknown tool(s) %s ignored (known: %s)",
-                    bot_id, ", ".join(unknown), ", ".join(livetools.TOOL_NAMES))
-    return [n for n in livetools.TOOL_NAMES if n in wanted]
+                    bot_id, ", ".join(unknown), ", ".join(known))
+    return [n for n in known if n in wanted]
 
 
 _registries: dict[tuple[str, str, str], livetools.ToolRegistry] = {}
+_registries_gen = 0
 
 
 def _tool_registry(cfg: AdvisorConfig) -> livetools.ToolRegistry:
-    """One registry per bot (it holds the search cache and spacing)."""
+    """One registry per bot (it holds the search cache and spacing). The cache
+    is dropped whenever an extension adds or removes tools."""
+    global _registries_gen
+    if _registries_gen != livetools.generation():
+        _registries.clear()
+        _registries_gen = livetools.generation()
     key = (cfg.bot_id, cfg.location, cfg.units)
     reg = _registries.get(key)
     if reg is None:
@@ -1098,7 +1126,7 @@ def _today() -> str:
 
 
 async def _prepare(cfg: AdvisorConfig, thread_id: str, rows: list, text: str, *,
-                   voice: Any, speculative: bool) -> _Prompt:
+                   voice: Any, speculative: bool, query: str | None = None) -> _Prompt:
     """History, retrieval, open requests and the system prompt for one call.
 
     `rows` are the thread's stored messages. For a real turn the user's row is
@@ -1120,17 +1148,19 @@ async def _prepare(cfg: AdvisorConfig, thread_id: str, rows: list, text: str, *,
     if not history:
         raise llm_api.ApiError("There was nothing to send",
                                "The thread had no user message to answer.")
+    # `query`: the words to search by when `text` is not them — a quick action's
+    # expanded prompt would otherwise send its template to the lookup.
     hits: list[knowledge.Hit] = []
     if idx is not None:
         try:
-            hits = await idx.search(_search_query(history),
+            hits = await idx.search(" ".join((query or "").split())[:500] or _search_query(history),
                                     budget_chars=cfg.retrieval_chars,
                                     voice=voice is not None)
         except Exception:
             log.exception("advisor %s: knowledge search failed", cfg.bot_id)
     if cfg.lookup:
         try:
-            hits = [*await lookup_hits(cfg, _lookup_query(history)), *hits]
+            hits = [*await lookup_hits(cfg, query or _lookup_query(history)), *hits]
         except Exception:
             log.exception("advisor %s: lookup failed", cfg.bot_id)
     open_reqs = await asyncio.to_thread(
@@ -1236,7 +1266,8 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                    voice: Any = None,
                    prefetched: llm_api.SpeculativeRun | None = None,
                    model: str | None = None,
-                   locked: bool = False) -> None:
+                   locked: bool = False,
+                   query: str | None = None) -> None:
     """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn.
 
     Voice chat (C-§B.2): ``voice.system`` lands in the system prompt (see
@@ -1277,7 +1308,7 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
         else:
             rows, _ = await h.list_messages(thread_id, HISTORY_ROW_LIMIT)
             prompt = await _prepare(cfg, thread_id, rows, text, voice=voice,
-                                    speculative=False)
+                                    speculative=False, query=query)
 
             async def on_tool(call: dict, result: livetools.ToolResult) -> None:
                 # One collapsible notice row per lookup, before the answer.
@@ -1342,6 +1373,21 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                         metadata={"notice": {"level": "warn"}},
                         source_id=f"advisor:markers:{emitter.prov}",
                         dedup_recent_window=False)
+    except NotConnected as e:
+        # Not a failure: the bot simply has no model yet. Say so in the thread
+        # (a collapsed warn notice, which history and the nightly digest skip)
+        # and leave the thread idle -- no red error banner.
+        log.info("advisor %s/%s: no provider connected yet", bot_id, thread_id)
+        with contextlib.suppress(Exception):
+            await emitter.retire()
+        with contextlib.suppress(Exception):
+            await h.deliver(
+                thread_id, e.thread_text,
+                metadata={"notice": {"level": "warn"}, "not_connected": True},
+                source_id=f"advisor:notconnected:{emitter.prov}",
+                dedup_recent_window=False)
+        # (the `finally` below returns the thread to idle and closes the
+        # thinking indicator)
     except llm_api.ApiError as e:
         log.warning("advisor turn failed (%s/%s): %s — %s",
                     bot_id, thread_id, e.message, e.detail)
@@ -1816,7 +1862,11 @@ async def digest(day: str | None = None, *, force: bool = False) -> list[dict]:
     end = start + timedelta(days=1)
     results = []
     for bot in advisor_bots():
-        cfg = AdvisorConfig.from_bot(bot)
+        try:
+            cfg = AdvisorConfig.from_bot(bot)
+        except NotConnected:
+            results.append({"bot": bot.id, "skipped": "not connected"})
+            continue
         idx = index_for(cfg)
         if idx is None:
             results.append({"bot": bot.id, "skipped": "no knowledge_dir"})
@@ -1948,6 +1998,7 @@ async def status() -> dict:
             "providers": [f"{p.get('provider')}/{p.get('model')}" for p in cfg.providers],
             "agents": cfg.agents,
             "tools": cfg.tools,
+            "livetools": tools_mod.livetools_enabled(),
             "lookup": (cfg.lookup or {}).get("kind"),
             # No corpus `root` (a path on the owner's disk) and no request
             # `context` (a private conversation excerpt) on this surface —

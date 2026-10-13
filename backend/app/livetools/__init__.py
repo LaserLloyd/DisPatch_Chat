@@ -8,6 +8,19 @@ talks to a fixed public service; none can run a program or touch the box. The
 ``create_document`` tool was left behind on purpose.
 """
 from .registry import (  # noqa: F401
-    DEFAULT_ENABLED, TOOL_NAMES, ToolNotAllowed, ToolRegistry, ToolResult,
-    parse_arguments, tool_catalog,
+    DEFAULT_ENABLED,
+    TOOL_NAMES,
+    LiveTool,
+    ToolNotAllowed,
+    ToolRegistry,
+    ToolResult,
+    all_tool_names,
+    extension_tool_names,
+    find_spec,
+    generation,
+    parse_arguments,
+    register_extension,
+    tool_catalog,
+    unregister_extension,
+    validate_live_tools,
 )

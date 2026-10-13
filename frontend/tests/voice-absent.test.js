@@ -210,6 +210,16 @@ test('disabled, and installed-but-cannot-load-here', dom, withDom(async (win, ro
   assert.match(root.textContent, /Failed to fetch/);
 }));
 
+test('disabled by the operator in Settings -> Plugins says so, not "DISPATCH_EXTENSIONS"', dom, withDom(async (win, root) => {
+  const m = await load();
+  const off = { id: 'voice', name: 'DisPatch Voice', version: '1.1.0', state: 'disabled',
+    detail: 'Switched off in Settings -> Plugins; it loads again after you switch it on and restart.' };
+  m.renderVoiceAbsent(root, m.voiceState([off], 'entry_points'), {});
+  assert.match(root.textContent, /Voice chat is switched off/);
+  assert.match(root.textContent, /Settings → Plugins/);
+  assert.doesNotMatch(root.textContent, /DISPATCH_EXTENSIONS/);
+}));
+
 test('every locale renders the page without a missing key', dom, withDom(async (win, root) => {
   const i18n = await import('../static/js/i18n.js?v=4');
   const m = await load();

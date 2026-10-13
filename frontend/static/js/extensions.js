@@ -240,3 +240,96 @@ export function createPaneHost(root, renderAbsent) {
     hide() { if (visible) fire('onHide'); visible = false; },
   };
 }
+
+/** A tab id an add-in may take: lower-case, digits and hyphens. */
+export const ADDIN_TAB_ID = /^[a-z][a-z0-9-]{1,30}$/;
+
+/**
+ * Add-in Settings tabs (docs/extensions.md "Settings panes").
+ * `shell.settings.pane(id, spec)` with an id the shell did not pre-declare
+ * creates a tab button (`stab-<id>`) and a pane (`spane-<id>`) on demand, placed
+ * after Voice and before Plugins, so the order reads core -> add-ins -> setup.
+ * The pane's contents follow the same ownership rules as the Voice pane (a
+ * createPaneHost per pane); disposing the claim removes the tab and the pane
+ * again. Tabs are admin-only unless the spec says `public: true`.
+ *
+ *   doc        the document
+ *   tablist    #settings-tabs
+ *   beforeTab  the tab button new tabs are inserted before (#stab-plugins)
+ *   beforePane the pane element new panes are inserted before (#spane-plugins)
+ *   reserved   Set of ids that are not available (the core tabs)
+ *   t          i18n lookup (a spec's `titleKey`)
+ *   isLocked() is this a Safe-Mode session (an admin tab starts hidden)
+ *   onAdd(id, { public }) / onRemove(id)   main.js keeps its tab lists in step
+ *   onTab(id)  a tab button was clicked
+ */
+export function createAddinTabs({ doc, tablist, beforeTab, beforePane, reserved = new Set(),
+  t = (k) => k, isLocked = () => false, onAdd, onRemove, onTab }) {
+  const tabs = new Map();         // id -> { owner, button, pane, host, isPublic, dispose }
+
+  const mk = (tag, attrs = {}, kids = []) => {
+    const n = doc.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'text') n.textContent = v;
+      else n.setAttribute(k, v);
+    }
+    n.append(...kids);
+    return n;
+  };
+
+  function claim(owner, id, spec = {}) {
+    if (typeof id !== 'string' || !ADDIN_TAB_ID.test(id)) {
+      throw new Error(`settings.pane: "${id}" is not a valid tab id (a-z, 0-9, hyphen; 2-31 characters)`);
+    }
+    if (reserved.has(id)) throw new Error(`settings.pane: "${id}" is a built-in tab`);
+    if (!spec || typeof spec.render !== 'function') throw new Error('settings.pane: render(root) is required');
+    const cur = tabs.get(id);
+    if (cur && cur.owner !== owner) throw new Error(`settings.pane: "${id}" is taken`);
+    if (cur) return cur.host.claim(owner, spec);
+
+    const isPublic = spec.public === true;
+    const title = spec.titleKey ? t(String(spec.titleKey)) : String(spec.title == null ? id : spec.title);
+    const labelAttrs = { class: 'stab-label', text: title };
+    if (spec.titleKey) labelAttrs['data-i18n'] = String(spec.titleKey);
+    const glyph = typeof spec.glyph === 'string' && spec.glyph ? spec.glyph.slice(0, 4) : '🧩';
+    const button = mk('button', {
+      class: 'settings-tab' + (isPublic ? '' : ' admin-only') + (!isPublic && isLocked() ? ' hidden' : ''),
+      id: `stab-${id}`, role: 'tab', 'data-tab': id, 'aria-selected': 'false',
+      'aria-controls': `spane-${id}`, tabindex: '-1', 'data-addin': owner || '',
+    }, [
+      mk('span', { class: 'stab-glyph', 'aria-hidden': 'true', text: glyph }),
+      mk('span', labelAttrs),
+    ]);
+    const root = mk('div', { class: 'ext-pane', id: `ext-pane-${id}` });
+    const pane = mk('section', {
+      class: 'settings-pane hidden', id: `spane-${id}`, role: 'tabpanel',
+      'aria-labelledby': `stab-${id}`, tabindex: '0',
+    }, [root]);
+    const host = createPaneHost(root, () => {});
+    tablist.insertBefore(button, beforeTab || null);
+    if (beforePane && beforePane.parentNode) beforePane.parentNode.insertBefore(pane, beforePane);
+    else tablist.parentNode.append(pane);
+    button.addEventListener('click', () => { if (onTab) onTab(id); });
+    const entry = { owner, button, pane, host, isPublic, dispose: null };
+    tabs.set(id, entry);
+    if (onAdd) onAdd(id, { public: isPublic });
+    const release = host.claim(owner, spec);
+    entry.dispose = () => {
+      if (tabs.get(id) !== entry) return;
+      try { release(); } catch { /* idem */ }
+      tabs.delete(id);
+      button.remove();
+      pane.remove();
+      if (onRemove) onRemove(id);
+    };
+    return entry.dispose;
+  }
+
+  return {
+    claim,
+    has: (id) => tabs.has(id),
+    ids: () => [...tabs.keys()],
+    host: (id) => (tabs.has(id) ? tabs.get(id).host : null),
+    isPublic: (id) => !!(tabs.get(id) && tabs.get(id).isPublic),
+  };
+}

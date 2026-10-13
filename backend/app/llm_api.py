@@ -53,6 +53,7 @@ import functools
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -2134,17 +2135,15 @@ def connect(spec: ConnectSpec) -> config.Bot:
     # avatar, its colour, its position, and any flags the operator has since
     # turned on in the Bot Manager.
     if existing is not None:
-        bot = config.Bot(
-            id=bot_id,
+        # dataclasses.replace, not a rebuild from a field subset: the rebuild
+        # used to drop everything it did not spell out -- agent, advisor,
+        # avatar_pool, the image_* fields, voice, reaction_autopilot -- on
+        # every re-save of a connected bot.
+        bot = dataclasses.replace(
+            existing,
             name=(spec.name or "").strip() or existing.name,
-            avatar=existing.avatar,
             emoji=existing.emoji or _EMOJI_BY_PROVIDER.get(provider.id, "🔌"),
             model_hint=model,
-            order=existing.order,
-            visible=existing.visible,
-            safe=existing.safe,
-            color=existing.color,
-            reactions=existing.reactions,
             api=api,
         )
     else:
@@ -2158,4 +2157,137 @@ def connect(spec: ConnectSpec) -> config.Bot:
             reactions=False,
             api=api,
         )
+    return config.upsert_bot(bot)
+
+
+# --------------------------------------------------------------------------- #
+# Connect -> a DIRECT-API bot (the advisor backend)
+# --------------------------------------------------------------------------- #
+
+#: Ids the API mints for a new bot. An existing bot may carry any id.
+_NEW_BOT_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+DEFAULT_DIRECT_TARGET = "atlas"
+#: Provider-entry keys a re-connect to the same provider carries over from the
+#: stored entry when the panel did not send them (they are not in the form).
+_KEEP_ON_RECONNECT = ("max_tokens", "read_timeout_s", "extra_body")
+
+
+@dataclass
+class DirectConnectSpec:
+    provider: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    api_key_env: str = ""
+    target: str = DEFAULT_DIRECT_TARGET
+    name: str = ""
+    emoji: str = ""
+    tools: bool = True
+    max_tokens: int = 0
+
+
+def direct_provider_entry(spec: DirectConnectSpec,
+                          stored: dict | None = None) -> dict[str, Any]:
+    """The ``advisor.providers[0]`` entry for a setup-panel submission.
+
+    Built from the preset exactly the way the advisor reads one
+    (docs/advisor.md: ``provider, base_url, model, api_key | api_key_env,
+    max_tokens, extra_body``). The preset's own ``extra_body`` is written into
+    the entry -- the MiniMax preset's thinking-off switch -- so the file says
+    what the request will carry. ``stored`` is the bot's current first entry:
+    for the SAME provider its key (and extras) survive a re-save whose form sent
+    none, because a saved key never comes back out of the API.
+    """
+    provider = PROVIDER_BY_ID.get((spec.provider or "").strip())
+    if provider is None:
+        raise ApiError("Unknown provider",
+                       f"{spec.provider!r} is not one of: "
+                       f"{', '.join(sorted(PROVIDER_BY_ID))}.")
+    base_url = normalize_base_url(spec.base_url or provider.base_url)
+    model = (spec.model or "").strip() or (provider.models[0] if provider.models else "")
+    if not model:
+        raise ApiError("A model is required",
+                       "Run Test connection to list the models this provider "
+                       "offers, or type the model name in.")
+    same = bool(stored) and (stored or {}).get("provider") == provider.id
+    kept: dict[str, Any] = dict(stored) if same else {}
+    key = (spec.api_key or "").strip() or str(kept.get("api_key") or "")
+    key_env = (spec.api_key_env or "").strip() or str(kept.get("api_key_env") or "")
+    if provider.key_required and not key and not (
+            key_env and os.environ.get(key_env, "").strip()):
+        raise ApiError(f"{provider.label} needs an API key",
+                       "Paste a key, or name an environment variable that "
+                       "holds one and make sure it is set for this process.")
+    entry: dict[str, Any] = {"provider": provider.id, "base_url": base_url,
+                             "model": model}
+    if key:
+        entry["api_key"] = key
+    if key_env:
+        entry["api_key_env"] = key_env
+    for k in _KEEP_ON_RECONNECT:
+        if kept.get(k):
+            entry[k] = kept[k]
+    if spec.max_tokens and int(spec.max_tokens) > 0:
+        entry["max_tokens"] = int(spec.max_tokens)
+    if provider.extra_body and "extra_body" not in entry:
+        entry["extra_body"] = dict(provider.extra_body)
+    return entry
+
+
+def connect_direct(spec: DirectConnectSpec) -> config.Bot:
+    """Point a bot at a provider through the advisor backend ("Direct API").
+
+    ``advisor.providers`` becomes ``[entry]`` and ``advisor.tools`` follows
+    ``spec.tools``; every other key of an existing advisor block (owner,
+    knowledge_dir, lookup, agents, ...) and every other field of the bot is
+    kept. A new id creates the bot (never Safe Mode, no reactions -- the
+    operator opts in). An id that is an agent or legacy-API bot is refused
+    rather than silently converted.
+    """
+    target = (spec.target or "").strip() or DEFAULT_DIRECT_TARGET
+    # Ids are unique case-insensitively (session keys are lowercased), so a
+    # case-only difference names the existing bot rather than a new one.
+    existing = config.resolve_bot(target)
+    if existing is None:
+        if not _NEW_BOT_ID_RE.match(target):
+            raise ApiError("That bot id is not allowed",
+                           "Use 1-32 characters from a-z, 0-9, '-' and '_'.")
+    elif not config.is_direct(existing):
+        raise ApiError(
+            "That bot already exists and is not a direct-API bot",
+            f"{target!r} uses the "
+            f"{'legacy API' if existing.api else 'agent'} backend. Choose a "
+            "different name, or remove it first.")
+    stored_first = None
+    if existing is not None:
+        stored_first = next((p for p in (existing.advisor or {}).get("providers") or []
+                             if isinstance(p, dict)), None)
+    entry = direct_provider_entry(spec, stored_first)
+    tools_on = bool(spec.tools)
+    if existing is not None:
+        adv = dict(existing.advisor or {})
+        old_tools = adv.get("tools")
+        # "Lookups on" keeps a hand-picked subset; only a plain on/off flips.
+        adv["tools"] = old_tools if (tools_on and isinstance(old_tools, list)
+                                     and old_tools) else tools_on
+        # Only the FIRST provider is the connection the panel edits; a fallback
+        # chain behind it (a local model after the API) stays as it was.
+        rest = [p for p in ((existing.advisor or {}).get("providers") or [])[1:] if isinstance(p, dict)]
+        adv["providers"] = [entry, *rest]
+        hint = existing.model_hint
+        bot = dataclasses.replace(
+            existing,
+            name=(spec.name or "").strip() or existing.name,
+            emoji=(spec.emoji or "").strip() or existing.emoji
+            or _EMOJI_BY_PROVIDER.get(entry["provider"], "🌍"),
+            model_hint=entry["model"] if hint in ("", "Direct API") else hint,
+            advisor=adv)
+    else:
+        bot = config.Bot(
+            id=target,
+            name=(spec.name or "").strip() or target,
+            emoji=(spec.emoji or "").strip() or "🌍",
+            model_hint=entry["model"],
+            visible=True, safe=False, reactions=False,
+            advisor={"providers": [entry], "tools": tools_on})
     return config.upsert_bot(bot)

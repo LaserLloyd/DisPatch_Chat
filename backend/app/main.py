@@ -30,6 +30,7 @@ import time
 import uuid
 from collections import OrderedDict, defaultdict
 from collections.abc import Sequence
+from dataclasses import replace as dc_replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -70,6 +71,7 @@ from . import (
     config,
     dashboard_routes,
     extensions,
+    firstrun,
     gateway_router,
     gateway_ws,
     harness,
@@ -80,10 +82,12 @@ from . import (
     mailforge_bridge,
     openclaw,
     openclaw_text,
+    plugins_api,
     pool_guard,
     practice_bridge,
     problem,
     push,
+    quick_actions,
     reactions,
     tools,
 )
@@ -92,6 +96,8 @@ from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
     AdvisorActionIn,
+    BotCreateIn,
+    BotPatchIn,
     DailyThreadIn,
     FireReactionIn,
     GenerateReactionIn,
@@ -478,6 +484,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
         with contextlib.suppress(Exception):
             await advisor.recover_requests()
         _track(asyncio.create_task(advisor.background_loop()))
+    # First run only: the two explainer threads on the default bot (never on
+    # an install that already has threads; see app/firstrun.py). Non-fatal.
+    await firstrun.seed_if_first_run(db, _deliver_assistant_text)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first
     # voice chat after a restart neither waits to accept nor pays the model
@@ -527,7 +536,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.2.0", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.3.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -1958,6 +1967,8 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # dependency every extension route carries; other
                         # extension prefixes are checked just below.
                         "/api/extensions", "/ext/", "/api/voice",
+                        # Settings -> Plugins (app/plugins_api.py): operator only.
+                        "/api/plugins",
                         # Local Viewer: reads arbitrary bytes off the host's
                         # disk. Unlocked operator only — Safe Mode never even
                         # renders the affordance, and this is the server half
@@ -2011,6 +2022,11 @@ def _decoy_blocked(method: str, path: str) -> bool:
         if m.group(2) or method != "GET":
             return True
         return m.group(1) not in _safe_bot_ids()
+    # Bot management (add / edit / remove): operator-only, every method.
+    if method != "GET" and path == "/api/bots":
+        return True
+    if re.match(r"^/api/bots/[^/]+$", path):
+        return True
     return path in ("/api/bots/order", "/api/bots/all")
 
 
@@ -6845,6 +6861,9 @@ class TurnOptions(NamedTuple):
                    handoff marker (advisor.run_turn(locked=True)); a locked
                    family device never steers an agent through an LLM-written
                    brief. Gateway/API bots ignore it (they never dispatch).
+      action       a quick-action id (app/quick_actions.py): the turn runs on
+                   the action's expanded prompt, the stored row keeps the
+                   typed text. Applied in _compose_agent_text, for every backend
     """
     user_msg_id: str | None = None
     model: str | None = None
@@ -6855,6 +6874,7 @@ class TurnOptions(NamedTuple):
     voice: Any = None
     prefetched: Any = None
     locked: bool = False
+    action: str | None = None
 
 
 # A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
@@ -6931,6 +6951,17 @@ async def _compose_agent_text(thread_id: str, text: str,
     in their system slot instead (run_agent_turn passes it through).
     """
     composed = text
+    if opts is not None and opts.action:
+        # Quick action: the model reads the task + the typed text inside
+        # <text> tags; the stored row keeps what was typed. Resolved against
+        # the CURRENT list, so an id hidden since the send runs as plain text
+        # (a retry never fails on it).
+        act = quick_actions.find(opts.action)
+        if act is not None:
+            composed = quick_actions.expand(act, text)
+        else:
+            log.warning("quick action %r is no longer available - the turn "
+                        "runs on the typed text", opts.action)
     if opts is not None and opts.reply_to:
         quoted = await db.get_message(opts.reply_to)
         # Same "id must name a row in THIS thread" rule the id-form directive
@@ -7065,6 +7096,8 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
             kw["model"] = opts.model
         if opts.locked:
             kw["locked"] = True
+        if opts.action:
+            kw["query"] = text          # lookups search the typed words, not the template
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
@@ -8048,40 +8081,97 @@ async def llm_providers():
             "connected": [b.to_admin_dict() for b in config.load_bots() if b.api]}
 
 
+def _stored_probe_key(payload: dict) -> str:
+    """The key a Test should use when the form sent none.
+
+    A saved key never comes back out of the API, so re-testing a connected bot
+    from the panel posts an empty `api_key`. Falls back to (1) the named
+    environment variable, then (2) the stored key of the targeted bot -- only
+    when the form names a bot (`target` / `bot_id`) and that bot is already on
+    the SAME provider, so a test can never borrow another provider's key."""
+    env_name = str(payload.get("api_key_env") or "").strip()
+    # A credential-shaped name only, and never DisPatch's own variables: the
+    # value goes to the base URL the form names.
+    if (env_name and re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", env_name)
+            and not env_name.startswith("DISPATCH_") and os.environ.get(env_name, "").strip()):
+        return os.environ[env_name].strip()
+    tid = str(payload.get("target") or payload.get("bot_id") or "").strip()
+    bot = config.get_bot(tid) if tid else None
+    if bot is None:
+        return ""
+    prov = str(payload.get("provider") or "").strip()
+    entries = ([p for p in (bot.advisor or {}).get("providers") or [] if isinstance(p, dict)]
+               if config.is_direct(bot) else [bot.api] if bot.api else [])
+    for e in entries:
+        if e.get("provider") == prov:
+            return llm_api.resolve_key(e)
+    return ""
+
+
 @app.post("/api/llm/test", dependencies=[Depends(_require_operator)])
 async def llm_test(payload: dict = Body(...)):
     """Probe a provider and report what it can run.
 
-    Never raises for a provider-side failure: `{ok: false, error: "..."}` with
-    a sentence the operator can act on is the product here. Only a malformed
+    Takes the same body as /api/llm/connect (extra keys are ignored). Never
+    raises for a provider-side failure: `{ok: false, error: "..."}` with a
+    sentence the operator can act on is the product here. Only a malformed
     request (unknown provider, non-http scheme) is a 4xx.
     """
     return await llm_api.probe(
         str(payload.get("provider") or ""),
         base_url=str(payload.get("base_url") or ""),
-        api_key=str(payload.get("api_key") or ""),
+        api_key=str(payload.get("api_key") or "") or _stored_probe_key(payload),
         model=str(payload.get("model") or ""),
     )
 
 
 @app.post("/api/llm/connect", dependencies=[Depends(_require_operator)])
 async def llm_connect(payload: dict = Body(...)):
-    """Create-or-update a bot backed by a direct provider.
+    """Connect a bot to an AI provider.
 
-    The response echoes the bot with its key redacted to `has_key` — there is
-    no route anywhere that reads an API key back out.
+    `backend: "direct"` (the default) writes `advisor.providers = [entry]` and
+    `advisor.tools` on the bot named by `target` (default `atlas`; created when
+    the id is new) and returns its row -- the flat fields plus the same row
+    under `bot`. `backend: "legacy-api"` is the older no-tools `api:` backend
+    keyed by `bot_id`, answered as `{bot: ...}`.
+
+    The response never carries a key: `has_key` / `connected` only. There is no
+    route anywhere that reads an API key back out.
     """
+    backend = str(payload.get("backend") or "direct").strip().lower()
+    if backend not in ("direct", "legacy-api"):
+        raise HTTPException(422, "backend must be 'direct' or 'legacy-api'")
     try:
-        bot = llm_api.connect(llm_api.ConnectSpec(
-            provider=str(payload.get("provider") or ""),
-            model=str(payload.get("model") or ""),
-            base_url=str(payload.get("base_url") or ""),
-            api_key=str(payload.get("api_key") or ""),
-            api_key_env=str(payload.get("api_key_env") or ""),
-            name=str(payload.get("name") or ""),
-            system_prompt=str(payload.get("system_prompt") or ""),
-            bot_id=str(payload.get("bot_id") or ""),
-        ))
+        if backend == "legacy-api":
+            bot = llm_api.connect(llm_api.ConnectSpec(
+                provider=str(payload.get("provider") or ""),
+                model=str(payload.get("model") or ""),
+                base_url=str(payload.get("base_url") or ""),
+                api_key=str(payload.get("api_key") or ""),
+                api_key_env=str(payload.get("api_key_env") or ""),
+                name=str(payload.get("name") or ""),
+                system_prompt=str(payload.get("system_prompt") or ""),
+                bot_id=str(payload.get("bot_id") or ""),
+            ))
+        else:
+            tools = payload.get("tools", True)
+            if not isinstance(tools, bool):
+                raise HTTPException(422, "tools must be true or false")
+            max_tokens = payload.get("max_tokens") or 0
+            if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) \
+                    or max_tokens < 0 or max_tokens > 1_000_000:
+                raise HTTPException(422, "max_tokens must be a whole number")
+            bot = await asyncio.to_thread(llm_api.connect_direct, llm_api.DirectConnectSpec(
+                provider=str(payload.get("provider") or ""),
+                model=str(payload.get("model") or ""),
+                base_url=str(payload.get("base_url") or ""),
+                api_key=str(payload.get("api_key") or ""),
+                api_key_env=str(payload.get("api_key_env") or ""),
+                target=str(payload.get("target") or payload.get("bot_id") or ""),
+                name=str(payload.get("name") or ""),
+                emoji=str(payload.get("emoji") or ""),
+                tools=tools, max_tokens=max_tokens,
+            ))
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
     # Every open tab is holding the roster from before this bot existed. Push
@@ -8091,7 +8181,10 @@ async def llm_connect(payload: dict = Body(...)):
     await manager.broadcast(
         {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()
                                   if b.visible]})
-    return {"bot": bot.to_admin_dict()}
+    if backend == "legacy-api":
+        return {"bot": bot.to_admin_dict()}
+    row = _bot_row(bot)
+    return {**row, "bot": row}
 
 
 @app.get("/api/bots", responses=problem.SAFE_MODE)
@@ -8116,8 +8209,112 @@ async def get_all_bots(request: Request):
     # `voice` / `voice_rp` (which recorded person a bot speaks as, and how its
     # role-play text is read aloud) ride only on this full-access listing,
     # never on the broadcast `bots` frame.
-    return {"bots": [{**b.to_dict(), "voice": b.voice, "voice_rp": b.voice_rp}
-                     for b in config.load_bots()]}
+    return {"bots": [_bot_row(b) for b in config.load_bots()]}
+
+
+def _bot_row(b: config.Bot) -> dict:
+    """One bot as the Bots tab / Connect panel see it (full-access routes only).
+
+    `backend` says which engine answers: "direct" (the advisor backend, a
+    direct-API bot), "legacy-api" (the older `api:` block, no tools), "app"
+    (an app's roster bot) or "agent". `tools` / `connected` are for direct-API
+    bots; `provider` / `model` name the first provider in its chain. No key and
+    no base URL ever leave through here -- that is what makes the row safe to
+    return from the write routes too.
+    """
+    if config.is_direct(b):
+        backend = "direct"
+    elif b.api:
+        backend = "legacy-api"
+    elif apps_loader.owns_bot(b.id):
+        backend = "app"
+    else:
+        backend = "agent"
+    row = {**b.to_dict(), "voice": b.voice, "voice_rp": b.voice_rp,
+           "backend": backend,
+           "tools": config.direct_tools_on(b) if backend == "direct" else False,
+           "connected": config.direct_connected(b)}
+    if backend == "direct":
+        first = next((p for p in (b.advisor or {}).get("providers") or []
+                      if isinstance(p, dict)), None)
+        row["provider"] = str((first or {}).get("provider") or "")
+        row["model"] = str((first or {}).get("model") or "")
+    return row
+
+
+@app.post("/api/bots", status_code=201)
+async def create_bot(request: Request, payload: BotCreateIn):
+    """Add a bot to the roster (direct-API or agent). Operator only."""
+    _require_full_access(request)
+    bots = await asyncio.to_thread(config.load_bots)
+    taken = {b.id for b in bots}
+    if payload.id is not None:
+        if payload.id.lower() in {t.lower() for t in taken}:
+            raise HTTPException(409, f"A bot with the id {payload.id!r} already exists")
+        bot_id = payload.id
+    else:
+        bot_id = config.derive_bot_id(payload.name, taken)
+    kw: dict[str, Any] = {}
+    if payload.backend == "direct":
+        kw["advisor"] = {"providers": [],
+                         "tools": True if payload.tools is None else payload.tools}
+    else:
+        kw["agent"] = (payload.agent or "").strip()
+    bot = config.Bot(
+        id=bot_id, name=payload.name,
+        emoji=payload.emoji or ("🌍" if payload.backend == "direct" else "🤖"),
+        model_hint=payload.model_hint
+        or ("Direct API" if payload.backend == "direct" else ""),
+        visible=payload.visible, safe=payload.safe, **kw)
+    saved = await asyncio.to_thread(config.upsert_bot, bot)
+    await _broadcast_roster()
+    return JSONResponse(_bot_row(saved), status_code=201)
+
+
+@app.patch("/api/bots/{bot_id}")
+async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
+    """Change a bot's name / emoji / badge / flags / lookups. Operator only."""
+    _require_full_access(request)
+    bot = await asyncio.to_thread(config.get_bot, bot_id)
+    if bot is None:
+        raise HTTPException(404, "Unknown bot")
+    changes = payload.model_dump(exclude_unset=True)
+    tools = changes.pop("tools", None)
+    if "tools" in payload.model_fields_set:
+        if not config.is_direct(bot):
+            raise HTTPException(422, "tools only applies to direct-API bots")
+        adv = dict(bot.advisor or {})
+        if tools and isinstance(adv.get("tools"), list) and adv["tools"]:
+            pass                       # keep the owner's hand-picked subset
+        else:
+            adv["tools"] = bool(tools)
+        changes["advisor"] = adv
+    saved = await asyncio.to_thread(config.upsert_bot, dc_replace(bot, **changes))
+    await _broadcast_roster()
+    return _bot_row(saved)
+
+
+@app.delete("/api/bots/{bot_id}")
+async def remove_bot_route(request: Request, bot_id: str):
+    """Remove a bot from config.yaml. Its threads and messages stay."""
+    _require_full_access(request)
+    if await asyncio.to_thread(config.get_bot, bot_id) is None:
+        raise HTTPException(404, "Unknown bot")
+    if apps_loader.owns_bot(bot_id):
+        raise HTTPException(409, "This bot belongs to an app; remove or disable the app instead")
+    try:
+        await asyncio.to_thread(config.remove_bot, bot_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    await _broadcast_roster()
+    return {"removed": bot_id}
+
+
+async def _broadcast_roster() -> None:
+    """Tell every open tab the roster changed -- the same frame the Bot
+    Manager's own save sends (the WS redactor filters it for Safe Mode)."""
+    await manager.broadcast({"type": "bots",
+                             "bots": [b.to_dict() for b in config.load_bots()]})
 
 
 def _check_bot_field(field: str, bot_id: str, value: str) -> None:
@@ -10616,6 +10813,13 @@ async def _prune_avatar_snapshots() -> None:
         log.warning("avatar snapshot prune failed", exc_info=True)
 
 
+@app.get("/api/quick-actions")
+async def get_quick_actions():
+    """The quick actions in use (defaults + `<data>/quick-actions.yaml`), in
+    display order. Public, Safe Mode included: they are only prompt templates."""
+    return {"actions": quick_actions.views()}
+
+
 @app.post("/api/threads/{thread_id}/messages", responses=problem.MACHINE)
 async def post_message_rest(request: Request, thread_id: str, payload: dict = Body(...)):
     """REST alias for injecting a single message into a known thread.
@@ -10650,10 +10854,23 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     if not content.strip() and not media_url:
         raise HTTPException(
             422, "content is required — the message text field is `content`")
+    metadata = {k: v for k, v in _inbound_metadata(payload.get("metadata")).items()
+                if k != "action"} or None    # the tag is set from `action` only
+    # `action`: a quick-action id. Stored as metadata.action on a user row (the
+    # tag the bubble shows; a later retry re-runs with it). A REST post never
+    # starts a turn, so nothing is expanded here.
+    action_raw = payload.get("action")
+    if action_raw not in (None, ""):
+        act = quick_actions.find(action_raw)
+        if act is None:
+            raise HTTPException(422, "bad_action: unknown quick action")
+        if role != "user":
+            raise HTTPException(422, "bad_action: a quick action applies to user messages")
+        metadata = {**(metadata or {}), "action": act.stored()}
     msg = await _persist_and_broadcast_message(
         thread_id, role, content,
         media_url=media_url,
-        metadata=_inbound_metadata(payload.get("metadata")) or None,
+        metadata=metadata,
     )
     await _broadcast_thread_update(thread_id)
     return msg.model_dump()
@@ -11941,13 +12158,24 @@ async def _ack(ws: WebSocket, client_msg_id: str | None,
     await manager.send(ws, frame)
 
 
-def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str):
+def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str,
+                     action: str | None = None):
     """run_agent_turn for a turn a socket asked for with no options of its
-    own (a retry, a resend): a Safe-Mode socket's turn runs locked, any other
+    own (a retry, a resend): a Safe-Mode socket's turn runs locked, and a
+    quick action (the id stored on the row) is carried along; any other plain
     socket calls the three-argument form exactly as before."""
-    if manager.conn_decoy(ws):
-        return run_agent_turn(thread_id, bot_id, text, TurnOptions(locked=True))
+    locked = manager.conn_decoy(ws)
+    if locked or action:
+        return run_agent_turn(thread_id, bot_id, text,
+                              TurnOptions(locked=locked, action=action or None))
     return run_agent_turn(thread_id, bot_id, text)
+
+
+def _action_of(metadata: dict | None) -> str | None:
+    """The quick-action id a stored user row was sent with, if any."""
+    act = (metadata or {}).get("action")
+    aid = act.get("id") if isinstance(act, dict) else None
+    return aid if isinstance(aid, str) and aid else None
 
 
 async def _handle_send(ws: WebSocket, data: dict) -> None:
@@ -11967,7 +12195,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
                         "never ran — dispatching it now", cmid)
             seen["scheduled"] = True
             _track(asyncio.create_task(_turn_for_socket(
-                ws, seen["thread_id"], seen["bot_id"], seen["text"])))
+                ws, seen["thread_id"], seen["bot_id"], seen["text"],
+                seen.get("action"))))
         return
     if cmid and await db.source_id_seen(_client_source_id(cmid)):
         # The durable half of the dedup. _ACK_SEEN is process memory: a
@@ -11996,6 +12225,19 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     if not await _ws_bot_allowed(ws, thread.bot_id):
         await _ack(ws, cmid, "rejected", "Not allowed")
         return
+
+    # Quick action: an id the server knows (and the operator has not hidden).
+    # Allowed in Safe Mode too - an action is only text around the message.
+    action_def = None
+    action_raw = data.get("action")
+    if action_raw not in (None, ""):
+        action_def = quick_actions.find(action_raw)
+        if action_def is None:
+            await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                    "code": "bad_action",
+                                    "message": "Unknown quick action"})
+            await _ack(ws, cmid, "rejected", "Unknown quick action")
+            return
 
     # FEATURE 5 (quote/reply). An id that names no row, or one in ANOTHER
     # thread, is silently ignored rather than rejecting the whole send — same
@@ -12052,6 +12294,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             "reply_role": reply_target.role,
             "reply_excerpt": _quote_excerpt(reply_target.content),
         }
+    if action_def is not None:
+        user_metadata = {**(user_metadata or {}), "action": action_def.stored()}
     try:
         user_msg = await db.add_message(
             thread_id, "user", text, metadata=user_metadata,
@@ -12070,7 +12314,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         await _ack(ws, cmid, "rejected", "Server error — please retry")
         raise
     if cmid:
-        _ack_mark(cmid, thread_id=thread_id, bot_id=thread.bot_id, text=text)
+        _ack_mark(cmid, thread_id=thread_id, bot_id=thread.bot_id, text=text,
+                  action=action_def.id if action_def else None)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     msg_frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
                  "message": user_msg.model_dump()}
@@ -12123,12 +12368,14 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # quote calls run_agent_turn exactly as it always has (three args,
         # opts defaulting on the far side) so nothing about the ordinary send
         # path changes shape.
-        if reply_target is not None or locked:
+        if reply_target is not None or locked or action_def is not None:
             await run_agent_turn(thread_id, thread.bot_id, text,
                                  TurnOptions(user_msg_id=user_msg.id,
                                             reply_to=(reply_target.id
                                                       if reply_target else None),
-                                            locked=locked))
+                                            locked=locked,
+                                            action=(action_def.id
+                                                    if action_def else None)))
         else:
             await run_agent_turn(thread_id, thread.bot_id, text)
 
@@ -12459,7 +12706,8 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
     # different question than the one the family asked.
     opts = TurnOptions(user_msg_id=user_msg.id, rewind_entry=entry_id,
                        replaces=tuple(m.id for m in superseded),
-                       reply_to=(user_msg.metadata or {}).get("reply_to") or None)
+                       reply_to=(user_msg.metadata or {}).get("reply_to") or None,
+                       action=_action_of(user_msg.metadata))
     try:
         await run_agent_turn(thread_id, bot_id,
                              user_msg.content if text is None else text, opts)
@@ -12613,7 +12861,8 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
                                            "try again tomorrow or unlock."})
         return
     _track(asyncio.create_task(_turn_for_socket(
-        ws, thread_id, thread.bot_id, last_user.content)))
+        ws, thread_id, thread.bot_id, last_user.content,
+        _action_of(last_user.metadata))))
 
 
 async def _handle_abort(ws: WebSocket, data: dict) -> None:
@@ -13173,6 +13422,7 @@ app.include_router(localview.router)
 # `safe: true` tools); _decoy_blocked bars refresh + the write path one layer
 # earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
+app.include_router(plugins_api.router)   # Settings -> Plugins (operator only)
 # Apps (docs/design/2026-09-25-apps.md): trusted packages under apps/<id>/
 # (plus data-dir packages tools.yaml trusts). Each is mounted at
 # /api/apps/<id> and at its manifest's legacy prefix — the Job Board keeps

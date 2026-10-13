@@ -149,12 +149,16 @@ test('wireTools() is called from init with the four builtin openers and the app 
   }
 });
 
-test('Settings → Tools is an admin-only tab with its pane and Save', () => {
-  assert.match(MARKUP, /class="settings-tab admin-only" id="stab-tools"[^>]*data-tab="tools"/);
-  assert.match(MARKUP, /id="spane-tools"/);
-  assert.match(MARKUP, /data-tab="tools">\s*<button class="btn-primary" id="tools-save"/);
-  assert.match(MAIN, /const ADMIN_TABS = \[[^\]]*'tools'[^\]]*\];/);
-  assert.match(MAIN, /const SETTINGS_TABS = \[[^\]]*'tools'[^\]]*\];/);
+test('Settings → Plugins is an admin-only tab; the Tools table, its host and Save live in it', () => {
+  assert.match(MARKUP, /class="settings-tab admin-only" id="stab-plugins"[^>]*data-tab="plugins"/);
+  assert.match(MARKUP, /id="spane-plugins"/);
+  // The old standalone Tools tab and pane are gone.
+  assert.doesNotMatch(MARKUP, /id="stab-tools"|id="spane-tools"/);
+  assert.match(MARKUP, /data-tab="plugins">\s*<button class="btn-primary" id="tools-save"/);
+  assert.match(MAIN, /const ADMIN_TABS = \[[^\]]*'plugins'[^\]]*\];/);
+  assert.match(MAIN, /const SETTINGS_TABS = \[[^\]]*'plugins'[^\]]*\];/);
+  // main.js hands the Plugins pane the Tools mounter.
+  assert.match(MAIN, /mountPluginsSettings\(pane, \{\s*mountTools: \(host\) => mountToolsSettings\(host\)/);
 });
 
 test('the deep link opens only unlocked, after the feature probes', () => {
@@ -207,9 +211,13 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v151 (Web Push)', () => {
+test('the sw.js CACHE is local-chat-v152 (2.3.0 platform round)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v152: 2.3.0 — quick-actions.js, plugins.js and bots-edit.js join SHELL,
+  // the Tools tab folds into Plugins, add-in tabs (main.js 128→129, api.js
+  // 32→33, extensions.js 1→2, ext-sdk.js 2→3, voice-absent.js 1→2, app.css
+  // 99→100, index.html, locales).
   // v151: Web Push — js/push.js joins SHELL, push + notificationclick
   // handlers (main.js 127→128, index.html, locales).
   // v150: password fields wrapped in <form data-no-submit>; advisor bots hide
@@ -267,7 +275,7 @@ test('the sw.js CACHE is local-chat-v151 (Web Push)', () => {
   // and every importer, main.js, app.css, index.html and every locale moved.
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v151');
+  assert.equal(m[1], 'local-chat-v152');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

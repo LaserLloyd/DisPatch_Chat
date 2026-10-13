@@ -249,7 +249,7 @@ def test_env_carries_only_declared_names(ext_env, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 ROW_KEYS = {"id", "name", "version", "api", "state", "source", "assets_version",
-            "entry", "css", "locales", "tools"}
+            "entry", "css", "locales", "tools", "live_tools"}
 
 
 def test_api_extensions_shape_has_no_paths(ext_env):

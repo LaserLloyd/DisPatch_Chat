@@ -43,6 +43,8 @@ ALLOW: list[tuple[str, str, str]] = [
     # bot calls itself. A sub-package needs its own row — `*.py` on
     # backend/app does not descend.
     ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
+    ("backend/app/guide",           "backend/app/guide",           "*.md"),
+    ("frontend/static/guide",       "frontend/static/guide",       "*.png"),
     # (Voice chat left DisPatch in 2.2.0 — it is the DisPatch Voice add-on, a
     # package installed beside the app, never part of the install tree. The
     # 2.1 `backend/app/voice` and static voice rows are gone on purpose: a

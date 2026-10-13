@@ -22,7 +22,7 @@
 
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=7';
+import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=8';
 
 export { VOICE_REPO_URL };
 /** The moving tag that always names the latest 1.x release (SPEC §3.4). */
@@ -104,6 +104,9 @@ function command(cmd) {
     btn,
   ]);
 }
+
+/** The same copyable command line, for other Settings panes (Plugins). */
+export const commandBlock = command;
 
 function row(title, hints = [], extra = []) {
   return el('div', { class: 'dev-row dev-row-block ext-row' }, [
@@ -199,6 +202,11 @@ function stateRow(info, opts) {
     ], [again]);
   }
   if (info.state === 'disabled') {
+    // The operator's own switch (Settings -> Plugins writes extensions.yaml):
+    // the server's detail starts "Switched off in Settings".
+    if (/^Switched off in Settings/.test(ext.detail || '')) {
+      return row(t('voice_absent.state_user_off_title'), [hint(t('voice_absent.state_user_off'))], [again]);
+    }
     return row(t('voice_absent.state_disabled_title'), [hint(t('voice_absent.state_disabled'))],
       opts.noAgain ? [] : [again]);
   }

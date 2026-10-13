@@ -16,6 +16,13 @@
 //   toast, confirm, prompt, navigate
 //   chatHeader.addAction(node, { before })              → remove()
 //   settings.pane(id, { render, onShow, onHide })       → dispose()
+//       id 'voice' is the pre-declared Voice tab. Any other id matching
+//       [a-z][a-z0-9-]{1,30} (not a built-in tab) makes the shell create a tab
+//       button + pane for you, after Voice and before Plugins, titled by
+//       `title` (text) or `titleKey` (a key in your merged locale bundle);
+//       also `glyph` (a short emoji, default a puzzle piece) and
+//       `public: true` (visible in Safe Mode too; default admin-only).
+//       dispose() removes the tab again.
 //   settings.open(id) / settings.close()
 //   bots.rowExtra(fn(bot, onChange) → Node|null)        → dispose()
 //   tools.register([{ id, feature, iconPaths, nameKey, ariaKey, open }]) → dispose()
@@ -44,7 +51,7 @@
 import { el, railIcon, RAIL_ICONS, loadStyle, acquireInert, releaseInert } from './util.js?v=20';
 import { t, tHtml, has, applyDom, list, n, lang } from './i18n.js?v=4';
 import { api, DecoyError } from './app-sdk.js?v=1';
-import { APP_VERSION } from './about.js?v=7';
+import { APP_VERSION } from './about.js?v=8';
 
 /** The extension API this shell speaks. Bump ONLY on a breaking change. */
 export const EXT_API = 1;
