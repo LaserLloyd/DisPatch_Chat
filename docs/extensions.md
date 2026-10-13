@@ -317,7 +317,7 @@ socket **not yet accepted**:
    itself runs in the background, so a half-open phone that never answers the
    close frame does not hold up its own reconnect.
 
-`sock` is a `ThreadSocket {thread, bot (a BotView, never safe), token,
+`sock` is a `ThreadSocket {thread, bot (a BotView; since 2.3.1 it may be a `safe` bot — the socket is unlocked-only regardless), token,
 session_live(), touch(), close_unavailable(reason), on_replaced(fn)}`.
 `session_live()` turns false when the session lapses, a PIN appears on a
 PIN-less install, the thread is deleted or its bot becomes a Safe-Mode bot —
@@ -546,7 +546,7 @@ anything and does nothing on a locked or remembered device), and the slots:
 | `chatHeader.addAction(node)` | your button in the chat header, before the thread menu → `remove()` |
 | `settings.pane(id, {render, onShow, onHide, title, titleKey, glyph, public})` | `'voice'` takes over Settings → Voice (`dispose()` gives it back to the install page); any other id makes a **new Settings tab** (see [Settings panes](#settings-panes)) → `dispose()` removes it |
 | `settings.open(id)` / `settings.close()` | opens Settings on a tab / closes it (asking first when it has unsaved edits) |
-| `bots.rowExtra(fn(bot, onChange))` | a control on each non-safe bot's Bots-tab row; `onChange({voice})` marks the field for the next Save |
+| `bots.rowExtra(fn(bot, onChange))` | a control on each bot's Bots-tab row (safe bots included since 2.3.1); `onChange({voice})` marks the field for the next Save |
 | `tools.register([{id, feature, iconPaths, nameKey, ariaKey, open(id)}])` | the rail tile for a tool row your backend registered |
 | `tools.openPane({id, title, subtitle, iconPaths, render(root), onClose})` | the shell's native full-page tool pane → `close()`; `onClose()` runs whenever the shell closes it (Back, ✕, another tool, lock) |
 | `history.push(tag, onBack)` | a Back-button entry (Back calls `onBack`) → `pop()`. Entries stack: Settings opened over your overlay takes its own entry, so Back closes Settings first and your overlay only on the next Back |
@@ -608,8 +608,10 @@ Every gate stays in DisPatch; an extension only ever receives what passed it.
 - Unlocked tier only: Safe Mode gets 403 on `/api/extensions`, `/ext/*` and
   every extension route, 1008 before accept on its websockets, no
   `features.extensions`, and the shell never mounts anything.
-- Websockets: Origin==Host, a live session and a non-safe bot are checked
-  inline before `accept` (HTTP middleware never sees a websocket).
+- Websockets: Origin==Host, a live unlocked session and an existing thread are
+  checked inline before `accept` (HTTP middleware never sees a websocket). A
+  `safe` bot's thread is allowed since 2.3.1: the tier is the device's, not the
+  bot's.
 - HTTP: the operator dependency on every route, the Safe-Mode block list, never
   the machine-inbound surface, body ceilings before the body is read.
 - Static: an asset-type allowlist, no documents, `nosniff`, a deny-all CSP.

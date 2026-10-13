@@ -299,7 +299,7 @@ test('the shell object is frozen and carries the contract members', dom, withDom
   const shell = sdk.createShell('voice');
   assert.ok(Object.isFrozen(shell));
   assert.equal(shell.EXT_API, 1);
-  assert.equal(shell.version, '2.3.0');
+  assert.equal(shell.version, '2.3.1');
   for (const k of ['el', 'railIcon', 'RAIL_ICONS', 'loadStyle', 'acquireInert', 'releaseInert', 'isMobile',
     'onLocale', 'onLocked', 'onThread', 'onThreadChange', 'api', 'activeThread', 'bots', 'botById', 'allBots',
     'isLocked', 'language', 'features', 'threadFace', 'toast', 'confirm', 'prompt', 'navigate']) {

@@ -7,6 +7,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-10-14
+
+### Changed
+
+- **Extension websockets accept a `safe` bot's thread.** The voice add-on can
+  now serve a bot that locked devices may also talk to (Atlas, a Wikipedia
+  bot). The gate is unchanged where it matters: Origin == Host and a live
+  unlocked session — a Safe-Mode device never reaches an extension socket.
+  Pairs with DisPatch Voice 1.3.1.
+
 ## [2.3.0] — 2026-10-14
 
 DisPatch becomes a platform: a default bot that only needs a key, chats that

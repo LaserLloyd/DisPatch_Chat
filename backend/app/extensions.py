@@ -1466,7 +1466,7 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str) -> Callable
         if thread_id in _deleted_threads:
             return False
         bot = config.get_bot(bot_id)
-        if bot is None or bot.safe:
+        if bot is None:
             return False
         cfg = auth.load()
         if token is None:
@@ -1493,11 +1493,15 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             await ws.close(code=POLICY)
             return
         token = session.token
-    # 3. The thread exists and its bot is not a Safe-Mode bot (pre-accept).
+    # 3. The thread exists (pre-accept). Since 2.3.1 a `safe` bot's thread is
+    # allowed: an extension socket is unlocked-only by step 2 (the DEVICE holds
+    # the PIN), and that is the tier that matters — the bot's Safe-Mode flag only
+    # says locked devices may chat with it too (the owner: "allow voice on
+    # locked bots").
     db = _hooks.db()
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
-    if thread is None or bot is None or bot.safe or thread_id in _deleted_threads:
+    if thread is None or bot is None or thread_id in _deleted_threads:
         await ws.close(code=POLICY)
         return
     # Rule 9: nothing claims this name — the gate ran, so say why with a real
