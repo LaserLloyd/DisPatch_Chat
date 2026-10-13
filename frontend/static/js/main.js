@@ -46,7 +46,7 @@ import {
 } from './ext-sdk.js?v=4';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=3';
-import { mountPluginsSettings } from './plugins.js?v=1';
+import { mountPluginsSettings } from './plugins.js?v=2';
 import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
