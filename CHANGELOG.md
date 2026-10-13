@@ -23,8 +23,8 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   news search (DuckDuckGo), a page fetch (SSRF-hardened), weather
   (Open-Meteo), Wikipedia, exchange rates (ECB), the time and a calculator.
   Each call that ran shows as a collapsible notice row before the answer.
-  `tools_locked` names the subset a Safe-Mode device may trigger. New
-  dependency: `ddgs`.
+  `tools_locked` names what a Safe-Mode device may trigger (default: all of
+  them). New dependency: `ddgs`.
 - **Advisor lookup** (`advisor.lookup`): the turn runs `infoforge search
   --json --text` itself and hands the articles to the model as reference
   notes, so a Wikipedia bot answers in about two seconds with a citation.

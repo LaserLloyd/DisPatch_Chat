@@ -105,12 +105,14 @@ from here. {owner} can ask again from an unlocked device for a researched answer
 # `advisor.tools` offers the model OpenAI tool calling over app/livetools —
 # read-only lookups against fixed public services (weather, web and news
 # search, a page fetch, Wikipedia, exchange rates, the time, a calculator).
-# A locked (Safe-Mode) turn is offered only `tools_locked`.
+# A locked (Safe-Mode) turn is offered only `tools_locked`; since 2026-10-14
+# that defaults to the full set (the owner wants search and page fetch on locked devices
+# too — every tool is read-only and the fetch is SSRF-guarded), so the key
+# exists to narrow a bot, not to widen it.
 
 DEFAULT_TOOL_ROUNDS = 4
 DEFAULT_TOOL_RESULT_CHARS = 4000
-DEFAULT_LOCKED_TOOLS = ("weather", "wikipedia", "exchange_rate", "current_datetime",
-                        "calculator")
+DEFAULT_LOCKED_TOOLS = tuple(livetools.TOOL_NAMES)
 TOOLS_SENTENCE = (
     "You have live lookups through your tools, which are exactly: {tools}. For "
     "anything current or local (weather, news, prices, exchange rates, the time, "

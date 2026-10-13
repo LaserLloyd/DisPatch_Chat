@@ -68,7 +68,7 @@ def test_tools_config_parses_true_lists_and_unknown_names(adv_env):
     _with_tools()
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
     assert cfg.tools == list(livetools.TOOL_NAMES)
-    assert cfg.tools_locked == list(advisor.DEFAULT_LOCKED_TOOLS)
+    assert cfg.tools_locked == list(livetools.TOOL_NAMES), "locked devices get every lookup by default"
     _with_tools(["weather", "NEWS_SEARCH", "nope"], tools_locked=["weather"],
                 location="  Tokyo,  Japan ", units="Imperial", tool_rounds=2)
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
@@ -162,7 +162,7 @@ def test_the_round_limit_is_enforced(adv_env, monkeypatch):
 
 def test_a_locked_turn_is_offered_only_the_locked_tools(adv_env, monkeypatch):
     tmp_path, _ = adv_env
-    _with_tools(["web_search", "weather", "fetch_url"])
+    _with_tools(["web_search", "weather", "fetch_url"], tools_locked=["weather"])
     reg = _Registry()
     _install(monkeypatch, reg)
     seen = _rounds(monkeypatch, [llm_api.StreamResult(text="Plain answer.")])

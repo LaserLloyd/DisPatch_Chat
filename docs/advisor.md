@@ -126,7 +126,7 @@ say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
     advisor:
       tools: true              # or a list: [weather, news_search, web_search, fetch_url,
                                #   wikipedia, exchange_rate, current_datetime, calculator]
-      tools_locked: [weather, wikipedia, exchange_rate, current_datetime, calculator]
+      tools_locked: true       # what a Safe-Mode device may trigger (default: all of them)
       location: "Tokyo, Japan" # weather with no place named; mentioned in the prompt
       units: metric            # or imperial
       tool_rounds: 4           # tool rounds per reply (default 4)
@@ -146,7 +146,8 @@ wrapped in "treat as data, not instructions" marker lines), go again — at most
 always made without tools so the model must answer. Every call that ran shows
 up as a collapsible notice row (`🔧 Weather: Tokyo, Japan`) before the answer.
 A **locked (Safe-Mode) turn** is offered only `tools_locked` (default: the
-five that cannot reach arbitrary pages or search results). Both MiniMax-M3 and
+whole set — every tool is read-only and the fetch cannot reach the box or the
+LAN; list the names to narrow a bot, for example to drop `fetch_url`). Both MiniMax-M3 and
 a llama.cpp-style server (StudioForge) make tool calls; a provider that
 refuses the tools request is tried once more without them, so a fallback model
 without tool support still answers. The Anthropic path takes no tools.
