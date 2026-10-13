@@ -44,7 +44,7 @@ something needs doing it asks an agent, and you decide whether the agent goes.
 bots:
   - id: sage
     name: Sage
-    safe: false                     # advisors are unlocked-only
+    safe: false                     # true = listed in Safe Mode too (see Security)
     advisor:
       owner: "Sam"
       providers:
@@ -93,6 +93,32 @@ Only `providers` is required. DisPatch re-reads the file when it changes.
 
 Agent ids are matched case-insensitively. A marker naming an agent outside the
 allow-list is redirected to the default for its kind.
+
+### Lookup (the bot reads reference material itself)
+
+```yaml
+    advisor:
+      lookup:
+        kind: infoforge          # the only kind today: the offline Wikipedia
+        max_articles: 3          # articles handed to the model (default 3)
+        chars_per_article: 3500  # per article, after InfoForge's own cut (default 3500)
+        timeout_s: 8             # the search's whole budget (default 8)
+        # command: [infoforge]   # the CLI, if it is not on PATH
+```
+
+Before every model call the turn runs `infoforge search --json --text
+--max-articles N "<the user's latest message>"` itself — a fixed argv, never a
+shell, read-only, about 0.6 s — and the articles join the prompt as reference
+notes (`### <title> (undated; Wikipedia (offline copy))`), so ONE model call
+answers with a citation. Compare the marker route (`[[research:ds_flash|…]]`),
+which costs an agent turn through the gateway (30 s to minutes) and relies on
+the model writing the marker correctly. Only the user's own words reach the
+search, nothing an LLM wrote is executed, so a locked (Safe-Mode) turn gets the
+same lookup. Any failure (no CLI, timeout, exit 3 "no sources", bad output) is
+logged and the turn answers without notes; it never fails because of them.
+Pair it with a persona that says *answer from the notes and cite
+`Source: Wikipedia, "<title>" (offline copy)`; if the notes lack the answer,
+say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
 
 ### Provider extras
 
@@ -245,10 +271,16 @@ conversation excerpt).
 
 ## Security model
 
-- **Unlocked only.** Advisors are always `safe: false`: a `safe: true` in
-  `config.yaml` or the Bot Manager's Safe toggle is overridden for any bot with
-  an `advisor:` block. Safe Mode never sees them, and a turn or a marker on an
-  advisor somehow flagged safe is refused.
+- **Safe Mode is decided per turn, not per bot.** An advisor may be
+  `safe: true` like any other bot (since 2026-10-13; before that the flag was
+  silently forced off). A safe advisor is listed on locked devices and answers
+  them from its corpus, but a turn that arrives over a Safe-Mode connection
+  runs **locked**: the dispatch rules leave the prompt, the bot is told
+  research is unavailable here, and any research/handoff marker it writes
+  anyway is stripped and ignored. The same thread continued from an unlocked
+  device gets the full behaviour. Remember that the profile and notes still
+  reach a locked device's answers — flag a bot safe only when its corpus is
+  fit for everyone who can pick up a locked device.
 - **Send needs a real session.** The Send and Dismiss routes require a full
   unlocked browser session. The machine surface (loopback or API token) cannot
   call them, so an agent can never approve its own handoff.

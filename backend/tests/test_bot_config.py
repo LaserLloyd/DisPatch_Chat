@@ -106,10 +106,11 @@ def test_bot_entry_round_trips_every_persistable_field(cfg_env):
     from dataclasses import fields
 
     every = {f.name: _non_default(f) for f in fields(config.Bot)}
-    # `safe` and `advisor` cannot both be non-default: an advisor is forced
-    # unsafe (Bot.__post_init__). So the round trip runs twice, once with
-    # each, and between them every field is exercised non-default.
-    for values in ({**every, "advisor": None},
+    # One pass with EVERY field non-default (a safe advisor is a legal bot
+    # since 2026-10-13), plus the two single-sided shapes that used to be the
+    # only legal ones, so a regression in either direction still fails here.
+    for values in (every,
+                   {**every, "advisor": None},
                    {**every, "safe": False}):
         bot = config.Bot(**values)
         for name, want in values.items():

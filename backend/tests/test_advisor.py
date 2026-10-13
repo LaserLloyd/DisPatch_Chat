@@ -624,48 +624,24 @@ def test_send_refuses_a_button_on_any_other_message(adv_env, monkeypatch):
     assert advisor.ledger().get(rid)["state"] == "proposed"
 
 
-# -- 3. advisors are never safe ---------------------------------------------- #
+# -- 3. a safe advisor: the FLAG sticks, the TURN decides (2026-10-13) ------- #
+# Until 2026-10-13 config.Bot forced `safe` off for every advisor (and the
+# Bot Manager's shield silently reverted). Now `safe: true` sticks and a turn
+# from a Safe-Mode connection runs locked instead — see
+# tests/test_safe_advisor_locked_turns.py for the whole contract.
 
 
-def test_an_advisor_can_never_be_safe(tmp_path, monkeypatch):
-    from dataclasses import replace
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
-    config._invalidate_bots_cache()
-    b = config.Bot(id="adv", name="A", safe=True, advisor={"providers": []})
-    assert b.safe is False
-    assert replace(b, safe=True).safe is False
-    assert config.Bot(id="plain", name="P", safe=True).safe is True
-    (tmp_path / "config.yaml").write_text(
-        "bots:\n  - id: adv\n    name: A\n    safe: true\n"
-        "    advisor:\n      providers: [{provider: custom, model: m}]\n")
-    config._invalidate_bots_cache()
-    assert config.get_bot("adv").safe is False
-    config.save_bot_order([{"id": "adv", "order": 0, "safe": True}])
-    assert config.get_bot("adv").safe is False
-    config._invalidate_bots_cache()
-
-
-def test_a_safe_flagged_advisor_neither_answers_nor_acts(adv_env, monkeypatch):
+def test_a_safe_advisor_keeps_its_flag_and_answers(adv_env, monkeypatch):
     tmp_path, _ = adv_env
+    config.upsert_bot(config.Bot(id="adv", name="Sage", safe=True,
+                                 advisor=config.get_bot("adv").advisor))
+    assert config.get_bot("adv").safe is True
     hooks, log = _rec_hooks(tmp_path)
     advisor.bind(hooks)
-    real = config.get_bot
-
-    def forced(bid):
-        b = real(bid)
-        if b is not None:
-            b.safe = True        # bypass __post_init__, as a future bug might
-        return b
-    monkeypatch.setattr(config, "get_bot", forced)
-    _run_with_reply(monkeypatch, "x\n[[research:worker|Something worth researching]]")
+    _run_with_reply(monkeypatch, "Plain answer.")
     asyncio.run(advisor.run_turn("t1", "adv", "q"))
-    assert not log.delivered and "error" in log.statuses
-    cfg = advisor.AdvisorConfig.from_bot(forced("adv"))
-    asyncio.run(advisor._act_on_markers(
-        cfg, "t1", [("research", "worker", "Something worth researching")], []))
-    assert not log.delivered and not advisor._tasks
-
+    assert [t for _, t, _ in log.delivered] == ["Plain answer."]
+    assert "error" not in log.statuses
 
 # -- 4. a background delivery cannot claim the live bubble ------------------- #
 

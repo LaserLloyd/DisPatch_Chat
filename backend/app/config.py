@@ -586,15 +586,13 @@ class Bot:
     voice: str = ""
     voice_rp: str = ""
 
-    def __post_init__(self) -> None:
-        # An advisor is NEVER a Safe-Mode bot. It reads a private corpus into
-        # every prompt and can dispatch research to agents on its own, so a
-        # locked family device must not be able to reach it — whatever the
-        # file, the Bot Manager toggle (save_bot_order) or any future writer
-        # says. Enforced here, in the constructor, so every path that builds a
-        # Bot (load_bots, dataclasses.replace, upsert_bot) gets it for free.
-        if self.advisor and self.safe:
-            self.safe = False
+    # An advisor MAY be a Safe-Mode bot (2026-10-13; until then the
+    # constructor forced `safe` off for every advisor and the Bot Manager's
+    # shield silently reverted). What a locked family device must never do is
+    # steer an exec-capable agent through an LLM-written brief, and that is
+    # enforced per TURN, not per bot: a turn arriving over a Safe-Mode
+    # connection runs with dispatch off (TurnOptions.locked ->
+    # advisor.run_turn(locked=True)), an unlocked turn keeps everything.
 
     @property
     def agent_id(self) -> str:

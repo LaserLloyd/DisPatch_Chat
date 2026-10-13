@@ -607,8 +607,9 @@ def test_ws_retry_is_metered_for_a_locked_device(gate_env, monkeypatch):
     main._decoy_action_used.clear()
     turns: list[tuple] = []
 
-    async def fake_turn(thread_id, bot_id, text):
-        turns.append((thread_id, bot_id, text))
+    # A Safe-Mode retry carries TurnOptions(locked=True) since 2026-10-13.
+    async def fake_turn(thread_id, bot_id, text, opts=None):
+        turns.append((thread_id, bot_id, text, opts))
 
     monkeypatch.setattr(main, "run_agent_turn", fake_turn)
 
@@ -636,6 +637,8 @@ def test_ws_retry_is_metered_for_a_locked_device(gate_env, monkeypatch):
                 and "limit" in (f.get("message") or "").lower()]
     assert refusals, f"second retry was not refused: {frames}"
     assert len(turns) == 1, f"budget did not cap the retries: {turns}"
+    assert turns[0][3] is not None and turns[0][3].locked is True, (
+        "a locked device's retry must run its turn locked")
 
 
 # --------------------------------------------------------------------------- #

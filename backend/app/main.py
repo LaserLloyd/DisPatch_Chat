@@ -6840,6 +6840,11 @@ class TurnOptions(NamedTuple):
                    agent reads. Never stored on the user's row.
       prefetched   a SpeculativeRun the direct backend ADOPTS instead of
                    starting a new call (voice chat's speculative start)
+      locked       the turn came over a Safe-Mode (decoy) connection. An
+                   advisor then answers without acting on any research/
+                   handoff marker (advisor.run_turn(locked=True)); a locked
+                   family device never steers an agent through an LLM-written
+                   brief. Gateway/API bots ignore it (they never dispatch).
     """
     user_msg_id: str | None = None
     model: str | None = None
@@ -6849,6 +6854,7 @@ class TurnOptions(NamedTuple):
     reply_to: str | None = None
     voice: Any = None
     prefetched: Any = None
+    locked: bool = False
 
 
 # A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
@@ -7057,6 +7063,8 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
         kw = _direct_turn_kwargs(advisor.run_turn, opts)
         if opts.model:
             kw["model"] = opts.model
+        if opts.locked:
+            kw["locked"] = True
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
@@ -11933,6 +11941,15 @@ async def _ack(ws: WebSocket, client_msg_id: str | None,
     await manager.send(ws, frame)
 
 
+def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str):
+    """run_agent_turn for a turn a socket asked for with no options of its
+    own (a retry, a resend): a Safe-Mode socket's turn runs locked, any other
+    socket calls the three-argument form exactly as before."""
+    if manager.conn_decoy(ws):
+        return run_agent_turn(thread_id, bot_id, text, TurnOptions(locked=True))
+    return run_agent_turn(thread_id, bot_id, text)
+
+
 async def _handle_send(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     text = (data.get("text") or "").strip()
@@ -11949,8 +11966,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             log.warning("resend of %s: the message was stored but its turn "
                         "never ran — dispatching it now", cmid)
             seen["scheduled"] = True
-            _track(asyncio.create_task(run_agent_turn(
-                seen["thread_id"], seen["bot_id"], seen["text"])))
+            _track(asyncio.create_task(_turn_for_socket(
+                ws, seen["thread_id"], seen["bot_id"], seen["text"])))
         return
     if cmid and await db.source_id_seen(_client_source_id(cmid)):
         # The durable half of the dedup. _ACK_SEEN is process memory: a
@@ -12078,6 +12095,10 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # before the message it is replying to. Awaiting them in sequence inside a
     # single task preserves exactly the ordering the previous straight-line
     # code had, while giving the reader loop back immediately.
+    # Read now, not inside the task: the socket may be gone by the time the
+    # turn starts, and a Safe-Mode send must run its turn locked (TurnOptions).
+    locked = manager.conn_decoy(ws)
+
     async def _publish_then_run() -> None:
         # The publish must not be able to cancel the turn.
         #
@@ -12102,10 +12123,12 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # quote calls run_agent_turn exactly as it always has (three args,
         # opts defaulting on the far side) so nothing about the ordinary send
         # path changes shape.
-        if reply_target is not None:
+        if reply_target is not None or locked:
             await run_agent_turn(thread_id, thread.bot_id, text,
                                  TurnOptions(user_msg_id=user_msg.id,
-                                            reply_to=reply_target.id))
+                                            reply_to=(reply_target.id
+                                                      if reply_target else None),
+                                            locked=locked))
         else:
             await run_agent_turn(thread_id, thread.bot_id, text)
 
@@ -12589,7 +12612,8 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
                                 "message": "Daily message limit reached — "
                                            "try again tomorrow or unlock."})
         return
-    _track(asyncio.create_task(run_agent_turn(thread_id, thread.bot_id, last_user.content)))
+    _track(asyncio.create_task(_turn_for_socket(
+        ws, thread_id, thread.bot_id, last_user.content)))
 
 
 async def _handle_abort(ws: WebSocket, data: dict) -> None:
