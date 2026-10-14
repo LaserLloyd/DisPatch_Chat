@@ -89,7 +89,8 @@ def test_every_runtime_data_file_is_on_the_allowlist():
     from the Bots tab, so every such file is pinned here."""
     allow = _allow()
     app_dir = REPO / "backend" / "app"
-    files = [*app_dir.glob("personas/*.md"), *app_dir.glob("guide/*.md")]
+    files = [*app_dir.glob("personas/*.md"), *app_dir.glob("guide/*.md"),
+             *app_dir.glob("default_avatars/*.png")]
     assert any(f.parent.name == "personas" for f in files)
     missing = [f.relative_to(REPO).as_posix() for f in files
                if not _covered(f.relative_to(REPO).as_posix(), allow)]

@@ -15,3 +15,9 @@ onnx-asr, soundfile and the rest) are credited in that package's own
 `THIRD_PARTY_NOTICES.md`, and its optional Kokoro built-in voices are a
 further plugin licensed GPL-3.0-or-later. DisPatch never downloads, imports
 or redistributes any of them.
+
+**Default avatar.** The Atlas avatar in `backend/app/default_avatars/` was
+generated with MiniMax image-01. MiniMax's terms leave rights in the output
+with the user while MiniMax keeps a service licence, and AI-generated images
+may not be copyrightable. It is distributed with DisPatch under the MIT
+licence; see that folder's `README.md`.

@@ -45,6 +45,9 @@ log = logging.getLogger("local-chat.firstrun")
 BOT_ID = "atlas"
 FLAG_NAME = ".firstrun-seeded"
 GUIDE_DIR = Path(__file__).resolve().parent / "guide"
+AVATAR_SRC_DIR = Path(__file__).resolve().parent / "default_avatars"
+#: The shipped avatar set, keyed by the bot whose `avatar` names its face file.
+DEFAULT_AVATARS: tuple[str, ...] = ("atlas-face.png", "atlas-full.png", "atlas-thumb.png")
 
 #: (thread title, guide file) in the order they should appear in the list.
 #: Created in REVERSE so the first one is the newest and sits on top.
@@ -72,6 +75,41 @@ def _read_guide(name: str) -> str:
     except OSError:
         log.warning("first-run guide %s is missing", name)
         return ""
+
+
+def install_default_avatars() -> list[str]:
+    """Copy the shipped avatar set into ``config.AVATAR_DIR``. Returns the file
+    names written.
+
+    Independent of the first-run flag: a missing file is the only condition,
+    so a deleted avatar comes back and a fresh install always has one. An
+    existing file is NEVER overwritten, and when the face file is already
+    there the whole set is left alone (an install with its own Atlas picture
+    must not end up with our full-size image beside its face). Each file is
+    written to a temp name and renamed. Never raises: a missing source or an
+    unwritable directory is a log line.
+    """
+    written: list[str] = []
+    try:
+        dest_dir = Path(config.AVATAR_DIR)
+        if (dest_dir / DEFAULT_AVATARS[0]).exists():
+            return written
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for name in DEFAULT_AVATARS:
+            dest = dest_dir / name
+            if dest.exists():
+                continue
+            tmp = dest.with_name(f".{name}.partial")
+            try:
+                tmp.write_bytes((AVATAR_SRC_DIR / name).read_bytes())
+                tmp.replace(dest)
+                written.append(name)
+            except OSError:
+                log.warning("could not install default avatar %s", name, exc_info=True)
+                tmp.unlink(missing_ok=True)
+    except Exception:
+        log.warning("default avatar install failed (ignored)", exc_info=True)
+    return written
 
 
 async def seed_if_first_run(

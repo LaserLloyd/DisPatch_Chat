@@ -487,6 +487,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
         _track(asyncio.create_task(advisor.background_loop()))
     # First run only: the two explainer threads on the default bot (never on
     # an install that already has threads; see app/firstrun.py). Non-fatal.
+    await asyncio.to_thread(firstrun.install_default_avatars)
     await firstrun.seed_if_first_run(db, _deliver_assistant_text)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first

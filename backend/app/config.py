@@ -707,11 +707,9 @@ def shipped_default_bots() -> list[Bot]:
     # to talk to out of the box. A Safe-Mode turn on an advisor runs "locked":
     # no delegation, and only the `tools_locked` subset of the lookups.
     #
-    # No `avatar`: the repo ships no avatar images, so naming one would mean a
-    # fresh clone requesting a file that does not exist. With the field empty
-    # the UI draws a coloured letter block instead -- a deliberate fallback, not
-    # a broken image. Drop your own PNG/SVG into the avatar directory and set it
-    # here or in config.yaml.
+    # `avatar`: the repo ships the Atlas picture in app/default_avatars/; on
+    # start-up firstrun.install_default_avatars() copies any missing file of it
+    # into the avatar directory (never overwriting one that is there).
     #
     # model_hint is a LABEL, not a setting -- it renders as the badge under the
     # name and the runtime value wins when there is one.
@@ -720,7 +718,7 @@ def shipped_default_bots() -> list[Bot]:
     # fall-back for a config.yaml with no usable entries). Nothing here is ever
     # merged into a roster that already exists.
     Bot(id="atlas", name="Atlas", emoji="🌍", model_hint="Direct API",
-        order=0, visible=True, safe=True, reactions=False, avatar_pool=False,
+        avatar="atlas-face.png", order=0, visible=True, safe=True, reactions=False, avatar_pool=False,
         advisor={"providers": [], "tools": True}),
     ]
 

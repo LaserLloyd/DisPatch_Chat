@@ -650,3 +650,72 @@ def test_a_connected_direct_bot_counts_for_the_first_run_card(env):
     c.post("/api/bots", json={"id": "w", "name": "W", "backend": "agent"})
     assert {b["id"]: b for b in c.get("/api/bots/all").json()["bots"]}["w"]["connected"] is False
     assert config.api_bot_count() == 1
+
+
+# --------------------------------------------------------------------------- #
+# Shipped default avatar
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def avatar_dir(env, monkeypatch):
+    d = env.tmp_path / "avatars"
+    monkeypatch.setattr(config, "AVATAR_DIR", d)
+    return d
+
+
+def test_a_fresh_install_gets_the_atlas_avatar_set(env, avatar_dir):
+    c = env(real_defaults=True)
+    for name in firstrun.DEFAULT_AVATARS:
+        assert (avatar_dir / name).read_bytes() == (firstrun.AVATAR_SRC_DIR / name).read_bytes()
+    assert not list(avatar_dir.glob(".*partial"))
+    row = next(b for b in c.get("/api/bots").json()["bots"] if b["id"] == "atlas")
+    assert "atlas-face.png" in row["avatar_url"]
+    full = c.get("/api/bots/atlas/avatar/full")
+    thumb = c.get("/api/bots/atlas/avatar/thumb")
+    assert full.status_code == 200 and thumb.status_code == 200
+    assert full.content == (avatar_dir / "atlas-full.png").read_bytes()
+    assert thumb.content == (avatar_dir / "atlas-thumb.png").read_bytes()
+
+
+def test_the_shipped_avatar_files_are_the_documented_sizes():
+    from PIL import Image
+    sizes = {n: Image.open(firstrun.AVATAR_SRC_DIR / n).size for n in firstrun.DEFAULT_AVATARS}
+    assert sizes == {"atlas-face.png": (512, 512), "atlas-full.png": (1096, 1536),
+                     "atlas-thumb.png": (128, 128)}
+
+
+def test_an_existing_atlas_avatar_is_never_overwritten(env, avatar_dir):
+    avatar_dir.mkdir(exist_ok=True)
+    (avatar_dir / "atlas-face.png").write_bytes(b"mine")
+    env(real_defaults=True)
+    assert (avatar_dir / "atlas-face.png").read_bytes() == b"mine"
+    # the set stays whole: no shipped full/thumb beside somebody else's face
+    assert not (avatar_dir / "atlas-full.png").exists()
+    assert not (avatar_dir / "atlas-thumb.png").exists()
+
+
+def test_an_existing_full_or_thumb_is_kept_when_the_face_is_missing(avatar_dir):
+    avatar_dir.mkdir(exist_ok=True)
+    (avatar_dir / "atlas-full.png").write_bytes(b"mine")
+    assert firstrun.install_default_avatars() == ["atlas-face.png", "atlas-thumb.png"]
+    assert (avatar_dir / "atlas-full.png").read_bytes() == b"mine"
+
+
+def test_a_deleted_avatar_comes_back_even_after_the_first_run(env, avatar_dir):
+    env(real_defaults=True)
+    for p in avatar_dir.iterdir():
+        p.unlink()
+    assert (env.tmp_path / firstrun.FLAG_NAME).exists()
+    assert firstrun.install_default_avatars() == list(firstrun.DEFAULT_AVATARS)
+
+
+def test_a_missing_source_file_fails_safe(env, avatar_dir, monkeypatch, tmp_path, caplog):
+    src = tmp_path / "empty-src"
+    src.mkdir()
+    monkeypatch.setattr(firstrun, "AVATAR_SRC_DIR", src)
+    with caplog.at_level("WARNING", logger="local-chat.firstrun"):
+        c = env(real_defaults=True)                 # boots anyway
+    assert c.get("/api/bots").status_code == 200
+    assert "could not install default avatar" in caplog.text
+    assert not list(avatar_dir.iterdir()) # no half-written leftovers
