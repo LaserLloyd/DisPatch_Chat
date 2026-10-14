@@ -7,6 +7,22 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.5] — 2026-10-14
+
+### Fixed
+
+- **Settings shows and reaches every tab.** Ten tabs are wider than the
+  desktop dialog as well as a phone, and the strip has no scrollbar, so with a
+  mouse there was no way to reach Security and nothing said it was there. The
+  strip now has ‹ / › edge buttons that appear only while there are tabs that
+  way (right-to-left aware), a mouse wheel scrolls it sideways, and the active
+  tab is kept clear of the buttons. Add-in tabs are measured too.
+- The Security tab no longer pulls focus into the PIN field when it is reached
+  with the arrow keys (the next arrow press moved the caret instead of the
+  tab) or on a touch screen (the keyboard covered the pane).
+- Settings polish: "Lock now" lines up with the PIN fields, and the lead
+  sentence of Security and AI models has room above the first field.
+
 ## [2.3.4] — 2026-10-14
 
 ### Changed
