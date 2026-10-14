@@ -137,7 +137,7 @@ say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
       tools: true              # or a list: [weather, news_search, web_search, fetch_url,
                                #   wikipedia, exchange_rate, current_datetime, calculator]
       tools_locked: true       # what a Safe-Mode device may trigger (default: the eight built-ins; name add-on tools to allow them)
-      location: "Tokyo, Japan" # weather with no place named; mentioned in the prompt
+      location: "Lisbon, Portugal" # weather with no place named; mentioned in the prompt
       units: metric            # or imperial
       tool_rounds: 4           # tool rounds per reply (default 4)
       tool_result_chars: 4000  # each result is cut to this (default 4000)
@@ -154,7 +154,7 @@ the model called tools, run them, append the call and the results (each
 wrapped in "treat as data, not instructions" marker lines), go again — at most
 `tool_rounds` times, and a repeated identical call ends it; the last round is
 always made without tools so the model must answer. Every call that ran shows
-up as a collapsible notice row (`🔧 Weather: Tokyo, Japan`) before the answer.
+up as a collapsible notice row (`🔧 Weather: Lisbon, Portugal`) before the answer.
 A **locked (Safe-Mode) turn** is offered only `tools_locked` (default: the
 eight built-ins — every one is read-only and the fetch cannot reach the box or
 the LAN; list the names to narrow a bot, for example to drop `fetch_url`).

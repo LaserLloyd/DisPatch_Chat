@@ -115,6 +115,11 @@ def test_a_turn_on_an_unconnected_bot_says_so_in_the_thread(env, monkeypatch):
     async def noop(*a, **kw):
         return None
 
+    statuses = []
+
+    async def set_status(tid, status):
+        statuses.append(status)
+
     async def list_messages(tid, limit):
         return [], False
 
@@ -122,7 +127,7 @@ def test_a_turn_on_an_unconnected_bot_says_so_in_the_thread(env, monkeypatch):
         frames.append(f)
 
     monkeypatch.setattr(advisor, "_hooks", advisor.Hooks(
-        list_messages=list_messages, deliver=deliver, set_status=noop,
+        list_messages=list_messages, deliver=deliver, set_status=set_status,
         broadcast=broadcast, thread_update=noop,
         open_stream=lambda t, p: None, close_stream=lambda t, p: True,
         sanitize_delta=lambda s: s, ask_agent=noop, threads_since=noop,
@@ -133,6 +138,8 @@ def test_a_turn_on_an_unconnected_bot_says_so_in_the_thread(env, monkeypatch):
                     "Open Settings → AI models to add a key.")
     assert meta["notice"]["level"] == "warn" and meta["not_connected"] is True
     assert not [f for f in frames if f["type"] == "error"]
+    # The thread is back to idle, not left "thinking" with Send disabled.
+    assert statuses and statuses[-1] == "idle"
 
 
 def test_digest_and_status_survive_an_unconnected_advisor(env):
@@ -148,10 +155,11 @@ def test_digest_and_status_survive_an_unconnected_advisor(env):
 # --------------------------------------------------------------------------- #
 
 
-def test_a_fresh_install_seeds_the_two_guide_threads_once(env):
+def test_a_fresh_install_seeds_the_guide_threads_once(env):
     c = env(real_defaults=True)
     ts = _threads(c)
-    assert sorted(t["title"] for t in ts) == ["How DisPatch works", "Meet Atlas"]
+    assert sorted(t["title"] for t in ts) == ["How DisPatch works", "Meet Atlas",
+                                              "Set up add-ons"]
     assert ts[0]["title"] == "Meet Atlas"            # newest = top of the list
     for t in ts:
         msgs = c.get(f"/api/threads/{t['id']}/messages").json()
@@ -169,10 +177,10 @@ def test_a_fresh_install_seeds_the_two_guide_threads_once(env):
 
 def test_a_second_boot_seeds_nothing(env):
     c = env(real_defaults=True)
-    assert len(_threads(c)) == 2
+    assert len(_threads(c)) == 3
     c.__exit__(None, None, None)
     c2 = env(real_defaults=True, fresh_db=False)
-    assert len(_threads(c2)) == 2
+    assert len(_threads(c2)) == 3
 
 
 def test_deleting_every_thread_does_not_bring_the_tour_back(env):

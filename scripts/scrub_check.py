@@ -169,8 +169,20 @@ def _screenshot_allowlist(root: Path) -> set[str]:
     return out
 
 
+#: The first-run guide's pictures ship INSIDE the app (2.3.7): same rule, and
+#: they are named in the same file as ``guide/<file>``.
+GUIDE_SHOT_DIR = "frontend/static/guide/"
+
+
 def _unlisted_screenshot(name: str, allowed: set[str]) -> str | None:
     """Why this path is a problem, or None if it is fine."""
+    if name.startswith(GUIDE_SHOT_DIR):
+        base = name[len(GUIDE_SHOT_DIR):]
+        if Path(base).suffix.lower() not in SCREENSHOT_SUFFIXES or f"guide/{base}" in allowed:
+            return None
+        return (f"a guide picture not listed in {SCREENSHOT_ALLOWLIST} — add "
+                f"'guide/{base}' only after opening it and confirming it shows no "
+                f"real names, places, addresses, avatars or message text")
     if not name.startswith(SCREENSHOT_DIR):
         return None
     base = name[len(SCREENSHOT_DIR):]

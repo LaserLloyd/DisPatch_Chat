@@ -406,6 +406,9 @@ class Settings:
     callback_base: str = env("CALLBACK_BASE", "").strip().rstrip("/")
     image_jobs_enabled: bool = _image_jobs_default(
         env("IMAGE_JOBS", "auto"), env("CLAWFORGE_URL", ""))
+    # The raw flag, for the API image provider (2.3.7): "auto" lets a provider
+    # chosen in Settings switch image jobs on even with no MCP server.
+    image_jobs_flag: str = env("IMAGE_JOBS", "auto")
     harness_unit: str = env("HARNESS_UNIT", "dsh-web.service")
     harness_port: int = int(env("HARNESS_PORT", "3080") or 3080)
     # StudioForge control panel: a read-only embed of the LLM rig's own web
@@ -953,6 +956,8 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None
                          else b.avatar_pool),
+            image_jobs=(bool(it["image_jobs"]) if it.get("image_jobs") is not None
+                        else b.image_jobs),
             voice=(str(it["voice"]).strip() if it.get("voice") is not None else b.voice),
             voice_rp=(str(it["voice_rp"]).strip() if it.get("voice_rp") is not None
                       else b.voice_rp),

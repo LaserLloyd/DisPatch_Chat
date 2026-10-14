@@ -1,10 +1,13 @@
-"""First-run seed: the two explainer threads a brand-new install opens to.
+"""First-run seed: the explainer threads a brand-new install opens to.
 
 A fresh clone should not open on an empty chat. On the very first start with an
-EMPTY database, two threads are created on the default bot, Atlas:
+EMPTY database, three threads are created on the default bot, Atlas:
 
 * "Meet Atlas"         -- who he is, where to put the key, what he can do;
-* "How DisPatch works" -- the tour: bots, Connect an AI, Safe Mode, add-ons.
+* "How DisPatch works" -- the tour: bots, Connect an AI, Safe Mode, add-ons;
+* "Set up add-ons"     -- the recommended order for everything optional
+  (2.3.7), following app/catalog.yaml. ``POST /api/guide/seed?name=…`` posts
+  any guide on an existing install.
 
 Each holds ONE assistant message whose text is the Markdown file of the same
 name under ``app/guide/``. A reply in either thread simply goes to Atlas.
@@ -34,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -54,7 +58,39 @@ DEFAULT_AVATARS: tuple[str, ...] = ("atlas-face.png", "atlas-full.png", "atlas-t
 THREADS: tuple[tuple[str, str], ...] = (
     ("Meet Atlas", "meet-atlas.md"),
     ("How DisPatch works", "how-dispatch-works.md"),
+    ("Set up add-ons", "set-up-add-ons.md"),
 )
+
+#: Guide name (the file stem) -> (title, file), for seeding one on demand.
+GUIDES: dict[str, tuple[str, str]] = {f.removesuffix(".md"): (t, f) for t, f in THREADS}
+
+
+class GuideExists(Exception):
+    """That guide was already posted on this install."""
+
+
+async def seed_one(db, deliver, name: str, *, force: bool = False) -> str:
+    """Post ONE guide thread on Atlas now (an existing install never auto-seeds).
+
+    Raises KeyError for an unknown guide or a missing Atlas, GuideExists when the
+    guide was already posted (unless `force`). Returns the new thread id."""
+    title, fname = GUIDES[name]
+    bot = next((b for b in config.load_bots() if b.id == BOT_ID), None)
+    if bot is None:
+        raise KeyError("atlas")
+    source = f"firstrun:{fname}"
+    if await db.source_id_seen(source):
+        if not force:
+            raise GuideExists(name)
+        source = f"{source}:{int(time.time())}"
+    text = _read_guide(fname)
+    if not text:
+        raise KeyError(name)
+    thread = await db.create_thread(BOT_ID, title=title)
+    await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
+                  dedup_recent_window=False)
+    log.info("guide %s posted on demand (thread %s)", name, thread.id)
+    return thread.id
 
 
 def flag_path() -> Path:
@@ -116,7 +152,7 @@ async def seed_if_first_run(
     db: Any,
     deliver: Callable[..., Awaitable[Any]],
 ) -> list[str]:
-    """Seed the two threads when this is a first run. Returns the thread ids
+    """Seed the guide threads when this is a first run. Returns the thread ids
     created (empty = nothing seeded). Never raises: a failed seed is logged and
     the app starts normally."""
     if os.environ.get("DISPATCH_FIRSTRUN", "1").strip().lower() in ("0", "false", "no", "off"):

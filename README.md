@@ -25,15 +25,17 @@ no account, no cloud, no telemetry.
 - **Atlas**, a general assistant who works as soon as you give him an API key or
   point him at a local model server, with lookups built in: web and news search,
   a page fetch, weather, Wikipedia, exchange rates, the time and a calculator.
-- **Two first-run chats** that explain the app: one introduces Atlas, one tours
-  how DisPatch works.
+- **Three first-run chats** that explain the app: one introduces Atlas, one tours
+  how DisPatch works, one walks through setting up the add-ons.
 - **Quick actions** on desktop: summarise, translate, fix grammar and other
   ready-made prompts, for any bot.
 - **A PIN and a Safe Mode.** Unlocked devices can do everything; locked family
   devices can only talk to the bots you mark safe.
 - **Ten themes**, eight languages, and a phone-installable PWA with push pings.
-- **Reactions and pictures** when you connect an image server (for example the
-  author's ClawForge).
+- **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
+  OpenAI-compatible images endpoint) or your own image server, and reaction images.
+- **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
+  chat, pictures and (where offered) knowledge search are set up and tested.
 - **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
   is installed.
 
@@ -48,6 +50,23 @@ no account, no cloud, no telemetry.
   ([docs/apps.md](docs/apps.md)).
 - **Settings tabs**: an add-on can add a tab of its own to Settings.
 
+## Works with
+
+DisPatch connects to these, all optional. Each one's status shows in
+**Settings → Plugins → Works with DisPatch**, and
+[docs/integrations.md](docs/integrations.md) has the setup for every one, the
+alternatives, and a feature-by-feature matrix of what needs what.
+
+| | What it adds | How it connects |
+|---|---|---|
+| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → AI models |
+| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Connect an AI → Local server |
+| [OpenClaw](https://github.com/openclaw/openclaw) | agent bots with tools, files and long jobs | `openclaw` on PATH or its gateway |
+| [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
+| [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
+| An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
+| Offline Wikipedia (InfoForge, not public yet) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
+
 ## Quick start
 
 ```bash
@@ -57,7 +76,8 @@ uv run uvicorn app.main:app --port 8765
 ```
 
 Open <http://localhost:8765>, set a PIN under **Settings → Security**, then go to
-**Settings → AI models** and connect Atlas to a provider. Prefer a container, a
+**Settings → AI models** and connect Atlas to a provider; **Set up everything with
+one provider** does chat and pictures from a single key. Prefer a container, a
 Raspberry Pi or a systemd service? See [Run it in Docker](#run-it-in-docker) and
 [Deployment](#deployment).
 
@@ -173,6 +193,10 @@ on a phone, in a few of the ten themes.
 - **Quick actions** on desktop, and a **Plugins tab** with room for add-ons' own
   Settings tabs. Settings is reordered by how often you use each tab.
 - **Tool packages**: add-ons can register their own lookups.
+- **2.3.7, integrations:** pictures from MiniMax, OpenAI or xAI Grok; one key
+  sets up chat and pictures together; a *Works with DisPatch* catalog in
+  Settings → Plugins; a "Set up add-ons" guide chat; see
+  [docs/integrations.md](docs/integrations.md).
 - Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
   arrived on the way; the [changelog](CHANGELOG.md) has all of it.
 

@@ -360,11 +360,11 @@ def test_rate_limit_refuses_a_burst(rx_env):
 
 
 def test_rate_limit_is_blind_to_the_actor_name_case(rx_env):
-    """"Bits" and " bits " are one actor: a second spelling must not get a
+    """"Nova" and " nova " are one actor: a second spelling must not get a
     fresh cooldown slot of its own."""
     c = rx_env()
-    first = {**AGENT_FIRE, "actor": "BITS"}
-    again = {**AGENT_FIRE, "actor": " bits "}
+    first = {**AGENT_FIRE, "actor": "NOVA"}
+    again = {**AGENT_FIRE, "actor": " nova "}
     assert c.post("/api/reactions/fire",
                   json={"reaction": "nice", **first}).status_code == 200
     r = c.post("/api/reactions/fire", json={"reaction": "oof", **again})

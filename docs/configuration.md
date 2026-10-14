@@ -301,7 +301,10 @@ render: `POST /api/image-jobs` returns immediately, a placeholder message
 appears in the thread, and DisPatch rewrites that message into the picture (or
 into a visible failure line) when the render lands. There is deliberately **no
 default endpoint** — the address of a GPU box is site configuration — and
-`auto` therefore means "on iff `DISPATCH_CLAWFORGE_URL` is set".
+`auto` therefore means "on iff `DISPATCH_CLAWFORGE_URL` is set" — or, since
+2.3.7, iff an image API provider is chosen in Settings → AI models → Image
+generation (`<data>/image.yaml`; see [integrations.md](integrations.md#image-api)).
+`0` switches both off.
 
 Two switches have to agree before anything happens: this one, and
 `image_jobs: true` on the individual bot in `config.yaml`. It is off for every

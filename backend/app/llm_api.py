@@ -123,6 +123,15 @@ PROVIDERS: tuple[Provider, ...] = (
         key_required=False, key_accepted=False, local=True,
     ),
     Provider(
+        # 2.3.7: llama.cpp's own `llama-server` (default port 8080) or
+        # StudioForge (a llama.cpp wrapper that loads models just in time and
+        # unloads them when idle; it listens on 1234). Either way the address
+        # is the thing to set, so the field is editable and no key is needed.
+        id="llamacpp", label="Local server (llama.cpp / StudioForge)",
+        bot_name="Local model", base_url="http://127.0.0.1:8080/v1",
+        key_required=False, local=True, editable_base_url=True,
+    ),
+    Provider(
         id="openai", label="OpenAI", bot_name="OpenAI", base_url="https://api.openai.com/v1",
         key_env="OPENAI_API_KEY", docs="https://platform.openai.com/api-keys",
         models=("gpt-4o-mini", "gpt-4o"),
@@ -154,6 +163,8 @@ PROVIDERS: tuple[Provider, ...] = (
     Provider(
         id="xai", label="xAI (Grok)", bot_name="Grok", base_url="https://api.x.ai/v1",
         key_env="XAI_API_KEY", docs="https://console.x.ai/",
+        # docs.x.ai/docs/models recommends Grok 4.7 for chat (2026-10-14).
+        models=("grok-4.7",),
     ),
     Provider(
         id="together", label="Together AI", bot_name="Together", base_url="https://api.together.xyz/v1",
@@ -2046,7 +2057,7 @@ def default_bot_id(provider_id: str) -> str:
 
 
 _EMOJI_BY_PROVIDER = {
-    "lmstudio": "🖥", "ollama": "🦙", "openai": "🟢", "anthropic": "🅰",
+    "lmstudio": "🖥", "ollama": "🦙", "llamacpp": "🖥", "openai": "🟢", "anthropic": "🅰",
     "deepseek": "🐋", "groq": "⚡", "openrouter": "🧭", "mistral": "🌬",
     "xai": "✖", "together": "🤝", "custom": "🔌",
 }

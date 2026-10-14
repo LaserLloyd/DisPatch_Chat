@@ -4625,3 +4625,28 @@ body.tools-sheet-open::after {
 .bm-persona-foot .bm-edit-actions { flex-wrap: wrap; }
 .bm-persona-count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .bm-persona-count.over { color: var(--danger); }
+
+/* ===== Integrations (2.3.7): one-key setup, image generation, catalog ===== */
+.qs-box { border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 14px; }
+.qs-box > summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+.qs-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.qs-row { display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
+.qs-mark { width: 1.2em; flex: none; text-align: center; font-weight: 700; }
+.qs-ok .qs-mark { color: var(--success-text); }
+.qs-failed .qs-mark, .qs-failed .qs-detail { color: var(--error-text); }
+.qs-absent, .qs-skipped { color: var(--text-muted); }
+.llm-quick-host { padding: 6px 18px 0; }
+.llm-image-host { margin: 18px 18px 0; padding-top: 12px; border-top: 1px solid var(--border-light); }
+.llm-image-host .llm-body { padding: 0; }
+.img-api-fields[hidden] { display: none; }
+.img-preview { display: block; max-width: min(256px, 100%); border-radius: var(--radius-sm); margin-top: 8px; }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.cat-card { border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0; }
+.cat-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.cat-status { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-light); color: var(--text-muted); white-space: nowrap; }
+.cat-status-connected, .cat-status-bundled { color: var(--success-text); border-color: color-mix(in srgb, var(--success-text) 45%, transparent); }
+.cat-summary { margin: 6px 0 4px; font-size: 14px; line-height: 1.4; }
+.cat-detail, .cat-connects, .cat-toggle { margin: 2px 0; font-size: 13px; overflow-wrap: anywhere; }
+.cat-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; font-size: 13px; }
+.cat-note { color: var(--text-muted); }
+@media (max-width: 480px) { .cat-grid { grid-template-columns: 1fr; } }

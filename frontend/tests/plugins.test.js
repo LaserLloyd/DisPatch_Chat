@@ -129,11 +129,11 @@ async function setup(over = {}) {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test('Plugins pane: three groups - Add-ons, Apps & tools, Built-in lookups', { skip: dom.skip }, async () => {
+test('Plugins pane: four groups - Works with DisPatch, Add-ons, Apps & tools, Built-in lookups', { skip: dom.skip }, async () => {
   const { mod, pane, deps, rec } = await setup();
   await mod.mountPluginsSettings(pane, deps);
   const titles = [...pane.querySelectorAll('.dev-group-title')].map((h) => h.textContent);
-  assert.deepEqual(titles, ['Add-ons', 'Apps & tools', 'Built-in lookups']);
+  assert.deepEqual(titles, ['Works with DisPatch', 'Add-ons', 'Apps & tools', 'Built-in lookups']);
   // The Tools table got its own host inside the second group.
   assert.equal(rec.tools.length, 1);
   assert.equal(rec.tools[0].id, 'plugins-tools-host');

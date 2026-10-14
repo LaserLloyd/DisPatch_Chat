@@ -1006,6 +1006,10 @@ async def _agent() -> dict:
     """
     binary = (config.SETTINGS.openclaw_bin or "").strip()
     out: dict = {"bin": binary, "configured": bool(binary), "optional": True,
+                 # Named by the operator (OPENCLAW_BIN set), as opposed to the
+                 # built-in default name. A default that is not on PATH is a
+                 # fresh install without agents, not a broken one (2.3.7).
+                 "explicit": "OPENCLAW_BIN" in os.environ,
                  "path": None, "present": False, "executable": False,
                  "version": None, "version_error": None, "gateway": None,
                  # Bots wired straight to an LLM provider ("Connect an AI").
@@ -1457,7 +1461,9 @@ def _build_findings(*, process: dict, storage: dict, database: dict, agent: dict
             "which is written owner-readable (0600)."))
 
     # --- agent backend ---
-    if not agent.get("configured"):
+    absent_default = (agent.get("configured") and not agent.get("present")
+                      and not agent.get("explicit", True))
+    if not agent.get("configured") or absent_default:
         out.append(_finding(
             "agent.none", OK, "No agent backend configured",
             "Assistants cannot reply, which is a supported setup: chat history, "
@@ -1488,7 +1494,7 @@ def _build_findings(*, process: dict, storage: dict, database: dict, agent: dict
 
     # --- agent gateway (a separate thing that fails separately) ---
     gateway = agent.get("gateway") or {}
-    if agent.get("configured") and gateway:
+    if agent.get("configured") and gateway and not absent_default:
         gw = f"{gateway.get('host')}:{gateway.get('port')}"
         if gateway.get("reachable"):
             out.append(_finding(

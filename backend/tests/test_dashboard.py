@@ -326,6 +326,7 @@ def test_connections_degrade_when_the_manager_changes(monkeypatch):
 
 def test_collect_survives_a_missing_agent_binary(dash_env, live_db, monkeypatch):
     dash_env()
+    monkeypatch.setenv("OPENCLAW_BIN", "/nonexistent/bin/openclaw")
     monkeypatch.setattr(config, "SETTINGS",
                         replace(config.SETTINGS, openclaw_bin="/nonexistent/bin/openclaw"))
     body = asyncio.run(dashboard.collect(live_db))
@@ -342,6 +343,21 @@ def test_collect_treats_no_agent_backend_as_supported(dash_env, live_db, monkeyp
     monkeypatch.setattr(config, "SETTINGS", replace(config.SETTINGS, openclaw_bin=""))
     body = asyncio.run(dashboard.collect(live_db))
     assert _find(body, "agent.none")["level"] == "ok"
+
+
+def test_the_default_agent_name_missing_is_a_fresh_install_not_a_fault(
+        dash_env, live_db, monkeypatch):
+    """2.3.7 audit: OPENCLAW_BIN unset and no `openclaw` on PATH is an install
+    without agents. It must not warn "nothing will reply" while Atlas, a
+    direct-API bot, replies fine -- nor probe a gateway nobody configured."""
+    dash_env()
+    monkeypatch.delenv("OPENCLAW_BIN", raising=False)
+    monkeypatch.setattr(config, "SETTINGS", replace(
+        config.SETTINGS, openclaw_bin="openclaw-not-on-this-path-2-3-7"))
+    body = asyncio.run(dashboard.collect(live_db))
+    assert _find(body, "agent.none")["level"] == "ok"
+    ids = {f["id"] for f in body["findings"]}
+    assert "agent.missing" not in ids and "agent.gateway" not in ids
 
 
 def test_collect_survives_an_agent_binary_that_hangs(dash_env, live_db, monkeypatch,

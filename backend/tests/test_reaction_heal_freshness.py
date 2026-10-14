@@ -56,10 +56,10 @@ def test_heal_aliases_dangling_onto_surviving_kin(rx_env):
 
 
 def test_heal_drops_dangling_without_kin(rx_env):
-    _mint_pack_entry("sasha_var1", blob=False)
+    _mint_pack_entry("nova_var1", blob=False)
     out = reactions.heal_pack()
     assert out["dropped"] == 1 and out["aliased"] == 0
-    assert reactions.get("sasha_var1") is None
+    assert reactions.get("nova_var1") is None
 
 
 def test_heal_is_idempotent_and_spares_the_healthy(rx_env):

@@ -1,7 +1,7 @@
 # Advisor bot — design (2026-10-09)
 
 A fast DisPatch chat partner for advice and general conversation. It answers
-straight from a model API (no OpenClaw turn), knows the owner and his projects
+straight from a model API (no OpenClaw turn), knows the owner and their projects
 from a knowledge corpus that OpenClaw maintains, and hands work to OpenClaw
 agents — research on its own, actions only after the owner taps Send. Every
 report that comes back joins the corpus, so the bot gets better informed over

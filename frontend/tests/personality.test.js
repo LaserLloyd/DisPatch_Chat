@@ -189,7 +189,7 @@ test('safe bots carry the family-device note; others do not', { skip: dom.skip }
 
 test('an agent bot gets a pointer to its workspace and no editor; an app bot gets nothing', { skip: dom.skip }, async () => {
   const { mod, ctx, win } = await setup();
-  const agent = mod.rowControls({ id: 'main', name: 'Bits', backend: 'agent', persona_kind: 'none' }, ctx);
+  const agent = mod.rowControls({ id: 'main', name: 'Nova', backend: 'agent', persona_kind: 'none' }, ctx);
   fire(win, agent.persona);
   await tick();
   assert.ok(agent.personaPanel.querySelector('[data-bm="persona-agent-note"]'));

@@ -1,6 +1,6 @@
 [project]
 name = "dispatch-chat"
-version = "2.3.6"
+version = "2.3.7"
 description = "Self-hosted chat for your household and your AI agents"
 license = "MIT"
 requires-python = ">=3.12"

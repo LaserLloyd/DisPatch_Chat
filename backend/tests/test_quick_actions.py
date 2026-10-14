@@ -90,7 +90,7 @@ def real_turn_client(tmp_path, monkeypatch):
     config._invalidate_bots_cache()
     # The shipped roster is Atlas, a direct-API bot with no provider (2.3.0): this
     # test needs a GATEWAY bot so the turn reaches _send_with_gateway_retry.
-    config.upsert_bot(config.Bot(id="main", name="Bits", agent="main", order=0))
+    config.upsert_bot(config.Bot(id="main", name="Nova", agent="main", order=0))
 
     temp_db = Database(tmp_path / "chats.db")
     monkeypatch.setattr(main, "db", temp_db)

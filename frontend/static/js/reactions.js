@@ -525,8 +525,12 @@ function renderManager() {
     el('span', {}, [el('b', { text: String(pool.remaining ?? 0) }), t('reactions.pool_on_hand')]),
     el('span', {}, [el('b', { text: String(pool.per_mood ?? 0) }), t('reactions.pool_target')]),
     el('span', {}, [t('reactions.pool_refilled'), el('b', { text: pool.batch_date || '—' })]),
-    el('span', { class: pool.available ? '' : 'rx-pool-warn',
-                 text: t(pool.available ? 'reactions.pool_reachable' : 'reactions.pool_unreachable') }),
+    // 2.3.7 (fresh-install audit): "unset" is not an outage — nothing was
+    // ever configured — so it gets a how-to line instead of a warning.
+    pool.image_cli === 'unset'
+      ? el('span', { class: 'muted', text: t('reactions.pool_needs_cli') })
+      : el('span', { class: pool.available ? '' : 'rx-pool-warn',
+                     text: t(pool.available ? 'reactions.pool_reachable' : 'reactions.pool_unreachable') }),
   ]);
   if (lowMoods.length) {
     stat.append(el('span', { class: 'rx-pool-warn' }, iconLabel(RAIL_ICONS.alert, t('reactions.pool_low', { moods: lowMoods.join(', ') }))));

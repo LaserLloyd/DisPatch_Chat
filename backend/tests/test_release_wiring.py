@@ -90,7 +90,8 @@ def test_every_runtime_data_file_is_on_the_allowlist():
     allow = _allow()
     app_dir = REPO / "backend" / "app"
     files = [*app_dir.glob("personas/*.md"), *app_dir.glob("guide/*.md"),
-             *app_dir.glob("default_avatars/*.png")]
+             *app_dir.glob("default_avatars/*.png"),
+             *app_dir.glob("*.yaml")]          # 2.3.7: catalog.yaml
     assert any(f.parent.name == "personas" for f in files)
     missing = [f.relative_to(REPO).as_posix() for f in files
                if not _covered(f.relative_to(REPO).as_posix(), allow)]

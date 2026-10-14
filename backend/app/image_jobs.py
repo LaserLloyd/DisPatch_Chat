@@ -1178,8 +1178,16 @@ class ImageSpec:
     #: sitting in a thread with somebody looking at it; the pool refills, which
     #: nobody is waiting on, go through the image CLI and pass 3 there.
     priority: int = 1
+    #: Which backend renders it: "" / "clawforge" = the MCP image server,
+    #: "api" = the default API provider (app/image_providers.py). Decided once,
+    #: when the job is created, and stored with it: a row written before this
+    #: field existed reads back as "" and stays on the MCP server.
+    backend: str = ""
 
     def __post_init__(self) -> None:
+        self.backend = (self.backend or "").strip().lower()
+        if self.backend not in ("", "clawforge", "api"):
+            raise ValueError("backend must be clawforge or api")
         self.prompt = (self.prompt or "").strip()
         if not self.prompt:
             raise ValueError("prompt is required")
@@ -1218,11 +1226,15 @@ class ImageSpec:
             raise ValueError("priority must be 1, 2 or 3")
 
     def to_json(self) -> str:
-        return json.dumps({"prompt": self.prompt, "workflow": self.workflow,
-                           "ratio": self.ratio, "width": self.width,
-                           "height": self.height, "negative": self.negative,
-                           "caption": self.caption,
-                           "priority": self.priority}, sort_keys=True)
+        d = {"prompt": self.prompt, "workflow": self.workflow,
+             "ratio": self.ratio, "width": self.width,
+             "height": self.height, "negative": self.negative,
+             "caption": self.caption, "priority": self.priority}
+        if self.backend == "api":
+            # Only when it differs from the default, so an MCP job's stored
+            # spec is byte-identical to what 2.3.6 wrote.
+            d["backend"] = self.backend
+        return json.dumps(d, sort_keys=True)
 
     @classmethod
     def from_json(cls, blob: str) -> ImageSpec:
@@ -1234,7 +1246,8 @@ class ImageSpec:
                    # A row written before priority existed reads back as 1,
                    # which is what it was submitted as in every practical
                    # sense: it was a chat request with somebody waiting.
-                   priority=d.get("priority", 1))
+                   priority=d.get("priority", 1),
+                   backend=d.get("backend", ""))
 
 
 @dataclass

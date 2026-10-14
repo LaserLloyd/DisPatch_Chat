@@ -46,15 +46,20 @@ safer, and works everywhere DisPatch works.
 |---|---|---|---|
 | **LM Studio** | `http://127.0.0.1:1234/v1` | none | Start its local server first |
 | **Ollama** | `http://127.0.0.1:11434/v1` | none | Must be running; models are whatever you have pulled |
+| **Local server (llama.cpp / StudioForge)** | `http://127.0.0.1:8080/v1` | none | llama.cpp's `llama-server` (port 8080), or [StudioForge](https://github.com/LaserLloyd/StudioForge) (port 1234), which loads models just in time and unloads them when idle |
 | **OpenAI** | `https://api.openai.com/v1` | `OPENAI_API_KEY` | |
 | **Anthropic (Claude)** | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | Uses the official `anthropic` SDK, not raw HTTP |
 | **DeepSeek** | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | |
 | **Groq** | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | One key, many models |
 | **Mistral** | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | |
-| **xAI (Grok)** | `https://api.x.ai/v1` | `XAI_API_KEY` | |
+| **xAI (Grok)** | `https://api.x.ai/v1` | `XAI_API_KEY` | Suggested model `grok-4.7` |
+| **MiniMax** | `https://api.minimax.io/v1` | `MINIMAX_API_KEY` | `MiniMax-M3`, thinking off by default; one key also draws pictures |
 | **Together AI** | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | |
 | **Custom** | you supply it | optional | Anything speaking OpenAI's `/chat/completions` |
+
+For pictures, embeddings and the one-key setup that configures them together,
+see [integrations.md](integrations.md).
 
 The Base URL column is the default the panel pre-fills. It is editable for every
 provider — a proxy or a self-hosted gateway in front of a vendor is a normal

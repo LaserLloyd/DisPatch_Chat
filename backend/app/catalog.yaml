@@ -1,0 +1,111 @@
+# "Works with DisPatch" — the companion catalog (Settings -> Plugins).
+#
+# One entry per service or project DisPatch can use. Adding one is a one-file
+# change: write the entry here; `probe` names a status check in app/catalog.py
+# (or leave it out for a static "see the docs" card). The setup-guide thread
+# (app/guide/set-up-add-ons.md) and docs/integrations.md follow this list; a
+# test checks that every `guide: true` entry appears in the guide.
+#
+# Rules for this public file: `repo` only for PUBLIC repositories, no private
+# hostnames, addresses, paths or names.
+#
+#   id        stable id ([a-z0-9-]); also the anchor in docs/integrations.md
+#   name      card title
+#   summary   one line: what you get
+#   repo      public repository URL (omit when not public)
+#   repo_note shown instead of a link when there is no public repo
+#   connects  one line: how DisPatch reaches it
+#   probe     status check (see catalog.py PROBES)
+#   toggle    an existing switch to surface: "extension:<id>" or "livetools"
+#   guide     true = has a step in the "Set up add-ons" thread
+entries:
+  - id: ai-provider
+    name: An AI provider
+    summary: Chat with any OpenAI-compatible API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek...), Anthropic, or a local model server.
+    connects: "Settings → AI models → Connect an AI, or Set up everything with one provider."
+    probe: chat
+    guide: true
+
+  - id: image-api
+    name: Image generation (API)
+    summary: Pictures in chat ([[pic:…]]) from MiniMax image-01, OpenAI, xAI Grok or any OpenAI-compatible images endpoint. Billed per picture.
+    connects: "Settings → AI models → Image generation."
+    probe: image_api
+    guide: true
+
+  - id: image-server
+    name: Image server (MCP)
+    summary: A self-hosted ComfyUI-style image server that speaks MCP, such as a private ClawForge server if you have one. Also feeds reaction and avatar pools through an image CLI.
+    repo_note: No public server is published; any MCP server with generate_image / get_job works.
+    connects: "DISPATCH_CLAWFORGE_URL (MCP endpoint); pools use DISPATCH_IMAGE_CLI."
+    probe: image_server
+
+  - id: studioforge
+    name: StudioForge
+    summary: A llama.cpp server wrapper for your own GPUs — loads a model just in time, unloads it when idle, and shares VRAM through leases. OpenAI-compatible.
+    repo: https://github.com/LaserLloyd/StudioForge
+    connects: "Connect an AI → Local server (llama.cpp / StudioForge) with its /v1 address; optional control-panel tab via DISPATCH_STUDIOFORGE=1 and DISPATCH_STUDIOFORGE_URL."
+    probe: studioforge
+    guide: true
+
+  - id: openclaw
+    name: OpenClaw
+    summary: The agent runtime behind agent bots — tools, files, long jobs, research and hand-off markers, the Job Board.
+    repo: https://github.com/openclaw/openclaw
+    connects: "The openclaw command on PATH, or the gateway socket with DISPATCH_GATEWAY_WS=1."
+    probe: openclaw
+    guide: true
+
+  - id: dispatch-voice
+    name: DisPatch Voice
+    summary: Hands-free voice chat — speech recognition, turn-taking and voices, on this machine.
+    repo: https://github.com/LaserLloyd/DisPatch_Voice
+    connects: "An add-on: install it into DisPatch's environment, restart, then Settings → Voice."
+    probe: voice
+    toggle: extension:voice
+    guide: true
+
+  - id: speechforge
+    name: SpeechForge
+    summary: A GPU speech server the voice add-on can hand recognition and voices to, for faster and better speech.
+    repo_note: Not public yet. The voice add-on works without it.
+    connects: "Configured inside the voice add-on (Settings → Voice)."
+    probe: voice_rig
+    guide: true
+
+  - id: infoforge
+    name: InfoForge
+    summary: Offline Wikipedia search the Wikipedia-librarian style of bot uses before it answers (advisor lookup).
+    repo_note: Not public yet. Without it, use the built-in online Wikipedia lookup.
+    connects: "The infoforge command on PATH and a kiwix server; advisor.lookup on the bot."
+    probe: infoforge
+    guide: true
+
+  - id: mailforge
+    name: MailForge
+    summary: A local email assistant that triages and drafts and never sends on its own; DisPatch shows it as the Emails tab.
+    repo: https://github.com/LaserLloyd/MailForge
+    connects: "Run MailForge on the same machine; DISPATCH_MAIL=auto finds its data directory."
+    probe: mail
+    guide: true
+
+  - id: lookups
+    name: Built-in lookups
+    summary: Web and news search, page fetch, weather, Wikipedia, exchange rates, time and a calculator for direct-API bots. No key needed.
+    connects: "Built in. Switch per bot in Settings → Bots."
+    probe: livetools
+    toggle: livetools
+
+  - id: crucibleforge
+    name: CrucibleForge
+    summary: An LLM benchmark; its results page can be added as a tool panel.
+    repo: https://github.com/LaserLloyd/CrucibleForge
+    connects: "A url row in tools.yaml (the benchmark panel)."
+    probe: tool:benchmark
+
+  - id: themeforge
+    name: ThemeForge
+    summary: The shared colour themes DisPatch ships with (Settings → Theme).
+    repo: https://github.com/LaserLloyd/ThemeForge
+    connects: "Bundled. Nothing to set up."
+    probe: bundled

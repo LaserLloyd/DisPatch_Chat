@@ -21,13 +21,13 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=25';
+} from './reactions.js?v=26';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=12';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=11';
+} from './llm.js?v=12';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -43,10 +43,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=9';
+} from './ext-sdk.js?v=10';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=8';
-import { mountPluginsSettings } from './plugins.js?v=8';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=9';
+import { mountPluginsSettings } from './plugins.js?v=9';
 import { rowControls, addBotRow } from './bots-edit.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -70,8 +70,8 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=14';
-import { pushRow } from './push.js?v=1';
+import { aboutRow } from './about.js?v=15';
+import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
@@ -4215,6 +4215,7 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       await mountPluginsSettings(pane, {
         mountTools: (host) => mountToolsSettings(host),
         toast, openTab: (tab) => setSettingsTab(tab),
+        onGuide: () => resync(),
       });
       break;
     case 'device':
@@ -4422,6 +4423,19 @@ function renderBotManager() {
         bmDirty = true;
       },
     }, iconLabel(RAIL_ICONS.images, t('settings.pool_badge')));
+    // Per-bot pictures ([[pic:…]], 2.3.7). Needs an image generator
+    // (Settings → AI models → Image generation); without one the bot is never
+    // told about the marker, and a stray one leaves a "needs" note instead.
+    const picBtn = el('button', {
+      class: 'bm-safe-btn' + (bot.image_jobs ? ' on' : ''),
+      title: t('settings.pics_title'),
+      onclick: (e) => {
+        e.stopPropagation();
+        bmBots[idx].image_jobs = !bmBots[idx].image_jobs;
+        picBtn.classList.toggle('on', bmBots[idx].image_jobs);
+        bmDirty = true;
+      },
+    }, iconLabel(RAIL_ICONS.images, t('settings.pics_badge')));
     // Placement badge. DEVICE-local, unlike its neighbours: it writes straight
     // to localStorage and repaints, rather than joining bmDirty and waiting for
     // Save, because there is nothing server-side to save. Off in Safe Mode —
@@ -4462,6 +4476,7 @@ function renderBotManager() {
       safeBtn,
       rxBtn,
       apBtn,
+      picBtn,
       ctl && ctl.lookups,
       ...extras,
       mbBtn,
@@ -4598,8 +4613,11 @@ function renderAvatarPoolPanel() {
       el('span', { class: 'ap-name', text: (bot && bot.name) || bid }),
       el('span', { class: 'ap-stats muted', text: stats }),
       p.has_prompts ? null : el('span', { class: 'ap-warn', text: t('settings.pool_no_prompts') }),
+      // 2.3.7 audit: no image tool = say so, and no Refill that can only 503.
+      p.available === false ? el('span', { class: 'ap-warn', text: t('settings.pool_needs_cli') }) : null,
       el('button', {
         class: 'bm-avatar-btn', text: t('settings.pool_refill'),
+        disabled: p.available === false ? '' : null,
         onclick: async () => {
           try { await api.avatarPoolRefill(bid); toast(t('settings.pool_refill_kicked')); }
           catch (e) { toast(e.message, true); }
@@ -4646,7 +4664,7 @@ async function saveBotManager() {
   const payload = bmBots.map((b, i) => {
     const item = {
       id: b.id, order: i, visible: b.visible, safe: !!b.safe, reactions: !!b.reactions,
-      avatar_pool: !!b.avatar_pool,
+      avatar_pool: !!b.avatar_pool, image_jobs: !!b.image_jobs,
     };
     // Only an extension field the user actually changed: an absent key leaves
     // it alone (and without the add-on the server accepts only "" or the

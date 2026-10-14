@@ -6,6 +6,7 @@ then the REST summary endpoint returns the article's description and opening par
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from urllib.parse import quote
 
@@ -81,3 +82,52 @@ async def run(topic: str, *, transport: httpx.AsyncBaseTransport | None = None) 
         lines.append(extract.strip())
     lines.append(f"URL: {_page_url(summary, name)}")
     return ToolResult(True, "\n".join(lines), f"Wikipedia: {name}")
+
+
+async def search_articles(
+    query: str,
+    limit: int = 3,
+    *,
+    chars: int = 3500,
+    transport: httpx.AsyncBaseTransport | None = None,
+    timeout_s: float = 8.0,
+) -> list[dict[str, str]]:
+    """Full-text search, then each hit's lead summary: ``[{title, text, url}]``.
+
+    The online stand-in for an offline InfoForge lookup (``advisor.lookup``
+    ``kind: wikipedia``). Unlike :func:`run` this uses ``list=search`` -- a
+    whole user sentence rarely prefix-matches a title -- and it RAISES
+    :class:`ApiError` on a failed search so the caller can log it; one failed
+    summary only drops that article.
+    """
+    query = " ".join(str(query or "").split())[:300]
+    if not query:
+        return []
+    data = await get_json(
+        SEARCH_URL,
+        {"action": "query", "list": "search", "srsearch": query,
+         "srlimit": max(1, min(int(limit), 5)), "format": "json"},
+        transport=transport, timeout_s=timeout_s,
+    )
+    found = ((data or {}).get("query") or {}).get("search") if isinstance(data, dict) else None
+    titles = [str(h.get("title")) for h in (found or []) if isinstance(h, dict) and h.get("title")]
+
+    async def one(title: str) -> dict[str, str] | None:
+        try:
+            s = await get_json(
+                SUMMARY_URL.format(title=quote(title.replace(" ", "_"), safe="")),
+                transport=transport, timeout_s=timeout_s,
+            )
+        except ApiError:
+            return None
+        if not isinstance(s, dict) or s.get("type") == "disambiguation":
+            return None
+        extract = str(s.get("extract") or "").strip()
+        if not extract:
+            return None
+        url = _page_url(s, title)
+        return {"title": str(s.get("title") or title),
+                "text": f"{extract[:chars]}\nURL: {url}", "url": url}
+
+    got = await asyncio.gather(*(one(t) for t in titles))
+    return [g for g in got if g]
