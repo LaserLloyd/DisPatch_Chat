@@ -70,8 +70,16 @@ export function wireTabStrip({ list, prev = null, next = null, win = (list.owner
   // One "page" = most of the visible strip, so the tab at the far edge stays
   // on screen as the anchor of where you were.
   const page = () => Math.max(80, Math.round(list.clientWidth * 0.7));
-  if (prev) prev.addEventListener('click', () => scrollStrip(list, -page()));
-  if (next) next.addEventListener('click', () => scrollStrip(list, page()));
+  // The buttons are mouse/touch affordances outside the Tab order (index.html
+  // gives them tabindex=-1), but a mouse click still focuses a button in
+  // Chromium and Firefox -- and then the tablist's own ←/→ no longer apply,
+  // because the key events land on the arrow instead. Keep focus where it
+  // was (on the active tab, or wherever the operator had it).
+  for (const b of [prev, next]) {
+    if (!b) continue;
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => scrollStrip(list, b === prev ? -page() : page()));
+  }
 
   // A plain mouse wheel only ever sends deltaY. Turn it into sideways motion
   // while the strip can move that way; at the end let the event go (nothing

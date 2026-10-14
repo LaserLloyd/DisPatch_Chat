@@ -120,6 +120,13 @@ test('a vertical wheel scrolls the strip sideways and is consumed', { skip: dom.
   assert.equal(side.defaultPrevented, false);
 });
 
+test('a click on an edge button does not take focus off the tablist', { skip: dom.skip }, () => {
+  const { w, next } = strip();
+  const md = new w.MouseEvent('mousedown', { bubbles: true, cancelable: true });
+  next.dispatchEvent(md);
+  assert.equal(md.defaultPrevented, true, 'mousedown would move focus to the arrow; ←/→ then stop working');
+});
+
 test('a strip that fits ignores the wheel', { skip: dom.skip }, () => {
   const { w, list } = strip({ scrollWidth: 300, clientWidth: 360 });
   const ev = new w.WheelEvent('wheel', { deltaY: 120, cancelable: true });

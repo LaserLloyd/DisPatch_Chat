@@ -25,7 +25,7 @@
 import { api as realApi } from './api.js?v=33';
 import { t } from './i18n.js?v=4';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
-import { personaButton, personaPanel } from './personality.js?v=1';
+import { personaButton, personaPanel } from './personality.js?v=2';
 
 export const NAME_MAX = 40;
 export const EMOJI_MAX = 8;
@@ -194,8 +194,10 @@ export function rowControls(bot, ctx) {
   // Personality (js/personality.js): a preset picker + system-prompt editor
   // for direct-API and legacy-API bots, a pointer to the workspace for agents.
   const pe = personaPanel(bot, { ...ctx, api: apiOf(ctx) });
+  const personaBtn = pe.panel ? personaButton(bot, pe.toggle) : null;
+  if (personaBtn) pe.setOpener(personaBtn);
   return {
-    persona: pe.panel ? personaButton(bot, pe.toggle) : null,
+    persona: personaBtn,
     personaPanel: pe.panel,
     badge: backendBadge(bot),
     notConnected: notConnectedLink(bot, ctx),
