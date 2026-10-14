@@ -42,6 +42,7 @@ import logging
 import re
 import sqlite3
 import threading
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
