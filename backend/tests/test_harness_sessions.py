@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import stat
 import sys
 from dataclasses import replace
@@ -60,6 +61,10 @@ else:
 
 @pytest.fixture
 def fake_dsh(tmp_path):
+    # The fake writes zstd frames and the app decodes them, both through the
+    # `zstd` CLI (harness_sessions._ZSTD) — skip, with the reason, without it.
+    if shutil.which("zstd") is None and not Path("/usr/bin/zstd").exists():
+        pytest.skip("needs the zstd CLI on PATH")
     p = tmp_path / "fake-dsh"
     p.write_text(FAKE_DSH.format(python=sys.executable))
     p.chmod(p.stat().st_mode | stat.S_IEXEC)

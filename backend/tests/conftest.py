@@ -354,3 +354,26 @@ def _no_hard_exit_on_failed_startup(monkeypatch):
     from app import main as _main
     monkeypatch.setattr(_main, "_HARD_EXIT_ON_FAILED_STARTUP", False,
                         raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_systemctl(monkeypatch):
+    """The suite never talks to a real systemd.
+
+    `harness.unit_state` shells out to `systemctl --user show`. A bare
+    container has no systemctl and a CI runner has one but no user session bus,
+    so the call failed ("failed to launch systemctl") or returned noise
+    depending on the machine. Answer systemctl as "no such unit" everywhere;
+    every other argv (the fake dsh the harness tests launch) is untouched, and a
+    test that wants specific unit state still patches `harness._run` itself.
+    """
+    from app import harness
+
+    real = harness._run
+
+    async def run(argv, timeout=harness._OP_TIMEOUT):
+        if argv and os.path.basename(str(argv[0])) == "systemctl":
+            return 4, "", "Unit could not be found (stubbed by the test suite)"
+        return await real(argv, timeout)
+
+    monkeypatch.setattr(harness, "_run", run)

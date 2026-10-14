@@ -23,6 +23,8 @@ from app import config, main
 from app.database import Database
 
 HAVE_PDFTOTEXT = shutil.which("pdftotext") is not None
+needs_pdftotext = pytest.mark.skipif(
+    not HAVE_PDFTOTEXT, reason="needs poppler-utils (pdftotext) on PATH")
 HAVE_PDFTOPPM = shutil.which("pdftoppm") is not None
 try:
     from rapidocr_onnxruntime import RapidOCR
@@ -150,6 +152,7 @@ async def _add_blob(db: Database, files_dir: Path, name: str, data: bytes,
 # Tests
 # --------------------------------------------------------------------------- #
 
+@needs_pdftotext
 async def test_pdf_text_layer_inlines(pdf_env):
     """A text-layer PDF reaches the agent as inlined text, not a path."""
     db, files_dir = pdf_env
@@ -228,6 +231,7 @@ async def test_unknown_file_keeps_original_ref(pdf_env):
     assert resolved == "[[doc:does-not-exist|x.pdf]]"
 
 
+@needs_pdftotext
 async def test_pdf_reaches_agent_gateway_boundary(pdf_env, monkeypatch):
     """End-to-end at the gateway boundary: upload → [[doc:…]] → resolved text.
 
@@ -247,7 +251,7 @@ async def test_pdf_reaches_agent_gateway_boundary(pdf_env, monkeypatch):
     class FakeReply:
         metadata: ClassVar[dict] = {"model": "fake", "provider": "fake",
                                     "session_id": "fake-sess-1"}
-        payloads: ClassVar[list] = [SimpleNamespace(text="On it!", sub=False)]
+        payloads: ClassVar[list] = [SimpleNamespace(text="On it!", sub=False, media_url=None)]
 
     async def fake_send(bot_id, session_key, message, thread_id):
         sent.append((bot_id, session_key, message))

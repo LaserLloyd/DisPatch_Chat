@@ -65,6 +65,11 @@ def test_uv_run_group_voice_still_boots(tmp_path):
     r = subprocess.run(["uv", "run", "--offline", "--quiet", "--group", "voice", "python", "-c",
                         "print('started')"], cwd=tmp_path, env=env, capture_output=True,
                        text=True, timeout=300)
+    if r.returncode != 0 and "voice" not in r.stderr and "cache" in r.stderr.lower():
+        # Re-locking the edited pyproject needs packages this machine's uv cache
+        # lacks (a clean CI runner): the control cannot run, and the assertion
+        # above — the one that guards the unit line — has already passed.
+        pytest.skip("control needs a warm uv cache to re-lock offline: " + r.stderr[-200:])
     assert r.returncode != 0 and "voice" in r.stderr
 
 

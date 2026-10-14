@@ -50,6 +50,11 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+      - name: Install poppler and zstd
+        # `pdftotext` reads the text layer of an attached PDF and `zstd`
+        # decodes dsh session logs; without them those tests skip (a skip is
+        # not a pass).
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils zstd
       - name: Sync dependencies
         working-directory: backend
         run: uv sync --frozen --python ${{ matrix.python }}
