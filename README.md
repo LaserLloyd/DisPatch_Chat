@@ -4,7 +4,7 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 2.3.1** (October 2026) · [what changed](#whats-new-in-23)
+**Current release: 2.3.9** (October 2026) · [what changed](#whats-new-in-23)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
@@ -29,11 +29,18 @@ no account, no cloud, no telemetry.
   how DisPatch works, one walks through setting up the add-ons.
 - **Quick actions** on desktop: summarise, translate, fix grammar and other
   ready-made prompts, for any bot.
+- **A personality for every bot.** Settings → Bots → Personality has ten presets
+  (Sleek assistant, Cat-girl, Warm friend, Patient tutor and more) and an editor;
+  `{name}` and `{user}` in the text are filled in for each reply.
 - **A PIN and a Safe Mode.** Unlocked devices can do everything; locked family
-  devices can only talk to the bots you mark safe.
+  devices can only talk to the bots you mark safe, by text or, with the voice
+  add-on, by voice.
 - **Ten themes**, eight languages, and a phone-installable PWA with push pings.
 - **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
   OpenAI-compatible images endpoint) or your own image server, and reaction images.
+  **Image Studio** (an app in the rail, unlocked devices only) makes pictures on
+  demand from the same provider, and the lightbox steps through every picture in
+  a thread.
 - **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
   chat, pictures and (where offered) knowledge search are set up and tested.
 - **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
@@ -41,9 +48,11 @@ no account, no cloud, no telemetry.
 
 ## Add-ons
 
-- **Voice chat**: talk to a thread hands-free. The separate package
+- **Voice chat**: talk to a thread hands-free, or type on the call screen while
+  replies are still spoken. The separate package
   [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice); a GPU machine
-  for the speech work is optional ([docs/extensions.md](docs/extensions.md#voice)).
+  for the speech work is optional. It also works on a locked device, on the
+  bots marked safe ([docs/extensions.md](docs/extensions.md#voice)).
 - **Tool packages**: a package can register more lookups for the bots through
   `register_live_tools` ([docs/extensions.md](docs/extensions.md)).
 - **Apps**: trusted packages in `apps/<id>/` with their own page, routes and bot
@@ -193,10 +202,18 @@ on a phone, in a few of the ten themes.
 - **Quick actions** on desktop, and a **Plugins tab** with room for add-ons' own
   Settings tabs. Settings is reordered by how often you use each tab.
 - **Tool packages**: add-ons can register their own lookups.
+- **2.3.4, voice on locked devices:** a Safe-Mode device can talk to a `safe` bot
+  by voice. Every voice turn runs with the same locked rules, and the same daily
+  budget, as a typed Safe-Mode message. Needs DisPatch Voice 1.3.3 or later.
+- **2.3.6, Personality:** a preset picker and prompt editor per bot, in
+  Settings → Bots (ten presets in `backend/app/personas/`).
 - **2.3.7, integrations:** pictures from MiniMax, OpenAI or xAI Grok; one key
   sets up chat and pictures together; a *Works with DisPatch* catalog in
   Settings → Plugins; a "Set up add-ons" guide chat; see
   [docs/integrations.md](docs/integrations.md).
+- **2.3.8:** Settings is laid out for a 360px phone.
+- **2.3.9, pictures:** Image Studio, and a lightbox gallery with arrow keys, side
+  buttons and swipe.
 - Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
   arrived on the way; the [changelog](CHANGELOG.md) has all of it.
 
@@ -258,7 +275,8 @@ that keeps an existing install's history.
   thread that resolves into the image when the render lands — failures turn
   the placeholder into a visible warning, never silence
 - Per-bot avatar pools and one-shot reaction overlays, topped up automatically
-- Every thumbnail opens its full-resolution original in the lightbox
+- Every thumbnail opens its full-resolution original in the lightbox, which steps
+  through the thread's pictures (arrow keys, side buttons or a swipe)
 
 **Tools & apps (plugins)**
 - Embed your own projects as switchable modules: a static directory, a URL, or
