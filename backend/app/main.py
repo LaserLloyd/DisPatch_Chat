@@ -2933,7 +2933,10 @@ async def fire_reaction(
     # to display it (a hand-deleted blob would otherwise pop an empty card).
     reactions.image_path(r)
 
-    err = reactions.limiter.check(f"{actor_kind}:{actor}", pack.settings)
+    # Keyed case- and space-blind: "Atlas" and "atlas" are one actor and
+    # share one slot (they pass the claim check above as the same bot).
+    slot = f"{actor_kind}:{actor.strip().lower()}"
+    err = reactions.limiter.check(slot, pack.settings)
     if err:
         raise reactions.ReactionError(err, 429)
 
@@ -2944,7 +2947,7 @@ async def fire_reaction(
     if from_pool and not reactions.pool_consume(r.id, bot_id=bot_id):
         # The limiter already recorded this fire; the actor lost a race they
         # weren't at fault for, so give the slot back.
-        reactions.limiter.refund(f"{actor_kind}:{actor}")
+        reactions.limiter.refund(slot)
         raise reactions.ReactionError("That image was just used — try again", 409)
 
     # The trace is persisted BEFORE the broadcast: it is the chat's copy of the

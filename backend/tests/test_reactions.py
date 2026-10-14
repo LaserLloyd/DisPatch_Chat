@@ -359,6 +359,18 @@ def test_rate_limit_refuses_a_burst(rx_env):
     assert r.status_code == 429                  # cooldown, same actor
 
 
+def test_rate_limit_is_blind_to_the_actor_name_case(rx_env):
+    """"Bits" and " bits " are one actor: a second spelling must not get a
+    fresh cooldown slot of its own."""
+    c = rx_env()
+    first = {**AGENT_FIRE, "actor": "BITS"}
+    again = {**AGENT_FIRE, "actor": " bits "}
+    assert c.post("/api/reactions/fire",
+                  json={"reaction": "nice", **first}).status_code == 200
+    r = c.post("/api/reactions/fire", json={"reaction": "oof", **again})
+    assert r.status_code == 429
+
+
 def test_disabled_pack_refuses_every_fire(rx_env):
     c = rx_env()
     reactions.update_settings({"enabled": False})
