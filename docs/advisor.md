@@ -156,8 +156,11 @@ wrapped in "treat as data, not instructions" marker lines), go again — at most
 always made without tools so the model must answer. Every call that ran shows
 up as a collapsible notice row (`🔧 Weather: Tokyo, Japan`) before the answer.
 A **locked (Safe-Mode) turn** is offered only `tools_locked` (default: the
-whole set — every tool is read-only and the fetch cannot reach the box or the
-LAN; list the names to narrow a bot, for example to drop `fetch_url`). Both MiniMax-M3 and
+eight built-ins — every one is read-only and the fetch cannot reach the box or
+the LAN; list the names to narrow a bot, for example to drop `fetch_url`).
+Switching a bot's lookups off in the Bots tab (or `PATCH /api/bots/{id}`
+`tools: false`) while `tools:` is a list parks that list under `tools_picked`
+and restores it when the switch goes back on. Both MiniMax-M3 and
 a llama.cpp-style server (StudioForge) make tool calls; a provider that
 refuses the tools request is tried once more without them, so a fallback model
 without tool support still answers. The Anthropic path takes no tools.

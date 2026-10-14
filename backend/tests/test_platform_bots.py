@@ -276,6 +276,8 @@ def test_create_an_agent_bot(env):
     {"name": "ok", "backend": "carrier-pigeon"},
     {"name": "ok", "backend": "agent", "tools": True},
     {"name": "ok", "backend": "direct", "agent": "a"},
+    # the Bots tab (and its hint text) allow letters, digits, - and _ only
+    {"name": "ok", "backend": "agent", "agent": "a.b"},
 ])
 def test_create_rejects_bad_bodies(env, body):
     c = env(real_defaults=True)
@@ -311,8 +313,61 @@ def test_patch_keeps_a_hand_picked_tool_list_when_lookups_stay_on(env):
     c.patch("/api/bots/atlas", json={"tools": True})
     assert config.get_bot("atlas").advisor["tools"] == ["weather", "calculator"]
     c.patch("/api/bots/atlas", json={"tools": False})
-    assert config.get_bot("atlas").advisor["tools"] is False
-    assert config.get_bot("atlas").advisor["owner"] == "Sam"
+    adv = config.get_bot("atlas").advisor
+    assert adv["tools"] is False and adv["owner"] == "Sam"
+    # The list is parked, not lost: on again brings it back, not "every tool".
+    assert adv["tools_picked"] == ["weather", "calculator"]
+    assert c.patch("/api/bots/atlas", json={"tools": False}).status_code == 200   # idempotent
+    assert config.get_bot("atlas").advisor["tools_picked"] == ["weather", "calculator"]
+    c.patch("/api/bots/atlas", json={"tools": True})
+    adv = config.get_bot("atlas").advisor
+    assert adv["tools"] == ["weather", "calculator"] and "tools_picked" not in adv
+    # A plain on/off bot just flips.
+    config.upsert_bot(config.Bot(id="atlas", name="Atlas", advisor={"providers": [], "tools": True}))
+    c.patch("/api/bots/atlas", json={"tools": False})
+    assert config.get_bot("atlas").advisor == {"providers": [], "tools": False}
+    c.patch("/api/bots/atlas", json={"tools": True})
+    assert config.get_bot("atlas").advisor == {"providers": [], "tools": True}
+
+
+def test_connect_writes_the_system_prompt_as_the_persona_and_never_clears_it(env):
+    c = env(real_defaults=True)
+    base = {"provider": "openai", "model": "gpt-4o", "api_key": "sk-1"}
+    r = c.post("/api/llm/connect", json={**base, "system_prompt": "  You are Globe.  "})
+    assert r.status_code == 200, r.text
+    assert config.get_bot("atlas").advisor["persona"] == "You are Globe."
+    assert "You are Globe" not in r.text          # the row never carries the prompt
+    # A blank field on a re-save keeps the persona (the panel cannot show it).
+    assert c.post("/api/llm/connect", json={**base, "system_prompt": ""}).status_code == 200
+    assert config.get_bot("atlas").advisor["persona"] == "You are Globe."
+    # A new bot made through connect gets it too; no field = no key.
+    c.post("/api/llm/connect", json={**base, "target": "globe", "system_prompt": "Terse."})
+    assert config.get_bot("globe").advisor["persona"] == "Terse."
+    c.post("/api/llm/connect", json={**base, "target": "plain"})
+    assert "persona" not in config.get_bot("plain").advisor
+
+
+def test_the_probe_reads_only_credential_shaped_or_stored_env_names(env, monkeypatch):
+    """The named variable's value goes to whatever base URL the form says, so
+    the probe never reads PATH/HOME/... on an operator's say-so: a name must
+    end like a credential, or be one a bot already stores for that provider."""
+    env(real_defaults=True)
+    for name, val in (("PATH_LIKE", "p"), ("MY_API_KEY", "sk-env"), ("DISPATCH_API_KEY", "no"),
+                      ("HOUSE_AUTH", "sk-stored"), ("A", "short")):
+        monkeypatch.setenv(name, val)
+    probe = main._stored_probe_key
+    assert probe({"provider": "openai", "api_key_env": "MY_API_KEY"}) == "sk-env"
+    assert probe({"provider": "openai", "api_key_env": "PATH_LIKE"}) == ""
+    assert probe({"provider": "openai", "api_key_env": "DISPATCH_API_KEY"}) == ""
+    assert probe({"provider": "openai", "api_key_env": "A"}) == ""
+    assert probe({"provider": "openai", "api_key_env": "HOUSE_AUTH"}) == ""
+    # ...unless the targeted bot already stores that name for this provider.
+    config.upsert_bot(config.Bot(id="atlas", name="Atlas", advisor={
+        "providers": [{"provider": "openai", "model": "m", "api_key_env": "HOUSE_AUTH"}]}))
+    assert probe({"provider": "openai", "api_key_env": "HOUSE_AUTH", "target": "atlas"}) == "sk-stored"
+    assert probe({"provider": "deepseek", "api_key_env": "HOUSE_AUTH", "target": "atlas"}) == ""
+    # No env name: the stored entry's own key resolution.
+    assert probe({"provider": "openai", "target": "atlas"}) == "sk-stored"
 
 
 def test_patch_errors(env):

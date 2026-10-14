@@ -1087,6 +1087,32 @@ def direct_tools_on(bot: Bot) -> bool:
     return False
 
 
+#: Where a hand-picked `tools:` list is parked while the switch is off, so
+#: switching it back on restores the list instead of "every tool".
+TOOLS_PICKED_KEY = "tools_picked"
+
+
+def set_direct_tools(advisor: dict | None, on: bool) -> dict:
+    """The advisor block with the lookups switch set, keeping a hand-picked
+    list. ``tools: [a, b]`` switched off becomes ``tools: false`` plus
+    ``tools_picked: [a, b]``; switched on again, the list comes back. A plain
+    true/false just flips. Returns a NEW dict (the input is not changed)."""
+    adv = dict(advisor or {})
+    current = adv.get("tools")
+    picked = adv.pop(TOOLS_PICKED_KEY, None)
+    if on:
+        if isinstance(current, list) and current:
+            return adv                      # already on, with a chosen subset
+        adv["tools"] = picked if isinstance(picked, list) and picked else True
+        return adv
+    if isinstance(current, list) and current:
+        adv[TOOLS_PICKED_KEY] = list(current)
+    elif isinstance(picked, list) and picked:
+        adv[TOOLS_PICKED_KEY] = picked      # off already; keep what was parked
+    adv["tools"] = False
+    return adv
+
+
 def api_bot_count() -> int:
     """How many bots have a direct-provider backend configured: legacy `api:`
     bots plus direct-API (advisor-backend) bots with at least one provider.

@@ -1,6 +1,8 @@
 """The thread-websocket gate the host owns (app/extensions.py, CONTRACTS §B.1
-rule 3 and rule 9): Origin==Host → unlocked session → thread and non-safe bot
-→ max_total → per-session slots → the extension's handler. Refusals 1–3 close
+rule 3 and rule 9): Origin==Host → unlocked session → the thread exists (since
+2.3.1 a `safe` bot's thread is allowed: the DEVICE must be unlocked, the bot's
+Safe-Mode flag only says locked devices may chat with it too) → max_total →
+per-session slots → the extension's handler. Refusals 1–3 close
 1008 BEFORE accept; "busy" and "nothing provides this" are accept-then-1013
 for authorised callers only. Plus the uvicorn frame cap the live unit runs
 with (--ws-max-size 262144) against the main /ws's 65,536-char messages.
@@ -57,14 +59,31 @@ def test_locked_device_is_refused(ext_env):
     assert KNOBS.sockets == []
 
 
-def test_unknown_thread_and_safe_bot_are_refused(ext_env):
+def test_unknown_thread_is_refused(ext_env):
     c, _ = ext_env
     install()
     unlock(c)
     assert refused(c, "/ws/voice/no-such-thread", headers=ORIGIN)[0] == 1008
+    assert KNOBS.sockets == []
+
+
+def test_a_safe_bots_thread_needs_an_unlocked_device_too(ext_env):
+    """2.3.1: a `safe` bot's thread is reachable from an UNLOCKED device (voice
+    for the family-safe bots), and from nowhere else — a cookieless (Safe-Mode)
+    caller still gets 1008 before accept, exactly as on any other thread."""
+    c, _ = ext_env
+    install()
     tid = thread_for(c, "alpha")                      # a Safe-Mode bot
+    lock(c)
     assert refused(c, f"/ws/voice/{tid}", headers=ORIGIN)[0] == 1008
     assert KNOBS.sockets == []
+    unlock(c)
+    KNOBS.handler_mode = "hold"
+    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
+        ws.receive_text()
+        assert _live(ws) is True
+    sock = KNOBS.sockets[-1]
+    assert sock.thread.id == tid and sock.bot.safe is True
 
 
 def test_unclaimed_name_runs_the_gate_then_1013(ext_env):
@@ -250,7 +269,9 @@ def test_session_live_false_when_the_thread_is_deleted(ext_env):
         assert _live(ws) is False
 
 
-def test_session_live_false_when_the_bot_turns_safe(ext_env):
+def test_session_live_stays_true_when_the_bot_turns_safe(ext_env):
+    """Marking the bot `safe` mid-call widens who may chat with it; it does not
+    end an unlocked device's socket (2.3.1). Removing the bot still does."""
     c, _ = ext_env
     KNOBS.handler_mode = "hold"
     install()
@@ -263,6 +284,8 @@ def test_session_live_false_when_the_bot_turns_safe(ext_env):
                  for i, b in enumerate(bots)]
         assert c.put("/api/bots/order", json={"bots": items}).status_code == 200
         assert config.get_bot("main").safe is True
+        assert _live(ws) is True
+        assert c.delete("/api/bots/main").status_code == 200
         assert _live(ws) is False
 
 

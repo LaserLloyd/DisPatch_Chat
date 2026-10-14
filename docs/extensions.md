@@ -471,11 +471,11 @@ tools as `live_tools`.
 Rules for a tool:
 
 - **Read-only intent.** A tool is called by a model that read text from the
-  open web or from a chat, and on a bot with `tools_locked` left at its default
-  it is callable from a Safe-Mode (family) device. Look things up; do not send,
-  write, delete, spend or run anything. If a tool must act, the bot's list is
-  the control: name it in `tools` and narrow `tools_locked` so it is not
-  offered on locked turns.
+  open web or from a chat, and once the owner names it in a bot's
+  `tools_locked` it is callable from a Safe-Mode (family) device. Look things
+  up; do not send, write, delete, spend or run anything. If a tool must act,
+  the bot's lists are the control: name it in `tools` and leave it out of
+  `tools_locked` so it is never offered on a locked turn.
 - **Never raise, and keep arguments honest.** The model's arguments are
   untrusted; validate them and return a short message the model can act on.
   DisPatch still catches anything you raise: the model then sees only

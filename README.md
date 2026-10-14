@@ -4,7 +4,7 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 2.3.0** (October 2026) · [what changed](#whats-new-in-23)
+**Current release: 2.3.1** (October 2026) · [what changed](#whats-new-in-23)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·

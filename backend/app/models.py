@@ -89,8 +89,9 @@ class UpdateBotOrderIn(BaseModel):
 #: A bot id minted by the API. Hand-written ids in config.yaml may be anything
 #: (the shipped test roster has `AI_Sage`); the API only ever creates these.
 BOT_ID_PATTERN = r"^[a-z0-9_-]{1,32}$"
-#: An agent id on the agent backend: whatever the agent runtime calls it.
-AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"
+#: An agent id on the agent backend (letters, digits, - and _ -- the same rule
+#: the Bots tab checks and its hint text states).
+AGENT_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 
 
 def _clean_text(v: str | None) -> str | None:

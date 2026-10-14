@@ -42,7 +42,6 @@ import logging
 import re
 import sqlite3
 import threading
-import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -106,9 +105,10 @@ from here. {owner} can ask again from an unlocked device for a researched answer
 # read-only lookups against fixed public services (weather, web and news
 # search, a page fetch, Wikipedia, exchange rates, the time, a calculator).
 # A locked (Safe-Mode) turn is offered only `tools_locked`; since 2026-10-14
-# that defaults to the full set (the owner wants search and page fetch on locked devices
-# too — every tool is read-only and the fetch is SSRF-guarded), so the key
-# exists to narrow a bot, not to widen it.
+# that defaults to every BUILT-IN lookup (the owner wants search and page fetch
+# on locked devices too — every tool is read-only and the fetch is
+# SSRF-guarded), so for the built-ins the key narrows a bot; an extension's
+# tool reaches a locked device only when named there.
 
 DEFAULT_TOOL_ROUNDS = 4
 DEFAULT_TOOL_RESULT_CHARS = 4000
@@ -1311,7 +1311,10 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                                     speculative=False, query=query)
 
             async def on_tool(call: dict, result: livetools.ToolResult) -> None:
-                # One collapsible notice row per lookup, before the answer.
+                # One collapsible notice row per lookup, before the answer. The
+                # source_id (the durable dedup key) is unique per TURN through
+                # emitter.prov, not only per call id: a server that sends no
+                # ids gets `call_0` every turn.
                 label = result.summary or call["name"]
                 await h.deliver(
                     thread_id, f"🔧 {label}" if result.ok else f"🔧 {label} (no result)",
