@@ -7,6 +7,18 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-10-14
+
+### Fixed
+
+- **The reaction pool's daily run never mints into a full shelf.** Each mood's
+  quota (fresh images plus the ones used since the last run) is capped at the
+  room left under its target, so a full shelf costs nothing and a used image
+  is replaced the next morning. The target (`per_mood`) is the outage buffer:
+  how many unused images stay on hand per mood if the image server is away.
+  Until now a full 32-mood shelf with a daily add of 10 rendered about 470
+  images a day, retiring an unused one for each.
+
 ## [2.3.2] — 2026-10-14
 
 A review pass over 2.3.0/2.3.1.

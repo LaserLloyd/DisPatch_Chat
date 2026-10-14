@@ -765,7 +765,7 @@
     "pool_hour": "Réappro nocturne à (heure)",
     "pool_hour_hint": "Heure locale du réappro quotidien (nouvelles images, plus le remplacement des utilisées).",
     "pool_daily_add": "Nouvelles chaque jour (par humeur)",
-    "pool_daily_add_hint": "À l’heure de réappro, chaque humeur reçoit ce nombre de nouvelles images. Au-delà de l’objectif, les plus anciennes inutilisées sont retirées.",
+    "pool_daily_add_hint": "À l'heure de rafraîchissement, chaque humeur reçoit jusqu'à ce nombre d'images nouvelles, plus une par image utilisée depuis la dernière exécution ; jamais plus que la place restante sous la cible ci-dessus. Une étagère pleine ne génère rien.",
     "pool_refill_spent": "Remplacer aussi les utilisées",
     "pool_refill_spent_hint": "Le réappro quotidien remplace aussi chaque image envoyée depuis le précédent.",
     "pool_safe": "Utilisables en mode sécurisé",

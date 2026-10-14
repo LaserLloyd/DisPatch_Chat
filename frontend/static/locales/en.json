@@ -847,7 +847,7 @@
     "pool_hour": "Nightly refill at (hour)",
     "pool_hour_hint": "Local hour of the daily refresh (fresh images, plus replacements for what was used).",
     "pool_daily_add": "Fresh each day (per mood)",
-    "pool_daily_add_hint": "At the refresh hour each mood gets this many new images. Past the target above, the oldest unused ones are retired.",
+    "pool_daily_add_hint": "At the refresh hour each mood gets up to this many new images, plus one for every image used since the last run — never more than the room left under the target above. A full shelf mints nothing.",
     "pool_refill_spent": "Also replace what was used",
     "pool_refill_spent_hint": "The daily refresh also replaces every image fired since the last one.",
     "pool_safe": "Safe Mode can use them",

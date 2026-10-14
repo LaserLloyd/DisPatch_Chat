@@ -754,7 +754,7 @@
     "pool_hour": "Nächtliches Auffüllen um (Stunde)",
     "pool_hour_hint": "Lokale Stunde des täglichen Auffüllens (neue Bilder plus Ersatz für Benutztes).",
     "pool_daily_add": "Neu pro Tag (pro Stimmung)",
-    "pool_daily_add_hint": "Zur Auffüllstunde bekommt jede Stimmung so viele neue Bilder. Über dem Ziel oben werden die ältesten ungenutzten aussortiert.",
+    "pool_daily_add_hint": "Zur Auffrischungsstunde bekommt jede Stimmung bis zu so viele neue Bilder, plus eines je verbrauchtem Bild seit dem letzten Lauf – nie mehr, als unter dem Ziel oben noch Platz ist. Ein volles Regal erzeugt nichts.",
     "pool_refill_spent": "Auch Benutztes ersetzen",
     "pool_refill_spent_hint": "Das tägliche Auffüllen ersetzt auch jedes seit dem letzten Mal abgefeuerte Bild.",
     "pool_safe": "Sicherer Modus darf sie nutzen",

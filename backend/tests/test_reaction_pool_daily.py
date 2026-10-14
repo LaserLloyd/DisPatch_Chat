@@ -209,27 +209,42 @@ def test_daily_quota_is_fresh_plus_fired_and_stamps_when_paid(rx):
     assert reactions.pool_refill(daily=True) == 0
 
 
-def test_shelf_ceiling_retires_oldest_unfired_and_retirements_are_not_fires(rx):
+def test_a_full_shelf_mints_nothing_and_a_fire_is_replaced_next_day(rx):
+    """2026-10-14: the daily quota is capped at the room left on the shelf. A
+    full shelf costs nothing (no mint-and-retire churn); an image fired since
+    the last run is replaced the next morning, plus fresh ones only while there
+    is room. The shelf is the outage buffer, never a treadmill."""
     _configure(per_mood=4, min_per_mood=1, daily_add_per_mood=2, max_per_cycle=10,
                per_mood_overrides={"bravo": 0})          # bravo is switched off
     old = [f"old{i}.png" for i in range(4)]
     for n in old:
         _drop(n, mood="alpha")
 
-    assert _run_daily_until_done() == 2
+    assert _run_daily_until_done() == 0, "a full shelf mints nothing"
     files = sorted(p.name for p in reactions._moods_dir().joinpath("alpha").iterdir())
-    assert len(files) == 4                 # held at the ceiling
-    assert "old0.png" not in files and "old1.png" not in files   # the OLDEST went
-    assert "old2.png" in files and "old3.png" in files
-    # Kept, never deleted: retired into spent/<mood>/.
-    spent = {p.name for p in (config.REACTIONS_SPENT_DIR / "alpha").iterdir()}
-    assert {"old0.png", "old1.png"} <= spent
-    assert rx["calls"] == ["alpha", "alpha"]
+    assert files == sorted(old), "and retires nothing"
+    assert not (config.REACTIONS_SPENT_DIR / "alpha").exists() or not any(
+        (config.REACTIONS_SPENT_DIR / "alpha").iterdir())
+    assert rx["calls"] == []
 
-    # Next day: the two retirements in spent/ are NOT fires — quota is add only.
+    # One fired: next day the quota is that one image (room 1), not add + fired.
+    st = reactions.pool_load()
+    st.fired = {"alpha": 1}
+    reactions.pool_save(st)
+    reactions._retire(reactions._moods_dir() / "alpha" / "old0.png")
     _new_day()
     rx["calls"].clear()
+    assert _run_daily_until_done() == 1
+    assert _have("alpha") == 4 and rx["calls"] == ["alpha"]
+
+    # Room without fires (the operator raised the target): fresh ones fill it,
+    # capped by the add. (The call log is NOT cleared here: the fake generator
+    # names files by call count, and a reset would overwrite g0001.)
+    _configure(per_mood=8, min_per_mood=1, daily_add_per_mood=2, max_per_cycle=10,
+               per_mood_overrides={"bravo": 0})
+    _new_day()
     assert _run_daily_until_done() == 2
+    assert _have("alpha") == 6 and rx["calls"] == ["alpha", "alpha", "alpha"]
 
 
 def test_daily_quota_is_capped_at_the_ceiling(rx):
@@ -263,8 +278,10 @@ def test_unfinished_quota_carries_into_the_next_day_capped(rx):
                per_mood_overrides={"bravo": 0})
     assert reactions.pool_refill(daily=True) == 1           # 2 still owed
     _new_day()
-    # 3 fresh + 2 carried = 5, at the ceiling of 5.
-    assert _run_daily_until_done() == 5
+    # 3 fresh + 2 carried = 5, but the shelf already holds 1 of its 5: the
+    # quota is the ROOM (4), never a mint that would retire an unused image.
+    assert _run_daily_until_done() == 4
+    assert _have("alpha") == 5
 
 
 def test_refill_spent_today_off_ignores_fires(rx):

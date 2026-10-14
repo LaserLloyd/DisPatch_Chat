@@ -765,7 +765,7 @@
     "pool_hour": "Reposición nocturna a las (hora)",
     "pool_hour_hint": "Hora local de la reposición diaria (imágenes nuevas y sustitutas de las usadas).",
     "pool_daily_add": "Nuevas cada día (por ánimo)",
-    "pool_daily_add_hint": "A la hora de reposición cada ánimo recibe esta cantidad de imágenes nuevas. Por encima del objetivo, se retiran las más antiguas sin usar.",
+    "pool_daily_add_hint": "A la hora de actualización cada estado recibe hasta este número de imágenes nuevas, más una por cada imagen usada desde la última ejecución; nunca más del hueco que quede bajo el objetivo de arriba. Un estante lleno no genera nada.",
     "pool_refill_spent": "Reponer también lo usado",
     "pool_refill_spent_hint": "La reposición diaria también sustituye cada imagen usada desde la anterior.",
     "pool_safe": "El modo seguro puede usarlas",

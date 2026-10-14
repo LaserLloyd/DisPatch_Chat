@@ -765,7 +765,7 @@
     "pool_hour": "Reforço noturno às (hora)",
     "pool_hour_hint": "Hora local do reforço diário (imagens novas e substitutas das usadas).",
     "pool_daily_add": "Novas por dia (por humor)",
-    "pool_daily_add_hint": "À hora do reforço cada humor recebe este número de imagens novas. Acima do alvo, as mais antigas por usar são retiradas.",
+    "pool_daily_add_hint": "À hora de atualização cada humor recebe até este número de imagens novas, mais uma por cada imagem usada desde a última execução; nunca mais do que o espaço que resta abaixo do alvo acima. Uma prateleira cheia não gera nada.",
     "pool_refill_spent": "Repor também as usadas",
     "pool_refill_spent_hint": "O reforço diário também substitui cada imagem usada desde o anterior.",
     "pool_safe": "O Modo seguro pode usá-las",

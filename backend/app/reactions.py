@@ -1782,10 +1782,12 @@ class PoolConfig:
     # one for every image FIRED since the previous daily run. per_mood (and
     # its override) is the shelf CEILING: going past it retires the oldest
     # unfired image of that mood through _retire (kept, never deleted).
-    # The default was 10 until 2026-10-14: on a full shelf with 32 moods that
-    # is ~320 renders a day (about five GPU hours) to replace a handful that
-    # were used, every one of them retiring an unused image. 2 keeps the
-    # rotation visible and costs a few minutes; the owner raises it per bot.
+    # Since 2026-10-14 the daily quota is capped at the ROOM on the shelf
+    # (ceiling minus on hand): a full shelf mints nothing, a mood that fired
+    # gets its fired images back plus up to this many fresh ones while there
+    # is room. (With a default of 10 and no room cap, a full 32-mood shelf
+    # cost ~470 renders a day — five GPU-hours — each retiring an unused
+    # image.) The shelf is the outage buffer: per_mood says how deep it is.
     daily_add_per_mood: int = 2
     refill_spent_today: bool = True
 
@@ -2853,10 +2855,14 @@ def _daily_snapshot(bot_id: str | None = None) -> PoolState:
 
     Per bank mood: ``daily_add_per_mood`` + (``refill_spent_today``) the fires
     counted since the previous snapshot + whatever an unfinished earlier day
-    still owed — capped at the mood's ceiling, because minting more than the
-    shelf holds would only retire images minted in the same run. The fire
-    ledger is zeroed in the same write, so fires DURING the run count toward
-    tomorrow. Idempotent within a day: a resumed run reuses the snapshot.
+    still owed — capped at the ROOM left on the shelf (ceiling minus what is on
+    hand), so a daily run never mints an image only to retire an unused one
+    (2026-10-14: a full shelf with 32 moods and a daily add of 10 cost ~470
+    renders a day, ~5 GPU-hours, to replace a handful that were used). The
+    shelf IS the buffer for a rig outage: it refills what was fired and adds
+    fresh ones only while there is room. The fire ledger is zeroed in the same
+    write, so fires DURING the run count toward tomorrow. Idempotent within a
+    day: a resumed run reuses the snapshot.
     """
     today = time.strftime("%Y-%m-%d")
     with _yaml_lock:
@@ -2865,6 +2871,7 @@ def _daily_snapshot(bot_id: str | None = None) -> PoolState:
             return st
         cfg = st.config
         owed: dict[str, int] = {}
+        held_back = 0
         for c in bank_categories(bot_id):
             ceiling = per_mood_for(cfg, c)
             if ceiling <= 0:
@@ -2872,11 +2879,15 @@ def _daily_snapshot(bot_id: str | None = None) -> PoolState:
             n = cfg.daily_add_per_mood + st.daily_owed.get(c, 0)
             if cfg.refill_spent_today:
                 n += st.fired.get(c, 0)
-            n = min(n, ceiling)
+            room = max(0, ceiling - len(_mood_files(_moods_dir(bot_id) / c)))
+            if n > room:
+                held_back += n - room
+                n = room
             if n > 0:
                 owed[c] = n
-        log.info("reaction pool: daily quota for %s: %s", resolve_bot_id(bot_id),
-                 owed or "nothing owed")
+        log.info("reaction pool: daily quota for %s: %s%s", resolve_bot_id(bot_id),
+                 owed or "nothing owed",
+                 f" ({held_back} not minted: the shelf is full)" if held_back else "")
         return _pool_update(bot_id, daily_owed=owed, daily_date=today, fired={})
 
 
