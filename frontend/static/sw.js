@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v156';  // v156: 2.3.3 — about.js?v=10→11 and its importers ext-sdk.js?v=5→6, voice-absent.js?v=4→5, plugins.js?v=4→5, main.js?v=132→133 (the reaction pool's daily run never mints into a full shelf; locales reactions.pool_daily_add_hint).
+const CACHE = 'local-chat-v157';  // v157: 2.3.4 — voice on locked devices: extensions.js?v=2→3 (a locked device mounts add-ons, told it is locked), about.js?v=11→12 and its importers ext-sdk.js?v=6→7, voice-absent.js?v=5→6, plugins.js?v=5→6, main.js?v=133→134.
+// v156: 2.3.3 — about.js?v=10→11 and its importers ext-sdk.js?v=5→6, voice-absent.js?v=4→5, plugins.js?v=4→5, main.js?v=132→133 (the reaction pool's daily run never mints into a full shelf; locales reactions.pool_daily_add_hint).
 // v155: 2.3.2 — about.js?v=9→10 and its importers ext-sdk.js?v=4→5, voice-absent.js?v=3→4, plugins.js?v=3→4, main.js?v=131→132 (review fixes).
 // v154: 2.3.1 review — llm.js?v=9→10 (Test connection sends target + api_key_env so a connected bot's saved key is used), plugins.js?v=2→3 (restart hint follows the server's rule for failed/incompatible add-ons), main.js?v=130→131 (settings.pane guard before the tabs exist).
 // v153: 2.3.1 — about.js?v=8→9 and its importers ext-sdk.js?v=3→4, voice-absent.js?v=2→3, plugins.js?v=1→2, main.js?v=129→130 (version 2.3.1; extension websockets accept a safe bot's thread, voice for Safe-Mode bots).

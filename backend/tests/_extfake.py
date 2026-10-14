@@ -45,7 +45,8 @@ class Knobs:
     async_setup: bool = False
     block_setup: threading.Event | None = None   # setup() waits on it (a hung setup)
     with_tools: bool = True
-    handler_mode: str = "echo"          # echo | unavailable | hold | noaccept | slow_replaced
+    handler_mode: str = "echo"          # echo | unavailable | hold | noaccept | slow_replaced | submit
+    locked_status: Any = None           # ctx.locked_status(fn) when set
     ctx: Any = None
     sockets: list = field(default_factory=list)
     startup_threads: list = field(default_factory=list)
@@ -94,7 +95,22 @@ async def handler(ws, sock) -> None:
     await ws.accept()
     await ws.send_text(json.dumps({"type": "ready", "bot": sock.bot.id,
                                    "backend": sock.bot.backend,
-                                   "token": bool(sock.token)}))
+                                   "token": bool(sock.token),
+                                   "locked": bool(getattr(sock, "locked", False))}))
+    if KNOBS.handler_mode == "submit":
+        # Plays the voice add-on's turn path: every text frame becomes a turn
+        # through ctx.submit_turn (spoken or typed alike). The fake never says
+        # whether its socket is locked — the host must know on its own.
+        with contextlib.suppress(Exception):
+            while True:
+                msg = await ws.receive_text()
+                if msg.startswith("spec:"):
+                    run = await KNOBS.ctx.speculate_turn(sock.thread.id, msg[5:])
+                    await ws.send_text(json.dumps({"spec": run is not None}))
+                    continue
+                mid = await KNOBS.ctx.submit_turn(sock.thread.id, msg, metadata={"voice": True})
+                await ws.send_text(json.dumps({"id": mid}))
+        return
     if KNOBS.handler_mode == "hold":
         with contextlib.suppress(Exception):
             while True:
@@ -146,6 +162,8 @@ def setup(ctx) -> None:
         ctx.serve_static(KNOBS.static_dir, entry="index.js", css=["voice.css"], locales=True)
     ctx.thread_websocket("voice", handler, max_per_session=KNOBS.max_per_session,
                          max_total=KNOBS.max_total)
+    if KNOBS.locked_status is not None:
+        ctx.locked_status(KNOBS.locked_status)
     ctx.set_bot_field_validator("voice", _validator)
     ctx.set_bot_field_validator("voice_rp", _rp_validator)
     if KNOBS.with_tools:

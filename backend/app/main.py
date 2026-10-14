@@ -536,7 +536,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.3.3", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.3.4", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -852,7 +852,7 @@ async def auth_gate(request: Request, call_next):
                 # fail-closed.
                 if method == "GET" and (
                         path in ("/api/reactions", "/api/bots", "/api/threads",
-                                 "/api/unread")
+                                 "/api/unread", "/api/extensions")
                         or _INBOUND_THREAD_ONE_RE.match(path)
                         or _INBOUND_THREAD_SUB_RE.match(path)):
                     request.state.decoy = True
@@ -1959,14 +1959,16 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # unlocked-operator-only features — belt-and-braces on
                         # top of _require_mail / _require_practice.
                         "/api/mail", "/api/practice",
-                        # Extensions (app/extensions.py): the list of
-                        # installed add-ons, their code under /ext/, and the
-                        # voice add-on's API (its status names engines, its
-                        # Voices manager holds recordings of a person's
-                        # voice). Belt-and-braces on top of the operator
-                        # dependency every extension route carries; other
-                        # extension prefixes are checked just below.
-                        "/api/extensions", "/ext/", "/api/voice",
+                        # Extensions (app/extensions.py): the voice add-on's
+                        # API (its status names engines, its Voices manager
+                        # holds recordings of a person's voice). Belt-and-
+                        # braces on top of the operator dependency every
+                        # extension route carries; other extension prefixes
+                        # are checked just below. The list of add-ons and
+                        # their public code under /ext/ are READABLE by a
+                        # locked device since 2.3.4 (voice on the bots it can
+                        # see) — see the read-only exception after this list.
+                        "/api/voice",
                         # Settings -> Plugins (app/plugins_api.py): operator only.
                         "/api/plugins",
                         # Local Viewer: reads arbitrary bytes off the host's
@@ -1979,6 +1981,10 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # re-check for themselves (_push_device_key).
                         "/api/push")):
         return True
+    if path == "/api/extensions" or path.startswith("/ext/"):
+        # Read-only for a locked device (the handlers serve it the mount rows
+        # and the public frontend files); nothing else on either path.
+        return method not in ("GET", "HEAD")
     if extensions.owns_path(path):
         return True
     # Apps: /api/apps/*, /apps/* and each mounted app's legacy prefix (the Job
@@ -7850,7 +7856,10 @@ async def auth_status(request: Request):
                       "extensions": extensions.ok_count(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
-                     if (authed or not cfg.pin_set) else {}),
+                     if (authed or not cfg.pin_set)
+                     # A locked device mounts add-ons too (2.3.4: voice on
+                     # the bots it can see) — the count and nothing else.
+                     else {"extensions": extensions.ok_count()}),
     }
 
 
@@ -13023,9 +13032,11 @@ def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
 # as DisPatch Voice. The host itself is generic; below is the part only main
 # can do: a turn submitted, speculated, aborted or annotated on an extension's
 # behalf goes through exactly the persist / broadcast / run_agent_turn path a
-# typed message takes. Voice is UNLOCKED TIER ONLY: the host's gate refuses a
-# locked device, a cross-origin page and a Safe-Mode bot before anything here
-# can run.
+# typed message takes. The host's gate refuses a cross-origin page and, for a
+# locked device, any thread it cannot see (a non-`safe` bot's) before anything
+# here can run; a turn for a thread a locked device's socket is on runs LOCKED
+# (TurnOptions.locked, extensions.turn_locked), exactly like a typed Safe-Mode
+# send, and never adopts a speculative run (those are built unlocked).
 # --------------------------------------------------------------------------- #
 
 
@@ -13115,8 +13126,17 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
+    locked = extensions.turn_locked(thread_id)
+    if locked:
+        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
+    if locked and adopted is not None:
+        # Never reached in practice (_ext_speculate_turn refuses a locked
+        # thread), but a run built unlocked must never answer a locked turn.
+        await _discard_run(adopted)
+        adopted = None
     turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
-                            thinking=thinking or None, prefetched=adopted)
+                            thinking=thinking or None, prefetched=adopted,
+                            locked=locked)
     try:
         await manager.broadcast(frame)
         await _broadcast_thread_update(thread_id)
@@ -13148,7 +13168,8 @@ async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = 
     thread = await db.get_thread(thread_id)
     bot = config.get_bot(thread.bot_id) if thread else None
     backend = extensions.bot_backend_of(bot)
-    if bot is None or backend not in ("advisor", "api") or _turn_running(thread_id):
+    if (bot is None or backend not in ("advisor", "api") or _turn_running(thread_id)
+            or extensions.turn_locked(thread_id)):
         return None
     old = _speculations.pop(thread_id, None)
     if old is not None:

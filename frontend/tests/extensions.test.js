@@ -108,12 +108,33 @@ test('nothing is requested when the status says no extension is ok', async () =>
   assert.equal(fetches(), 1, 'an unforced refresh after a forced read must not fetch');
 });
 
-test('a locked device never asks and never mounts', async () => {
-  const v = voiceModule();
+test('a locked device mounts the add-on too, told it is locked (2.3.4)', async () => {
+  const seen = [];
+  const v = voiceModule({
+    async mount(shell, opts) { seen.push(opts); return { unmount() { seen.push('unmount'); } }; },
+  });
   const h = harness({ modules: { '/ext/voice/index.js': v.mod }, locked: true });
-  await h.loader.refresh({ force: true });
-  assert.deepEqual(h.log, []);
-  assert.deepEqual(v.calls, []);
+  await h.loader.refresh();
+  assert.ok(h.log.includes('fetch /api/extensions'));
+  assert.ok(h.loader.isMounted('voice'));
+  assert.deepEqual(seen, [{ assetsVersion: 'abc123', locked: true }]);
+  assert.equal(h.loader.tier(), 'locked');
+});
+
+test('crossing the lock boundary remounts in the new tier', async () => {
+  const seen = [];
+  const v = voiceModule({
+    async mount(shell, opts) { seen.push(opts.locked); return { unmount() { seen.push('unmount'); } }; },
+  });
+  const h = harness({ modules: { '/ext/voice/index.js': v.mod } });
+  await h.loader.refresh();
+  assert.equal(h.loader.tier(), 'unlocked');
+  h.st.locked = true;
+  await h.loader.refresh();
+  assert.deepEqual(seen, [false, 'unmount', true]);
+  h.st.locked = false;
+  await h.loader.refresh();
+  assert.deepEqual(seen, [false, 'unmount', true, 'unmount', false]);
 });
 
 test('lock → unmount, dispose everything it registered, drop its strings', async () => {
@@ -299,7 +320,7 @@ test('the shell object is frozen and carries the contract members', dom, withDom
   const shell = sdk.createShell('voice');
   assert.ok(Object.isFrozen(shell));
   assert.equal(shell.EXT_API, 1);
-  assert.equal(shell.version, '2.3.3');
+  assert.equal(shell.version, '2.3.4');
   for (const k of ['el', 'railIcon', 'RAIL_ICONS', 'loadStyle', 'acquireInert', 'releaseInert', 'isMobile',
     'onLocale', 'onLocked', 'onThread', 'onThreadChange', 'api', 'activeThread', 'bots', 'botById', 'allBots',
     'isLocked', 'language', 'features', 'threadFace', 'toast', 'confirm', 'prompt', 'navigate']) {

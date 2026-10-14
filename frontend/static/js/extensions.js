@@ -1,7 +1,7 @@
 // The extension loader: installed add-ons' frontends, mounted into the shell.
 //
-// Contract: docs/extensions.md and CONTRACTS §E.1. On an UNLOCKED session the
-// loader reads GET /api/extensions (only when /api/auth/status says at least
+// Contract: docs/extensions.md and CONTRACTS §E.1. The loader reads
+// GET /api/extensions (only when /api/auth/status says at least
 // one extension is `ok` — a fresh install costs no request), and for each `ok`
 // one, in this order:
 //
@@ -9,16 +9,18 @@
 //   2. its stylesheets   → <link>, ?v=<assets hash>
 //   3. import('/ext/<id>/<entry>?v=<assets hash>')
 //   4. the JS handshake  → EXT.id matches and EXT.api = [lo, hi] spans EXT_API
-//   5. mount(shell, { assetsVersion })  → { unmount(), onLocale() }
+//   5. mount(shell, { assetsVersion, locked })  → { unmount(), onLocale() }
 //
 // Every /ext/ file asked for with the current hash is served `immutable`, so
 // the add-on imports its siblings with the same `?v=` and a cold open on a
 // phone costs one round trip each, not a revalidation each. The service
 // worker never caches /ext/.
 //
-// On lock / logout every extension is unmounted, everything it registered on
-// the shell is disposed (js/ext-sdk.js disposeExtension) and its strings are
-// dropped. A failed import, handshake or mount — in any order relative to the
+// Locked devices mount too (2.3.4: voice on the bots a locked device can see;
+// `locked: true` tells the add-on to show only what such a device may use).
+// Crossing the lock boundary unmounts every extension (everything it
+// registered on the shell is disposed, its strings dropped) and mounts it
+// again for the new tier. A failed import, handshake or mount — in any order relative to the
 // add-on taking its Settings pane — leaves the shell exactly as it was and
 // the Voice tab showing why (js/voice-absent.js).
 //
@@ -47,6 +49,8 @@ export function createLoader(deps) {
   let mode = null;
   let readError = null;
   let gen = 0;               // bumps on every unmountAll: stale async mounts give up
+  let tier = null;           // what the mounts were made for: null, 'unlocked' or 'locked'
+  const tierNow = () => (deps.isLocked() ? 'locked' : 'unlocked');
   let inflight = null;
   const mounted = new Map();   // id -> { handle, ext }
   const client = new Map();    // id -> { state, detail }
@@ -70,7 +74,7 @@ export function createLoader(deps) {
     changed();
   }
 
-  async function mountOne(ext, myGen) {
+  async function mountOne(ext, myGen, myTier) {
     if (mounted.has(ext.id)) return;
     client.set(ext.id, { state: 'loading', detail: '' });
     changed();
@@ -78,7 +82,7 @@ export function createLoader(deps) {
       if (ext.locales) await bundle(ext, deps.lang());
       await Promise.all((ext.css || []).map((c) => deps.loadStyle(`/ext/${enc(ext.id)}/${c}${q(ext)}`)));
       const mod = await deps.importModule(`/ext/${enc(ext.id)}/${ext.entry}${q(ext)}`);
-      if (myGen !== gen || deps.isLocked()) { deps.removeBundle(ext.id); return; }
+      if (myGen !== gen || tierNow() !== myTier) { deps.removeBundle(ext.id); return; }
       const meta = mod && mod.EXT;
       const api = meta && meta.api;
       if (!meta || meta.id !== ext.id || !Array.isArray(api) || api.length !== 2
@@ -93,8 +97,9 @@ export function createLoader(deps) {
         return;
       }
       if (typeof mod.mount !== 'function') throw new Error('the entry module exports no mount()');
-      const handle = await mod.mount(deps.shellFor(ext.id), { assetsVersion: ext.assets_version || '' });
-      if (myGen !== gen || deps.isLocked()) {
+      const handle = await mod.mount(deps.shellFor(ext.id),
+        { assetsVersion: ext.assets_version || '', locked: myTier === 'locked' });
+      if (myGen !== gen || tierNow() !== myTier) {
         try { handle && handle.unmount && handle.unmount(); } catch { /* best effort */ }
         try { deps.disposeExtension(ext.id); } catch { /* idem */ }
         deps.removeBundle(ext.id);
@@ -109,14 +114,24 @@ export function createLoader(deps) {
     }
   }
 
-  /** Read /api/extensions (unless locked) and mount every `ok` extension not
-   *  mounted yet. `force` reads even when the status count says 0 (the Voice
-   *  tab and "Check again" need the failed/incompatible/disabled states). */
+  /** Read /api/extensions and mount every `ok` extension not mounted yet.
+   *  `force` reads even when the status count says 0 (the Voice tab and
+   *  "Check again" need the failed/incompatible/disabled states). Since 2.3.4
+   *  a locked device mounts too (the server sends it the locked rows) and the
+   *  add-on is told so (`mount(shell, { locked: true })`); a mount made for
+   *  the other tier is unmounted first. */
   async function refresh({ force = false } = {}) {
-    if (deps.isLocked()) return list;
+    const myTier = tierNow();
+    if (tier !== null && tier !== myTier) {
+      unmountAll();                         // bumps gen: an older read gives up
+      const old = inflight;
+      if (old) await old.catch(() => {});
+      if (inflight === old) inflight = null;
+    }
     if (inflight) return inflight;
+    tier = myTier;
     const myGen = gen;
-    inflight = (async () => {
+    const mine = (async () => {
       const count = Number((deps.features() || {}).extensions || 0);
       // No `ok` extension per the status: no request, ever, unless forced (the
       // Voice tab / "Check again"). A list a forced read already holds stays.
@@ -139,12 +154,13 @@ export function createLoader(deps) {
         if (ext && ext.state === 'ok' && ext.entry && !mounted.has(ext.id)) {
           const prev = client.get(ext.id);
           if (prev && (prev.state === 'failed' || prev.state === 'incompatible') && !force) continue;
-          await mountOne(ext, myGen);
+          await mountOne(ext, myGen, myTier);
         }
       }
       return list;
     })();
-    try { return await inflight; } finally { inflight = null; }
+    inflight = mine;
+    try { return await mine; } finally { if (inflight === mine) inflight = null; }
   }
 
   /** Lock / logout: unmount everything, forget the list. */
@@ -159,6 +175,7 @@ export function createLoader(deps) {
     client.clear();
     list = null;
     mode = null;
+    tier = null;
     changed();
   }
 
@@ -183,6 +200,8 @@ export function createLoader(deps) {
                client: new Map(client) };
     },
     isMounted: (id) => mounted.has(id),
+    /** The tier the current mounts were made for: 'unlocked', 'locked' or null. */
+    tier: () => tier,
   };
 }
 

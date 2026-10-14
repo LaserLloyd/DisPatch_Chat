@@ -40,13 +40,13 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
 // how to add it (voice-absent.js).
-import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=2';
+import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=6';
+} from './ext-sdk.js?v=7';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=5';
-import { mountPluginsSettings } from './plugins.js?v=5';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=6';
+import { mountPluginsSettings } from './plugins.js?v=6';
 import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -70,7 +70,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=11';
+import { aboutRow } from './about.js?v=12';
 import { pushRow } from './push.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
@@ -5061,7 +5061,9 @@ function wireFileServer() {
  */
 async function ensureFeatures() {
   const f = state.auth.features;
-  if (f && Object.keys(f).length) return;
+  // The locked inventory is `{extensions: n}` since 2.3.4 — not empty, but
+  // still not the full one (`tools` is in every full inventory).
+  if (f && Object.keys(f).length && 'tools' in f) return;
   try {
     const s = await api.authStatus();
     if (s && s.features && Object.keys(s.features).length) state.auth.features = s.features;
@@ -7372,8 +7374,8 @@ function applyAuthChrome() {
 // the shell's implementation: the slots an add-on may fill, and the Voice
 // tab, which shows the voice add-on's own pane once it is mounted and
 // js/voice-absent.js (what voice chat is, how to add it) until then.
-// Everything here is unlocked-only: a locked device never asks the server
-// and never mounts anything (the server 403s /api/extensions and /ext/ too).
+// A locked device mounts them too (2.3.4), told it is locked: the header slot
+// works, the Settings / Bots-tab / tools slots are no-ops (their routes 403).
 
 /** Bot fields an extension may set from its Bots-tab control (F.5). */
 const EXT_BOT_FIELDS = ['voice', 'voice_rp'];
@@ -7466,15 +7468,23 @@ function extToolStillOn(id) {
   return !row || row.kind !== 'builtin' || (row.enabled === true && row.available !== false);
 }
 
-/** Mount (unlocked) or unmount (locked) every extension. */
+/** Mount every extension for the tier the device is in. Since 2.3.4 a locked
+ *  device mounts them too (voice on the bots it can see): crossing the lock
+ *  boundary tells the unlocked mount it is locked, unmounts it, and mounts
+ *  the add-on again as `locked` — which fills only the chat-header slot (the
+ *  Settings, Bots-tab and tools slots are no-ops while locked). */
 function syncExtensions() {
-  if (state.decoy || !state.started) {
-    if (state.decoy) {
-      emitLocked();
-      extLoader.unmountAll();
-      closeExtToolView();
-    }
-    renderVoicePane();
+  if (state.decoy && extLoader.tier() === 'unlocked') {
+    emitLocked();
+    extLoader.unmountAll();
+    closeExtToolView();
+  }
+  if (!state.started) { renderVoicePane(); return; }
+  if (state.decoy) {
+    // The boot status carries the locked inventory ({extensions: n}); a lock
+    // that came after an unlocked boot still holds the full one, whose count
+    // is the same number — either way the loader knows whether to ask.
+    extLoader.refresh().catch(() => {}).finally(renderVoicePane);
     return;
   }
   extLoader.refresh().catch(() => {});
@@ -7544,6 +7554,9 @@ function addHeaderAction(owner, node, { before = 'thread-menu-btn' } = {}) {
 }
 
 function extSettingsPane(owner, id, spec = {}) {
+  // Settings change server state: unlocked only. A locked mount's claim is a
+  // quiet no-op (it gets a disposer like any other), never a throw.
+  if (state.decoy) return () => {};
   const host = paneHost(id);
   // Not a pre-declared pane: the shell makes the tab (docs/extensions.md,
   // "Settings panes"). A core tab id, or a malformed one, throws. So does a
@@ -7558,7 +7571,7 @@ function extSettingsPane(owner, id, spec = {}) {
 }
 
 function botRowExtra(owner, fn) {
-  if (typeof fn !== 'function') return () => {};
+  if (typeof fn !== 'function' || state.decoy) return () => {};
   const entry = { owner, fn };
   botRowExtras.push(entry);
   if (settingsOpen('bots')) renderBotManager();
@@ -7570,7 +7583,9 @@ function botRowExtra(owner, fn) {
 }
 
 function botRowExtrasFor(bot, onChange) {
-  if (!bot || bot.safe) return [];
+  // Every bot, `safe` ones included (2.3.4): their voice is set here too, and
+  // it works on locked devices as well. The Bots tab itself is unlocked-only.
+  if (!bot) return [];
   const out = [];
   for (const { fn } of botRowExtras) {
     try {
@@ -7582,6 +7597,7 @@ function botRowExtrasFor(bot, onChange) {
 }
 
 function registerTools(owner, tiles) {
+  if (state.decoy) return () => {};
   const dispose = registerExtTiles(owner, tiles);
   const ids = (Array.isArray(tiles) ? tiles : []).map((x) => x.id);
   ids.forEach((id) => extTileIds.add(id));

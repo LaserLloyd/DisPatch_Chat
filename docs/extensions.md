@@ -47,7 +47,10 @@ Voice chat lets you talk to a thread hands-free: DisPatch listens, works out
 when you have finished, sends what you said like a typed message and speaks
 the bot's reply back sentence by sentence. Everything runs on the server's
 CPU; nothing you say leaves the machine. It understands and speaks English
-only for now. Unlocked tier only — a locked (Safe Mode) device never gets it.
+only for now. Since 2.3.4 it works on a locked (Safe Mode) device too, on the
+bots that device can chat with (the `safe` ones), and every turn it sends runs
+with the same locked rules as a typed Safe-Mode message. Voice settings stay
+unlocked-only.
 
 **Settings → Voice** tells you which state you are in. Without the add-on it
 explains what voice chat is and shows the commands below, ready to copy, with
@@ -290,8 +293,8 @@ websocket route, `Mount` or plain Starlette `Route` is refused (`ValueError` →
 them. Static files go through `serve_static`.
 
 **Static files** — `serve_static(directory, entry, css, locales)` serves
-`/ext/<id>/<path>`: operator only (a locked device gets the decoy 403 and
-never downloads a byte), only `js mjs css json map wasm onnx wav mp3 ogg png
+`/ext/<id>/<path>`: GET/HEAD for an unlocked session and, since 2.3.4, a
+locked device (it mounts the frontend too); never a machine caller; only `js mjs css json map wasm onnx wav mp3 ogg png
 jpg webp woff2` (anything else — HTML, SVG and XML documents in particular —
 is a 404: an extension renders into the shell's DOM and never ships a page),
 `X-Content-Type-Options: nosniff`, a deny-all CSP, a strong ETag, `no-cache`
@@ -304,8 +307,10 @@ with it). DisPatch runs the gate, then calls `handler(ws, sock)` with the
 socket **not yet accepted**:
 
 1. a present `Origin` must equal `Host` — else **1008** before accept;
-2. with a PIN, a live unlocked `lc_session` — else **1008** before accept;
-3. the thread exists and its bot is not a Safe-Mode bot — else **1008** before accept;
+2. the tier, decided like the main `/ws`: with a PIN, a live unlocked
+   `lc_session`, else a **locked** device;
+3. the thread exists and, for a locked device, its bot is `safe` (the threads
+   a locked device can see) — else **1008** before accept;
 4. at most `max_total` open sockets under the name — beyond it
    accept-then-**1013** "Voice is busy on this server (3 chats open)" (a
    session that already holds one is never "busy": its oldest is replaced;
@@ -317,10 +322,16 @@ socket **not yet accepted**:
    itself runs in the background, so a half-open phone that never answers the
    close frame does not hold up its own reconnect.
 
-`sock` is a `ThreadSocket {thread, bot (a BotView; since 2.3.1 it may be a `safe` bot — the socket is unlocked-only regardless), token,
-session_live(), touch(), close_unavailable(reason), on_replaced(fn)}`.
-`session_live()` turns false when the session lapses, a PIN appears on a
-PIN-less install, the thread is deleted or its bot becomes a Safe-Mode bot —
+`sock` is a `ThreadSocket {thread, bot (a BotView), token, session_live(),
+touch(), close_unavailable(reason), on_replaced(fn), locked}`. `locked` (2.3.4)
+says the socket came from a locked device (`token` is None): every turn the
+host takes for that thread — `submit_turn` while the socket is open and for
+two minutes after it closed — runs with `TurnOptions(locked=True)` exactly
+like a typed Safe-Mode send, and `speculate_turn` answers None there (a
+speculation is built unlocked). The extension never has to pass it; it reads
+it only to show less. `session_live()` turns false when the session lapses, a
+PIN appears on a PIN-less install, the thread is deleted, the bot is removed,
+or (for a locked socket) the bot stops being `safe` —
 re-check it (≤ 1/s) and close 1008 when it does. `close_unavailable(reason)`
 is accept-then-1013 with your reason (≤ 120 characters). A handler that returns
 without accepting is answered accept-then-1013 "extension did not accept" (and
@@ -393,6 +404,12 @@ may only keep the stored value or clear it.
 **Lifecycle** — `on_startup(fn, thread=False)` (a coroutine is awaited;
 `thread=True` runs it on a daemon thread, never awaited), `on_shutdown(fn)`.
 A raising hook is logged, never fatal.
+
+**Locked status** (2.3.4) — `locked_status(fn)`: what a locked device may
+read about you, e.g. `{"enabled": True, "ready": True}` for voice. Called per
+`GET /api/extensions` from a locked device and served in your row as
+`locked_status`, cut to at most 16 flat scalars (bool, number, None, a string
+≤ 80 characters); a raising `fn` is `None`. Never put a secret in it.
 
 > **The trailer is in-band.** A gateway agent reads the voice note as part of
 > the user's message — there is no separate system slot on that path — so an
@@ -505,8 +522,11 @@ prompt stops mentioning them, and it takes effect on the next turn.
 
 ## Writing an extension: the frontend
 
-When an unlocked session starts (and `features.extensions > 0`) the shell
-reads `/api/extensions` and, for each `ok` extension:
+When a session starts (and `features.extensions > 0`) the shell reads
+`/api/extensions` and, for each `ok` extension — on a locked device too since
+2.3.4, which then gets `mount(shell, {assetsVersion, locked: true})` and
+whose Settings, Bots-tab and tools slots are no-ops; crossing the lock
+boundary unmounts and mounts again:
 
 1. merges its locale bundle (`/ext/<id>/locales/<lang>.json` and `en.json`)
    under the shell's strings — it can never override a shell key; a missing
@@ -605,13 +625,14 @@ to `settings.pane`. The service worker never caches `/ext/`.
 
 Every gate stays in DisPatch; an extension only ever receives what passed it.
 
-- Unlocked tier only: Safe Mode gets 403 on `/api/extensions`, `/ext/*` and
-  every extension route, 1008 before accept on its websockets, no
-  `features.extensions`, and the shell never mounts anything.
-- Websockets: Origin==Host, a live unlocked session and an existing thread are
-  checked inline before `accept` (HTTP middleware never sees a websocket). A
-  `safe` bot's thread is allowed since 2.3.1: the tier is the device's, not the
-  bot's.
+- Locked devices (2.3.4): Safe Mode reads `/api/extensions` (the mount rows
+  and each one's `locked_status`, nothing else) and `/ext/*` (GET/HEAD), gets
+  `features.extensions` only, and mounts the frontend told it is locked.
+  Every extension ROUTE stays operator-only (403). Its websockets are open to
+  it on a `safe` bot's thread only, and every turn from there runs locked.
+- Websockets: Origin==Host, the tier and an existing thread (a `safe` bot's
+  for a locked device) are checked inline before `accept` (HTTP middleware
+  never sees a websocket).
 - HTTP: the operator dependency on every route, the Safe-Mode block list, never
   the machine-inbound surface, body ceilings before the body is read.
 - Static: an asset-type allowlist, no documents, `nosniff`, a deny-all CSP.

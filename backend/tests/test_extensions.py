@@ -278,13 +278,17 @@ def test_api_extensions_detail_scrubs_home_and_caps(ext_env, monkeypatch):
     assert len(row["detail"]) <= 200
 
 
-def test_api_extensions_safe_mode_403_and_machine_without_detail(ext_env):
+def test_api_extensions_safe_mode_and_machine_without_detail(ext_env):
     c, _ = ext_env
     install()
     lock(c)
-    # A browser with no session (Safe Mode): the uniform decoy 403.
+    # A browser with no session (Safe Mode, 2.3.4): the list without detail,
+    # plus each extension's locked status (voice works on locked devices too).
     r = c.get("/api/extensions", headers={"sec-fetch-mode": "cors", "origin": "http://testserver"})
-    assert r.status_code == 403
+    assert r.status_code == 200, r.text
+    row = r.json()["extensions"][0]
+    assert row["id"] == "voice" and row["entry"] == "index.js" and "detail" not in row
+    assert row["locked_status"] is None
     # A sessionless on-box machine (TestClient is not loopback, so it presents
     # the api token the way a remote agent would).
     cfg = auth.load()
@@ -296,7 +300,11 @@ def test_api_extensions_safe_mode_403_and_machine_without_detail(ext_env):
     assert "detail" not in r.json()["extensions"][0]
     # …but a machine never reaches an extension's own routes.
     assert c.get("/api/voice/status", headers={"x-api-key": "tok-ext-123"}).status_code == 403
-    assert c.get("/api/extensions", headers={"x-api-key": "wrong"}).status_code == 401
+    # A wrong key degrades to the locked view (a plain-http locked tab sends no
+    # Sec-Fetch-*, so it looks exactly like this), never the machine one.
+    r = c.get("/api/extensions", headers={"x-api-key": "wrong"})
+    assert r.status_code == 200 and "tools" not in r.json()["extensions"][0]
+    assert "locked_status" in r.json()["extensions"][0]
 
 
 def test_api_extensions_operator_gets_detail(ext_env):
@@ -313,7 +321,8 @@ def test_auth_status_counts_ok_extensions(ext_env):
     install()
     assert c.get("/api/auth/status").json()["features"]["extensions"] == 1
     lock(c)
-    assert "extensions" not in (c.get("/api/auth/status").json().get("features") or {})
+    # A locked device mounts extensions too (2.3.4) — and learns nothing else.
+    assert c.get("/api/auth/status").json()["features"] == {"extensions": 1}
 
 
 # --------------------------------------------------------------------------- #
@@ -370,12 +379,15 @@ def test_ext_static_unknown_or_unhealthy_extension_404(ext_env):
     assert c.get("/ext/voice/index.js").status_code == 404
 
 
-def test_ext_static_locked_device_403(ext_env):
+def test_ext_static_reaches_a_locked_device(ext_env):
+    """2.3.4: a locked device mounts the add-on (voice on the bots it can
+    see), so it downloads the add-on's public code — never its routes."""
     c, _ = ext_env
     install()
     lock(c)
-    r = c.get("/ext/voice/index.js")
-    assert r.status_code == 403 and "index.js" not in r.text
+    assert c.get("/ext/voice/index.js").status_code == 200
+    assert c.get("/ext/voice/voices.html").status_code == 404
+    assert c.get("/api/voice/status").status_code == 403
     unlock(c)
     assert c.get("/ext/voice/index.js").status_code == 200
 
@@ -404,8 +416,10 @@ def test_extension_routes_are_operator_only(ext_env):
     lock(c)
     assert c.get("/api/voice/status").status_code == 403
     assert main._decoy_blocked("GET", "/api/voice/status")
-    assert main._decoy_blocked("GET", "/api/extensions")
-    assert main._decoy_blocked("GET", "/ext/voice/index.js")
+    assert not main._decoy_blocked("GET", "/api/extensions")
+    assert not main._decoy_blocked("GET", "/ext/voice/index.js")
+    assert main._decoy_blocked("POST", "/api/extensions")
+    assert main._decoy_blocked("POST", "/ext/voice/index.js")
     assert not main._is_inbound("GET", "/api/voice/status")
     assert main._is_inbound("GET", "/api/extensions")
     unlock(c)
@@ -748,3 +762,26 @@ def test_the_test_suite_never_writes_a_boot_marker(ext_env, monkeypatch):
     extensions._write_boot_marker(5)
     assert not (Path(config.DATA_DIR) / "ext" / ".booting").exists()
     assert extensions.boot_fails() == 0
+
+
+def test_locked_status_is_what_the_extension_says_scalars_only(ext_env):
+    c, _ = ext_env
+    from _extfake import KNOBS
+    KNOBS.locked_status = lambda: {"enabled": True, "ready": False, "name": "x" * 500,
+                                   "nested": {"rig": "ws://secret"}, 3: "bad key"}
+    install()
+    lock(c)
+    row = c.get("/api/extensions").json()["extensions"][0]
+    assert row["locked_status"] == {"enabled": True, "ready": False, "name": "x" * 80}
+
+
+def test_a_raising_locked_status_is_none(ext_env):
+    c, _ = ext_env
+    from _extfake import KNOBS
+
+    def boom():
+        raise RuntimeError("no")
+    KNOBS.locked_status = boom
+    install()
+    lock(c)
+    assert c.get("/api/extensions").json()["extensions"][0]["locked_status"] is None

@@ -125,12 +125,17 @@ def test_the_running_app_serves_with_voice_absent(ext_env):
         with c.websocket_connect(f"/ws/voice/{tid}", headers={"origin": "http://testserver"}) as ws:
             ws.receive_text()
     assert e.value.code == 1013 and e.value.reason == "No extension provides voice"
-    # Safe Mode is refused before any of that.
+    # Safe Mode (2.3.4) reads the same empty list; a locked device on a
+    # non-safe bot's thread is refused before any of that.
     lock(c)
     browser = {"sec-fetch-mode": "cors", "origin": "http://testserver"}
-    assert c.get("/api/extensions", headers=browser).status_code == 403
-    assert c.get("/api/extensions").status_code == 401     # a keyless remote machine
-    assert c.get("/ext/voice/index.js").status_code == 403
+    assert c.get("/api/extensions", headers=browser).json()["extensions"] == []
+    assert c.get("/api/extensions").json()["extensions"] == []   # keyless remote = locked view
+    assert c.get("/ext/voice/index.js").status_code == 404
+    with pytest.raises(WebSocketDisconnect) as e:
+        with c.websocket_connect(f"/ws/voice/{tid}", headers={"origin": "http://testserver"}) as ws:
+            ws.receive_text()
+    assert e.value.code == 1008
     unlock(c)
 
 
@@ -152,4 +157,4 @@ def test_the_shipped_bots_need_nothing_from_voice(ext_env):
     assert all(b["voice"] == "" and b["voice_rp"] == "" for b in bots)
     items = [{"id": b["id"], "order": i, "voice": ""} for i, b in enumerate(bots)]
     assert c.put("/api/bots/order", json={"bots": items}).status_code == 200
-    assert main.app.version == "2.3.3"
+    assert main.app.version == "2.3.4"

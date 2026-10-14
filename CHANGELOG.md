@@ -7,6 +7,28 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.4] — 2026-10-14
+
+### Changed
+
+- **Voice chat works on locked devices too**, on the bots a locked device can
+  already chat with (the `safe` ones). Every turn it sends, spoken or typed on
+  the call screen, runs exactly like a typed Safe-Mode message: no agent
+  hand-offs, only the bot's `tools_locked` lookups, the locked rules in the
+  prompt. Voice settings (Settings → Voice, the Bots-tab Voice pill, the voice
+  tools) stay unlocked-only, as does every `/api/voice` route. Needs DisPatch
+  Voice 1.3.3. For add-on authors: a locked device now reads
+  `GET /api/extensions` (mount rows plus each add-on's new `locked_status`) and
+  `/ext/<id>/`, mounts the frontend with `locked: true`, and a thread websocket
+  from it carries `sock.locked`; the host marks every turn for that thread
+  locked itself and refuses speculative starts there.
+- The Bots-tab row control an add-on registers now shows on `safe` bots too
+  (the docs said so since 2.3.1).
+
+### Fixed
+
+- The reaction fire rate limiter keys the actor case- and space-blind.
+
 ## [2.3.3] — 2026-10-14
 
 ### Fixed

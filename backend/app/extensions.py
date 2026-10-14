@@ -146,6 +146,12 @@ FRAME_QUEUE_MAX = 256
 #: replayed to every voice chat for the rest of the process).
 STREAM_STALE_S = 15 * 60
 STREAM_TEXT_MAX = 64 * 1024
+#: ``ctx.locked_status``: what a locked device may read about an extension.
+LOCKED_STATUS_KEYS = 16
+LOCKED_STATUS_STR = 80
+#: A thread stays "locked" this long after its last locked extension socket
+#: closed: a spoken turn committed on hang-up still runs locked (fail closed).
+LOCKED_GRACE_S = 120.0
 
 
 # --------------------------------------------------------------------------- #
@@ -233,6 +239,11 @@ class ThreadSocket:
     #: half-open client never answers the close frame, so the extension's
     #: receive loop may not wake on its own.
     on_replaced: Callable[[Callable[[], Any]], None] = lambda fn: None
+    #: Additive (2.3.4): the socket came from a LOCKED (Safe-Mode) device — a
+    #: `safe` bot's thread, ``token`` None. The host stamps every turn submitted
+    #: for its thread ``locked`` itself (:func:`turn_locked`); an extension
+    #: reads this only to show less (no settings, nothing that writes).
+    locked: bool = False
 
 
 def bot_backend_of(bot) -> Backend | None:
@@ -350,6 +361,7 @@ class Extension:
     validators: dict[str, Callable[[str], None]] = field(default_factory=dict)
     startup: list[tuple[Callable[[], Any], bool]] = field(default_factory=list)
     shutdown: list[Callable[[], Any]] = field(default_factory=list)
+    locked_status: Callable[[], Any] | None = None
     ctx: ExtensionContext | None = None
     _assets: tuple[tuple, str] | None = None
 
@@ -393,6 +405,42 @@ class Extension:
         if operator:
             d["detail"] = scrub_detail(self.detail)
         return d
+
+    def locked_public(self) -> dict:
+        """The row a LOCKED device gets (2.3.4): what the loader needs to mount
+        the frontend, plus the extension's own ``locked_status`` — never a
+        detail, a tools list or anything an operator page shows."""
+        d = self.public(operator=False)
+        d.pop("tools", None)
+        d.pop("live_tools", None)
+        d["locked_status"] = self.read_locked_status() if self.ok else None
+        return d
+
+    def read_locked_status(self) -> dict | None:
+        """``ctx.locked_status(fn)``'s answer, cut to flat scalars (bool, int,
+        float, a string ≤ LOCKED_STATUS_STR chars) under string keys, at most
+        LOCKED_STATUS_KEYS of them. None when unset or when it raises."""
+        fn = self.locked_status
+        if fn is None:
+            return None
+        try:
+            raw = fn()
+        except Exception:
+            log.exception("ext %s: locked_status failed", self.id)
+            return None
+        if not isinstance(raw, Mapping):
+            return None
+        out: dict = {}
+        for k, v in raw.items():
+            if len(out) >= LOCKED_STATUS_KEYS or not isinstance(k, str) or len(k) > 40:
+                continue
+            if isinstance(v, bool) or v is None:
+                out[k] = v
+            elif isinstance(v, (int, float)):
+                out[k] = v
+            elif isinstance(v, str):
+                out[k] = v[:LOCKED_STATUS_STR]
+        return out
 
 
 _all: list[Extension] = []
@@ -664,6 +712,16 @@ class ExtensionContext:
     def on_startup(self, fn: Callable[[], Any], *, thread: bool = False) -> None:
         self._check_open("on_startup")
         self._ext.startup.append((fn, bool(thread)))
+
+    def locked_status(self, fn: Callable[[], Mapping[str, Any]]) -> None:
+        """Additive (2.3.4): what a LOCKED device may read about this
+        extension, served in its ``GET /api/extensions`` row as
+        ``locked_status`` (flat scalars only, see Extension.read_locked_status).
+        Called per request, so keep it cheap; never put a secret in it."""
+        self._check_open("locked_status")
+        if not callable(fn):
+            raise ValueError("locked_status needs a callable")
+        self._ext.locked_status = fn
 
     def on_shutdown(self, fn: Callable[[], Any]) -> None:
         self._check_open("on_shutdown")
@@ -1461,18 +1519,55 @@ async def _accept_then_close(ws, code: int, reason: str) -> None:
         await ws.close(code=code, reason=(reason or "unavailable")[:120])
 
 
-def _session_live_fn(token: str | None, thread_id: str, bot_id: str) -> Callable[[], bool]:
+def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
+                     locked: bool = False) -> Callable[[], bool]:
     def session_live() -> bool:
         if thread_id in _deleted_threads:
             return False
         bot = config.get_bot(bot_id)
         if bot is None:
             return False
+        if locked:
+            # A locked device may stay as long as it could still see the
+            # thread: the bot is still `safe`.
+            return bool(bot.safe)
         cfg = auth.load()
         if token is None:
             return not cfg.pin_set          # opened with no PIN; a PIN since = locked
         return auth.get_session(token) is not None
     return session_live
+
+
+#: thread id -> [open locked extension sockets, monotonic time the last closed].
+_locked_threads: dict[str, list[float]] = {}
+
+
+def _locked_open(thread_id: str) -> None:
+    row = _locked_threads.setdefault(thread_id, [0, 0.0])
+    row[0] += 1
+
+
+def _locked_closed(thread_id: str) -> None:
+    row = _locked_threads.get(thread_id)
+    if row is None:
+        return
+    row[0] = max(0, row[0] - 1)
+    row[1] = time.monotonic()
+
+
+def turn_locked(thread_id: str) -> bool:
+    """Must an extension turn on this thread run locked? True while a locked
+    device's extension socket is open on it, and for LOCKED_GRACE_S after the
+    last one closed (a turn committed on hang-up). Fail closed: an unlocked
+    device's voice turn on the same thread in that window runs locked too —
+    the restricted answer, never the reverse."""
+    row = _locked_threads.get(thread_id)
+    if row is None:
+        return False
+    if row[0] > 0 or time.monotonic() - row[1] < LOCKED_GRACE_S:
+        return True
+    _locked_threads.pop(thread_id, None)
+    return False
 
 
 router = APIRouter()
@@ -1484,24 +1579,27 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     if not origin_ok(ws.headers):
         await ws.close(code=POLICY)
         return
-    # 2. A live unlocked session when a PIN is set (pre-accept).
+    # 2. The tier, as the main /ws decides it: a live unlocked session when a
+    # PIN is set, else a LOCKED (Safe-Mode) device (pre-accept).
     cfg = auth.load()
     token = None
+    locked = False
     if cfg.pin_set:
         session = auth.get_session(ws.cookies.get(_hooks.cookie_name))
         if session is None:
-            await ws.close(code=POLICY)
-            return
-        token = session.token
-    # 3. The thread exists (pre-accept). Since 2.3.1 a `safe` bot's thread is
-    # allowed: an extension socket is unlocked-only by step 2 (the DEVICE holds
-    # the PIN), and that is the tier that matters — the bot's Safe-Mode flag only
-    # says locked devices may chat with it too (the owner: "allow voice on
-    # locked bots").
+            locked = True
+        else:
+            token = session.token
+    # 3. The thread exists, and a locked device can see it: only a `safe`
+    # bot's threads, the same rule its chat list follows (pre-accept, the same
+    # 1008 as an unknown thread). Since 2.3.4 a locked device may use voice on
+    # them (the owner: "if it's enabled it also works in safe mode"); its turns
+    # run locked like a typed Safe-Mode send (turn_locked).
     db = _hooks.db()
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
-    if thread is None or bot is None or thread_id in _deleted_threads:
+    if (thread is None or bot is None or thread_id in _deleted_threads
+            or (locked and not bot.safe)):
         await ws.close(code=POLICY)
         return
     # Rule 9: nothing claims this name — the gate ran, so say why with a real
@@ -1541,10 +1639,12 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
 
     sock = ThreadSocket(
         thread=thread, bot=bot_view(bot), token=token,
-        session_live=_session_live_fn(token, thread_id, bot.id),
+        session_live=_session_live_fn(token, thread_id, bot.id, locked),
         touch=touch,
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
-        on_replaced=me.replaced.append)
+        on_replaced=me.replaced.append, locked=locked)
+    if locked:
+        _locked_open(thread_id)
     try:
         # Inside the try: a handshake cancelled mid-eviction (shutdown) still
         # gives its slot back in the finally below.
@@ -1566,6 +1666,8 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
                 else:
                     await ws.close(code=INTERNAL)
     finally:
+        if locked:
+            _locked_closed(thread_id)
         cur = _slots.get((name, key))
         if cur is not None and me in cur:
             cur.remove(me)
@@ -1581,9 +1683,10 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
 @router.get("/api/extensions")
 def api_extensions(request: Request):
     """Operator, or an authenticated on-box machine (the deploy check reads it
-    with a plain loopback curl). Never Safe Mode; ``detail`` operators only."""
+    with a plain loopback curl); ``detail`` operators only. A locked device
+    (2.3.4) gets the mount rows and each one's ``locked_status`` only."""
     if getattr(request.state, "decoy", False):
-        return JSONResponse(DECOY_BODY, status_code=403)
+        return {"extensions": [e.locked_public() for e in _all if e.ok], "api": EXT_API}
     operator = tools._is_operator(request)
     if not operator and not getattr(request.state, "machine", False):
         return JSONResponse(DECOY_BODY, status_code=403)
@@ -1607,8 +1710,9 @@ def _etag(p: Path, st: os.stat_result) -> str:
 
 @router.api_route("/ext/{ext_id}/{rel:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def ext_static(request: Request, ext_id: str, rel: str):
-    if getattr(request.state, "decoy", False) or not tools._is_operator(request):
-        # A locked device never downloads a byte of extension code.
+    if not getattr(request.state, "decoy", False) and not tools._is_operator(request):
+        # A locked device downloads the add-on's public frontend since 2.3.4
+        # (voice on the bots it can see); a machine caller never does.
         return JSONResponse(DECOY_BODY, status_code=403)
     ext = get(ext_id)
     if ext is None or ext.static_dir is None:
