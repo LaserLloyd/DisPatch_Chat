@@ -1901,6 +1901,10 @@ def _is_inbound(method: str, path: str) -> bool:
         return True
     if (method, path) in _INBOUND_REACTION:
         return True
+    if method == "POST" and path == "/api/guide/seed":
+        # 2.3.7: an install script adds the setup guide. Fixed shipped text;
+        # the handler refuses `force` without a session.
+        return True
     if (method, path) in (("GET", "/api/advisor/status"),
                           ("POST", "/api/advisor/digest")):
         # The nightly digest is a cron job on the box; status is what an
@@ -13805,10 +13809,20 @@ async def plugins_catalog():
     return {"entries": rows, "guides": sorted(firstrun.GUIDES)}
 
 
-@app.post("/api/guide/seed", dependencies=[Depends(_require_operator)])
-async def guide_seed(name: str, force: bool = False):
+@app.post("/api/guide/seed")
+async def guide_seed(request: Request, name: str, force: bool = False):
     """Post one setup-guide thread on Atlas now (existing installs never
-    auto-seed). 404 unknown guide / no Atlas; 409 already posted."""
+    auto-seed). 404 unknown guide / no Atlas; 409 already posted.
+
+    The operator, or an on-box process over loopback (an install script or the
+    operator's own shell): the thread it writes is fixed text shipped with the
+    app, so the machine surface can add a guide but never choose its content.
+    `force` stays operator-only."""
+    machine = _on_box_machine(request)
+    if not machine:
+        _require_operator(request)
+    elif force:
+        raise HTTPException(403, "force needs an unlocked session")
     if name not in firstrun.GUIDES:
         raise HTTPException(404, "Unknown guide")
     try:

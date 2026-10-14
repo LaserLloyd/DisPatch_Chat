@@ -237,8 +237,7 @@ def test_routes_are_operator_only(env):
     for method, path in [("get", "/api/llm/image"), ("put", "/api/llm/image"),
                          ("post", "/api/llm/image/test"),
                          ("post", "/api/llm/quicksetup"),
-                         ("get", "/api/plugins/catalog"),
-                         ("post", "/api/guide/seed?name=set-up-add-ons")]:
+                         ("get", "/api/plugins/catalog")]:
         kw = {"json": {}} if method in ("put", "post") else {}
         assert getattr(c, method)(path, **kw).status_code in (401, 403), path
     assert main._decoy_blocked("POST", "/api/guide/seed")
@@ -345,3 +344,18 @@ def test_health_shows_the_api_provider_without_secrets(env):
     body = c.get("/api/health").text
     assert "mm-secret" not in body
     assert '"image_api"' in body
+
+
+def test_an_on_box_process_may_post_a_guide_but_not_force_one(env, monkeypatch):
+    """2.3.7: an install script on the box can add the setup guide to a locked
+    install over loopback; choosing `force` (a duplicate) needs a session."""
+    from app import auth, firstrun
+    monkeypatch.setattr(firstrun, "BOT_ID", "Atlas")      # the suite's roster
+    monkeypatch.setenv("DISPATCH_FIRSTRUN", "0")          # an existing install
+    auth.set_pin("4321")
+    c = env()                                    # loopback, no cookie
+    assert c.post("/api/guide/seed?name=set-up-add-ons").status_code == 200
+    assert c.post("/api/guide/seed?name=set-up-add-ons").status_code == 409
+    assert c.post("/api/guide/seed?name=set-up-add-ons&force=true").status_code == 403
+    remote = env(client_addr=("192.0.2.9", 50000))
+    assert remote.post("/api/guide/seed?name=set-up-add-ons").status_code in (401, 403)
