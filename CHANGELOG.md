@@ -7,6 +7,26 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-10-14
+
+A review pass over 2.3.0/2.3.1.
+
+### Fixed
+
+- The AI models panel's **system prompt** now reaches a direct-API bot
+  (`advisor.persona`); a blank field never clears a saved one.
+- **Lookups on/off keeps a hand-picked list**: switching a bot's lookups off and
+  on again restores the list it had (`advisor.tools_picked`).
+- **Test connection** re-tests a connected bot without re-typing its key, and
+  only credential-shaped environment names are ever read for a probe.
+- Safe-Mode turns: the locked prompt no longer tells the model to answer from
+  its own knowledge ahead of the lookups it has.
+- Agent ids no longer accept a dot; Settings → Plugins shows the restart hint
+  exactly when the server says a restart is pending; an add-in asking for a
+  Settings tab before the host exists gets a clear error.
+- Docs: the locked-tools default and the add-on tools rule read as the code
+  behaves; README names the current release.
+
 ## [2.3.1] — 2026-10-14
 
 ### Changed

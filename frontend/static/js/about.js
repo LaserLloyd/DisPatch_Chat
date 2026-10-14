@@ -31,7 +31,7 @@ export const VOICE_REPO_URL = 'https://github.com/LaserLloyd/DisPatch_Voice';
  *  is admin-only by design. frontend/tests/about.test.js fails if the two
  *  numbers drift.
  */
-export const APP_VERSION = '2.3.1';
+export const APP_VERSION = '2.3.2';
 
 /** Build the About row for the Device pane.
  *
