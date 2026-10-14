@@ -216,21 +216,29 @@ class Resolved:
     key_source: str            # "stored" | "env" | "shared" | ""
 
 
-def _host(url: str) -> str:
+def _origin(url: str) -> tuple[str, str, int | None] | None:
+    """(scheme, host, port) -- the tuple a borrowed key is scoped to, the
+    same one llm_api scopes a chat credential to on redirects. None for a
+    URL with no host (nothing can match it)."""
     try:
-        return (urlparse(url).hostname or "").lower()
-    except ValueError:
-        return ""
+        scheme, host, port = llm_api._origin_of(url)
+    except (ValueError, TypeError):
+        return None
+    if scheme not in ("http", "https") or not host:
+        return None
+    return scheme, host, port
 
 
 def shared_chat_key(base_url: str) -> str:
-    """The key of a chat connection to the same host, or "".
+    """The key of a chat connection to the same origin, or "".
 
-    "Same host" is the whole rule: a key is only ever sent where its owner
-    already sends it. Direct-API bots (advisor.providers) and legacy api: bots
-    both count."""
-    host = _host(base_url)
-    if not host:
+    "Same origin" -- scheme, host AND port -- is the whole rule: a key is only
+    ever sent where its owner already sends it. Matching the hostname alone
+    let `http://api.minimax.io/v1` (plaintext) or `https://api.minimax.io:8443`
+    borrow the MiniMax chat key. Direct-API bots (advisor.providers) and
+    legacy api: bots both count."""
+    want = _origin(base_url)
+    if want is None:
         return ""
     for bot in config.load_bots():
         entries = [p for p in ((bot.advisor or {}).get("providers") or [])
@@ -240,7 +248,7 @@ def shared_chat_key(base_url: str) -> str:
         for e in entries:
             prov = llm_api.PROVIDER_BY_ID.get(str(e.get("provider") or ""))
             url = str(e.get("base_url") or "") or (prov.base_url if prov else "")
-            if _host(url) == host:
+            if _origin(url) == want:
                 key = llm_api.resolve_key(e)
                 if key:
                     return key
@@ -307,19 +315,27 @@ def merge_submission(payload: dict, stored: dict | None = None) -> dict:
            or (stored.get("api_key", "") if same else ""),
            "api_key_env": str(payload.get("api_key_env") or "").strip()}
     if cfg["api_key_env"] and not env_name_ok(cfg["api_key_env"]):
-        raise ValueError("api_key_env must be an environment variable name "
-                         "such as MINIMAX_API_KEY")
+        raise ValueError("api_key_env must be the name of a credential variable "
+                         "such as MINIMAX_API_KEY (ending in _KEY, _TOKEN, "
+                         "_SECRET, _PASSWORD or _CREDENTIALS)")
     if pid not in PRESET_BY_ID:
         cfg.update(base_url="", model="", api_key="", api_key_env="")
     return cfg
 
 
 def env_name_ok(name: str) -> bool:
-    """A credential-shaped variable name, never one of DisPatch's own."""
-    return bool(_ENV_NAME_RE.fullmatch(name)) and not name.startswith("DISPATCH_")
+    """A credential-shaped variable name, never one of DisPatch's own.
+
+    The value of the named variable is sent as a bearer token to whatever
+    base URL the form names, so only a name that plausibly holds a credential
+    is accepted (the same suffix rule the chat Test applies): `MINIMAX_API_KEY`
+    yes, `PATH` or `HOME` no."""
+    return (bool(_ENV_NAME_RE.fullmatch(name)) and not name.startswith("DISPATCH_")
+            and bool(_CREDENTIAL_SUFFIX_RE.search(name)))
 
 
 _ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{2,63}")
+_CREDENTIAL_SUFFIX_RE = re.compile(r"(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIALS?)$")
 
 
 # --------------------------------------------------------------------------- #

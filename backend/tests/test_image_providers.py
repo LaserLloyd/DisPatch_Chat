@@ -230,6 +230,54 @@ def test_a_chat_key_for_the_same_host_is_shared(env):
         image_providers.resolve()
 
 
+@pytest.mark.parametrize("base_url", [
+    "http://api.minimax.io/v1",            # plaintext: a different origin
+    "https://api.minimax.io:8443/v1",      # another port
+    "https://api.minimax.io.evil.example/v1",
+    "https://evil.example/v1",
+    "https://api.minimax.io@evil.example/v1",   # scrub-ok: a userinfo URL, not an email
+])
+def test_a_chat_key_is_borrowed_for_the_same_origin_only(env, base_url):
+    """Scheme, host AND port must match: hostname alone let a custom base URL
+    on another port, or plain http, carry the MiniMax chat key (review
+    2026-10-15). The key must never travel to anywhere its owner did not
+    already send it."""
+    bots = config.load_bots()
+    atlas = next(b for b in bots if b.id == "Atlas")
+    config.upsert_bot(replace(atlas, advisor={"providers": [
+        {"provider": "minimax", "base_url": "https://api.minimax.io/v1",
+         "model": "MiniMax-M3", "api_key": "chat-key"}]}))
+    assert image_providers.shared_chat_key("https://api.minimax.io/v1") == "chat-key"
+    assert image_providers.shared_chat_key("https://api.minimax.io:443/v1") == "chat-key"
+    assert image_providers.shared_chat_key("HTTPS://API.MINIMAX.IO/v1") == "chat-key"
+    assert image_providers.shared_chat_key(base_url) == ""
+    # The custom preset needs no key of its own, so it must go out keyless.
+    res = image_providers.resolve({"provider": "custom", "base_url": base_url,
+                                   "model": "m", "api_key": "", "api_key_env": ""})
+    assert (res.api_key, res.key_source) == ("", "")
+
+
+def test_the_env_name_must_look_like_a_credential(env, monkeypatch):
+    """The named variable's value is sent as a bearer token to the base URL the
+    form names, so PATH / HOME / USER are refused, the same as the chat
+    Test's rule (main._CREDENTIAL_SUFFIX_RE)."""
+    for ok in ("MINIMAX_API_KEY", "MY_TOKEN", "X_SECRET", "DB_PASSWORD", "A_CREDENTIALS"):
+        assert image_providers.env_name_ok(ok), ok
+    for bad in ("PATH", "HOME", "USER", "DISPATCH_API_KEY", "lower_key", "KEY"):
+        assert not image_providers.env_name_ok(bad), bad
+    with pytest.raises(ValueError, match="credential"):
+        image_providers.merge_submission({"provider": "custom", "base_url": "http://h/v1",
+                                          "api_key_env": "PATH"}, {})
+    c = _unlocked(env)
+    monkeypatch.setenv("PATH_LIKE", "/usr/bin")
+    r = c.post("/api/llm/image/test", json={"provider": "custom", "base_url": "http://h/v1",
+                                            "model": "m", "api_key_env": "PATH_LIKE"})
+    assert r.status_code == 422
+    r = c.put("/api/llm/image", json={"provider": "custom", "base_url": "http://h/v1",
+                                      "model": "m", "api_key_env": "HOME"})
+    assert r.status_code == 422
+
+
 def test_routes_are_operator_only(env):
     from app import auth
     auth.set_pin("4321")

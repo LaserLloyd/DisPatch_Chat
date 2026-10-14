@@ -46,10 +46,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app import image_jobs, image_providers
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-
-from app import image_jobs, image_providers
 
 log = logging.getLogger("local-chat.app.imagestudio")
 
@@ -258,7 +257,7 @@ class GenerateIn(BaseModel):
     prompt: str = Field(min_length=1, max_length=PROMPT_MAX + 400)
     provider: str = ""
     model: str = ""
-    ratio: str = "1:1"
+    ratio: str = Field(default="1:1", max_length=8)
     n: int = Field(default=1, ge=1, le=9)
     optimizer: bool = False
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
@@ -316,6 +315,10 @@ def build(ctx):
         model = body.model.strip()
         if model and not MODEL_RE.match(model):
             raise HTTPException(422, "That model name is not valid")
+        ratio = body.ratio.strip()
+        if ratio and not image_jobs._RATIO_RE.match(ratio):
+            # ImageSpec would raise ValueError below -- a 500, not a 422.
+            raise HTTPException(422, "The aspect ratio must look like 16:9")
         res = _resolved(pid, model)
         if res is None:
             raise HTTPException(
@@ -329,7 +332,7 @@ def build(ctx):
         if _lock.locked():
             raise HTTPException(409, "A generation is already running")
         async with _lock:
-            spec = image_jobs.ImageSpec(prompt=prompt, ratio=body.ratio, backend="api")
+            spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
             try:
                 blobs = await image_providers.generate_batch(
                     res, spec, n=n,
@@ -339,7 +342,7 @@ def build(ctx):
             except image_jobs.ImageJobError as e:
                 raise HTTPException(502, e.message) from None
             rows = await asyncio.to_thread(
-                _store, blobs, prompt, pid, res.model, body.ratio,
+                _store, blobs, prompt, pid, res.model, ratio,
                 body.seed if caps["seed"] else None,
                 bool(body.optimizer and caps["optimizer"]), wants_ref)
         return {"images": [_public_row(r) for r in rows], "asked": n}

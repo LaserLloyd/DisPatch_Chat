@@ -13,7 +13,6 @@ import json
 
 import httpx
 import pytest
-
 from app import config, image_providers
 from tests.test_image_jobs import _png, _say, _thread, _unlocked
 from tests.test_image_jobs import env as env
@@ -206,6 +205,10 @@ def test_prompt_and_count_are_validated(env, provider):
     assert _gen(c, seed=-1).status_code == 422
     assert _gen(c, model="bad model name!").status_code == 422
     assert _gen(c, provider="nonesuch").status_code == 422
+    # A ratio ImageSpec would reject was a 500 (ValueError escaped the route).
+    for ratio in ("wide", "16/9", "1:1:1", "Z" * 5000, "100:1"):
+        r = _gen(c, ratio=ratio)
+        assert r.status_code == 422, (ratio, r.status_code, r.text)
     assert provider.requests == []
 
 
