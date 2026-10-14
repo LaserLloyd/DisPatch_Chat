@@ -643,12 +643,35 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
 /* Horizontal on desktop, a swipeable strip on a phone: six tabs never fit
    390px, and truncating labels to fit is worse than scrolling to them. */
+/* The bar owns the rule under the strip and positions the two edge buttons
+   (js/tabstrip.js) OVER the strip's ends, so showing or hiding one never
+   moves a tab under the pointer. */
+.settings-tabbar { position: relative; flex-shrink: 0; border-bottom: 1px solid var(--border-strong); }
 .settings-tabs {
-  display: flex; gap: 2px; flex-shrink: 0;
-  padding: 0 10px; border-bottom: 1px solid var(--border-strong);
+  display: flex; gap: 2px;
+  padding: 0 10px;
   overflow-x: auto; overflow-y: hidden;
   scrollbar-width: none;              /* the tabs are the affordance, not a bar */
+  overscroll-behavior-x: contain;     /* a flick past the end is not "Back" */
+  /* scrollIntoView() of the active tab stops clear of the edge buttons. */
+  scroll-padding-inline: 40px;
 }
+.stab-nav {
+  position: absolute; inset-block: 0; z-index: 1;
+  width: 36px; padding: 0; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+.stab-nav[hidden] { display: none; }
+.stab-prev { inset-inline-start: 0; box-shadow: 8px 0 10px -4px var(--bg-secondary); }
+.stab-next { inset-inline-end: 0; box-shadow: -8px 0 10px -4px var(--bg-secondary); }
+[dir="rtl"] .stab-prev { box-shadow: -8px 0 10px -4px var(--bg-secondary); }
+[dir="rtl"] .stab-next { box-shadow: 8px 0 10px -4px var(--bg-secondary); }
+/* The chevrons point the way the strip moves, so they flip with the text. */
+[dir="rtl"] .stab-nav svg { transform: scaleX(-1); }
+.stab-nav:hover { color: var(--accent-text); background: var(--bg-tertiary); }
+.stab-nav:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .settings-tabs::-webkit-scrollbar { display: none; }
 /* Edge fades: main.js measures the overflow and adds these, so a fade only ever
    appears when there really are more tabs that way. `--fade-fwd` is the reading
@@ -708,6 +731,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .settings-pane > .bm-list { overflow: visible; flex: 0 0 auto; min-height: 0; }
 /* Busy = a manager request in flight. Same treatment its backdrop used to get. */
 .settings-pane.busy { pointer-events: none; opacity: .7; }
+/* A pane's lead sentence (Security's status line, AI models' intro) sat 4px
+   above the first field label, so the two read as one run of small text. */
+.settings-pane > .modal-hint + .sec-body,
+.settings-pane > .modal-hint + .llm-body { padding-top: 12px; }
 
 /* ---- Theme gallery (Settings → Theme; the cards are built by js/theme.js) ----
    A conventional picker: a grid of miniature app windows. Each CARD carries
@@ -792,7 +819,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .settings-actions { display: flex; flex: 1; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 /* Lock now is a security action, not a device preference — it rides with the
    PIN controls rather than the footer's Set/Remove pair. */
-.sec-lock-row { padding-inline: 0; }
+/* `.sec-body` in the selector: .bm-actions (declared further down, same
+   specificity) re-added its 18px side padding, so "Lock now" sat indented from
+   the PIN fields above it. */
+.sec-body .sec-lock-row { padding-inline: 0; }
 
 /* Safe-Mode companions panel (the gear's locked face). */
 .comp-list { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }

@@ -357,6 +357,8 @@ const SHELL = [
   // Web Push settings row (2026-10-12): pure module, statically imported by
   // main.js.
   '/static/js/push.js', '/static/js/quick-actions.js',
+  // 2.3.5: the edge buttons + wheel of the Settings tab strip (main.js imports it).
+  '/static/js/tabstrip.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

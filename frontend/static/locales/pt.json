@@ -250,6 +250,8 @@
   "settings": {
     "title": "Definições",
     "tabs_aria": "Secções das definições",
+    "tabs_prev": "Abas anteriores",
+    "tabs_next": "Mais abas",
     "tab_bots": "Bots",
     "tab_reactions": "Reações",
     "tab_health": "Estado",

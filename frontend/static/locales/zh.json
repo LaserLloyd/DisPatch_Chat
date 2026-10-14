@@ -246,6 +246,8 @@
   "settings": {
     "title": "设置",
     "tabs_aria": "设置分区",
+    "tabs_prev": "前面的标签",
+    "tabs_next": "更多标签",
     "tab_bots": "机器人",
     "tab_reactions": "反应图片",
     "tab_health": "运行状况",

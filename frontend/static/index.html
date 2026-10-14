@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=100" />
+  <link rel="stylesheet" href="/static/app.css?v=101" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -702,6 +702,12 @@
            ←/→/Home/End move between them (main.js: wireSettingsTabs). The three
            admin tabs are hidden for a Safe-Mode session exactly as the rail
            buttons they replace were. -->
+      <!-- The strip is wider than a phone AND than the desktop dialog. The two
+           edge buttons (js/tabstrip.js) show only while there are tabs beyond
+           that edge; they are mouse/touch affordances, so they stay out of the
+           Tab order — the keyboard already has ←/→/Home/End on the tablist. -->
+      <div class="settings-tabbar">
+      <button type="button" class="stab-nav stab-prev" id="stab-prev" tabindex="-1" aria-hidden="true" hidden title="Earlier tabs" data-i18n-attr="title=settings.tabs_prev"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
         <button class="settings-tab active" id="stab-bots" role="tab" data-tab="bots" aria-selected="true" aria-controls="spane-bots" tabindex="0"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="settings.tab_bots">Bots</span></button>
         <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
@@ -715,6 +721,8 @@
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
+      </div>
+      <button type="button" class="stab-nav stab-next" id="stab-next" tabindex="-1" aria-hidden="true" hidden title="More tabs" data-i18n-attr="title=settings.tabs_next"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
 
       <!-- ---- Bots ---- -->

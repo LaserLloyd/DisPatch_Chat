@@ -248,6 +248,8 @@
   "settings": {
     "title": "Einstellungen",
     "tabs_aria": "Einstellungsbereiche",
+    "tabs_prev": "Vorherige Tabs",
+    "tabs_next": "Weitere Tabs",
     "tab_bots": "Bots",
     "tab_reactions": "Reaktionen",
     "tab_health": "Zustand",

@@ -250,6 +250,8 @@
   "settings": {
     "title": "Ajustes",
     "tabs_aria": "Secciones de ajustes",
+    "tabs_prev": "Pestañas anteriores",
+    "tabs_next": "Más pestañas",
     "tab_bots": "Bots",
     "tab_reactions": "Reacciones",
     "tab_health": "Estado",

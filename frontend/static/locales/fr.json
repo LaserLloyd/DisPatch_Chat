@@ -250,6 +250,8 @@
   "settings": {
     "title": "Réglages",
     "tabs_aria": "Sections des réglages",
+    "tabs_prev": "Onglets précédents",
+    "tabs_next": "Plus d’onglets",
     "tab_bots": "Bots",
     "tab_reactions": "Réactions",
     "tab_health": "État",

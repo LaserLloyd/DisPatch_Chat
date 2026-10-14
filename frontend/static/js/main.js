@@ -72,6 +72,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
 import { aboutRow } from './about.js?v=12';
 import { pushRow } from './push.js?v=1';
+import { wireTabStrip } from './tabstrip.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
 import {
@@ -4237,7 +4238,7 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       showVoiceTab();
       break;
     case 'security':
-      activateSecurityPane();
+      activateSecurityPane({ focusField: !focusTab });
       break;
     default: {
       // An add-in's own tab: its pane host fires the add-in's onShow.
@@ -4247,26 +4248,16 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
   }
 }
 
-/** Fade whichever end of the tab strip has more tabs beyond it.
+/** Edge fades + the ‹ / › buttons of the tab strip (js/tabstrip.js).
  *
- *  Six tabs are ~570px of strip against a 390px phone, so two of them —
- *  Device and Security — are simply not on screen, and a hard-cut edge reads
- *  as "that's all of them". The fade is measured, not assumed: it appears only
- *  when there is genuinely something to scroll to, in either direction, which
- *  also makes it correct under RTL without a second rule.
+ *  Ten tabs are ~800px of strip, more than a phone and more than the desktop
+ *  dialog, and the strip has no scrollbar. Before 2.3.5 a 22px fade was the
+ *  only sign of the rest, and a mouse could not reach Security at all. The
+ *  strip now measures itself and shows an arrow at whichever end has more.
  */
+let tabStrip = null;
 function updateTabStripEdges() {
-  const list = dom['settings-tabs'];
-  if (!list) return;
-  const slack = list.scrollWidth - list.clientWidth;
-  if (slack <= 1) {
-    list.classList.remove('fade-start', 'fade-end');
-    return;
-  }
-  // scrollLeft is negative in an RTL container in every engine we target.
-  const pos = Math.abs(list.scrollLeft);
-  list.classList.toggle('fade-start', pos > 2);
-  list.classList.toggle('fade-end', pos < slack - 2);
+  if (tabStrip) tabStrip.update();
 }
 
 function wireSettingsTabs() {
@@ -4275,8 +4266,11 @@ function wireSettingsTabs() {
   list.querySelectorAll('.settings-tab').forEach((b) => {
     b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
   });
-  list.addEventListener('scroll', updateTabStripEdges, { passive: true });
-  window.addEventListener('resize', updateTabStripEdges);
+  tabStrip = wireTabStrip({
+    list,
+    prev: document.getElementById('stab-prev'),
+    next: document.getElementById('stab-next'),
+  });
   // Arrow-key navigation over the VISIBLE tabs only: in Safe Mode the three
   // admin tabs aren't rendered, and stepping onto one would be a dead stop.
   list.addEventListener('keydown', (e) => {
@@ -8156,7 +8150,7 @@ function renderSecurityStrings() {
 // own: it was already a plain field stack with two footer buttons, which is
 // exactly what a pane is. This is what the tab controller calls when it
 // becomes visible — populate, clear, focus the first field somebody types in.
-function activateSecurityPane() {
+function activateSecurityPane({ focusField = true } = {}) {
   const pinSet = state.auth.pinSet;
   dom['sec-current-wrap'].hidden = !pinSet;
   dom['sec-remove'].hidden = !pinSet;
@@ -8167,6 +8161,14 @@ function activateSecurityPane() {
   renderSecurityStrings();
   dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
   setSecError('');
+  // Not when the tab was reached with the arrow keys (focusTab): stealing focus
+  // into the PIN field there made Security a dead end for ←/→ — the next arrow
+  // press moved the caret instead of the tab. Not on a touch screen either,
+  // where a focused field throws the keyboard over the pane you just opened.
+  if (!focusField) return;
+  let coarse = false;
+  try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch { /* old engine */ }
+  if (coarse) return;
   setTimeout(() => (pinSet ? dom['sec-current'] : dom['sec-new']).focus(), 40);
 }
 
