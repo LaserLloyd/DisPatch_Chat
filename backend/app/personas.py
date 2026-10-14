@@ -132,15 +132,18 @@ def normalise(text: str, kind: str = "direct") -> str:
     as typed."""
     from .advisor import DEFAULT_PERSONA
     t = check_text(text).replace("\r\n", "\n").strip()
-    if kind == "direct" and t == DEFAULT_PERSONA.strip():
+    if kind == "direct" and t.replace("{owner}", "{user}") == DEFAULT_PERSONA.strip():
         return ""
     return t
 
 
 def fill(text: str, name: str, owner: str = "the user") -> str:
     """The two documented placeholders filled in. One rule for both bot kinds:
-    a preset says ``{name}`` and ``{owner}`` whichever backend runs it."""
-    return (text or "").replace("{name}", name).replace("{owner}", owner)
+    a preset says ``{name}`` and ``{user}`` whichever backend runs it.
+    ``{owner}`` is the older spelling of ``{user}`` and is still filled in, so
+    a persona saved before the rename keeps working. (The ``owner`` argument
+    and the ``owner:`` config key keep their names: they are internal.)"""
+    return (text or "").replace("{name}", name).replace("{user}", owner).replace("{owner}", owner)
 
 
 def apply(bot: config.Bot, text: str) -> config.Bot:

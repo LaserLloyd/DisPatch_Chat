@@ -49,14 +49,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import config, knowledge, livetools, llm_api
+from . import config, knowledge, livetools, llm_api, personas
 from . import tools as tools_mod
 
 log = logging.getLogger("dispatch.advisor")
 
 DEFAULT_PERSONA = (
     "You are {name}, a warm, quick-witted advisor for advice and everyday "
-    "conversation. You are talking with {owner} in a private chat app. Be "
+    "conversation. You are talking with {user} in a private chat app. Be "
     "direct and genuinely useful: lead with the answer, keep it conversational, "
     "and skip filler. Use the background below naturally — never recite it, and "
     "never mention that you were given a profile or search results."
@@ -256,7 +256,7 @@ class AdvisorConfig:
 
         advisor:
           owner: "Sam"                 # how the persona refers to the user
-          persona: "…{name}…{owner}…"  # replaces DEFAULT_PERSONA
+          persona: "…{name}…{user}…"  # replaces DEFAULT_PERSONA ({owner} is an alias)
           providers:                   # tried in order; same keys as `api`
             - {provider: custom, base_url: https://…/v1, model: …,
                api_key_env: …, extra_body: {…}, max_tokens: 4096}
@@ -908,7 +908,7 @@ def build_system_prompt(cfg: AdvisorConfig, profile: str,
     the first data block (``## About {owner}``), so it reads as a standing rule
     of the conversation and the user turn stays the clean transcript.
     """
-    persona = cfg.persona.replace("{name}", cfg.name).replace("{owner}", cfg.owner)
+    persona = personas.fill(cfg.persona, cfg.name, cfg.owner)
     out = [persona.strip(), f"Today is {today}."]
     if cfg.can_dispatch:
         out.append(RULES.format(

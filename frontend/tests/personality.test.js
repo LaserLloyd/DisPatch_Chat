@@ -31,8 +31,8 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 const PRESETS = {
   presets: [
     { id: 'default', title: 'DisPatch default', description: 'Shipped.', text: 'You are {name}, default.' },
-    { id: 'sleek', title: 'Sleek assistant', description: 'Spare.', text: 'You are {name}, sleek, for {owner}.' },
-    { id: 'contrarian', title: 'Contrarian', description: 'Disagrees.', text: 'You are {name}, contrarian, for {owner}.' },
+    { id: 'sleek', title: 'Sleek assistant', description: 'Spare.', text: 'You are {name}, sleek, for {user}.' },
+    { id: 'contrarian', title: 'Contrarian', description: 'Disagrees.', text: 'You are {name}, contrarian, for {user}.' },
   ],
   default_id: 'default', max_chars: 8000,
 };
@@ -95,8 +95,8 @@ const ATLAS = {
 
 test('matchPreset: equal text (trimmed) is that preset, anything else is custom', async () => {
   const { matchPreset, CUSTOM } = await import('../static/js/' + PERSONALITY.slice(2));
-  assert.equal(matchPreset(PRESETS.presets, '  You are {name}, sleek, for {owner}.\n'), 'sleek');
-  assert.equal(matchPreset(PRESETS.presets, 'You are {name}, sleek, for {owner}!'), CUSTOM);
+  assert.equal(matchPreset(PRESETS.presets, '  You are {name}, sleek, for {user}.\n'), 'sleek');
+  assert.equal(matchPreset(PRESETS.presets, 'You are {name}, sleek, for {user}!'), CUSTOM);
   assert.equal(matchPreset([], 'x'), CUSTOM);
 });
 
@@ -117,7 +117,7 @@ test('a direct bot gets the button and a panel; picking a preset fills the edito
   assert.equal(f('persona-save').disabled, true);           // nothing changed yet
   sel.value = 'contrarian';
   fire(win, sel, 'change');
-  assert.equal(f('persona-text').value, 'You are {name}, contrarian, for {owner}.');
+  assert.equal(f('persona-text').value, 'You are {name}, contrarian, for {user}.');
   assert.equal(f('persona-desc').textContent, 'Disagrees.');
   assert.equal(f('persona-save').disabled, false);
   f('persona-text').value += ' Extra.';
@@ -126,7 +126,7 @@ test('a direct bot gets the button and a panel; picking a preset fills the edito
   assert.match(f('persona-count').textContent, /^\d+ \/ 8000$/);
   // Reset to preset goes back to the last preset picked (Contrarian).
   fire(win, f('persona-reset'));
-  assert.equal(f('persona-text').value, 'You are {name}, contrarian, for {owner}.');
+  assert.equal(f('persona-text').value, 'You are {name}, contrarian, for {user}.');
   assert.equal(sel.value, 'contrarian');
   // Revert goes back to what is saved.
   fire(win, f('persona-revert'));
@@ -135,7 +135,7 @@ test('a direct bot gets the button and a panel; picking a preset fills the edito
 });
 
 test('Save PATCHes {persona}, reports the row, and the panel stays open across a re-render', { skip: dom.skip }, async () => {
-  const saved = 'You are {name}, contrarian, for {owner}.';
+  const saved = 'You are {name}, contrarian, for {user}.';
   const { mod, ctx, rec, win } = await setup({
     'PATCH /api/bots/atlas': () => [200, { ...ATLAS, persona: saved, persona_custom: true }],
   });

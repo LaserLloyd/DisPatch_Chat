@@ -40,6 +40,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `image_providers.generate_batch()`: several pictures per provider request, plus seed,
   optimizer and reference for MiniMax. `generate()` is its one-picture case.
+- **Personality placeholder `{user}`.** A persona now says `{user}` for the
+  person it talks to (it was `{owner}`): the presets, the shipped default, the
+  editor hint in all eight languages and the docs. `{owner}` is still filled in
+  as an alias, so a saved persona that uses it keeps working; the `owner:`
+  config key is unchanged.
+
 
 ## [2.3.8] — 2026-10-14
 
