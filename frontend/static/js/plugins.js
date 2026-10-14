@@ -21,7 +21,7 @@
 import { api as realApi } from './api.js?v=33';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { COMMANDS, commandBlock } from './voice-absent.js?v=7';
+import { COMMANDS, commandBlock } from './voice-absent.js?v=8';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 

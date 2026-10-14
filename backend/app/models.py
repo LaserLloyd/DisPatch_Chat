@@ -141,6 +141,9 @@ class BotPatchIn(BaseModel):
     reactions: bool | None = None
     avatar_pool: bool | None = None
     tools: bool | None = None
+    # The bot's personality (direct-API: advisor.persona; legacy-API:
+    # api.system_prompt). "" = back to the shipped default. See app/personas.py.
+    persona: str | None = Field(default=None, max_length=8000)
 
     @field_validator("name", "emoji", "model_hint")
     @classmethod

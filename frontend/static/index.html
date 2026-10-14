@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=101" />
+  <link rel="stylesheet" href="/static/app.css?v=102" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -879,7 +879,7 @@
             </div>
             <div class="sec-field">
               <label for="llm-system" data-i18n="llm.system_prompt">System prompt</label>
-              <textarea id="llm-system" rows="3" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
+              <textarea id="llm-system" rows="3" maxlength="8000" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
             </div>
           </details>
         </div>
@@ -1268,6 +1268,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=135"></script>
+  <script type="module" src="/static/js/main.js?v=136"></script>
 </body>
 </html>

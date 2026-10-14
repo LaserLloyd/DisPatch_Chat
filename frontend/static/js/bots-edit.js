@@ -4,6 +4,7 @@
 //   PATCH  /api/bots/{id}   {name, emoji, model_hint, tools, ...} -> the bot row
 //   POST   /api/bots        {name, emoji?, backend, agent?}       -> 201 + the row
 //   DELETE /api/bots/{id}                                        -> {removed}; 409 for an app bot
+//   (Personality -- PATCH {persona} -- lives in js/personality.js.)
 //
 // Unlike the Safe / Reactions / visible toggles, which wait for the Save
 // button, these act at once (a rename, a new bot and a removal are server
@@ -24,6 +25,7 @@
 import { api as realApi } from './api.js?v=33';
 import { t } from './i18n.js?v=4';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { personaButton, personaPanel } from './personality.js?v=1';
 
 export const NAME_MAX = 40;
 export const EMOJI_MAX = 8;
@@ -189,7 +191,12 @@ export function removeButton(bot, ctx) {
 /** Everything a row gains, as separate slots so main.js can place them. */
 export function rowControls(bot, ctx) {
   const ed = editPanel(bot, ctx);
+  // Personality (js/personality.js): a preset picker + system-prompt editor
+  // for direct-API and legacy-API bots, a pointer to the workspace for agents.
+  const pe = personaPanel(bot, { ...ctx, api: apiOf(ctx) });
   return {
+    persona: pe.panel ? personaButton(bot, pe.toggle) : null,
+    personaPanel: pe.panel,
     badge: backendBadge(bot),
     notConnected: notConnectedLink(bot, ctx),
     lookups: lookupsPill(bot, ctx),

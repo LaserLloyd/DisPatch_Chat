@@ -27,7 +27,7 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=10';
+} from './llm.js?v=11';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -43,11 +43,11 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=8';
+} from './ext-sdk.js?v=9';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=7';
-import { mountPluginsSettings } from './plugins.js?v=7';
-import { rowControls, addBotRow } from './bots-edit.js?v=1';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=8';
+import { mountPluginsSettings } from './plugins.js?v=8';
+import { rowControls, addBotRow } from './bots-edit.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -70,7 +70,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=13';
+import { aboutRow } from './about.js?v=14';
 import { pushRow } from './push.js?v=1';
 import { wireTabStrip } from './tabstrip.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -4485,15 +4485,20 @@ function renderBotManager() {
         lbl.append(cb, el('span', { class: 'slider' }));
         return lbl;
       })(),
+      ctl && ctl.persona,
       ctl && ctl.edit,
       ctl && ctl.remove,
       ctl && ctl.panel,
+      ctl && ctl.personaPanel,
     ]);
     // Firefox cannot select text inside an input whose ancestor is draggable:
     // the row stops being draggable while a field in it has focus.
     if (ctl) {
-      ctl.panel.addEventListener('focusin', () => { row.draggable = false; });
-      ctl.panel.addEventListener('focusout', () => { row.draggable = true; });
+      for (const p of [ctl.panel, ctl.personaPanel]) {
+        if (!p) continue;
+        p.addEventListener('focusin', () => { row.draggable = false; });
+        p.addEventListener('focusout', () => { row.draggable = true; });
+      }
     }
     wireDrag(row);
     list.append(row);
@@ -4504,7 +4509,8 @@ function renderBotManager() {
 /** What js/bots-edit.js reports back through: the roster (bmBots) and the
  *  sidebar (state.bots) follow the server at once, leaving any unsaved
  *  order / visibility / Safe edits alone. */
-const BOT_ROW_FIELDS = ['name', 'emoji', 'model_hint', 'tools', 'backend', 'connected'];
+const BOT_ROW_FIELDS = ['name', 'emoji', 'model_hint', 'tools', 'backend', 'connected',
+  'persona', 'persona_custom', 'persona_kind'];
 function botEditCtx() {
   return {
     toast,

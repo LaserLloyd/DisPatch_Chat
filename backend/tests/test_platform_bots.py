@@ -336,8 +336,11 @@ def test_connect_writes_the_system_prompt_as_the_persona_and_never_clears_it(env
     r = c.post("/api/llm/connect", json={**base, "system_prompt": "  You are Globe.  "})
     assert r.status_code == 200, r.text
     assert config.get_bot("atlas").advisor["persona"] == "You are Globe."
-    assert "You are Globe" not in r.text          # the row never carries the prompt
-    # A blank field on a re-save keeps the persona (the panel cannot show it).
+    # 2.3.6: the full-access row carries it (the Bots tab's Personality editor
+    # and the Connect field show it); the public roster never does.
+    assert r.json()["persona"] == "You are Globe."
+    assert "You are Globe" not in c.get("/api/bots").text
+    # A blank field on a re-save keeps the persona.
     assert c.post("/api/llm/connect", json={**base, "system_prompt": ""}).status_code == 200
     assert config.get_bot("atlas").advisor["persona"] == "You are Globe."
     # A new bot made through connect gets it too; no field = no key.

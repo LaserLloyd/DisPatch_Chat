@@ -81,3 +81,16 @@ def test_release_notes_cover_the_voice_split():
     whats_new = readme.split("## What's new in 2.2", 1)[1].split("\n## ", 1)[0]
     assert "DisPatch Voice" in whats_new and "docs/extensions.md" in whats_new
     assert "Drive mode" not in whats_new
+
+
+def test_every_runtime_data_file_is_on_the_allowlist():
+    """2.3.6: app/personas.py reads app/personas/*.md at runtime (like the
+    first-run guide). A preset the deploy did not carry would simply vanish
+    from the Bots tab, so every such file is pinned here."""
+    allow = _allow()
+    app_dir = REPO / "backend" / "app"
+    files = [*app_dir.glob("personas/*.md"), *app_dir.glob("guide/*.md")]
+    assert any(f.parent.name == "personas" for f in files)
+    missing = [f.relative_to(REPO).as_posix() for f in files
+               if not _covered(f.relative_to(REPO).as_posix(), allow)]
+    assert not missing, f"runtime data a deploy would not carry: {missing}"

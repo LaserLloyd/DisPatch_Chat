@@ -7,6 +7,33 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.6] — 2026-10-14
+
+### Added
+
+- **Settings → Bots → Personality.** Each direct-API bot (and each legacy
+  API bot) has a Personality panel: a preset picker, a system-prompt editor
+  with a character count (up to 8,000), Save, Revert and Reset to preset.
+  Picking a preset fills the editor; editing it after that makes it Custom.
+  Ten presets ship as data in `backend/app/personas/*.md` next to the shipped
+  default: Sleek assistant, Cat-girl, Challenger, Contrarian, Warm friend,
+  Patient tutor, Blunt critic, Storyteller, Deadpan wit and Hype trainer. A save
+  applies from the next reply, no restart. The text is only the first block of
+  the prompt: the date, the rules (the locked rules on a Safe-Mode device), the
+  lookups and the profile are still added by DisPatch after it. A bot shown on
+  family devices says so in the panel. Agent bots get a pointer to their
+  OpenClaw workspace instead of an editor.
+- `GET /api/bots/personas` (operator only) lists the presets;
+  `PATCH /api/bots/<id>` takes `persona` (`""` = back to the default). Rows
+  from `/api/bots/all` carry `persona`, `persona_custom` and `persona_kind`;
+  the public roster never carries a persona.
+
+### Changed
+
+- The AI models Connect field ("System prompt") shows the picked bot's
+  current personality and writes the same field as the Bots tab, so the two
+  never disagree. Sending the shipped default text back means "the default".
+
 ## [2.3.5] — 2026-10-14
 
 ### Fixed

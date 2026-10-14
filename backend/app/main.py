@@ -82,6 +82,7 @@ from . import (
     mailforge_bridge,
     openclaw,
     openclaw_text,
+    personas,
     plugins_api,
     pool_guard,
     practice_bridge,
@@ -536,7 +537,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.3.5", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.3.6", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -8258,12 +8259,20 @@ def _bot_row(b: config.Bot) -> dict:
            "backend": backend,
            "tools": config.direct_tools_on(b) if backend == "direct" else False,
            "connected": config.direct_connected(b)}
+    row.update(personas.row_fields(b))
     if backend == "direct":
         first = next((p for p in (b.advisor or {}).get("providers") or []
                       if isinstance(p, dict)), None)
         row["provider"] = str((first or {}).get("provider") or "")
         row["model"] = str((first or {}).get("model") or "")
     return row
+
+
+@app.get("/api/bots/personas", dependencies=[Depends(_require_operator)])
+async def get_personas():
+    """The personality presets the Bots tab offers (app/personas/*.md plus
+    the shipped default). Operator only, like the rest of the Bot Manager."""
+    return personas.public()
 
 
 @app.post("/api/bots", status_code=201)
@@ -8297,7 +8306,8 @@ async def create_bot(request: Request, payload: BotCreateIn):
 
 @app.patch("/api/bots/{bot_id}")
 async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
-    """Change a bot's name / emoji / badge / flags / lookups. Operator only."""
+    """Change a bot's name / emoji / badge / flags / lookups / personality.
+    Operator only."""
     _require_full_access(request)
     bot = await asyncio.to_thread(config.get_bot, bot_id)
     if bot is None:
@@ -8310,7 +8320,17 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
         # A hand-picked `tools:` list survives an off/on round trip
         # (config.set_direct_tools parks it under `tools_picked`).
         changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
-    saved = await asyncio.to_thread(config.upsert_bot, dc_replace(bot, **changes))
+    persona = changes.pop("persona", None)
+    updated = dc_replace(bot, **changes)
+    if persona is not None:
+        # advisor.persona / api.system_prompt, the same field the AI models
+        # Connect panel writes. Takes effect on the next turn (load_bots is
+        # mtime-cached); the code-appended rules are not part of it.
+        try:
+            updated = personas.apply(updated, persona)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+    saved = await asyncio.to_thread(config.upsert_bot, updated)
     await _broadcast_roster()
     return _bot_row(saved)
 

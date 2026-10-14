@@ -1266,5 +1266,25 @@
     "on": "已在此设备上开启推送通知",
     "off": "已在此设备上关闭推送通知",
     "failed": "无法更改推送通知，请重试。"
+  },
+  "persona": {
+    "button_title": "性格：预设或系统提示词",
+    "button_aria": "{name}的性格",
+    "title": "性格",
+    "preset": "预设",
+    "editor": "系统提示词",
+    "custom": "自定义",
+    "custom_desc": "你自己写的文本。选择一个预设可以从它开始。",
+    "count": "{n} / {max}",
+    "revert": "撤销",
+    "reset": "恢复为预设",
+    "save": "保存性格",
+    "saved": "已保存{name}的性格，从下一条回复开始生效。",
+    "safe_note": "这个机器人也会显示在家庭设备上。那里的聊天仍按安全模式的规则运行。",
+    "hint": "{name} 和 {owner} 会自动替换。DisPatch 会在这段文本之后加上日期、规则、查询和个人资料。",
+    "hint_legacy": "这是机器人的完整系统提示词。",
+    "legacy_placeholder": "留空：使用服务商的默认行为",
+    "agent_note": "这个机器人由 OpenClaw 代理运行。它的性格写在该代理的工作区文件中（SOUL.md、IDENTITY.md、AGENTS.md），不在 DisPatch 里。",
+    "presets_failed": "无法加载预设。编辑器仍可使用。"
   }
 }

@@ -89,7 +89,7 @@ agent runtime to be useful. The rest of this page describes what you can add.
 | Key | Default | Meaning |
 |---|---|---|
 | `owner` | `the user` | How the persona refers to the person it talks to ("Sam"). |
-| `persona` | built-in | System prompt that replaces the default. `{name}` (the bot's display name) and `{owner}` are filled in. The delegation rules and the profile are appended after it either way; retrieved notes go in the user turn. |
+| `persona` | built-in | System prompt that replaces the default. `{name}` (the bot's display name) and `{owner}` are filled in. The delegation rules and the profile are appended after it either way; retrieved notes go in the user turn.  Edited in Settings → Bots → Personality (preset picker + editor, `PATCH /api/bots/<id>` `{persona}`; presets in `backend/app/personas/*.md`, served by `GET /api/bots/personas`) or the AI models Connect field — the same key. The shipped default text is stored as no key. |
 | `providers` | none (required) | Ordered list. Each entry takes the same keys as a bot's `api:` block (`provider`, `base_url`, `model`, `api_key_env` or `api_key`; see [llm-providers.md](llm-providers.md)) plus the extras below. |
 | `knowledge_dir` | none | Corpus directory. Without it the advisor has no notes, no saved reports and no digest. |
 | `profile_fallback` | `[]` | Files read and used as the profile when `_profile.md` does not exist. |

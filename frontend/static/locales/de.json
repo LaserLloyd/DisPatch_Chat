@@ -1291,5 +1291,25 @@
     "on": "Push-Benachrichtigungen auf diesem Gerät an",
     "off": "Push-Benachrichtigungen auf diesem Gerät aus",
     "failed": "Push-Benachrichtigungen konnten nicht geändert werden. Bitte erneut versuchen."
+  },
+  "persona": {
+    "button_title": "Persönlichkeit: Vorlage oder Systemprompt",
+    "button_aria": "Persönlichkeit von {name}",
+    "title": "Persönlichkeit",
+    "preset": "Vorlage",
+    "editor": "Systemprompt",
+    "custom": "Eigene",
+    "custom_desc": "Dein eigener Text. Wähle eine Vorlage als Ausgangspunkt.",
+    "count": "{n} / {max}",
+    "revert": "Zurücksetzen",
+    "reset": "Auf Vorlage zurücksetzen",
+    "save": "Persönlichkeit speichern",
+    "saved": "Persönlichkeit von {name} gespeichert. Sie gilt ab der nächsten Antwort.",
+    "safe_note": "Dieser Bot erscheint auch auf Familiengeräten. Chats dort laufen weiter unter den Regeln des sicheren Modus.",
+    "hint": "{name} und {owner} werden eingesetzt. DisPatch hängt Datum, eigene Regeln, Nachschlagen und das Profil an diesen Text an.",
+    "hint_legacy": "Das ist der vollständige Systemprompt des Bots.",
+    "legacy_placeholder": "Leer: der einfache Standard des Anbieters",
+    "agent_note": "Dieser Bot läuft über einen OpenClaw-Agenten. Seine Persönlichkeit steht in dessen Workspace-Dateien (SOUL.md, IDENTITY.md, AGENTS.md), nicht in DisPatch.",
+    "presets_failed": "Die Vorlagen konnten nicht geladen werden. Der Editor funktioniert trotzdem."
   }
 }

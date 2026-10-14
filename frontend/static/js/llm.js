@@ -269,7 +269,10 @@ function applyProvider() {
   const target = targetBot();
   $('llm-name').value = target ? target.name : ((existing && existing.name) || '');
   $('llm-name').placeholder = p.bot_name || p.label;
-  $('llm-system').value = api.system_prompt || '';
+  // The same field the Bots tab's Personality editor shows (advisor.persona
+  // for a direct-API bot, served on the row as `persona`), so the two can
+  // never disagree. A new bot starts blank (= the shipped default).
+  $('llm-system').value = target ? String(target.persona || '') : (api.system_prompt || '');
 
   // A provider switch invalidates the model list, but its OWN suggestions are
   // still worth offering — they save a Test round-trip for the vendors whose

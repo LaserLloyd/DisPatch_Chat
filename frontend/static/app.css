@@ -4599,3 +4599,29 @@ body.tools-sheet-open::after {
 .bm-add .bm-add-open { display: inline-flex; align-items: center; gap: 6px; }
 .bm-add .bm-add-form { border-top: 0; padding-top: 0; }
 .bm-instant-hint { padding-top: 0; }
+
+/* ========================================================================= *
+ * Settings -> Bots -> Personality (js/personality.js, 2.3.6)
+ * ========================================================================= */
+.bm-persona {
+  flex: 1 0 100%; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  padding-top: 8px; border-top: 1px solid var(--border-strong);
+}
+.bm-persona-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.bm-persona-pick { max-width: 320px; }
+.bm-persona-desc, .bm-persona-hint, .bm-persona-note { margin: 0; font-size: 12.5px; }
+.bm-persona-safe {
+  margin: 0; font-size: 12.5px; padding: 6px 9px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--bg-secondary); color: var(--text-secondary);
+}
+.bm-persona-text {
+  width: 100%; box-sizing: border-box; min-height: 9lh; resize: vertical;
+  padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.45; color: var(--text-primary);
+  background: var(--bg-input, var(--bg-secondary)); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.bm-persona-text:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.bm-persona-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.bm-persona-foot .bm-edit-actions { flex-wrap: wrap; }
+.bm-persona-count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.bm-persona-count.over { color: var(--danger); }

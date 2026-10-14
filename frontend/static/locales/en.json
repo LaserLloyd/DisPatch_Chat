@@ -1291,5 +1291,25 @@
     "on": "Push notifications on for this device",
     "off": "Push notifications off for this device",
     "failed": "Could not change push notifications. Try again."
+  },
+  "persona": {
+    "button_title": "Personality: preset or system prompt",
+    "button_aria": "Personality of {name}",
+    "title": "Personality",
+    "preset": "Preset",
+    "editor": "System prompt",
+    "custom": "Custom",
+    "custom_desc": "Your own text. Pick a preset to start from one.",
+    "count": "{n} / {max}",
+    "revert": "Revert",
+    "reset": "Reset to preset",
+    "save": "Save personality",
+    "saved": "{name}'s personality saved. It applies from the next reply.",
+    "safe_note": "This bot is also shown on family devices. Chats there still run under the Safe-Mode rules.",
+    "hint": "{name} and {owner} are filled in. DisPatch adds the date, its rules, lookups and the profile after this text.",
+    "hint_legacy": "This is the bot's whole system prompt.",
+    "legacy_placeholder": "Empty: the provider's plain default",
+    "agent_note": "This bot runs on an OpenClaw agent. Its personality lives in that agent's workspace files (SOUL.md, IDENTITY.md, AGENTS.md), not in DisPatch.",
+    "presets_failed": "Could not load the presets. The editor still works."
   }
 }

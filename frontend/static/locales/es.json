@@ -1316,5 +1316,25 @@
     "on": "Notificaciones push activadas en este dispositivo",
     "off": "Notificaciones push desactivadas en este dispositivo",
     "failed": "No se pudieron cambiar las notificaciones push. Inténtalo de nuevo."
+  },
+  "persona": {
+    "button_title": "Personalidad: plantilla o prompt de sistema",
+    "button_aria": "Personalidad de {name}",
+    "title": "Personalidad",
+    "preset": "Plantilla",
+    "editor": "Prompt de sistema",
+    "custom": "Personalizada",
+    "custom_desc": "Tu propio texto. Elige una plantilla para empezar desde ella.",
+    "count": "{n} / {max}",
+    "revert": "Deshacer",
+    "reset": "Volver a la plantilla",
+    "save": "Guardar personalidad",
+    "saved": "Personalidad de {name} guardada. Se aplica desde la próxima respuesta.",
+    "safe_note": "Este bot también aparece en los dispositivos de la familia. Allí los chats siguen con las reglas del modo seguro.",
+    "hint": "Se rellenan {name} y {owner}. DisPatch añade después de este texto la fecha, sus reglas, las consultas y el perfil.",
+    "hint_legacy": "Este es el prompt de sistema completo del bot.",
+    "legacy_placeholder": "Vacío: el valor por defecto del proveedor",
+    "agent_note": "Este bot funciona con un agente de OpenClaw. Su personalidad está en los archivos del espacio de trabajo de ese agente (SOUL.md, IDENTITY.md, AGENTS.md), no en DisPatch.",
+    "presets_failed": "No se pudieron cargar las plantillas. El editor sigue funcionando."
   }
 }

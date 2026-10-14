@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v158';  // v158: 2.3.5 — the Settings tab strip shows and reaches every tab: new js/tabstrip.js joins SHELL (edge buttons, wheel), app.css?v=100→101, about.js?v=12→13 and its importers ext-sdk.js?v=7→8, voice-absent.js?v=6→7, plugins.js?v=6→7, main.js?v=134→135, index.html, locales (settings.tabs_prev, settings.tabs_next).
+const CACHE = 'local-chat-v159';  // v159: 2.3.6 — Settings → Bots → Personality: new js/personality.js joins SHELL (preset picker + system-prompt editor), bots-edit.js?v=1→2, llm.js?v=10→11 (the Connect field reads the bot's persona), app.css?v=101→102, about.js?v=13→14 and its importers ext-sdk.js?v=8→9, voice-absent.js?v=7→8, plugins.js?v=7→8, main.js?v=135→136; locales persona.*.
+// v158: 2.3.5 — the Settings tab strip shows and reaches every tab: new js/tabstrip.js joins SHELL (edge buttons, wheel), app.css?v=100→101, about.js?v=12→13 and its importers ext-sdk.js?v=7→8, voice-absent.js?v=6→7, plugins.js?v=6→7, main.js?v=134→135, index.html, locales (settings.tabs_prev, settings.tabs_next).
 // v157: 2.3.4 — voice on locked devices: extensions.js?v=2→3 (a locked device mounts add-ons, told it is locked), about.js?v=11→12 and its importers ext-sdk.js?v=6→7, voice-absent.js?v=5→6, plugins.js?v=5→6, main.js?v=133→134.
 // v156: 2.3.3 — about.js?v=10→11 and its importers ext-sdk.js?v=5→6, voice-absent.js?v=4→5, plugins.js?v=4→5, main.js?v=132→133 (the reaction pool's daily run never mints into a full shelf; locales reactions.pool_daily_add_hint).
 // v155: 2.3.2 — about.js?v=9→10 and its importers ext-sdk.js?v=4→5, voice-absent.js?v=3→4, plugins.js?v=3→4, main.js?v=131→132 (review fixes).
@@ -351,7 +352,7 @@ const SHELL = [
   // by main.js. An add-on (/ext/<id>/…) is NEVER cached here: see the fetch
   // handler. (Voice chat itself left the shell in 2.2.0.)
   '/static/js/extensions.js', '/static/js/ext-sdk.js', '/static/js/voice-absent.js',
-  '/static/js/plugins.js', '/static/js/bots-edit.js',
+  '/static/js/plugins.js', '/static/js/bots-edit.js', '/static/js/personality.js',
   // What a voice-chat listener did not hear of a reply (2.2.0): pure module,
   // statically imported by the message renderer in main.js.
   '/static/js/voice-heard.js',

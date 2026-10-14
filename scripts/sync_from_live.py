@@ -44,6 +44,8 @@ ALLOW: list[tuple[str, str, str]] = [
     # backend/app does not descend.
     ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
+    # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).
+    ("backend/app/personas",        "backend/app/personas",        "*.md"),
     ("frontend/static/guide",       "frontend/static/guide",       "*.png"),
     # (Voice chat left DisPatch in 2.2.0 — it is the DisPatch Voice add-on, a
     # package installed beside the app, never part of the install tree. The

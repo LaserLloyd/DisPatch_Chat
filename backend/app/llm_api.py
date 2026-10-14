@@ -65,7 +65,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-from . import config
+from . import config, personas
 
 log = logging.getLogger("local-chat.llm")
 
@@ -2269,13 +2269,20 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
                              if isinstance(p, dict)), None)
     entry = direct_provider_entry(spec, stored_first)
     tools_on = bool(spec.tools)
-    persona = (spec.persona or "").strip()[:MAX_PERSONA_CHARS]
+    # The same field the Bots tab's Personality editor writes (app/personas):
+    # blank keeps the bot's persona; the shipped default text means "no
+    # custom persona", stored as no key so a later default reaches the bot.
+    raw = (spec.persona or "").strip()[:MAX_PERSONA_CHARS]
+    persona = personas.normalise(raw)
+    reset = bool(raw) and not persona
     if existing is not None:
         # "Lookups on" keeps a hand-picked subset (config.set_direct_tools
         # parks it while off); only a plain on/off flips.
         adv = config.set_direct_tools(existing.advisor, tools_on)
         if persona:
             adv["persona"] = persona
+        elif reset:
+            adv.pop("persona", None)
         # Only the FIRST provider is the connection the panel edits; a fallback
         # chain behind it (a local model after the API) stays as it was.
         rest = [p for p in ((existing.advisor or {}).get("providers") or [])[1:] if isinstance(p, dict)]
