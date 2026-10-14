@@ -1331,7 +1331,7 @@
     "save": "Guardar personalidad",
     "saved": "Personalidad de {name} guardada. Se aplica desde la próxima respuesta.",
     "safe_note": "Este bot también aparece en los dispositivos de la familia. Allí los chats siguen con las reglas del modo seguro.",
-    "hint": "Se rellenan {name} y {owner}. DisPatch añade después de este texto la fecha, sus reglas, las consultas y el perfil.",
+    "hint": "Se rellenan {name} y {user}. DisPatch añade después de este texto la fecha, sus reglas, las consultas y el perfil.",
     "hint_legacy": "Este es el prompt de sistema completo del bot.",
     "legacy_placeholder": "Vacío: el valor por defecto del proveedor",
     "agent_note": "Este bot funciona con un agente de OpenClaw. Su personalidad está en los archivos del espacio de trabajo de ese agente (SOUL.md, IDENTITY.md, AGENTS.md), no en DisPatch.",

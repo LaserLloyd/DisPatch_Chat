@@ -7,6 +7,14 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Personality placeholder `{user}`.** A persona now says `{user}` for the
+  person it talks to (it was `{owner}`): the presets, the shipped default, the
+  editor hint in all eight languages and the docs. `{owner}` is still filled in
+  as an alias, so a saved persona that uses it keeps working; the `owner:`
+  config key is unchanged.
+
 ## [2.3.8] — 2026-10-14
 
 ### Changed

@@ -58,10 +58,11 @@ def test_the_presets_cover_the_asked_for_characters():
 def test_every_preset_is_short_named_and_uses_the_placeholders(p):
     assert p.title and p.description
     assert len(p.text) <= personas.PRESET_MAX_CHARS
-    assert "{name}" in p.text and "{owner}" in p.text
+    assert "{name}" in p.text and "{user}" in p.text
+    assert "{owner}" not in p.text
     # Only the two documented placeholders: anything else in braces would
     # reach the model literally.
-    assert set(re.findall(r"\{[^}]*\}", p.text)) <= {"{name}", "{owner}"}
+    assert set(re.findall(r"\{[^}]*\}", p.text)) <= {"{name}", "{user}"}
 
 
 @pytest.mark.parametrize("p", [p for p in personas.presets() if p.id != "default"],
@@ -244,13 +245,13 @@ def test_a_saved_persona_reaches_the_next_turn_without_a_restart(env, monkeypatc
     bot = config.get_bot("atlas")
     config.upsert_bot(config.Bot(**{**bot.__dict__, "advisor": {
         **bot.advisor, "agents": ["main"], "research_agent": "main"}}))
-    default = advisor.DEFAULT_PERSONA.replace("{name}", "Atlas").replace("{owner}", "the user")
+    default = advisor.DEFAULT_PERSONA.replace("{name}", "Atlas").replace("{user}", "the user")
     before = _run_turn(env, monkeypatch)
     assert before.startswith(default)
     text = next(p.text for p in personas.presets() if p.id == "contrarian")
     assert c.patch("/api/bots/atlas", json={"persona": text}).status_code == 200
     after = _run_turn(env, monkeypatch)
-    want = text.replace("{name}", "Atlas").replace("{owner}", "the user")
+    want = text.replace("{name}", "Atlas").replace("{user}", "the user")
     assert after.startswith(want)
     # Everything the code appends after the persona is byte-identical.
     assert after[len(want):] == before[len(default):]
@@ -297,8 +298,8 @@ def test_a_legacy_bot_keeps_the_default_preset_text_and_fills_the_placeholders(e
     c.patch(f"/api/bots/{bid}", json={"persona": sleek})
     bot = config.get_bot(bid)
     resolved = llm_api.resolve_api(bot.api, bot.name, bot.id)
-    assert "{name}" not in resolved.system_prompt and "{owner}" not in resolved.system_prompt
-    assert resolved.system_prompt == sleek.replace("{name}", bot.name).replace("{owner}", "the user")
+    assert "{name}" not in resolved.system_prompt and "{user}" not in resolved.system_prompt
+    assert resolved.system_prompt == sleek.replace("{name}", bot.name).replace("{user}", "the user")
     # "" still means the provider's plain default for a legacy bot.
     c.patch(f"/api/bots/{bid}", json={"persona": ""})
     assert "system_prompt" not in config.get_bot(bid).api
@@ -366,3 +367,25 @@ def test_update_bot_returns_none_for_an_unknown_bot_and_the_route_404s(env):
     c = _unlocked(env)
     assert config.update_bot("nope", lambda b: b) is None
     assert c.patch("/api/bots/nope", json={"persona": "x"}).status_code == 404
+
+
+def test_fill_replaces_user_and_keeps_owner_as_an_alias():
+    assert personas.fill("Hi {user}, I am {name}.", "Atlas", "Sam") == "Hi Sam, I am Atlas."
+    assert personas.fill("Hi {owner}, I am {name}.", "Atlas", "Sam") == "Hi Sam, I am Atlas."
+    assert personas.fill("{user} and {owner}", "A") == "the user and the user"
+
+
+def test_the_advisor_prompt_fills_user_and_a_legacy_owner_persona():
+    for ph in ("{user}", "{owner}"):
+        bot = config.Bot(id="adv", name="Atlas", advisor={
+            "owner": "Sam", "providers": [{"provider": "custom", "model": "m"}],
+            "persona": f"You are {{name}} for {ph}."})
+        cfg = advisor.AdvisorConfig.from_bot(bot)
+        out = advisor.build_system_prompt(cfg, "", [], "2026-10-14")
+        assert out.startswith("You are Atlas for Sam."), ph
+
+
+def test_the_default_persona_uses_user_and_normalise_still_recognises_an_old_copy():
+    assert "{user}" in advisor.DEFAULT_PERSONA and "{owner}" not in advisor.DEFAULT_PERSONA
+    old = advisor.DEFAULT_PERSONA.replace("{user}", "{owner}")
+    assert personas.normalise(old) == ""
