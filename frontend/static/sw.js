@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v155';  // v155: 2.3.2 — about.js?v=9→10 and its importers ext-sdk.js?v=4→5, voice-absent.js?v=3→4, plugins.js?v=3→4, main.js?v=131→132 (review fixes).
+const CACHE = 'local-chat-v156';  // v156: 2.3.3 — about.js?v=10→11 and its importers ext-sdk.js?v=5→6, voice-absent.js?v=4→5, plugins.js?v=4→5, main.js?v=132→133 (the reaction pool's daily run never mints into a full shelf; locales reactions.pool_daily_add_hint).
+// v155: 2.3.2 — about.js?v=9→10 and its importers ext-sdk.js?v=4→5, voice-absent.js?v=3→4, plugins.js?v=3→4, main.js?v=131→132 (review fixes).
 // v154: 2.3.1 review — llm.js?v=9→10 (Test connection sends target + api_key_env so a connected bot's saved key is used), plugins.js?v=2→3 (restart hint follows the server's rule for failed/incompatible add-ons), main.js?v=130→131 (settings.pane guard before the tabs exist).
 // v153: 2.3.1 — about.js?v=8→9 and its importers ext-sdk.js?v=3→4, voice-absent.js?v=2→3, plugins.js?v=1→2, main.js?v=129→130 (version 2.3.1; extension websockets accept a safe bot's thread, voice for Safe-Mode bots).
 // v152: 2.3.0 — quick actions (js/quick-actions.js), Settings → Plugins (js/plugins.js) and Bots-tab editing (js/bots-edit.js) join SHELL; the Tools tab folds into Plugins; add-in tabs; main.js?v=128→129, api.js?v=32→33, extensions.js?v=1→2, ext-sdk.js?v=2→3, voice-absent.js?v=1→2, llm.js?v=8→9, tools.js?v=12→13, app.css?v=99→100, index.html, locales (quick.*, plugins.*, bots_edit.*).

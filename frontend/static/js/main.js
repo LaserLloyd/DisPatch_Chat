@@ -43,10 +43,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=2';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=5';
+} from './ext-sdk.js?v=6';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=4';
-import { mountPluginsSettings } from './plugins.js?v=4';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=5';
+import { mountPluginsSettings } from './plugins.js?v=5';
 import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -70,7 +70,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=10';
+import { aboutRow } from './about.js?v=11';
 import { pushRow } from './push.js?v=1';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
