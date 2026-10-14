@@ -309,8 +309,10 @@ socket **not yet accepted**:
 1. a present `Origin` must equal `Host` — else **1008** before accept;
 2. the tier, decided like the main `/ws`: with a PIN, a live unlocked
    `lc_session`, else a **locked** device;
-3. the thread exists and, for a locked device, its bot is `safe` (the threads
-   a locked device can see) — else **1008** before accept;
+3. the thread exists and, for a locked device, its bot is `safe` **and
+   listed** (`visible` — the threads a locked device's chat list shows, the
+   same rule as a Safe-Mode send on the main `/ws`) — else **1008** before
+   accept;
 4. at most `max_total` open sockets under the name — beyond it
    accept-then-**1013** "Voice is busy on this server (3 chats open)" (a
    session that already holds one is never "busy": its oldest is replaced;
@@ -328,10 +330,16 @@ says the socket came from a locked device (`token` is None): every turn the
 host takes for that thread — `submit_turn` while the socket is open and for
 two minutes after it closed — runs with `TurnOptions(locked=True)` exactly
 like a typed Safe-Mode send, and `speculate_turn` answers None there (a
-speculation is built unlocked). The extension never has to pass it; it reads
-it only to show less. `session_live()` turns false when the session lapses, a
-PIN appears on a PIN-less install, the thread is deleted, the bot is removed,
-or (for a locked socket) the bot stops being `safe` —
+speculation is built unlocked). Such a turn is also a Safe-Mode send for the
+daily budget: while a locked socket is open on the thread, `submit_turn` is
+charged to that device's `DECOY_TURN_QUOTA` (the same "turn" budget as the
+main `/ws`) and, once it is spent — or the bot has stopped being safe or
+listed meanwhile — it raises `PermissionError` before anything is persisted
+(the voice add-on tells the listener it could not send). The extension never
+has to pass `locked`; it reads it only to show less. `session_live()` turns
+false when the session lapses, a PIN appears on a PIN-less install, the
+thread is deleted, the bot is removed, or (for a locked socket) the bot stops
+being `safe` or listed —
 re-check it (≤ 1/s) and close 1008 when it does. `close_unavailable(reason)`
 is accept-then-1013 with your reason (≤ 120 characters). A handler that returns
 without accepting is answered accept-then-1013 "extension did not accept" (and

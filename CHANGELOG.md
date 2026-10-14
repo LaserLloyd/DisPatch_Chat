@@ -7,6 +7,20 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Locked voice (2.3.4) follows the chat list and the daily budget.** An
+  extension thread websocket from a locked device is admitted only on a
+  `safe` bot that is also **listed** (`visible`) — the same rule as a
+  Safe-Mode send on the main `/ws`; a hidden safe bot's thread was reachable
+  by voice but not by chat. A locked device's voice turns (spoken or typed on
+  the call screen) are now charged to the same daily Safe-Mode budget as a
+  typed send (`DECOY_TURN_QUOTA` per client) and refused once it is spent —
+  they ran unmetered before. The host also refuses a locked thread's turn
+  itself when the bot has stopped being safe or listed, under the add-on's
+  own `session_live` check. `ThreadSocket` is unchanged; `Hooks` gains
+  `client_ip`.
+
 ## [2.3.6] — 2026-10-14
 
 ### Added

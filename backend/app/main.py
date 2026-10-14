@@ -13141,14 +13141,35 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             with contextlib.suppress(Exception):
                 prefetched.stale = True
             await _discard_run(prefetched)
+    locked = extensions.turn_locked(thread_id)
+    if locked:
+        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
+        # Decided BEFORE the row is persisted, like a Safe-Mode send on the
+        # main /ws (_handle_send): the thread's bot must still be one a locked
+        # device may see, and the turn is charged to that device's daily
+        # Safe-Mode budget (_decoy_action_allowed, the same "turn" action
+        # and DECOY_TURN_QUOTA). Refused = no row, no turn, the extension's
+        # submit raises (the voice add-on tells the listener it could not
+        # send). The budget is spent only while a locked socket is OPEN on
+        # the thread (extensions.locked_client_ip); a turn in the grace
+        # window after it closed runs locked but charges nobody.
+        bot = config.get_bot(thread.bot_id)
+        if not extensions.locked_may_see(bot):
+            if adopted is not None:
+                await _discard_run(adopted)
+            raise PermissionError("Unlock for full access")
+        ip = extensions.locked_client_ip(thread_id)
+        if ip is not None and not _decoy_action_allowed(ip, "turn", DECOY_TURN_QUOTA):
+            if adopted is not None:
+                await _discard_run(adopted)
+            log.info("ext %s: locked turn on %s refused — the daily Safe-Mode "
+                     "message limit is spent", ext_id, thread_id)
+            raise PermissionError("Daily message limit reached — try again tomorrow or unlock.")
     meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
     user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
-    locked = extensions.turn_locked(thread_id)
-    if locked:
-        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
     if locked and adopted is not None:
         # Never reached in practice (_ext_speculate_turn refuses a locked
         # thread), but a run built unlocked must never answer a locked turn.
@@ -13395,6 +13416,7 @@ EXT_HOOKS = extensions.Hooks(
     replies_after=lambda *a, **kw: _ext_replies_after(*a, **kw),
     note_heard=lambda *a, **kw: _ext_note_heard(*a, **kw),
     counters=lambda: dict(_ext_counters),
+    client_ip=_ws_client_ip,
 )
 # Discovery + handshake + setup; never raises (a broken add-on is a state in
 # GET /api/extensions and in Settings → Voice, not a failed boot).
