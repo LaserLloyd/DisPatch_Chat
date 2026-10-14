@@ -47,7 +47,7 @@ import {
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=8';
 import { mountPluginsSettings } from './plugins.js?v=8';
-import { rowControls, addBotRow } from './bots-edit.js?v=2';
+import { rowControls, addBotRow } from './bots-edit.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -72,7 +72,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
 import { aboutRow } from './about.js?v=14';
 import { pushRow } from './push.js?v=1';
-import { wireTabStrip } from './tabstrip.js?v=1';
+import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
 import {

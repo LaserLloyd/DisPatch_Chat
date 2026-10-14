@@ -687,7 +687,10 @@ def resolve_api(api: dict, name: str, bot_id: str = "", *,
         budget = int(api.get("max_history_chars") or DEFAULT_HISTORY_CHARS)
     except (TypeError, ValueError):
         budget = DEFAULT_HISTORY_CHARS
-    system = str(api.get("system_prompt") or "").strip() or \
+    # A stored prompt gets the same two placeholders a direct bot's persona
+    # does: the Bots tab offers one set of presets to both kinds (2.3.6), and
+    # "{name}" reaching the model literally was what a legacy bot got before.
+    system = personas.fill(str(api.get("system_prompt") or "").strip(), bot.name) or \
         (SAFE_SYSTEM_PROMPT if safe else DEFAULT_SYSTEM_PROMPT).format(name=bot.name)
     return Resolved(provider=provider, base_url=base_url, model=model,
                     api_key=api_key, system_prompt=system,
@@ -2273,7 +2276,10 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
     # blank keeps the bot's persona; the shipped default text means "no
     # custom persona", stored as no key so a later default reaches the bot.
     raw = (spec.persona or "").strip()[:MAX_PERSONA_CHARS]
-    persona = personas.normalise(raw)
+    try:
+        persona = personas.normalise(raw)
+    except ValueError as e:
+        raise ApiError("That system prompt cannot be saved", str(e)) from e
     reset = bool(raw) and not persona
     if existing is not None:
         # "Lookups on" keeps a hand-picked subset (config.set_direct_tools

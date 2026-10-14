@@ -7,6 +7,26 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings → Bots → Personality.** An unsaved edit survives the row being
+  rebuilt (a rename, the Lookups pill, a save on another row used to replace
+  the editor with the stored text). A legacy API bot is no longer offered the
+  shipped advisor persona as a preset, and saving that text no longer wipes
+  its system prompt; a preset's `{name}` / `{owner}` are filled in for a
+  legacy bot's turn as they are for a direct-API bot. Esc and Close hand
+  focus back to the Personality button.
+- **Bot edits no longer overwrite each other.** `PATCH /api/bots/<id>` reads,
+  changes and writes the bot under one lock (`config.update_bot`), so a
+  persona save racing a rename or a Lookups toggle — two tabs, or two
+  controls on one row — keeps both (before: the second writer carried a stale
+  copy of the bot and undid the first, every time).
+- A lone surrogate in any JSON string field (`"\ud800"`) is a 422 with the
+  validation error, not a 500: the 422 body no longer echoes text the
+  response cannot encode.
+- **Settings tab strip.** A mouse click on the ‹ › edge buttons no longer
+  takes focus off the tablist, so ←/→ keep working afterwards.
+
 ## [2.3.6] — 2026-10-14
 
 ### Added

@@ -112,12 +112,35 @@ def current(bot: config.Bot) -> tuple[str, bool]:
     return ("", False)
 
 
-def normalise(text: str) -> str:
-    """Line endings and trailing space tidied; the shipped default is stored
-    as "no persona" so a later change to it reaches the bot."""
+def check_text(text: str) -> str:
+    """The text as it can be stored. Raises ValueError for one that cannot be
+    written as UTF-8 (a lone surrogate from a JSON ``\\ud800`` escape): the
+    roster write would fail halfway with a 500 and no message."""
+    t = text or ""
+    try:
+        t.encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise ValueError("A personality must be valid text (no lone surrogates)") from e
+    return t
+
+
+def normalise(text: str, kind: str = "direct") -> str:
+    """Line endings and trailing space tidied. For a direct-API bot the shipped
+    default is stored as "no persona" so a later change to it reaches the bot;
+    a legacy ``api:`` bot has no default persona of its own (an empty
+    ``system_prompt`` means the provider's plain default), so its text is kept
+    as typed."""
     from .advisor import DEFAULT_PERSONA
-    t = (text or "").replace("\r\n", "\n").strip()
-    return "" if t == DEFAULT_PERSONA.strip() else t
+    t = check_text(text).replace("\r\n", "\n").strip()
+    if kind == "direct" and t == DEFAULT_PERSONA.strip():
+        return ""
+    return t
+
+
+def fill(text: str, name: str, owner: str = "the user") -> str:
+    """The two documented placeholders filled in. One rule for both bot kinds:
+    a preset says ``{name}`` and ``{owner}`` whichever backend runs it."""
+    return (text or "").replace("{name}", name).replace("{owner}", owner)
 
 
 def apply(bot: config.Bot, text: str) -> config.Bot:
@@ -130,7 +153,7 @@ def apply(bot: config.Bot, text: str) -> config.Bot:
     k = kind(bot)
     if k == "none":
         raise ValueError("This bot's personality lives in its agent workspace, not in DisPatch")
-    t = normalise(text)
+    t = normalise(text, k)
     if len(t) > MAX_CHARS:
         raise ValueError(f"A personality is at most {MAX_CHARS} characters")
     if k == "direct":

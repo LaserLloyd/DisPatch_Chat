@@ -25,6 +25,10 @@ export const CUSTOM = 'custom';
 /** Bot ids whose panel is open: the Bots tab is rebuilt after every PATCH,
  *  and a Save must not snap the editor shut under the operator's hands. */
 const openFor = new Set();
+/** Unsaved editor text by bot id. The same rebuild (a rename, the Lookups
+ *  pill, another row's save) used to replace the textarea with the stored
+ *  text and lose whatever was typed (review 2.3.6). Cleared by Save / Revert. */
+const drafts = new Map();
 
 let presetsPromise = null;
 
@@ -50,7 +54,7 @@ export function loadPresets(ctx) {
 }
 
 /** Test hook: forget the cached presets and open panels. */
-export function _reset() { presetsPromise = null; openFor.clear(); }
+export function _reset() { presetsPromise = null; openFor.clear(); drafts.clear(); }
 
 export function kindOf(bot) {
   const k = bot && bot.persona_kind;
@@ -89,11 +93,16 @@ export function personaPanel(bot, ctx) {
   if (bot && bot.backend === 'app') return { panel: null, toggle: () => {} };
   const kind = kindOf(bot);
   const panel = el('div', { class: 'bm-persona hidden', dataset: { bm: 'persona-panel', kind } });
+  let opener = null;
   const toggle = (open) => {
     const show = open === undefined ? panel.classList.contains('hidden') : open;
+    // Closing with the keyboard (Esc, the Close button) must not drop focus
+    // on the floor: the panel's own controls are about to be display:none.
+    const inside = !show && panel.contains(panel.ownerDocument.activeElement);
     panel.classList.toggle('hidden', !show);
     if (show) openFor.add(bot.id); else openFor.delete(bot.id);
     if (show && !panel.dataset.built) build();
+    if (inside && opener) opener.focus();
   };
 
   function build() {
@@ -106,6 +115,7 @@ export function personaPanel(bot, ctx) {
       return;
     }
     const saved = { text: String(bot.persona || '') };
+    const draft = drafts.get(bot.id);
     const select = el('select', { dataset: { bm: 'persona-preset' }, 'aria-label': t('persona.preset') });
     const desc = el('p', { class: 'muted bm-persona-desc', dataset: { bm: 'persona-desc' } });
     const area = el('textarea', {
@@ -113,7 +123,7 @@ export function personaPanel(bot, ctx) {
       class: 'bm-persona-text', dataset: { bm: 'persona-text' }, 'aria-label': t('persona.editor'),
       placeholder: kind === 'legacy-api' ? t('persona.legacy_placeholder') : '',
     });
-    area.value = saved.text;
+    area.value = draft !== undefined ? draft : saved.text;
     const count = el('span', { class: 'bm-persona-count', dataset: { bm: 'persona-count' }, 'aria-live': 'polite' });
     const save = el('button', { type: 'button', class: 'btn-primary', text: t('persona.save'), dataset: { bm: 'persona-save' } });
     const revert = el('button', { type: 'button', class: 'btn-secondary', text: t('persona.revert'), dataset: { bm: 'persona-revert' } });
@@ -137,14 +147,19 @@ export function personaPanel(bot, ctx) {
     let lastPreset = null;
     const byId = (id) => presets.find((p) => p.id === id);
 
+    // A legacy api: bot's prompt is the WHOLE prompt and its blank state is
+    // the provider's own default, so the shipped advisor persona (which talks
+    // about "the background below") is not one of its choices.
+    const offered = () => (kind === 'legacy-api' ? presets.filter((p) => p.id !== 'default') : presets);
+    const fallback = () => (kind === 'legacy-api' ? null : byId('default'));
     const paintSelect = () => {
       select.replaceChildren(
-        ...presets.map((p) => el('option', { value: p.id, text: p.title })),
+        ...offered().map((p) => el('option', { value: p.id, text: p.title })),
         el('option', { value: CUSTOM, text: t('persona.custom') }),
       );
     };
     const sync = () => {
-      const id = matchPreset(presets, area.value);
+      const id = matchPreset(offered(), area.value);
       select.value = id;
       if (id !== CUSTOM) lastPreset = id;
       const p = byId(id);
@@ -153,9 +168,10 @@ export function personaPanel(bot, ctx) {
       count.textContent = t('persona.count', { n: String(n), max: String(MAX_CHARS) });
       count.classList.toggle('over', n > MAX_CHARS);
       const dirty = area.value.trim() !== saved.text.trim();
+      if (dirty) drafts.set(bot.id, area.value); else drafts.delete(bot.id);
       save.disabled = !dirty || n > MAX_CHARS;
       revert.disabled = !dirty;
-      const target = byId(lastPreset || 'default');
+      const target = (lastPreset && byId(lastPreset)) || fallback();
       reset.disabled = !target || area.value.trim() === String(target.text).trim();
     };
 
@@ -171,7 +187,7 @@ export function personaPanel(bot, ctx) {
     });
     revert.addEventListener('click', () => { area.value = saved.text; sync(); });
     reset.addEventListener('click', () => {
-      const p = byId(lastPreset || 'default');
+      const p = (lastPreset && byId(lastPreset)) || fallback();
       if (p) { area.value = p.text; sync(); }
     });
     close.addEventListener('click', () => toggle(false));
@@ -206,5 +222,5 @@ export function personaPanel(bot, ctx) {
   }
 
   if (openFor.has(bot.id)) toggle(true);
-  return { panel, toggle };
+  return { panel, toggle, setOpener: (b) => { opener = b; } };
 }

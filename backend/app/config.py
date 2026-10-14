@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -1009,6 +1010,14 @@ def save_bot_avatar(bot_id: str, avatar_filename: str) -> Bot | None:
     return get_bot(bot_id)
 
 
+#: Roster writers read config.yaml, change one entry and write the whole file
+#: back. Two of them interleaving (a Bots-tab save in each of two tabs, or a
+#: persona save racing a Lookups toggle on the same row) lost whichever write
+#: landed first: review 2.3.6 measured 10 lost updates in 10 rounds. The lock
+#: serialises the read-modify-write; the file write itself is atomic already.
+_ROSTER_LOCK = threading.RLock()
+
+
 def upsert_bot(bot: Bot) -> Bot:
     """Create-or-update ONE bot by id, leaving every other bot untouched.
 
@@ -1016,16 +1025,33 @@ def upsert_bot(bot: Bot) -> Bot:
     bot the operator never listed by hand. An existing id is replaced in place
     (keeping its position in the file, so re-running the setup panel does not
     shuffle the sidebar); a new id lands at the end with the next free `order`.
+
+    A caller that CHANGES a bot it read earlier should go through
+    :func:`update_bot` so the read and the write happen under one lock.
     """
-    bots = load_bots()
-    if any(b.id == bot.id for b in bots):
-        entries = [_bot_entry(bot if b.id == bot.id else b) for b in bots]
-    else:
-        entries = [_bot_entry(b) for b in bots]
-        entries.append(_bot_entry(replace(
-            bot, order=max((b.order for b in bots), default=-1) + 1)))
-    _write_bots(entries)
-    return get_bot(bot.id)  # type: ignore[return-value]
+    with _ROSTER_LOCK:
+        bots = load_bots()
+        if any(b.id == bot.id for b in bots):
+            entries = [_bot_entry(bot if b.id == bot.id else b) for b in bots]
+        else:
+            entries = [_bot_entry(b) for b in bots]
+            entries.append(_bot_entry(replace(
+                bot, order=max((b.order for b in bots), default=-1) + 1)))
+        _write_bots(entries)
+        return get_bot(bot.id)  # type: ignore[return-value]
+
+
+def update_bot(bot_id: str, mutate) -> Bot | None:
+    """Read ONE bot, pass it through ``mutate`` and write the result back, all
+    under the roster lock -- so two concurrent edits of the same bot (or of
+    two bots) both land. None when there is no such bot. ``mutate`` receives
+    the CURRENT bot and returns the bot to store; whatever it raises
+    propagates unchanged (a route raises its own HTTPException there)."""
+    with _ROSTER_LOCK:
+        bot = get_bot(bot_id)
+        if bot is None:
+            return None
+        return upsert_bot(mutate(bot))
 
 
 def remove_bot(bot_id: str) -> bool:
@@ -1037,14 +1063,15 @@ def remove_bot(bot_id: str) -> bool:
     shipped defaults, which would silently bring a bot back that the operator
     just removed.
     """
-    bots = load_bots()
-    if not any(b.id == bot_id for b in bots):
-        return False
-    rest = [b for b in bots if b.id != bot_id]
-    if not rest:
-        raise ValueError("A DisPatch install needs at least one bot")
-    _write_bots([_bot_entry(b) for b in rest])
-    return True
+    with _ROSTER_LOCK:
+        bots = load_bots()
+        if not any(b.id == bot_id for b in bots):
+            return False
+        rest = [b for b in bots if b.id != bot_id]
+        if not rest:
+            raise ValueError("A DisPatch install needs at least one bot")
+        _write_bots([_bot_entry(b) for b in rest])
+        return True
 
 
 def derive_bot_id(name: str, taken: set[str]) -> str:
