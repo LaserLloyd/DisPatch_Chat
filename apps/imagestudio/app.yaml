@@ -1,0 +1,11 @@
+# Image Studio — an operator-only tool for making pictures from the configured
+# image API provider (Settings → AI models → Image generation). Prompt, aspect
+# ratio, count, optimizer, seed and a reference image in; a results grid out,
+# with send-to-chat and set-as-avatar. Nothing runs unless the operator presses
+# Generate. Contract: docs/apps.md.
+id: imagestudio
+title: Image Studio
+icon: images
+safe: false                     # operator only; Safe Mode never sees it
+order: 60
+env: []

@@ -7,6 +7,40 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.9] — 2026-10-15
+
+### Added
+
+- **Image Studio** (`apps/imagestudio/`, operator only). A tool in the rail for making
+  pictures from the image API provider set up under Settings → AI models → Image
+  generation: a prompt box with a 1,500-character counter and recent prompts, provider and
+  model, aspect ratio, 1-9 pictures per request, MiniMax's prompt optimizer, an optional
+  seed and an optional reference image (an upload, an earlier result or a picture from a
+  chat; MiniMax's character `subject_reference`), each hidden for a provider that cannot
+  use it. Ctrl+Enter (Cmd+Enter on a Mac) generates, the same as the button and only while
+  it is enabled. Results land in the same media store as every other generated picture,
+  with the prompt and settings in a ledger and a per-day count; each has Download, Copy
+  prompt, Use as reference, Send to chat (an assistant or system message through the
+  ordinary inject path) and Set as bot avatar (the existing face + full avatar upload).
+  One Generate press is one provider request; nothing runs on its own, a second press
+  while one runs is refused, and a calm note says when the provider is metered. The key is
+  never sent to the page. Locked devices, cookieless callers and forged cookies get the
+  usual 403 on every route. Strings in all eight languages.
+- **One lightbox, now with a gallery.** The picture viewer chat images already use steps
+  through every picture of the open thread, in message order: the arrow keys, the side
+  buttons and a swipe go to the next (newer) or previous (older) picture, stop at the
+  ends and show "n / total"; only the picture on screen is loaded and No-Image Mode never
+  gets a gallery. Image Studio opens its results in this same viewer through a new
+  `lightbox()` call in the app SDK (`dispatch:lightbox`). The ✕, Download, caption,
+  counter and arrows now hide unless the pointer is near the bottom of the picture or on
+  a control, fade 1.5 s after it leaves, toggle on a touch tap, show on keyboard focus,
+  never fade under reduced motion, and never get in the way of Esc.
+
+### Changed
+
+- `image_providers.generate_batch()`: several pictures per provider request, plus seed,
+  optimizer and reference for MiniMax. `generate()` is its one-picture case.
+
 ## [2.3.8] — 2026-10-14
 
 ### Changed

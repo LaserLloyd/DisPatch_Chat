@@ -1003,6 +1003,53 @@ body.drive-open .toast { z-index: 1100; }
 .lightbox-close .rail-icon { width: 18px; height: 18px; }
 .lightbox-close:hover { background: var(--accent); color: var(--on-accent); }
 
+/* ---- Lightbox chrome + gallery (2.3.9) -------------------------------------
+   The close button, Download pill, caption, counter and side arrows (all
+   `.lightbox-chrome`) show only while the pointer is near the bottom of the
+   picture or on a control, fade ~1.5 s after it leaves, toggle on a touch tap
+   and show on keyboard focus (js/lightbox-nav.js decides; `.chrome-on` is the
+   verdict). Hidden chrome keeps pointer-events off but stays focusable, so Tab
+   brings it back; Esc and the arrow keys never depend on it. */
+.lightbox { touch-action: none; }
+.lightbox:focus { outline: none; }
+.lightbox .lightbox-chrome { transition: opacity .25s ease; }
+.lightbox:not(.chrome-on) .lightbox-chrome:not(:focus-visible) { opacity: 0; pointer-events: none; }
+.lightbox-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 5;
+  width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--border-light);
+  background: rgba(20,20,40,.8); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.lightbox-nav .rail-icon { width: 20px; height: 20px; }
+.lightbox-nav:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.lightbox-nav:disabled { opacity: .35; cursor: default; }
+.lightbox:not(.chrome-on) .lightbox-nav:disabled { opacity: 0; }
+.lightbox-prev { left: 14px; }
+.lightbox-next { right: 14px; }
+.lightbox-next .rail-icon { transform: scaleX(-1); }
+.lightbox-counter {
+  position: absolute; bottom: 30px; inset-inline-start: 18px; z-index: 5;
+  padding: 4px 10px; border-radius: 999px; background: rgba(20,20,40,.8); color: #fff;
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.lightbox-counter:empty { display: none; }
+.lightbox-caption {
+  position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 5;
+  width: min(720px, calc(100vw - 32px)); padding: 8px 12px; border-radius: 10px;
+  background: rgba(20,20,40,.82); color: #fff; font-size: 13px; line-height: 1.4;
+  text-align: center; cursor: pointer; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.lightbox-caption.open { display: block; max-height: 40vh; overflow: auto; text-align: start; }
+.lightbox-caption[hidden], .lightbox-download[hidden] { display: none; }
+@media (hover: none) {
+  .lightbox-prev { left: 6px; }
+  .lightbox-next { right: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lightbox .lightbox-chrome { transition: none; }
+}
+
 /* ===================== Thread list collapse (desktop) ===================== */
 @media (min-width: 769px) {
   .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }

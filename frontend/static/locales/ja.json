@@ -1286,5 +1286,10 @@
     "legacy_placeholder": "空欄：プロバイダーの標準動作",
     "agent_note": "このボットは OpenClaw のエージェントで動いています。性格はそのエージェントのワークスペースのファイル（SOUL.md、IDENTITY.md、AGENTS.md）にあり、DisPatch では編集しません。",
     "presets_failed": "プリセットを読み込めませんでした。エディターはそのまま使えます。"
+  },
+  "lightbox": {
+    "previous": "前の(古い)画像",
+    "next": "次の(新しい)画像",
+    "nim_blocked": "画像なしモードでは画像は表示されません。"
   }
 }

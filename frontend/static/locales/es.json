@@ -1336,5 +1336,10 @@
     "legacy_placeholder": "Vacío: el valor por defecto del proveedor",
     "agent_note": "Este bot funciona con un agente de OpenClaw. Su personalidad está en los archivos del espacio de trabajo de ese agente (SOUL.md, IDENTITY.md, AGENTS.md), no en DisPatch.",
     "presets_failed": "No se pudieron cargar las plantillas. El editor sigue funcionando."
+  },
+  "lightbox": {
+    "previous": "Imagen anterior (más antigua)",
+    "next": "Imagen siguiente (más reciente)",
+    "nim_blocked": "Las imágenes están ocultas en el modo sin imágenes."
   }
 }

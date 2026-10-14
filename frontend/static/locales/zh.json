@@ -1286,5 +1286,10 @@
     "legacy_placeholder": "留空：使用服务商的默认行为",
     "agent_note": "这个机器人由 OpenClaw 代理运行。它的性格写在该代理的工作区文件中（SOUL.md、IDENTITY.md、AGENTS.md），不在 DisPatch 里。",
     "presets_failed": "无法加载预设。编辑器仍可使用。"
+  },
+  "lightbox": {
+    "previous": "上一张(较早)图片",
+    "next": "下一张(较新)图片",
+    "nim_blocked": "无图模式下不显示图片。"
   }
 }

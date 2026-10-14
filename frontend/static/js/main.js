@@ -43,10 +43,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=11';
+} from './ext-sdk.js?v=12';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=10';
-import { mountPluginsSettings } from './plugins.js?v=10';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=11';
+import { mountPluginsSettings } from './plugins.js?v=11';
 import { rowControls, addBotRow } from './bots-edit.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -61,16 +61,17 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
-} from './tools.js?v=14';
+} from './tools.js?v=15';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp, api as appApi } from './app-sdk.js?v=1';
+import { forApp, api as appApi } from './app-sdk.js?v=2';
 import { renderLinkRail, linksSection } from './links.js?v=7';
+import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=1';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=16';
+import { aboutRow } from './about.js?v=17';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -3190,11 +3191,40 @@ async function handleFiles(files) {
 // Click outside (backdrop) or ✕ closes. Double-click/double-tap an image
 // zooms in at that point; drag to pan while zoomed; double-click again to
 // reset. Videos get native controls + sound.
-function openLightbox(src, { video = false, downloadUrl = null, downloadName = null } = {}) {
-  const media = video
-    ? el('video', { src, controls: '', autoplay: '', loop: '', playsinline: '' })
-    : el('img', { src, draggable: 'false', alt: downloadName || t('msg.fullsize_alt') });
-  const closeBtn = el('button', { class: 'lightbox-close', 'aria-label': t('common.close') }, [railIcon(RAIL_ICONS.close)]);
+//
+// GALLERY. Given `gallery` (items oldest -> newest) and `index`, ← / → keys,
+// the side arrows and a swipe step through them: forward is NEWER, both stop at
+// the ends, and only the picture on screen is ever loaded. Chat images pass
+// every picture of the open thread; an app page (Image Studio) passes its own
+// results through the `dispatch:lightbox` message. No-Image Mode never gets a
+// gallery at all, so nothing is fetched for a neighbour.
+//
+// CHROME (✕, Download, caption, counter, arrows) is hidden until the pointer is
+// near the bottom of the picture or on a control, fades 1.5 s after it leaves,
+// toggles on a touch tap, shows on keyboard focus, and never blocks Esc.
+// The logic lives in lightbox-nav.js; this is the DOM around it.
+function openLightbox(src, { video = false, downloadUrl = null, downloadName = null,
+                             gallery = null, index = 0 } = {}) {
+  const useGallery = Array.isArray(gallery) && gallery.length > 0 && !nimEnabled();
+  const items = useGallery ? gallery : [{ src, video, downloadUrl, downloadName }];
+  const nav = createGallery(items, useGallery ? index : 0);
+  const itemVideo = (it) => !!(it.video != null ? it.video : isVideoUrl(it.src));
+
+  const makeMedia = (it) => {
+    const { src, downloadName } = it;
+    return itemVideo(it)
+      ? el('video', { src, controls: '', autoplay: '', loop: '', playsinline: '' })
+      : el('img', { src, draggable: 'false', alt: downloadName || t('msg.fullsize_alt') });
+  };
+  let media = makeMedia(nav.current());
+  const chromeCls = 'lightbox-chrome';
+  const closeBtn = el('button', { class: `lightbox-close ${chromeCls}`, 'aria-label': t('common.close') }, [railIcon(RAIL_ICONS.close)]);
+  const prevBtn = el('button', { class: `lightbox-nav lightbox-prev ${chromeCls}`, type: 'button', 'aria-label': t('lightbox.previous') }, [railIcon(RAIL_ICONS.back)]);
+  const nextBtn = el('button', { class: `lightbox-nav lightbox-next ${chromeCls}`, type: 'button', 'aria-label': t('lightbox.next') }, [railIcon(RAIL_ICONS.back)]);
+  const counter = el('div', { class: `lightbox-counter ${chromeCls}`, 'aria-live': 'polite', dir: 'ltr' });
+  const caption = el('div', { class: `lightbox-caption ${chromeCls}`, tabindex: '0' });
+  const dl = el('a', { class: `lightbox-download ${chromeCls}` }, iconLabel(RAIL_ICONS['viewer-download'], t('common.download')));
+  dl.addEventListener('click', (e) => e.stopPropagation());
   // A modal dialog, declared as one: without role/aria-modal a screen reader
   // keeps reading the chat behind it, and without `inert` on #app a Tab walks
   // straight out of the picture into the composer underneath.
@@ -3202,23 +3232,22 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     class: 'lightbox',
     role: 'dialog',
     'aria-modal': 'true',
-    'aria-label': downloadName || t('msg.fullsize_alt'),
+    'aria-label': nav.current().downloadName || t('msg.fullsize_alt'),
     tabindex: '-1',
   }, [media, closeBtn]);
-  if (downloadUrl) {
-    const dl = el('a', { class: 'lightbox-download', href: downloadUrl }, iconLabel(RAIL_ICONS['viewer-download'], t('common.download')));
-    if (downloadName) dl.setAttribute('download', downloadName);
-    dl.addEventListener('click', (e) => e.stopPropagation());
-    lb.append(dl);
-  }
+  const multi = nav.size > 1;
+  if (multi) lb.append(prevBtn, nextBtn, counter);
+  lb.append(caption, dl);
 
   const cleanups = [];
   // Whoever was focused when the picture opened gets focus back when it closes
   // — a keyboard user who opened a thumbnail lands back on that thumbnail, not
   // at the top of the document.
   const returnFocus = document.activeElement;
+  const chrome = createChrome({ onChange: (on) => lb.classList.toggle('chrome-on', on) });
   const close = () => {
-    try { if (video) media.pause(); } catch {}
+    try { if (itemVideo(nav.current())) media.pause(); } catch {}
+    chrome.dispose();
     cleanups.forEach((f) => f());
     lb.remove();
     if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') {
@@ -3231,12 +3260,21 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   closeBtn.addEventListener('click', close);
   lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
 
-  if (!video) {
-    let scale = 1, tx = 0, ty = 0;
-    const apply = () => {
-      media.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-      media.classList.toggle('zoomed', scale > 1);
-    };
+  // ---- zoom / pan, re-armed for each picture ----------------------------
+  let scale = 1, tx = 0, ty = 0;
+  const apply = () => {
+    media.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    media.classList.toggle('zoomed', scale > 1);
+  };
+  let dragging = false, lx = 0, ly = 0;
+  const down = (x, y) => { if (scale > 1) { dragging = true; lx = x; ly = y; } };
+  const move = (x, y) => {
+    if (!dragging) return;
+    tx += x - lx; ty += y - ly; lx = x; ly = y; apply();
+  };
+  let tapStart = null;   // a touch that may turn out to be a tap or a swipe
+  const armMedia = () => {
+    if (itemVideo(nav.current())) return;
     media.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (scale > 1) { scale = 1; tx = ty = 0; }
@@ -3250,42 +3288,108 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
       apply();
     });
     // Drag (mouse or touch) to pan while zoomed.
-    let dragging = false, lx = 0, ly = 0;
-    const down = (x, y) => { if (scale > 1) { dragging = true; lx = x; ly = y; } };
-    const move = (x, y) => {
-      if (!dragging) return;
-      tx += x - lx; ty += y - ly; lx = x; ly = y; apply();
-    };
     media.addEventListener('mousedown', (e) => { e.preventDefault(); down(e.clientX, e.clientY); });
-    // Pan tracks on window (so drags survive leaving the image), but the
-    // handlers must die with the lightbox or every open leaks two listeners.
-    const onMove = (e) => move(e.clientX, e.clientY);
-    const onUp = () => { dragging = false; };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    cleanups.push(() => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    });
     media.addEventListener('touchstart', (e) => { if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
     media.addEventListener('touchmove', (e) => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
     media.addEventListener('touchend', () => { dragging = false; });
-    // Mouse wheel zoom.
-    lb.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const prev = scale;
-      scale = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.18 : 0.85)));
-      if (scale === 1) { tx = ty = 0; }
-      else { const f = scale / prev; tx *= f; ty *= f; }
-      apply();
-    }, { passive: false });
-  }
+  };
+  // Pan tracks on window (so drags survive leaving the image), but the
+  // handlers must die with the lightbox or every open leaks two listeners.
+  const onMove = (e) => move(e.clientX, e.clientY);
+  const onUp = () => { dragging = false; };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  cleanups.push(() => {
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  });
+  // Mouse wheel zoom (pictures only).
+  lb.addEventListener('wheel', (e) => {
+    if (itemVideo(nav.current())) return;
+    e.preventDefault();
+    const prev = scale;
+    scale = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.18 : 0.85)));
+    if (scale === 1) { tx = ty = 0; }
+    else { const f = scale / prev; tx *= f; ty *= f; }
+    apply();
+  }, { passive: false });
+
+  // ---- showing one item ---------------------------------------------------
+  const show = () => {
+    const it = nav.current();
+    const fresh = makeMedia(it);
+    try { if (itemVideo(it) !== (media.tagName === 'VIDEO')) media.pause?.(); } catch {}
+    lb.replaceChild(fresh, media);
+    media = fresh;
+    scale = 1; tx = ty = 0; dragging = false;
+    armMedia();
+    lb.setAttribute('aria-label', it.downloadName || it.caption || t('msg.fullsize_alt'));
+    const href = it.downloadUrl || (useGallery && !itemVideo(it) ? it.src : '');
+    dl.hidden = !href;
+    if (href) {
+      dl.setAttribute('href', href);
+      if (it.downloadName) dl.setAttribute('download', it.downloadName);
+      else dl.setAttribute('download', '');
+    }
+    caption.textContent = it.caption || '';
+    caption.hidden = !it.caption;
+    caption.classList.remove('open');
+    counter.textContent = nav.label();
+    prevBtn.disabled = !nav.canStep(-1);
+    nextBtn.disabled = !nav.canStep(1);
+  };
+  const stepBy = (dir) => { if (nav.step(dir)) { show(); chrome.flash(); } };
+  caption.addEventListener('click', (e) => { e.stopPropagation(); caption.classList.toggle('open'); });
+  prevBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(-1); });
+  nextBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(1); });
+  show();
+
+  // ---- keyboard: ← older, → newer (Esc is the global handler's) ------------
+  const onKey = (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    if ([...document.querySelectorAll('.lightbox')].at(-1) !== lb) return;
+    const dir = keyDirection(e.key);
+    if (!dir || !multi) return;
+    e.preventDefault();
+    stepBy(dir);
+  };
+  window.addEventListener('keydown', onKey);
+  cleanups.push(() => window.removeEventListener('keydown', onKey));
+
+  // ---- chrome: pointer zone, touch tap, swipe, focus ------------------------
+  const onPointerMove = (e) => {
+    if (e.pointerType === 'touch') return;
+    const onCtl = !!e.target.closest?.(`.${chromeCls}`);
+    chrome.pointer(inBottomZone(e.clientY, media.getBoundingClientRect(), window.innerHeight), onCtl);
+  };
+  lb.addEventListener('pointermove', onPointerMove);
+  lb.addEventListener('pointerleave', () => chrome.leave());
+  lb.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    tapStart = { x: e.clientX, y: e.clientY, t: Date.now(), onCtl: !!e.target.closest?.(`.${chromeCls}`) };
+  });
+  lb.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'touch' || !tapStart) return;
+    const s = tapStart; tapStart = null;
+    if (s.onCtl) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    const dir = multi ? swipeDirection(dx, dy, { zoomed: scale > 1 }) : 0;
+    if (dir) { stepBy(dir); return; }
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.target !== lb) chrome.tap();
+  });
+  lb.addEventListener('pointercancel', () => { tapStart = null; });
+  lb.addEventListener('focusin', (e) => { if (e.target.closest?.(`.${chromeCls}`)) chrome.focusIn(); });
+  lb.addEventListener('focusout', (e) => { if (e.target.closest?.(`.${chromeCls}`)) chrome.focusOut(); });
+
   // Ref-counted: a lightbox opened OVER another modal (an avatar from the Bot
   // Manager) must not re-enable that modal's page when it closes.
   const inertToken = acquireInert();
   cleanups.push(() => releaseInert(inertToken));
   document.body.append(lb);
-  closeBtn.focus();
+  // The dialog itself takes focus, not ✕: a focused control would pin the
+  // chrome open (focus keeps it up), and Tab still walks into the controls.
+  lb.focus();
+  chrome.flash();
 }
 
 // Full-resolution avatar viewer (click any bot avatar).
@@ -3331,8 +3435,41 @@ function installThumbnailLightbox() {
     e.preventDefault();
     e.stopPropagation();
     const url = thumb.dataset.full;
-    if (url) openLightbox(url, { video: isVideoUrl(url) });
+    if (!url) return;
+    const chat = chatGalleryFor(thumb);
+    openLightbox(url, chat ? { video: false, ...chat } : { video: isVideoUrl(url) });
   }, true);
+}
+
+/** The pictures of the open thread, in message order (oldest -> newest), for a
+ *  chat image that was clicked; null for anything else (avatars, reaction
+ *  shelves, No-Image Mode). Only URLs are collected — nothing is fetched until
+ *  the lightbox shows that item. */
+function chatGalleryFor(thumb) {
+  if (nimEnabled() || thumb.tagName !== 'IMG') return null;
+  const root = thumb.closest('#messages');
+  if (!root) return null;
+  const nodes = [...root.querySelectorAll('.msg-media img[data-full], .bubble img[data-full]')]
+    .filter((n) => n.dataset.full && !isVideoUrl(n.dataset.full));
+  const index = nodes.indexOf(thumb);
+  if (index < 0) return null;
+  return {
+    gallery: nodes.map((n) => ({ src: n.dataset.full, video: false, downloadUrl: n.dataset.full, downloadName: null, caption: '' })),
+    index,
+  };
+}
+
+/** An app page's picture set (Image Studio), already validated by
+ *  normalizeGalleryRequest. The same viewer as the chat's. */
+function openAppGallery(req) {
+  if (nimEnabled()) { toast(t('lightbox.nim_blocked')); return; }
+  const g = normalizeGalleryRequest(req);
+  if (!g) return;
+  openLightbox(g.items[g.index].src, {
+    video: false,
+    gallery: g.items.map((it) => ({ ...it, video: false })),
+    index: g.index,
+  });
 }
 
 function openAvatarLightbox(botId) {
@@ -7085,6 +7222,8 @@ function wireEvents() {
     },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
+    // An app pane asked to show a picture set in the shell's own lightbox.
+    lightbox: openAppGallery,
     closeToolPanes,
     builtinOn,
     builtinDot,

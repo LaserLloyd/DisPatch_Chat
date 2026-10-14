@@ -22,7 +22,7 @@
 
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=16';
+import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=17';
 
 export { VOICE_REPO_URL };
 /** The moving tag that always names the latest 1.x release (SPEC §3.4). */

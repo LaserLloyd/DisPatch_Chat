@@ -1168,6 +1168,12 @@ function onAppMessage(ev) {
       if (typeof deps.openThread === 'function') deps.openThread(id, { botId: tool.bot_id || null, hint, appId: tool.id });
       return;
     }
+    case 'dispatch:lightbox': {
+      // A picture set (Image Studio results) for the shell's own viewer. The
+      // shell validates it (same-origin paths only, capped) before it opens.
+      if (typeof deps.lightbox === 'function') deps.lightbox({ items: msg.items, index: msg.index });
+      return;
+    }
     case 'dispatch:close':
       closeTool();
       return;

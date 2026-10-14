@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v162';  // v162: 2.3.8 — Settings on a phone: compact Bots rows, the Plugins tools table as cards, wrapping server paths, a full-width Reactions describe box; tools.js?v=13→14, app.css?v=103→104, about.js?v=15→16 (APP_VERSION 2.3.8) and its importers ext-sdk.js?v=10→11, voice-absent.js?v=9→10, plugins.js?v=9→10, main.js?v=138→139; locales tools.settings_path (replaces tools.settings_hint), reactions.generate_placeholder.
+const CACHE = 'local-chat-v163';  // v163: 2.3.9 — Image Studio (apps/imagestudio) and a better lightbox: new js/lightbox-nav.js joins SHELL (gallery stepping, auto-hiding chrome), main.js?v=139→140, tools.js?v=14→15 (the dispatch:lightbox message), app-sdk.js?v=1→2 (lightbox()) and its importers ext-sdk.js, the Job Board's board.js/thread.js, app.css?v=104→105, about.js?v=16→17 (APP_VERSION 2.3.9) and its importers ext-sdk.js?v=11→12, voice-absent.js?v=10→11, plugins.js?v=10→11; locales lightbox.*.
+// v162: 2.3.8 — Settings on a phone: compact Bots rows, the Plugins tools table as cards, wrapping server paths, a full-width Reactions describe box; tools.js?v=13→14, app.css?v=103→104, about.js?v=15→16 (APP_VERSION 2.3.8) and its importers ext-sdk.js?v=10→11, voice-absent.js?v=9→10, plugins.js?v=9→10, main.js?v=138→139; locales tools.settings_path (replaces tools.settings_hint), reactions.generate_placeholder.
 // v161: merge of review 2.3.6 (personality.js?v=1→2 draft survives rebuilds, legacy bots skip the advisor default, focus returns; tabstrip.js?v=1→2 arrow click keeps tablist focus; bots-edit.js?v=2→3) onto 2.3.7; main.js?v=137→138.
 // v160: 2.3.7 — integrations: new js/integrations.js joins SHELL (one-key setup, Image generation, the Works with DisPatch catalog), llm.js?v=11→12, plugins.js?v=8→9, reactions.js?v=25→26 (needs-line for an unset image tool), push.js?v=1→2 (neutral example name), about.js?v=14→15 (APP_VERSION 2.3.7) and its importers ext-sdk.js?v=9→10, voice-absent.js?v=8→9, main.js?v=136→137, app.css?v=102→103; locales integrations.*, settings.pics_*, settings.pool_needs_cli, reactions.pool_needs_cli.
 // v159: 2.3.6 — Settings → Bots → Personality: new js/personality.js joins SHELL (preset picker + system-prompt editor), bots-edit.js?v=1→2, llm.js?v=10→11 (the Connect field reads the bot's persona), app.css?v=101→102, about.js?v=13→14 and its importers ext-sdk.js?v=8→9, voice-absent.js?v=7→8, plugins.js?v=7→8, main.js?v=135→136; locales persona.*.
@@ -363,7 +364,7 @@ const SHELL = [
   // main.js.
   '/static/js/push.js', '/static/js/quick-actions.js',
   // 2.3.5: the edge buttons + wheel of the Settings tab strip (main.js imports it).
-  '/static/js/tabstrip.js',
+  '/static/js/tabstrip.js', '/static/js/lightbox-nav.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

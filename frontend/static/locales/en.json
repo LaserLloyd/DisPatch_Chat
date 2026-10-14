@@ -1364,5 +1364,10 @@
     "howto_link": "How to set it up",
     "toggle_below": "Its on/off switch is further down this tab.",
     "firstrun_one_key": "One key for everything"
+  },
+  "lightbox": {
+    "previous": "Previous (older) image",
+    "next": "Next (newer) image",
+    "nim_blocked": "Pictures are hidden in No-Image Mode."
   }
 }

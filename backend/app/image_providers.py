@@ -414,26 +414,63 @@ def _b64(s: str) -> bytes:
 
 async def generate(res: Resolved, spec: image_jobs.ImageSpec) -> bytes:
     """One picture's bytes, validated. Raises ImageJobError."""
+    return (await generate_batch(res, spec))[0]
+
+
+#: The most pictures one request may ask for, by wire shape. MiniMax documents
+#: 1-9; OpenAI-shape hosts differ per model, so the Studio keeps to a modest 4
+#: (and 1 for dall-e-3, which refuses more).
+MAX_BATCH = {"minimax": 9, "openai-images": 4}
+
+
+def max_batch(res: Resolved) -> int:
+    if res.preset.shape == "openai-images" and res.model.startswith("dall-e-3"):
+        return 1
+    return MAX_BATCH.get(res.preset.shape, 1)
+
+
+def supports(res: Resolved) -> dict:
+    """What a provider can do beyond a prompt, for UIs that hide the rest."""
+    mm = res.preset.shape == "minimax"
+    return {"reference": mm, "optimizer": mm, "seed": mm, "max_n": max_batch(res)}
+
+
+async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 1,
+                         seed: int | None = None, optimizer: bool = False,
+                         reference: str | None = None) -> list[bytes]:
+    """``n`` pictures' bytes, validated, in one provider request.
+
+    The same client and error mapping as :func:`generate` (which is the n=1
+    case). ``seed``, ``optimizer`` and ``reference`` (a ``data:image/...``
+    URL: MiniMax's ``subject_reference`` character mode) apply to the
+    ``minimax`` shape only and are ignored elsewhere. Raises ImageJobError.
+    """
     label = res.preset.label
+    n = max(1, min(int(n), max_batch(res)))
     headers = {"Content-Type": "application/json"}
     if res.api_key:
         headers["Authorization"] = f"Bearer {res.api_key}"
+    blobs: list[bytes] = []
     async with _client() as client:
         try:
             if res.preset.shape == "minimax":
-                body = {"model": res.model, "prompt": spec.prompt[:MINIMAX_PROMPT_MAX],
-                        "aspect_ratio": minimax_ratio(spec.ratio or "1:1"),
-                        "response_format": "base64", "n": 1,
-                        "prompt_optimizer": False}
+                body: dict[str, Any] = {
+                    "model": res.model, "prompt": spec.prompt[:MINIMAX_PROMPT_MAX],
+                    "aspect_ratio": minimax_ratio(spec.ratio or "1:1"),
+                    "response_format": "base64", "n": n,
+                    "prompt_optimizer": bool(optimizer)}
+                if seed is not None:
+                    body["seed"] = int(seed)
+                if reference:
+                    body["subject_reference"] = [
+                        {"type": "character", "image_file": reference}]
                 r = await client.post(f"{res.base_url}/image_generation",
                                       json=body, headers=headers)
                 if r.status_code >= 400:
                     raise _error_from_status(r, label)
-                data = _minimax_bytes(r.json(), label)
-                if isinstance(data, str):
-                    data = await _download(client, data)
+                items = _minimax_items(r.json(), label)
             else:
-                body = {"model": res.model, "prompt": spec.prompt, "n": 1}
+                body = {"model": res.model, "prompt": spec.prompt, "n": n}
                 if res.preset.size_mode == "openai":
                     body["size"] = openai_size(spec.ratio, spec.width, spec.height,
                                                res.model)
@@ -441,9 +478,10 @@ async def generate(res: Resolved, spec: image_jobs.ImageSpec) -> bytes:
                                       json=body, headers=headers)
                 if r.status_code >= 400:
                     raise _error_from_status(r, label)
-                data = _openai_bytes(r.json(), label)
-                if isinstance(data, str):
-                    data = await _download(client, data)
+                items = _openai_items(r.json(), label)
+            for item in items:
+                blobs.append(await _download(client, item) if isinstance(item, str)
+                             else item)
         except image_jobs.ImageJobError:
             raise
         except httpx.TimeoutException:
@@ -453,22 +491,33 @@ async def generate(res: Resolved, spec: image_jobs.ImageSpec) -> bytes:
                 f"{label} could not be reached ({type(e).__name__})") from None
         except ValueError:
             raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON") from None
-    ok, why = image_jobs.validate_image(data)
-    if not ok:
-        raise image_jobs.ImageJobError(f"{label} returned something that is not an image ({why})")
-    return data
+    for data in blobs:
+        ok, why = image_jobs.validate_image(data)
+        if not ok:
+            raise image_jobs.ImageJobError(
+                f"{label} returned something that is not an image ({why})")
+    return blobs
+
+
+def _openai_items(payload: Any, label: str) -> list[bytes | str]:
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        raise image_jobs.ImageJobError(f"{label} returned no picture")
+    out: list[bytes | str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("b64_json"):
+            out.append(_b64(str(row["b64_json"])))
+        elif row.get("url"):
+            out.append(str(row["url"]))
+    if not out:
+        raise image_jobs.ImageJobError(f"{label} returned no picture")
+    return out
 
 
 def _openai_bytes(payload: Any, label: str) -> bytes | str:
-    items = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(items, list) or not items or not isinstance(items[0], dict):
-        raise image_jobs.ImageJobError(f"{label} returned no picture")
-    first = items[0]
-    if first.get("b64_json"):
-        return _b64(str(first["b64_json"]))
-    if first.get("url"):
-        return str(first["url"])
-    raise image_jobs.ImageJobError(f"{label} returned no picture")
+    return _openai_items(payload, label)[0]
 
 
 _MINIMAX_CODES = {
@@ -476,12 +525,13 @@ _MINIMAX_CODES = {
     1004: "MiniMax rejected the API key",
     1008: "the MiniMax account balance is too low",
     1026: "MiniMax refused the prompt (sensitive content)",
+    1027: "MiniMax refused the picture it made (sensitive content)",
     2013: "MiniMax rejected the request parameters",
     2049: "MiniMax rejected the API key",
 }
 
 
-def _minimax_bytes(payload: Any, label: str) -> bytes | str:
+def _minimax_items(payload: Any, label: str) -> list[bytes | str]:
     if not isinstance(payload, dict):
         raise image_jobs.ImageJobError(f"{label} returned no picture")
     base = payload.get("base_resp") or {}
@@ -495,14 +545,21 @@ def _minimax_bytes(payload: Any, label: str) -> bytes | str:
         msg = str(base.get("status_msg") or "").strip()
         raise image_jobs.ImageJobError(f"{why}" + (f" ({msg})" if msg and code not in _MINIMAX_CODES else ""))
     data = payload.get("data") or {}
+    out: list[bytes | str] = []
     b64s = data.get("image_base64") if isinstance(data, dict) else None
-    if isinstance(b64s, list) and b64s and b64s[0]:
-        return _b64(str(b64s[0]))
+    if isinstance(b64s, list):
+        out.extend(_b64(str(x)) for x in b64s if x)
     urls = data.get("image_urls") if isinstance(data, dict) else None
-    if isinstance(urls, list) and urls and urls[0]:
-        return str(urls[0])
-    raise image_jobs.ImageJobError(f"{label} returned no picture (it may have "
-                                   "blocked the prompt)")
+    if not out and isinstance(urls, list):
+        out.extend(str(u) for u in urls if u)
+    if not out:
+        raise image_jobs.ImageJobError(f"{label} returned no picture (it may have "
+                                       "blocked the prompt)")
+    return out
+
+
+def _minimax_bytes(payload: Any, label: str) -> bytes | str:
+    return _minimax_items(payload, label)[0]
 
 
 # --------------------------------------------------------------------------- #

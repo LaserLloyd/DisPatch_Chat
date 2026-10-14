@@ -360,6 +360,16 @@ export function openThread(threadId, hint) {
   if (hint && typeof hint === 'object') msg.hint = hint;
   return post('open-thread', msg);
 }
+/** Ask the shell to open its own lightbox (zoom, pan, swipe and arrow keys,
+ *  download, Esc, No-Image Mode) on a picture set, oldest -> newest. Each item
+ *  is {src, name?, caption?, downloadUrl?} with a same-origin path. */
+export function lightbox(items, index = 0) {
+  const list = (Array.isArray(items) ? items : []).map((it) => ({
+    src: String(it && it.src || ''), name: String(it && it.name || ''),
+    caption: String(it && it.caption || ''), downloadUrl: String(it && it.downloadUrl || ''),
+  }));
+  return list.length ? post('lightbox', { items: list, index: Number(index) || 0 }) : false;
+}
 /** Ask the shell to close this app's pane. */
 export function close() { return post('close'); }
 /** Ask the shell to show a toast. */

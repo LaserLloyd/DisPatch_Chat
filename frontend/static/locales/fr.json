@@ -1336,5 +1336,10 @@
     "legacy_placeholder": "Vide : le comportement par défaut du fournisseur",
     "agent_note": "Ce bot passe par un agent OpenClaw. Sa personnalité se trouve dans les fichiers de l'espace de travail de cet agent (SOUL.md, IDENTITY.md, AGENTS.md), pas dans DisPatch.",
     "presets_failed": "Impossible de charger les modèles. L'éditeur fonctionne quand même."
+  },
+  "lightbox": {
+    "previous": "Image précédente (plus ancienne)",
+    "next": "Image suivante (plus récente)",
+    "nim_blocked": "Les images sont masquées en mode sans image."
   }
 }

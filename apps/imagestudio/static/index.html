@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Image Studio (apps/imagestudio). Framed by the shell at /apps/imagestudio/
+       WITHOUT a sandbox: repo code on the shell's own origin, calling its API
+       with the operator's session. The server's CSP is script-src 'self', so
+       nothing here is inline; each file carries its own ?v= (bump it when the
+       file changes). The theme sheets are linked by app-sdk.js theme(). -->
+  <title>Image Studio</title>
+  <link rel="stylesheet" href="/apps/imagestudio/studio.css?v=1" />
+  <script type="module" src="/apps/imagestudio/studio.js?v=1"></script>
+</head>
+<body class="st-page">
+  <main class="st-root" id="st-root"></main>
+</body>
+</html>
