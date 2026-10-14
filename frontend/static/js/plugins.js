@@ -88,8 +88,11 @@ function extensionRow(ext, deps, a) {
         await a.setPluginExtension(ext.id, want);
         ext.enabled = want;
         // A switch takes effect at the next start: the hint shows while the
-        // choice and the running state disagree.
-        pending.hidden = want === (ext.state === 'ok');
+        // choice and the running state disagree — the server's own
+        // `restart_pending` rule (plugins_api._extension_rows). "Running" is
+        // not the only loaded state: a failed or incompatible add-on is still
+        // loaded until a restart, so switching it off is pending too.
+        pending.hidden = want !== (ext.state === 'disabled');
       } catch (e) {
         cb.checked = !want;
         deps.toast(t('plugins.save_failed', { error: errText(e) }), true);

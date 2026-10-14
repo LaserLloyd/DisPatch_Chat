@@ -345,10 +345,18 @@ async function runTest() {
   $('llm-test').disabled = true;
   showResult(t('llm.testing'), '');
   try {
+    const target = targetBot();
     const r = await post('/api/llm/test', {
       provider: p.id,
       base_url: $('llm-base-url').value.trim(),
+      // A saved key never comes back out of the API, so re-testing a connected
+      // bot posts an empty key; the server then falls back to the named
+      // environment variable, else to the key stored on `target` for this same
+      // provider (main._stored_probe_key). Without `target` that fallback has
+      // nothing to look at and the Test says "needs an API key".
       api_key: $('llm-key').value,
+      api_key_env: $('llm-key-env').value.trim(),
+      target: target ? target.id : '',
       model: chosenModel(),
     });
     if (!r || !r.ok) {

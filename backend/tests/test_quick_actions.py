@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -428,12 +429,14 @@ def test_the_expanded_prompt_reaches_the_gateway_boundary(real_turn_client):
         ws.receive_json()
         ws.send_json({"type": "send", "thread_id": tid, "text": "helo wrld",
                       "client_msg_id": "cm-qa-8", "action": "proof"})
-        for _ in range(120):          # a loaded box: the turn is a task behind the acks
-            if c.sent:
-                break
+        # The turn is a task scheduled behind the acks; on a loaded box it can
+        # take a while to get the loop. Wait on TIME, not on a ping count.
+        deadline = time.monotonic() + 30
+        while not c.sent and time.monotonic() < deadline:
             ws.send_json({"type": "ping"})
             while ws.receive_json().get("type") != "pong":
                 pass
+            time.sleep(0.02)
     assert c.sent, "the turn never reached the gateway boundary"
     assert c.sent[-1] == quick_actions.expand(quick_actions.find("proof"), "helo wrld")
     msgs = c.get(f"/api/threads/{tid}/messages").json()["messages"]

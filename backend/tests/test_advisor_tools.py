@@ -124,6 +124,25 @@ def test_a_tool_call_runs_and_the_model_answers_from_its_result(adv_env, monkeyp
     assert log.statuses[-1] == "idle" and "error" not in log.statuses
 
 
+def test_tool_notice_source_ids_are_unique_per_turn(adv_env, monkeypatch):
+    """A server that sends no call ids gets `call_0` every turn; the notice
+    row's source_id (the durable dedup key) must still differ per turn, or
+    every turn after the first would silently lose its 🔧 row."""
+    tmp_path, _ = adv_env
+    _with_tools(["weather"])
+    _install(monkeypatch, _Registry())
+    call = {**WEATHER_CALL, "id": "call_0"}
+    hooks, log = _rec_hooks(tmp_path)
+    advisor.bind(hooks)
+    for text in ("Weather?", "And now?"):
+        _rounds(monkeypatch, [llm_api.StreamResult(text="", tool_calls=[call]),
+                              llm_api.StreamResult(text="20°C.")])
+        asyncio.run(advisor.run_turn("t1", "adv", text))
+    sids = [kw["source_id"] for _, text, kw in log.delivered if text.startswith("🔧")]
+    assert len(sids) == 2 and sids[0] != sids[1]
+    assert all(s.startswith("advisor:tool:") and s.endswith(":call_0") for s in sids)
+
+
 def test_a_repeated_call_ends_the_loop_with_a_final_round_without_tools(adv_env, monkeypatch):
     tmp_path, _ = adv_env
     _with_tools(["weather"])

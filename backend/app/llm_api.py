@@ -2170,6 +2170,8 @@ DEFAULT_DIRECT_TARGET = "atlas"
 #: Provider-entry keys a re-connect to the same provider carries over from the
 #: stored entry when the panel did not send them (they are not in the form).
 _KEEP_ON_RECONNECT = ("max_tokens", "read_timeout_s", "extra_body")
+#: A system prompt longer than this is a document, not a persona.
+MAX_PERSONA_CHARS = 8000
 
 
 @dataclass
@@ -2182,6 +2184,9 @@ class DirectConnectSpec:
     target: str = DEFAULT_DIRECT_TARGET
     name: str = ""
     emoji: str = ""
+    #: The panel's "System prompt" -> ``advisor.persona`` (replaces the default
+    #: persona text). Blank = keep whatever the bot has; it never clears one.
+    persona: str = ""
     tools: bool = True
     max_tokens: int = 0
 
@@ -2264,12 +2269,13 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
                              if isinstance(p, dict)), None)
     entry = direct_provider_entry(spec, stored_first)
     tools_on = bool(spec.tools)
+    persona = (spec.persona or "").strip()[:MAX_PERSONA_CHARS]
     if existing is not None:
-        adv = dict(existing.advisor or {})
-        old_tools = adv.get("tools")
-        # "Lookups on" keeps a hand-picked subset; only a plain on/off flips.
-        adv["tools"] = old_tools if (tools_on and isinstance(old_tools, list)
-                                     and old_tools) else tools_on
+        # "Lookups on" keeps a hand-picked subset (config.set_direct_tools
+        # parks it while off); only a plain on/off flips.
+        adv = config.set_direct_tools(existing.advisor, tools_on)
+        if persona:
+            adv["persona"] = persona
         # Only the FIRST provider is the connection the panel edits; a fallback
         # chain behind it (a local model after the API) stays as it was.
         rest = [p for p in ((existing.advisor or {}).get("providers") or [])[1:] if isinstance(p, dict)]
@@ -2283,11 +2289,14 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
             model_hint=entry["model"] if hint in ("", "Direct API") else hint,
             advisor=adv)
     else:
+        adv = {"providers": [entry], "tools": tools_on}
+        if persona:
+            adv["persona"] = persona
         bot = config.Bot(
             id=target,
             name=(spec.name or "").strip() or target,
             emoji=(spec.emoji or "").strip() or "🌍",
             model_hint=entry["model"],
             visible=True, safe=False, reactions=False,
-            advisor={"providers": [entry], "tools": tools_on})
+            advisor=adv)
     return config.upsert_bot(bot)

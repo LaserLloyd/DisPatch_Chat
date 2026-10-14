@@ -8090,22 +8090,33 @@ def _stored_probe_key(payload: dict) -> str:
     when the form names a bot (`target` / `bot_id`) and that bot is already on
     the SAME provider, so a test can never borrow another provider's key."""
     env_name = str(payload.get("api_key_env") or "").strip()
-    # A credential-shaped name only, and never DisPatch's own variables: the
-    # value goes to the base URL the form names.
-    if (env_name and re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", env_name)
-            and not env_name.startswith("DISPATCH_") and os.environ.get(env_name, "").strip()):
-        return os.environ[env_name].strip()
     tid = str(payload.get("target") or payload.get("bot_id") or "").strip()
     bot = config.get_bot(tid) if tid else None
-    if bot is None:
-        return ""
     prov = str(payload.get("provider") or "").strip()
-    entries = ([p for p in (bot.advisor or {}).get("providers") or [] if isinstance(p, dict)]
-               if config.is_direct(bot) else [bot.api] if bot.api else [])
+    entries = []
+    if bot is not None:
+        entries = ([p for p in (bot.advisor or {}).get("providers") or []
+                    if isinstance(p, dict)]
+                   if config.is_direct(bot) else [bot.api] if bot.api else [])
+    # The value of a named variable goes to the base URL the form names, so
+    # only a name that plausibly holds a credential is read: one that ends
+    # like one (OPENAI_API_KEY, GROQ_TOKEN, ...) or one a bot already stores
+    # for this provider. Never DisPatch's own variables, never PATH/HOME/...
+    stored_env = {str(e.get("api_key_env") or "").strip()
+                  for e in entries if e.get("provider") == prov}
+    if (env_name and _CREDENTIAL_ENV_RE.fullmatch(env_name)
+            and not env_name.startswith("DISPATCH_")
+            and (env_name in stored_env or _CREDENTIAL_SUFFIX_RE.search(env_name))
+            and os.environ.get(env_name, "").strip()):
+        return os.environ[env_name].strip()
     for e in entries:
         if e.get("provider") == prov:
             return llm_api.resolve_key(e)
     return ""
+
+
+_CREDENTIAL_ENV_RE = re.compile(r"[A-Z][A-Z0-9_]{2,63}")
+_CREDENTIAL_SUFFIX_RE = re.compile(r"(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIALS?)$")
 
 
 @app.post("/api/llm/test", dependencies=[Depends(_require_operator)])
@@ -8170,6 +8181,7 @@ async def llm_connect(payload: dict = Body(...)):
                 target=str(payload.get("target") or payload.get("bot_id") or ""),
                 name=str(payload.get("name") or ""),
                 emoji=str(payload.get("emoji") or ""),
+                persona=str(payload.get("system_prompt") or ""),
                 tools=tools, max_tokens=max_tokens,
             ))
     except llm_api.ApiError as e:
@@ -8283,12 +8295,9 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
     if "tools" in payload.model_fields_set:
         if not config.is_direct(bot):
             raise HTTPException(422, "tools only applies to direct-API bots")
-        adv = dict(bot.advisor or {})
-        if tools and isinstance(adv.get("tools"), list) and adv["tools"]:
-            pass                       # keep the owner's hand-picked subset
-        else:
-            adv["tools"] = bool(tools)
-        changes["advisor"] = adv
+        # A hand-picked `tools:` list survives an off/on round trip
+        # (config.set_direct_tools parks it under `tools_picked`).
+        changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
     saved = await asyncio.to_thread(config.upsert_bot, dc_replace(bot, **changes))
     await _broadcast_roster()
     return _bot_row(saved)
