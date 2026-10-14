@@ -1,10 +1,13 @@
-"""First-run seed: the two explainer threads a brand-new install opens to.
+"""First-run seed: the explainer threads a brand-new install opens to.
 
 A fresh clone should not open on an empty chat. On the very first start with an
-EMPTY database, two threads are created on the default bot, Atlas:
+EMPTY database, three threads are created on the default bot, Atlas:
 
 * "Meet Atlas"         -- who he is, where to put the key, what he can do;
-* "How DisPatch works" -- the tour: bots, Connect an AI, Safe Mode, add-ons.
+* "How DisPatch works" -- the tour: bots, Connect an AI, Safe Mode, add-ons;
+* "Set up add-ons"     -- the recommended order for everything optional
+  (2.3.7), following app/catalog.yaml. ``POST /api/guide/seed?name=…`` posts
+  any guide on an existing install.
 
 Each holds ONE assistant message whose text is the Markdown file of the same
 name under ``app/guide/``. A reply in either thread simply goes to Atlas.
@@ -34,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -45,13 +49,48 @@ log = logging.getLogger("local-chat.firstrun")
 BOT_ID = "atlas"
 FLAG_NAME = ".firstrun-seeded"
 GUIDE_DIR = Path(__file__).resolve().parent / "guide"
+AVATAR_SRC_DIR = Path(__file__).resolve().parent / "default_avatars"
+#: The shipped avatar set, keyed by the bot whose `avatar` names its face file.
+DEFAULT_AVATARS: tuple[str, ...] = ("atlas-face.png", "atlas-full.png", "atlas-thumb.png")
 
 #: (thread title, guide file) in the order they should appear in the list.
 #: Created in REVERSE so the first one is the newest and sits on top.
 THREADS: tuple[tuple[str, str], ...] = (
     ("Meet Atlas", "meet-atlas.md"),
     ("How DisPatch works", "how-dispatch-works.md"),
+    ("Set up add-ons", "set-up-add-ons.md"),
 )
+
+#: Guide name (the file stem) -> (title, file), for seeding one on demand.
+GUIDES: dict[str, tuple[str, str]] = {f.removesuffix(".md"): (t, f) for t, f in THREADS}
+
+
+class GuideExists(Exception):
+    """That guide was already posted on this install."""
+
+
+async def seed_one(db, deliver, name: str, *, force: bool = False) -> str:
+    """Post ONE guide thread on Atlas now (an existing install never auto-seeds).
+
+    Raises KeyError for an unknown guide or a missing Atlas, GuideExists when the
+    guide was already posted (unless `force`). Returns the new thread id."""
+    title, fname = GUIDES[name]
+    bot = next((b for b in config.load_bots() if b.id == BOT_ID), None)
+    if bot is None:
+        raise KeyError("atlas")
+    source = f"firstrun:{fname}"
+    if await db.source_id_seen(source):
+        if not force:
+            raise GuideExists(name)
+        source = f"{source}:{int(time.time())}"
+    text = _read_guide(fname)
+    if not text:
+        raise KeyError(name)
+    thread = await db.create_thread(BOT_ID, title=title)
+    await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
+                  dedup_recent_window=False)
+    log.info("guide %s posted on demand (thread %s)", name, thread.id)
+    return thread.id
 
 
 def flag_path() -> Path:
@@ -74,11 +113,46 @@ def _read_guide(name: str) -> str:
         return ""
 
 
+def install_default_avatars() -> list[str]:
+    """Copy the shipped avatar set into ``config.AVATAR_DIR``. Returns the file
+    names written.
+
+    Independent of the first-run flag: a missing file is the only condition,
+    so a deleted avatar comes back and a fresh install always has one. An
+    existing file is NEVER overwritten, and when the face file is already
+    there the whole set is left alone (an install with its own Atlas picture
+    must not end up with our full-size image beside its face). Each file is
+    written to a temp name and renamed. Never raises: a missing source or an
+    unwritable directory is a log line.
+    """
+    written: list[str] = []
+    try:
+        dest_dir = Path(config.AVATAR_DIR)
+        if (dest_dir / DEFAULT_AVATARS[0]).exists():
+            return written
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for name in DEFAULT_AVATARS:
+            dest = dest_dir / name
+            if dest.exists():
+                continue
+            tmp = dest.with_name(f".{name}.partial")
+            try:
+                tmp.write_bytes((AVATAR_SRC_DIR / name).read_bytes())
+                tmp.replace(dest)
+                written.append(name)
+            except OSError:
+                log.warning("could not install default avatar %s", name, exc_info=True)
+                tmp.unlink(missing_ok=True)
+    except Exception:
+        log.warning("default avatar install failed (ignored)", exc_info=True)
+    return written
+
+
 async def seed_if_first_run(
     db: Any,
     deliver: Callable[..., Awaitable[Any]],
 ) -> list[str]:
-    """Seed the two threads when this is a first run. Returns the thread ids
+    """Seed the guide threads when this is a first run. Returns the thread ids
     created (empty = nothing seeded). Never raises: a failed seed is logged and
     the app starts normally."""
     if os.environ.get("DISPATCH_FIRSTRUN", "1").strip().lower() in ("0", "false", "no", "off"):

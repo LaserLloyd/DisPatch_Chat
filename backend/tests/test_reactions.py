@@ -360,11 +360,11 @@ def test_rate_limit_refuses_a_burst(rx_env):
 
 
 def test_rate_limit_is_blind_to_the_actor_name_case(rx_env):
-    """"Bits" and " bits " are one actor: a second spelling must not get a
+    """"Nova" and " nova " are one actor: a second spelling must not get a
     fresh cooldown slot of its own."""
     c = rx_env()
-    first = {**AGENT_FIRE, "actor": "BITS"}
-    again = {**AGENT_FIRE, "actor": " bits "}
+    first = {**AGENT_FIRE, "actor": "NOVA"}
+    again = {**AGENT_FIRE, "actor": " nova "}
     assert c.post("/api/reactions/fire",
                   json={"reaction": "nice", **first}).status_code == 200
     r = c.post("/api/reactions/fire", json={"reaction": "oof", **again})
@@ -509,11 +509,14 @@ def test_pool_consume_race_refunds_the_rate_limiter(rx_env, monkeypatch):
     the limiter slot is returned so the next fire isn't cooldown-blocked."""
     c = rx_env()
     rid = _fake_pool_item()
-    monkeypatch.setattr(reactions, "pool_consume",
-                        lambda _rid, **_kw: False)
-    r = c.post("/api/reactions/fire", json={"reaction": rid, "bot_id": "main"})
-    assert r.status_code == 409, r.text
-    monkeypatch.undo()
+    # A scoped patch, NOT `monkeypatch.undo()`: undo() reverts every patch on
+    # the instance, including rx_env's DATA_DIR/MEDIA_DIR redirects, so the
+    # second fire used to run against the real ~/.local/share/local-chat (green
+    # on a box whose live config enables reactions for main, 403 everywhere else).
+    with monkeypatch.context() as mp:
+        mp.setattr(reactions, "pool_consume", lambda _rid, **_kw: False)
+        r = c.post("/api/reactions/fire", json={"reaction": rid, "bot_id": "main"})
+        assert r.status_code == 409, r.text
     # Without the refund this next fire would 429 (cooldown from the 409).
     r = c.post("/api/reactions/fire", json={"reaction": "nice", "bot_id": "main"})
     assert r.status_code == 200, r.text

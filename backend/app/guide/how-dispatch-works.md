@@ -31,9 +31,11 @@ The key is written to `config.yaml` in your data directory, which is set to owne
 
 Turn it on: Settings → AI models, choose Atlas (or another direct API bot) as the target, Test, Connect.
 
+Quickest of all: Settings → AI models → **Set up everything with one provider**. Pick MiniMax, OpenAI or xAI, paste one key, and chat, pictures and (where the provider has it) knowledge search are set up and tested in one go.
+
 ## Lookups
 
-A direct API bot can look things up while it answers. There are eight: web search, news search, a page fetch, weather, Wikipedia, exchange rates, the current time and a calculator. They only read; none of them can run a program or touch your machine, and the page fetch refuses private and local addresses. Each lookup that runs leaves a small notice row before the answer.
+A direct API bot on an OpenAI-compatible provider can look things up while it answers. There are eight: web search, news search, a page fetch, weather, Wikipedia, exchange rates, the current time and a calculator. They only read; none of them can run a program or touch your machine, and the page fetch refuses private and local addresses. Each lookup that runs leaves a small notice row before the answer.
 
 Lookups are on or off per bot. Safe Mode devices get a subset, by default all eight, and you can narrow it with `tools_locked`. An install-wide switch lives in Settings → Plugins.
 
@@ -61,9 +63,11 @@ Turn it on: Settings → Security to set the PIN; Settings → Bots to mark a bo
 
 ## Reactions and pictures
 
-Reactions are small pictures a bot can attach to a message to show a mood, drawn from a pack you build. Pictures on request use the `[[pic:…]]` marker: the bot writes a prompt, a placeholder appears at once, and the image replaces it when it is ready. Both need an image server, such as ClawForge or another ComfyUI-style service; DisPatch does not draw anything itself. Without one, the bots simply never offer pictures.
+Reactions are small pictures a bot can attach to a message to show a mood, drawn from a pack you build; the built-in pack works with nothing else installed. Pictures on request use the `[[pic:…]]` marker: the bot writes a description, a placeholder appears at once, and the image replaces it when it is ready. DisPatch does not draw anything itself. It sends the request to an image API (MiniMax, OpenAI, xAI Grok, or any host with the OpenAI images endpoint) or to your own image server. API pictures are billed per image, and DisPatch makes one per request.
 
-Turn it on: configure image jobs as described in [configuration.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/configuration.md), then enable Reactions or Pool per bot in Settings → Bots.
+Refilling a reaction or avatar pool automatically needs an image tool of your own (`DISPATCH_IMAGE_CLI`); pools never use a paid API.
+
+Turn it on: Settings → AI models → Image generation, press Test, Save; then switch Pictures on for a bot in Settings → Bots. The "Set up add-ons" chat and [integrations.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/integrations.md) cover every option.
 
 ## Voice chat
 

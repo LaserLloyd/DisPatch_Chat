@@ -775,7 +775,12 @@ def test_markers_are_stripped_when_no_image_server_is_configured(env,
     _say(c, tid, "sure [[pic:a teapot]]")
 
     rows = _messages(c, tid)
-    assert len(rows) == 1 and "[[pic:" not in rows[0]["content"]
+    assert "[[pic:" not in rows[0]["content"]
+    # Nothing starts; since 2.3.7 one quiet sub row says why (no image
+    # generator), instead of the request vanishing without a trace.
+    assert not _placeholders(c, tid)
+    assert len(rows) == 2 and rows[1]["metadata"].get("sub") is True
+    assert "needs an image generator" in rows[1]["content"]
 
 
 def test_at_most_two_markers_per_message_render(env):

@@ -2,7 +2,9 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v159';  // v159: 2.3.6 — Settings → Bots → Personality: new js/personality.js joins SHELL (preset picker + system-prompt editor), bots-edit.js?v=1→2, llm.js?v=10→11 (the Connect field reads the bot's persona), app.css?v=101→102, about.js?v=13→14 and its importers ext-sdk.js?v=8→9, voice-absent.js?v=7→8, plugins.js?v=7→8, main.js?v=135→136; locales persona.*.
+const CACHE = 'local-chat-v161';  // v161: 2.3.8 — Settings on a phone: compact Bots rows, the Plugins tools table as cards, wrapping server paths, a full-width Reactions describe box; tools.js?v=13→14, app.css?v=103→104, about.js?v=15→16 (APP_VERSION 2.3.8) and its importers ext-sdk.js?v=10→11, voice-absent.js?v=9→10, plugins.js?v=9→10, main.js?v=137→138; locales tools.settings_path (replaces tools.settings_hint), reactions.generate_placeholder.
+// v160: 2.3.7 — integrations: new js/integrations.js joins SHELL (one-key setup, Image generation, the Works with DisPatch catalog), llm.js?v=11→12, plugins.js?v=8→9, reactions.js?v=25→26 (needs-line for an unset image tool), push.js?v=1→2 (neutral example name), about.js?v=14→15 (APP_VERSION 2.3.7) and its importers ext-sdk.js?v=9→10, voice-absent.js?v=8→9, main.js?v=136→137, app.css?v=102→103; locales integrations.*, settings.pics_*, settings.pool_needs_cli, reactions.pool_needs_cli.
+// v159: 2.3.6 — Settings → Bots → Personality: new js/personality.js joins SHELL (preset picker + system-prompt editor), bots-edit.js?v=1→2, llm.js?v=10→11 (the Connect field reads the bot's persona), app.css?v=101→102, about.js?v=13→14 and its importers ext-sdk.js?v=8→9, voice-absent.js?v=7→8, plugins.js?v=7→8, main.js?v=135→136; locales persona.*.
 // v158: 2.3.5 — the Settings tab strip shows and reaches every tab: new js/tabstrip.js joins SHELL (edge buttons, wheel), app.css?v=100→101, about.js?v=12→13 and its importers ext-sdk.js?v=7→8, voice-absent.js?v=6→7, plugins.js?v=6→7, main.js?v=134→135, index.html, locales (settings.tabs_prev, settings.tabs_next).
 // v157: 2.3.4 — voice on locked devices: extensions.js?v=2→3 (a locked device mounts add-ons, told it is locked), about.js?v=11→12 and its importers ext-sdk.js?v=6→7, voice-absent.js?v=5→6, plugins.js?v=5→6, main.js?v=133→134.
 // v156: 2.3.3 — about.js?v=10→11 and its importers ext-sdk.js?v=5→6, voice-absent.js?v=4→5, plugins.js?v=4→5, main.js?v=132→133 (the reaction pool's daily run never mints into a full shelf; locales reactions.pool_daily_add_hint).
@@ -320,7 +322,7 @@ const SHELL = [
   '/static/js/dashboard.js', '/static/js/privacy.js', '/static/js/llm.js',
   '/static/js/nim.js', '/static/js/about.js', '/static/js/pins.js',
   '/static/js/imagejobs.js', '/static/js/advisor.js', '/static/js/links.js', '/static/js/viewer.js',
-  '/static/js/menubots.js',
+  '/static/js/menubots.js', '/static/js/integrations.js',
   // The app SDK (2026-09-25): statically imported by main.js, so a cold
   // offline start needs it. The apps themselves (/apps/*) are never cached.
   '/static/js/app-sdk.js',
@@ -441,7 +443,7 @@ self.addEventListener('fetch', (e) => {
 
 // ---------------------------------------------------------------------------
 // Web Push (2026-10-12). The server sends a PING — {kind, thread_id, title},
-// e.g. "Bits replied" — and never message text, so a lock screen shows that
+// e.g. "Nova replied" — and never message text, so a lock screen shows that
 // something arrived and nothing of what it says. Opening the app decides what
 // this device may see, by the usual session rules.
 // ---------------------------------------------------------------------------

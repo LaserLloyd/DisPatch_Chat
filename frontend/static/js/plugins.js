@@ -1,9 +1,10 @@
 // Settings -> Plugins (admin-only): one place that answers "what is installed
 // and what is on". Contract: docs/design/platform-2-3.md section 3.
 //
-// Three groups, in the Settings modal's own group/row style (.dev-group /
+// Four groups, in the Settings modal's own group/row style (.dev-group /
 // .dev-row, so every palette applies and this file carries no colour):
 //
+//   Works with DisPatch  the companion catalog (js/integrations.js, 2.3.7).
 //   Add-ons          one row per extension the host knows (GET /api/plugins):
 //                    name, version, state and an install-wide switch bound to
 //                    PUT /api/plugins/extensions/{id} (takes effect after a
@@ -21,7 +22,8 @@
 import { api as realApi } from './api.js?v=33';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { COMMANDS, commandBlock } from './voice-absent.js?v=8';
+import { COMMANDS, commandBlock } from './voice-absent.js?v=10';
+import { catalogGroup } from './integrations.js?v=1';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 
@@ -175,6 +177,10 @@ export async function mountPluginsSettings(pane, deps) {
   }
   if (mine !== seq) return;                         // a newer mount took over
   const parts = [hint];
+  // 2.3.7: "Works with DisPatch" — every companion and its status, first,
+  // because it is the map of everything below. Loads its own data.
+  parts.push(catalogGroup({ toast: deps.toast, onGuide: deps.onGuide,
+    loadCatalog: a.pluginsCatalog }));
   if (data) {
     parts.push(group('plugins-addons', t('plugins.addons_title'), t('plugins.addons_hint'),
       addonsBody(data, deps, a)));

@@ -43,3 +43,16 @@ ai-models.png
 quick-actions.png
 plugins-tab.png
 voice-screen.png
+# voice-screen.png re-shot 2026-10-14 (2.3.7): the typed sample now says Lisbon.
+
+# The first-run guide's pictures (frontend/static/guide/, shipped inside the
+# app and shown in the seeded Atlas chats). Same rule, checked by
+# scripts/scrub_check.py; opened one by one 2026-10-14 (Atlas + the seeded
+# chats, letter-block avatars, no address, path or real name in frame).
+guide/welcome.png
+guide/bots-tab.png
+guide/ai-models.png
+guide/plugins-tab.png
+guide/quick-actions.png
+guide/safe-mode.png
+guide/voice-screen.png

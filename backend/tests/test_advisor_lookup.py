@@ -15,7 +15,7 @@ import asyncio
 import json
 
 from app import advisor, config
-from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env  # noqa: F401
+from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env
 
 SEARCH_JSON = json.dumps({"query": "q", "sources": [
     {"title": "Mona Lisa", "url": "http://127.0.0.1:8080/content/x/Mona_Lisa",
@@ -137,3 +137,44 @@ def test_a_quick_action_turn_searches_the_typed_words_not_the_template(adv_env, 
     asyncio.run(advisor.run_turn("t1", "adv", template, query="Who painted the Mona Lisa?"))
     assert calls and calls[0][0][-1] == "Who painted the Mona Lisa?", calls
     assert "### Mona Lisa" in seen["messages"][-1]["content"]
+
+
+# --------------------------------------------------------------------------- #
+# kind: wikipedia (2.3.7) -- the online stand-in for InfoForge
+# --------------------------------------------------------------------------- #
+
+
+def test_the_online_wikipedia_kind_needs_no_command_and_cites_online(adv_env, monkeypatch):
+    import httpx
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url)
+        if request.url.path.endswith("/w/api.php"):
+            assert request.url.params["list"] == "search"
+            return httpx.Response(200, json={"query": {"search": [
+                {"title": "Mona Lisa"}, {"title": "Louvre"}]}})
+        title = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json={
+            "title": title.replace("_", " "), "type": "standard",
+            "extract": f"About {title}.",
+            "content_urls": {"desktop": {"page": f"https://en.wikipedia.org/wiki/{title}"}}})
+
+    monkeypatch.setattr(advisor, "_wikipedia_transport", httpx.MockTransport(handler))
+    _with_lookup({"kind": "wikipedia"})
+    cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
+    assert cfg.lookup["kind"] == "wikipedia" and cfg.lookup["command"] == []
+    hits = asyncio.run(advisor.lookup_hits(cfg, "who painted the mona lisa"))
+    assert [h.title for h in hits] == ["Mona Lisa", "Louvre"]    # max_articles 2
+    assert all(h.path == advisor.LOOKUP_SOURCE_ONLINE for h in hits)
+    assert "URL: https://en.wikipedia.org/wiki/Mona_Lisa" in hits[0].text
+
+
+def test_a_failed_online_lookup_is_empty_not_an_error(adv_env, monkeypatch):
+    import httpx
+    monkeypatch.setattr(advisor, "_wikipedia_transport", httpx.MockTransport(
+        lambda r: httpx.Response(503)))
+    _with_lookup({"kind": "wikipedia"})
+    cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
+    assert asyncio.run(advisor.lookup_hits(cfg, "anything")) == []

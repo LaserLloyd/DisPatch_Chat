@@ -1,7 +1,7 @@
 // Web Push — Settings → Device → Notifications.
 //
 // A ping on this device's lock screen when a bot replies, a picture is ready
-// or a scheduled post lands: "Bits replied", never what Bits said. The server
+// or a scheduled post lands: "Nova replied", never what Nova said. The server
 // (backend/app/push.py) only ever sends {kind, thread_id, title}; tapping the
 // notification opens the thread (sw.js `notificationclick`).
 //

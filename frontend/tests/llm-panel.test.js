@@ -33,7 +33,7 @@ const BOTS = () => ({
   bots: [
     { id: 'atlas', name: 'Atlas', backend: 'direct', tools: true, connected: false, provider: '', model: '' },
     { id: 'sage', name: 'Sage', backend: 'direct', tools: false, connected: true, provider: 'minimax', model: 'MiniMax-M3' },
-    { id: 'bits', name: 'Bits', backend: 'agent', tools: false, connected: false },
+    { id: 'nova', name: 'Nova', backend: 'agent', tools: false, connected: false },
   ],
 });
 

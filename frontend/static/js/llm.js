@@ -18,6 +18,7 @@
 
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 import { t, applyDom } from './i18n.js?v=4';
+import { mountQuickSetup, mountImageSection } from './integrations.js?v=1';
 
 // ===================== State =====================
 
@@ -117,6 +118,15 @@ export async function activateLlmPanel(next = {}) {
   renderTargets();
   renderProviders();
   applyTarget();
+  // 2.3.7: the one-key path above the form, image generation below it. Each
+  // loads its own state; a failure there costs only that section.
+  mountQuickSetup($('llm-quick-host'), {
+    onConfigured: async (r) => {
+      if (r && r.bot) await ctx.onConnected(r.bot, { keepOpen: true });
+      mountImageSection($('llm-image-host'), { toast: ctx.toast });
+    },
+  });
+  mountImageSection($('llm-image-host'), { toast: ctx.toast });
 }
 
 // ===================== Bot to connect (2.3.0) =====================
@@ -451,6 +461,13 @@ export function firstRunCard(onOpen) {
     el('button', { class: 'btn-primary', id: 'llm-firstrun-btn',
       'data-i18n': 'llm.card_button', text: t('llm.card_button'),
       onclick: onOpen }),
+    // 2.3.7: the quickest start — the same tab, landing on the one-key box.
+    el('button', { class: 'btn-secondary', id: 'llm-firstrun-onekey',
+      'data-i18n': 'integrations.firstrun_one_key', text: t('integrations.firstrun_one_key'),
+      onclick: async (e) => {
+        await onOpen(e);
+        setTimeout(() => { const k = document.getElementById('qs-key'); if (k) k.focus(); }, 400);
+      } }),
   ]);
 }
 

@@ -7,6 +7,88 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.8] — 2026-10-14
+
+### Changed
+
+- **Settings on a phone (360px).** Each Bots row is now avatar, name and small
+  inline up/down buttons on one line, with the pills, switches and the
+  Personality button wrapping underneath. The Plugins tools table becomes one card
+  per tool instead of a sideways scroller, and its duplicate explanation above the
+  table is gone (the tools.yaml path stays, as a small wrapping monospace line).
+  Server paths in the Security note wrap instead of running off the screen. The
+  Reactions describe box takes its own full line, and the German placeholder is
+  shorter. Desktop layout is unchanged.
+
+## [2.3.7] — 2026-10-14
+
+### Added
+
+- **Image generation through a standard API.** Settings → AI models → Image
+  generation picks a provider for `[[pic:…]]` pictures: **MiniMax**
+  (`image-01`, `POST /v1/image_generation`), **OpenAI** (`gpt-image-1`) and
+  **xAI Grok** (`grok-imagine-image`) through the OpenAI-shape
+  `POST /v1/images/generations`, or **Custom** for any compatible host. Test
+  makes one picture and shows it; the setting lives in `<data>/image.yaml`
+  (0600) and never returns a key. With no key of its own a provider borrows a
+  chat connection's key for the same host. `app/image_providers.py` answers
+  the same calls as the MCP client, so placeholders, deadlines, coalescing,
+  rate limits and Safe-Mode redaction are unchanged. A bot naming an image
+  workflow keeps the MCP image server; rows written before 2.3.7 read back as
+  MCP jobs. Reaction and avatar pools never use an API provider.
+  Routes: `GET/PUT /api/llm/image`, `POST /api/llm/image/test`.
+- **One key for everything.** Settings → AI models → *Set up everything with
+  one provider* (and a button on the first-run card): MiniMax, OpenAI or xAI
+  and one key configure chat on Atlas, pictures and, for OpenAI, knowledge
+  embeddings, each with one live test, answered as a ✓ / — / ✗ checklist. The
+  key is stored once, on the chat connection. `GET/POST /api/llm/quicksetup`
+  (`test: false` makes no calls).
+- **Works with DisPatch.** Settings → Plugins opens with a card per companion
+  (AI providers, image API, MCP image server, StudioForge, OpenClaw, DisPatch
+  Voice, SpeechForge, InfoForge, MailForge, lookups, CrucibleForge, ThemeForge):
+  what it adds, how it connects, a public repository link where there is one,
+  and its live status. Data in `backend/app/catalog.yaml`;
+  `GET /api/plugins/catalog`.
+- **A third guide chat, "Set up add-ons"**, in the recommended order, seeded on a
+  fresh install; *Show setup guide* (or `POST /api/guide/seed?name=…`) posts it
+  on an existing one.
+- **Pictures switch per bot** in Settings → Bots (`image_jobs`), and
+  direct-API bots with it on are told about `[[pic:…]]` when an image
+  generator is configured (unless their persona already explains it).
+- **`advisor.lookup` kind `wikipedia`**: the online encyclopedia as an
+  InfoForge alternative (full-text search + lead summaries).
+- Chat presets: **Local server (llama.cpp / StudioForge)**; Grok suggests
+  `grok-4.7`.
+- `docs/integrations.md`: every companion, image providers, the one-key setup,
+  a feature-by-feature matrix of what needs what, how to add an alternative,
+  and cost.
+
+### Fixed
+
+- A message to an unconnected Atlas no longer leaves the thread "thinking" with
+  Send disabled after a reload.
+- A `[[pic:…]]` on an install with no image generator leaves one quiet
+  "needs an image generator" line instead of vanishing.
+- Health no longer warns "Agent CLI not found, nothing will reply" (and probes
+  a gateway) on an install that never configured an agent.
+- Reactions and avatar pools say "needs an image tool" instead of "image host
+  unreachable", and Refill is disabled without one.
+- Public-repo hygiene: neutral sample names and cities in docs, comments and
+  tests; the guide's voice screenshot re-shot; guide pictures are now covered
+  by the screenshot allowlist (`guide/<file>` in `docs/screenshots/ALLOWED.txt`).
+
+- **Locked voice (2.3.4) follows the chat list and the daily budget.** An
+  extension thread websocket from a locked device is admitted only on a
+  `safe` bot that is also **listed** (`visible`) — the same rule as a
+  Safe-Mode send on the main `/ws`; a hidden safe bot's thread was reachable
+  by voice but not by chat. A locked device's voice turns (spoken or typed on
+  the call screen) are now charged to the same daily Safe-Mode budget as a
+  typed send (`DECOY_TURN_QUOTA` per client) and refused once it is spent —
+  they ran unmetered before. The host also refuses a locked thread's turn
+  itself when the bot has stopped being safe or listed, under the add-on's
+  own `session_live` check. `ThreadSocket` is unchanged; `Hooks` gains
+  `client_ip`.
+
 ## [2.3.6] — 2026-10-14
 
 ### Added

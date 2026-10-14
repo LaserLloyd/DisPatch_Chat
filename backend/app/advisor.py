@@ -49,7 +49,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import config, knowledge, livetools, llm_api, tools as tools_mod
+from . import config, knowledge, livetools, llm_api
+from . import tools as tools_mod
 
 log = logging.getLogger("dispatch.advisor")
 
@@ -118,6 +119,21 @@ notes and your own knowledge, and say plainly when something is unverified. \
 DEFAULT_TOOL_ROUNDS = 4
 DEFAULT_TOOL_RESULT_CHARS = 4000
 DEFAULT_LOCKED_TOOLS = tuple(livetools.TOOL_NAMES)
+#: Told to a bot with pictures switched on, when an image generator exists.
+PICTURE_RULES = (
+    "You can show a picture. When the user asks for one, or a picture would "
+    "clearly help, write [[pic:<a detailed visual description>|<a short "
+    "caption>]] on its own line; a placeholder appears and the picture "
+    "replaces it in a moment. At most one per reply, never describe the "
+    "marker, and do not promise pictures in any other way.")
+
+def _no_pictures() -> bool:
+    return False
+
+
+#: main.py points this at "is an image generator configured?" at startup.
+pictures_available: Callable[[], bool] = _no_pictures
+
 TOOLS_SENTENCE = (
     "You have live lookups through your tools, which are exactly: {tools}. For "
     "anything current or local (weather, news, prices, exchange rates, the time, "
@@ -287,7 +303,7 @@ class AdvisorConfig:
     tools_locked: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_TOOLS))
     tool_rounds: int = DEFAULT_TOOL_ROUNDS
     tool_result_chars: int = DEFAULT_TOOL_RESULT_CHARS
-    # The owner's home location ("Tokyo, Japan") for weather with no place
+    # The owner's home location ("Lisbon, Portugal") for weather with no place
     # named, and the units the weather tool reports in (metric | imperial).
     location: str = ""
     units: str = "metric"
@@ -295,6 +311,11 @@ class AdvisorConfig:
     # (``advisor.lookup`` in config.yaml, parsed by _parse_lookup): today only
     # InfoForge, the offline Wikipedia. None = off.
     lookup: dict | None = None
+    # Mirrors Bot.image_jobs: this bot may show pictures with `[[pic:…]]`
+    # (2.3.7). The rule only reaches the prompt when an image generator is
+    # configured (`pictures_available`) and the persona does not already
+    # explain the marker itself.
+    pictures: bool = False
 
     @classmethod
     def from_bot(cls, bot: config.Bot) -> AdvisorConfig:
@@ -342,6 +363,7 @@ class AdvisorConfig:
             history_chars=_int("history_chars", DEFAULT_HISTORY_CHARS),
             safe=bool(bot.safe),
             lookup=_parse_lookup(c.get("lookup"), bot.id),
+            pictures=bool(bot.image_jobs),
             tools=_parse_tools(c.get("tools"), (), bot.id),
             tools_locked=_parse_tools(c.get("tools_locked"), DEFAULT_LOCKED_TOOLS, bot.id),
             tool_rounds=_int("tool_rounds", DEFAULT_TOOL_ROUNDS),
@@ -355,7 +377,7 @@ class AdvisorConfig:
     def can_dispatch(self) -> bool:
         return bool(self.agents) and not self.locked
 
-    def locked_down(self) -> "AdvisorConfig":
+    def locked_down(self) -> AdvisorConfig:
         """This config for a turn from a locked (Safe-Mode) device."""
         return replace(self, locked=True)
 
@@ -419,8 +441,12 @@ class AdvisorConfig:
 DEFAULT_LOOKUP_ARTICLES = 3
 DEFAULT_LOOKUP_CHARS = 3500       # per article, after InfoForge's own cut
 DEFAULT_LOOKUP_TIMEOUT_S = 8.0
-LOOKUP_KINDS = ("infoforge",)
+LOOKUP_KINDS = ("infoforge", "wikipedia")
 LOOKUP_SOURCE = "Wikipedia (offline copy)"
+#: `kind: wikipedia` (2.3.7): the online encyclopedia, for installs without
+#: InfoForge. Note that it sends the user's words to wikipedia.org, also on a
+#: locked (Safe-Mode) turn -- the offline kind keeps them on the machine.
+LOOKUP_SOURCE_ONLINE = "Wikipedia (online)"
 
 
 def _parse_tools(raw: Any, default: tuple[str, ...], bot_id: str = "") -> list[str]:
@@ -484,10 +510,12 @@ def _parse_lookup(raw: Any, bot_id: str = "") -> dict | None:
         log.warning("advisor %s: unknown lookup kind %r (known: %s); lookup off",
                     bot_id, kind, ", ".join(LOOKUP_KINDS))
         return None
-    cmd = raw.get("command") or ["infoforge"]
-    if isinstance(cmd, str):
-        cmd = [cmd]
-    cmd = [str(c) for c in cmd if str(c).strip()] or ["infoforge"]
+    cmd: list[str] = []
+    if kind == "infoforge":
+        cmd = raw.get("command") or ["infoforge"]
+        if isinstance(cmd, str):
+            cmd = [cmd]
+        cmd = [str(c) for c in cmd if str(c).strip()] or ["infoforge"]
 
     def _num(key: str, default, cast):
         try:
@@ -535,6 +563,8 @@ async def lookup_hits(cfg: AdvisorConfig, query: str) -> list[knowledge.Hit]:
     query = " ".join((query or "").split())[:500]
     if not lk or not query:
         return []
+    if lk["kind"] == "wikipedia":
+        return await _wikipedia_hits(cfg, query)
     argv = [*lk["command"], "search", "--json", "--text",
             "--max-articles", str(lk["max_articles"]), query]
     try:
@@ -571,6 +601,28 @@ async def lookup_hits(cfg: AdvisorConfig, query: str) -> list[knowledge.Hit]:
         if len(hits) >= lk["max_articles"]:
             break
     return hits
+
+
+#: Test seam for the online lookup.
+_wikipedia_transport: Any = None
+
+
+async def _wikipedia_hits(cfg: AdvisorConfig, query: str) -> list[knowledge.Hit]:
+    """`kind: wikipedia`: full-text search + lead summaries, [] on failure."""
+    from .livetools import webapi, wikipedia
+    lk = cfg.lookup or {}
+    try:
+        found = await asyncio.wait_for(wikipedia.search_articles(
+            query, lk.get("max_articles", DEFAULT_LOOKUP_ARTICLES),
+            chars=lk.get("chars_per_article", DEFAULT_LOOKUP_CHARS),
+            transport=_wikipedia_transport,
+            timeout_s=lk.get("timeout_s", DEFAULT_LOOKUP_TIMEOUT_S)),
+            lk.get("timeout_s", DEFAULT_LOOKUP_TIMEOUT_S) * 2)
+    except (TimeoutError, webapi.ApiError) as e:
+        log.warning("advisor %s: online Wikipedia lookup failed (%s)", cfg.bot_id, e)
+        return []
+    return [knowledge.Hit(path=LOOKUP_SOURCE_ONLINE, title=a["title"], date="",
+                          text=a["text"], score=0.0) for a in found]
 
 
 def safe_agent_ids() -> set[str]:
@@ -870,6 +922,9 @@ def build_system_prompt(cfg: AdvisorConfig, profile: str,
     if offered:
         home = f" {cfg.owner}'s home location is {cfg.location}." if cfg.location else ""
         out.append(f"{TOOLS_SENTENCE.format(tools=', '.join(offered))}{home} {DATA_SENTENCE}")
+    if (cfg.pictures and not cfg.locked and "[[pic:" not in persona
+            and pictures_available()):
+        out.append(PICTURE_RULES)
     spoken = llm_api.voice_system_text(voice)
     if spoken:
         out.append(spoken)
@@ -1394,8 +1449,11 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                 metadata={"notice": {"level": "warn"}, "not_connected": True},
                 source_id=f"advisor:notconnected:{emitter.prov}",
                 dedup_recent_window=False)
-        # (the `finally` below returns the thread to idle and closes the
-        # thinking indicator)
+        # The `finally` below only closes the thinking indicator; the thread's
+        # STATUS must be put back here, or a reload shows it "thinking" with
+        # Send disabled forever (fresh-install audit, 2.3.7).
+        with contextlib.suppress(Exception):
+            await h.set_status(thread_id, "idle")
     except llm_api.ApiError as e:
         log.warning("advisor turn failed (%s/%s): %s — %s",
                     bot_id, thread_id, e.message, e.detail)
@@ -1863,7 +1921,9 @@ Be specific and brief. Skip a section if there is nothing for it. Never invent.
 async def digest(day: str | None = None, *, force: bool = False) -> list[dict]:
     """Summarise one day (default: yesterday) of each advisor's chats."""
     h = _h()
-    when = (datetime.strptime(day, "%Y-%m-%d") if day
+    # Only the calendar date is kept (`.date()`), so a naive parse is correct:
+    # the day is the user's local day and is made aware by `.astimezone()` below.
+    when = (datetime.strptime(day, "%Y-%m-%d") if day  # noqa: DTZ007
             else datetime.now() - timedelta(days=1)).date()
     day_s = when.isoformat()
     start = datetime.combine(when, datetime.min.time()).astimezone()

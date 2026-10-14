@@ -1,6 +1,6 @@
 """Web Push: a ping to a device's lock screen, never the message itself.
 
-What a push carries is ``{kind, thread_id, title}`` — "Bits replied", "Image
+What a push carries is ``{kind, thread_id, title}`` — "Nova replied", "Image
 ready", "Morning brief posted". No message text, no picture, no preview: the
 phone's lock screen is readable by whoever picks the phone up, and the locked
 (Safe Mode) tier exists precisely so that what a bot said stays behind the PIN.

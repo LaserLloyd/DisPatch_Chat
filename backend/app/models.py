@@ -71,6 +71,7 @@ class BotOrderItem(BaseModel):
     safe: bool | None = None      # None = leave unchanged (Safe-Mode visibility)
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
+    image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
     # Voice chat (the voice add-on): None = leave unchanged, "" = the add-on's
     # default. Opaque to DisPatch; the add-on's validator checks the value
     # (422), and without the add-on only "" or the stored value is accepted.
@@ -140,6 +141,7 @@ class BotPatchIn(BaseModel):
     safe: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None
+    image_jobs: bool | None = None
     tools: bool | None = None
     # The bot's personality (direct-API: advisor.persona; legacy-API:
     # api.system_prompt). "" = back to the shipped default. See app/personas.py.

@@ -1,6 +1,6 @@
 [project]
 name = "dispatch-chat"
-version = "2.3.6"
+version = "2.3.8"
 description = "Self-hosted chat for your household and your AI agents"
 license = "MIT"
 requires-python = ">=3.12"
@@ -65,7 +65,7 @@ pythonpath = ["."]
 # --------------------------------------------------------------------------- #
 # Ruff
 #
-# CI runs `uvx ruff check app tests`, i.e. whatever ruff is newest that day.
+# CI runs `uvx ruff@<pinned> check app tests` (see .github/workflows/ci.yml).
 # Without an explicit config that means the rule set moves under us and a green
 # branch can go red with no code change, so everything below is pinned on
 # purpose: the families we want, and a short reason for every rule we turn off.

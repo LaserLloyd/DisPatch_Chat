@@ -7,6 +7,7 @@ Run with:  uvicorn app.main:app --host 127.0.0.1 --port 8765
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import contextvars
 import errno
@@ -36,6 +37,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import httpx
+import yaml
 from fastapi import (
     Body,
     Depends,
@@ -67,6 +69,7 @@ from . import (
     auth,
     avatar_pool,
     avatar_snapshots,
+    catalog,
     client_links,
     config,
     dashboard_routes,
@@ -77,6 +80,7 @@ from . import (
     harness,
     harness_sessions,
     image_jobs,
+    image_providers,
     llm_api,
     localview,
     mailforge_bridge,
@@ -89,6 +93,7 @@ from . import (
     problem,
     push,
     quick_actions,
+    quicksetup,
     reactions,
     tools,
 )
@@ -487,6 +492,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
         _track(asyncio.create_task(advisor.background_loop()))
     # First run only: the two explainer threads on the default bot (never on
     # an install that already has threads; see app/firstrun.py). Non-fatal.
+    await asyncio.to_thread(firstrun.install_default_avatars)
     await firstrun.seed_if_first_run(db, _deliver_assistant_text)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first
@@ -537,7 +543,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.3.6", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.3.8", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -1980,7 +1986,9 @@ def _decoy_blocked(method: str, path: str) -> bool:
                         # Web Push: subscribing binds a remembered device to
                         # pings about every thread. Unlocked only; the routes
                         # re-check for themselves (_push_device_key).
-                        "/api/push")):
+                        "/api/push",
+                        # Setup-guide seeding (2.3.7): writes a thread.
+                        "/api/guide")):
         return True
     if path == "/api/extensions" or path.startswith("/ext/"):
         # Read-only for a locked device (the handlers serve it the mount rows
@@ -3169,7 +3177,46 @@ def _image_jobs_configured() -> bool:
     otherwise advertise a route that can only ever fail, and "auto" already
     keys off the endpoint being set.
     """
+    if SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url:
+        return True
+    # 2.3.7: an API image provider (Settings -> AI models -> Image generation)
+    # switches the feature on too, unless DISPATCH_IMAGE_JOBS says off.
+    return (_image_jobs_flag_allows() and image_providers.api_selected())
+
+
+# Direct-API bots with pictures on learn the `[[pic:…]]` marker only when
+# something can draw it (advisor.PICTURE_RULES).
+advisor.pictures_available = lambda: _image_jobs_configured()
+
+#: The drop reason a marker gets on an install with no image generator.
+NO_IMAGE_GENERATOR = ("needs an image generator — Settings → AI models → "
+                      "Image generation")
+
+
+def _image_jobs_flag_allows() -> bool:
+    f = (SETTINGS.image_jobs_flag or "").strip().lower()
+    return f not in ("0", "false", "no", "off", "")
+
+
+def _clawforge_configured() -> bool:
     return bool(SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url)
+
+
+def _choose_image_backend(workflow: str) -> str:
+    """"clawforge", "api" or "" for a NEW job (image_providers.choose_backend)."""
+    backend = image_providers.choose_backend(
+        workflow, clawforge=_clawforge_configured())
+    if backend == "api" and not _image_jobs_flag_allows():
+        return ""
+    return backend
+
+
+def _image_backend(spec: image_jobs.ImageSpec):
+    """The client a job's calls go to: the API backend for an `api` job, the
+    one MCP rig client for everything else (every row written before 2.3.7)."""
+    if spec.backend == "api":
+        return image_providers.backend
+    return _clawforge()
 
 
 _clawforge_client: image_jobs.ClawForge | None = None
@@ -3515,7 +3562,10 @@ async def _pic_specs_from_markers(content: str, bot_id: str | None,
     if not _image_jobs_configured():
         log.info("ignored %d image marker(s): no image server configured",
                  len(markers))
-        return content, [], []
+        # 2.3.7 (fresh-install audit): ONE quiet sub row per message, so a
+        # bot asking for a picture on an install without an image generator
+        # is visible as such instead of vanishing.
+        return content, [], [NO_IMAGE_GENERATOR]
     bot = config.resolve_bot(bot_id)
     if bot is None or not bot.image_jobs:
         log.info("ignored %d image marker(s): not enabled for %s",
@@ -3544,9 +3594,13 @@ async def _pic_specs_from_markers(content: str, bot_id: str | None,
         try:
             full_prompt, display_caption = _compose_pic_prompt(
                 bot, clamped, caption)
+            backend = _choose_image_backend(bot.image_workflow)
+            if not backend:
+                raise ValueError("no image generator is set up for this bot")
             spec = image_jobs.ImageSpec(
                 prompt=full_prompt, caption=display_caption,
                 workflow=bot.image_workflow, ratio=bot.image_ratio,
+                backend=backend,
                 # Explicit, not the dataclass default: this is the bot
                 # decorating its own reply, nobody is waiting on it, and the
                 # rig contract reserves tier 1 for work a person IS waiting
@@ -3828,7 +3882,7 @@ async def _cancel_on_rig(job: dict, why: str) -> None:
     if not rig_id:
         return
     try:
-        await _clawforge().cancel(str(rig_id))
+        await _image_backend(_image_job_spec(job)).cancel(str(rig_id))
         log.info("image job %s: asked the rig to cancel %s (%s)",
                  job["id"], rig_id, why)
     except Exception as e:
@@ -4115,8 +4169,8 @@ async def _advance_image_job(job: dict) -> None:
 
 
 async def _advance_image_job_locked(job: dict) -> None:
-    forge = _clawforge()
     spec = _image_job_spec(job)
+    forge = _image_backend(spec)
     try:
         if job["state"] == image_jobs.QUEUED:
             # Ask the rig whether a submit would run at all before making one.
@@ -7531,8 +7585,11 @@ async def health(request: Request):
         "viewer_denied_24h": localview.denial_stats()["denials_24h"],
         # Is the rig answering RIGHT NOW (the worker's breaker), and if not,
         # for how long. Reachability, not prose: no rig URL, no job ids.
-        "image_rig": (_clawforge().status() if _image_jobs_configured()
+        "image_rig": (_clawforge().status() if _clawforge_configured()
                       else {"reachable": None}),
+        # 2.3.7: the API image provider, when one is selected. Provider id and
+        # the last error sentence only -- never a URL or a key.
+        "image_api": image_providers.backend.status(),
         # Markers that asked for a picture and got none. A different problem
         # from a failed render — a bot writing markers the pipeline cannot
         # honour — so a different number, count-only like the rest.
@@ -8147,6 +8204,107 @@ async def llm_test(payload: dict = Body(...)):
         api_key=str(payload.get("api_key") or "") or _stored_probe_key(payload),
         model=str(payload.get("model") or ""),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Image generation provider (2.3.7, app/image_providers.py)
+#
+# Under /api/llm on purpose: the prefix is already decoy-blocked, and these are
+# the same kind of configuration surface as Connect an AI (a key goes to disk,
+# a Test reaches a host the operator typed). Never returns a key.
+# --------------------------------------------------------------------------- #
+
+
+def _image_provider_state() -> dict:
+    return {"config": image_providers.public_config(),
+            "presets": [p.public() for p in image_providers.PRESETS],
+            "clawforge": _clawforge_configured(),
+            "enabled": _image_jobs_configured(),
+            "flag_off": not _image_jobs_flag_allows(),
+            "status": image_providers.backend.status()}
+
+
+@app.get("/api/llm/image", dependencies=[Depends(_require_operator)])
+async def llm_image_get():
+    return _image_provider_state()
+
+
+@app.put("/api/llm/image", dependencies=[Depends(_require_operator)])
+async def llm_image_put(payload: dict = Body(...)):
+    try:
+        cfg = image_providers.merge_submission(payload)
+        if cfg["provider"] == image_providers.CLAWFORGE and not _clawforge_configured():
+            raise ValueError("no MCP image server is configured "
+                             "(set DISPATCH_CLAWFORGE_URL and restart)")
+        if image_providers.api_selected(cfg):
+            image_providers.resolve(cfg)       # refuse a config that cannot work
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except image_jobs.ImageJobError as e:
+        raise HTTPException(400, e.message) from e
+    await asyncio.to_thread(image_providers.save_config, cfg)
+    log.info("image provider set to %r", cfg["provider"] or "automatic")
+    return _image_provider_state()
+
+
+@app.post("/api/llm/image/test", dependencies=[Depends(_require_operator)])
+async def llm_image_test(payload: dict = Body(...)):
+    """ONE small generation with the submitted (unsaved) settings.
+
+    Metered on most providers: it is one picture, made only when the operator
+    presses Test. The picture comes back inline (a data: URL the panel shows)
+    and is not stored anywhere."""
+    try:
+        cfg = image_providers.merge_submission(payload)
+        res = image_providers.resolve(cfg)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except image_jobs.ImageJobError as e:
+        return {"ok": False, "error": e.message}
+    spec = image_jobs.ImageSpec(
+        prompt=str(payload.get("prompt") or "").strip()[:300]
+        or "A small red paper boat on a calm blue pond, simple illustration",
+        ratio="1:1", backend="api")
+    try:
+        data = await image_providers.generate(res, spec)
+    except image_jobs.ImageJobError as e:
+        return {"ok": False, "error": e.message}
+    suffix = image_jobs.image_suffix(data)
+    mime = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp",
+            ".gif": "image/gif"}.get(suffix, "image/png")
+    return {"ok": True, "mime": mime, "bytes": len(data),
+            "key_source": res.key_source,
+            "preview": f"data:{mime};base64,{base64.b64encode(data).decode()}"}
+
+
+@app.get("/api/llm/quicksetup", dependencies=[Depends(_require_operator)])
+async def llm_quicksetup_plans():
+    return {"plans": quicksetup.plans_public()}
+
+
+@app.post("/api/llm/quicksetup", dependencies=[Depends(_require_operator)])
+async def llm_quicksetup(payload: dict = Body(...)):
+    """"Set up everything with one provider": one key -> chat on the target bot
+    (default Atlas), image generation, embeddings where real; a checklist back.
+    `test: false` configures without any live call. Never returns the key."""
+    test = payload.get("test", True)
+    if not isinstance(test, bool):
+        raise HTTPException(422, "test must be true or false")
+    try:
+        out = await quicksetup.run(
+            str(payload.get("provider") or ""),
+            api_key=str(payload.get("api_key") or ""),
+            api_key_env=str(payload.get("api_key_env") or ""),
+            target=str(payload.get("target") or "") or llm_api.DEFAULT_DIRECT_TARGET,
+            test=test)
+    except llm_api.ApiError as e:
+        raise _llm_error(e) from e
+    await manager.broadcast(
+        {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()
+                                  if b.visible]})
+    bot = config.get_bot(out["bot"])
+    out["bot"] = bot.to_dict() if bot else None
+    return out
 
 
 @app.post("/api/llm/connect", dependencies=[Depends(_require_operator)])
@@ -10457,12 +10615,16 @@ async def image_job_create(request: Request, payload: ImageJobIn):
         # it and post an off-model picture under that bot's name.
         full_prompt, display_caption = _compose_pic_prompt(
             bot, payload.prompt, payload.caption or "")
+        workflow = payload.workflow or bot.image_workflow
+        backend = _choose_image_backend(workflow)
+        if not backend:
+            raise HTTPException(503, "No image generator is set up for this bot")
         spec = image_jobs.ImageSpec(
             # A request that names no workflow gets the bot's own default, if
             # it has one — the same rule the inline marker path uses, since a
             # marker has no room to name one at all.
-            prompt=full_prompt,
-            workflow=payload.workflow or bot.image_workflow,
+            prompt=full_prompt, backend=backend,
+            workflow=workflow,
             ratio=payload.ratio or bot.image_ratio, width=payload.width,
             height=payload.height, negative=payload.negative or "",
             caption=display_caption, priority=priority)
@@ -13141,14 +13303,35 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             with contextlib.suppress(Exception):
                 prefetched.stale = True
             await _discard_run(prefetched)
+    locked = extensions.turn_locked(thread_id)
+    if locked:
+        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
+        # Decided BEFORE the row is persisted, like a Safe-Mode send on the
+        # main /ws (_handle_send): the thread's bot must still be one a locked
+        # device may see, and the turn is charged to that device's daily
+        # Safe-Mode budget (_decoy_action_allowed, the same "turn" action
+        # and DECOY_TURN_QUOTA). Refused = no row, no turn, the extension's
+        # submit raises (the voice add-on tells the listener it could not
+        # send). The budget is spent only while a locked socket is OPEN on
+        # the thread (extensions.locked_client_ip); a turn in the grace
+        # window after it closed runs locked but charges nobody.
+        bot = config.get_bot(thread.bot_id)
+        if not extensions.locked_may_see(bot):
+            if adopted is not None:
+                await _discard_run(adopted)
+            raise PermissionError("Unlock for full access")
+        ip = extensions.locked_client_ip(thread_id)
+        if ip is not None and not _decoy_action_allowed(ip, "turn", DECOY_TURN_QUOTA):
+            if adopted is not None:
+                await _discard_run(adopted)
+            log.info("ext %s: locked turn on %s refused — the daily Safe-Mode "
+                     "message limit is spent", ext_id, thread_id)
+            raise PermissionError("Daily message limit reached — try again tomorrow or unlock.")
     meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
     user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
-    locked = extensions.turn_locked(thread_id)
-    if locked:
-        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
     if locked and adopted is not None:
         # Never reached in practice (_ext_speculate_turn refuses a locked
         # thread), but a run built unlocked must never answer a locked turn.
@@ -13395,6 +13578,7 @@ EXT_HOOKS = extensions.Hooks(
     replies_after=lambda *a, **kw: _ext_replies_after(*a, **kw),
     note_heard=lambda *a, **kw: _ext_note_heard(*a, **kw),
     counters=lambda: dict(_ext_counters),
+    client_ip=_ws_client_ip,
 )
 # Discovery + handshake + setup; never raises (a broken add-on is a state in
 # GET /api/extensions and in Settings → Voice, not a failed boot).
@@ -13476,6 +13660,143 @@ app.include_router(localview.router)
 # earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
 app.include_router(plugins_api.router)   # Settings -> Plugins (operator only)
+
+# --------------------------------------------------------------------------- #
+# "Works with DisPatch" (2.3.7): app/catalog.yaml + live status, and posting a
+# setup guide on demand.
+# --------------------------------------------------------------------------- #
+
+
+def _probe_chat(_: str) -> tuple[str, str]:
+    bots = config.load_bots()
+    direct = [b for b in bots if config.is_direct(b) and config.direct_connected(b)]
+    legacy = [b for b in bots if b.api]
+    if direct or legacy:
+        names = ", ".join(b.name for b in (direct + legacy)[:3])
+        return "connected", names
+    return "not_configured", "No bot is connected to an AI yet"
+
+
+def _probe_image_api(_: str) -> tuple[str, str]:
+    cfg = image_providers.load_config()
+    if not image_providers.api_selected(cfg):
+        return "not_configured", ""
+    preset = image_providers.PRESET_BY_ID[image_providers.provider_id(cfg)]
+    if not _image_jobs_flag_allows():
+        return "installed", "Switched off by DISPATCH_IMAGE_JOBS"
+    try:
+        res = image_providers.resolve(cfg)
+    except image_jobs.ImageJobError as e:
+        return "installed", e.message
+    return "connected", f"{preset.label} ({res.model})"
+
+
+def _probe_image_server(_: str) -> tuple[str, str]:
+    pools = reactions.image_cli_state() == reactions.IMAGE_CLI_OK
+    if _clawforge_configured():
+        return "connected", "Pools: image CLI found" if pools else ""
+    if pools:
+        return "installed", "Image CLI found for pools; no MCP server for chat pictures"
+    return "not_configured", ""
+
+
+def _probe_studioforge(_: str) -> tuple[str, str]:
+    if studioforge_available():
+        return "connected", "Control panel tab on"
+    return "not_configured", ""
+
+
+def _probe_openclaw(_: str) -> tuple[str, str]:
+    if _agent_backend_available():
+        return "connected", ""
+    return "not_configured", "Agent bots cannot answer until OpenClaw is reachable"
+
+
+def _voice_ext():
+    return next((e for e in extensions.registry() if e.id == "voice"), None)
+
+
+def _probe_voice(_: str) -> tuple[str, str]:
+    ext = _voice_ext()
+    if ext is None:
+        return "not_configured", ""
+    if ext.state == "ok":
+        return "connected", f"Version {ext.version}" if ext.version else ""
+    return "installed", ext.state
+
+
+def _probe_voice_rig(_: str) -> tuple[str, str]:
+    if _voice_ext() is None:
+        return "not_configured", "Needs the voice add-on first"
+    try:
+        doc = yaml.safe_load((config.DATA_DIR / "voice.yaml").read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        doc = {}
+    rig = doc.get("rig") if isinstance(doc, dict) else None
+    if isinstance(rig, dict) and rig.get("enabled"):
+        return "connected", ""
+    return "not_configured", "The add-on is using this machine for speech"
+
+
+def _probe_infoforge(_: str) -> tuple[str, str]:
+    have = shutil.which("infoforge") is not None
+    using = [b.name for b in config.load_bots()
+             if isinstance((b.advisor or {}).get("lookup"), dict)]
+    if have and using:
+        return "connected", ", ".join(using[:3])
+    if have:
+        return "installed", "No bot has advisor.lookup set"
+    if using:
+        return "not_configured", "A bot has advisor.lookup but the infoforge command is missing"
+    return "not_configured", ""
+
+
+def _probe_mail(_: str) -> tuple[str, str]:
+    return ("connected", "") if mail_available() else ("not_configured", "")
+
+
+def _probe_livetools(_: str) -> tuple[str, str]:
+    return (("connected", "On") if tools.livetools_enabled()
+            else ("installed", "Switched off install-wide"))
+
+
+def _probe_tool(tool_id: str) -> tuple[str, str]:
+    for row in tools.list_out(True):
+        if row.get("id") == tool_id:
+            return "connected", ""
+    return "not_configured", ""
+
+
+_CATALOG_PROBES = {
+    "chat": _probe_chat, "image_api": _probe_image_api,
+    "image_server": _probe_image_server, "studioforge": _probe_studioforge,
+    "openclaw": _probe_openclaw, "voice": _probe_voice, "voice_rig": _probe_voice_rig,
+    "infoforge": _probe_infoforge, "mail": _probe_mail, "livetools": _probe_livetools,
+    "tool": _probe_tool,
+}
+
+
+@app.get("/api/plugins/catalog", dependencies=[Depends(_require_operator)])
+async def plugins_catalog():
+    """The companion catalog with live status. No network calls, no paths."""
+    rows = await asyncio.to_thread(catalog.resolve, _CATALOG_PROBES)
+    return {"entries": rows, "guides": sorted(firstrun.GUIDES)}
+
+
+@app.post("/api/guide/seed", dependencies=[Depends(_require_operator)])
+async def guide_seed(name: str, force: bool = False):
+    """Post one setup-guide thread on Atlas now (existing installs never
+    auto-seed). 404 unknown guide / no Atlas; 409 already posted."""
+    if name not in firstrun.GUIDES:
+        raise HTTPException(404, "Unknown guide")
+    try:
+        tid = await firstrun.seed_one(db, _deliver_assistant_text, name, force=force)
+    except firstrun.GuideExists:
+        raise HTTPException(409, "That guide is already in your chats") from None
+    except KeyError:
+        raise HTTPException(404, "The guide needs the Atlas bot") from None
+    return {"thread_id": tid}
+
 # Apps (docs/design/2026-09-25-apps.md): trusted packages under apps/<id>/
 # (plus data-dir packages tools.yaml trusts). Each is mounted at
 # /api/apps/<id> and at its manifest's legacy prefix — the Job Board keeps

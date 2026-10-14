@@ -47,7 +47,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # IMAGE_NAME is NOT set here: `github.repository` is "LaserLloyd/DisPatch_Chat"
+  # and an OCI repository name must be lowercase ("invalid reference format:
+  # repository name ... must be lowercase" on every push). Expressions have no
+  # lower() function, so each job sets it from a shell step instead.
 
 # Least privilege at the top; jobs widen it where needed.
 permissions:
@@ -76,6 +79,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Image name (lowercase)
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Normalise platform name
         run: |
           # "linux/amd64" -> "linux-amd64". Artifact names cannot contain "/",
@@ -176,6 +182,9 @@ jobs:
       id-token: write        # Sigstore/OIDC identity for attestations
       attestations: write    # GitHub's own attestation store
     steps:
+      - name: Image name (lowercase)
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests

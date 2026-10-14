@@ -22,7 +22,7 @@ import types
 import pytest
 
 from app import auth, config, main, push
-from tests.test_remember_device import PIN, _enable, _unlock, env  # noqa: F401
+from tests.test_remember_device import PIN, _enable, _unlock, env
 
 FCM = "https://fcm.googleapis.com/fcm/send/abc123"
 SUB = {"endpoint": FCM,
@@ -168,9 +168,9 @@ def test_malformed_keys_are_refused(env):
 def test_payload_is_kind_thread_and_title_only(env, sent):
     client = _remembered(env)
     client.post("/api/push/subscribe", json=SUB)
-    n = asyncio.run(push.notify("reply", "t-1", "Bits   replied"))
+    n = asyncio.run(push.notify("reply", "t-1", "Nova   replied"))
     assert n == 1
-    assert sent[0]["data"] == {"kind": "reply", "thread_id": "t-1", "title": "Bits replied"}
+    assert sent[0]["data"] == {"kind": "reply", "thread_id": "t-1", "title": "Nova replied"}
     assert len(sent[0]["topic"]) <= 32
 
 
@@ -178,7 +178,7 @@ def test_a_revoked_device_gets_nothing_and_loses_its_subscription(env, sent):
     client = _remembered(env)
     client.post("/api/push/subscribe", json=SUB)
     assert client.post("/api/auth/lock").status_code == 200     # forgets the device
-    assert asyncio.run(push.notify("reply", "t-1", "Bits replied")) == 0
+    assert asyncio.run(push.notify("reply", "t-1", "Nova replied")) == 0
     assert sent == [] and _subs() == {}
 
 

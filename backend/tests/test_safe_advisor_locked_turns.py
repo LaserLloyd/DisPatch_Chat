@@ -17,8 +17,8 @@ from __future__ import annotations
 import asyncio
 
 from app import advisor, auth, config, main
-from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env  # noqa: F401
-from tests.test_socket_turn_round import app_client  # noqa: F401
+from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env
+from tests.test_socket_turn_round import app_client
 
 ADVISOR = {"providers": [{"provider": "custom", "base_url": "http://p/v1", "model": "m"}],
            "research_agent": "worker", "action_agent": "lead"}

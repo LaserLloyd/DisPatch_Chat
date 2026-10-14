@@ -310,6 +310,11 @@ class Hooks:
     replies_after: Callable[..., Awaitable[list | None]] | None = None
     note_heard: Callable[..., Awaitable[bool]] | None = None
     counters: Callable[[], dict] = dict
+    #: The budget identity of a websocket's client (main._ws_client_ip: the
+    #: same forwarded-header rule the REST quotas use). A locked device's
+    #: extension turns are charged to it (locked_client_ip).
+    client_ip: Callable[[Any], str] = lambda ws: (
+        ws.client.host if getattr(ws, "client", None) else "?")
 
 
 _hooks = Hooks()
@@ -1529,8 +1534,9 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
             return False
         if locked:
             # A locked device may stay as long as it could still see the
-            # thread: the bot is still `safe`.
-            return bool(bot.safe)
+            # thread: the bot is still `safe` and listed (what its chat list
+            # shows — main._safe_bot_ids).
+            return locked_may_see(bot)
         cfg = auth.load()
         if token is None:
             return not cfg.pin_set          # opened with no PIN; a PIN since = locked
@@ -1538,13 +1544,23 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
     return session_live
 
 
-#: thread id -> [open locked extension sockets, monotonic time the last closed].
-_locked_threads: dict[str, list[float]] = {}
+def locked_may_see(bot) -> bool:
+    """May a LOCKED device use this bot's threads? The same rule its chat list
+    and the main /ws follow (main._safe_bot_ids): flagged `safe` AND listed.
+    A hidden bot's thread is not one a locked device can see, so it gets no
+    extension socket on it either."""
+    return bool(bot is not None and bot.safe and bot.visible)
 
 
-def _locked_open(thread_id: str) -> None:
-    row = _locked_threads.setdefault(thread_id, [0, 0.0])
+#: thread id -> [open locked extension sockets, monotonic time the last
+#: closed, the budget identity (client ip) of the last locked socket opened].
+_locked_threads: dict[str, list] = {}
+
+
+def _locked_open(thread_id: str, client_ip: str = "?") -> None:
+    row = _locked_threads.setdefault(thread_id, [0, 0.0, "?"])
     row[0] += 1
+    row[2] = client_ip or "?"
 
 
 def _locked_closed(thread_id: str) -> None:
@@ -1553,6 +1569,17 @@ def _locked_closed(thread_id: str) -> None:
         return
     row[0] = max(0, row[0] - 1)
     row[1] = time.monotonic()
+
+
+def locked_client_ip(thread_id: str) -> str | None:
+    """The budget identity to charge an extension turn on this thread to: the
+    client ip of the locked device whose extension socket is OPEN on it, else
+    None. Only while one is open — a turn in the LOCKED_GRACE_S window after
+    it closed runs locked (turn_locked) but is nobody's budget to spend."""
+    row = _locked_threads.get(thread_id)
+    if row is None or row[0] <= 0:
+        return None
+    return str(row[2] or "?")
 
 
 def turn_locked(thread_id: str) -> bool:
@@ -1599,7 +1626,7 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
     if (thread is None or bot is None or thread_id in _deleted_threads
-            or (locked and not bot.safe)):
+            or (locked and not locked_may_see(bot))):
         await ws.close(code=POLICY)
         return
     # Rule 9: nothing claims this name — the gate ran, so say why with a real
@@ -1644,7 +1671,11 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
         on_replaced=me.replaced.append, locked=locked)
     if locked:
-        _locked_open(thread_id)
+        try:
+            client_ip = str(_hooks.client_ip(ws) or "?")
+        except Exception:
+            client_ip = "?"
+        _locked_open(thread_id, client_ip)
     try:
         # Inside the try: a handshake cancelled mid-eviction (shutdown) still
         # gives its slot back in the finally below.

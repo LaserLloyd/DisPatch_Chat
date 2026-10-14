@@ -44,8 +44,12 @@ ALLOW: list[tuple[str, str, str]] = [
     # backend/app does not descend.
     ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
+    # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
+    ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
     # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).
     ("backend/app/personas",        "backend/app/personas",        "*.md"),
+    # 2.3.7: the "Works with DisPatch" catalog (app/catalog.py reads it).
+    ("backend/app",                 "backend/app",                 "catalog.yaml"),
     ("frontend/static/guide",       "frontend/static/guide",       "*.png"),
     # (Voice chat left DisPatch in 2.2.0 — it is the DisPatch Voice add-on, a
     # package installed beside the app, never part of the install tree. The
