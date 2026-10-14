@@ -273,3 +273,96 @@ def test_a_locked_turn_keeps_locked_rules_under_a_custom_persona(env, monkeypatc
 
 def test_connect_direct_truncates_at_the_same_ceiling():
     assert llm_api.MAX_PERSONA_CHARS == personas.MAX_CHARS
+
+
+# --------------------------------------------------------------------------- #
+# Review 2.3.6 (2026-10-14): legacy bots, odd text, concurrent saves
+# --------------------------------------------------------------------------- #
+
+
+def test_a_legacy_bot_keeps_the_default_preset_text_and_fills_the_placeholders(env):
+    """Before: the shipped default text was mapped to "" for a legacy bot too
+    (its system_prompt vanished, the editor went blank) and a preset's {name}
+    reached the provider literally."""
+    c = _unlocked(env)
+    r = c.post("/api/llm/connect", json={"backend": "legacy-api", "provider": "lmstudio",
+                                         "model": "m", "system_prompt": "Old prompt"})
+    bid = r.json()["bot"]["id"]
+    r = c.patch(f"/api/bots/{bid}", json={"persona": advisor.DEFAULT_PERSONA})
+    assert r.status_code == 200, r.text
+    assert r.json()["persona"] == advisor.DEFAULT_PERSONA.strip()
+    assert r.json()["persona_custom"] is True
+    assert config.get_bot(bid).api["system_prompt"] == advisor.DEFAULT_PERSONA.strip()
+    sleek = next(p.text for p in personas.presets() if p.id == "sleek")
+    c.patch(f"/api/bots/{bid}", json={"persona": sleek})
+    bot = config.get_bot(bid)
+    resolved = llm_api.resolve_api(bot.api, bot.name, bot.id)
+    assert "{name}" not in resolved.system_prompt and "{owner}" not in resolved.system_prompt
+    assert resolved.system_prompt == sleek.replace("{name}", bot.name).replace("{owner}", "the user")
+    # "" still means the provider's plain default for a legacy bot.
+    c.patch(f"/api/bots/{bid}", json={"persona": ""})
+    assert "system_prompt" not in config.get_bot(bid).api
+    assert llm_api.resolve_api(config.get_bot(bid).api, "LM Studio").system_prompt == \
+        llm_api.DEFAULT_SYSTEM_PROMPT.format(name="LM Studio")
+
+
+def test_a_direct_bot_still_stores_the_default_text_as_no_persona():
+    assert personas.normalise(advisor.DEFAULT_PERSONA, "direct") == ""
+    assert personas.normalise(advisor.DEFAULT_PERSONA, "legacy-api") == advisor.DEFAULT_PERSONA.strip()
+
+
+def test_a_lone_surrogate_is_a_422_not_a_500(env):
+    c = _unlocked(env)
+    before = (env.tmp_path / "config.yaml").read_text()
+    r = c.patch("/api/bots/atlas", content=b'{"persona": "bad \\ud800 text"}',
+                headers={"content-type": "application/json"})
+    assert r.status_code == 422, r.text
+    assert "valid string" in r.text and "persona" in r.text
+    assert (env.tmp_path / "config.yaml").read_text() == before
+    assert not [p for p in env.tmp_path.iterdir() if p.name.startswith(".config.yaml.")]
+    r = c.post("/api/llm/connect", content=b'{"provider": "openai", "api_key": "k", "system_prompt": "x \\udc00"}',
+               headers={"content-type": "application/json"})
+    assert r.status_code in (400, 422), r.text
+    assert "persona" not in (config.get_bot("atlas").advisor or {})
+
+
+def test_two_concurrent_edits_of_one_bot_both_land(env):
+    """Two tabs: a persona save racing a rename (or the Lookups pill) on the
+    same bot. Before config.update_bot the second writer carried a stale copy
+    of the bot and silently undid the first (10 of 10 rounds in the review)."""
+    import threading
+    _unlocked(env)
+    started = threading.Barrier(2)
+
+    def slow_persona(bot):
+        started.wait(timeout=5)
+        # The other writer is now blocked on the roster lock (or, without the
+        # lock, racing us); give it a moment so the race is real.
+        import time
+        time.sleep(0.2)
+        return personas.apply(bot, "Raced {name}")
+
+    def rename(bot):
+        return config.Bot(**{**bot.__dict__, "name": "Renamed"})
+
+    errors = []
+
+    def run(fn):
+        try:
+            config.update_bot("atlas", fn)
+        except Exception as e:  # pragma: no cover - surfaces in the assert
+            errors.append(e)
+
+    t1 = threading.Thread(target=run, args=(slow_persona,))
+    t2 = threading.Thread(target=lambda: (started.wait(timeout=5), run(rename)))
+    t1.start(); t2.start(); t1.join(5); t2.join(5)
+    assert not errors
+    bot = config.get_bot("atlas")
+    assert bot.name == "Renamed"
+    assert bot.advisor.get("persona") == "Raced {name}"
+
+
+def test_update_bot_returns_none_for_an_unknown_bot_and_the_route_404s(env):
+    c = _unlocked(env)
+    assert config.update_bot("nope", lambda b: b) is None
+    assert c.patch("/api/bots/nope", json={"persona": "x"}).status_code == 404

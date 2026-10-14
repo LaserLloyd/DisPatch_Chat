@@ -54,7 +54,6 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import (
     http_exception_handler,
-    request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -573,13 +572,30 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
     and it is genuinely the most useful thing in the body — with the problem
     envelope wrapped around it.
     """
+    errors = _encodable(jsonable_encoder(exc.errors()))
     if _wants_problem_json(request):
         return JSONResponse(
-            problem.body(422, jsonable_encoder(exc.errors()), code="validation_error"),
+            problem.body(422, errors, code="validation_error"),
             status_code=422,
             media_type=problem.MEDIA_TYPE,
         )
-    return await request_validation_exception_handler(request, exc)
+    # FastAPI's own handler, minus one failure mode: it echoes the offending
+    # `input`, and a lone surrogate in it (a JSON "\ud800" escape in any str
+    # field) made the 422 response itself fail to encode -- a 500 with no
+    # message instead of the validation error (review 2.3.6).
+    return JSONResponse({"detail": errors}, status_code=422)
+
+
+def _encodable(value):
+    """`value` with every string made UTF-8-encodable (lone surrogates
+    replaced), recursively; anything else is returned as it is."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_encodable(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _encodable(v) for k, v in value.items()}
+    return value
 
 
 def _wants_problem_json(request: Request) -> bool:
@@ -1884,6 +1900,10 @@ def _is_inbound(method: str, path: str) -> bool:
         # read the disk, and the one-way drop stays one-way for everyone else.
         return True
     if (method, path) in _INBOUND_REACTION:
+        return True
+    if method == "POST" and path == "/api/guide/seed":
+        # 2.3.7: an install script adds the setup guide. Fixed shipped text;
+        # the handler refuses `force` without a session.
         return True
     if (method, path) in (("GET", "/api/advisor/status"),
                           ("POST", "/api/advisor/digest")):
@@ -8467,28 +8487,34 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
     """Change a bot's name / emoji / badge / flags / lookups / personality.
     Operator only."""
     _require_full_access(request)
-    bot = await asyncio.to_thread(config.get_bot, bot_id)
-    if bot is None:
+
+    def _apply(bot: config.Bot) -> config.Bot:
+        # Runs under config's roster lock with the CURRENT bot, so a save from
+        # another tab (or the Lookups pill racing a persona save on the same
+        # row) is never overwritten by a stale copy of the bot.
+        changes = payload.model_dump(exclude_unset=True)
+        tools = changes.pop("tools", None)
+        if "tools" in payload.model_fields_set:
+            if not config.is_direct(bot):
+                raise HTTPException(422, "tools only applies to direct-API bots")
+            # A hand-picked `tools:` list survives an off/on round trip
+            # (config.set_direct_tools parks it under `tools_picked`).
+            changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
+        persona = changes.pop("persona", None)
+        updated = dc_replace(bot, **changes)
+        if persona is not None:
+            # advisor.persona / api.system_prompt, the same field the AI models
+            # Connect panel writes. Takes effect on the next turn (load_bots is
+            # mtime-cached); the code-appended rules are not part of it.
+            try:
+                updated = personas.apply(updated, persona)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+        return updated
+
+    saved = await asyncio.to_thread(config.update_bot, bot_id, _apply)
+    if saved is None:
         raise HTTPException(404, "Unknown bot")
-    changes = payload.model_dump(exclude_unset=True)
-    tools = changes.pop("tools", None)
-    if "tools" in payload.model_fields_set:
-        if not config.is_direct(bot):
-            raise HTTPException(422, "tools only applies to direct-API bots")
-        # A hand-picked `tools:` list survives an off/on round trip
-        # (config.set_direct_tools parks it under `tools_picked`).
-        changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
-    persona = changes.pop("persona", None)
-    updated = dc_replace(bot, **changes)
-    if persona is not None:
-        # advisor.persona / api.system_prompt, the same field the AI models
-        # Connect panel writes. Takes effect on the next turn (load_bots is
-        # mtime-cached); the code-appended rules are not part of it.
-        try:
-            updated = personas.apply(updated, persona)
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from e
-    saved = await asyncio.to_thread(config.upsert_bot, updated)
     await _broadcast_roster()
     return _bot_row(saved)
 
@@ -13783,10 +13809,20 @@ async def plugins_catalog():
     return {"entries": rows, "guides": sorted(firstrun.GUIDES)}
 
 
-@app.post("/api/guide/seed", dependencies=[Depends(_require_operator)])
-async def guide_seed(name: str, force: bool = False):
+@app.post("/api/guide/seed")
+async def guide_seed(request: Request, name: str, force: bool = False):
     """Post one setup-guide thread on Atlas now (existing installs never
-    auto-seed). 404 unknown guide / no Atlas; 409 already posted."""
+    auto-seed). 404 unknown guide / no Atlas; 409 already posted.
+
+    The operator, or an on-box process over loopback (an install script or the
+    operator's own shell): the thread it writes is fixed text shipped with the
+    app, so the machine surface can add a guide but never choose its content.
+    `force` stays operator-only."""
+    machine = _on_box_machine(request)
+    if not machine:
+        _require_operator(request)
+    elif force:
+        raise HTTPException(403, "force needs an unlocked session")
     if name not in firstrun.GUIDES:
         raise HTTPException(404, "Unknown guide")
     try:

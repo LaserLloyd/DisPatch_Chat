@@ -19,6 +19,9 @@ const BOTS_EDIT = readFileSync(join(STATIC, 'js', 'bots-edit.js'), 'utf8');
 const LLM = readFileSync(join(STATIC, 'js', 'llm.js'), 'utf8');
 const SW = readFileSync(join(STATIC, 'sw.js'), 'utf8');
 const EN = JSON.parse(readFileSync(join(STATIC, 'locales', 'en.json'), 'utf8'));
+// The SAME module instance bots-edit.js imports: a second ?v= would give the
+// tests their own copy of the module state (open panels, drafts) to reset.
+const PERSONALITY = './' + BOTS_EDIT.match(/personality\.js\?v=\d+/)[0];
 
 const require = createRequire(import.meta.url);
 let jsdom = null;
@@ -67,7 +70,7 @@ async function setup(extra = {}) {
   const i18n = await import('../static/js/i18n.js?v=4');
   await i18n.init('en');
   calls.length = 0;
-  const pmod = await import('../static/js/personality.js?v=1');
+  const pmod = await import('../static/js/' + PERSONALITY.slice(2));
   pmod._reset();
   const mod = await import(`../static/js/bots-edit.js?t=${Math.random()}`);
   const rec = { toasts: [], patched: [] };
@@ -91,7 +94,7 @@ const ATLAS = {
 };
 
 test('matchPreset: equal text (trimmed) is that preset, anything else is custom', async () => {
-  const { matchPreset, CUSTOM } = await import('../static/js/personality.js?v=1');
+  const { matchPreset, CUSTOM } = await import('../static/js/' + PERSONALITY.slice(2));
   assert.equal(matchPreset(PRESETS.presets, '  You are {name}, sleek, for {owner}.\n'), 'sleek');
   assert.equal(matchPreset(PRESETS.presets, 'You are {name}, sleek, for {owner}!'), CUSTOM);
   assert.equal(matchPreset([], 'x'), CUSTOM);
@@ -233,4 +236,75 @@ test('every language has the persona strings, with the same placeholders', () =>
       assert.deepEqual(ph(d.persona[k]), ph(v), `${lang}.persona.${k}`);
     }
   }
+});
+
+// ---- Review 2.3.6 (2026-10-14) -------------------------------------------
+
+test('an unsaved draft survives the row being rebuilt (rename, Lookups pill, another save)', { skip: dom.skip }, async () => {
+  const { mod, ctx, win } = await setup();
+  const c = mod.rowControls({ ...ATLAS }, ctx);
+  fire(win, c.persona);
+  await tick();
+  const ta = c.personaPanel.querySelector('[data-bm="persona-text"]');
+  ta.value = 'Half-typed draft';
+  fire(win, ta, 'input');
+  // main.js: onPatched -> renderBotManager() builds every row afresh.
+  const again = mod.rowControls({ ...ATLAS }, ctx);
+  await tick();
+  const ta2 = again.personaPanel.querySelector('[data-bm="persona-text"]');
+  assert.ok(!again.personaPanel.classList.contains('hidden'));
+  assert.equal(ta2.value, 'Half-typed draft');
+  assert.equal(again.personaPanel.querySelector('[data-bm="persona-save"]').disabled, false);
+  // Revert drops the draft; a later rebuild shows the stored text.
+  fire(win, again.personaPanel.querySelector('[data-bm="persona-revert"]'));
+  const third = mod.rowControls({ ...ATLAS }, ctx);
+  await tick();
+  assert.equal(third.personaPanel.querySelector('[data-bm="persona-text"]').value, ATLAS.persona);
+});
+
+test('a legacy-API bot is not offered the DisPatch default preset, and Reset stays off until a preset is picked', { skip: dom.skip }, async () => {
+  const { mod, ctx, win } = await setup();
+  const c = mod.rowControls({ id: 'llm-x', name: 'X', backend: 'legacy-api', persona_kind: 'legacy-api', persona: '' }, ctx);
+  fire(win, c.persona);
+  await tick();
+  const f = (k) => c.personaPanel.querySelector(`[data-bm="${k}"]`);
+  assert.deepEqual([...f('persona-preset').options].map((o) => o.value), ['sleek', 'contrarian', 'custom']);
+  assert.equal(f('persona-reset').disabled, true, 'nothing to reset to');
+  // Pasting the advisor default by hand is just a custom prompt here.
+  f('persona-text').value = PRESETS.presets[0].text;
+  fire(win, f('persona-text'), 'input');
+  assert.equal(f('persona-preset').value, 'custom');
+  f('persona-preset').value = 'sleek';
+  fire(win, f('persona-preset'), 'change');
+  assert.equal(f('persona-reset').disabled, true);
+  f('persona-text').value += ' more';
+  fire(win, f('persona-text'), 'input');
+  assert.equal(f('persona-reset').disabled, false);
+  fire(win, f('persona-reset'));
+  assert.equal(f('persona-text').value, PRESETS.presets[1].text);
+  // A direct bot still gets the default and can reset to it.
+  const d = mod.rowControls({ ...ATLAS, id: 'sage', persona: 'Custom' }, ctx);
+  fire(win, d.persona);
+  await tick();
+  assert.equal(d.personaPanel.querySelector('[data-bm="persona-preset"]').options[0].value, 'default');
+  assert.equal(d.personaPanel.querySelector('[data-bm="persona-reset"]').disabled, false);
+});
+
+test('Esc in the editor and the Close button hand focus back to the Personality button', { skip: dom.skip }, async () => {
+  const { mod, ctx, win } = await setup();
+  const c = mod.rowControls({ ...ATLAS }, ctx);
+  win.document.body.append(c.persona, c.personaPanel);
+  fire(win, c.persona);
+  await tick();
+  const ta = c.personaPanel.querySelector('[data-bm="persona-text"]');
+  ta.focus();
+  assert.equal(win.document.activeElement, ta);
+  ta.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.ok(c.personaPanel.classList.contains('hidden'));
+  assert.equal(win.document.activeElement, c.persona);
+  fire(win, c.persona);
+  const close = c.personaPanel.querySelector('[data-bm="persona-close"]');
+  close.focus();
+  fire(win, close);
+  assert.equal(win.document.activeElement, c.persona);
 });
