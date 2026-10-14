@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _extfake import ext_env, install, lock, unlock  # noqa: F401
+from _extfake import ext_env, install, lock, unlock
 
 from app import config, extensions, livetools, plugins_api, tools
 
@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 ORIGIN = {"origin": "http://testserver"}
 
 
-def test_aggregate_shape_without_extensions(ext_env):  # noqa: F811
+def test_aggregate_shape_without_extensions(ext_env):
     c, _ = ext_env
     r = c.get("/api/plugins")
     assert r.status_code == 200, r.text
@@ -30,7 +30,7 @@ def test_aggregate_shape_without_extensions(ext_env):  # noqa: F811
     assert body["tools"] == c.get("/api/tools").json()["tools"]
 
 
-def test_aggregate_lists_an_installed_extension(ext_env):  # noqa: F811
+def test_aggregate_lists_an_installed_extension(ext_env):
     c, _ = ext_env
     install()
     body = c.get("/api/plugins").json()
@@ -44,7 +44,7 @@ def test_aggregate_lists_an_installed_extension(ext_env):  # noqa: F811
     assert row["restart_pending"] is False
 
 
-def test_extension_switch_writes_extensions_yaml(ext_env):  # noqa: F811
+def test_extension_switch_writes_extensions_yaml(ext_env):
     c, tmp = ext_env
     install()
     r = c.put("/api/plugins/extensions/voice", json={"enabled": False}, headers=ORIGIN)
@@ -59,7 +59,7 @@ def test_extension_switch_writes_extensions_yaml(ext_env):  # noqa: F811
     assert yaml.safe_load((tmp / "extensions.yaml").read_text()) == {"disabled": []}
 
 
-def test_extension_switch_rejects_unknown_id_and_bad_bodies(ext_env):  # noqa: F811
+def test_extension_switch_rejects_unknown_id_and_bad_bodies(ext_env):
     c, _ = ext_env
     install()
     assert c.put("/api/plugins/extensions/nope", json={"enabled": False},
@@ -69,7 +69,7 @@ def test_extension_switch_rejects_unknown_id_and_bad_bodies(ext_env):  # noqa: F
         assert r.status_code == 422, body
 
 
-def test_listed_extension_loads_as_disabled_at_next_discovery(ext_env, monkeypatch):  # noqa: F811
+def test_listed_extension_loads_as_disabled_at_next_discovery(ext_env, monkeypatch):
     c, tmp = ext_env
     (tmp / "extensions.yaml").write_text("disabled: [voice]\n")
 
@@ -90,7 +90,7 @@ def test_listed_extension_loads_as_disabled_at_next_discovery(ext_env, monkeypat
     assert [x.target for x in cands] == ["_extfake:EXTENSION"] and off == []
 
 
-def test_unreadable_extensions_yaml_switches_nothing_off(ext_env):  # noqa: F811
+def test_unreadable_extensions_yaml_switches_nothing_off(ext_env):
     _, tmp = ext_env
     (tmp / "extensions.yaml").write_text("disabled: [unclosed\n")
     assert extensions.user_disabled() == set()
@@ -98,7 +98,7 @@ def test_unreadable_extensions_yaml_switches_nothing_off(ext_env):  # noqa: F811
     assert extensions.user_disabled() == set()
 
 
-def test_livetools_switch_persists_and_is_read_by_the_hook(ext_env):  # noqa: F811
+def test_livetools_switch_persists_and_is_read_by_the_hook(ext_env):
     c, tmp = ext_env
     assert tools.livetools_enabled() is True
     r = c.put("/api/plugins/livetools", json={"enabled": False}, headers=ORIGIN)
@@ -111,7 +111,7 @@ def test_livetools_switch_persists_and_is_read_by_the_hook(ext_env):  # noqa: F8
     assert tools.livetools_enabled() is True
 
 
-def test_livetools_switch_survives_a_tools_save_and_keeps_tool_rows(ext_env):  # noqa: F811
+def test_livetools_switch_survives_a_tools_save_and_keeps_tool_rows(ext_env):
     c, tmp = ext_env
     (tmp / "tools.yaml").write_text(yaml.safe_dump({"tools": [
         {"id": "docs", "kind": "url", "title": "Docs", "url": "https://example.org/", "enabled": True}]}))
@@ -127,14 +127,14 @@ def test_livetools_switch_survives_a_tools_save_and_keeps_tool_rows(ext_env):  #
     assert tools.livetools_enabled() is False
 
 
-def test_livetools_bad_block_is_a_malformed_manifest_but_hook_stays_on(ext_env):  # noqa: F811
+def test_livetools_bad_block_is_a_malformed_manifest_but_hook_stays_on(ext_env):
     _, tmp = ext_env
     (tmp / "tools.yaml").write_text("livetools: {enabled: maybe}\n")
     assert tools.load_tools() == []
     assert tools.livetools_enabled() is True
 
 
-def test_livetools_switch_refuses_to_overwrite_an_unreadable_file(ext_env):  # noqa: F811
+def test_livetools_switch_refuses_to_overwrite_an_unreadable_file(ext_env):
     c, tmp = ext_env
     (tmp / "tools.yaml").write_text("tools: [unclosed\n")
     r = c.put("/api/plugins/livetools", json={"enabled": False}, headers=ORIGIN)
@@ -147,7 +147,7 @@ def test_livetools_switch_refuses_to_overwrite_an_unreadable_file(ext_env):  # n
     ("PUT", "/api/plugins/extensions/voice", {"enabled": False}),
     ("PUT", "/api/plugins/livetools", {"enabled": False}),
 ])
-def test_routes_are_operator_only(ext_env, method, path, body):  # noqa: F811
+def test_routes_are_operator_only(ext_env, method, path, body):
     c, tmp = ext_env
     install()
     lock(c)                                           # PIN set, no session = Safe Mode
@@ -159,7 +159,7 @@ def test_routes_are_operator_only(ext_env, method, path, body):  # noqa: F811
     assert r.status_code == 200, (path, r.text)
 
 
-def test_cross_origin_write_is_refused(ext_env):  # noqa: F811
+def test_cross_origin_write_is_refused(ext_env):
     c, tmp = ext_env
     r = c.put("/api/plugins/livetools", json={"enabled": False},
               headers={"origin": "http://evil.example"})
@@ -175,7 +175,7 @@ def test_voice_install_command_matches_the_frontend_constants():
     assert plugins_api.VOICE_REPO_URL == repo and plugins_api.VOICE_TAG == tag
 
 
-def test_a_switch_never_overwrites_an_off_list_it_cannot_read(ext_env):  # noqa: F811
+def test_a_switch_never_overwrites_an_off_list_it_cannot_read(ext_env):
     """Review 2.3.0 LOW-4: a hand-edit typo in extensions.yaml must not be turned
     into a file that re-enables every other add-on."""
     c, _ = ext_env

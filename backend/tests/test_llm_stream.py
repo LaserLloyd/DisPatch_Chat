@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from app import config, llm_api, main
-from tests.test_llm_api import _api_bot, _mock_http, db_env  # noqa: F401
+from tests.test_llm_api import _api_bot, _mock_http, db_env
 
 
 def _sse(*pieces: str, model: str = "stream-model", usage: int | None = None) -> bytes:

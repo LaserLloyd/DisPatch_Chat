@@ -49,7 +49,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import config, knowledge, livetools, llm_api, tools as tools_mod
+from . import config, knowledge, livetools, llm_api
+from . import tools as tools_mod
 
 log = logging.getLogger("dispatch.advisor")
 
@@ -355,7 +356,7 @@ class AdvisorConfig:
     def can_dispatch(self) -> bool:
         return bool(self.agents) and not self.locked
 
-    def locked_down(self) -> "AdvisorConfig":
+    def locked_down(self) -> AdvisorConfig:
         """This config for a turn from a locked (Safe-Mode) device."""
         return replace(self, locked=True)
 
@@ -1863,7 +1864,9 @@ Be specific and brief. Skip a section if there is nothing for it. Never invent.
 async def digest(day: str | None = None, *, force: bool = False) -> list[dict]:
     """Summarise one day (default: yesterday) of each advisor's chats."""
     h = _h()
-    when = (datetime.strptime(day, "%Y-%m-%d") if day
+    # Only the calendar date is kept (`.date()`), so a naive parse is correct:
+    # the day is the user's local day and is made aware by `.astimezone()` below.
+    when = (datetime.strptime(day, "%Y-%m-%d") if day  # noqa: DTZ007
             else datetime.now() - timedelta(days=1)).date()
     day_s = when.isoformat()
     start = datetime.combine(when, datetime.min.time()).astimezone()

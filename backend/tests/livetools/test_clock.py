@@ -34,7 +34,7 @@ def test_describe_now_is_aware():
 
 
 def test_naive_datetime_is_treated_as_local():
-    info = clock.describe(datetime(2026, 9, 30, 12, 0, 0))
+    info = clock.describe(datetime(2026, 9, 30, 12, 0, 0))  # noqa: DTZ001 - naive on purpose: that is the case under test
     assert info["iso"].startswith("2026-09-30T12:00:00")
     assert info["weekday"] == "Wednesday"
 

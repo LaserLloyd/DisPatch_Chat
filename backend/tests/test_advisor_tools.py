@@ -12,7 +12,7 @@ import asyncio
 import json
 
 from app import advisor, config, livetools, llm_api
-from tests.test_advisor import _rec_hooks, adv_env  # noqa: F401
+from tests.test_advisor import _rec_hooks, adv_env
 
 WEATHER_CALL = {"id": "c1", "name": "weather", "arguments": json.dumps({"location": "Tokyo"})}
 

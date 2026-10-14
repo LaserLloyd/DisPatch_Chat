@@ -22,7 +22,7 @@ import types
 import pytest
 
 from app import auth, config, main, push
-from tests.test_remember_device import PIN, _enable, _unlock, env  # noqa: F401
+from tests.test_remember_device import PIN, _enable, _unlock, env
 
 FCM = "https://fcm.googleapis.com/fcm/send/abc123"
 SUB = {"endpoint": FCM,

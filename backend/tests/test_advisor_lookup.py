@@ -15,7 +15,7 @@ import asyncio
 import json
 
 from app import advisor, config
-from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env  # noqa: F401
+from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env
 
 SEARCH_JSON = json.dumps({"query": "q", "sources": [
     {"title": "Mona Lisa", "url": "http://127.0.0.1:8080/content/x/Mona_Lisa",

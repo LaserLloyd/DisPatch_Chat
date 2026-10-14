@@ -6,12 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_llm_api import _unlock, llm_env
 
-from app import advisor, auth, config, knowledge, llm_api
-from app import main
-
-from test_llm_api import _unlock, llm_env  # noqa: F401  (fixture re-export)
-
+from app import advisor, auth, config, knowledge, llm_api, main
 
 # --------------------------------------------------------------------------- #
 # knowledge.py
@@ -407,7 +404,7 @@ def test_advisor_block_is_redacted_in_admin_output():
 # --------------------------------------------------------------------------- #
 
 
-def test_send_needs_a_real_session(llm_env):  # noqa: F811
+def test_send_needs_a_real_session(llm_env):
     client = llm_env()
     _unlock(client)
     client.cookies.clear()
@@ -420,7 +417,7 @@ def test_send_needs_a_real_session(llm_env):  # noqa: F811
     assert main._is_inbound("GET", "/api/advisor/status")
 
 
-def test_unknown_request_is_404_for_an_unlocked_session(llm_env, monkeypatch, tmp_path):  # noqa: F811
+def test_unknown_request_is_404_for_an_unlocked_session(llm_env, monkeypatch, tmp_path):
     monkeypatch.setattr(advisor, "_ledger", None)
     # The app's real hooks carry an import-time snapshot of the LIVE data dir;
     # the route under test must open its ledger in scratch space instead.
@@ -591,7 +588,7 @@ def test_inbound_metadata_drops_advisor_keys():
     assert main._inbound_metadata("nope") == {}
 
 
-def test_inject_cannot_forge_a_handoff_card(llm_env):  # noqa: F811
+def test_inject_cannot_forge_a_handoff_card(llm_env):
     client = llm_env()
     config.upsert_bot(config.Bot(id="adv2", name="A", advisor={
         "providers": [{"provider": "custom", "model": "m"}]}))
