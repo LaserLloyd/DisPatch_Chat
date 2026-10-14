@@ -130,3 +130,30 @@ test('New bot… needs a name and derives the id from it', dom, async () => {
   assert.equal(mod.slugForBot('  Ünïcode name  '), 'n-code-name');
   assert.equal(mod.slugForBot(''), 'assistant');
 });
+
+test('Test connection names the picked bot (target) and the env name, so a connected bot re-tests on its saved key', dom, async () => {
+  const { doc } = await setup();
+  const sel = doc.getElementById('llm-target');
+  sel.value = 'sage'; sel.dispatchEvent(new doc.defaultView.Event('change'));
+  await tick();
+  // The key field is blank on purpose: a saved key never comes back out of the
+  // API, and the server falls back to the stored key of `target` for the same
+  // provider (main._stored_probe_key) — which it cannot do without `target`.
+  assert.equal(doc.getElementById('llm-key').value, '');
+  doc.getElementById('llm-key-env').value = 'MINIMAX_API_KEY';
+  doc.getElementById('llm-test').click();
+  for (let i = 0; i < 5; i++) await tick();
+  const probe = calls.find((c) => c.key === 'POST /api/llm/test');
+  assert.ok(probe, 'the probe was posted');
+  assert.equal(probe.body.provider, 'minimax');
+  assert.equal(probe.body.target, 'sage');
+  assert.equal(probe.body.api_key, '');
+  assert.equal(probe.body.api_key_env, 'MINIMAX_API_KEY');
+  // New bot…: nothing stored to fall back on, so no target is named.
+  sel.value = '__new__'; sel.dispatchEvent(new doc.defaultView.Event('change'));
+  await tick();
+  doc.getElementById('llm-test').click();
+  for (let i = 0; i < 5; i++) await tick();
+  const again = calls.filter((c) => c.key === 'POST /api/llm/test').at(-1);
+  assert.equal(again.body.target, '');
+});

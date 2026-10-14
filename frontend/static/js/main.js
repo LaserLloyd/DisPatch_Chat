@@ -27,7 +27,7 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=9';
+} from './llm.js?v=10';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -46,7 +46,7 @@ import {
 } from './ext-sdk.js?v=4';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=3';
-import { mountPluginsSettings } from './plugins.js?v=2';
+import { mountPluginsSettings } from './plugins.js?v=3';
 import { rowControls, addBotRow } from './bots-edit.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -7546,8 +7546,13 @@ function addHeaderAction(owner, node, { before = 'thread-menu-btn' } = {}) {
 function extSettingsPane(owner, id, spec = {}) {
   const host = paneHost(id);
   // Not a pre-declared pane: the shell makes the tab (docs/extensions.md,
-  // "Settings panes"). A core tab id, or a malformed one, throws.
-  if (!host) return addinTabs.claim(owner, id, spec);
+  // "Settings panes"). A core tab id, or a malformed one, throws. So does a
+  // claim before the Settings DOM is wired (wireSettingsTabs) — a real error
+  // the loader records as the add-on's `failed` detail, not a TypeError.
+  if (!host) {
+    if (!addinTabs) throw new Error(`settings.pane: "${id}" claimed before the Settings tabs exist`);
+    return addinTabs.claim(owner, id, spec);
+  }
   if (host.owned() && host.ownerId() !== owner) throw new Error(`settings.pane: "${id}" is taken`);
   return host.claim(owner, spec);
 }

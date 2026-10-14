@@ -491,7 +491,10 @@ test('the same owner claiming its tab again re-renders into the existing pane', 
 
 test('main.js routes an unknown shell.settings.pane id to the add-in tabs and keeps its lists in step', () => {
   const src = readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(!host\) return addinTabs\.claim\(owner, id, spec\);/);
+  assert.match(src, /return addinTabs\.claim\(owner, id, spec\);/);
+  // A claim before wireSettingsTabs built the add-in tab host is a real error
+  // for the loader to record, never a TypeError on null.
+  assert.match(src, /if \(!addinTabs\) throw new Error\(`settings\.pane: "\$\{id\}" claimed before the Settings tabs exist`\);/);
   assert.match(src, /SETTINGS_TABS\.splice\(at < 0 \? SETTINGS_TABS\.length : at, 0, id\)/);
   assert.match(src, /if \(!isPublic\) ADMIN_TABS\.push\(id\);/);
   assert.match(src, /reserved: CORE_SETTINGS_TABS/);

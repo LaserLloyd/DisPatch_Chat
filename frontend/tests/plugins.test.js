@@ -308,3 +308,26 @@ test('the namespaces sit right before security, after the others', () => {
   const i = keys.indexOf('plugins');
   assert.deepEqual(keys.slice(i - 1, i + 3), [keys[i - 1], 'plugins', 'bots_edit', 'security']);
 });
+
+test('switching off a failed add-on shows the restart hint too: it stays loaded until a restart', { skip: dom.skip }, async () => {
+  const { mod, pane, deps } = await setup();
+  await mod.mountPluginsSettings(pane, deps);
+  const row = pane.querySelector('[data-ext="stats"]');
+  const hint = row.querySelector('.plugins-restart');
+  assert.equal(hint.hidden, true, 'nothing pending at first');
+  const cb = row.querySelector('input');
+  cb.checked = false;
+  cb.dispatchEvent(new globalThis.window.Event('change'));
+  await tick(); await tick();
+  assert.deepEqual(calls.at(-1).body, { enabled: false });
+  assert.equal(hint.hidden, false, 'the server rule: off + not yet unloaded = restart pending');
+  // And the mirror image: a row the operator switched off earlier (state
+  // "disabled") switched back on is pending until the restart loads it.
+  const old = pane.querySelector('[data-ext="old"]');
+  routes['PUT /api/plugins/extensions/old'] = () => [200, { id: 'old', enabled: true, restart_required: true }];
+  const ocb = old.querySelector('input');
+  ocb.checked = true;
+  ocb.dispatchEvent(new globalThis.window.Event('change'));
+  await tick(); await tick();
+  assert.equal(old.querySelector('.plugins-restart').hidden, false);
+});
