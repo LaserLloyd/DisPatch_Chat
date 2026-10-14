@@ -1155,7 +1155,7 @@
     "loopback_hint": "ここで使うにはホスト上で DisPatch を開いてください。",
     "bad_url_text": "このツールには使えるアドレスがありません。",
     "not_found": "そのツールは利用できません。",
-    "settings_hint": "ツールはレールのボットの下に表示され、全画面で開きます。パスと更新コマンドは {path} にあります。",
+    "settings_path": "パスと更新コマンドの場所:",
     "location_hint": "パスと更新は tools.yaml で編集してください。",
     "col_icon": "アイコン",
     "col_title": "タイトル",

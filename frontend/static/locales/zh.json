@@ -1155,7 +1155,7 @@
     "loopback_hint": "请在主机本机上打开 DisPatch 以在此使用。",
     "bad_url_text": "此工具没有可用的地址。",
     "not_found": "该工具不可用。",
-    "settings_hint": "工具显示在侧栏的机器人下方，并以整页打开。路径和刷新命令位于 {path}。",
+    "settings_path": "路径和刷新命令位于：",
     "location_hint": "路径和刷新请在 tools.yaml 中编辑。",
     "col_icon": "图标",
     "col_title": "标题",

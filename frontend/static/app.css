@@ -4625,3 +4625,63 @@ body.tools-sheet-open::after {
 .bm-persona-foot .bm-edit-actions { flex-wrap: wrap; }
 .bm-persona-count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .bm-persona-count.over { color: var(--danger); }
+
+/* ==========================================================================
+   2.3.8 — Settings on a phone (360px): compact Bots rows, Plugins tools table
+   as cards, wrapping server paths, a Reactions add-box that uses the width.
+   Everything here is inside a max-width query or only restyles text, so the
+   desktop layout is unchanged.
+   ========================================================================== */
+
+/* Server paths (Security note, Plugins tools pointer): small, monospace,
+   wrap anywhere instead of pushing a phone screen sideways. */
+.sec-note .sec-path,
+.tools-path-note .tools-path {
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+  overflow-wrap: anywhere; word-break: normal;
+}
+.tools-path-note { font-size: 12px; margin: 0; }
+.tools-path { background: var(--code-inline); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 480px) {
+  /* Bots row = avatar + name + inline ▲▼ on the first line; the pills,
+     switches and the Personality button wrap neatly underneath. The name's
+     basis leaves no room for a fourth item on line one (avatar 36 + move 2x32
+     + gaps), so line one is always exactly those three. */
+  .bm-row { gap: 6px 8px; padding: 8px 10px; }
+  .bm-row > .bm-avatar-pick, .bm-row > img { order: -3; }
+  .bm-row > .bm-name { order: -2; flex: 1 1 calc(100% - 36px - 72px - 16px); min-width: 0; }
+  .bm-row > .bm-move { order: -1; flex-direction: row; gap: 4px; }
+  .bm-move-btn { min-width: 32px; width: 32px; min-height: 32px; height: 32px; font-size: 11px; }
+  .bm-row > :is(.bm-safe-btn, .bm-avatar-btn, .switch) { margin-block: 0; }
+
+  /* Reactions: the describe box takes its own full line, Generate under it. */
+  .rx-gen-row { flex-wrap: wrap; }
+  .rx-gen-row .rx-input { flex: 1 1 100%; }
+  .rx-gen-row .btn-primary { flex: 1 1 auto; }
+}
+
+/* Plugins -> tools table: cards instead of a sideways scroller. */
+@media (max-width: 600px) {
+  .tools-table-wrap { overflow-x: visible; }
+  .tools-table, .tools-table tbody { display: block; }
+  .tools-table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+  }
+  .tools-table tr.tools-row {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "icon title on rm" ". kind kind kind" "loc loc loc loc";
+    gap: 4px 10px; align-items: center; margin-bottom: 8px; padding: 10px;
+    background: var(--bg-tertiary); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+  }
+  .tools-table .tools-row td { display: block; padding: 0; border: 0; min-width: 0; }
+  .tools-row.invalid { border-color: var(--error-text); }
+  .tools-cell-icon { grid-area: icon; }
+  .tools-cell-title { grid-area: title; font-weight: 600; }
+  .tools-cell-on { grid-area: on; }
+  .tools-cell-rm { grid-area: rm; }
+  .tools-cell-kind { grid-area: kind; font-size: 12px; color: var(--text-muted); }
+  .tools-cell-loc { grid-area: loc; }
+  .tools-cell-loc:has(> .tools-loc-none:only-child) { display: none; }
+}

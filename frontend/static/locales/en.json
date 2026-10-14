@@ -1180,7 +1180,7 @@
     "loopback_hint": "Open DisPatch on the host itself to use it here.",
     "bad_url_text": "This tool has no usable address.",
     "not_found": "That tool is not available.",
-    "settings_hint": "Tools appear in the rail under the bots and open full-page. Paths and refresh commands live in {path}.",
+    "settings_path": "Paths and refresh commands live in",
     "location_hint": "Edit tools.yaml for paths and refresh.",
     "col_icon": "Icon",
     "col_title": "Title",

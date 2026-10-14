@@ -1427,7 +1427,7 @@ function toolRow(tool, idx) {
     // The switch is what gets saved; the feature itself is off on this install.
     loc.append(el('span', { class: 'muted', text: t('tools.not_installed') }));
   } else {
-    loc.append(el('span', { class: 'muted', text: '—' }));
+    loc.append(el('span', { class: 'muted tools-loc-none', text: '—' }));
   }
   // How it opens: only where a tab is a real alternative (a page at an
   // address — static, url, or a builtin the server gave an address field).
@@ -1529,7 +1529,13 @@ function renderSettings() {
   const host = settingsHost;
   if (!host) return;
   host.textContent = '';
-  host.append(el('p', { class: 'muted modal-hint', text: t('tools.settings_hint', { path: toolsPath || 'tools.yaml' }) }));
+  // The Plugins group already says what this table is for; this line is only
+  // the operator's pointer to tools.yaml, kept small and wrapping so a long
+  // server path does not take over a phone screen.
+  host.append(el('p', { class: 'muted modal-hint tools-path-note' }, [
+    `${t('tools.settings_path')} `,
+    el('code', { class: 'tools-path', dir: 'ltr', text: toolsPath || 'tools.yaml' }),
+  ]));
   host.append(el('div', { class: 'tools-settings-error hidden', id: 'tools-settings-error', role: 'alert' }));
   if (!draft) {
     host.append(el('p', { class: 'muted', text: t('common.loading') }));
