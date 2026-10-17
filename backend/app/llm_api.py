@@ -2166,7 +2166,6 @@ def connect(spec: ConnectSpec) -> config.Bot:
             name=(spec.name or "").strip() or provider.bot_name or provider.label,
             emoji=_EMOJI_BY_PROVIDER.get(provider.id, "🔌"),
             model_hint=model,
-            visible=True,
             safe=False,
             reactions=False,
             api=api,
@@ -2321,6 +2320,6 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
             name=(spec.name or "").strip() or target,
             emoji=(spec.emoji or "").strip() or "🌍",
             model_hint=entry["model"],
-            visible=True, safe=False, reactions=False,
+            safe=False, reactions=False,
             advisor=adv)
     return config.upsert_bot(bot)

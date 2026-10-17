@@ -705,7 +705,10 @@ def provision_bots() -> list[str]:
         if any(b.id.lower() == spec.id.lower() for b in bots):
             continue
         new = config.Bot(id=spec.id, name=spec.name, emoji=spec.emoji,
-                         avatar=spec.avatar, agent=spec.agent, visible=spec.visible,
+                         avatar=spec.avatar, agent=spec.agent,
+                         # An app bot that is not `visible` is "neither"
+                         # (shown nowhere; the app opens its threads).
+                         **config.fold_visible(spec.visible, False, False),
                          order=max((b.order for b in bots), default=-1) + 1)
         config._write_bots([config._bot_entry(b) for b in bots] + [config._bot_entry(new)])
         added.append(spec.id)

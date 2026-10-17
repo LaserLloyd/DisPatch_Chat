@@ -67,9 +67,9 @@ class CreateThreadIn(BaseModel):
 class BotOrderItem(BaseModel):
     id: str
     order: int = 0
-    visible: bool | None = None   # None = leave unchanged
-    safe: bool | None = None      # None = leave unchanged (Safe-Mode visibility)
-    hide_unlocked: bool | None = None  # None = leave unchanged (off the unlocked rail, 2.4.0)
+    visible: bool | None = None   # pre-2.4.2 clients: False = "neither", True = no change
+    safe: bool | None = None      # None = leave unchanged ("Show locked", Safe-Mode gate)
+    hide_unlocked: bool | None = None  # None = leave unchanged (NOT "Show unlocked", 2.4.0)
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
@@ -113,7 +113,7 @@ class BotCreateIn(BaseModel):
     safe: bool = False
     hide_unlocked: bool = False
     quick_actions: bool = True
-    visible: bool = True
+    visible: bool = True             # pre-2.4.2: False = "neither" (config.fold_visible)
     tools: bool | None = None        # direct-API bots only; default on
 
     @field_validator("name", "emoji", "model_hint")
@@ -140,7 +140,7 @@ class BotPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     emoji: str | None = Field(default=None, max_length=8)
     model_hint: str | None = Field(default=None, max_length=60)
-    visible: bool | None = None
+    visible: bool | None = None      # pre-2.4.2: False = "neither", True = no change
     safe: bool | None = None
     hide_unlocked: bool | None = None
     quick_actions: bool | None = None

@@ -542,7 +542,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.4.1", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.4.2", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -1494,14 +1494,14 @@ def _redact_thread_dict(t: dict) -> dict:
 def _safe_bot_ids() -> set[str]:
     """Bots flagged for Safe Mode (visible there without a PIN). Cheap: the
     bot registry is mtime-cached in config.load_bots()."""
-    return {b.id for b in config.load_bots() if b.safe and b.visible}
+    return {b.id for b in config.load_bots() if b.safe}
 
 
 def _safe_avatar_files() -> set[str]:
     """Avatar filenames belonging to safe bots. These specific files may be
     served to a Safe-Mode (decoy) session so the locked view can render the same
     pictures it already lists — non-safe bots' avatars stay behind the PIN."""
-    return {b.avatar for b in config.load_bots() if b.safe and b.visible}
+    return {b.avatar for b in config.load_bots() if b.safe}
 
 
 # thread_id -> bot_id, so the (synchronous) redactor can scope broadcast frames
@@ -8320,8 +8320,7 @@ async def llm_quicksetup(payload: dict = Body(...)):
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
     await manager.broadcast(
-        {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()
-                                  if b.visible]})
+        {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()]})
     bot = config.get_bot(out["bot"])
     out["bot"] = bot.to_dict() if bot else None
     return out
@@ -8382,8 +8381,7 @@ async def llm_connect(payload: dict = Body(...)):
     # redactor filters that frame to safe bots per connection, so a Safe-Mode
     # device does not learn a non-safe bot appeared.
     await manager.broadcast(
-        {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()
-                                  if b.visible]})
+        {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()]})
     if backend == "legacy-api":
         return {"bot": bot.to_admin_dict()}
     row = _bot_row(bot)
@@ -8399,7 +8397,10 @@ async def get_bots(request: Request):
     a browser tab with no full session is Safe Mode even on loopback, which is
     what this box's own idle-locked tab is.
     """
-    bots = [b for b in config.load_bots() if b.visible]
+    # Unlocked: the whole roster, "Hidden" bots included -- the client keeps a
+    # bot with Show unlocked off off the rail (per device, with an opt-in), and
+    # its threads must still open by URL. Locked: Show locked bots only.
+    bots = config.load_bots()
     if _is_safe_mode_caller(request):
         bots = [b for b in bots if b.safe]   # Safe Mode sees only safe bots
     return {"bots": [b.to_dict() for b in bots]}
@@ -8476,8 +8477,7 @@ async def create_bot(request: Request, payload: BotCreateIn):
         emoji=payload.emoji or ("🌍" if payload.backend == "direct" else "🤖"),
         model_hint=payload.model_hint
         or ("Direct API" if payload.backend == "direct" else ""),
-        visible=payload.visible, safe=payload.safe,
-        hide_unlocked=payload.hide_unlocked, **kw)
+        **config.fold_visible(payload.visible, payload.safe, payload.hide_unlocked), **kw)
     saved = await asyncio.to_thread(config.upsert_bot, bot)
     await _broadcast_roster()
     return JSONResponse(_bot_row(saved), status_code=201)
@@ -8502,6 +8502,11 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
             # (config.set_direct_tools parks it under `tools_picked`).
             changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
         persona = changes.pop("persona", None)
+        # Pre-2.4.2 `visible`: false = "neither", true = no change.
+        if "visible" in changes:
+            changes.update(config.fold_visible(
+                changes.pop("visible"), changes.get("safe", bot.safe),
+                changes.get("hide_unlocked", bot.hide_unlocked)))
         updated = dc_replace(bot, **changes)
         if persona is not None:
             # advisor.persona / api.system_prompt, the same field the AI models
@@ -8887,7 +8892,7 @@ async def upload_bot_avatar(
     if not updated:
         raise HTTPException(500, "Failed to update bot config")
     data = [b.to_dict() for b in config.load_bots()]
-    await manager.broadcast({"type": "bots", "bots": [b for b in data if b["visible"]]})
+    await manager.broadcast({"type": "bots", "bots": data})
     await _after_avatar_change(bot_id)
     return {"ok": True, "avatar_url": updated.avatar_url,
             "full_url": f"/api/bots/{bot_id}/avatar/full",
@@ -9206,7 +9211,7 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
     if not updated:
         raise HTTPException(500, "Failed to update bot config")
     data = [b.to_dict() for b in config.load_bots()]
-    await manager.broadcast({"type": "bots", "bots": [b for b in data if b["visible"]]})
+    await manager.broadcast({"type": "bots", "bots": data})
     await _after_avatar_change(bot_id)
     return {"ok": True, "restored": sid, "avatar_url": updated.avatar_url,
             "full_restored": full_src is not None}
@@ -10037,7 +10042,7 @@ def _drop_notice_bot() -> str | None:
     """Default bot whose daily thread receives drop notices: the first visible
     safe bot in sidebar order. None when no bot is flagged safe."""
     for b in config.load_bots():
-        if b.safe and b.visible:
+        if b.safe:
             return b.id
     return None
 
@@ -13174,7 +13179,7 @@ async def websocket_endpoint(ws: WebSocket):
         decoy = session is None      # no full session → Safe Mode
     await manager.connect(ws, decoy=decoy, token=(session.token if session else None))
     try:
-        bots = [b for b in config.load_bots() if b.visible]
+        bots = config.load_bots()
         if decoy:
             bots = [b for b in bots if b.safe]
         await ws.send_json({

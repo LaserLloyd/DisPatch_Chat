@@ -492,11 +492,18 @@ class Bot:
     emoji: str = ""             # Fallback glyph if avatar missing
     model_hint: str = ""        # Human label for the model badge (runtime wins)
     order: int = 0
-    visible: bool = True
-    # Shown in Safe Mode (the no-PIN, image-free view). Server-enforced: bots
-    # without this flag are invisible AND unreachable to Safe-Mode sessions.
+    # Visibility is TWO independent flags (2.4.2), the Bots tab's "Show
+    # locked" and "Show unlocked" switches. Neither on = the bot shows nowhere
+    # but still exists (Bots tab, dimmed "Hidden"; its threads open by URL on
+    # an unlocked device). The old `visible` master switch is folded in: a
+    # config.yaml or client `visible: false` reads as "neither" (see
+    # fold_visible), and `visible` survives only as the derived property below.
+    #
+    # Show locked. Shown in Safe Mode (the no-PIN, image-free view).
+    # Server-enforced: bots without this flag are invisible AND unreachable to
+    # Safe-Mode sessions.
     safe: bool = False
-    # The inverse of `safe` (2.4.0): left OFF the rail on unlocked devices —
+    # NOT Show unlocked (2.4.0): left OFF the rail on unlocked devices —
     # the sidebar, the new-chat picker, Ctrl-K — while locked (Safe-Mode)
     # devices still list it when it is `safe`. For bots that belong on the
     # family tablet but not on the owner's own screen (the kids' science
@@ -603,6 +610,13 @@ class Bot:
     # not. Empty = the add-on's default.
     voice: str = ""
     voice_rp: str = ""
+
+    @property
+    def visible(self) -> bool:
+        """Listed on SOME device: shown locked, or shown unlocked. Derived and
+        read-only (2.4.2) -- kept on the wire for older clients and the voice
+        add-on. Never a gate: Safe Mode is `safe` alone."""
+        return bool(self.safe or not self.hide_unlocked)
 
     # An advisor MAY be a Safe-Mode bot (2026-10-13; until then the
     # constructor forced `safe` off for every advisor and the Bot Manager's
@@ -738,7 +752,7 @@ def shipped_default_bots() -> list[Bot]:
     # fall-back for a config.yaml with no usable entries). Nothing here is ever
     # merged into a roster that already exists.
     Bot(id="atlas", name="Atlas", emoji="🌍", model_hint="Direct API",
-        avatar="atlas-face.png", order=0, visible=True, safe=True, reactions=False, avatar_pool=False,
+        avatar="atlas-face.png", order=0, safe=True, reactions=False, avatar_pool=False,
         advisor={"providers": [], "tools": True}),
     ]
 
@@ -774,7 +788,6 @@ def _bot_entry(b: Bot) -> dict:
         "emoji": b.emoji,
         "model_hint": b.model_hint,
         "order": b.order,
-        "visible": b.visible,
         "safe": b.safe,
         "hide_unlocked": b.hide_unlocked,
         "quick_actions": b.quick_actions,
@@ -904,10 +917,12 @@ def load_bots() -> list[Bot]:
                 emoji=str(e.get("emoji", base.emoji if base else "🤖")),
                 model_hint=str(e.get("model_hint", base.model_hint if base else "")),
                 order=int(e.get("order", i)),
-                visible=bool(e.get("visible", True)),
-                safe=bool(e.get("safe", base.safe if base else False)),
-                hide_unlocked=bool(e.get("hide_unlocked",
-                                         base.hide_unlocked if base else False)),
+                # `visible: false` (pre-2.4.2) = shown nowhere = "neither".
+                **fold_visible(
+                    e.get("visible"),
+                    bool(e.get("safe", base.safe if base else False)),
+                    bool(e.get("hide_unlocked",
+                               base.hide_unlocked if base else False))),
                 quick_actions=bool(e.get("quick_actions",
                                          base.quick_actions if base else True)),
                 color=str(e.get("color", base.color if base else "")),
@@ -953,10 +968,25 @@ def load_bots() -> list[Bot]:
     return result
 
 
-def save_bot_order(items: list[dict]) -> list[Bot]:
-    """Persist ordering/visibility/safe/hide_unlocked/reactions flags.
+def fold_visible(visible, safe: bool, hide_unlocked: bool) -> dict:
+    """Fold the pre-2.4.2 `visible` master switch into the two flags.
 
-    `items` = [{id, order?, visible?, safe?, hide_unlocked?, reactions?}].
+    `visible: false` meant "shown nowhere", which is now "neither": Show
+    locked off AND Show unlocked off. It wins over a `safe: true` beside it,
+    because such a bot was not on any locked device before and must not start
+    being on one. `visible: true` (or absent) changes nothing -- older clients
+    sent it for every bot they held, and it must never un-hide one.
+    """
+    if visible is not None and not bool(visible):
+        return {"safe": False, "hide_unlocked": True}
+    return {"safe": bool(safe), "hide_unlocked": bool(hide_unlocked)}
+
+
+def save_bot_order(items: list[dict]) -> list[Bot]:
+    """Persist ordering/safe/hide_unlocked/reactions flags.
+
+    `items` = [{id, order?, safe?, hide_unlocked?, reactions?, visible?}] --
+    `visible: false` from an older client folds to "neither" (fold_visible).
 
     Preserves all other bot fields from the current config so the Bot Manager
     only needs to send the fields it manages.
@@ -973,10 +1003,11 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
         payload_bots.append(_bot_entry(replace(
             b,
             order=idx,
-            visible=bool(it["visible"]) if it.get("visible") is not None else b.visible,
-            safe=bool(it["safe"]) if it.get("safe") is not None else b.safe,
-            hide_unlocked=(bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
-                           else b.hide_unlocked),
+            **fold_visible(
+                it.get("visible"),
+                bool(it["safe"]) if it.get("safe") is not None else b.safe,
+                (bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
+                 else b.hide_unlocked)),
             reactions=(bool(it["reactions"]) if it.get("reactions") is not None
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None

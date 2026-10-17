@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=105" />
+  <link rel="stylesheet" href="/static/app.css?v=106" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -727,9 +727,8 @@
 
       <!-- ---- Bots ---- -->
       <section class="settings-pane" id="spane-bots" role="tabpanel" aria-labelledby="stab-bots" tabindex="0">
-        <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); use the switch to show or hide a bot from the sidebar.
-          <strong>Safe</strong> — this character (and its avatar) is visible in Safe Mode, no PIN needed.
-          Order, visibility and Safe changes apply when you press <strong>Save</strong>.</p>
+        <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); <strong>Show locked</strong> puts a bot on locked (Safe Mode) devices, <strong>Show unlocked</strong> on unlocked ones; with neither it is hidden everywhere.
+          Order and visibility changes apply when you press <strong>Save</strong>.</p>
         <p class="muted modal-hint bm-instant-hint" data-i18n="bots_edit.instant_hint">Renaming, adding and removing a bot, and the Lookups switch, apply at once.</p>
         <div class="bm-list" id="bm-list"></div>
         <!-- Avatar pools: status + prompt banks for pool-enabled bots
@@ -1270,6 +1269,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=142"></script>
+  <script type="module" src="/static/js/main.js?v=143"></script>
 </body>
 </html>

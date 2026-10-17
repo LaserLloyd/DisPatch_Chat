@@ -596,7 +596,7 @@ def test_bot_provisioning_appends_once_and_never_edits(env, caplog):
     _write_app(repo, "kept-test", {"bot": {"id": "keptbot", "name": "From Manifest"}})
     config._write_bots([config._bot_entry(b) for b in config.load_bots()]
                        + [config._bot_entry(config.Bot(id="keptbot", name="Operator's",
-                                                       emoji="🦊", visible=True))])
+                                                       emoji="🦊"))])
     load()
     added = apps_loader.provision_bots()
     # (The repo's own Job Board is mounted too and brings `jobboard`.)

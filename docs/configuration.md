@@ -156,14 +156,27 @@ bots:
     emoji: "✨"
     avatar: assistant.png
     order: 0
-    visible: true
-    safe: false          # true = also reachable from Safe Mode (no PIN)
+    safe: false          # "Show locked": true = also on Safe-Mode (no PIN) devices
+    hide_unlocked: false # "Show unlocked" off: true = kept off unlocked devices' rail
 ```
+
+Where a bot shows is two independent switches (Settings → Bots, 2.4.2):
+**Show locked** (`safe`) and **Show unlocked** (`hide_unlocked: false`). With
+neither on, the bot is shown on no device — it stays on the roster, the Bots tab
+lists it dimmed as *Hidden*, and its chats still open by link on an unlocked
+device. An unlocked device can bring back every bot with Show unlocked off via
+Settings → Device → *Show hidden bots on this device*.
 
 `safe` is the access flag, and it is server-enforced: a bot without it is
 invisible *and* unreachable to a Safe-Mode session, not merely hidden. Turning
 it on is the deliberate decision — it means anyone who can reach the port,
-with no credential, can spend agent turns on that bot.
+with no credential, can spend agent turns on that bot. `hide_unlocked` is only
+a display preference for unlocked devices; it never opens or closes Safe Mode.
+
+The pre-2.4.2 `visible` key is still read: `visible: false` means "shown
+nowhere" and loads as `safe: false` + `hide_unlocked: true` (it wins over a
+`safe: true` beside it). The next save drops the key. `visible` remains on the
+API's bot records as a derived, read-only "shown on some device".
 
 Other per-bot fields: `color` (pins the letter-block avatar colour),
 `reactions` (may this bot fire reaction images — off for every shipped bot),
@@ -611,7 +624,7 @@ edits a row that already exists, so an operator's changes stand:
   - id: jobboard
     name: Job Board
     avatar: jobboard-face.png
-    visible: false           # the Tools tile is the way in, not a rail bot
+    hide_unlocked: true      # shown nowhere: the Tools tile is the way in, not a rail bot
     safe: false
     agent: scout             # the OpenClaw agent the board's turns run on
 ```

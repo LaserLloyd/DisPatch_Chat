@@ -7,6 +7,21 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.4.2] — 2026-10-17
+
+### Changed
+
+- **Settings → Bots: Show locked / Show unlocked.** A bot's visibility is now two
+  independent switches. *Show locked* is the Safe-Mode flag (`safe`, unchanged in meaning
+  and still server-enforced); *Show unlocked* is the inverse of 2.4.0's `hide_unlocked`.
+  With neither on, the bot shows on no device: it stays on the roster, the Bots tab lists
+  it dimmed and tagged *Hidden*, and its chats still open by link on an unlocked device
+  (never on a locked one). The separate "show in sidebar" switch is gone: the old
+  `visible: false` loads as "neither" (and wins over `safe: true`, so nothing new reaches a
+  locked device); `visible` stays on bot records as a derived, read-only field, and an
+  API `visible: false` still means "neither". *Show hidden bots on this device* now also
+  brings back the bots shown nowhere, on that device only. Strings in all eight languages.
+
 ## [2.4.0] — 2026-10-17
 
 ### Added

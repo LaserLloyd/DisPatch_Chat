@@ -1572,6 +1572,15 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .bm-safe-btn:hover { border-color: var(--accent); }
 .bm-safe-btn.on { background: var(--accent-wash); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
+/* 2.4.2: a bot with neither "Show locked" nor "Show unlocked" is on no
+   device. The row stays editable; only its identity dims, plus a Hidden tag. */
+.bm-row--hidden .bm-avatar-pick, .bm-row--hidden .bm-name { opacity: .45; }
+.bm-hidden-tag {
+  flex: none; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px dashed var(--text-muted); color: var(--text-muted);
+}
+.bm-hidden-tag[hidden] { display: none; }
 
 /* ===================== Modern message surface ===================== */
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT

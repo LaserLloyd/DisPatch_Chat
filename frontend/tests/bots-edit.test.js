@@ -289,7 +289,7 @@ test('main.js builds every row with the new controls and keeps the old flags, av
   assert.match(MAIN, /const ctl = state\.decoy \? null : rowControls\(bot, botEditCtx\(\)\);/);
   assert.match(MAIN, /if \(!state\.decoy\) list\.append\(addBotRow\(botEditCtx\(\)\)\);/);
   // The existing behaviour is still there.
-  for (const part of ['safeBtn,', 'rxBtn,', 'apBtn,', 'moveBtn(-1), moveBtn(1)', 'pickAvatarFile(bot.id)', 'wireDrag(row);', 'avatar_pool: !!b.avatar_pool']) {
+  for (const part of ['lockedBtn,', 'unlockedBtn,', 'rxBtn,', 'apBtn,', 'moveBtn(-1), moveBtn(1)', 'pickAvatarFile(bot.id)', 'wireDrag(row);', 'avatar_pool: !!b.avatar_pool']) {
     assert.ok(MAIN.includes(part), part);
   }
   // A removed bot drops out of both the roster and the sidebar list.

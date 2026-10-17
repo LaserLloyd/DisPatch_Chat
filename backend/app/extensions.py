@@ -1546,10 +1546,10 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
 
 def locked_may_see(bot) -> bool:
     """May a LOCKED device use this bot's threads? The same rule its chat list
-    and the main /ws follow (main._safe_bot_ids): flagged `safe` AND listed.
-    A hidden bot's thread is not one a locked device can see, so it gets no
-    extension socket on it either."""
-    return bool(bot is not None and bot.safe and bot.visible)
+    and the main /ws follow (main._safe_bot_ids): flagged `safe` (the Bots
+    tab's "Show locked"). Any other bot's thread is not one a locked device
+    can see, so it gets no extension socket on it either."""
+    return bool(bot is not None and bot.safe)
 
 
 #: thread id -> [open locked extension sockets, monotonic time the last

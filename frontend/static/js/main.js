@@ -44,10 +44,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=14';
+} from './ext-sdk.js?v=15';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=13';
-import { mountPluginsSettings } from './plugins.js?v=13';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=14';
+import { mountPluginsSettings } from './plugins.js?v=14';
 import { rowControls, addBotRow } from './bots-edit.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -72,7 +72,7 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=19';
+import { aboutRow } from './about.js?v=20';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -347,6 +347,11 @@ function setI18nHtml(node, key, vars) {
 // rail, the companions list and Ctrl-K draw is this, which also drops the bots
 // flagged "hide on unlocked devices" unless this device opted back in
 // (menubots.js hiddenHere — never in Safe Mode).
+/** Shown on no device (2.4.2): neither "Show locked" (`safe`) nor "Show
+ *  unlocked" (`!hide_unlocked`). Still on the roster and in the Bot Manager. */
+function shownNowhere(bot) {
+  return !!bot && !bot.safe && !!bot.hide_unlocked;
+}
 function visibleBots() {
   return state.bots.filter((b) => !hiddenHere(b, state.decoy));
 }
@@ -792,7 +797,7 @@ function leaveToolPanes({ navigateTo = 'bots' } = {}) {
 let sidebarDragIdx = null;
 
 async function persistSidebarOrder() {
-  const payload = state.bots.map((b, i) => ({ id: b.id, order: i, visible: b.visible !== false }));
+  const payload = state.bots.map((b, i) => ({ id: b.id, order: i }));
   try { await api.saveOrder(payload); }
   catch (e) { toast(e.message, true); }
 }
@@ -4549,31 +4554,46 @@ function renderBotManager() {
         avatarImg.replaceWith(fb);
       });
     }
-    // Per-bot Safe Mode toggle — only reachable here (the Bot Manager opens
-    // only when unlocked), so what Safe Mode can see is decided in full mode.
-    const safeBtn = el('button', {
-      class: 'bm-safe-btn' + (bot.safe ? ' on' : ''),
-      title: t('settings.safe_title'),
+    // Visibility (2.4.2): two independent switches, decided only here (the
+    // Bot Manager opens only when unlocked). "Show locked" is the `safe` flag
+    // — the server-enforced Safe-Mode gate (a locked device lists and reaches
+    // only these bots; their turns there run locked). "Show unlocked" is the
+    // inverse of `hide_unlocked` — a display choice for unlocked devices.
+    // Neither on = shown nowhere: the row stays here, dimmed and labelled
+    // Hidden, and its chats still open by URL on an unlocked device.
+    const hiddenTag = el('span', { class: 'bm-hidden-tag', text: t('settings.hidden_badge'),
+      title: t('settings.hidden_title') });
+    const paintHidden = () => {
+      const none = shownNowhere(bmBots[idx]);
+      row.classList.toggle('bm-row--hidden', none);
+      hiddenTag.hidden = !none;
+    };
+    const lockedBtn = el('button', {
+      class: 'bm-safe-btn bm-vis-locked' + (bot.safe ? ' on' : ''),
+      title: t('settings.show_locked_title'),
+      'aria-pressed': String(!!bot.safe),
       onclick: (e) => {
         e.stopPropagation();
         bmBots[idx].safe = !bmBots[idx].safe;
-        safeBtn.classList.toggle('on', bmBots[idx].safe);
+        lockedBtn.classList.toggle('on', bmBots[idx].safe);
+        lockedBtn.setAttribute('aria-pressed', String(bmBots[idx].safe));
+        paintHidden();
         bmDirty = true;
       },
-    }, iconLabel(RAIL_ICONS.shield, t('settings.safe_badge')));
-    // Per-bot "hide on unlocked devices" (2.4.0): the inverse of the shield —
-    // off this kind of device's rail, still on a locked one when it is safe.
-    // A roster fact, so it waits for Save like its neighbours.
-    const hideBtn = el('button', {
-      class: 'bm-safe-btn' + (bot.hide_unlocked ? ' on' : ''),
-      title: t('settings.hide_unlocked_title'),
+    }, iconLabel(RAIL_ICONS.lock, t('settings.show_locked_badge')));
+    const unlockedBtn = el('button', {
+      class: 'bm-safe-btn bm-vis-unlocked' + (!bot.hide_unlocked ? ' on' : ''),
+      title: t('settings.show_unlocked_title'),
+      'aria-pressed': String(!bot.hide_unlocked),
       onclick: (e) => {
         e.stopPropagation();
         bmBots[idx].hide_unlocked = !bmBots[idx].hide_unlocked;
-        hideBtn.classList.toggle('on', bmBots[idx].hide_unlocked);
+        unlockedBtn.classList.toggle('on', !bmBots[idx].hide_unlocked);
+        unlockedBtn.setAttribute('aria-pressed', String(!bmBots[idx].hide_unlocked));
+        paintHidden();
         bmDirty = true;
       },
-    }, iconLabel(RAIL_ICONS.privacy, t('settings.hide_unlocked_badge')));
+    }, iconLabel(RAIL_ICONS.unlock, t('settings.show_unlocked_badge')));
     // ▲/▼ move buttons: HTML5 DnD never fires on touch, so these are the
     // reorder affordance that works everywhere (drag still works on desktop).
     const moveBtn = (dir) => {
@@ -4666,10 +4686,11 @@ function renderBotManager() {
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
       avatarImg,
       el('span', { class: 'bm-name', text: bot.name }),
+      hiddenTag,
       ctl && ctl.badge,
       ctl && ctl.notConnected,
-      safeBtn,
-      hideBtn,
+      lockedBtn,
+      unlockedBtn,
       rxBtn,
       apBtn,
       picBtn,
@@ -4688,14 +4709,6 @@ function renderBotManager() {
         'aria-label': t('settings.change_photo_short'),
         onclick: (e) => { e.stopPropagation(); pickAvatarFile(bot.id); },
       }, [railIcon(RAIL_ICONS.camera)]),
-      (() => {
-        const lbl = el('label', { class: 'switch', title: t('settings.show_in_sidebar') });
-        const cb = el('input', { type: 'checkbox', 'aria-label': t('settings.show_in_sidebar') });
-        cb.checked = bot.visible;
-        cb.addEventListener('change', () => { bmBots[idx].visible = cb.checked; bmDirty = true; });
-        lbl.append(cb, el('span', { class: 'slider' }));
-        return lbl;
-      })(),
       ctl && ctl.persona,
       ctl && ctl.edit,
       ctl && ctl.remove,
@@ -4711,6 +4724,7 @@ function renderBotManager() {
         p.addEventListener('focusout', () => { row.draggable = true; });
       }
     }
+    paintHidden();
     wireDrag(row);
     list.append(row);
   });
@@ -4744,14 +4758,14 @@ function botEditCtx() {
       renderSidebar();
       const gone = state.selectedBotId === id || (state.activeThread && state.activeThread.bot_id === id);
       if (gone) {
-        if (state.bots.length) await selectBot(state.bots[0].id);
+        if (visibleBots().length) await selectBot(visibleBots()[0].id);
         else { state.threads = []; renderThreads(); clearChatView(); }
       }
     },
     onAdded: (row) => {
       if (!row || bmBots.some((x) => x.id === row.id)) return;
       bmBots.push(row);
-      if (row.visible !== false && !state.bots.some((x) => x.id === row.id)) state.bots.push(row);
+      if (!state.bots.some((x) => x.id === row.id)) state.bots.push(row);
       renderBotManager();
       renderSidebar();
     },
@@ -4859,7 +4873,7 @@ function buildAvatarPromptEditor(bid) {
 async function saveBotManager() {
   const payload = bmBots.map((b, i) => {
     const item = {
-      id: b.id, order: i, visible: b.visible, safe: !!b.safe,
+      id: b.id, order: i, safe: !!b.safe,
       hide_unlocked: !!b.hide_unlocked, reactions: !!b.reactions,
       avatar_pool: !!b.avatar_pool, image_jobs: !!b.image_jobs,
     };
@@ -4872,7 +4886,9 @@ async function saveBotManager() {
   try {
     const r = await api.saveOrder(payload);
     for (const b of bmBots) delete b._extDirty;
-    state.bots = r.bots.filter((b) => b.visible);
+    // The whole roster: a bot with Show unlocked off (or shown nowhere) stays
+    // in state.bots so its chats open by URL; visibleBots() keeps it off the rail.
+    state.bots = r.bots.filter((b) => !state.decoy || b.safe);
     // "Hidden" here = no longer on this device's rail, which now includes a
     // bot just flagged hide-on-unlocked (unless the device opted back in).
     const selectedHidden = !visibleBots().some((b) => b.id === state.selectedBotId);
@@ -6683,7 +6699,7 @@ function handleWs(data) {
         // always present on the wire (Bot.to_dict), so this cannot empty the
         // list for a legitimate frame.
         const prevBots = state.bots;
-        state.bots = data.bots.filter((b) => b.visible && (!state.decoy || b.safe));
+        state.bots = data.bots.filter((b) => !state.decoy || b.safe);
         const vb = visibleBots();
         // Only repair the selection if one existed and its bot vanished —
         // never auto-select on a fresh landing (the bots list IS the landing).
