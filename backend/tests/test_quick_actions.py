@@ -441,3 +441,41 @@ def test_the_expanded_prompt_reaches_the_gateway_boundary(real_turn_client):
     assert c.sent[-1] == quick_actions.expand(quick_actions.find("proof"), "helo wrld")
     msgs = c.get(f"/api/threads/{tid}/messages").json()["messages"]
     assert next(m for m in msgs if m["role"] == "user")["content"] == "helo wrld"
+
+
+# ---- 2.4.1: a bot can opt out (`quick_actions: false`, the kids' bots) ----
+
+def _opt_out(bot_id="main"):
+    from dataclasses import replace
+    config.update_bot(bot_id, lambda b: replace(b, quick_actions=False))
+    config._invalidate_bots_cache()
+
+
+def test_quick_actions_flag_defaults_on_and_rides_the_record():
+    b = config.Bot(id="x", name="X")
+    assert b.quick_actions is True and b.to_dict()["quick_actions"] is True
+    assert config.Bot(id="y", name="Y", quick_actions=False).to_dict()["quick_actions"] is False
+
+
+def test_opted_out_bot_ignores_a_ws_action(app_client):
+    _opt_out("main")
+    assert config.get_bot("main").quick_actions is False
+    tid = app_client.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    with app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "send", "thread_id": tid, "text": "helo wrld",
+                      "client_msg_id": "cm-qa-off", "action": "proof"})
+        _wait_for_turn(ws, app_client)
+    _, _, text, opts = app_client.agent_turns[-1]
+    assert text == "helo wrld" and (opts is None or not opts.action)
+    msgs = app_client.get(f"/api/threads/{tid}/messages").json()["messages"]
+    assert "action" not in (next(m for m in msgs if m["role"] == "user").get("metadata") or {})
+
+
+def test_opted_out_bot_ignores_a_rest_action(app_client):
+    _opt_out("main")
+    tid = app_client.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    r = app_client.post(f"/api/threads/{tid}/messages",
+                        json={"role": "user", "content": "x", "action": "todo"})
+    assert r.status_code == 200
+    assert "action" not in (r.json().get("metadata") or {})

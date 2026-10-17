@@ -276,3 +276,27 @@ test('the quick locale namespace sits right after welcome and exists in all eigh
     }
   }
 });
+
+test('setAllowed(false) removes the chips, the button and a picked pill; true restores them', dom, async () => {
+  setup();
+  const m = await load();
+  m.setActions(ACTIONS);
+  m.setComposerAction(ACTIONS[0]);
+  assert.ok(m.welcomeChips().length > 0);
+  m.setAllowed(false);
+  assert.equal(m.currentAction(), null);
+  assert.equal($('quick-btn').hidden, true);
+  assert.deepEqual(m.welcomeChips(), []);
+  m.openQuickMenu();
+  assert.equal(m.quickMenuOpen(), false);
+  m.setActions(ACTIONS);                       // a refetch must not bring the button back
+  assert.equal($('quick-btn').hidden, true);
+  m.setAllowed(true);
+  assert.equal($('quick-btn').hidden, false);
+  assert.ok(m.welcomeChips().length > 0);
+});
+
+test('main.js gates the chips and the suggestions on the bot flag', () => {
+  assert.match(MAIN, /quick_actions === false/);
+  assert.match(MAIN, /setQuickAllowed/);
+});

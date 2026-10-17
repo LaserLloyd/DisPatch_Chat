@@ -112,6 +112,7 @@ class BotCreateIn(BaseModel):
     model_hint: str = Field(default="", max_length=60)
     safe: bool = False
     hide_unlocked: bool = False
+    quick_actions: bool = True
     visible: bool = True
     tools: bool | None = None        # direct-API bots only; default on
 
@@ -142,6 +143,7 @@ class BotPatchIn(BaseModel):
     visible: bool | None = None
     safe: bool | None = None
     hide_unlocked: bool | None = None
+    quick_actions: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None
     image_jobs: bool | None = None

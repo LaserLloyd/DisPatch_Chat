@@ -542,7 +542,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.4.0", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.4.1", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -11043,6 +11043,12 @@ async def _prune_avatar_snapshots() -> None:
         log.warning("avatar snapshot prune failed", exc_info=True)
 
 
+def _bot_allows_quick_actions(bot_id: str | None) -> bool:
+    """False when the bot opted out with `quick_actions: false` (the kids' bots)."""
+    bot = config.get_bot(bot_id) if bot_id else None
+    return bot is None or bot.quick_actions
+
+
 @app.get("/api/quick-actions")
 async def get_quick_actions():
     """The quick actions in use (defaults + `<data>/quick-actions.yaml`), in
@@ -11090,6 +11096,9 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     # tag the bubble shows; a later retry re-runs with it). A REST post never
     # starts a turn, so nothing is expanded here.
     action_raw = payload.get("action")
+    if action_raw not in (None, "") and not _bot_allows_quick_actions(
+            getattr(await db.get_thread(thread_id), "bot_id", None)):
+        action_raw = None      # this bot opted out: the action is ignored
     if action_raw not in (None, ""):
         act = quick_actions.find(action_raw)
         if act is None:
@@ -12460,6 +12469,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # Allowed in Safe Mode too - an action is only text around the message.
     action_def = None
     action_raw = data.get("action")
+    if action_raw not in (None, "") and not _bot_allows_quick_actions(thread.bot_id):
+        action_raw = None      # this bot opted out (`quick_actions: false`): sent as plain text
     if action_raw not in (None, ""):
         action_def = quick_actions.find(action_raw)
         if action_def is None:

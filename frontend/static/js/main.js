@@ -33,7 +33,8 @@ import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
-} from './quick-actions.js?v=1';
+  setAllowed as setQuickAllowed,
+} from './quick-actions.js?v=2';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
@@ -43,10 +44,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=13';
+} from './ext-sdk.js?v=14';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=12';
-import { mountPluginsSettings } from './plugins.js?v=12';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=13';
+import { mountPluginsSettings } from './plugins.js?v=13';
 import { rowControls, addBotRow } from './bots-edit.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -71,7 +72,7 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=18';
+import { aboutRow } from './about.js?v=19';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -2165,8 +2166,17 @@ function renderSkeleton() {
   box.append(wrap);
 }
 
+// A bot with `quick_actions: false` (the kids' animals) gets no chips, pill or composer
+// button, and none of the generic suggestion chips either.
+function syncQuickAllowed() {
+  const b = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
+  setQuickAllowed(!(b && b.quick_actions === false));
+  return !(b && b.quick_actions === false);
+}
+
 function renderMessages(stick = true) {
   closeMsgMenu();
+  const quickOk = syncQuickAllowed();
   const box = dom['messages'];
   box.innerHTML = '';   // takes any cached-tail rows with it
   cachedPainted.delete(state.activeThreadId);
@@ -2185,7 +2195,7 @@ function renderMessages(stick = true) {
     const quick = (!state.decoy && !isMobile()) ? quickWelcomeChips() : [];
     if (quick.length) {
       welcome.append(el('div', { class: 'welcome-quick' }, quick));
-    } else if (!state.decoy) {
+    } else if (!state.decoy && quickOk) {
       // welcome.chip_search keeps a TRAILING SPACE on purpose: the chip prefills
       // the composer and leaves the caret after it, ready for the query.
       const chips = [t('welcome.chip_help'), t('welcome.chip_summary'), t('welcome.chip_search')];
@@ -2555,6 +2565,7 @@ function reflectComposerState() {
     'placeholder',
     (!noThread && quickPlaceholder()) || t(noThread ? 'composer.placeholder_no_thread' : 'composer.placeholder'),
   );
+  syncQuickAllowed();
   dom['quick-btn'].disabled = noThread;
   dom['waiting'].hidden = !thinking && !offline;
   dom['waiting'].textContent = t(offline ? 'composer.offline' : 'composer.waiting');

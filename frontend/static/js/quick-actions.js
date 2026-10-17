@@ -27,6 +27,7 @@ const MAX_TAG = 60;
 let actions = [];        // [{id, label, hint, tools}] as served
 let current = null;      // the action picked in the composer, or null
 let wired = false;
+let allowed = true;      // false while the open chat's bot opted out (`quick_actions: false`)
 let announceFn = () => {};
 
 const $ = (id) => document.getElementById(id);
@@ -49,6 +50,19 @@ export function normalizeActions(list) {
   return out;
 }
 
+/** Let the open chat's bot opt out: no chips, no composer button, no pill. Idempotent. */
+export function setAllowed(on) {
+  on = on !== false;
+  if (on === allowed) return;
+  allowed = on;
+  if (!allowed) {
+    if (current) setComposerAction(null, { focus: false });
+    closeQuickMenu({ focusButton: false });
+  }
+  const btn = $('quick-btn');
+  if (btn) btn.hidden = !allowed || !actions.length;
+}
+
 export function getActions() { return actions.slice(); }
 export function currentAction() { return current; }
 
@@ -67,8 +81,8 @@ export function setActions(list) {
     else if (now.label !== current.label || now.hint !== current.hint) setComposerAction(now, { focus: false });
   }
   const btn = $('quick-btn');
-  if (btn) btn.hidden = !actions.length;
-  if (!actions.length) closeQuickMenu({ focusButton: false });
+  if (btn) btn.hidden = !allowed || !actions.length;
+  if (!actions.length || !allowed) closeQuickMenu({ focusButton: false });
 }
 
 /** Fetch the list with `fetchJson` (resolving {actions}) and apply it. Never throws. */
@@ -137,7 +151,7 @@ export function chooseAction(action) {
 
 /** The empty-thread block: a short line, then a grid of chips. [] when there are none. */
 export function welcomeChips() {
-  if (!actions.length) return [];
+  if (!allowed || !actions.length) return [];
   const grid = el('div', { class: 'qa-grid', role: 'group', 'aria-label': t('quick.title') });
   for (const a of actions) {
     const b = el('button', { class: 'qa-chip', type: 'button', title: a.hint || a.label, dataset: { action: a.id } }, [
@@ -189,7 +203,7 @@ function buildMenu() {
 
 export function openQuickMenu() {
   const m = menu();
-  if (!m || !actions.length) return;
+  if (!m || !actions.length || !allowed) return;
   buildMenu();
   m.hidden = false;
   $('quick-btn')?.setAttribute('aria-expanded', 'true');
@@ -255,5 +269,5 @@ export function repaintQuickActions() {
 
 /** Test hook: forget module state. */
 export function _reset() {
-  actions = []; current = null; wired = false; announceFn = () => {};
+  actions = []; current = null; wired = false; allowed = true; announceFn = () => {};
 }

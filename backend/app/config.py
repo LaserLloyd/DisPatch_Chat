@@ -506,6 +506,10 @@ class Bot:
     # Device, localStorage). Security is untouched — who can reach what is
     # still decided by `safe` and the session tier.
     hide_unlocked: bool = False
+    # Quick actions ("Proof this", "Fact-check", ...): False takes the chips, the
+    # composer pill and the action itself away from this bot (the kids' science
+    # animals). The server also ignores an `action` sent to it.
+    quick_actions: bool = True
     # Optional explicit avatar colour (any CSS colour, e.g. "#a01818"). Drives the
     # letter-block avatar gradient instead of the id-derived hue, so a character
     # whose auto-colour clashes with another can be pinned to a distinct shade.
@@ -657,6 +661,7 @@ class Bot:
             "visible": self.visible,
             "safe": self.safe,
             "hide_unlocked": self.hide_unlocked,
+            "quick_actions": self.quick_actions,
             "color": self.color,
             "reactions": self.reactions,
             "avatar_pool": self.avatar_pool,
@@ -772,6 +777,7 @@ def _bot_entry(b: Bot) -> dict:
         "visible": b.visible,
         "safe": b.safe,
         "hide_unlocked": b.hide_unlocked,
+        "quick_actions": b.quick_actions,
         "color": b.color,
         "reactions": b.reactions,
         "reaction_autopilot": b.reaction_autopilot,
@@ -902,6 +908,8 @@ def load_bots() -> list[Bot]:
                 safe=bool(e.get("safe", base.safe if base else False)),
                 hide_unlocked=bool(e.get("hide_unlocked",
                                          base.hide_unlocked if base else False)),
+                quick_actions=bool(e.get("quick_actions",
+                                         base.quick_actions if base else True)),
                 color=str(e.get("color", base.color if base else "")),
                 reactions=bool(e.get("reactions", base.reactions if base else False)),
                 reaction_autopilot=bool(e.get("reaction_autopilot",
