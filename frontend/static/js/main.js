@@ -28,14 +28,14 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=12';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=9';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=10';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
 } from './quick-actions.js?v=1';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -43,10 +43,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=13';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=12';
+} from './ext-sdk.js?v=13';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=11';
-import { mountPluginsSettings } from './plugins.js?v=11';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=12';
+import { mountPluginsSettings } from './plugins.js?v=12';
 import { rowControls, addBotRow } from './bots-edit.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -55,7 +55,7 @@ import { rowControls, addBotRow } from './bots-edit.js?v=3';
 import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=2';
-import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots } from './menubots.js?v=2';
+import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots, hiddenHere, showHiddenBots, setShowHiddenBots } from './menubots.js?v=3';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
@@ -71,7 +71,7 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=17';
+import { aboutRow } from './about.js?v=18';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -341,9 +341,13 @@ function setI18nHtml(node, key, vars) {
 
 // ===================== Avatars / safe-view helpers =====================
 // state.bots is already mode-correct: the server filters the list down to
-// safe-flagged bots for Safe-Mode sessions.
+// safe-flagged bots for Safe-Mode sessions. It stays the WHOLE roster this tier
+// may reach (a hidden bot's thread opened by URL still finds its bot); what the
+// rail, the companions list and Ctrl-K draw is this, which also drops the bots
+// flagged "hide on unlocked devices" unless this device opted back in
+// (menubots.js hiddenHere — never in Safe Mode).
 function visibleBots() {
-  return state.bots;
+  return state.bots.filter((b) => !hiddenHere(b, state.decoy));
 }
 
 function botLetter(bot) {
@@ -872,9 +876,15 @@ function renderSidebarInner() {
         e.preventDefault();
         if (sidebarDragIdx === null || sidebarDragIdx === idx) return;
         const r = btn.getBoundingClientRect();
-        let to = idx + (e.clientY > r.top + r.height / 2 ? 1 : 0);
-        const [moved] = state.bots.splice(sidebarDragIdx, 1);
-        if (sidebarDragIdx < to) to -= 1;
+        // idx / sidebarDragIdx index the DRAWN rail, which leaves out parked
+        // and hidden bots — so move by id within state.bots (the whole roster),
+        // or a drop next to a hidden bot lands somewhere else entirely.
+        const below = e.clientY > r.top + r.height / 2;
+        const from = state.bots.findIndex((b) => b.id === bots[sidebarDragIdx]?.id);
+        if (from < 0) { sidebarDragIdx = null; return; }
+        const [moved] = state.bots.splice(from, 1);
+        let to = state.bots.findIndex((b) => b.id === bot.id);
+        if (to < 0) to = state.bots.length; else if (below) to += 1;
         state.bots.splice(Math.max(0, Math.min(to, state.bots.length)), 0, moved);
         sidebarDragIdx = null;
         renderSidebar();
@@ -3974,6 +3984,30 @@ function mountLanguagePicker() {
     if (avPin) avRow.append(avPin);
   }
 
+  // "Show hidden bots on this device" (2.4.0): unlocked only, and only once
+  // some bot is flagged hide-on-unlocked — a switch for nothing is noise.
+  // Device-local and instant, like the rest of this pane (menubots.js).
+  document.getElementById('show-hidden-row')?.remove();
+  const displayBody = body('dev-body-display');
+  if (!state.decoy && displayBody && state.bots.some((b) => b.hide_unlocked)) {
+    const cb = el('input', { type: 'checkbox', id: 'show-hidden-bots' });
+    cb.checked = showHiddenBots();
+    cb.addEventListener('change', () => {
+      cb.checked = setShowHiddenBots(cb.checked);
+      renderSidebar();
+      // The open chat may belong to a bot that just left the rail: keep it
+      // open (it is still reachable), only the rail changes.
+    });
+    const names = state.bots.filter((b) => b.hide_unlocked).map((b) => b.name).join(', ');
+    displayBody.append(el('label', { class: 'bm-avatar-style dev-row', id: 'show-hidden-row' }, [
+      cb,
+      el('span', { class: 'dev-row-text' }, [
+        el('strong', { text: t('settings.show_hidden') }),
+        el('span', { class: 'dev-row-hint', text: t('settings.show_hidden_desc', { names }) }),
+      ]),
+    ]));
+  }
+
   // Menu bar shortcuts: the 🎨 rail button (a row whose ONLY control is its
   // pin — it ships pinned, pins.js `pinnedByDefault`, so the pin IS the
   // setting) and the custom link buttons. Both unlocked only, matching the
@@ -4516,6 +4550,19 @@ function renderBotManager() {
         bmDirty = true;
       },
     }, iconLabel(RAIL_ICONS.shield, t('settings.safe_badge')));
+    // Per-bot "hide on unlocked devices" (2.4.0): the inverse of the shield —
+    // off this kind of device's rail, still on a locked one when it is safe.
+    // A roster fact, so it waits for Save like its neighbours.
+    const hideBtn = el('button', {
+      class: 'bm-safe-btn' + (bot.hide_unlocked ? ' on' : ''),
+      title: t('settings.hide_unlocked_title'),
+      onclick: (e) => {
+        e.stopPropagation();
+        bmBots[idx].hide_unlocked = !bmBots[idx].hide_unlocked;
+        hideBtn.classList.toggle('on', bmBots[idx].hide_unlocked);
+        bmDirty = true;
+      },
+    }, iconLabel(RAIL_ICONS.privacy, t('settings.hide_unlocked_badge')));
     // ▲/▼ move buttons: HTML5 DnD never fires on touch, so these are the
     // reorder affordance that works everywhere (drag still works on desktop).
     const moveBtn = (dir) => {
@@ -4611,6 +4658,7 @@ function renderBotManager() {
       ctl && ctl.badge,
       ctl && ctl.notConnected,
       safeBtn,
+      hideBtn,
       rxBtn,
       apBtn,
       picBtn,
@@ -4800,7 +4848,8 @@ function buildAvatarPromptEditor(bid) {
 async function saveBotManager() {
   const payload = bmBots.map((b, i) => {
     const item = {
-      id: b.id, order: i, visible: b.visible, safe: !!b.safe, reactions: !!b.reactions,
+      id: b.id, order: i, visible: b.visible, safe: !!b.safe,
+      hide_unlocked: !!b.hide_unlocked, reactions: !!b.reactions,
       avatar_pool: !!b.avatar_pool, image_jobs: !!b.image_jobs,
     };
     // Only an extension field the user actually changed: an absent key leaves
@@ -4813,13 +4862,15 @@ async function saveBotManager() {
     const r = await api.saveOrder(payload);
     for (const b of bmBots) delete b._extDirty;
     state.bots = r.bots.filter((b) => b.visible);
-    const selectedHidden = !botById(state.selectedBotId);
+    // "Hidden" here = no longer on this device's rail, which now includes a
+    // bot just flagged hide-on-unlocked (unless the device opted back in).
+    const selectedHidden = !visibleBots().some((b) => b.id === state.selectedBotId);
     const activeBotHidden = state.activeThread && !botById(state.activeThread.bot_id);
-    if (selectedHidden && state.bots.length) state.selectedBotId = state.bots[0].id;
+    if (selectedHidden && visibleBots().length) state.selectedBotId = visibleBots()[0].id;
     renderSidebar();
     updateThreadListHeader();
     if (selectedHidden || activeBotHidden) {
-      if (state.bots.length) await selectBot(state.selectedBotId);
+      if (visibleBots().length) await selectBot(state.selectedBotId);
       else { state.threads = []; renderThreads(); clearChatView(); }
     }
     // Hide only on SUCCESS — a failed save must keep the modal (and the
@@ -6628,8 +6679,10 @@ function handleWs(data) {
         // A TOOL is never in the roster, so it never "vanished": without the
         // isToolId guard every bots frame (the hello on connect, an avatar
         // change) threw an open tool — builtin or tools.yaml — back to a bot.
+        // Against state.bots, not the drawn rail: a bot hidden on this device
+        // whose thread was opened by URL has not "vanished".
         if (state.selectedBotId && !isToolId(state.selectedBotId)
-            && !vb.find((b) => b.id === state.selectedBotId)) {
+            && !state.bots.find((b) => b.id === state.selectedBotId)) {
           if (vb.length) selectBot(vb[0].id);
           else { state.selectedBotId = null; state.threads = []; renderSidebar(); renderThreads(); clearChatView(); }
         } else {
@@ -9255,7 +9308,7 @@ function cmdkBuild(q) {
   const m = (s) => !ql || (s || '').toLowerCase().includes(ql);
   const items = [];
   for (const a of cmdkActions()) if (m(a.label)) items.push({ ...a, group: t('cmdk.group_actions') });
-  for (const b of state.bots) if (m(b.name)) items.push({ icon: b.emoji || '🤖', label: b.name, sub: b.model_hint || '', group: t('cmdk.group_bots'), run: () => selectBot(b.id) });
+  for (const b of visibleBots()) if (m(b.name)) items.push({ icon: b.emoji || '🤖', label: b.name, sub: b.model_hint || '', group: t('cmdk.group_bots'), run: () => selectBot(b.id) });
   // threadTitle() so untitled threads read 'New Chat' here too — the palette
   // must name a thread exactly like the thread list does.
   for (const th of state.threads) { const title = threadTitle(th); if (m(title)) items.push({ icon: RAIL_ICONS.messages, label: title, sub: t('cmdk.sub_chat'), group: t('cmdk.group_chats'), run: () => openThread(th.id) }); }

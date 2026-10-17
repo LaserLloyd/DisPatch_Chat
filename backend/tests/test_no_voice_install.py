@@ -162,4 +162,4 @@ def test_the_shipped_bots_need_nothing_from_voice(ext_env):
     assert all(b["voice"] == "" and b["voice_rp"] == "" for b in bots)
     items = [{"id": b["id"], "order": i, "voice": ""} for i, b in enumerate(bots)]
     assert c.put("/api/bots/order", json={"bots": items}).status_code == 200
-    assert main.app.version == "2.3.9"
+    assert main.app.version == "2.4.0"

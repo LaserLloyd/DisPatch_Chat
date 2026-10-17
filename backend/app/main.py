@@ -542,7 +542,7 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.3.9", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version="2.4.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -8476,7 +8476,8 @@ async def create_bot(request: Request, payload: BotCreateIn):
         emoji=payload.emoji or ("🌍" if payload.backend == "direct" else "🤖"),
         model_hint=payload.model_hint
         or ("Direct API" if payload.backend == "direct" else ""),
-        visible=payload.visible, safe=payload.safe, **kw)
+        visible=payload.visible, safe=payload.safe,
+        hide_unlocked=payload.hide_unlocked, **kw)
     saved = await asyncio.to_thread(config.upsert_bot, bot)
     await _broadcast_roster()
     return JSONResponse(_bot_row(saved), status_code=201)

@@ -910,15 +910,20 @@ def build_system_prompt(cfg: AdvisorConfig, profile: str,
     """
     persona = personas.fill(cfg.persona, cfg.name, cfg.owner)
     out = [persona.strip(), f"Today is {today}."]
+    offered = cfg.offered_tools()
     if cfg.can_dispatch:
         out.append(RULES.format(
             owner=cfg.owner,
             research_agent=cfg.research_agent or cfg.agents[0],
             action_agent=cfg.action_agent or cfg.agents[0],
             agents=", ".join(cfg.agents)))
-    elif cfg.locked:
+    elif cfg.locked and (cfg.agents or offered):
+        # Only when there is something Safe Mode actually takes away or still
+        # offers. A bot with no agents and no lookups (the kids' science
+        # animals, 2.4.0) has nothing to explain, and a paragraph about "Safe
+        # Mode" and "research markers" only gives a toddler's bot words to
+        # repeat.
         out.append(LOCKED_RULES.format(owner=cfg.owner))
-    offered = cfg.offered_tools()
     if offered:
         home = f" {cfg.owner}'s home location is {cfg.location}." if cfg.location else ""
         out.append(f"{TOOLS_SENTENCE.format(tools=', '.join(offered))}{home} {DATA_SENTENCE}")

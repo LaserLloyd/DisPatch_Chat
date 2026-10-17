@@ -4,7 +4,7 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 2.3.9** (October 2026) · [what changed](#whats-new-in-23)
+**Current release: 2.4.0** (October 2026) · [what changed](#whats-new-in-23)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
@@ -214,6 +214,8 @@ on a phone, in a few of the ten themes.
 - **2.3.8:** Settings is laid out for a 360px phone.
 - **2.3.9, pictures:** Image Studio, and a lightbox gallery with arrow keys, side
   buttons and swipe.
+- **2.4.0, hide on unlocked devices:** a bot can stay on the locked family tablet
+  and off your own screen; Settings → Device can bring hidden bots back per device.
 - Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
   arrived on the way; the [changelog](CHANGELOG.md) has all of it.
 

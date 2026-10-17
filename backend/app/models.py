@@ -69,6 +69,7 @@ class BotOrderItem(BaseModel):
     order: int = 0
     visible: bool | None = None   # None = leave unchanged
     safe: bool | None = None      # None = leave unchanged (Safe-Mode visibility)
+    hide_unlocked: bool | None = None  # None = leave unchanged (off the unlocked rail, 2.4.0)
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
@@ -110,6 +111,7 @@ class BotCreateIn(BaseModel):
     agent: str | None = Field(default=None, pattern=AGENT_ID_PATTERN)
     model_hint: str = Field(default="", max_length=60)
     safe: bool = False
+    hide_unlocked: bool = False
     visible: bool = True
     tools: bool | None = None        # direct-API bots only; default on
 
@@ -139,6 +141,7 @@ class BotPatchIn(BaseModel):
     model_hint: str | None = Field(default=None, max_length=60)
     visible: bool | None = None
     safe: bool | None = None
+    hide_unlocked: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None
     image_jobs: bool | None = None

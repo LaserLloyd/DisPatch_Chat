@@ -7,6 +7,28 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-10-17
+
+### Added
+
+- **Hide a bot on unlocked devices.** The inverse of the Safe-Mode shield: a bot flagged
+  `hide_unlocked` (Settings → Bots, the "Hide unlocked" pill; also `PATCH /api/bots/{id}`,
+  `POST /api/bots` and the Bots-tab save) is left off the rail, out of Ctrl-K and the
+  companions list on unlocked devices, while a locked device still lists it when it is
+  `safe`. Made for bots that belong on the family tablet and not on the owner's own screen.
+  It is a display preference, not a gate: the server still lists the bot to every tier
+  allowed to see it, the Bots tab still edits it, and its threads still open by link. Any
+  unlocked device can bring them back with **Settings → Device → Show hidden bots on this
+  device** (stored on that device only; "clear this device" forgets it). Strings in all
+  eight languages.
+
+### Changed
+
+- A locked turn on a direct-API bot with no agents and no lookups no longer gets the
+  "Safe Mode / research markers" paragraph: there is nothing to take away or explain.
+- Dragging a bot on the rail moves it by id, so parked and hidden bots no longer skew where
+  it lands.
+
 ## [2.3.9] — 2026-10-15
 
 ### Added

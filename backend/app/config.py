@@ -496,6 +496,16 @@ class Bot:
     # Shown in Safe Mode (the no-PIN, image-free view). Server-enforced: bots
     # without this flag are invisible AND unreachable to Safe-Mode sessions.
     safe: bool = False
+    # The inverse of `safe` (2.4.0): left OFF the rail on unlocked devices —
+    # the sidebar, the new-chat picker, Ctrl-K — while locked (Safe-Mode)
+    # devices still list it when it is `safe`. For bots that belong on the
+    # family tablet but not on the owner's own screen (the kids' science
+    # animals). A display preference, not a gate: the Bot Manager still lists
+    # it, its threads stay reachable by URL, the API still serves it, and a
+    # device may opt back in ("Show hidden bots on this device", Settings ->
+    # Device, localStorage). Security is untouched — who can reach what is
+    # still decided by `safe` and the session tier.
+    hide_unlocked: bool = False
     # Optional explicit avatar colour (any CSS colour, e.g. "#a01818"). Drives the
     # letter-block avatar gradient instead of the id-derived hue, so a character
     # whose auto-colour clashes with another can be pinned to a distinct shade.
@@ -646,6 +656,7 @@ class Bot:
             "order": self.order,
             "visible": self.visible,
             "safe": self.safe,
+            "hide_unlocked": self.hide_unlocked,
             "color": self.color,
             "reactions": self.reactions,
             "avatar_pool": self.avatar_pool,
@@ -760,6 +771,7 @@ def _bot_entry(b: Bot) -> dict:
         "order": b.order,
         "visible": b.visible,
         "safe": b.safe,
+        "hide_unlocked": b.hide_unlocked,
         "color": b.color,
         "reactions": b.reactions,
         "reaction_autopilot": b.reaction_autopilot,
@@ -888,6 +900,8 @@ def load_bots() -> list[Bot]:
                 order=int(e.get("order", i)),
                 visible=bool(e.get("visible", True)),
                 safe=bool(e.get("safe", base.safe if base else False)),
+                hide_unlocked=bool(e.get("hide_unlocked",
+                                         base.hide_unlocked if base else False)),
                 color=str(e.get("color", base.color if base else "")),
                 reactions=bool(e.get("reactions", base.reactions if base else False)),
                 reaction_autopilot=bool(e.get("reaction_autopilot",
@@ -932,9 +946,9 @@ def load_bots() -> list[Bot]:
 
 
 def save_bot_order(items: list[dict]) -> list[Bot]:
-    """Persist ordering/visibility/safe/reactions flags.
+    """Persist ordering/visibility/safe/hide_unlocked/reactions flags.
 
-    `items` = [{id, order?, visible?, safe?, reactions?}].
+    `items` = [{id, order?, visible?, safe?, hide_unlocked?, reactions?}].
 
     Preserves all other bot fields from the current config so the Bot Manager
     only needs to send the fields it manages.
@@ -953,6 +967,8 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
             order=idx,
             visible=bool(it["visible"]) if it.get("visible") is not None else b.visible,
             safe=bool(it["safe"]) if it.get("safe") is not None else b.safe,
+            hide_unlocked=(bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
+                           else b.hide_unlocked),
             reactions=(bool(it["reactions"]) if it.get("reactions") is not None
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None

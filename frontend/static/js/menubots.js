@@ -56,3 +56,36 @@ export function pruneMenuBots(knownIds) {
   if (kept.length === ids.size) return;
   try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch { /* storage off */ }
 }
+
+// ---- Bots hidden on unlocked devices (2.4.0) -------------------------------
+// A roster flag (`bot.hide_unlocked`, set in Settings → Bots) keeps a bot off
+// the UNLOCKED rail — the kids' science animals belong on the family tablet,
+// not on the owner's own screen. Whether THIS unlocked device honours the flag
+// is a device choice, like the placement above: "Show hidden bots on this
+// device" (Settings → Device) brings them back on, say, a second laptop.
+//
+// Display only. The server still lists the bot to every tier allowed to see it
+// (so its threads open by URL and the Bot Manager can edit it), and SAFE MODE
+// IGNORES THIS just as it ignores placement: a locked device always lists every
+// safe bot, hidden or not.
+
+const SHOW_HIDDEN_KEY = 'dispatch-show-hidden-bots';
+
+/** Does this device show bots flagged hide_unlocked? Off by default, and off
+ *  when storage is unavailable (the flag then simply does what it says). */
+export function showHiddenBots() {
+  try { return localStorage.getItem(SHOW_HIDDEN_KEY) === '1'; } catch { return false; }
+}
+
+export function setShowHiddenBots(on) {
+  try {
+    if (on) localStorage.setItem(SHOW_HIDDEN_KEY, '1');
+    else localStorage.removeItem(SHOW_HIDDEN_KEY);
+  } catch { /* storage off */ }
+  return showHiddenBots();
+}
+
+/** Is `bot` left off this device's rail? Never in Safe Mode. */
+export function hiddenHere(bot, decoy) {
+  return !decoy && !!(bot && bot.hide_unlocked) && !showHiddenBots();
+}
