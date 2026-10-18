@@ -612,6 +612,21 @@ class Bot:
     voice_rp: str = ""
 
     @property
+    def audience(self) -> str:
+        """Who this character is FOR (3.0): ``all`` (everyone), ``members``
+        (signed-in Members, Admins, Owner; never a Restricted profile) or
+        ``restricted`` (made for Restricted profiles; hidden from the Owner's own
+        rail by default). Derived from the two legacy flags - ``safe`` = reachable by
+        Restricted, ``hide_unlocked`` = kept off the signed-in rail - which stay
+        readable and writable for one release. The server gate is
+        ``audience in (all, restricted)`` for a Restricted caller, i.e. ``safe``."""
+        if self.safe and self.hide_unlocked:
+            return "restricted"
+        if self.safe:
+            return "all"
+        return "members"
+
+    @property
     def visible(self) -> bool:
         """Listed on SOME device: shown locked, or shown unlocked. Derived and
         read-only (2.4.2) -- kept on the wire for older clients and the voice
@@ -675,6 +690,7 @@ class Bot:
             "visible": self.visible,
             "safe": self.safe,
             "hide_unlocked": self.hide_unlocked,
+            "audience": self.audience,
             "quick_actions": self.quick_actions,
             "color": self.color,
             "reactions": self.reactions,
@@ -790,6 +806,10 @@ def _bot_entry(b: Bot) -> dict:
         "order": b.order,
         "safe": b.safe,
         "hide_unlocked": b.hide_unlocked,
+        # Written beside the legacy flags (3.0). Derived, so it can never disagree
+        # with them when this process writes; on read, `audience` wins over a
+        # hand-edited flag (see audience_flags).
+        "audience": b.audience,
         "quick_actions": b.quick_actions,
         "color": b.color,
         "reactions": b.reactions,
@@ -918,11 +938,13 @@ def load_bots() -> list[Bot]:
                 model_hint=str(e.get("model_hint", base.model_hint if base else "")),
                 order=int(e.get("order", i)),
                 # `visible: false` (pre-2.4.2) = shown nowhere = "neither".
-                **fold_visible(
-                    e.get("visible"),
-                    bool(e.get("safe", base.safe if base else False)),
-                    bool(e.get("hide_unlocked",
-                               base.hide_unlocked if base else False))),
+                **reconcile_flags(
+                    e.get("audience"),
+                    fold_visible(
+                        e.get("visible"),
+                        bool(e.get("safe", base.safe if base else False)),
+                        bool(e.get("hide_unlocked",
+                                   base.hide_unlocked if base else False)))),
                 quick_actions=bool(e.get("quick_actions",
                                          base.quick_actions if base else True)),
                 color=str(e.get("color", base.color if base else "")),
@@ -982,6 +1004,42 @@ def fold_visible(visible, safe: bool, hide_unlocked: bool) -> dict:
     return {"safe": bool(safe), "hide_unlocked": bool(hide_unlocked)}
 
 
+AUDIENCES = ("all", "members", "restricted")
+
+
+def audience_flags(audience, flags: dict) -> dict:
+    """Resolve an explicit ``audience`` over the legacy ``safe``/``hide_unlocked``
+    pair. ``audience`` wins when it is a known value; anything else (absent, None,
+    a typo) leaves the flags exactly as the file said - the migration is a no-op
+    for a config.yaml that predates 3.0."""
+    a = str(audience or "").strip().lower()
+    if a == "all":
+        return {"safe": True, "hide_unlocked": False}
+    if a == "restricted":
+        return {"safe": True, "hide_unlocked": True}
+    if a == "members":
+        # "Members" is not reachable by Restricted; whether it sits on the rail
+        # (hide_unlocked) is the separate display preference.
+        return {"safe": False, "hide_unlocked": bool(flags.get("hide_unlocked"))}
+    return flags
+
+
+def reconcile_flags(audience, flags: dict) -> dict:
+    """Read side: combine the ``audience`` on disk with the two legacy flags.
+
+    Both are written together by every code path, so they normally agree. When they do
+    not - a hand edit, an old tool that only knows ``safe``/``visible`` - the result is
+    the one that grants LESS: a character is reachable by a Restricted profile only if
+    its flag AND its audience allow it. Widening needs an explicit write through the
+    API (``audience_flags``), which sets both."""
+    a = str(audience or "").strip().lower()
+    if a not in AUDIENCES:
+        return flags
+    safe = bool(flags.get("safe")) and a != "members"
+    hide = bool(flags.get("hide_unlocked")) or (a == "restricted" and safe)
+    return {"safe": safe, "hide_unlocked": hide}
+
+
 def save_bot_order(items: list[dict]) -> list[Bot]:
     """Persist ordering/safe/hide_unlocked/reactions flags.
 
@@ -1003,11 +1061,11 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
         payload_bots.append(_bot_entry(replace(
             b,
             order=idx,
-            **fold_visible(
+            **audience_flags(it.get("audience"), fold_visible(
                 it.get("visible"),
                 bool(it["safe"]) if it.get("safe") is not None else b.safe,
                 (bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
-                 else b.hide_unlocked)),
+                 else b.hide_unlocked))),
             reactions=(bool(it["reactions"]) if it.get("reactions") is not None
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None

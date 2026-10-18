@@ -1,15 +1,14 @@
-"""PIN lock, "Safe Mode" (the default), and session management.
+"""Credentials, sessions and the brute-force throttle.
 
-The app is single-user on a trusted network. Once a PIN is set, the DEFAULT
-state is a stripped-down **Safe Mode**: anyone can view it with no PIN, but it is
-limited to the safe-flagged bots and chat media is withheld at the server (only
-those bots' own avatars are shown). Entering the PIN (from Settings) issues a
-full-access session cookie; that session auto-expires after a window of
-inactivity (default 10 min), dropping back to Safe Mode. The browser arms the
-same idle timer, and a "Lock" button returns to Safe Mode on demand.
+3.0 replaced the single shared PIN with *profiles* (``app/accounts.py``): an Owner,
+Admins, Members and Restricted profiles, each with its own credential. What used to
+be "Safe Mode" is now the **Restricted** role (nobody signed in on a claimed
+install is Restricted). The install's PIN in ``security.yaml`` is the Owner's PIN:
+entering it (``POST /api/auth/unlock``) signs the Owner in, exactly as before.
 
-So there is no blocking gate: a request that holds a valid full session gets
-everything; any other request (no/expired session) is served Safe Mode.
+A session belongs to a profile. A request that holds a valid session is that
+profile; any other request (no/expired session) is Restricted, unless the device is
+bound to a default profile. Authorisation itself lives in ``app/policy.py``.
 
 Optionally ("remember_device_days" > 0 in security.yaml), the unlock screen
 offers to REMEMBER the device: the session then survives restarts and never
@@ -38,10 +37,11 @@ import secrets
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import yaml
 
+from . import accounts, credentials
 from .config import DATA_DIR, ensure_dirs
 
 log = logging.getLogger("local-chat.auth")
@@ -75,10 +75,23 @@ _TRUSTED_TOUCH_MIN = 3600.0         # persist last_seen at most this often (s)
 # the file and type back in. ~30^8 ≈ 6.5e11 combinations.
 _RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
-# Brute-force throttle: once there have been this many consecutive failures,
-# each further attempt is refused for a cooldown that grows with the count.
+# Brute-force throttle. Three layers, so one noisy client cannot lock everybody out
+# (the 2.x throttle was process-global: six bad PINs from one LAN client made the
+# correct PIN fail for every device in the house):
+#   1. per (device, profile): 5 consecutive failures, then 5 s doubling to ~5 min;
+#   2. per client address: the same, at 3x the threshold (a device cookie is easy to
+#      rotate, an address is not);
+#   3. a global ceiling, high enough that only a distributed guesser reaches it.
 _FAIL_LOCKOUT_AFTER = 5
 _FAIL_BASE_COOLDOWN = 5.0           # seconds (doubles per extra failure, capped)
+_IP_LOCKOUT_AFTER = 15
+_GLOBAL_CEILING = 60                # failures in one window across the whole install
+_GLOBAL_WINDOW = 600.0
+_GLOBAL_COOLDOWN = 30.0
+
+#: Owner/Admin sessions follow ``lock_timeout``; these are the other roles' idle windows
+#: (seconds) unless security.yaml's ``session_timeouts`` or the profile says otherwise.
+DEFAULT_SESSION_TIMEOUTS = {"owner": None, "admin": None, "member": 3600, "restricted": 1800}
 
 # Reentrant: load() may call revoke_all() while already holding the lock.
 _lock = threading.RLock()
@@ -86,8 +99,12 @@ _lock = threading.RLock()
 # token -> _Session. In memory only: a server restart logs everyone out, which
 # is the safe default for a lock.
 _sessions: dict[str, _Session] = {}
+# GLOBAL ceiling state (layer 3). Tests reset these two to zero between cases.
 _fail_count = 0
 _fail_until = 0.0
+_fail_window_start = 0.0
+#: (layer, namespace, ...) -> [consecutive failures, locked-until (monotonic)]
+_buckets: dict[tuple, list] = {}
 
 _cache: tuple[float, SecurityConfig] | None = None
 
@@ -130,10 +147,32 @@ lock_timeout_seconds: {lock_timeout}
 remember_device_days: {remember_days}
 
 # API key for OpenClaw's inbound endpoints (/api/inject, /api/daily,
-# POST /api/threads/<id>/messages). Loopback (on-box agents/crons) is always
-# exempt. Remote (LAN/tailnet) callers must send  X-API-Key: <value>; with
-# api_token null, remote calls to these endpoints are REFUSED outright.
+# POST /api/threads/<id>/messages). Remote (LAN/tailnet) callers must send
+# X-API-Key: <value>; with api_token null, remote calls to these endpoints are
+# REFUSED outright.
 api_token: {api_token}
+
+# What a device that has not signed in may do once the install has an owner:
+#   restricted - the old Safe Mode: chat with the characters made for Restricted
+#                profiles (budgets apply). The default, so a tablet on the counter works.
+#   none       - nothing but the sign-in page. Use this when the app is reachable from
+#                outside your home network.
+anonymous_access: {anonymous_access}
+
+# On-box processes (agents, crons) on 127.0.0.1 are trusted as MACHINES while this is
+# true - the 2.x behaviour, kept so upgraded installs keep working. Set it to false
+# once your crons send the api_token: then a machine is identified by its key alone,
+# not by where it runs.
+machine_loopback_trust: {machine_loopback_trust}
+
+# The machine scopes an api_token holder gets (null = all of them). See
+# docs/contracts/permissions.json for the names.
+machine_scopes: {machine_scopes}
+
+# Idle seconds before a session of each role locks. owner/admin follow
+# lock_timeout_seconds above. A profile can override its own in People & Profiles.
+session_timeout_member: {timeout_member}
+session_timeout_restricted: {timeout_restricted}
 """
 
 
@@ -147,6 +186,12 @@ class SecurityConfig:
     recovery_hash: str | None = None
     recovery_salt: str | None = None
     remember_days: int = 0
+    machine_loopback_trust: bool = True
+    anonymous_access: str = "restricted"          # restricted | none
+    machine_scopes: list[str] | None = None
+    session_timeouts: dict = field(default_factory=lambda: {
+        "member": DEFAULT_SESSION_TIMEOUTS["member"],
+        "restricted": DEFAULT_SESSION_TIMEOUTS["restricted"]})
 
     @property
     def pin_set(self) -> bool:
@@ -164,6 +209,11 @@ class _Session:
     token: str
     last_seen: float        # time.monotonic()
     persistent: bool = False
+    #: Whose session this is. ``None`` = minted before accounts existed (or on an
+    #: install whose owner row has not been created yet): the Owner.
+    profile_id: str | None = None
+    device_id: str | None = None
+    epoch: int = 0          # the profile's epoch at issue; a bump kills the session
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +247,24 @@ def _nonneg_int(v, default: int) -> int:
         return default
 
 
+def _flag(v, default: bool) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _scope_list(v) -> list[str] | None:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list):
+        return None
+    return [str(x) for x in v if str(x).strip()]
+
+
 def _y(v) -> str:
     """Render a Python scalar as a YAML value for the template."""
     if v is None:
@@ -226,6 +294,14 @@ def _write(cfg: SecurityConfig, plaintext_pin: str | None = None) -> None:
         lock_timeout=cfg.lock_timeout,
         remember_days=cfg.remember_days,
         api_token=_y(cfg.api_token),
+        machine_loopback_trust=_y(bool(cfg.machine_loopback_trust)),
+        anonymous_access=_y(cfg.anonymous_access if cfg.anonymous_access in ("restricted", "none")
+                            else "restricted"),
+        machine_scopes=_y(None) if cfg.machine_scopes is None
+        else "[" + ", ".join(_y(x) for x in cfg.machine_scopes) + "]",
+        timeout_member=_pos_int(cfg.session_timeouts.get("member"), DEFAULT_SESSION_TIMEOUTS["member"]),
+        timeout_restricted=_pos_int(cfg.session_timeouts.get("restricted"),
+                                    DEFAULT_SESSION_TIMEOUTS["restricted"]),
     )
     # Atomic + 0600: the file holds the
     # api_token and PIN hash, and a crash mid-write (or a concurrent reader
@@ -366,6 +442,15 @@ def load() -> SecurityConfig:
             recovery_hash=_clean(raw.get("recovery_hash")),
             recovery_salt=_clean(raw.get("recovery_salt")),
             remember_days=_nonneg_int(raw.get("remember_device_days"), 0),
+            machine_loopback_trust=_flag(raw.get("machine_loopback_trust"), True),
+            anonymous_access=("none" if str(raw.get("anonymous_access") or "").strip().lower() == "none"
+                              else "restricted"),
+            machine_scopes=_scope_list(raw.get("machine_scopes")),
+            session_timeouts={
+                "member": _pos_int(raw.get("session_timeout_member"), DEFAULT_SESSION_TIMEOUTS["member"]),
+                "restricted": _pos_int(raw.get("session_timeout_restricted"),
+                                       DEFAULT_SESSION_TIMEOUTS["restricted"]),
+            },
         )
 
         # Apply a plaintext `pin:` recovery/set directive, then blank it out.
@@ -384,8 +469,8 @@ def load() -> SecurityConfig:
                 cfg.salt = salt
                 _ensure_recovery(cfg, rotate=True)
                 log.info("security.yaml: PIN (re)set via plaintext directive")
-            _sessions.clear()                # any change to the PIN logs out all
-            _wipe_trusted()                  # …and forgets every remembered device
+            _revoke_owner_sessions()         # any change to the PIN logs the owner out
+            _sync_owner_pin(cfg)
             dirty = True
         # Backfill a recovery code for a PIN set before this feature existed.
         elif cfg.pin_set and not cfg.recovery_hash:
@@ -426,12 +511,16 @@ def set_pin(new_pin: str) -> None:
         _ensure_recovery(cfg, rotate=True)
         _write(cfg)
         _bust_cache()
-        _sessions.clear()
-        _wipe_trusted()
+        _revoke_owner_sessions()
+        _sync_owner_pin(cfg)
 
 
 def clear_pin() -> None:
-    """Remove the PIN entirely (lock disabled) and drop the recovery code."""
+    """Remove the PIN entirely and drop the recovery code.
+
+    On a 2.x-style install (the owner has no password) that is "remove the lock":
+    the mirrored owner row goes too and the app is open again. If the owner has a
+    password the install stays claimed - the PIN was only one way in."""
     with _lock:
         cfg = load()
         cfg.pin_hash = None
@@ -439,8 +528,64 @@ def clear_pin() -> None:
         _drop_recovery(cfg)
         _write(cfg)
         _bust_cache()
-        _sessions.clear()
-        _wipe_trusted()
+        _revoke_owner_sessions()
+        _sync_owner_pin(cfg)
+
+
+def _revoke_owner_sessions() -> None:
+    """End the Owner's sessions (and any session minted before accounts existed) and
+    forget the Owner's remembered devices. Other profiles stay signed in: changing the
+    Owner's PIN must not log the children out."""
+    owner = accounts.get_owner()
+    oid = owner.id if owner is not None else None
+    with _lock:
+        for t in [t for t, s in _sessions.items() if s.profile_id is None or s.profile_id == oid]:
+            _sessions.pop(t, None)
+        store = _trusted_store()
+        gone = [h for h, e in store.items() if not e.get("profile_id") or e.get("profile_id") == oid]
+        for h in gone:
+            store.pop(h, None)
+        if gone:
+            if store:
+                with contextlib.suppress(OSError):
+                    _save_trusted()
+            else:
+                _wipe_trusted()
+        if oid:
+            with contextlib.suppress(Exception):
+                accounts.drop_profile_sessions(oid)
+
+
+def _sync_owner_pin(cfg: SecurityConfig) -> None:
+    """Keep the Owner profile's PIN in step with security.yaml's.
+
+    security.yaml stays the home of the Owner's PIN (its recovery directive and
+    RECOVERY-CODE keep working, and a 2.x binary still reads it); the profile row
+    mirrors it in the self-describing format so the People screen can show "has a
+    PIN" and the quick-switch list can verify it like any other profile's."""
+    try:
+        owner = accounts.get_owner()
+        mirror = (credentials.legacy_string(cfg.pin_hash, cfg.salt, cfg.iterations)
+                  if cfg.pin_set and cfg.pin_hash != _LOCKDOWN_HASH else None)
+        if owner is None:
+            if mirror:
+                accounts.create_profile("Owner", "owner", pin_hash=mirror)
+            return
+        if owner.pin_hash != mirror:
+            if mirror is None and not owner.has_password and len(accounts.list_profiles()) == 1:
+                accounts.delete_owner_row()
+                return
+            accounts.update_profile(owner.id, pin_hash=mirror)
+    except accounts.AccountError:
+        log.warning("could not mirror the PIN onto the owner profile", exc_info=True)
+
+
+def ensure_owner_for_pin() -> accounts.Profile | None:
+    """Create the Owner row for a PIN-only (2.x) install on first use. Idempotent."""
+    cfg = load()
+    if accounts.get_owner() is None and cfg.pin_set:
+        _sync_owner_pin(cfg)
+    return accounts.get_owner()
 
 
 def verify_recovery(code: str) -> bool:
@@ -499,6 +644,7 @@ def _trusted_store() -> dict[str, dict]:
                                 "created": float(meta.get("created") or 0.0),
                                 "last_seen": float(meta.get("last_seen") or 0.0),
                                 "ua": str(meta.get("ua") or "")[:160],
+                                "profile_id": str(meta.get("profile_id") or ""),
                             }
                 else:
                     log.error("trusted-devices.yaml is not the expected mapping "
@@ -614,22 +760,52 @@ def forget_all_trusted(keep_session_token: str | None = None) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def issue_session(persistent: bool = False, user_agent: str = "") -> str:
-    """Issue a full-access session token.
+def _role_timeout(profile: accounts.Profile | None, cfg: SecurityConfig) -> int:
+    """Idle seconds before this profile's session locks."""
+    if profile is not None:
+        if profile.session_timeout:
+            return int(profile.session_timeout)
+        t = cfg.session_timeouts.get(profile.role)
+        if t:
+            return int(t)
+    return cfg.lock_timeout
+
+
+def _session_timeout(s: _Session, cfg: SecurityConfig) -> int:
+    return _role_timeout(accounts.get_profile(s.profile_id) if s.profile_id else None, cfg)
+
+
+def _session_valid(s: _Session) -> bool:
+    """A session dies with its profile: deleted, disabled, or credentials/role changed."""
+    if s.profile_id is None:
+        return True
+    p = accounts.get_profile(s.profile_id)
+    return p is not None and not p.disabled and p.epoch == s.epoch
+
+
+def issue_session(persistent: bool = False, user_agent: str = "", *,
+                  profile_id: str | None = None, device_id: str | None = None) -> str:
+    """Issue a session token for a profile (default: the Owner).
 
     With ``persistent=True`` (and the feature enabled) the device is also
     remembered: its token hash is persisted so the session survives restarts
     and skips the idle timeout, for `remember_days` sliding days."""
     token = secrets.token_urlsafe(32)
     with _lock:
+        if profile_id is None:
+            owner = accounts.get_owner()
+            profile_id = owner.id if owner is not None else None
+        prof = accounts.get_profile(profile_id) if profile_id else None
         persistent = persistent and load().remember_days > 0   # defensive gate
         _sessions[token] = _Session(token=token, last_seen=time.monotonic(),
-                                    persistent=persistent)
+                                    persistent=persistent, profile_id=profile_id,
+                                    device_id=device_id, epoch=prof.epoch if prof else 0)
         if persistent:
             store = _trusted_store()
             now = time.time()
             store[_token_hash(token)] = {
-                "created": now, "last_seen": now, "ua": str(user_agent)[:160]}
+                "created": now, "last_seen": now, "ua": str(user_agent)[:160],
+                "profile_id": profile_id or ""}
             # Cap the store: evict the least-recently-seen extras.
             while len(store) > _MAX_TRUSTED:
                 oldest = min(store, key=lambda h: store[h]["last_seen"])
@@ -641,6 +817,11 @@ def issue_session(persistent: bool = False, user_agent: str = "") -> str:
                 log.error("could not write %s (%s) — session stays "
                           "non-persistent", TRUSTED_PATH, e)
                 _sessions[token].persistent = False
+                persistent = False
+        if profile_id:
+            with contextlib.suppress(Exception):
+                accounts.record_session(_token_hash(token), profile_id, device_id,
+                                        persistent=persistent, user_agent=user_agent)
     return token
 
 
@@ -652,19 +833,27 @@ def get_session(token: str | None) -> _Session | None:
     store is re-minted (that's how a cookie survives a server restart). With
     the feature disabled (remember_days == 0 — including the fail-closed
     lockdown config) persistent sessions are demoted to normal idle-expiring
-    ones and the store is not consulted."""
+    ones and the store is not consulted. A session also dies with its profile
+    (deleted, disabled, role or credential changed)."""
     if not token:
         return None
-    timeout = lock_timeout()
+    cfg = load()
     with _lock:
         s = _sessions.get(token)
+        if s is not None and not _session_valid(s):
+            _sessions.pop(token, None)
+            with contextlib.suppress(Exception):
+                accounts.drop_session(_token_hash(token))
+            return None
         if s is not None and not s.persistent:
-            if (time.monotonic() - s.last_seen) > timeout:
+            if (time.monotonic() - s.last_seen) > _session_timeout(s, cfg):
                 _sessions.pop(token, None)
+                with contextlib.suppress(Exception):
+                    accounts.drop_session(_token_hash(token))
                 return None
             return s
 
-        days = load().remember_days
+        days = cfg.remember_days
         if s is not None:                      # persistent
             if days <= 0:
                 s.persistent = False           # feature off → normal session
@@ -675,9 +864,20 @@ def get_session(token: str | None) -> _Session | None:
             return s
 
         # Unknown token (e.g. after a restart): honour it only via the store.
-        if days <= 0 or _trusted_entry(token, days) is None:
+        if days <= 0:
             return None
-        s = _Session(token=token, last_seen=time.monotonic(), persistent=True)
+        entry = _trusted_entry(token, days)
+        if entry is None:
+            return None
+        pid = entry.get("profile_id") or None
+        if pid is None:
+            owner = accounts.get_owner()
+            pid = owner.id if owner is not None else None
+        prof = accounts.get_profile(pid) if pid else None
+        if pid and (prof is None or prof.disabled):
+            return None
+        s = _Session(token=token, last_seen=time.monotonic(), persistent=True,
+                     profile_id=pid, epoch=prof.epoch if prof else 0)
         _sessions[token] = s
         return s
 
@@ -711,24 +911,50 @@ def revoke(token: str | None) -> None:
         if store.pop(_token_hash(token), None) is not None:
             with contextlib.suppress(OSError):
                 _save_trusted()
+        with contextlib.suppress(Exception):
+            accounts.drop_session(_token_hash(token))
+
+
+def revoke_profile(profile_id: str) -> int:
+    """Sign a profile out everywhere (live sessions and remembered devices)."""
+    n = 0
+    with _lock:
+        for t in [t for t, s in _sessions.items() if s.profile_id == profile_id]:
+            _sessions.pop(t, None)
+            n += 1
+        store = _trusted_store()
+        gone = [h for h, e in store.items() if e.get("profile_id") == profile_id]
+        for h in gone:
+            store.pop(h, None)
+        if gone:
+            with contextlib.suppress(OSError):
+                _save_trusted()
+        with contextlib.suppress(Exception):
+            accounts.drop_profile_sessions(profile_id)
+    return n
 
 
 def revoke_all() -> None:
     with _lock:
         _sessions.clear()
+        with contextlib.suppress(Exception):
+            accounts.drop_all_sessions()
 
 
 def purge_expired() -> int:
-    timeout = lock_timeout()
+    cfg = load()
     now = time.monotonic()
     with _lock:
         dead = [t for t, s in _sessions.items()
-                if not s.persistent and (now - s.last_seen) > timeout]
+                if not _session_valid(s)
+                or (not s.persistent and (now - s.last_seen) > _session_timeout(s, cfg))]
         for t in dead:
             _sessions.pop(t, None)
+            with contextlib.suppress(Exception):
+                accounts.drop_session(_token_hash(t))
         # Prune remembered devices that fell off their sliding window (lazy
         # backstop — get_session drops them on contact anyway).
-        days = load().remember_days
+        days = cfg.remember_days
         if days > 0:
             store = _trusted_store()
             wall = time.time()
@@ -739,6 +965,8 @@ def purge_expired() -> int:
             if stale:
                 with contextlib.suppress(OSError):
                     _save_trusted()
+        with contextlib.suppress(Exception):
+            accounts.prune()
     return len(dead)
 
 
@@ -747,26 +975,171 @@ def purge_expired() -> int:
 # --------------------------------------------------------------------------- #
 
 
-def throttle_wait() -> float:
-    """Seconds the caller must wait before another unlock attempt (0 if clear)."""
-    with _lock:
-        if _fail_count >= _FAIL_LOCKOUT_AFTER and time.monotonic() < _fail_until:
-            return _fail_until - time.monotonic()
-        return 0.0
+def _ns() -> str:
+    # Namespaced by the security file so two installs (or two tests) in one process
+    # never share a lockout.
+    return str(SECURITY_PATH)
 
 
-def register_failure() -> None:
-    global _fail_count, _fail_until
+def _keys(device: str, profile: str, ip: str) -> list[tuple]:
+    ns = _ns()
+    keys: list[tuple] = [("dp", ns, device or "-", profile or "-")]
+    if ip:
+        keys.append(("ip", ns, ip))
+    return keys
+
+
+def _threshold(key: tuple) -> int:
+    return _IP_LOCKOUT_AFTER if key[0] == "ip" else _FAIL_LOCKOUT_AFTER
+
+
+def throttle_wait(device: str = "", profile: str = "", ip: str = "") -> float:
+    """Seconds the caller must wait before another credential attempt (0 if clear).
+
+    Scoped to the (device, profile) being guessed, the client address, and - last -
+    a global ceiling. Without arguments it is the legacy single bucket."""
+    now = time.monotonic()
     with _lock:
+        wait = 0.0
+        if _fail_count >= _GLOBAL_CEILING and now < _fail_until:
+            wait = _fail_until - now
+        for key in _keys(device, profile, ip):
+            b = _buckets.get(key)
+            if b and b[0] >= _threshold(key) and now < b[1]:
+                wait = max(wait, b[1] - now)
+        return wait
+
+
+def register_failure(device: str = "", profile: str = "", ip: str = "") -> None:
+    global _fail_count, _fail_until, _fail_window_start
+    now = time.monotonic()
+    with _lock:
+        for key in _keys(device, profile, ip):
+            b = _buckets.setdefault(key, [0, 0.0])
+            b[0] += 1
+            thr = _threshold(key)
+            if b[0] >= thr:
+                over = b[0] - thr
+                b[1] = now + _FAIL_BASE_COOLDOWN * (2 ** min(over, 6))   # cap ~5 min
+        if now - _fail_window_start > _GLOBAL_WINDOW:
+            _fail_window_start = now
+            _fail_count = 0
         _fail_count += 1
-        if _fail_count >= _FAIL_LOCKOUT_AFTER:
-            over = _fail_count - _FAIL_LOCKOUT_AFTER
-            cooldown = _FAIL_BASE_COOLDOWN * (2 ** min(over, 6))   # cap ~5 min
-            _fail_until = time.monotonic() + cooldown
+        if _fail_count >= _GLOBAL_CEILING:
+            over = _fail_count - _GLOBAL_CEILING
+            _fail_until = now + _GLOBAL_COOLDOWN * (2 ** min(over, 6))
+        if len(_buckets) > 4096:                      # bound the table
+            for k in [k for k, v in _buckets.items() if v[1] < now][:2048]:
+                _buckets.pop(k, None)
 
 
-def register_success() -> None:
-    global _fail_count, _fail_until
+def register_success(device: str = "", profile: str = "", ip: str = "") -> None:
     with _lock:
-        _fail_count = 0
-        _fail_until = 0.0
+        for key in _keys(device, profile, ip):
+            _buckets.pop(key, None)
+        # A correct credential does NOT clear the global counter: an attacker must
+        # not be able to reset it by logging in as themselves.
+
+
+# --------------------------------------------------------------------------- #
+# Profile credentials
+# --------------------------------------------------------------------------- #
+
+
+def verify_profile_secret(profile: accounts.Profile, kind: str, secret: str) -> bool:
+    """Check a profile's ``pin`` or ``password``. Rehashes legacy/old-cost hashes."""
+    stored = profile.pin_hash if kind == "pin" else profile.password_hash
+    if not credentials.verify_secret(secret, stored):
+        return False
+    # A PIN-only owner's PIN lives in security.yaml and stays PBKDF2 there; every
+    # other secret is upgraded to the current argon2id cost on the way through.
+    if profile.role != "owner" and credentials.needs_rehash(stored):
+        field_name = "pin_hash" if kind == "pin" else "password_hash"
+        with contextlib.suppress(Exception):
+            accounts.update_profile_hash_silently(profile.id, field_name,
+                                                  credentials.hash_secret(secret))
+    return True
+
+
+def set_profile_pin(profile_id: str, pin: str) -> None:
+    err = credentials.check_pin(pin)
+    if err:
+        raise accounts.AccountError("pin_invalid", err)
+    p = accounts.get_profile(profile_id)
+    if p is None:
+        raise accounts.AccountError("profile_not_found", "No such profile.", 404)
+    if p.role == "owner":
+        set_pin(pin)                 # the Owner's PIN is the install PIN (security.yaml)
+        return
+    accounts.update_profile(profile_id, pin_hash=credentials.hash_secret(pin))
+    revoke_profile(profile_id)
+
+
+def clear_profile_pin(profile_id: str) -> None:
+    p = accounts.get_profile(profile_id)
+    if p is None:
+        raise accounts.AccountError("profile_not_found", "No such profile.", 404)
+    if p.role == "owner":
+        raise accounts.AccountError("owner_immutable",
+                                    "Remove the Owner's PIN from Security instead.", 409)
+    accounts.update_profile(profile_id, pin_hash=None)
+    revoke_profile(profile_id)
+
+
+def set_profile_password(profile_id: str, password: str) -> None:
+    err = credentials.check_password(password)
+    if err:
+        raise accounts.AccountError("password_invalid", err)
+    p = accounts.get_profile(profile_id)
+    if p is None:
+        raise accounts.AccountError("profile_not_found", "No such profile.", 404)
+    if p.role not in ("owner", "admin"):
+        raise accounts.AccountError("password_role", "Only the Owner and Admins have a password; "
+                                    "Members and Restricted profiles use a PIN.", 409)
+    accounts.update_profile(profile_id, password_hash=credentials.hash_secret(password))
+    revoke_profile(profile_id)
+
+
+# --------------------------------------------------------------------------- #
+# One-time setup token (first-run owner creation from another machine)
+# --------------------------------------------------------------------------- #
+
+_setup_token: str | None = None
+
+
+def setup_token() -> str:
+    """The token that authorises ``POST /api/auth/setup`` from a non-loopback client
+    while the install has no owner. Generated on first use, printed to the log at
+    startup, held in memory only and invalidated once the owner exists."""
+    global _setup_token
+    with _lock:
+        if _setup_token is None:
+            _setup_token = secrets.token_urlsafe(16)
+        return _setup_token
+
+
+def verify_setup_token(candidate: str | None) -> bool:
+    if not candidate:
+        return False
+    with _lock:
+        tok = _setup_token
+    if tok is None:
+        return False
+    try:
+        return hmac.compare_digest(str(candidate), tok)
+    except TypeError:
+        return False
+
+
+def burn_setup_token() -> None:
+    global _setup_token
+    with _lock:
+        _setup_token = None
+
+
+def machine_loopback_trust() -> bool:
+    return load().machine_loopback_trust
+
+
+def machine_scopes() -> list[str] | None:
+    return load().machine_scopes

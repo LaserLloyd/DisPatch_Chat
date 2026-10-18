@@ -106,6 +106,26 @@ const DYNAMIC = [
   // level set is notice.js's closed vocabulary (error | warn | ok | info).
   { re: /^msg\.notice_level_(error|warn|ok|info)$/,
     built: 'main.js  t(`msg.notice_level_${notice.level}`)' },
+  // 3.0 profiles, roles and policy -- keys built from a closed vocabulary.
+  // js/main.js  bot row audience caption:  t(`settings.audience_${aud}`), aud from profiles.js audienceOf()
+  { re: /^settings\.audience_(all|members|restricted)$/,
+    built: 'main.js  t(`settings.audience_${aud}`)' },
+  // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`), profiles.js ROLES
+  { re: /^role\.(owner|admin|member|restricted)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
+  // js/signin.js  openRestrictedPanel():  t(`restricted.use_${l.key}`), profiles.js usageLines()
+  { re: /^restricted\.use_(minutes|turns|threads|feedback|upload_mb)$/,
+    built: 'signin.js  t(`restricted.use_${l.key}`)' },
+  // js/signin.js  paintAccessNotice():  t(`${stem}_title|_body`), stem from profiles.js BLOCK_NOTICES
+  { re: /^notice\.(time_limit|quiet_hours)_(title|body)$/,
+    built: 'signin.js  t(`${stem}_title|_body`)' },
+  // js/people.js  errorText():  t(`people.err_${code}`), codes from profiles.js formToBudgets()/createPayload()
+  { re: /^people\.err_(required|min_4|min_8|range_1_1440|range_0_100000|both_times|same_times|range_1_43200)$/,
+    built: 'people.js  t(`people.err_${code}`)' },
+  // js/people.js + js/signin.js  activity table:  t(`people.col_${c}`), profiles.js ACTIVITY_COLUMNS
+  { re: /^people\.col_(login|turn|thread|upload|feedback|limit_hit)$/,
+    built: 'people.js / signin.js  t(`people.col_${c}`)' },
+  // js/people.js  auditKind():  t(`people.audit_${kind}`) for the kinds the server writes (people_api._audit, main.py)
+  { re: /^people\.audit_[a-z_]+$/, built: 'people.js  t(`people.audit_${kind}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {

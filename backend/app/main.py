@@ -11,10 +11,8 @@ import base64
 import contextlib
 import contextvars
 import errno
-import fcntl
 import inspect
 import io
-import ipaddress
 import json
 import logging
 import mimetypes
@@ -63,6 +61,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 from . import (
+    __version__,
+    _filelock,
+    accounts,
     advisor,
     apps_loader,
     auth,
@@ -71,6 +72,7 @@ from . import (
     catalog,
     client_links,
     config,
+    credentials,
     dashboard_routes,
     extensions,
     firstrun,
@@ -80,13 +82,17 @@ from . import (
     harness_sessions,
     image_jobs,
     image_providers,
+    limits,
     llm_api,
     localview,
     mailforge_bridge,
+    migrate,
     openclaw,
     openclaw_text,
+    people_api,
     personas,
     plugins_api,
+    policy,
     pool_guard,
     practice_bridge,
     problem,
@@ -94,9 +100,12 @@ from . import (
     quick_actions,
     quicksetup,
     reactions,
+    route_policy,
     tools,
 )
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
+from .contracts import errors
+from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
@@ -231,9 +240,10 @@ def _is_trustworthy_base(p: Path) -> bool:
         return False
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         return False
-    if st.st_uid != os.getuid():
+    me = _filelock.current_uid()
+    if me is not None and st.st_uid != me:     # no uid concept on Windows
         log.warning("ignoring media base %s: owned by uid %s, not %s",
-                    p, st.st_uid, os.getuid())
+                    p, st.st_uid, me)
         return False
     return True
 
@@ -270,7 +280,7 @@ def _claim_single_instance() -> io.IOBase | None:
         # exactly the invariant being enforced ("one process per data dir").
         # Worker processes are forked and do NOT inherit the lock, so
         # `--workers 4` still fails on workers 2-4, which is the point.
-        fcntl.lockf(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _filelock.try_lock_exclusive(fh, lock_path)
     except OSError as e:
         # Only a CONTENDED lock means "another instance". Anything else — an
         # unwritable data dir, a full disk, a filesystem with no lock support —
@@ -296,28 +306,38 @@ def _claim_single_instance() -> io.IOBase | None:
 
 
 def _warn_if_wide_open() -> None:
-    """Say so, loudly, when the app is reachable off-box with no credential.
+    """Tell the operator, in the one place they always read, that nobody owns this
+    install yet - and how to claim it.
 
-    With no PIN configured every route is open — which is the right first-run
-    experience on a laptop, and a genuinely bad surprise on a machine with a
-    port forward. The dashboard reports this as a finding too; this is for the
-    operator who only ever reads the startup log.
+    An install with no owner account and no PIN used to be open to everyone who could
+    reach the port. 3.0 closes it to the network: this machine can create the owner
+    account, and any other machine needs the one-time setup token printed here. With
+    ``DISPATCH_ALLOW_OPEN_INSTALL=1`` the old open behaviour is back (and this says so).
     """
-    if auth.load().pin_set:
+    if policy.claimed():
         return
     host = config.env("HOST", "127.0.0.1")
-    if host in ("127.0.0.1", "localhost", "::1"):
+    port = config.env("PORT", "8765")
+    if policy.allow_open_install():
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            log.warning(
+                "\n"
+                "  ================================================================\n"
+                "   NO OWNER ACCOUNT and DISPATCH_ALLOW_OPEN_INSTALL is on:\n"
+                "   anyone who can reach %s has full access. Create the owner\n"
+                "   account in Settings, or remove DISPATCH_ALLOW_OPEN_INSTALL.\n"
+                "  ================================================================", host)
         return
     log.warning(
         "\n"
         "  ================================================================\n"
-        "   NO PASSWORD IS SET and DisPatch is listening on %s.\n"
-        "   Anyone who can reach this port has full access: every message,\n"
-        "   every file, and the ability to delete both.\n"
-        "   Open the app and finish setup, or bind to 127.0.0.1.\n"
+        "   DisPatch has no owner account yet.\n"
+        "   - On THIS computer: open http://localhost:%s and create it.\n"
+        "   - From another device: use this one-time setup token.\n"
+        "         SETUP TOKEN: %s\n"
+        "   Until then the network sees only the sign-in page.\n"
         "  ================================================================",
-        host,
-    )
+        port, auth.setup_token())
 
 
 #: Backstop for a failed startup. Tests flip it off (conftest) because a
@@ -396,6 +416,10 @@ def _release_instance_lock(app: FastAPI) -> None:
 
 
 async def _lifespan_startup(app: FastAPI) -> None:
+    # A new lifespan owns a new set of background loops. A heartbeat left behind by
+    # a previous lifespan in this process (a test, a reload) would read as a stale
+    # loop and flip /api/health to "degraded" for no reason.
+    _loop_beats.clear()
     config.ensure_dirs()
     # Bound to the app, not a local, to make the lifetime obvious: the flock is
     # held for exactly as long as the process serves, and released by the OS if
@@ -405,6 +429,14 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # fd on the file after re-claiming would drop the new lock with it.
     _release_instance_lock(app)
     app.state.instance_lock = _claim_single_instance()
+    # Data migrations (accounts, audience, security keys), with a backup first. A
+    # failure aborts startup: better a refusal with a backup in place than a
+    # half-migrated install serving traffic.
+    report = await asyncio.to_thread(migrate.run)
+    if report.applied:
+        log.info("migrated the data directory to %s: %s%s", migrate.TARGET_VERSION,
+                 ", ".join(report.applied),
+                 f" (backup: {report.backup})" if report.backup else "")
     _warn_if_wide_open()
     config.load_bots()  # materialises config.yaml on first run
     # Apps that bring a roster bot (the Job Board's `jobboard`) get it appended
@@ -424,11 +456,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
     manager.is_session_live = lambda tok: auth.get_session(tok) is not None
     # Lets the manager demote token-less "full" connections (opened while no
     # PIN existed) the moment a PIN is set. auth.load() is mtime-cached.
-    manager.pin_set = lambda: auth.load().pin_set
+    manager.pin_set = lambda: policy.claimed()
     cfg = auth.load()
     log.info("DisPatch Chat started. data=%s openclaw=%s lock=%s fts=%s",
              config.DATA_DIR, SETTINGS.openclaw_bin,
-             "on" if cfg.pin_set else "off", db.fts_ok)
+             "on" if policy.claimed(cfg) else "off", db.fts_ok)
     if not openclaw.cli_available():
         log.warning("openclaw CLI not found at %r — agent replies will fail.",
                     SETTINGS.openclaw_bin)
@@ -542,48 +574,66 @@ async def _lifespan_shutdown() -> None:
 # for a full session or an on-box machine (see openapi_schema below). An agent
 # that has to call this API cold needs the route inventory; a stranger on the
 # network still gets nothing.
-app = FastAPI(title="DisPatch Chat", version="2.4.2", lifespan=lifespan,
+app = FastAPI(title="DisPatch Chat", version=__version__, lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
+#: Resolves (method, path) to the route's declared requirement (app/route_policy.py).
+_route_index = policy.RouteIndex(app)
+app.include_router(people_api.router)
+
+
+def _error_body(status: int, detail, exc: BaseException | None = None) -> dict:
+    """``{"detail": ..., "error": {code, message, fix, docs}}`` - the 2.x body plus the
+    catalogued envelope (contracts/errors.py). ``detail`` is byte-for-byte what the route
+    raised; everything else is additive."""
+    code = getattr(exc, "code", None)
+    body: dict[str, Any] = {"detail": detail,
+                            "error": errors.envelope(code, status=status, detail=detail)}
+    req = getattr(exc, "required_permission", None)
+    if req:
+        body["required_permission"] = req
+    return body
 
 
 @app.exception_handler(StarletteHTTPException)
 async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """RFC 9457 problem documents for machines; the old body for browsers.
+    """RFC 9457 problem documents for machines; the old body (plus ``error``) for browsers.
 
     See app/problem.py for why. In short: a model cannot branch on prose, so
-    every refusal a machine receives now carries a stable `code` beside the
-    unchanged `detail`. Nothing a browser sees changes shape.
+    every refusal a machine receives carries a stable `code` beside the
+    unchanged `detail`. Browsers keep `{"detail": ...}`; since 3.0 both also carry
+    the catalogued `error` object (code, message, fix, docs), purely additive.
     """
     if exc.status_code >= 400 and _wants_problem_json(request):
-        return JSONResponse(
-            problem.body(exc.status_code, exc.detail),
-            status_code=exc.status_code,
-            headers=getattr(exc, "headers", None),
-            media_type=problem.MEDIA_TYPE,
-        )
-    return await http_exception_handler(request, exc)
+        doc = problem.body(exc.status_code, exc.detail, code=getattr(exc, "code", None))
+        doc["error"] = errors.envelope(getattr(exc, "code", None) or doc["code"],
+                                       status=exc.status_code, detail=exc.detail)
+        return JSONResponse(doc, status_code=exc.status_code,
+                            headers=getattr(exc, "headers", None), media_type=problem.MEDIA_TYPE)
+    if exc.status_code < 400 or exc.status_code in (204, 304):
+        return await http_exception_handler(request, exc)
+    return JSONResponse(_error_body(exc.status_code, exc.detail, exc),
+                        status_code=exc.status_code, headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(request: Request, exc: RequestValidationError):
     """Same treatment for FastAPI's own 422s.
 
-    `detail` keeps the full pydantic error list — that is what it always was,
-    and it is genuinely the most useful thing in the body — with the problem
+    `detail` keeps the full pydantic error list - that is what it always was,
+    and it is genuinely the most useful thing in the body - with the problem
     envelope wrapped around it.
     """
-    errors = _encodable(jsonable_encoder(exc.errors()))
+    errs = _encodable(jsonable_encoder(exc.errors()))
+    envelope = errors.envelope("validation_error")
     if _wants_problem_json(request):
-        return JSONResponse(
-            problem.body(422, errors, code="validation_error"),
-            status_code=422,
-            media_type=problem.MEDIA_TYPE,
-        )
+        doc = problem.body(422, errs, code="validation_error")
+        doc["error"] = envelope
+        return JSONResponse(doc, status_code=422, media_type=problem.MEDIA_TYPE)
     # FastAPI's own handler, minus one failure mode: it echoes the offending
     # `input`, and a lone surrogate in it (a JSON "\ud800" escape in any str
     # field) made the 422 response itself fail to encode -- a 500 with no
     # message instead of the validation error (review 2.3.6).
-    return JSONResponse({"detail": errors}, status_code=422)
+    return JSONResponse({"detail": errs, "error": envelope}, status_code=422)
 
 
 def _encodable(value):
@@ -694,6 +744,19 @@ async def media_security_headers(request: Request, call_next):
     # the fetch handler never ran, and the CACHE-bump auto-reload was inert.
     if path == "/static/sw.js":
         response.headers["Service-Worker-Allowed"] = "/"
+    # Baseline headers on EVERY answer (3.0). setdefault: the more specific policies
+    # above (sandboxed viewer, tools, media) keep what they set.
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "same-origin")
+    # The pages that are framed on purpose (viewer, tools, apps, the shell) say so with
+    # CSP frame-ancestors; X-Frame-Options would only fight it, so it covers the rest.
+    if "frame-ancestors" not in h.get("content-security-policy", ""):
+        h.setdefault("X-Frame-Options", "SAMEORIGIN")
+    if path.startswith(("/api/auth", "/api/people")):
+        h["Cache-Control"] = "no-store"          # credentials and account data are never cached
+    if policy.request_is_https(request):
+        h.setdefault("Strict-Transport-Security", "max-age=15552000")
     return response
 
 
@@ -772,131 +835,230 @@ async def limit_upload_body(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Apply the Safe-Mode model once a PIN is configured.
+    """Resolve WHO is calling, then enforce the permission the route declares.
 
-    No PIN set → app is fully open (original behaviour). With a PIN set, a valid
-    full-session cookie gets everything; anything else is served **Safe Mode**
-    (the default): image/media endpoints are blocked here and message bodies are
-    redacted downstream. The WebSocket route does its own equivalent check (http
-    middleware doesn't run for the ws scope). Added after media_security_headers,
-    so it runs OUTERMOST.
+    The 2.x gate answered one question - "is there a PIN session?" - and handled
+    everything else with a default-allow path deny-list. This one never guesses:
+
+    1. Identify the principal: a session cookie -> that profile; else, on a route
+       that has a machine surface, an agent holding the api_token (or an on-box
+       process while ``machine_loopback_trust`` is on); else a device bound to a
+       default profile; else **anonymous = Restricted** (what used to be Safe Mode).
+       An install with no owner and no PIN is open to this machine only, until the
+       owner account exists (``POST /api/auth/setup``).
+    2. Look up the route's declared requirement (``app/route_policy.py``). A route
+       with none is refused: fail closed.
+    3. ``policy.authorize`` decides. Handlers keep their item-level checks (which
+       character, which tool) through ``request.state.policy``.
+
+    The WebSocket route does its own equivalent in :func:`websocket_endpoint`.
+    Added after media_security_headers, so it runs OUTERMOST.
     """
     request.state.session = None
     request.state.decoy = False
     request.state.machine = False
-    cfg = auth.load()
-    if not cfg.pin_set:
-        return await call_next(request)
-
+    request.state.principal = None
+    request.state.policy = None
     path = request.url.path
     method = request.method
+    cfg = auth.load()
 
-    # Local Viewer frame tickets: a page framed under `sandbox` runs as an
-    # opaque origin and sends NO cookie for its stylesheets/scripts, so this
-    # prefix is authenticated by the random ticket in the URL instead (minted
-    # by the cookie-bearing stat call, client-bound, expiring). The route is
-    # its own lock and fails closed — see localview.local_view.
-    if path.startswith(localview.TICKET_PREFIX):
-        return await call_next(request)
-    # Tool frame tickets: the same capability model for a static tool's
-    # framed page (tools.tool_ticket_file is the only lock on this prefix).
-    if path.startswith(tools.TICKET_PREFIX):
+    # Capability URLs: a page framed under `sandbox` runs as an opaque origin and
+    # sends NO cookie for its stylesheets/scripts, so these prefixes are
+    # authenticated by the random ticket in the URL (minted by a cookie-bearing
+    # call, client-bound, expiring). The route is its own lock and fails closed.
+    if path.startswith((localview.TICKET_PREFIX, tools.TICKET_PREFIX)):
+        _attach_principal(request, policy.anonymous(), None)
         return await call_next(request)
 
-    # Always-open: app shell, static assets, auth endpoints, health.
-    # Exception: avatar images stay behind the session EXCEPT for safe bots,
-    # whose pictures Safe Mode is allowed to render (see the per-file check below).
-    if (path in _OPEN_EXACT or path.startswith(_OPEN_PREFIXES)
-            or path == _AUTH_PREFIX or path.startswith(_AUTH_PREFIX + "/")):
-        request.state.session = auth.get_session(request.cookies.get(COOKIE_NAME))
-        if request.state.session is None and _gated_avatar_static(path):
-            # Safe Mode may still show real pictures for the bots it lists, so
-            # serve a safe bot's avatar file even without a session. Anything
-            # else avatar-shaped — a non-safe bot's picture, a nested backup
-            # path, a sibling copy like avatars.backup-<date>/ — stays behind
-            # the PIN (fail closed; see _gated_avatar_static).
-            if not _safe_avatar_static(path):
-                return JSONResponse({"detail": "Unlock for full access", "decoy": True}, status_code=403)
+    tmpl, req = _route_index.match("GET" if method == "HEAD" else method, path)
+    device_id = _device_id_of(request)
+
+    # ---- an installation nobody has claimed yet ---------------------------------
+    if not policy.claimed(cfg):
+        if (not policy.allow_open_install()
+                and not policy.is_loopback_origin(
+                    request.client.host if request.client else "", _proxied_request(request))):
+            # Reachable from the network with no owner: the only thing a stranger
+            # may do is finish setup (with the one-time token) or read the shell.
+            _attach_principal(request, policy.anonymous(device_id), None)
+            if req is not None and req.public:
+                return await call_next(request)
+            if tmpl is None:
+                return await call_next(request)
+            return _gate_denial(request, policy.Decision(
+                False, 403, "setup_required",
+                "This DisPatch has no owner yet. Open it on the computer it runs on, or "
+                "finish setup with the one-time setup token from the server log."),
+                req, extra={"setup_required": True})
+        _attach_principal(request, policy.open_principal(), None)
         return await call_next(request)
 
-    # OpenClaw inbound: API key instead of a session. Loopback callers (local
-    # agents/crons on 127.0.0.1/::1) are always exempt so on-box automation
-    # keeps working tokenless. Remote (LAN/tailnet) callers MUST present the
-    # configured api_token — and when no token is configured they are refused
-    # outright (fail closed) rather than allowed to inject messages.
-    #
-    # Browser-shaped requests never take the machine branch: several inbound
-    # paths (threads, messages, unread) double as the locked frontend's own
-    # API, and a REMOTE Safe-Mode tab must keep its decoy view instead of
-    # being told to present an API key. Falling through also marks the request
-    # decoy for the per-route guards — the same agents-yes/locked-tab-no split
-    # _deny_agent_route_to_browser enforces, decided once, here.
-    if _is_inbound(method, path) and not _browser_request(request):
-        # The image server's completion callback carries its own credential —
-        # the per-job token DisPatch generated and handed to the rig at submit
-        # time — and it arrives from another machine, so the api_token check
-        # below would refuse every one of them (the rig has no api_token, and
-        # giving it one would hand a GPU box a key to the whole inbound
-        # surface). The handler verifies the token in constant time and
-        # DISCARDS the body: a valid callback is a poke to re-poll one job,
-        # never content. Worst case for a forged one is a wasted get_job.
-        if method == "POST" and _INBOUND_IMAGE_JOB_CALLBACK_RE.match(path):
-            request.state.machine = True
-            return await call_next(request)
-        # A logged-in full session may always use these endpoints (e.g. a family
-        # member driving the app over the tailnet) — check that first.
-        sess = auth.get_session(request.cookies.get(COOKIE_NAME))
-        if sess is not None:
-            request.state.session = sess
-            auth.touch_session(sess.token)
-            return await call_next(request)
-        # A reverse proxy in front of us (a tailnet Serve terminates TLS and
-        # forwards from loopback) makes remote callers appear local, which would
-        # silently skip the token check. Any forwarding / Serve-identity header
-        # proves the request did NOT originate from an on-box process, so force
-        # the token even when the socket peer is 127.0.0.1. Both tests live in
-        # _loopback_socket/_proxied_request so the health endpoint's machine
-        # branch cannot drift from this one.
-        _is_loopback = _loopback_socket(request)
-        _proxied = _proxied_request(request)
-        if not _is_loopback or _proxied:
-            key = request.headers.get("x-api-key") or _bearer(request) or ""
-            if not cfg.api_token or not auth.verify_api_token(key):
-                # Dual-use GETs: these feed the locked UI's own rendering AND
-                # the machine surface. On a plain-HTTP origin (LAN IP — not a
-                # trustworthy context) a browser attaches NO Sec-Fetch-* and
-                # no Origin to same-origin GETs, so a locked tab's reads are
-                # indistinguishable from a remote machine here. A keyless
-                # remote GET therefore degrades to the decoy view (exactly
-                # what it got before these routes joined the inbound surface)
-                # rather than 401. Mutations are unaffected: browsers attach
-                # Origin to every non-GET request, so those tabs never reach
-                # this branch — and a keyless machine mutation stays
-                # fail-closed.
-                if method == "GET" and (
-                        path in ("/api/reactions", "/api/bots", "/api/threads",
-                                 "/api/unread", "/api/extensions")
-                        or _INBOUND_THREAD_ONE_RE.match(path)
-                        or _INBOUND_THREAD_SUB_RE.match(path)):
-                    request.state.decoy = True
-                    return await call_next(request)
-                return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
-        # An authenticated MACHINE caller (on-box loopback, or a remote holding
-        # the api_token). Recorded so an in-handler guard can tell it apart
-        # from "sessionless, therefore Safe Mode" — see _require_full_access.
-        request.state.machine = True
-        return await call_next(request)
-
-    # Full session → everything (and slide the idle window). Otherwise Safe Mode.
-    sess = auth.get_session(request.cookies.get(COOKIE_NAME))
-    if sess is not None:
+    # ---- who is calling ----------------------------------------------------------
+    sess = auth.get_session(request.cookies.get(policy.SESSION_COOKIE))
+    principal = policy.for_session(sess, device_id)
+    if principal is not None:
         request.state.session = sess
+    elif req is not None and req.machine and not _browser_request(request):
+        if req.public and method == "POST":
+            # The image rig's completion callback carries its own credential - the
+            # per-job token DisPatch handed it at submit time - and arrives from
+            # another machine; the handler verifies the token and DISCARDS the body.
+            principal = policy.machine_principal("callback", {MachineScope.IMAGE_JOB_CALLBACK.value})
+        elif req.public:
+            # A public route with a richer machine view (health): recognise a
+            # machine if there is one, never refuse a stranger.
+            principal = _opportunistic_machine(request, cfg)
+        else:
+            principal, early = _machine_principal(request, cfg, req, method, path)
+            if early is not None:
+                return early
+    if principal is None:
+        principal = policy.for_device(device_id) or policy.anonymous(device_id)
+
+    # ---- an install that shows nothing to a device nobody has signed in on --------
+    if (principal.kind == "anonymous" and cfg.anonymous_access == "none"
+            and tmpl is not None and not (req is not None and req.public)):
+        _attach_principal(request, principal, sess)
+        return _gate_denial(request, policy.Decision(
+            False, 401, "signin_required", "Sign in to continue."), req)
+
+    # ---- CSRF: a cookie-carrying browser may not be driven by another origin ----
+    # (Ambient authority is the cookie. An anonymous caller has none to abuse.)
+    if (method not in _SAFE_METHODS and (sess is not None or device_id is not None)
+            and _cross_origin(request)):
+        _attach_principal(request, principal, sess)
+        return _gate_denial(request, policy.Decision(
+            False, 403, "csrf_origin", "cross-origin request refused"), req)
+
+    _attach_principal(request, principal, sess)
+
+    # ---- the declared requirement ------------------------------------------------
+    if req is None:
+        if tmpl is None:
+            return await call_next(request)           # no such route: the app's own 404/405
+        log.error("route %s %s has no declared permission; refusing it", method, path)
+        return _gate_denial(request, policy.Decision(
+            False, 403, "route_undeclared", "This endpoint has no access policy."), req)
+    decision = policy.authorize(principal, req)
+    if not decision.allowed:
+        accounts_note = principal.profile_id or principal.via
+        log.info("denied %s %s for %s (%s)", method, path, accounts_note, decision.code)
+        return _gate_denial(request, decision, req)
+    request.state.policy.scoped = decision.scoped
+
+    # ---- item-level rules that depend on the path ---------------------------------
+    if principal.is_restricted:
+        if _gated_avatar_static(path) and not _safe_avatar_static(path):
+            return _gate_denial(request, policy.Decision(
+                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
+        item = _restricted_item_denied(method, path)
+        if item:
+            return _gate_denial(request, policy.Decision(
+                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
+        limited = _restricted_limit_denied(principal, req)
+        if limited is not None:
+            return _gate_denial(request, limited, req)
+    if sess is not None:
         auth.touch_session(sess.token)
-        return await call_next(request)
-    request.state.decoy = True
-    if _decoy_blocked(method, path):
-        return JSONResponse({"detail": "Unlock for full access", "decoy": True}, status_code=403)
+        if principal.kind == "profile" and principal.is_restricted and not req.public:
+            _note_active_time(principal)
     return await call_next(request)
+
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _attach_principal(request: Request, principal: policy.Principal,
+                      sess: auth._Session | None) -> None:
+    """Record the verdict where handlers (and the 2.x helper names) look for it."""
+    request.state.principal = principal
+    request.state.policy = policy.Policy(principal)
+    request.state.session = sess
+    request.state.decoy = principal.is_restricted
+    request.state.machine = principal.is_machine
+
+
+def _device_id_of(request: Request) -> str | None:
+    tok = request.cookies.get(policy.DEVICE_COOKIE)
+    return auth.device_hash(tok) if tok and 16 <= len(tok) <= 128 else None
+
+
+def _cross_origin(request: Request) -> bool:
+    """Does this state-changing request come from another origin's page?
+
+    ``SameSite=Strict`` on the cookies is the first line; this is the second, and
+    the one that covers a bare ``POST`` with no body (which FastAPI would accept
+    from a CORS "simple" request). A present Origin must equal the Host, and
+    ``Sec-Fetch-Site`` must not say cross-site or same-site (another port on the
+    same host). Non-browser callers send neither header and are judged by their
+    credential alone."""
+    if not extensions.origin_ok(request.headers):
+        return True
+    return request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site")
+
+
+def _opportunistic_machine(request: Request, cfg) -> policy.Principal | None:
+    """For a PUBLIC route with a machine surface (health detail): recognise a
+    trusted machine if there is one, never refuse a stranger."""
+    key = request.headers.get("x-api-key") or _bearer(request) or ""
+    if cfg.api_token and key and auth.verify_api_token(key):
+        return policy.machine_principal("api_token", _scopes_for(cfg))
+    if cfg.machine_loopback_trust and _on_box_machine(request):
+        return policy.machine_principal("loopback", _scopes_for(cfg))
+    return None
+
+
+def _scopes_for(cfg) -> set[str]:
+    allowed = {s.value for s in MACHINE_DEFAULT_SCOPES}
+    if cfg.machine_scopes is None:
+        return allowed
+    return allowed & set(cfg.machine_scopes)
+
+
+# GET routes shared by the machine surface and a locked tab's own rendering. On a
+# plain-http LAN origin (not a trustworthy context) a browser attaches no
+# Sec-Fetch-*/Origin to same-origin GETs, so a locked tab's reads look exactly like
+# a remote machine's; a keyless remote GET degrades to the Restricted view instead
+# of a 401. Mutations are unaffected: browsers attach Origin to every non-GET.
+_DEGRADE_GET = frozenset({"/api/reactions", "/api/bots", "/api/threads", "/api/unread",
+                          "/api/extensions"})
+
+
+def _machine_principal(request: Request, cfg, req, method: str, path: str):
+    """(principal, early_response) for a non-browser caller of a machine route."""
+    key = request.headers.get("x-api-key") or _bearer(request) or ""
+    # A reverse proxy in front of us (a tailnet Serve terminates TLS and forwards
+    # from loopback) makes remote callers appear local. Any forwarding / Serve
+    # identity header proves the request did NOT originate from an on-box process,
+    # so the token is required even when the socket peer is 127.0.0.1.
+    trusted_local = (cfg.machine_loopback_trust and _loopback_socket(request)
+                     and not _proxied_request(request))
+    if trusted_local:
+        return policy.machine_principal("loopback", _scopes_for(cfg)), None
+    if cfg.api_token and auth.verify_api_token(key):
+        return policy.machine_principal("api_token", _scopes_for(cfg)), None
+    if method == "GET" and (path in _DEGRADE_GET or _INBOUND_THREAD_ONE_RE.match(path)
+                            or _INBOUND_THREAD_SUB_RE.match(path)):
+        return None, None                              # falls through to Restricted
+    return None, JSONResponse({"detail": "Invalid or missing API key",
+                               "error": errors.envelope("invalid_api_key")}, status_code=401)
+
+
+def _gate_denial(request: Request, decision: policy.Decision, req,
+                 extra: dict | None = None) -> JSONResponse:
+    body: dict[str, Any] = {"detail": decision.detail}
+    if decision.code == "safe_mode":
+        body["decoy"] = True                          # the 2.x marker the frontend keys on
+    if decision.required:
+        body["required_permission"] = decision.required
+    body["error"] = errors.envelope(decision.code, message=decision.detail)
+    if extra:
+        body.update(extra)
+    if _wants_problem_json(request):
+        return JSONResponse(problem.body(decision.status, decision.detail, code=decision.code) | {
+            "error": body["error"]}, status_code=decision.status, media_type=problem.MEDIA_TYPE)
+    return JSONResponse(body, status_code=decision.status)
 
 
 def _task_done(task: asyncio.Task) -> None:
@@ -1771,80 +1933,6 @@ def _safe_avatar_static(path: str) -> bool:
         return False
     fname = path[len("/static/avatars/"):]
     return "/" not in fname and fname in _safe_avatar_files()
-_INBOUND_MSG_RE = re.compile(r"^/api/threads/[^/]+/messages$")
-
-
-# Reaction endpoints an on-box agent legitimately drives — everything the
-# dispatch-reactions skill instructs it to do: fire one, read/edit the prompt
-# bank, check and refill the pool, tune the overlay. Kept as an explicit table
-# so widening it is a deliberate edit, not a regex accident. Pack curation
-# (upload / edit / delete an image) stays full-session: that is the operator's shelf.
-_INBOUND_REACTION = {
-    ("GET", "/api/reactions"),
-    ("POST", "/api/reactions/fire"),
-    ("GET", "/api/reactions/prompts"), ("PUT", "/api/reactions/prompts"),
-    ("GET", "/api/reactions/pool"), ("PUT", "/api/reactions/pool"),
-    ("POST", "/api/reactions/pool/refill"),
-    ("PUT", "/api/reactions/settings"),
-    ("POST", "/api/reactions/generate"),
-}
-
-
-# Agent-fired image jobs. Exactly two routes, and both belong on the machine
-# surface for the same reason the reaction fire does: this is a bot asking for
-# something, not an operator configuring something. Firing is POST, reading a
-# job's state is GET, and there is deliberately no list route — an agent that
-# has lost its job id has also lost the thread it was for, and the placeholder
-# message in that thread is the answer either way.
-_INBOUND_IMAGE_JOB_RE = re.compile(r"^/api/image-jobs(?:/[A-Za-z0-9_-]{1,64})?$")
-
-# The rig's completion callback. A third route, and the only one on this
-# surface whose caller is neither on this box nor holding the api_token: the
-# image server is a LAN peer that knows one thing about us, the per-job token
-# we handed it at submit time. That token is the whole credential, which is
-# why the body is discarded — see image_job_callback.
-_INBOUND_IMAGE_JOB_CALLBACK_RE = re.compile(
-    r"^/api/image-jobs/[A-Za-z0-9_-]{1,64}/callback$")
-
-
-# Avatar management an on-box agent legitimately drives. Agents already
-# generate the images (the image CLI) and a cron rotates them daily — but the API
-# was full-session only, so that rotation had to be a shell script writing
-# files and config.yaml directly, going around the app entirely. OPENCLAW.md
-# meanwhile documented the upload endpoint as available to OpenClaw, which it
-# was not: it returned 403.
-#
-# Scoped to ONE bot's own avatar, by regex, so this cannot become a general
-# write channel. Reading a face is included because an agent that is about to
-# replace an avatar should be able to see the current one first.
-_INBOUND_AVATAR_RE = re.compile(
-    r"^/api/bots/[^/]+/avatar(?:/full|/history(?:/[^/]+)?|/restore)?$")
-
-# Re-pinning ONE thread's avatar is part of the same avatar-management surface
-# (POST only — the GET of this path is the browser-facing image route and keeps
-# its own decoy gating). The pattern itself is defined next to the upload
-# ceilings, which need it too.
-
-# The avatar pool is the same machine surface as the reaction pool: the
-# on-box watchdog CLI checks status and kicks refills, and agents curate the
-# prompt banks (deliberately data an agent can rewrite — see reactions'
-# prompts routes). The bot-id segment shares BOT_ID_RE's charset, so the
-# regex admits no dot and no separator.
-_INBOUND_AVATAR_POOL_RE = re.compile(
-    r"^/api/avatar-pool(?:/[A-Za-z0-9_-]+(?:/refill|/prompts)?)?$")
-
-# Apps (docs/design/2026-09-25-apps.md) — the Job Board first among them. A
-# MOUNTED app's whole API, at /api/apps/<id> and at its manifest's legacy
-# prefix (the board's /api/jobs, which the `dispatch-jobs` CLI, the scout
-# agent and the daily sweep cron call from loopback), is on the machine-inbound
-# surface: `apps_loader.is_inbound`. That replaces the hand-kept /api/jobs
-# allowlist that lived here (2026-09-14..25, grown one 403 at a time). The
-# per-route decision is the app's own ctx.require_access (operator OR on-box
-# machine) / ctx.require_operator (a real session only), behind a router-level
-# gate that refuses Safe Mode and 404s a disabled app; a locked BROWSER never
-# takes the machine branch at all (see auth_gate).
-
-
 # Thread management OPENCLAW.md has always documented as available to on-box
 # agents: list/read a thread, create/rename/pin/archive/delete one, delete a
 # message, mark read, unread counts. Until 2026-08-14 only the POST-message
@@ -1854,215 +1942,61 @@ _INBOUND_AVATAR_POOL_RE = re.compile(
 # sessionless BROWSER still gets exactly the Safe-Mode view it always had.
 _INBOUND_THREAD_ONE_RE = re.compile(r"^/api/threads/[^/]+$")
 _INBOUND_THREAD_SUB_RE = re.compile(r"^/api/threads/[^/]+/(?:messages|read)$")
-_INBOUND_MESSAGE_ONE_RE = re.compile(r"^/api/messages/[^/]+$")
 
 
 def _is_inbound(method: str, path: str) -> bool:
-    """OpenClaw machine-to-machine endpoints (session-exempt; API-key optional)."""
-    # Never an extension's own routes: they are operator-only, full stop (the
-    # voice add-on's routes hold recordings of a person's voice — not agent
-    # business). Checked first so no rule below can widen it.
-    if extensions.owns_path(path):
-        return False
-    if method == "GET" and path == "/api/extensions":
-        # The installed add-ons and their states: what a deploy check reads
-        # over loopback (a box with a PIN has no operator session in a plain
-        # curl). Names and versions only; `detail` is
-        # for operators (app/extensions.py).
-        return True
-    if method == "POST" and path in ("/api/inject", "/api/daily"):
-        return True
-    if method in ("GET", "POST") and path == "/api/threads":
-        return True
-    if method == "GET" and path == "/api/bots":
-        # Roster discovery. The dispatch skill has to WARN agents off this
-        # route today ("do NOT discover ids via GET /api/bots") because a
-        # sessionless machine got the Safe-Mode subset — so a model that
-        # looked up the roster the REST-natural way concluded the non-safe
-        # bots do not exist, then injected at the wrong one or gave up. A warning
-        # is not a fix for something a small model forgets under context load.
-        # Same machine-branch shape as GET /api/reactions, and the handler
-        # keeps _is_safe_mode_caller, so a browser tab with no session still
-        # sees exactly the Safe-Mode roster it always did.
-        return True
-    if method in ("GET", "PATCH", "DELETE") and _INBOUND_THREAD_ONE_RE.match(path):
-        return True
-    if method in ("GET", "POST") and _INBOUND_THREAD_SUB_RE.match(path):
-        return True
-    if method == "DELETE" and _INBOUND_MESSAGE_ONE_RE.match(path):
-        return True
-    if method == "GET" and path == "/api/unread":
-        return True
-    if method == "GET" and path == "/api/files":
-        # List ONLY — the metadata an on-box agent needs to map an upload to
-        # its blob (name → stored_name → FILES_DIR/<stored_name>). Retrieval
-        # (/download, /raw) deliberately stays off the machine surface: agents
-        # read the disk, and the one-way drop stays one-way for everyone else.
-        return True
-    if (method, path) in _INBOUND_REACTION:
-        return True
-    if method == "POST" and path == "/api/guide/seed":
-        # 2.3.7: an install script adds the setup guide. Fixed shipped text;
-        # the handler refuses `force` without a session.
-        return True
-    if (method, path) in (("GET", "/api/advisor/status"),
-                          ("POST", "/api/advisor/digest")):
-        # The nightly digest is a cron job on the box; status is what an
-        # agent or a watchdog reads. Approving a handoff is NOT here: an
-        # agent must never be able to press its own Send button.
-        return True
-    if method in ("GET", "POST") and _INBOUND_IMAGE_JOB_RE.match(path):
-        return True
-    if method == "POST" and _INBOUND_IMAGE_JOB_CALLBACK_RE.match(path):
-        return True
-    if method in ("GET", "POST") and _INBOUND_AVATAR_RE.match(path):
-        return True
-    if method == "POST" and _INBOUND_THREAD_AVATAR_RE.match(path):
-        return True
-    if method in ("GET", "PUT", "POST") and _INBOUND_AVATAR_POOL_RE.match(path):
-        return True
-    # Apps (the Job Board's /api/jobs among them): see the note above.
-    if apps_loader.is_inbound(method, path):
-        return True
-    return bool(method == "POST" and _INBOUND_MSG_RE.match(path))
+    """Is this a machine-to-machine endpoint (a route that declares machine scopes)?
+
+    Derived from the route table in ``app/route_policy.py``; there is no second
+    list to keep in step. Session-exempt does not mean credential-exempt: a machine
+    needs the api_token (or ``machine_loopback_trust`` for an on-box process)."""
+    _, req = _route_index.match("GET" if method.upper() == "HEAD" else method.upper(), path)
+    return bool(req is not None and req.machine)
 
 
 def _decoy_blocked(method: str, path: str) -> bool:
-    """Paths a decoy session must never reach (image/file RETRIEVAL + management).
+    """Would the gate refuse a signed-out (Restricted) caller this request?
 
-    `POST /api/upload` is intentionally NOT here: Safe Mode's "＋" button uploads
-    through it (the endpoint is POST-only, so there's no media to leak back) —
-    but decoy uploads are capped by a daily byte quota (DECOY_UPLOAD_QUOTA).
-    Retrieval (/media, /api/media, /api/files*) and management stay barred, so a
-    locked session can send an upload but can't browse or pull anything down.
-    """
-    # Belt-and-braces: /static/ is an open prefix so avatar paths normally get
-    # their safe-file filter in the auth gate itself — but if one ever reaches
-    # here, the same structural rule (any avatars* segment, incl. sibling
-    # backup copies) blocks it.
-    if _gated_avatar_static(path):
-        return True
-    if path.startswith(("/media/", "/api/media", "/api/files",
-                        # Operator diagnostics: storage layout, log tail, config
-                        # findings. The router fails closed on its own too.
-                        "/api/dashboard",
-                        # "Connect an AI" — provider presets, the connection
-                        # probe, and the route that writes an API key into
-                        # config.yaml. Setup UI is never shown in Safe Mode, and
-                        # the routes re-check for themselves (_require_operator).
-                        "/api/llm",
-                        # Recovery / retrieval tools are full-access only: they
-                        # read raw transcripts + dump all history (would bypass
-                        # Safe-Mode redaction). Locked sessions can't reach them.
-                        "/api/search", "/api/export", "/api/recover",
-                        "/api/openclaw",
-                        # Avatar-pool management (status, config, prompts,
-                        # refill) — full-session or on-box machine only; a
-                        # locked device has no business with the shelf.
-                        "/api/avatar-pool",
-                        # Image jobs: firing one spends GPU time and puts a
-                        # picture in a conversation, and reading one back names
-                        # the prompt and the rig's error text. Agents and the
-                        # operator only — a locked device sees the resulting
-                        # message (redacted) and nothing else.
-                        "/api/image-jobs",
-                        # The harness is code execution — a headless job runs
-                        # a shell agent in the operator's home directory —
-                        # so this is belt-and-braces on top of
-                        # _require_harness's own gate.
-                        # StudioForge is not code execution, but its panel is
-                        # an UNAUTHENTICATED admin surface for the LLM rig:
-                        # anyone who learns the address from a Safe-Mode device
-                        # can load and unload models on it. The status route
-                        # discloses that address, so it is operator-only too --
-                        # belt-and-braces on top of _require_studioforge.
-                        "/api/harness", "/api/studioforge",
-                        # Advisor requests name what the owner asked agents
-                        # to research or do; the corpus status names paths.
-                        "/api/advisor",
-                        # Emails tab: launch_url carries MailForge's one-time
-                        # launcher key. Clients tab: a same-origin proxy onto
-                        # the practice box's client-pipeline API. Both are
-                        # unlocked-operator-only features — belt-and-braces on
-                        # top of _require_mail / _require_practice.
-                        "/api/mail", "/api/practice",
-                        # Extensions (app/extensions.py): the voice add-on's
-                        # API (its status names engines, its Voices manager
-                        # holds recordings of a person's voice). Belt-and-
-                        # braces on top of the operator dependency every
-                        # extension route carries; other extension prefixes
-                        # are checked just below. The list of add-ons and
-                        # their public code under /ext/ are READABLE by a
-                        # locked device since 2.3.4 (voice on the bots it can
-                        # see) — see the read-only exception after this list.
-                        "/api/voice",
-                        # Settings -> Plugins (app/plugins_api.py): operator only.
-                        "/api/plugins",
-                        # Local Viewer: reads arbitrary bytes off the host's
-                        # disk. Unlocked operator only — Safe Mode never even
-                        # renders the affordance, and this is the server half
-                        # of that promise.
-                        "/local/", "/api/local",
-                        # Web Push: subscribing binds a remembered device to
-                        # pings about every thread. Unlocked only; the routes
-                        # re-check for themselves (_push_device_key).
-                        "/api/push",
-                        # Setup-guide seeding (2.3.7): writes a thread.
-                        "/api/guide")):
-        return True
-    if path == "/api/extensions" or path.startswith("/ext/"):
-        # Read-only for a locked device (the handlers serve it the mount rows
-        # and the public frontend files); nothing else on either path.
-        return method not in ("GET", "HEAD")
-    if extensions.owns_path(path):
-        return True
-    # Apps: /api/apps/*, /apps/* and each mounted app's legacy prefix (the Job
-    # Board's /api/jobs). Blocked unless the app is `safe: true` and the method
-    # only reads; an app path naming no app is blocked outright.
-    app_rule = apps_loader.decoy_blocked(method, path)
-    if app_rule is not None:
-        return app_rule
-    if path == "/api/tools" or path.startswith(("/api/tools/", "/tools/")):
-        # Tools (tools.yaml). Safe Mode may LIST (the route returns only
-        # `safe: true` static/url tools, stripped of paths and argv), read a
-        # tool's status, and GET a tool's pages — each handler answers a decoy
-        # 403 for any tool that is not safe, so the per-tool decision lives
-        # there. Refresh and the write path are operator-only, full stop.
-        if method not in ("GET", "HEAD"):
-            return True
-        if path == "/api/tools" or path.startswith("/tools/"):
-            return False
-        return not re.match(r"^/api/tools/[^/]+/status$", path)
-    if path == "/api/reactions" or path.startswith("/api/reactions/"):
-        # Safe Mode gets the reaction feature READ-ONLY, through the `safe`
-        # flag — the same opt-in model as safe bots' avatars: it may list (the
-        # route filters to safe entries) and fetch a safe reaction's image.
-        # Firing is agent-only (refused in reactions_fire — that endpoint is
-        # inbound-exempt so it normally never reaches this gate; no exception
-        # here is belt-and-braces). Pack management (upload, edit, delete,
-        # settings, image generation) stays full-session only.
-        if method == "GET" and path == "/api/reactions":
-            return False
-        mi = re.match(r"^/api/reactions/([^/]+)/image$", path)
-        if mi and method == "GET":
-            return mi.group(1) not in reactions.safe_ids()
-        return True
+    Not a deny-list any more - the answer is derived from the route table
+    (``app/route_policy.py``) - but the question is still the one tests, the
+    dashboard and a curious operator ask. Scoped routes count as reachable (the
+    handler narrows the answer); a path no route matches is not blocked."""
+    _, req = _route_index.match("GET" if method.upper() == "HEAD" else method.upper(), path)
+    if req is None:
+        return False
+    d = policy.authorize(policy.anonymous(), req)
+    return not d.allowed
 
-    m = re.match(r"^/api/bots/([^/]+)/avatar(/full)?$", path)
+
+#: Item-level rules a Restricted caller meets on a scoped route.
+_AVATAR_ITEM_RE = re.compile(r"^/api/bots/([^/]+)/avatar(?:/thumb|/history(?:/[^/]+)?)?$")
+_REACTION_IMAGE_RE = re.compile(r"^/api/reactions/([^/]+)/image$")
+
+
+def _restricted_item_denied(method: str, path: str) -> bool:
+    """True when a Restricted caller asks for a SPECIFIC thing it may not have: a
+    character outside its audience, a reaction image not flagged safe."""
+    if method not in ("GET", "HEAD"):
+        return False
+    m = _AVATAR_ITEM_RE.match(path)
     if m:
-        # /avatar/full is always PIN-gated (full-resolution images stay locked).
-        # GET /avatar is allowed for safe bots so the locked view can display
-        # their pictures; POST (replace) is a mutation — Safe Mode is VIEW +
-        # SEND only, so changing an avatar requires a full PIN session.
-        if m.group(2) or method != "GET":
-            return True
         return m.group(1) not in _safe_bot_ids()
-    # Bot management (add / edit / remove): operator-only, every method.
-    if method != "GET" and path == "/api/bots":
-        return True
-    if re.match(r"^/api/bots/[^/]+$", path):
-        return True
-    return path in ("/api/bots/order", "/api/bots/all")
+    m = _REACTION_IMAGE_RE.match(path)
+    if m:
+        return m.group(1) not in reactions.safe_ids()
+    return False
+
+
+def _restricted_limit_denied(principal: policy.Principal, req) -> policy.Decision | None:
+    """Time limits / quiet hours of a Restricted PROFILE (not an anonymous device)."""
+    if principal.kind != "profile" or req.public or req.permission not in (
+            "use_chat", "use_voice", "manage_history"):
+        return None
+    return limits.check(principal)
+
+
+def _note_active_time(principal: policy.Principal) -> None:
+    limits.note_active(principal)
 
 
 def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
@@ -2098,106 +2032,98 @@ async def _canonical_thread_id(thread_id: str) -> str:
     return canonical
 
 
-# Per-client decoy upload accounting: {client_ip: bytes_uploaded_today}.
-_decoy_upload_used: dict[str, int] = {}
-_decoy_upload_day: str = ""
+# Daily budgets of a Restricted caller (3.0). They used to be in-memory per-IP dicts
+# that reset on restart and lumped together every device behind one address. They
+# are now rows in chats.db (accounts.usage_daily), charged to the PROFILE when a
+# Restricted profile is signed in (or its device is bound), and to the client
+# address only for an anonymous device. The two names below are dict-shaped views
+# of today's rows, kept so tools and tests that read or clear them still work.
+_decoy_upload_used = accounts.UsageMap("upload_bytes")
+_decoy_action_used = accounts.UsageMap("action:", tuple_keys=True)
+_decoy_upload_day: str = ""        # retained for old test fixtures; unused
 
 
 def _quota_ip(headers, peer: str) -> str:
-    """The identity a Safe-Mode daily budget is charged to.
+    """The identity an anonymous device's daily budget is charged to (policy.py)."""
+    return policy.quota_ip(headers, peer)
 
-    The socket peer, and ONLY the socket peer, unless the peer is loopback.
 
-    This used to read the leftmost `X-Forwarded-For` whenever one was present,
-    with the reasoning that a forger "splits its OWN budget into more buckets".
-    That is exactly backwards: a bucket is a fresh ALLOWANCE, so N forged
-    values buy N times the daily quota — and a same-origin `fetch()` from the
-    locked page can set the header freely, so the limited tier could lift its
-    own limit from the browser.
-
-    There is no trusted reverse proxy in this deployment. Tailscale Serve is
-    the only thing that ever fronts the app, and it connects from loopback —
-    so a forwarding header is believed only when the peer IS loopback, where
-    the alternative (one shared household bucket for every tailnet device)
-    would be the worse failure. A remote peer's headers are ignored outright.
-    Of a forwarded list only the RIGHTMOST value — the one the proxy itself
-    appended — is read; anything to its left was written by the caller.
-    """
-    if _ip_is_loopback(peer):
-        # RIGHTMOST entry: a proxy appends the address it saw, so the last
-        # value is the one the proxy wrote and the leftmost is whatever the
-        # caller put there itself — a tailnet device could otherwise mint a
-        # fresh bucket per forged value, the very thing this docstring warns of.
-        first = (headers.get("x-forwarded-for") or "").split(",")[-1].strip()
-        # An IPv6 literal may arrive bracketed and/or with a port.
-        if first.startswith("[") and "]" in first:
-            first = first[1:first.index("]")]
-        elif first.count(":") == 1 and "." in first:
-            first = first.rsplit(":", 1)[0]
-        try:
-            return str(ipaddress.ip_address(first))
-        except ValueError:
-            pass
-    return peer or "?"
+def _budget_subject(headers, peer: str, principal: policy.Principal | None) -> str:
+    """Who a Restricted caller's budget belongs to: its profile, else its address."""
+    if principal is not None and principal.profile_id and principal.is_restricted:
+        return principal.profile_id
+    return _quota_ip(headers, peer)
 
 
 def _request_quota_ip(request: Request) -> str:
+    """The budget subject of a request (named for the 2.x per-IP counter it replaces)."""
     client = getattr(request, "client", None)
-    return _quota_ip(getattr(request, "headers", None) or {},
-                     client.host if client else "?")
+    return _budget_subject(getattr(request, "headers", None) or {},
+                           client.host if client else "?",
+                           getattr(request.state, "principal", None))
+
+
+#: profile budget key (People & Profiles) for each charged kind
+_BUDGET_KEYS = {"turn": "turns", "thread": "threads", "feedback": "feedback"}
+
+
+def _budget_limit(subject: str, kind: str, default: int) -> int:
+    """The daily limit for ``kind``: the profile's own, else the install default."""
+    prof = accounts.get_profile(subject) if subject else None
+    if prof is None:
+        return default
+    b = prof.budgets or {}
+    if kind == "upload_bytes":
+        mb = b.get("upload_mb")
+        return int(mb) * 1024 * 1024 if isinstance(mb, int) else default
+    v = b.get(_BUDGET_KEYS.get(kind, ""))
+    return int(v) if isinstance(v, int) else default
 
 
 def _decoy_quota_left(request: Request) -> int | None:
-    """Bytes a decoy client may still upload today; None for full sessions."""
-    global _decoy_upload_day
+    """Bytes a Restricted caller may still upload today; None for everyone else."""
     if not _is_decoy(request):
         return None
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today != _decoy_upload_day:
-        _decoy_upload_day = today
-        _decoy_upload_used.clear()
-    ip = _request_quota_ip(request)
-    return max(0, DECOY_UPLOAD_QUOTA - _decoy_upload_used.get(ip, 0))
+    subject = _request_quota_ip(request)
+    limit = _budget_limit(subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
+    return max(0, limit - accounts.usage_get(subject, "upload_bytes"))
 
 
 def _decoy_quota_add(request: Request, n: int) -> None:
-    ip = _request_quota_ip(request)
-    _decoy_upload_used[ip] = max(0, _decoy_upload_used.get(ip, 0) + n)
+    subject = _request_quota_ip(request)
+    accounts.usage_add(subject, "upload_bytes", n)
+    if n > 0:
+        accounts.log_activity("upload", profile_id=subject if accounts.get_profile(subject) else None,
+                              subject=subject, detail=f"{n} bytes")
 
 
 def _decoy_over_quota(request: Request) -> bool:
-    """True once this client's SHARED running total exceeds the daily budget.
+    """True once this caller's SHARED running total exceeds the daily budget.
 
     Read live (not from a per-request snapshot) so overlapping uploads all
-    contend on the same counter — closes the TOCTOU window where each request
+    contend on the same counter - closes the TOCTOU window where each request
     read the full remaining budget before any of them committed their bytes."""
-    ip = _request_quota_ip(request)
-    return _decoy_upload_used.get(ip, 0) > DECOY_UPLOAD_QUOTA
+    subject = _request_quota_ip(request)
+    return accounts.usage_get(subject, "upload_bytes") > _budget_limit(
+        subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
 
 
-# {(client_ip, action): count} for the current day; cleared with the upload day.
-_decoy_action_used: dict[tuple[str, str], int] = {}
-
-
-def _decoy_action_allowed(ip: str, action: str, limit: int) -> bool:
-    """Charge one unit of a Safe-Mode daily action budget. False once spent."""
-    global _decoy_upload_day
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today != _decoy_upload_day:
-        _decoy_upload_day = today
-        _decoy_upload_used.clear()
-        _decoy_action_used.clear()
-    key = (ip or "?", action)
-    used = _decoy_action_used.get(key, 0)
-    if used >= limit:
-        return False
-    _decoy_action_used[key] = used + 1
-    return True
+def _decoy_action_allowed(subject: str, action: str, limit: int) -> bool:
+    """Charge one unit of a Restricted daily action budget. False once spent."""
+    subject = subject or "?"
+    ok = accounts.usage_charge(subject, f"action:{action}", _budget_limit(subject, action, limit))
+    pid = subject if accounts.get_profile(subject) else None
+    # The activity summary the Owner sees (and the Restricted UI discloses): counts
+    # of what was done, never what was said.
+    accounts.log_activity(action if ok else "limit_hit", profile_id=pid, subject=subject,
+                          detail="" if ok else action)
+    return ok
 
 
 def _ws_client_ip(ws: WebSocket) -> str:
-    """Same budget identity as the REST path — see _quota_ip."""
-    return _quota_ip(ws.headers, ws.client.host if ws.client else "?")
+    """Same budget identity as the REST path - see _budget_subject."""
+    return _budget_subject(ws.headers, ws.client.host if ws.client else "?",
+                           manager.principal_of(ws))
 
 
 def _deny_decoy_mutation(request: Request) -> None:
@@ -2210,52 +2136,25 @@ def _deny_decoy_mutation(request: Request) -> None:
 
 
 def _require_full_access(request: Request) -> None:
-    """In-handler full-access gate for the operator-only routes.
-
-    A second lock on the same door, for the same reason dashboard_routes states
-    it: those routes are protected ONLY by the `_decoy_blocked` prefix tuple in
-    the middleware, so their security is a string-prefix list in another
-    function — an edit to that tuple, a route mounted at a new path, or a
-    handler called from anywhere but the middleware chain and the guard is
-    simply gone, silently. `/api/files/wipe` deletes the entire File Server.
-
-    Derives the answer itself: a Safe-Mode verdict is refused, a live session
-    or an AUTHENTICATED MACHINE caller (the gate's inbound branch — on-box
-    agents list files this way) is allowed, and a caller with neither is
-    allowed only when the app has no lock at all, which is the rule the rest
-    of the app uses.
-    """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
-    if getattr(request.state, "machine", False):
-        return
-    session = _session_of(request) or auth.get_session(
-        request.cookies.get(COOKIE_NAME))
-    if session is not None:
-        return
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+    """In-handler lock for the routes the gate has already declared: anybody but a
+    Restricted caller. A second lock on the same door - the route's own declared
+    permission is the first, enforced by ``auth_gate`` - kept so a handler called
+    from anywhere but the middleware chain still refuses a Restricted caller.
+    An authenticated machine passes (on-box agents list files this way)."""
+    pol = policy.of(request)
+    if pol.restricted:
+        raise policy.denied(pol.principal, "authenticated")
 
 
 def _require_operator_session(request: Request) -> None:
-    """Stricter than _require_full_access: a real PIN session only, never
-    the machine-inbound bypass.
+    """Stricter than _require_full_access: a PERSON allowed to configure
+    characters, never the machine-inbound bypass.
 
     A model name is operator configuration, not thread housekeeping. The
-    machine-to-machine surface (on-box agents, the API-token bypass) reaches
-    PATCH /api/threads/{id} for title/pin/archive — ordinary thread upkeep a
-    bot may reasonably do on its own thread — but must not be able to
-    reconfigure which model or thinking level answers it. Decoy is refused
-    like everywhere else; with no PIN set at all there is no session to
-    require, so that case is allowed the same way _require_full_access
-    allows it.
-    """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
-    if _session_of(request) is not None:
-        return
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+    machine-to-machine surface reaches PATCH /api/threads/{id} for title/pin/archive
+    - ordinary thread upkeep a bot may reasonably do on its own thread - but must not
+    be able to reconfigure which model or thinking level answers it."""
+    policy.of(request).require(Permission.MANAGE_CHARACTERS)
 
 
 # Liveness of the long-running background loops: {name: (last_beat_ts, period_s)}.
@@ -7544,9 +7443,8 @@ async def health(request: Request):
     the two-field body, because a browser stamps Sec-Fetch-*/Origin and a
     remote caller is not on loopback.
     """
-    cfg = auth.load()
-    detailed = (bool(_session_of(request)) or not cfg.pin_set
-                or _on_box_machine(request))
+    pol = policy.of(request)
+    detailed = (pol.operator and not pol.machine) or pol.principal.has_scope(MachineScope.HEALTH_DETAIL)
     loops = _loop_health()
     backup_age = _iso_age_seconds(_last_backup_at)
     # `last_backup_ok` latches: it holds the last outcome forever, so a loop
@@ -7654,9 +7552,7 @@ async def openapi_schema(request: Request):
     serving the schema is a hand-written document that drifts from the code —
     which is what happened, repeatedly. Same gate as the detailed health body.
     """
-    if not (_session_of(request) or not auth.load().pin_set
-            or _on_box_machine(request)):
-        raise HTTPException(403, "Unlock for full access")
+    # The gate already required manage_settings (or the machine:openapi scope).
     return JSONResponse(app.openapi())
 
 
@@ -7705,48 +7601,28 @@ def _gateway_ws_stats() -> dict[str, Any] | None:
 
 
 def _request_is_https(request: Request | None) -> bool:
-    """Did this request arrive over TLS, directly or through our proxy?
-
-    `X-Forwarded-Proto` is only consulted when a forwarding header proves the
-    request came through a proxy (the same presence test the auth gate uses);
-    otherwise a client could set it on a plain-http call and pin `Secure` on a
-    cookie the browser would then refuse to send back.
-    """
-    if request is None:
-        return False
-    if request.url.scheme == "https":
-        return True
-    proxied = bool(request.headers.get("x-forwarded-for")
-                   or request.headers.get("forwarded")
-                   or request.headers.get("tailscale-headers-info"))
-    if not proxied:
-        return False
-    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    return proto.lower() == "https"
+    """Did this request arrive over TLS, directly or through our proxy? (policy.py)"""
+    return policy.request_is_https(request)
 
 
 def _issue_cookie_response(body: dict, persistent: bool = False,
                            user_agent: str = "",
-                           request: Request | None = None) -> JSONResponse:
-    """Issue a fresh full-access session and attach it as an HttpOnly cookie.
+                           request: Request | None = None,
+                           profile: accounts.Profile | None = None) -> JSONResponse:
+    """Issue a fresh session for ``profile`` (default: the Owner) as an HttpOnly cookie.
 
-    `Secure` is set exactly when the request arrived over TLS (directly, or
-    through a proxy that terminated it — Tailscale Serve does). It cannot be
-    unconditional: the app is commonly served over plain http on a LAN, and a
-    Secure cookie would simply never come back, locking the family out. On an
-    https origin, though, withholding it let the token ride a downgraded
-    request. SameSite=Lax + HttpOnly apply either way.
+    `Secure` is set exactly when the request arrived over TLS (directly, or through
+    a proxy that terminated it - Tailscale Serve does). It cannot be unconditional:
+    the app is commonly served over plain http on a LAN, and a Secure cookie would
+    simply never come back, locking the family out. SameSite=Strict + HttpOnly apply
+    either way (3.0: Strict; the gate additionally checks Origin on every mutation).
 
-    A `persistent` (remembered-device) session gets a long-lived cookie to
-    match its server-side lifetime; a normal one stays a browser-session
-    cookie, exactly as before.
+    A `persistent` (remembered-device) session gets a long-lived cookie to match its
+    server-side lifetime; a normal one stays a browser-session cookie.
     """
-    token = auth.issue_session(persistent=persistent, user_agent=user_agent)
-    resp = JSONResponse(body)
-    max_age = auth.remember_days() * 86400 if persistent else None
-    resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", path="/",
-                    max_age=max_age, secure=_request_is_https(request))
-    return resp
+    if profile is None:
+        profile = accounts.get_owner()
+    return people_api.session_response(request, body, profile, persistent=persistent)
 
 
 # --------------------------------------------------------------------------- #
@@ -7889,12 +7765,30 @@ async def push_unsubscribe(request: Request):
 @app.get("/api/auth/status")
 async def auth_status(request: Request):
     cfg = auth.load()
+    pr = policy.of(request).principal
+    claimed = policy.claimed(cfg)
     sess = _session_of(request)            # middleware attaches it for /api/auth
-    authed = bool(sess)
+    # "authed" keeps its 2.x meaning: an UNLOCKED session (not Restricted).
+    authed = bool(sess) and not pr.is_restricted
+    prof = pr.profile
+    setup_required = (not claimed and not policy.allow_open_install()
+                      and not policy.is_loopback_origin(
+                          request.client.host if request.client else "", _proxied_request(request)))
     return {
         "pin_set": cfg.pin_set,
         "authenticated": authed,
-        "decoy": cfg.pin_set and not authed,   # Safe Mode = PIN set, not unlocked
+        "decoy": claimed and not authed,       # Restricted (was Safe Mode) = claimed, not unlocked
+        # 3.0: accounts
+        "claimed": claimed,
+        "anonymous_access": cfg.anonymous_access,   # "none": a device must sign in to see anything
+        "owner_exists": accounts.has_owner(),
+        "setup_required": setup_required,      # remote caller, no owner: needs the setup token
+        "signed_in": bool(sess),
+        "role": pr.role if claimed else "owner",
+        "profile": people_api.public_profile(prof),
+        "needs_password": bool(prof and prof.role in ("owner", "admin") and not prof.has_password),
+        "profiles": people_api.lock_screen_profiles() if claimed else [],
+        "disclosure": people_api.DISCLOSURE if (claimed and pr.is_restricted) else None,
         "lock_timeout_seconds": cfg.lock_timeout,
         "min_pin_length": auth.MIN_PIN_LENGTH,
         # Absolute local paths — recon for an unauthenticated caller on a
@@ -7923,10 +7817,10 @@ async def auth_status(request: Request):
         # the client nothing: a fresh install with no agent CLI and no connected
         # provider is exactly the state where the card is the right thing to
         # show, and every other state is exactly where it is not.
-        "features": ({"harness": harness_available(),
-                      "studioforge": studioforge_available(),
-                      "mail": mail_available(),
-                      "practice": practice_available(),
+        "features": ({"harness": pr.can(Permission.ADMIN_SYSTEM) and harness_available(),
+                      "studioforge": pr.can(Permission.MANAGE_CONNECTIONS) and studioforge_available(),
+                      "mail": pr.can(Permission.ADMIN_SYSTEM) and mail_available(),
+                      "practice": pr.can(Permission.ADMIN_SYSTEM) and practice_available(),
                       "tools": True,
                       # Installed add-ons in state `ok` (app/extensions.py).
                       # The shell asks GET /api/extensions only when this is
@@ -7934,7 +7828,7 @@ async def auth_status(request: Request):
                       "extensions": extensions.ok_count(),
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
-                     if (authed or not cfg.pin_set)
+                     if (authed or not claimed)
                      # A locked device mounts add-ons too (2.3.4: voice on
                      # the bots it can see) — the count and nothing else.
                      else {"extensions": extensions.ok_count()}),
@@ -7943,24 +7837,30 @@ async def auth_status(request: Request):
 
 @app.post("/api/auth/unlock")
 async def auth_unlock(request: Request, payload: dict = Body(...)):
+    """Sign the Owner in with the install PIN (the 2.x flow, unchanged on the wire)."""
     cfg = auth.load()
     if not cfg.pin_set:
-        return JSONResponse({"detail": "No PIN is set"}, status_code=400)
-    wait = auth.throttle_wait()
-    if wait > 0:
-        secs = int(wait) + 1
-        return JSONResponse(
-            {"detail": f"Too many attempts — wait {secs}s.", "retry_after": secs},
-            status_code=429,
-        )
+        return JSONResponse({"detail": "No PIN is set",
+                             "error": errors.envelope("pin_not_set")}, status_code=400)
+    owner = auth.ensure_owner_for_pin()
+    pkey = owner.id if owner else "owner"
+    blocked = people_api._throttled(request, pkey)
+    if blocked is not None:
+        return blocked
     if not auth.verify_pin(str(payload.get("pin") or "")):
-        auth.register_failure()
-        return JSONResponse({"detail": "Incorrect PIN"}, status_code=401)
-    auth.register_success()
+        dev, ip = people_api._client_keys(request)
+        auth.register_failure(dev, pkey, ip)
+        accounts.log_activity("login_failed", subject=ip, detail="owner pin", category="audit")
+        return JSONResponse({"detail": "Incorrect PIN", "error": errors.envelope("incorrect_pin")},
+                            status_code=401)
+    people_api._succeeded(request, pkey)
     # Remember-this-device is an opt-in checkbox AND the feature must be on.
     persistent = bool(payload.get("remember")) and cfg.remember_days > 0
+    accounts.log_activity("login", profile_id=owner.id if owner else None,
+                          subject=policy.request_quota_ip(request))
     return _issue_cookie_response(
-        {"ok": True, "remembered": persistent},
+        {"ok": True, "remembered": persistent,
+         "role": "owner", "needs_password": bool(owner and not owner.has_password)},
         persistent=persistent,
         user_agent=request.headers.get("user-agent") or "",
         request=request,
@@ -7983,8 +7883,7 @@ async def auth_remember_config(request: Request, payload: dict = Body(...)):
     unlock screen OFFER the checkbox — becoming remembered still takes a
     correct PIN — and disabling forgets every remembered device.
     """
-    if auth.is_pin_set() and _session_of(request) is None:
-        return JSONResponse({"detail": "Unlock for full access"}, status_code=403)
+    policy.of(request).require(Permission.MANAGE_SETTINGS)
     try:
         days = int(payload.get("days", 0))
     except (TypeError, ValueError):
@@ -8008,31 +7907,96 @@ async def auth_forget_devices(request: Request):
 
 @app.post("/api/auth/setup")
 async def auth_setup(request: Request, payload: dict = Body(...)):
-    """Set, change, or remove the real PIN.
+    """Create the owner account, or change / remove the Owner's PIN.
 
-    First-time set (no PIN yet) is open — there is no session to require yet.
-    Changing or removing an existing PIN requires a *real* (non-decoy) unlocked
-    session AND the current PIN. (The config file is the offline recovery path.)
+    **First run** (nobody has claimed the install): creates the Owner from
+    ``{"name"?, "password"?, "new_pin"?}`` (at least one of password / PIN) and signs
+    them in. It is allowed from the machine DisPatch runs on, or from anywhere with
+    the one-time ``setup_token`` printed in the server log - never to an anonymous
+    network client (the 2.x "first PIN claims the install" hole). With
+    ``DISPATCH_ALLOW_OPEN_INSTALL=1`` the old open behaviour is kept.
+
+    **Afterwards**: changing or removing the PIN needs the Owner's session and the
+    current PIN (or password). The config file is the offline recovery path.
     """
     cfg = auth.load()
     new_pin = str(payload.get("new_pin") or "")
+    password = str(payload.get("password") or "")
     current = str(payload.get("current_pin") or "")
-    sess = _session_of(request)
+    pr = policy.of(request).principal
 
-    if cfg.pin_set:
-        if sess is None:
-            return JSONResponse({"detail": "Unlock with your PIN first"}, status_code=403)
-        if not auth.verify_pin(current):
-            return JSONResponse({"detail": "Current PIN is incorrect"}, status_code=403)
-        if new_pin == "":
-            auth.clear_pin()
-            resp = JSONResponse({"ok": True, "pin_set": False})
-            resp.delete_cookie(COOKIE_NAME, path="/")
-            return resp
+    if not policy.claimed(cfg):
+        local = policy.is_loopback_origin(request.client.host if request.client else "",
+                                          _proxied_request(request))
+        if not (local or policy.allow_open_install()
+                or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
+            blocked = people_api._throttled(request, "setup")
+            if blocked is not None:
+                return blocked
+            people_api._failed(request, "setup", "setup token")
+            return JSONResponse(
+                {"detail": "Setup is only allowed from the computer DisPatch runs on, "
+                           "or with the setup token from the server log.",
+                 "error": errors.envelope("setup_forbidden")}, status_code=403)
+        if not new_pin and not password:
+            return JSONResponse({"detail": "Choose a PIN or a password",
+                                 "error": errors.envelope("pin_too_short")}, status_code=400)
+        if new_pin:
+            bad = credentials.check_pin(new_pin)
+            if bad:
+                return JSONResponse({"detail": bad, "error": errors.envelope("pin_too_short")},
+                                    status_code=400)
+        if password:
+            bad = credentials.check_password(password)
+            if bad:
+                return JSONResponse({"detail": bad, "error": errors.envelope("password_invalid")},
+                                    status_code=400)
+        try:
+            owner = None
+            if password:
+                owner = accounts.create_profile(
+                    str(payload.get("name") or "Owner")[:40] or "Owner", "owner",
+                    password_hash=credentials.hash_secret(password))
+            if new_pin:
+                auth.set_pin(new_pin)               # mirrors onto the owner row
+            owner = accounts.get_owner() or owner
+        except accounts.AccountError as e:
+            return people_api._account_error(e)
+        auth.burn_setup_token()
+        accounts.log_activity("owner_created", profile_id=owner.id if owner else None,
+                              subject=policy.request_quota_ip(request), category="audit")
+        return _issue_cookie_response(
+            {"ok": True, "pin_set": cfg.pin_set or bool(new_pin), "claimed": True,
+             "needs_password": bool(owner and not owner.has_password)},
+            request=request, profile=owner)
+
+    # ---- already claimed: only the Owner, with the current credential, may change it
+    sess = _session_of(request)
+    if sess is None or not pr.is_owner:
+        return JSONResponse({"detail": "Unlock with your PIN first",
+                             "error": errors.envelope("unlock_first")}, status_code=403)
+    owner = accounts.get_owner()
+    ok = (cfg.pin_set and auth.verify_pin(current)) or bool(
+        owner and owner.has_password and payload.get("current_password")
+        and auth.verify_profile_secret(owner, "password", str(payload.get("current_password"))))
+    if not ok:
+        return JSONResponse({"detail": "Current PIN is incorrect",
+                             "error": errors.envelope("current_pin_incorrect")}, status_code=403)
+    if new_pin == "":
+        others = [p for p in accounts.list_profiles() if p.role != "owner"]
+        if others and not (owner and owner.has_password):
+            return JSONResponse(
+                {"detail": "Other profiles exist; give the owner a password before removing the PIN.",
+                 "error": errors.envelope("password_required")}, status_code=409)
+        auth.clear_pin()
+        resp = JSONResponse({"ok": True, "pin_set": False})
+        resp.delete_cookie(COOKIE_NAME, path="/")
+        return resp
 
     if len(new_pin) < auth.MIN_PIN_LENGTH:
         return JSONResponse(
-            {"detail": f"PIN must be at least {auth.MIN_PIN_LENGTH} characters"},
+            {"detail": f"PIN must be at least {auth.MIN_PIN_LENGTH} characters",
+             "error": errors.envelope("pin_too_short")},
             status_code=400,
         )
     auth.set_pin(new_pin)
@@ -8043,26 +8007,29 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
 async def auth_recover(request: Request, payload: dict = Body(...)):
     """Reset the lock using the recovery code from RECOVERY-CODE.txt.
 
-    On success the PIN is removed (lock disabled) and a fresh real session is
+    On success the PIN is removed (lock disabled) and a fresh Owner session is
     issued, so the user is straight in and can set a new PIN from Security.
     """
     cfg = auth.load()
     if not cfg.pin_set:
-        return JSONResponse({"detail": "No PIN is set"}, status_code=400)
-    wait = auth.throttle_wait()
-    if wait > 0:
-        secs = int(wait) + 1
-        return JSONResponse(
-            {"detail": f"Too many attempts — wait {secs}s.", "retry_after": secs},
-            status_code=429,
-        )
+        return JSONResponse({"detail": "No PIN is set",
+                             "error": errors.envelope("pin_not_set")}, status_code=400)
+    blocked = people_api._throttled(request, "recovery")
+    if blocked is not None:
+        return blocked
     if not auth.verify_recovery(str(payload.get("code") or "")):
-        auth.register_failure()
-        return JSONResponse({"detail": "Incorrect recovery code"}, status_code=401)
-    auth.register_success()
+        dev, ip = people_api._client_keys(request)
+        auth.register_failure(dev, "recovery", ip)
+        accounts.log_activity("recovery_failed", subject=ip, category="audit")
+        return JSONResponse({"detail": "Incorrect recovery code",
+                             "error": errors.envelope("incorrect_recovery_code")}, status_code=401)
+    people_api._succeeded(request, "recovery")
     auth.clear_pin()
+    accounts.log_activity("recovered", subject=policy.request_quota_ip(request), category="audit")
+    # On a PIN-only install clear_pin removed the Owner row too (the lock is gone);
+    # with an owner password the row stays and the session belongs to it.
     return _issue_cookie_response({"ok": True, "pin_set": False, "recovered": True},
-                                  request=request)
+                                  request=request, profile=accounts.get_owner())
 
 
 # --------------------------------------------------------------------------- #
@@ -8078,24 +8045,13 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
 
 
 def _require_operator(request: Request) -> None:
-    """Full session, or no PIN configured at all. Anything else: 403.
+    """A signed-in person (Owner/Admin/Member), not a machine and not Restricted. The
+    gate already required the route's own permission; this is the second lock."""
+    pol = policy.of(request)
+    if pol.restricted or pol.machine:
+        raise policy.denied(pol.principal, "authenticated")
 
-    Deliberately a copy of dashboard_routes._require_operator's rule rather
-    than an import: that module is standalone by design (it can be mounted on a
-    bare app), and this one is the in-main version of the same sentence.
-    """
-    if _is_decoy(request):
-        raise HTTPException(403, "Unlock for full access")
-    if _session_of(request) is not None:
-        return
-    session = auth.get_session(request.cookies.get(COOKIE_NAME))
-    if session is not None:
-        auth.touch_session(session.token)
-        return
-    # No session is still the operator in exactly one state: the app has no
-    # lock at all, in which case everything is open and this changes nothing.
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+
 
 
 def _llm_error(e: llm_api.ApiError) -> HTTPException:
@@ -8477,7 +8433,9 @@ async def create_bot(request: Request, payload: BotCreateIn):
         emoji=payload.emoji or ("🌍" if payload.backend == "direct" else "🤖"),
         model_hint=payload.model_hint
         or ("Direct API" if payload.backend == "direct" else ""),
-        **config.fold_visible(payload.visible, payload.safe, payload.hide_unlocked), **kw)
+        **config.audience_flags(
+            payload.audience,
+            config.fold_visible(payload.visible, payload.safe, payload.hide_unlocked)), **kw)
     saved = await asyncio.to_thread(config.upsert_bot, bot)
     await _broadcast_roster()
     return JSONResponse(_bot_row(saved), status_code=201)
@@ -8507,6 +8465,11 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
             changes.update(config.fold_visible(
                 changes.pop("visible"), changes.get("safe", bot.safe),
                 changes.get("hide_unlocked", bot.hide_unlocked)))
+        # 3.0 `audience` wins over the two flags it summarises.
+        if "audience" in changes:
+            changes.update(config.audience_flags(changes.pop("audience"), {
+                "safe": changes.get("safe", bot.safe),
+                "hide_unlocked": changes.get("hide_unlocked", bot.hide_unlocked)}))
         updated = dc_replace(bot, **changes)
         if persona is not None:
             # advisor.persona / api.system_prompt, the same field the AI models
@@ -10289,21 +10252,10 @@ def _raise_for_reaction_error(e: reactions.ReactionError) -> None:
 
 
 def _is_safe_mode_caller(request: Request) -> bool:
-    """Safe-Mode test for the session-exempt reaction endpoints.
-
-    Those routes skip the auth gate so on-box agents can drive them tokenlessly
-    (see _INBOUND_REACTION). That exemption is for MACHINES: a browser with no
-    full session is Safe Mode no matter where it connected from — which is
-    exactly this box's own tab after the idle auto-lock, on loopback. Marks the
-    request so anything downstream (_deny_decoy_thread, the redactor) agrees.
-    """
-    if _is_decoy(request):
-        return True
-    if (_browser_request(request) and _session_of(request) is None
-            and auth.load().pin_set):
-        request.state.decoy = True
-        return True
-    return False
+    """Is this caller Restricted (what 2.x called Safe Mode)? The gate decides it once:
+    a browser tab with no session is anonymous = Restricted even on loopback, a
+    machine is not."""
+    return _is_decoy(request)
 
 
 def _deny_agent_route_to_browser(request: Request) -> None:
@@ -11866,7 +11818,7 @@ tools.set_builtin_probes({
 def _require_harness(request: Request) -> None:
     if not SETTINGS.harness_enabled or _builtin_off("harness"):
         raise HTTPException(404, "Harness disabled")
-    if not auth.load().pin_set:
+    if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
     _deny_decoy_mutation(request)
 
@@ -12145,7 +12097,7 @@ def _require_studioforge(request: Request) -> None:
     if (not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url
             or _builtin_off("studioforge")):
         raise HTTPException(404, "StudioForge panel disabled")
-    if not auth.load().pin_set:
+    if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
     _deny_decoy_mutation(request)
 
@@ -12235,7 +12187,7 @@ def _require_mail(request: Request) -> None:
     _require_harness/_require_studioforge."""
     if not SETTINGS.mail_enabled or _builtin_off("mail"):
         raise HTTPException(404, "Emails panel disabled")
-    if not auth.load().pin_set:
+    if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
     _deny_decoy_mutation(request)
 
@@ -12276,7 +12228,7 @@ def _require_practice(request: Request) -> None:
     with no PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
     if not SETTINGS.practice_enabled or _builtin_off("practice"):
         raise HTTPException(404, "Clients panel disabled")
-    if not auth.load().pin_set:
+    if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
     _deny_decoy_mutation(request)
 
@@ -12346,12 +12298,26 @@ async def practice_links_put(client_id: str, request: Request):
 # --------------------------------------------------------------------------- #
 
 
-async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None) -> bool:
-    """False (with an error frame) when a Safe-Mode connection targets an
-    unsafe bot. Full connections always pass."""
+async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool = False) -> bool:
+    """False (with an error frame) when a Restricted connection targets a character
+    outside its audience - or, with ``dispatch=True`` (a turn is about to run), when a
+    signed-in profile without ``dispatch_agents`` targets a character whose turns run
+    an AGENT on the host (the OpenClaw backend; a direct provider is just chat).
+
+    A Restricted turn is never a dispatch: it runs LOCKED (no tools, no hand-off)."""
     if manager.conn_decoy(ws) and bot_id not in _safe_bot_ids():
         await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
         return False
+    if dispatch:
+        pr = manager.principal_of(ws)
+        bot = config.get_bot(bot_id) if bot_id else None
+        if (pr is not None and not pr.is_restricted and bot is not None
+                and not (bot.api or bot.advisor) and not pr.can(Permission.DISPATCH_AGENTS)):
+            msg = "Your profile may not run agents. Ask the Owner for the dispatch_agents permission."
+            await manager.send(ws, {"type": "error", "code": "permission_denied", "message": msg,
+                                    "error": errors.envelope("permission_denied", message=msg),
+                                    "required_permission": "dispatch_agents"})
+            return False
     return True
 
 
@@ -12466,7 +12432,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
                                 "message": "Thread not found"})
         await _ack(ws, cmid, "rejected", "Thread not found")
         return
-    if not await _ws_bot_allowed(ws, thread.bot_id):
+    if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
         await _ack(ws, cmid, "rejected", "Not allowed")
         return
 
@@ -13014,7 +12980,7 @@ async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "A reply is already in progress"})
         return
-    if not await _ws_bot_allowed(ws, thread.bot_id):
+    if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
         return
     last_user = await db.get_last_user_message(thread_id)
     if not last_user:
@@ -13061,7 +13027,7 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "A reply is already in progress"})
         return
-    if not await _ws_bot_allowed(ws, thread.bot_id):
+    if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
         return
     msg = await db.get_message(message_id)
     if not msg or msg.thread_id != thread_id or msg.role != "user":
@@ -13090,7 +13056,7 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
     thread = await db.get_thread(thread_id)
     if not thread or thread.status == "thinking":
         return
-    if not await _ws_bot_allowed(ws, thread.bot_id):
+    if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
         return
     last_user = await db.get_last_user_message(thread_id)
     if not last_user:
@@ -13168,16 +13134,34 @@ async def websocket_endpoint(ws: WebSocket):
         if not origin_host or not host or origin_host != host:
             await ws.close(code=1008)
             return
-    # HTTP middleware doesn't run for the websocket scope, so the Safe-Mode
-    # model is applied here directly. A full session → full connection; anything
-    # else (no/expired session, PIN set) → a redacted Safe-Mode connection.
+    # HTTP middleware doesn't run for the websocket scope, so the same principal
+    # resolution happens here: a session -> that profile; else the device's default
+    # profile; else anonymous = Restricted. An install nobody has claimed is open
+    # to this machine only (see auth_gate).
     cfg = auth.load()
     session = None
-    decoy = False
-    if cfg.pin_set:
+    claimed = policy.claimed(cfg)
+    dev_tok = ws.cookies.get(policy.DEVICE_COOKIE)
+    device_id = auth.device_hash(dev_tok) if dev_tok and 16 <= len(dev_tok) <= 128 else None
+    if not claimed:
+        local = policy.is_loopback_origin(ws.client.host if ws.client else "",
+                                          any(ws.headers.get(h) for h in policy.PROXY_MARKER_HEADERS))
+        if not (local or policy.allow_open_install()):
+            await ws.close(code=1008)        # nobody owns this install yet: finish setup first
+            return
+        principal = policy.open_principal()
+    else:
         session = auth.get_session(ws.cookies.get(COOKIE_NAME))
-        decoy = session is None      # no full session → Safe Mode
-    await manager.connect(ws, decoy=decoy, token=(session.token if session else None))
+        principal = policy.for_session(session, device_id)
+        if principal is None:
+            session = None
+            principal = policy.for_device(device_id) or policy.anonymous(device_id)
+            if principal.kind == "anonymous" and cfg.anonymous_access == "none":
+                await ws.close(code=1008)      # sign in first
+                return
+    decoy = principal.is_restricted
+    await manager.connect(ws, decoy=decoy, token=(session.token if session else None),
+                          principal=principal)
     try:
         bots = config.load_bots()
         if decoy:
@@ -13186,6 +13170,8 @@ async def websocket_endpoint(ws: WebSocket):
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
             "decoy": decoy,
+            "role": principal.role,
+            "profile": people_api.public_profile(principal.profile),
         })
         while True:
             data = await ws.receive_json()
@@ -13194,15 +13180,21 @@ async def websocket_endpoint(ws: WebSocket):
             # client so it reconnects (as a Safe-Mode connection). A ping is NOT
             # activity (so idle genuinely expires); real actions slide the window.
             if session is not None:
-                if auth.get_session(session.token) is None:
+                live = auth.get_session(session.token)
+                fresh = policy.for_session(live, device_id) if live is not None else None
+                if fresh is None:
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
                     break
+                if fresh.role != principal.role or fresh.permissions != principal.permissions:
+                    principal = fresh            # a role / grant change applies at once
+                    manager.set_principal(ws, principal)
+                    decoy = principal.is_restricted
                 if mtype != "ping":
                     auth.touch_session(session.token)
-            elif not decoy and auth.load().pin_set:
-                # Token-less full connection (opened while no PIN was set) and a
-                # PIN exists now — nudge the client to reconnect as Safe Mode.
+            elif principal.kind == "open" and policy.claimed():
+                # A token-less open connection (opened before the install was
+                # claimed) and an owner exists now - nudge the client to reconnect.
                 with contextlib.suppress(Exception):
                     await ws.send_json({"type": "locked"})
                 break
@@ -13211,6 +13203,15 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
             handler = WS_HANDLERS.get(mtype)
             if handler:
+                verdict = policy.authorize(principal, route_policy.ws_action_requirement(mtype)
+                                           or policy.Requirement())
+                if not verdict.allowed:
+                    await manager.send(ws, {
+                        "type": "error", "thread_id": data.get("thread_id"),
+                        "message": verdict.detail, "code": verdict.code,
+                        "error": errors.envelope(verdict.code, message=verdict.detail),
+                        "client_msg_id": data.get("client_msg_id")})
+                    continue
                 # One bad statement must not tear down the whole connection:
                 # log, send a NEUTRAL error frame (no exception detail — decoy
                 # connections see these frames) and keep the receive loop alive.
@@ -13835,7 +13836,7 @@ async def guide_seed(request: Request, name: str, force: bool = False):
     operator's own shell): the thread it writes is fixed text shipped with the
     app, so the machine surface can add a guide but never choose its content.
     `force` stays operator-only."""
-    machine = _on_box_machine(request)
+    machine = policy.of(request).machine
     if not machine:
         _require_operator(request)
     elif force:

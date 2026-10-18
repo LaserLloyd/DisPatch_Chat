@@ -1,6 +1,6 @@
 [project]
 name = "dispatch-chat"
-version = "2.4.2"
+version = "3.0.0"
 description = "Self-hosted chat for your household and your AI agents"
 license = "MIT"
 requires-python = ">=3.12"
@@ -11,6 +11,7 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Communications :: Chat",
@@ -33,6 +34,9 @@ dependencies = [
     # wheels. Nothing is fetched at runtime.
     "pywebpush>=2.5.0",
     "ddgs>=9.16,<10",
+    # argon2id for profile PINs and passwords (app/credentials.py). Already pulled in by
+    # pywebpush; declared because 3.0 imports it directly (needs >= 44 for Argon2id).
+    "cryptography>=44",
 ]
 
 [project.optional-dependencies]

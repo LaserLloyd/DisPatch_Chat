@@ -1,0 +1,1842 @@
+{
+  "mounts": {
+    "/media": {
+      "note": "chat media",
+      "permission": "use_images"
+    },
+    "/static": {
+      "note": "the app's own JS/CSS/icons; carries no user data",
+      "public": true
+    },
+    "/static/avatars": {
+      "note": "avatar files; the gate itself narrows to audience=restricted|all characters for a Restricted caller",
+      "public": true
+    }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/",
+      "requirement": {
+        "note": "the app shell; carries no data",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/advisor/digest",
+      "requirement": {
+        "machine": [
+          "machine:advisor"
+        ],
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/advisor/requests/{rid}/dismiss",
+      "requirement": {
+        "permission": "approve_agent_actions"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/advisor/requests/{rid}/send",
+      "requirement": {
+        "note": "the human Send button; a machine may never press it",
+        "permission": "approve_agent_actions"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/advisor/status",
+      "requirement": {
+        "machine": [
+          "machine:advisor"
+        ],
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/imagestudio/chat-images",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/imagestudio/generate",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/imagestudio/images",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/imagestudio/state",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/imagestudio/targets",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/current",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/feedback",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/find",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/month/{key}",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/months",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/profile",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/profile/recompute",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/reasons",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/score",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/jobboard/{job_id}",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/{job_id}/applied",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/{job_id}/archive",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/{job_id}/feedback",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/{job_id}/tags",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/jobboard/{job_id}/vote",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/api-token",
+      "requirement": {
+        "note": "reports whether a token exists; never the token",
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/api-token",
+      "requirement": {
+        "note": "Owner only (checked in the handler)",
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/forget-devices",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/lock",
+      "requirement": {
+        "note": "dropping your own session needs no permission",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "requirement": {
+        "note": "credential check; throttled per device, profile and address",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "requirement": {
+        "note": "who am I, what may I do - answers Restricted too",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/password",
+      "requirement": {
+        "note": "YOUR password: only the Owner and Admins have one",
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/recover",
+      "requirement": {
+        "note": "recovery-code check; throttled",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/remember-config",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/setup",
+      "requirement": {
+        "note": "first-run owner creation (loopback or setup token) / PIN change (session + current PIN) - decided in the handler",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/status",
+      "requirement": {
+        "note": "the lock screen needs it; detail is added only for a signed-in caller",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/switch",
+      "requirement": {
+        "note": "quick profile switch; stepping up needs the target's credential",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/unlock",
+      "requirement": {
+        "note": "credential check; throttled per device, profile and address",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/avatar-pool",
+      "requirement": {
+        "machine": [
+          "machine:avatar_pool"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/avatar-pool/{bot_id}",
+      "requirement": {
+        "machine": [
+          "machine:avatar_pool"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/avatar-pool/{bot_id}/prompts",
+      "requirement": {
+        "machine": [
+          "machine:avatar_pool"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/avatar-pool/{bot_id}/prompts",
+      "requirement": {
+        "machine": [
+          "machine:avatar_pool"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/avatar-pool/{bot_id}/refill",
+      "requirement": {
+        "machine": [
+          "machine:avatar_pool"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots",
+      "requirement": {
+        "machine": [
+          "machine:bots_read"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/bots",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/all",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/bots/order",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/personas",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/bots/{bot_id}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/bots/{bot_id}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/avatar",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/bots/{bot_id}/avatar",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/avatar/full",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/avatar/history",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/avatar/history/{snapshot_id}",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/bots/{bot_id}/avatar/restore",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/avatar/thumb",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/bots/{bot_id}/models",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/daily",
+      "requirement": {
+        "machine": [
+          "machine:daily"
+        ],
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/deep",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/logs",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/drop",
+      "requirement": {
+        "note": "daily byte quota for Restricted",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/export",
+      "requirement": {
+        "note": "dumps all history",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/extensions",
+      "requirement": {
+        "machine": [
+          "machine:extensions_read"
+        ],
+        "note": "add-on mount rows only",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/files",
+      "requirement": {
+        "machine": [
+          "machine:files_list"
+        ],
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/files",
+      "requirement": {
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/files/wipe",
+      "requirement": {
+        "note": "deletes the whole File Server",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/files/{file_id}",
+      "requirement": {
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/{file_id}/download",
+      "requirement": {
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/{file_id}/raw",
+      "requirement": {
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/guide/seed",
+      "requirement": {
+        "machine": [
+          "machine:guide_seed"
+        ],
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/jobs",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/jobs",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/jobs/cancel",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/jobs/{job_id}",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/model",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/models",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/restart",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/sessions",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/sessions",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/sessions/{sid}",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/sessions/{sid}/dismiss",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/sessions/{sid}/stop",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/start",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/harness/status",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/harness/stop",
+      "requirement": {
+        "note": "code execution on the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "requirement": {
+        "machine": [
+          "machine:health_detail"
+        ],
+        "note": "liveness for anyone; the handler adds detail only for Owner/Admin or a machine holding machine:health_detail",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/image-jobs",
+      "requirement": {
+        "machine": [
+          "machine:image_jobs"
+        ],
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/image-jobs/{job_id}",
+      "requirement": {
+        "machine": [
+          "machine:image_jobs"
+        ],
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/image-jobs/{job_id}/callback",
+      "requirement": {
+        "machine": [
+          "machine:image_job_callback"
+        ],
+        "note": "the image rig's per-job callback token is the credential; the body is discarded",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/inject",
+      "requirement": {
+        "machine": [
+          "machine:inject"
+        ],
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/current",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/feedback",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/find",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/month/{key}",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/months",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/profile",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/profile/recompute",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/reasons",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/score",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/{job_id}",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/applied",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/archive",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/feedback",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/tags",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/vote",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/llm/connect",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/llm/image",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/llm/image",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/llm/image/test",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/llm/providers",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/llm/quicksetup",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/llm/quicksetup",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/llm/test",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/local/config",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/local/ls",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/local/roots",
+      "requirement": {
+        "note": "reads arbitrary bytes off the host",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/local/stat",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/status",
+      "requirement": {
+        "note": "its launch URL carries MailForge's one-time key",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/activity",
+      "requirement": {
+        "note": "a profile's own summary - the disclosure the Restricted UI shows",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/media",
+      "requirement": {
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/{message_id}",
+      "requirement": {
+        "machine": [
+          "machine:messages"
+        ],
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/messages/{message_id}",
+      "requirement": {
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/messages/{message_id}/checklist",
+      "requirement": {
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/{message_id}/feedback",
+      "requirement": {
+        "note": "daily feedback quota for Restricted",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/{message_id}/mood-face",
+      "requirement": {
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/openapi.json",
+      "requirement": {
+        "machine": [
+          "machine:openapi"
+        ],
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/openclaw/import",
+      "requirement": {
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/openclaw/sessions",
+      "requirement": {
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/openclaw/transcript",
+      "requirement": {
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/activity",
+      "requirement": {
+        "permission": "view_activity"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/audit",
+      "requirement": {
+        "permission": "view_activity"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/devices",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/people/devices/this",
+      "requirement": {
+        "note": "binds the CALLING device",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/people/devices/{device_id}",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/people/{profile_id}",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/people/{profile_id}",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/password",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/people/{profile_id}/pin",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/pin",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/sign-out",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/plugins",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/plugins/catalog",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/plugins/extensions/{ext_id}",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/plugins/livetools",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/practice-links/{client_id}",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/practice-links/{client_id}",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/practice/{path:path}",
+      "requirement": {
+        "note": "same-origin proxy onto the practice box",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/practice/{path:path}",
+      "requirement": {
+        "note": "same-origin proxy onto the practice box",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/push/subscribe",
+      "requirement": {
+        "permission": "use_notifications"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/subscribe",
+      "requirement": {
+        "permission": "use_notifications"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/push/vapid",
+      "requirement": {
+        "permission": "use_notifications"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/quick-actions",
+      "requirement": {
+        "note": "static list of built-in prompt shortcuts",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reactions",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reactions",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reactions/fire",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "note": "agents only"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reactions/generate",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reactions/pool",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reactions/pool",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reactions/pool/refill",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reactions/prompts",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reactions/prompts",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reactions/reseed",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reactions/settings",
+      "requirement": {
+        "machine": [
+          "machine:reactions"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reactions/{rid}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/reactions/{rid}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reactions/{rid}/image",
+      "requirement": {
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/recover/transcript",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/search",
+      "requirement": {
+        "note": "searches every conversation",
+        "permission": "view_activity"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/studioforge/status",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "note": "daily thread quota for Restricted",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/threads/{thread_id}",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/{thread_id}",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/threads/{thread_id}",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "note": "model/thinking fields additionally need a signed-in session",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/{thread_id}/abort",
+      "requirement": {
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/{thread_id}/avatar",
+      "requirement": {
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/{thread_id}/avatar",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/{thread_id}/messages",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/{thread_id}/messages",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/{thread_id}/read",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools",
+      "requirement": {
+        "note": "Restricted sees only tools flagged safe",
+        "permission": "use_tools",
+        "scoped": true
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/{tool_id}/refresh",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/{tool_id}/status",
+      "requirement": {
+        "permission": "use_tools",
+        "scoped": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/unread",
+      "requirement": {
+        "machine": [
+          "machine:threads"
+        ],
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/upload",
+      "requirement": {
+        "note": "daily byte quota for Restricted",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/apps/{app_id}",
+      "requirement": {
+        "note": "mounted app",
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/apps/{app_id}/{rel:path}",
+      "requirement": {
+        "note": "mounted app",
+        "permission": "use_tools"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/ext/{ext_id}/{rel:path}",
+      "requirement": {
+        "note": "an add-on's public frontend files",
+        "permission": "use_voice"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/local/file/{path:path}",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/local/view/{ticket}/{rel:path}",
+      "requirement": {
+        "note": "capability URL: the random, expiring, client-bound ticket is the credential",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/tools/_t/{ticket}/{rel:path}",
+      "requirement": {
+        "note": "capability URL: the random, expiring ticket is the credential",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/tools/{tool_id}",
+      "requirement": {
+        "permission": "use_tools",
+        "scoped": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/tools/{tool_id}/{rel:path}",
+      "requirement": {
+        "permission": "use_tools",
+        "scoped": true
+      }
+    }
+  ],
+  "schema": 1,
+  "websocket_actions": {
+    "abort": {
+      "permission": "manage_history"
+    },
+    "archive_thread": {
+      "permission": "manage_history"
+    },
+    "create_thread": {
+      "note": "quota-charged for Restricted",
+      "permission": "use_chat"
+    },
+    "edit_rerun": {
+      "permission": "manage_history"
+    },
+    "get_messages": {
+      "permission": "use_chat",
+      "scoped": true
+    },
+    "get_threads": {
+      "permission": "use_chat",
+      "scoped": true
+    },
+    "ping": {
+      "note": "liveness",
+      "public": true
+    },
+    "regenerate": {
+      "permission": "manage_history"
+    },
+    "retry": {
+      "note": "quota-charged for Restricted",
+      "permission": "use_chat"
+    },
+    "send": {
+      "note": "quota-charged for Restricted",
+      "permission": "use_chat"
+    }
+  },
+  "websocket_routes": {
+    "/ws": {
+      "note": "the handshake only identifies the caller; every action is checked in WS_ACTION_PERMISSIONS",
+      "public": true
+    },
+    "/ws/{name}/{thread_id}": {
+      "note": "an add-on's socket; the host also checks the thread's character",
+      "permission": "use_voice",
+      "scoped": true
+    }
+  }
+}

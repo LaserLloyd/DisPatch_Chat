@@ -1,0 +1,1086 @@
+{
+  "capabilities": [
+    {
+      "cli": null,
+      "http": [
+        "GET /api/auth/status"
+      ],
+      "id": "auth.status",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Read the sign-in state",
+      "ui": "api.authStatus",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/auth/me"
+      ],
+      "id": "auth.me",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Who am I, and what may I do",
+      "ui": "api.me",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/unlock"
+      ],
+      "id": "auth.unlock",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Sign the Owner in with the install PIN",
+      "ui": "api.unlock",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/login"
+      ],
+      "id": "auth.login",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Sign in as a profile (PIN or password)",
+      "ui": "api.login",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/switch"
+      ],
+      "id": "auth.switch",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Quick-switch profile",
+      "ui": "api.switchProfile",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/lock"
+      ],
+      "id": "auth.lock",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Sign out",
+      "ui": "api.lock",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/setup"
+      ],
+      "id": "auth.setup",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Create the owner account / change the PIN",
+      "ui": "api.setupOwner",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/recover"
+      ],
+      "id": "auth.recover",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Recover with the recovery code",
+      "ui": "api.recover",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/password"
+      ],
+      "id": "auth.password",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Change my password",
+      "ui": "api.changePassword",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/auth/remember-config",
+        "POST /api/auth/forget-devices"
+      ],
+      "id": "auth.remember",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Configure remembered devices",
+      "ui": "api.rememberConfig",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/auth/api-token",
+        "POST /api/auth/api-token"
+      ],
+      "id": "auth.api_token",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Manage the machine API key",
+      "ui": "api.apiTokenInfo",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/people"
+      ],
+      "id": "people.list",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "List profiles",
+      "ui": "api.people",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/people"
+      ],
+      "id": "people.create",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Create a profile",
+      "ui": "api.createPerson",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PATCH /api/people/{profile_id}"
+      ],
+      "id": "people.update",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Change a profile (role, limits, name)",
+      "ui": "api.patchPerson",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "DELETE /api/people/{profile_id}"
+      ],
+      "id": "people.delete",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Delete a profile",
+      "ui": "api.deletePerson",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/people/{profile_id}/pin",
+        "DELETE /api/people/{profile_id}/pin"
+      ],
+      "id": "people.pin",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Set or clear a profile's PIN",
+      "ui": "api.setPersonPin",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/people/{profile_id}/password"
+      ],
+      "id": "people.password",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Set an Admin's password",
+      "ui": "api.setPersonPassword",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/people/{profile_id}/sign-out"
+      ],
+      "id": "people.sign_out",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Sign a profile out everywhere",
+      "ui": "api.signOutPerson",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/people/devices",
+        "PUT /api/people/devices/this",
+        "DELETE /api/people/devices/{device_id}"
+      ],
+      "id": "people.devices",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "List devices; bind this device to a profile; forget one",
+      "ui": "api.devices",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/people/activity",
+        "GET /api/people/audit"
+      ],
+      "id": "people.activity",
+      "machine": [],
+      "mcp": null,
+      "permission": "view_activity",
+      "title": "Activity summary and admin audit log",
+      "ui": "api.peopleActivity",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/me/activity"
+      ],
+      "id": "me.activity",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "My own activity summary (the Restricted disclosure)",
+      "ui": "api.myActivity",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/threads"
+      ],
+      "id": "threads.list",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "List threads",
+      "ui": "api.threads",
+      "ws": [
+        "get_threads"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/threads"
+      ],
+      "id": "threads.create",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Start a thread",
+      "ui": "api.createThread",
+      "ws": [
+        "create_thread"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/threads/{thread_id}"
+      ],
+      "id": "threads.get",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Read one thread",
+      "ui": "api.thread",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/threads/{thread_id}/messages"
+      ],
+      "id": "threads.messages",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Read a thread's messages",
+      "ui": "api.messages",
+      "ws": [
+        "get_messages"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "PATCH /api/threads/{thread_id}",
+        "DELETE /api/threads/{thread_id}"
+      ],
+      "id": "threads.edit",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "manage_history",
+      "title": "Rename, pin or archive a thread",
+      "ui": "api.rename",
+      "ws": [
+        "archive_thread"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/threads/{thread_id}/abort"
+      ],
+      "id": "threads.abort",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_history",
+      "title": "Stop a running turn",
+      "ui": null,
+      "ws": [
+        "abort"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/threads/{thread_id}/read"
+      ],
+      "id": "threads.read",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Mark a thread read",
+      "ui": "api.markRead",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/unread"
+      ],
+      "id": "threads.unread",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Unread counts",
+      "ui": "api.unread",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/threads/{thread_id}/messages"
+      ],
+      "id": "messages.send",
+      "machine": [
+        "machine:threads"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Send a message (starts a turn)",
+      "ui": null,
+      "ws": [
+        "send"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [],
+      "id": "messages.retry",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Retry the last reply",
+      "ui": null,
+      "ws": [
+        "retry"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [],
+      "id": "messages.regenerate",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_history",
+      "title": "Regenerate or edit-and-rerun",
+      "ui": null,
+      "ws": [
+        "regenerate",
+        "edit_rerun"
+      ]
+    },
+    {
+      "cli": null,
+      "http": [
+        "DELETE /api/messages/{message_id}"
+      ],
+      "id": "messages.delete",
+      "machine": [
+        "machine:messages"
+      ],
+      "mcp": null,
+      "permission": "manage_history",
+      "title": "Delete a message",
+      "ui": "api.deleteMessage",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PATCH /api/messages/{message_id}"
+      ],
+      "id": "messages.edit",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_history",
+      "title": "Edit a message",
+      "ui": "api.editMessage",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/messages/{message_id}/feedback"
+      ],
+      "id": "messages.feedback",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Rate a reply",
+      "ui": "api.messageFeedback",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/upload",
+        "POST /api/drop"
+      ],
+      "id": "uploads.attach",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Attach a picture or file to a chat",
+      "ui": "api.upload",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/search"
+      ],
+      "id": "search",
+      "machine": [],
+      "mcp": null,
+      "permission": "view_activity",
+      "title": "Search every conversation",
+      "ui": "api.search",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/export"
+      ],
+      "id": "export",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Export all history",
+      "ui": "api.exportUrl",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/bots"
+      ],
+      "id": "characters.list",
+      "machine": [
+        "machine:bots_read"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "List the characters I may talk to",
+      "ui": "api.bots",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/bots/all"
+      ],
+      "id": "characters.manage_list",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "List every character with its settings",
+      "ui": "api.allBots",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/bots"
+      ],
+      "id": "characters.create",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Add a character",
+      "ui": "api.addBot",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PATCH /api/bots/{bot_id}"
+      ],
+      "id": "characters.update",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Change a character (including its audience)",
+      "ui": "api.patchBot",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "DELETE /api/bots/{bot_id}"
+      ],
+      "id": "characters.delete",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Remove a character",
+      "ui": "api.deleteBot",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PUT /api/bots/order"
+      ],
+      "id": "characters.order",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Reorder characters",
+      "ui": "api.saveOrder",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/bots/{bot_id}/avatar",
+        "POST /api/bots/{bot_id}/avatar/restore"
+      ],
+      "id": "characters.avatar",
+      "machine": [
+        "machine:avatars"
+      ],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Upload or restore a character's avatar",
+      "ui": "api.uploadAvatar",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/reactions"
+      ],
+      "id": "reactions.list",
+      "machine": [
+        "machine:reactions"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "List reaction images",
+      "ui": "api.reactions",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/reactions",
+        "PATCH /api/reactions/{rid}",
+        "DELETE /api/reactions/{rid}",
+        "POST /api/reactions/reseed",
+        "PUT /api/reactions/settings"
+      ],
+      "id": "reactions.manage",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Curate the reaction pack",
+      "ui": "api.addReaction",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/reactions/fire"
+      ],
+      "id": "reactions.fire",
+      "machine": [
+        "machine:reactions"
+      ],
+      "mcp": null,
+      "permission": null,
+      "title": "Fire a reaction (agents)",
+      "ui": "api.fireReaction",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/llm/providers",
+        "POST /api/llm/test",
+        "POST /api/llm/connect"
+      ],
+      "id": "connections.llm",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_connections",
+      "title": "Connect and test an AI provider",
+      "ui": "settings.connections",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/llm/image",
+        "PUT /api/llm/image",
+        "POST /api/llm/image/test"
+      ],
+      "id": "connections.image",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_connections",
+      "title": "Configure image generation",
+      "ui": "settings.connections",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/inject"
+      ],
+      "id": "agents.inject",
+      "machine": [
+        "machine:inject"
+      ],
+      "mcp": null,
+      "permission": "manage_agents",
+      "title": "Post a message as an agent",
+      "ui": null,
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/daily"
+      ],
+      "id": "agents.daily",
+      "machine": [
+        "machine:daily"
+      ],
+      "mcp": null,
+      "permission": "manage_agents",
+      "title": "Ensure today's thread",
+      "ui": null,
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/advisor/requests/{rid}/send",
+        "POST /api/advisor/requests/{rid}/dismiss"
+      ],
+      "id": "agents.handoff",
+      "machine": [],
+      "mcp": null,
+      "permission": "approve_agent_actions",
+      "title": "Approve or dismiss an agent hand-off",
+      "ui": "api.advisorSend",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/openclaw/sessions",
+        "GET /api/openclaw/transcript",
+        "POST /api/openclaw/import"
+      ],
+      "id": "agents.openclaw",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_agents",
+      "title": "Browse and import OpenClaw sessions",
+      "ui": "api.ocSessions",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/image-jobs",
+        "GET /api/image-jobs/{job_id}"
+      ],
+      "id": "images.jobs",
+      "machine": [
+        "machine:image_jobs"
+      ],
+      "mcp": null,
+      "permission": "use_images",
+      "title": "Create and read an image job",
+      "ui": null,
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/files"
+      ],
+      "id": "files.list",
+      "machine": [
+        "machine:files_list"
+      ],
+      "mcp": null,
+      "permission": "use_tools",
+      "title": "List the file server",
+      "ui": "api.files",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/files"
+      ],
+      "id": "files.upload",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_tools",
+      "title": "Upload to the file server",
+      "ui": "api.uploadFile",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "DELETE /api/files/{file_id}"
+      ],
+      "id": "files.delete",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_tools",
+      "title": "Delete a file",
+      "ui": "api.deleteFile",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/files/wipe"
+      ],
+      "id": "files.wipe",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Wipe the file server",
+      "ui": "api.wipeFiles",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/tools"
+      ],
+      "id": "tools.list",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_tools",
+      "title": "List tools I may open",
+      "ui": "api.tools",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PUT /api/tools",
+        "POST /api/tools/{tool_id}/refresh"
+      ],
+      "id": "tools.configure",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_plugins",
+      "title": "Edit the tool list; refresh a tool",
+      "ui": "api.toolsSave",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/plugins",
+        "PUT /api/plugins/extensions/{ext_id}",
+        "PUT /api/plugins/livetools"
+      ],
+      "id": "plugins.manage",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_plugins",
+      "title": "Enable or disable plugins and live tools",
+      "ui": "api.plugins",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/push/subscribe",
+        "DELETE /api/push/subscribe",
+        "GET /api/push/vapid"
+      ],
+      "id": "push.subscribe",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_notifications",
+      "title": "Subscribe this device to notifications",
+      "ui": "settings.device",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/health"
+      ],
+      "id": "system.health",
+      "machine": [
+        "machine:health_detail"
+      ],
+      "mcp": null,
+      "permission": null,
+      "title": "Health and diagnostics",
+      "ui": "api.health",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/dashboard",
+        "GET /api/dashboard/deep",
+        "GET /api/dashboard/logs"
+      ],
+      "id": "system.dashboard",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Host dashboard",
+      "ui": "settings.health",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/harness/status",
+        "POST /api/harness/jobs",
+        "POST /api/harness/sessions"
+      ],
+      "id": "system.harness",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "DeepSeek harness (code execution)",
+      "ui": "api.harnessStatus",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/local/roots",
+        "GET /api/local/stat",
+        "GET /api/local/ls",
+        "PUT /api/local/config"
+      ],
+      "id": "system.local_viewer",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Local viewer",
+      "ui": "api.localRoots",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/openapi.json"
+      ],
+      "id": "system.openapi",
+      "machine": [
+        "machine:openapi"
+      ],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Read the OpenAPI document",
+      "ui": null,
+      "ws": []
+    }
+  ],
+  "note": "cli and mcp are null everywhere: DisPatch ships no CLI or MCP server yet.",
+  "schema": 1,
+  "surfaces": [
+    "http",
+    "ws",
+    "ui",
+    "cli",
+    "mcp"
+  ],
+  "unmapped_routes": [
+    "GET /",
+    "GET /api/advisor/status",
+    "GET /api/apps/imagestudio/chat-images",
+    "GET /api/apps/imagestudio/images",
+    "GET /api/apps/imagestudio/state",
+    "GET /api/apps/imagestudio/targets",
+    "GET /api/apps/jobboard",
+    "GET /api/apps/jobboard/current",
+    "GET /api/apps/jobboard/feedback",
+    "GET /api/apps/jobboard/month/{key}",
+    "GET /api/apps/jobboard/months",
+    "GET /api/apps/jobboard/profile",
+    "GET /api/apps/jobboard/reasons",
+    "GET /api/apps/jobboard/{job_id}",
+    "GET /api/avatar-pool",
+    "GET /api/avatar-pool/{bot_id}/prompts",
+    "GET /api/bots/personas",
+    "GET /api/bots/{bot_id}/avatar",
+    "GET /api/bots/{bot_id}/avatar/full",
+    "GET /api/bots/{bot_id}/avatar/history",
+    "GET /api/bots/{bot_id}/avatar/history/{snapshot_id}",
+    "GET /api/bots/{bot_id}/avatar/thumb",
+    "GET /api/bots/{bot_id}/models",
+    "GET /api/extensions",
+    "GET /api/files/{file_id}/download",
+    "GET /api/files/{file_id}/raw",
+    "GET /api/harness/jobs",
+    "GET /api/harness/jobs/{job_id}",
+    "GET /api/harness/models",
+    "GET /api/harness/sessions",
+    "GET /api/harness/sessions/{sid}",
+    "GET /api/jobs",
+    "GET /api/jobs/current",
+    "GET /api/jobs/feedback",
+    "GET /api/jobs/month/{key}",
+    "GET /api/jobs/months",
+    "GET /api/jobs/profile",
+    "GET /api/jobs/reasons",
+    "GET /api/jobs/{job_id}",
+    "GET /api/llm/quicksetup",
+    "GET /api/mail/status",
+    "GET /api/media",
+    "GET /api/messages/{message_id}/mood-face",
+    "GET /api/plugins/catalog",
+    "GET /api/practice-links/{client_id}",
+    "GET /api/practice/{path:path}",
+    "GET /api/quick-actions",
+    "GET /api/reactions/pool",
+    "GET /api/reactions/prompts",
+    "GET /api/reactions/{rid}/image",
+    "GET /api/studioforge/status",
+    "GET /api/threads/{thread_id}/avatar",
+    "GET /api/tools/{tool_id}/status",
+    "GET /apps/{app_id}",
+    "GET /apps/{app_id}/{rel:path}",
+    "GET /ext/{ext_id}/{rel:path}",
+    "GET /local/file/{path:path}",
+    "GET /local/view/{ticket}/{rel:path}",
+    "GET /tools/_t/{ticket}/{rel:path}",
+    "GET /tools/{tool_id}",
+    "GET /tools/{tool_id}/{rel:path}",
+    "PATCH /api/messages/{message_id}/checklist",
+    "POST /api/advisor/digest",
+    "POST /api/apps/imagestudio/generate",
+    "POST /api/apps/jobboard",
+    "POST /api/apps/jobboard/find",
+    "POST /api/apps/jobboard/profile/recompute",
+    "POST /api/apps/jobboard/score",
+    "POST /api/apps/jobboard/{job_id}/applied",
+    "POST /api/apps/jobboard/{job_id}/archive",
+    "POST /api/apps/jobboard/{job_id}/feedback",
+    "POST /api/apps/jobboard/{job_id}/tags",
+    "POST /api/apps/jobboard/{job_id}/vote",
+    "POST /api/avatar-pool/{bot_id}/refill",
+    "POST /api/guide/seed",
+    "POST /api/harness/jobs/cancel",
+    "POST /api/harness/model",
+    "POST /api/harness/restart",
+    "POST /api/harness/sessions/{sid}/dismiss",
+    "POST /api/harness/sessions/{sid}/stop",
+    "POST /api/harness/start",
+    "POST /api/harness/stop",
+    "POST /api/image-jobs/{job_id}/callback",
+    "POST /api/jobs",
+    "POST /api/jobs/find",
+    "POST /api/jobs/profile/recompute",
+    "POST /api/jobs/score",
+    "POST /api/jobs/{job_id}/applied",
+    "POST /api/jobs/{job_id}/archive",
+    "POST /api/jobs/{job_id}/feedback",
+    "POST /api/jobs/{job_id}/tags",
+    "POST /api/jobs/{job_id}/vote",
+    "POST /api/llm/quicksetup",
+    "POST /api/practice/{path:path}",
+    "POST /api/reactions/generate",
+    "POST /api/reactions/pool/refill",
+    "POST /api/recover/transcript",
+    "POST /api/threads/{thread_id}/avatar",
+    "PUT /api/avatar-pool/{bot_id}",
+    "PUT /api/avatar-pool/{bot_id}/prompts",
+    "PUT /api/practice-links/{client_id}",
+    "PUT /api/reactions/pool",
+    "PUT /api/reactions/prompts"
+  ]
+}

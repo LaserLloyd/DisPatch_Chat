@@ -7,6 +7,58 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-10-18
+
+Profiles, roles and one policy engine. The binary "PIN or Safe Mode" model is replaced by
+an Owner, Admins, Members and Restricted profiles; every route and WebSocket action now
+declares the permission it needs; and the backend runs on native Windows.
+
+### Old name -> new name
+
+| Before | Now |
+|---|---|
+| decoy, Safe Mode, locked device, "limited tier", `request.state.decoy` | **Restricted** |
+| Unlocked, operator, full session | **Owner** (or **Admin**) |
+| the one PIN | the **Owner's PIN** (Members have their own PIN, Admins a password) |
+| bot flags `safe` + `hide_unlocked` | `audience`: `all` / `members` / `restricted` (flags kept for one release) |
+| per-IP in-memory budgets, `DISPATCH_DECOY_*` | per-profile budgets in `chats.db` (`DISPATCH_DECOY_*` still set the defaults) |
+
+### BREAKING
+
+- **A new install is closed to the network until it has an owner.** With no owner and no
+  PIN, only the machine DisPatch runs on may use it; any other machine sees the shell and
+  the sign-in state, and can finish setup only with the one-time **setup token** printed
+  in the server log (`SETUP TOKEN: ...`). Docker users: `docker compose logs app`. This
+  closes the 2.x hole where the first network client to call `POST /api/auth/setup`
+  became the owner. An install that already has a PIN is unaffected. To keep the old
+  "open until a PIN is set" behaviour set `DISPATCH_ALLOW_OPEN_INSTALL=1`.
+- **Authorisation moved from a path deny-list to declared permissions.** `main._decoy_blocked`
+  and the eight operator checks are gone from the request path; `auth_gate` enforces the
+  requirement each route declares in `backend/app/route_policy.py` and refuses a route
+  that declares none. Behaviour for the Owner is unchanged. Responses to a Restricted
+  caller keep `detail: "Unlock for full access"` and `"decoy": true`, and gain
+  `required_permission` and `error`.
+- **Error bodies gain an `error` object** `{code, message, fix, docs}` (additive: `detail`
+  is byte-for-byte what it was). Catalogue: `docs/errors.md`. A machine caller gets the
+  same object inside its `application/problem+json` document.
+- **Cookies are `SameSite=Strict`** (were `Lax`), and a state-changing request that
+  carries a session or device cookie is refused unless its `Origin` is ours and
+  `Sec-Fetch-Site` is not `cross-site` / `same-site` (`error.code: csrf_origin`). A
+  reverse proxy must pass the original `Host` header through.
+- **Machine access is a principal with scopes, not network position.** Agents holding
+  the `api_token` get the named scopes in `docs/contracts/permissions.json`
+  (`machine_scopes` in `security.yaml` narrows them). On-box processes on `127.0.0.1`
+  are still trusted without a key while `machine_loopback_trust: true` (the default
+  after an upgrade); set it to `false` once your crons send the key.
+- **The unlock throttle is per (device, profile) + per address + a global ceiling**, not
+  one process-wide counter. After 5 failures that device and profile wait 5 s, doubling
+  to about 5 minutes.
+- `GET /api/openapi.json` without the key answers `401` (was `403`); `POST
+  /api/auth/setup` answers `403 setup_forbidden` from the network; `/ws` refuses
+  (`1008`) an unclaimed install from the network.
+- `Dockerfile` / compose users: the container binds `0.0.0.0`, so a fresh container
+  needs the setup token from `docker compose logs`.
+
 ### Added
 
 - **Agent dispatch core (library only, not wired yet).** A new self-contained package
@@ -28,10 +80,83 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Optional extra `agents-claude` (`claude-agent-sdk==0.2.168`, exact pin); it is not in
   the default dependencies and `uv.lock` gains its resolution.
 
+- **Accounts** (`backend/app/accounts.py`, tables `profiles`, `devices`, `sessions`,
+  `usage_daily`, `activity`, `schema_migrations` in `chats.db`): Owner (exactly one),
+  Admin, Member, Restricted. argon2id for PINs and passwords (`cryptography`). Per-profile
+  PIN quick-switch; Admin/Owner need their credential; per-role and per-profile session
+  timeouts. Sessions end when a profile is deleted, disabled, re-roled or re-credentialed.
+- **People & Profiles** API (`/api/people*`, `/api/auth/login|switch|me|password|api-token`)
+  and Settings tab: create/edit profiles, budgets (messages, conversations, ratings,
+  upload MB, **minutes per day**, **quiet hours**), grants/denies, sign-out, bind **this
+  device** to a Member or Restricted profile, activity summary, admin audit log.
+- **Policy engine** (`backend/app/policy.py`, `contracts/permissions.py`): the role ->
+  permission matrix, `require_permission(...)`, `request.state.policy`, and
+  `dispatch_agents` as its own permission (a Member cannot run a host agent until granted).
+- **Route-table gate** (`tests/test_route_table.py`) and **access-control suite**
+  (`tests/test_g5_access.py`): every route and WebSocket action is called with no session
+  and with a Restricted session and must be refused; a Restricted turn reaches only
+  `audience in (all, restricted)` characters.
+- **Contracts** (`backend/app/contracts/`, `docs/contracts/`, `docs/errors.md`,
+  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (189 codes),
+  capability registry and JSON Schemas for Connection, Tool plugin, Voice provider and
+  Character manifests, regenerated and checked in CI (`tests/test_contracts_drift.py`).
+- **Migration with a safety net**: `python -m app.migrate [--dry-run] [--restore DIR]`;
+  the server runs it at start. See "Upgrading" below.
+- `anonymous_access: none` in `security.yaml`: a device that has not signed in sees only
+  the sign-in page.
+- Security headers on every response (`nosniff`, `Referrer-Policy`, `X-Frame-Options`
+  where no CSP frame-ancestors, `no-store` on auth and people APIs, HSTS over TLS).
+- **Native Windows**: the backend imports and the test suite collects on Windows
+  (`app/_filelock.py` replaces `fcntl`); `.gitattributes` keeps LF everywhere; the
+  frontend suite (788 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
+  PowerShell; `frontend/package-lock.json` is committed.
+- `.claude/agents/`: contract-guardian, security-reviewer, migration-verifier,
+  docs-drift-checker, a11y-reviewer.
+
 ### Changed
 
 - `openclaw.send_to_agent` takes an optional `on_spawn` callback (default `None`, no
   behaviour change) so the agent adapter can stop the CLI process on cancel.
+
+- Settings and docs say **Restricted** / **Owner**; the Bots tab shows each character's
+  audience. Strings in all eight languages (`frontend/static/locales/I18N-TODO.md` lists
+  the entries still awaiting a translator).
+- `GET /api/tools` has three audiences: the Owner/Admin sees everything, a Member every
+  enabled page tool (no host paths), Restricted only tools flagged `safe`.
+
+### Upgrading from 2.x (exact behaviour)
+
+Start 3.0.0 as usual; the server migrates before it serves. Or look first:
+`python -m app.migrate --dry-run --data-dir <dir>` prints each step and writes nothing.
+
+1. **Backup** (only when there is data to protect and a step is pending):
+   `<data>/backups/3.0.0-<UTC stamp>/` receives a consistent copy of `chats.db`,
+   `config.yaml`, `security.yaml` and `trusted-devices.yaml`. The newest five are kept.
+   Undo with `python -m app.migrate --restore <that directory>` (server stopped).
+2. `001_accounts` creates the new tables (additive; a 2.x binary still runs on the result).
+3. `002_owner_from_pin` — **an install with a PIN gets an Owner profile built from that
+   PIN.** The PIN is unchanged and unlocks as before. The profile has **no password yet**;
+   the first time you do something that needs one (create an Admin) the app asks you to
+   set it. Nothing is locked out; remembered devices stay remembered (as the Owner's).
+4. `003_audience` writes `audience` on every character in `config.yaml`, computed from the
+   legacy flags: `safe` + `hide_unlocked` -> `restricted`; `safe` -> `all`; otherwise
+   `members`. The flags are kept and still read; when the two disagree the more
+   restrictive reading wins.
+5. `004_security_keys` writes `machine_loopback_trust: true`, `machine_scopes: null`,
+   `anonymous_access: restricted` and the per-role session timeouts into `security.yaml`
+   at the values that reproduce 2.x behaviour.
+6. An install with **no PIN** is not migrated into an owner: it stays unclaimed (see
+   BREAKING, first item) until you create one.
+
+Running it again does nothing. `DISPATCH_ARGON2_MEMORY_KIB` / `DISPATCH_ARGON2_PASSES`
+exist for tests only.
+
+### Known limits
+
+- Conversations are one shared household space; roles gate actions and characters, not
+  individual threads (`docs/design/multi-user.md` lists what is deferred).
+- Behind a TLS-terminating proxy that rewrites `Host`, the Origin check will refuse
+  state-changing requests; make the proxy preserve `Host`.
 
 ## [2.4.2] — 2026-10-17
 

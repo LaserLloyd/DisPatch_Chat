@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -48,6 +47,8 @@ from pathlib import Path
 
 import httpx
 import yaml
+
+from . import _filelock
 
 log = logging.getLogger("local-chat.harness")
 
@@ -575,7 +576,7 @@ def set_default_model(provider: str, model: str, path: Path | None = None) -> di
     except OSError as e:
         raise HarnessError(f"cannot lock {p.name}: {e}") from e
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        _filelock.lock_exclusive(lock_fd)
         try:
             original = p.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -623,7 +624,7 @@ def set_default_model(provider: str, model: str, path: Path | None = None) -> di
             raise HarnessError(f"cannot write {p.name}: {e}") from e
     finally:
         with contextlib.suppress(OSError):
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _filelock.unlock(lock_fd)
         os.close(lock_fd)
     return {"provider": provider, "model": model}
 

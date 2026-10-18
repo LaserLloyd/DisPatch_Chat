@@ -61,7 +61,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import auth, config
+from . import config
+from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.localview")
 
@@ -753,14 +754,8 @@ def _require_full_access(request: Request) -> None:
     directory. Browsers only — which is also why these routes are absent from
     ``main._is_inbound``.
     """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
-    session = getattr(request.state, "session", None) or auth.get_session(
-        request.cookies.get(COOKIE_NAME))
-    if session is not None:
-        return
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+    from . import policy
+    policy.of(request).require(Permission.ADMIN_SYSTEM)
 
 
 def _roots_body(cfg: ViewerConfig) -> list[dict]:

@@ -23,7 +23,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { domSkip } from './_require-dom.js';
 
@@ -32,7 +32,7 @@ const STATIC = join(HERE, '..', 'static');
 
 // markdown.js guards its module-scope `window` access, so it imports under
 // plain node. Only the sanitize path needs a DOM.
-const { toPlainPreview, renderMarkdown } = await import(join(STATIC, 'js', 'markdown.js'));
+const { toPlainPreview, renderMarkdown } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
 
 // ---------------------------------------------------------------------------
 // 1. Thread-list previews
@@ -318,7 +318,7 @@ test('table column alignment and h5/h6 headings survive sanitization', { skip: d
 
 test('enhanceContent makes markdown tables sortable (numeric-aware, blanks last) and resizable', { skip: dom.skip }, async () => {
   const win = await withDom();
-  const { enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
+  const { enhanceContent } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
   const div = win.document.createElement('div');
   div.innerHTML = renderMarkdown('| name | price |\n|---|---|\n| pear | $1,200 |\n| apple | 95 |\n| fig |  |\n| kiwi | 1,050.5 |');
   win.document.body.appendChild(div);
@@ -617,7 +617,7 @@ test('noLocal suppresses every local affordance', { skip: dom.skip }, async () =
 
 test('enhanceContent rewrites a local href, and removes it under noLocal', { skip: dom.skip }, async () => {
   const win = await withDom();
-  const { enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
+  const { enhanceContent } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
 
   const div = win.document.createElement('div');
   div.innerHTML = '<p><a href="/var/home/user/a.md">a</a> <a href="/api/files/1/raw">keep</a></p>';
@@ -656,7 +656,7 @@ test('the thread preview shows a [[view:]] label, never the syntax', () => {
 // the link opens a tab that connects to nothing. Every one of these is about
 // which links may be moved and which must be left exactly as written.
 
-const { retargetLoopbackHref } = await import(join(STATIC, 'js', 'markdown.js'));
+const { retargetLoopbackHref } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
 
 test('a loopback host becomes the host the reader reached the app on', () => {
   for (const [href, want] of [
@@ -721,7 +721,7 @@ test('the plain-text user bubble retargets too, not just rendered markdown', () 
 // WHERE it refuses to fire. A JSON blob in a code block is the case that
 // matters most: it is nothing but quote marks, and none of them are speech.
 
-const { markSpeech } = await import(join(STATIC, 'js', 'markdown.js'));
+const { markSpeech } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
 
 function speechOf(html) {
   const { JSDOM } = jsdom;
@@ -891,7 +891,7 @@ function parensOf(html) {
   return [...c.querySelectorAll('.md-paren')].map((s) => s.textContent);
 }
 
-const { markParens } = await import(join(STATIC, 'js', 'markdown.js'));
+const { markParens } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
 
 test('a parenthetical aside is marked', dom, () => {
   assert.deepEqual(parensOf('<p>The run finished (about 12 minutes) and passed.</p>'),

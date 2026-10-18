@@ -490,7 +490,7 @@ def test_health_withholds_recon_from_an_unauthenticated_caller(app_client, monke
 
     body = app_client.get("/api/health").json()
     # What the Docker HEALTHCHECK reads must still be there.
-    assert body["status"] == "ok"
+    assert body["status"] == "ok", body
     assert body["db_integrity_ok"] is True
     for leak in ("data_dir", "gateway_ok", "clients", "openclaw_available",
                  "last_backup_at"):

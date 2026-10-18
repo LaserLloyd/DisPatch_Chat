@@ -4,7 +4,7 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 2.4.0** (October 2026) · [what changed](#whats-new-in-23)
+**Current release: 3.0.0** (October 2026) · [what changed](CHANGELOG.md#300--2026-10-18)
 
 [Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
@@ -32,9 +32,10 @@ no account, no cloud, no telemetry.
 - **A personality for every bot.** Settings → Bots → Personality has ten presets
   (Sleek assistant, Cat-girl, Warm friend, Patient tutor and more) and an editor;
   `{name}` and `{user}` in the text are filled in for each reply.
-- **A PIN and a Safe Mode.** Unlocked devices can do everything; locked family
-  devices can only talk to the bots you mark safe, by text or, with the voice
-  add-on, by voice.
+- **Profiles and roles.** An Owner, Admins, Members and Restricted profiles for
+  children and guests, each with their own PIN or password, daily budgets, time
+  limits and a device you can bind to them. A Restricted profile can only talk to
+  the characters made for it, by text or, with the voice add-on, by voice.
 - **Ten themes**, eight languages, and a phone-installable PWA with push pings.
 - **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
   OpenAI-compatible images endpoint) or your own image server, and reaction images.
@@ -251,11 +252,12 @@ bot at a model provider's API directly. The agent path is still what you want
 if you need a thing that can *use tools and act on the machine*, and it is
 still the one that has to run on the same host.
 
-It is also **single-account today**. One PIN, one shared view of everything.
-Per-person accounts with separate identities, roles and per-conversation access
-are designed in detail and not built — the design is in
-[docs/design/multi-user.md](docs/design/multi-user.md), including the migration
-that keeps an existing install's history.
+Since 3.0 it has **accounts**: an Owner, Admins, Members and Restricted profiles,
+enforced on the server for every route. Conversations are still one shared
+household space (no per-person threads yet); roles decide what each person can
+*do* and which characters they can reach. The design and what is built are in
+[docs/design/multi-user.md](docs/design/multi-user.md); the upgrade that keeps an
+existing install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to-30).
 
 ## Features
 
@@ -402,28 +404,34 @@ thorough job, and it would tell you cheerfully when it was finished. Nothing in
 that request looks different to an agent from "summarise this email", and by the
 time you read the message the ducks are live.
 
-So the two tiers are not about keeping the family out of the chat. They are
-about which half of the app is behind a door:
+So roles are not about keeping the family out of the chat. They are about which
+half of the app is behind a door:
 
 <div align="center">
   <img src="docs/assets/tiers.svg" width="100%"
        alt="Both tiers funnel through one server-side gate. A kitchen tablet with no PIN reaches Safe Mode: read and send to safe characters only, media stripped server-side, a one-way file drop, daily per-device budgets, and 403 on every mutating endpoint. A phone with the PIN entered reaches everything: full-power agents, files, settings, deletion, the host dashboard, the tools and the coding pane." />
 </div>
 
-**Safe Mode — no PIN.** What a kitchen tablet or a kid's phone gets. Read and
-send, but only to the characters you marked safe, with media stripped
-server-side, per-device daily budgets, and a one-way file drop (they can send
-you a file; they cannot browse or retrieve anything). Every mutating endpoint
-answers 403. The app does not even hint that it unlocks.
+**Restricted** (formerly "Safe Mode") — what a kitchen tablet or a child's profile
+gets, signed in or not. Read and send, but only to the characters whose audience
+is *Restricted* or *Everyone*, with media stripped server-side, per-profile daily
+budgets, time limits and quiet hours, and a one-way file drop (they can send you a
+file; they cannot browse or retrieve anything). Every management endpoint answers
+403, and the Owner sees a summary of what the profile did (counts, not content).
 
-**Unlocked — with the PIN.** Everything: the full-power agents, files, settings,
-deletion, the host dashboard, and the DeepSeek Harness pane (when `dsh` is
-installed) if you turned it on.
+**Member, Admin, Owner** — progressively more. A Member chats, uses voice, images
+and the tools you enabled. An Admin also manages characters, connections, plugins
+and the other profiles. The Owner (formerly "Unlocked") also holds host control:
+the full-power agents, files, wipe and export, the host dashboard, and the
+DeepSeek Harness pane (when `dsh` is installed) if you turned it on. Running an
+agent on the host is its own permission (`dispatch_agents`).
 
-The split is enforced on the server, not in the interface — a locked device that
-crafts the request by hand gets the same 403 as one that presses the button.
-That is the invariant to protect if you contribute: new endpoints inherit the
-gate, and a permission problem is never fixed by loosening it.
+The split is enforced on the server, not in the interface — a Restricted device
+that crafts the request by hand gets the same 403 as one that presses the button.
+That is the invariant to protect if you contribute: every route and WebSocket
+action declares the permission it needs in `backend/app/route_policy.py`, a test
+fails the build if one does not, and a permission problem is never fixed by
+loosening it. The generated reference is [docs/contracts/](docs/contracts/).
 
 ## Run it in Docker
 
@@ -554,9 +562,10 @@ of what you are trusting:
   history and hands text to agent backends. Transport is TLS; storage is your
   filesystem. Anyone claiming otherwise about an app shaped like this is
   selling something.
-- **It is currently single-account, not multi-user.** One PIN grants full
-  access; there are no per-person accounts yet. Everyone who unlocks sees
-  everything. See the roadmap below.
+- **Accounts are roles, not walls.** Members share the household's conversations;
+  there is no per-person thread ownership yet, and an agent-backed character runs
+  with your user's rights on the host (hence the separate `dispatch_agents`
+  permission). See [docs/security.md](docs/security.md).
 - **Privacy mode** lets a device hold nothing locally: no offline cache, no
   saved settings, no persistent session. See
   [docs/security.md](docs/security.md#privacy-mode).

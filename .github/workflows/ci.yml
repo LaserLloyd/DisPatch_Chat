@@ -62,6 +62,33 @@ jobs:
         working-directory: backend
         run: uv run pytest -q
 
+  windows:
+    name: Windows (imports, collects, frontend)
+    needs: privacy
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: The backend imports and the suite collects on native Windows
+        # `import fcntl` once made this impossible. The FULL suite still runs on Linux
+        # (POSIX paths, process groups); this job is the importability guard.
+        working-directory: backend
+        env:
+          PYTHONUTF8: "1"
+          DISPATCH_DATA_DIR: ${{ runner.temp }}\dispatch-data
+        run: |
+          uv sync --frozen --python 3.12
+          uv run python -c "import app.main"
+          uv run pytest --co -q
+      - name: Frontend tests on Windows
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:ci
+
   lint:
     name: Lint
     needs: privacy
@@ -100,7 +127,7 @@ jobs:
         # and the whole sanitizer suite — so CI was green over 243 of 339
         # tests and nobody could tell from the summary.
         working-directory: frontend
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Frontend tests
         # node --check only PARSES. It cannot see that a function being called

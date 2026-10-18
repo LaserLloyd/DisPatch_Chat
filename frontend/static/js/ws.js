@@ -4,7 +4,7 @@
 const HEARTBEAT_MS = 30000;
 
 export class ChatSocket {
-  constructor({ onMessage, onStatus, onReconnect, onOpen }) {
+  constructor({ onMessage, onStatus, onReconnect, onOpen, onSignInRequired }) {
     this.onMessage = onMessage;
     this.onStatus = onStatus || (() => {});
     this.onReconnect = onReconnect || (() => {});
@@ -15,6 +15,11 @@ export class ChatSocket {
     // and at boot the answer arrives on the first open, which onReconnect
     // never sees.
     this.onOpen = onOpen || (() => {});
+    // 3.0: with anonymous_access: none the server closes /ws with 1008 (policy
+    // violation) until somebody signs in. That is an answer, not a dropped link:
+    // retrying every half second would only hammer it. We stop, tell the app,
+    // and the app calls connect() again after a successful sign-in.
+    this.onSignInRequired = onSignInRequired || (() => {});
     this.ws = null;
     this.backoff = 500;
     this.maxBackoff = 8000;
@@ -84,10 +89,16 @@ export class ChatSocket {
       this.onMessage(data);
     });
 
-    sock.addEventListener('close', () => {
+    sock.addEventListener('close', (ev) => {
       if (this.ws !== sock) return;   // a superseded socket closing is not our drop
       clearInterval(this.heartbeat);
       this.onStatus(false);
+      if (ev && ev.code === 1008 && !this.closedByUser) {
+        this.closedByUser = true;     // no reconnect loop; connect() re-arms it
+        this.backoff = 500;
+        this.onSignInRequired();
+        return;
+      }
       if (!this.closedByUser) this.scheduleReconnect();
     });
 

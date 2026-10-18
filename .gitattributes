@@ -1,0 +1,31 @@
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.zst binary
+*.db binary
+*.onnx binary
+*.npz binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.mp4 binary
+*.webm binary
+*.svg text
+
+# Shell scripts must stay LF even on Windows checkouts
+*.sh text eol=lf
+*.service text eol=lf
+docker-entrypoint.sh text eol=lf

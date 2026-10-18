@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "SettingField": {
+      "additionalProperties": false,
+      "description": "One setting a plugin contributes to its Settings section (rendered from this).",
+      "properties": {
+        "advanced": {
+          "default": false,
+          "title": "Advanced",
+          "type": "boolean"
+        },
+        "choices": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Choices",
+          "type": "array"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 400,
+          "title": "Description",
+          "type": "string"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Env"
+        },
+        "key": {
+          "pattern": "^[a-z][a-z0-9_]{0,47}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 80,
+          "title": "Label",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "choice",
+            "secret",
+            "url",
+            "path"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "type",
+        "label"
+      ],
+      "title": "SettingField",
+      "type": "object"
+    },
+    "VoiceModelRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 120,
+          "title": "Id",
+          "type": "string"
+        },
+        "license": {
+          "default": "",
+          "maxLength": 60,
+          "title": "License",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_mb": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Mb"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "VoiceModelRef",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A speech engine: speech-to-text, text-to-speech, voice-activity or turn\ndetection. A GPL engine MUST declare ``process_boundary: true`` (it runs as its own\nprocess, never imported into DisPatch) - the loader refuses it otherwise.",
+  "properties": {
+    "engine": {
+      "maxLength": 60,
+      "title": "Engine",
+      "type": "string"
+    },
+    "gpu": {
+      "default": "none",
+      "enum": [
+        "none",
+        "optional",
+        "required"
+      ],
+      "title": "Gpu",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "languages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Languages",
+      "type": "array"
+    },
+    "license": {
+      "maxLength": 60,
+      "title": "License",
+      "type": "string"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/VoiceModelRef"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "name": {
+      "maxLength": 80,
+      "title": "Name",
+      "type": "string"
+    },
+    "process_boundary": {
+      "default": false,
+      "title": "Process Boundary",
+      "type": "boolean"
+    },
+    "requires_permission": {
+      "default": "use_voice",
+      "title": "Requires Permission",
+      "type": "string"
+    },
+    "role": {
+      "enum": [
+        "stt",
+        "tts",
+        "vad",
+        "turn"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "schema": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema",
+      "type": "integer"
+    },
+    "settings": {
+      "items": {
+        "$ref": "#/$defs/SettingField"
+      },
+      "title": "Settings",
+      "type": "array"
+    },
+    "streaming": {
+      "default": true,
+      "title": "Streaming",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "role",
+    "engine",
+    "license"
+  ],
+  "title": "DisPatch voice-provider manifest",
+  "type": "object"
+}

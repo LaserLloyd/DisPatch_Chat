@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "CharacterBackend": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent"
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connection"
+        },
+        "kind": {
+          "default": "direct",
+          "enum": [
+            "direct",
+            "advisor",
+            "agent"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "title": "CharacterBackend",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A character (the 2.x \"bot\"): who it is, who it is for, and what answers for it.",
+  "properties": {
+    "audience": {
+      "default": "members",
+      "enum": [
+        "all",
+        "members",
+        "restricted"
+      ],
+      "title": "Audience",
+      "type": "string"
+    },
+    "avatar": {
+      "default": "",
+      "maxLength": 120,
+      "title": "Avatar",
+      "type": "string"
+    },
+    "backend": {
+      "$ref": "#/$defs/CharacterBackend"
+    },
+    "color": {
+      "default": "",
+      "maxLength": 32,
+      "title": "Color",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 400,
+      "title": "Description",
+      "type": "string"
+    },
+    "emoji": {
+      "default": "",
+      "maxLength": 8,
+      "title": "Emoji",
+      "type": "string"
+    },
+    "guardrails": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Guardrails",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9_-]{1,48}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "pack": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pack"
+    },
+    "persona": {
+      "default": "",
+      "maxLength": 8000,
+      "title": "Persona",
+      "type": "string"
+    },
+    "schema": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema",
+      "type": "integer"
+    },
+    "voice": {
+      "default": "",
+      "maxLength": 80,
+      "title": "Voice",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "title": "DisPatch character manifest",
+  "type": "object"
+}

@@ -59,7 +59,9 @@ def test_detail_is_unchanged_for_everyone(client):
 def test_a_browser_still_gets_the_plain_body(client):
     r = client.get("/api/threads/no-such-thread-id", headers=BROWSER)
     assert r.headers["content-type"].startswith("application/json")
-    assert set(r.json()) == {"detail"}, "the browser's error body changed shape"
+    # 3.0: `detail` is untouched; the catalogued `error` object is purely additive.
+    assert set(r.json()) == {"detail", "error"}, "the browser's error body changed shape"
+    assert r.json()["error"]["code"] == "thread_not_found"
 
 
 def test_a_refusal_carries_a_code_the_prose_cannot_give(client):
@@ -69,8 +71,10 @@ def test_a_refusal_carries_a_code_the_prose_cannot_give(client):
     r = client.post("/api/inject", json={"bot_id": "main", "content": "hi"},
                     headers=BROWSER)
     assert r.status_code == 403
-    # Browser-shaped: plain body, as promised.
-    assert set(r.json()) == {"detail"}
+    # Browser-shaped: the plain body, as promised - `detail` unchanged, `error` added.
+    assert r.json()["detail"] == "Unlock for full access"
+    assert r.json()["error"]["code"] == "safe_mode"
+    assert not r.headers["content-type"].startswith(problem.MEDIA_TYPE)
     assert problem.code_for(403, "Unlock for full access") == "safe_mode"
     assert problem.code_for(404, "thread not found") == "thread_not_found"
 
@@ -123,5 +127,6 @@ def test_the_schema_is_not_handed_to_a_stranger(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "db", temp_db)
     with TestClient(main.app, client=("203.0.113.5", 50000)) as c:
         auth.set_pin("1234")
-        assert c.get("/api/openapi.json").status_code == 403
+        # A stranger holds neither a session nor the API key: refused either way.
+        assert c.get("/api/openapi.json").status_code in (401, 403)
     asyncio.run(temp_db.close())

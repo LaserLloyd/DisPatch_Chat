@@ -19,7 +19,7 @@
 // `deps` ({ mountTools(host), toast(msg, isErr), openTab(id), api? }), which
 // is also how the tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=33';
+import { api as realApi } from './api.js?v=34';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import { COMMANDS, commandBlock } from './voice-absent.js?v=14';

@@ -51,13 +51,27 @@ class ConnectionManager:
         lapsed, exactly as for a browser tab of the same session."""
         return self._frame_for({"decoy": False, "token": token}, message)
 
-    async def connect(self, ws: WebSocket, decoy: bool = False, token: str | None = None) -> None:
+    async def connect(self, ws: WebSocket, decoy: bool = False, token: str | None = None,
+                      principal=None) -> None:
         await ws.accept()
         async with self._lock:
             # The per-connection lock serializes every send to this socket, so
             # concurrent broadcasts / direct sends can never interleave a
             # frame's bytes on the wire or reorder frames for one client.
-            self._conns[ws] = {"decoy": decoy, "token": token, "lock": asyncio.Lock()}
+            # ``principal`` (3.0) is who the socket belongs to: a Restricted one is
+            # redacted exactly like the old Safe-Mode connection.
+            self._conns[ws] = {"decoy": decoy, "token": token, "lock": asyncio.Lock(),
+                               "principal": principal}
+
+    def principal_of(self, ws: WebSocket):
+        meta = self._conns.get(ws)
+        return meta.get("principal") if meta else None
+
+    def set_principal(self, ws: WebSocket, principal) -> None:
+        meta = self._conns.get(ws)
+        if meta is not None:
+            meta["principal"] = principal
+            meta["decoy"] = bool(principal.is_restricted)
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
@@ -66,6 +80,12 @@ class ConnectionManager:
     def _is_safe(self, meta: dict) -> bool:
         if meta.get("decoy"):
             return True
+        pr = meta.get("principal")
+        if pr is not None and getattr(pr, "kind", "") == "profile" and not pr.is_restricted \
+                and not meta.get("token"):
+            # A signed-in profile with no live token can only be a device bound to a
+            # default profile (Member): its role decides, not the missing token.
+            return False
         # A full connection whose session has lapsed is treated as Safe Mode
         # immediately (don't wait for it to send a frame).
         tok = meta.get("token")

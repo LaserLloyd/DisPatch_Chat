@@ -27,11 +27,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { isMixedContent } = await import(join(HERE, '..', 'static', 'js', 'util.js'));
+const { isMixedContent } = await import(pathToFileURL(join(HERE, '..', 'static', 'js', 'util.js')).href);
 
 test('the Tailscale case: an HTTPS page may not embed the plain-HTTP rig', () => {
   assert.equal(

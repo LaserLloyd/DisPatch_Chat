@@ -71,6 +71,7 @@ from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocketState
 
 from . import auth, config, livetools, tools
+from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.ext")
 
@@ -816,8 +817,8 @@ def require_operator(request: Request) -> None:
         if not origin_ok(request.headers) or \
                 request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site"):
             raise HTTPException(403, "cross-origin request refused")
-    if not tools._is_operator(request):
-        raise HTTPException(403, "Unlock for full access")
+    from . import policy
+    policy.of(request).require(Permission.MANAGE_PLUGINS)
 
 
 # --------------------------------------------------------------------------- #
@@ -1537,9 +1538,9 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
             # thread: the bot is still `safe` and listed (what its chat list
             # shows — main._safe_bot_ids).
             return locked_may_see(bot)
-        cfg = auth.load()
+        from . import policy
         if token is None:
-            return not cfg.pin_set          # opened with no PIN; a PIN since = locked
+            return not policy.claimed()     # opened on an unclaimed install; claimed since = locked
         return auth.get_session(token) is not None
     return session_live
 
@@ -1608,15 +1609,23 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         return
     # 2. The tier, as the main /ws decides it: a live unlocked session when a
     # PIN is set, else a LOCKED (Safe-Mode) device (pre-accept).
+    from . import policy
     cfg = auth.load()
     token = None
     locked = False
-    if cfg.pin_set:
+    if policy.claimed(cfg):
         session = auth.get_session(ws.cookies.get(_hooks.cookie_name))
-        if session is None:
+        principal = policy.for_session(session)
+        if principal is None:
             locked = True
+        elif not principal.can(Permission.USE_VOICE):
+            await ws.close(code=POLICY)        # a signed-in profile without voice
+            return
         else:
             token = session.token
+            # A Restricted PROFILE is the old locked device: same redaction, same
+            # safe-character rule, but its budget and activity are its own.
+            locked = principal.is_restricted
     # 3. The thread exists, and a locked device can see it: only a `safe`
     # bot's threads, the same rule its chat list follows (pre-accept, the same
     # 1008 as an unknown thread). Since 2.3.4 a locked device may use voice on
@@ -1718,8 +1727,10 @@ def api_extensions(request: Request):
     (2.3.4) gets the mount rows and each one's ``locked_status`` only."""
     if getattr(request.state, "decoy", False):
         return {"extensions": [e.locked_public() for e in _all if e.ok], "api": EXT_API}
+    from . import policy
     operator = tools._is_operator(request)
-    if not operator and not getattr(request.state, "machine", False):
+    pol = policy.of(request)
+    if not operator and not pol.machine and not pol.can(Permission.USE_CHAT):
         return JSONResponse(DECOY_BODY, status_code=403)
     return {"extensions": [e.public(operator=operator) for e in _all], "mode": _mode,
             "api": EXT_API}
@@ -1741,9 +1752,11 @@ def _etag(p: Path, st: os.stat_result) -> str:
 
 @router.api_route("/ext/{ext_id}/{rel:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def ext_static(request: Request, ext_id: str, rel: str):
-    if not getattr(request.state, "decoy", False) and not tools._is_operator(request):
-        # A locked device downloads the add-on's public frontend since 2.3.4
-        # (voice on the bots it can see); a machine caller never does.
+    from . import policy
+    if not policy.of(request).can(Permission.USE_VOICE):
+        # Anyone who may use voice downloads the add-on's public frontend (a
+        # Restricted profile too, since 2.3.4: voice on the characters it can see);
+        # a machine caller never does.
         return JSONResponse(DECOY_BODY, status_code=403)
     ext = get(ext_id)
     if ext is None or ext.static_dir is None:

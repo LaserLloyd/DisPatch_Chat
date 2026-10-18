@@ -7,6 +7,8 @@ title: Job Board
 icon: clipboard
 safe: false                     # operator only; Safe Mode never sees it
 order: 50
+# 3.0: a personal tracker - Admins and the Owner only.
+permission: manage_agents
 api:
   # The `dispatch-jobs` CLI, the scout agent and the daily sweep cron call
   # /api/jobs/... sessionless from loopback — keep it mounted there too.
