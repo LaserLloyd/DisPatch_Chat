@@ -163,3 +163,58 @@ def test_an_admin_cannot_move_a_saved_key_to_another_host(world):
                                                         "api_key": "sk-admins-own-0123456789"}).status_code == 200  # scrub-ok
     # The Owner may move it.
     assert owner.patch(f"/api/connections/{cid}", json={"base_url": "http://198.51.100.7:9/v1"}).status_code == 200
+
+
+# O-5 ------------------------------------------------------------------------ #
+
+def _ws_refused(c, path) -> int:
+    with pytest.raises(WebSocketDisconnect) as e:
+        with c.websocket_connect(path, headers=ORIGIN) as ws:
+            ws.receive_text()
+            ws.receive_text()
+    return e.value.code
+
+
+def _set_bot(bot_id: str, **fields) -> None:
+    doc = yaml.safe_load(config.CONFIG_PATH.read_text())
+    for b in doc["bots"]:
+        if b["id"] == bot_id:
+            b.update(fields)
+    config.CONFIG_PATH.write_text(yaml.safe_dump(doc))
+    config._invalidate_bots_cache()
+
+
+def test_the_voice_socket_of_an_unclaimed_install_is_closed_to_the_network(ext_env, monkeypatch):
+    from _extfake import KNOBS, install, thread_for
+    c, _ = ext_env
+    install()
+    tid = thread_for(c, "alpha")
+    monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)   # the secure default
+    assert not policy.claimed()
+    assert _ws_refused(c, f"/ws/voice/{tid}") == 1008                   # the TestClient is not loopback
+    assert KNOBS.sockets == []
+
+
+def test_the_voice_socket_honours_anonymous_access_none(ext_env):
+    from _extfake import KNOBS, install, lock, thread_for
+    c, _ = ext_env
+    install()
+    tid = thread_for(c, "alpha")                                        # a safe bot
+    lock(c)
+    cfg = auth.load()
+    cfg.anonymous_access = "none"
+    auth._write(cfg)
+    auth._bust_cache()
+    assert _ws_refused(c, f"/ws/voice/{tid}") == 1008
+    assert KNOBS.sockets == []
+
+
+def test_the_voice_socket_honours_the_characters_profiles_list(ext_env):
+    from _extfake import KNOBS, install, lock, thread_for
+    c, _ = ext_env
+    install()
+    tid = thread_for(c, "alpha")                                        # a safe bot ...
+    _set_bot("alpha", profiles=["someone-else"])                        # ... made for one profile
+    lock(c)
+    assert _ws_refused(c, f"/ws/voice/{tid}") == 1008                   # not for an anonymous device
+    assert KNOBS.sockets == []
