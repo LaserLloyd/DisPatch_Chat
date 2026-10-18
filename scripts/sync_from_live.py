@@ -46,6 +46,8 @@ ALLOW: list[tuple[str, str, str]] = [
     # 3.0: the frozen contracts (permissions, error catalog, capabilities, manifests).
     ("backend/app/contracts",       "backend/app/contracts",       "*.py"),
     ("backend/app/contracts",       "backend/app/contracts",       "error_catalog.json"),
+    # 3.0: the agent-dispatch core (AgentBackend, adapters, secrets); extensions import app.agents.secrets.
+    ("backend/app/agents",          "backend/app/agents",          "*.py"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
     # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
