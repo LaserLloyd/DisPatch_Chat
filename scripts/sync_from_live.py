@@ -43,6 +43,9 @@ ALLOW: list[tuple[str, str, str]] = [
     # bot calls itself. A sub-package needs its own row — `*.py` on
     # backend/app does not descend.
     ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
+    # 3.0: the frozen contracts (permissions, error catalog, capabilities, manifests).
+    ("backend/app/contracts",       "backend/app/contracts",       "*.py"),
+    ("backend/app/contracts",       "backend/app/contracts",       "error_catalog.json"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
     # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),

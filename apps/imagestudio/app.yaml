@@ -8,4 +8,6 @@ title: Image Studio
 icon: images
 safe: false                     # operator only; Safe Mode never sees it
 order: 60
+# 3.0: who may use it. Members and up (Restricted profiles never see it).
+permission: use_images
 env: []

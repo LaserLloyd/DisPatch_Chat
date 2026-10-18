@@ -1083,7 +1083,12 @@ def test_a_callback_for_a_finished_job_is_benign(env, monkeypatch):
 
 def test_the_callback_route_is_on_the_machine_surface_only(env):
     assert main._is_inbound("POST", "/api/image-jobs/abc/callback")
-    assert main._decoy_blocked("POST", "/api/image-jobs/abc/callback")
+    # Declared PUBLIC with a machine scope: the per-job token the rig was handed is the
+    # credential (the handler checks it and discards the body), not a session.
+    from app import route_policy
+    req = route_policy.requirement_for("POST", "/api/image-jobs/{job_id}/callback",
+                                       "/api/image-jobs/abc/callback")
+    assert req.public and "machine:image_job_callback" in req.machine
 
 
 def test_the_status_route_never_hands_out_the_callback_token(env, monkeypatch):

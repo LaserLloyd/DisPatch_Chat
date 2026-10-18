@@ -50,6 +50,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from . import auth, dashboard
+from .contracts.permissions import Permission
 
 # Must match main.COOKIE_NAME. Duplicated rather than imported: main imports
 # THIS module to mount it, so importing main here would be a cycle. It is the
@@ -118,18 +119,12 @@ def _require_operator(request: Request) -> None:
     # Done here rather than per-route so a route added later gets it too.
     dashboard.note_bound_socket(request.scope.get("server"))
 
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
-    session = getattr(request.state, "session", None)
-    if session is None:
-        session = auth.get_session(request.cookies.get(COOKIE_NAME))
-    if session is not None:
-        auth.touch_session(session.token)
-        return
-    # No session. The only state in which that is still the operator is the one
-    # where the app has no lock at all — the same rule the rest of the app uses.
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+    from . import policy
+    pol = policy.of(request)
+    pol.require(Permission.ADMIN_SYSTEM)
+    sess = getattr(request.state, "session", None)
+    if sess is not None:
+        auth.touch_session(sess.token)
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],

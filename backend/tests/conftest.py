@@ -204,6 +204,47 @@ def _cheap_kdf(monkeypatch):
                         "default", 1_000)
     yield
 
+@pytest.fixture(autouse=True)
+def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
+    """Per-test isolation for the 3.0 account layer.
+
+    * argon2id at a token cost (the shipped cost is asserted in test_accounts.py);
+    * security.yaml / RECOVERY-CODE.txt / trusted-devices.yaml follow the test's tmp
+      dir unless the test chose its own - they are bound at import time, so without
+      this a test that set a PIN wrote the REAL install's security file;
+    * the profile cache, the throttle buckets, the setup token and the per-profile
+      time counters start empty;
+    * ``DISPATCH_ALLOW_OPEN_INSTALL=1``: most of the suite exercises the product with
+      no owner created, from a TestClient whose peer is not loopback. That is the 2.x
+      "open until a PIN is set" behaviour, which 3.0 keeps only behind this switch
+      (test_open_install.py turns it off to test the secure default).
+    """
+    from _tmpguard import is_disposable
+
+    from app import accounts, auth, limits
+
+    monkeypatch.setenv("DISPATCH_ARGON2_MEMORY_KIB", "8")
+    monkeypatch.setenv("DISPATCH_ARGON2_PASSES", "1")
+    monkeypatch.setenv("DISPATCH_ALLOW_OPEN_INSTALL", "1")
+    base = tmp_path / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
+                        ("TRUSTED_PATH", "trusted-devices.yaml")):
+        if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
+            monkeypatch.setattr(auth, name, base / fname)
+    accounts.reset_for_tests()
+    limits.reset()
+    auth._cache = None
+    auth._trusted = None
+    auth._sessions.clear()
+    auth._buckets.clear()
+    auth._fail_count = 0
+    auth._fail_until = 0.0
+    auth._setup_token = None
+    yield
+    accounts.reset_for_tests()
+
+
 # --------------------------------------------------------------------------- #
 # Tests must never touch a real directory.
 #
@@ -377,3 +418,88 @@ def _no_real_systemctl(monkeypatch):
         return await real(argv, timeout)
 
     monkeypatch.setattr(harness, "_run", run)
+
+
+# --------------------------------------------------------------------------- #
+# A fully wired app with accounts, for the 3.0 access-control suites.
+# --------------------------------------------------------------------------- #
+
+class World:
+    """An isolated app + a factory for clients with chosen peer addresses, and the
+    handful of helpers every access-control test wants."""
+
+    LOOPBACK = ("127.0.0.1", 50000)
+    LAN = ("192.168.1.50", 50001)
+
+    def __init__(self, tmp_path, main_module, db):
+        self.tmp = tmp_path
+        self.main = main_module
+        self.db = db
+        self._clients: list = []
+
+    def client(self, addr=None, *, origin: bool = True):
+        from fastapi.testclient import TestClient
+        c = TestClient(self.main.app, client=addr or self.LOOPBACK)
+        c.__enter__()
+        self._clients.append(c)
+        if origin:
+            # What our own page sends on a state-changing fetch: the Host the client
+            # talks to and a matching Origin.
+            c.headers.update({"Origin": "http://testserver"})
+        return c
+
+    def create_owner(self, client=None, *, name="Olive", password="owner-password-1", pin="2468"):
+        c = client or self.client()
+        r = c.post("/api/auth/setup", json={"name": name, "password": password, "new_pin": pin})
+        assert r.status_code == 200, r.text
+        return c
+
+    def person(self, owner_client, name, role, *, pin=None, password=None, **extra):
+        body = {"name": name, "role": role, **extra}
+        if pin:
+            body["pin"] = pin
+        if password:
+            body["password"] = password
+        r = owner_client.post("/api/people", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def login(self, client, *, profile_id=None, name=None, pin=None, password=None):
+        body = {k: v for k, v in {"profile_id": profile_id, "name": name, "pin": pin, "password": password}.items() if v}
+        return client.post("/api/auth/login", json=body)
+
+    def close(self):
+        for c in self._clients:
+            c.__exit__(None, None, None)
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    import asyncio
+
+    from app import auth, config, main
+    from app.database import Database
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(config, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(main, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
+    monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
+    monkeypatch.setattr(auth, "TRUSTED_PATH", tmp_path / "trusted-devices.yaml")
+    config._invalidate_bots_cache()
+    from app import accounts
+    accounts.reset_for_tests()
+    temp_db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", temp_db)
+    main._ACK_SEEN.clear()
+    main._delivered.clear()
+    main._thread_bot.clear()
+    w = World(tmp_path, main, temp_db)
+    yield w
+    w.close()
+    asyncio.run(temp_db.close())

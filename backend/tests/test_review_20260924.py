@@ -145,7 +145,7 @@ class FakeWS:
 def _ws_env(monkeypatch, frames):
     monkeypatch.setattr(main.manager, "conn_decoy", lambda w: False)
 
-    async def _allowed(w, b):
+    async def _allowed(w, b, **_kw):
         return True
 
     async def _send(w, f):

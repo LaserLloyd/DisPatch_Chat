@@ -60,6 +60,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from . import config, localview, tools
+from .contracts.permissions import is_valid_permission
 
 log = logging.getLogger("local-chat.apps")
 
@@ -87,7 +88,7 @@ DEFAULT_ORDER = 100
 DEFAULT_ICON = "🧩"
 
 TOP_KEYS = frozenset({"id", "title", "icon", "safe", "order", "api", "bot",
-                      "thread_hook", "env"})
+                      "thread_hook", "env", "permission"})
 API_KEYS = frozenset({"legacy_prefix"})
 BOT_KEYS = frozenset({"id", "name", "emoji", "avatar", "agent", "visible"})
 
@@ -142,6 +143,9 @@ class Manifest:
     env: tuple[str, ...]
     dir: Path
     source: str                      # "repo" | "data"
+    #: The Permission a profile needs to use this app (3.0). `safe: true` apps are
+    #: additionally readable by Restricted profiles. Default: use_tools.
+    permission: str = "use_tools"
 
     @property
     def static_dir(self) -> Path:
@@ -239,9 +243,15 @@ def parse_manifest(doc: Any, app_dir: Path, source: str) -> Manifest:
             or not all(isinstance(n, str) and ENV_RE.match(n) for n in env)):
         raise ManifestError("env", f"must be a list of at most {MAX_ENV} UPPER_CASE env names")
 
+    permission = doc.get("permission", "use_tools")
+    if (not isinstance(permission, str) or not is_valid_permission(permission)
+            or permission == "admin_system"):
+        raise ManifestError("permission", "must be a known permission (not admin_system)")
+
     return Manifest(id=app_id, title=title, icon=icon, safe=safe, order=order,
                     legacy_prefix=legacy, bot=bot, thread_hook=thread_hook,
-                    env=tuple(dict.fromkeys(env)), dir=app_dir, source=source)
+                    env=tuple(dict.fromkeys(env)), dir=app_dir, source=source,
+                    permission=permission)
 
 
 def _read_manifest(app_dir: Path, source: str) -> Manifest | None:
@@ -321,19 +331,29 @@ def _is_machine(request: Request) -> bool:
     return bool(getattr(request.state, "machine", False))
 
 
+def _permission_for(request: Request) -> str:
+    """The Permission this request's app declares in its manifest (default use_tools)."""
+    path = getattr(getattr(request, "url", None), "path", "") or ""
+    hit = _app_for_path(path) if path else None
+    la = _registry.get(hit[1]) if hit and hit[1] else None
+    return la.manifest.permission if la is not None else "use_tools"
+
+
 def require_operator(request: Request) -> None:
-    """A real operator: a live PIN session, or anyone when no PIN exists.
-    Never the machine-inbound tier, never Safe Mode."""
-    if not tools._is_operator(request):
+    """A person holding the app's permission. Never a machine, never Restricted."""
+    from . import policy
+    if not policy.of(request).can(_permission_for(request)):
         raise AppDecoy
 
 
 def require_access(request: Request) -> None:
-    """The operator OR an authenticated on-box machine (loopback / api_token —
-    the auth gate decided that and stamped ``request.state.machine``)."""
+    """A person holding the app's permission OR an authenticated machine holding the
+    apps scope (the auth gate decided that and stamped ``request.state.machine``)."""
+    from . import policy
     if _is_decoy(request):
         raise AppDecoy
-    if _is_machine(request) or tools._is_operator(request):
+    pol = policy.of(request)
+    if pol.machine or pol.can(_permission_for(request)):
         return
     raise AppDecoy
 
@@ -491,6 +511,26 @@ def is_inbound(method: str, path: str) -> bool:
     return bool(la and la.mounted)
 
 
+def requirement_for(method: str, path: str):
+    """The declared Requirement for a mounted app's path (None = not an app path).
+
+    The permission comes from the manifest (default ``use_tools``); a ``safe: true``
+    app is readable by a Restricted profile (the route narrows, ``scoped``). An app's
+    API is also on the machine surface; its static page is not."""
+    from . import policy
+    from .contracts.permissions import MachineScope
+    hit = _app_for_path(path)
+    if hit is None:
+        return None
+    kind, app_id = hit
+    la = _registry.get(app_id) if app_id else None
+    perm = la.manifest.permission if la is not None else "use_tools"
+    safe_read = bool(la and la.manifest.safe) and method in ("GET", "HEAD")
+    machine = (MachineScope.APPS.value,) if (kind != "static" and app_id) else ()
+    return policy.Requirement(permission=perm, machine=machine, scoped=safe_read,
+                              note="mounted app")
+
+
 def decoy_blocked(method: str, path: str) -> bool | None:
     """Safe-Mode rule for app paths: None = not an app path. Blocked unless the
     app is ``safe: true`` and the method only reads."""
@@ -540,11 +580,13 @@ def _import_backend(m: Manifest):
 def _gate_for(app_id: str) -> Callable[[Request], None]:
     def gate(request: Request) -> None:
         la = _registry.get(app_id)
+        from . import policy
         safe_read = bool(la and la.manifest.safe) and request.method in ("GET", "HEAD")
+        perm = la.manifest.permission if la is not None else "use_tools"
         if _is_decoy(request):
             if not safe_read:
                 raise AppDecoy
-        elif not (_is_machine(request) or tools._is_operator(request) or safe_read):
+        elif not (_is_machine(request) or policy.of(request).can(perm) or safe_read):
             raise AppDecoy
         if la is None or not la.mounted or not enabled(app_id):
             raise HTTPException(404, NOT_FOUND["detail"])
@@ -804,7 +846,9 @@ def app_static_bare(app_id: str):
 def app_static(request: Request, app_id: str, rel: str):
     la = _registry.get(app_id)
     safe = bool(la and la.manifest.safe)
-    if (_is_decoy(request) or not tools._is_operator(request)) and not safe:
+    from . import policy
+    perm = la.manifest.permission if la is not None else "use_tools"
+    if (_is_decoy(request) or not policy.of(request).can(perm)) and not safe:
         return JSONResponse(DECOY_BODY, status_code=403)
     if la is None or not la.mounted or not enabled(app_id):
         return JSONResponse(NOT_FOUND, status_code=404)
