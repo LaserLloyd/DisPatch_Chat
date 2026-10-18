@@ -8132,11 +8132,14 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
     if not policy.claimed(cfg):
         local = policy.is_loopback_origin(request.client.host if request.client else "",
                                           _proxied_request(request))
-        if not (local or policy.allow_open_install()
-                or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
+        trusted = local or policy.allow_open_install()
+        if not trusted:
+            # The throttle is asked BEFORE the token is compared: checked after a miss, a client
+            # past its limit was still having every guess verified (only the answer was a 429).
             blocked = people_api._throttled(request, "setup")
             if blocked is not None:
                 return blocked
+        if not (trusted or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
             people_api._failed(request, "setup", "setup token")
             return JSONResponse(
                 {"detail": "Setup is only allowed from the computer DisPatch runs on, "

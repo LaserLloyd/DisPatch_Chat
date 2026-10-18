@@ -280,3 +280,17 @@ def test_erasing_the_only_profile_on_a_list_does_not_open_the_character(world):
     assert not characters.may_use(config.get_bot("diary"), leo)
     assert not characters.may_use(config.get_bot("diary"), policy.anonymous())
     assert characters.may_use(config.get_bot("diary"), policy.profile_principal(accounts.get_owner()))
+
+
+# O-8 ------------------------------------------------------------------------ #
+
+def test_a_throttled_client_gets_no_more_setup_token_comparisons(world, monkeypatch):
+    monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)
+    lan = world.client(LAN)
+    for i in range(5):
+        assert lan.post("/api/auth/setup", json={"password": "owner-pass1",
+                                                 "setup_token": f"guess-{i}"}).status_code == 403
+    # Past the limit even the RIGHT token is not looked at until the cooldown ends.
+    r = lan.post("/api/auth/setup", json={"password": "owner-pass1", "setup_token": auth.setup_token()})
+    assert r.status_code == 429, r.text
+    assert not accounts.has_owner()
