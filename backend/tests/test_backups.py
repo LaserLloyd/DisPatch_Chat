@@ -444,3 +444,95 @@ def test_erase_follows_the_rank_rules(world, owner):
     assert admin.delete(f"/api/users/{people['Ada']['id']}").status_code == 409     # not yourself
     assert owner.delete(f"/api/users/{people['Olive']['id']}").status_code == 409    # not the owner
     assert admin.delete(f"/api/users/{max_['id']}").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# L-2: what a restore writes is owner-only, like a fresh write
+# --------------------------------------------------------------------------- #
+
+
+def _open_to_everyone(folder: Path) -> bool:
+    """Make new files in ``folder`` readable by others, the way a lax umask / a shared ACL would. True when the
+    precondition holds (so a restore that does nothing would fail the test)."""
+    from app import fsperm
+    if os.name == "nt":
+        import subprocess
+        subprocess.run(["icacls", str(folder), "/grant", "*S-1-1-0:(OI)(CI)R"], capture_output=True, check=False)
+        probe = folder / "probe.txt"
+        probe.write_text("x", encoding="utf-8")
+        try:
+            return fsperm.others_can_read(probe) is True
+        finally:
+            probe.unlink()
+    return True
+
+
+def _others_can_read(p: Path) -> bool | None:
+    from app import fsperm
+    return fsperm.others_can_read(p)
+
+
+@pytest.fixture
+def lax_umask():
+    if os.name == "nt":
+        yield
+        return
+    old = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def test_a_restore_leaves_secret_bearing_files_owner_only(data, lax_umask):
+    if not _open_to_everyone(data):
+        pytest.skip("cannot make the folder world-readable here, so the test would prove nothing")
+    (data / "security.yaml").write_text("pin_hash: not-a-real-hash\n", encoding="utf-8")
+    (data / "push-vapid.json").write_text("{}", encoding="utf-8")
+    connections.create(type="openai", api_key="sk-restore-perm-0123456789")  # scrub-ok: test fixture, not a real credential
+    row = backups.create_archive(PASS)
+    for name in ("security.yaml", "config.yaml", "push-vapid.json", "chats.db"):      # the world is lax
+        os.chmod(data / name, 0o644)
+    out = backups.stage_restore(f"archive:{row['name']}", PASS)
+    stage = Path(json.loads(backups.pending_path().read_text(encoding="utf-8"))["staging"])
+    assert out["staged"]
+    if os.name != "nt":
+        assert stage.stat().st_mode & 0o077 == 0, "the staging folder holds decrypted secrets"
+        assert all(f.stat().st_mode & 0o077 == 0 for f in stage.rglob("*") if f.is_file())
+    else:
+        assert _others_can_read(stage) is False
+    result = backups.apply_pending_restore()
+    assert result["applied"] is True
+    secrets_file = data / "agents" / "secrets.json"
+    assert secrets_file.is_file()
+    restored = [data / n for n in ("security.yaml", "config.yaml", "push-vapid.json", "chats.db")] + [secrets_file]
+    for p in restored:
+        assert p.is_file(), p
+        if os.name != "nt":
+            assert (p.stat().st_mode & 0o777) == 0o600, f"{p.name} is {oct(p.stat().st_mode & 0o777)}"
+        else:
+            assert _others_can_read(p) is False, p.name
+    prev = Path(result["previous"])
+    for p in prev.iterdir():
+        if p.is_file() and os.name != "nt":
+            assert p.stat().st_mode & 0o077 == 0, p.name
+    if os.name != "nt":
+        assert secrets_file.parent.stat().st_mode & 0o077 == 0
+
+
+def test_the_offline_restore_command_is_owner_only_too(data, lax_umask):
+    if not _open_to_everyone(data):
+        pytest.skip("cannot make the folder world-readable here, so the test would prove nothing")
+    (data / "security.yaml").write_text("pin_hash: not-a-real-hash\n", encoding="utf-8")
+    row = backups.create_archive(PASS)
+    pw = data / "pass.txt"
+    pw.write_text(PASS, encoding="utf-8")
+    os.chmod(data / "security.yaml", 0o644)
+    (data / "security.yaml").unlink()
+    assert backups.main(["restore", str(backups.archive_dir() / row["name"]), "--passphrase-file", str(pw)]) == 0
+    p = data / "security.yaml"
+    assert p.is_file()
+    if os.name != "nt":
+        assert (p.stat().st_mode & 0o777) == 0o600
+    else:
+        assert _others_can_read(p) is False
