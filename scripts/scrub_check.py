@@ -368,7 +368,17 @@ def load_local_rules(path: Path | None = None) -> list[tuple[re.Pattern, str]]:
 
 
 def _skipped(rel: str) -> bool:
-    return any(part in SKIP_DIRS for part in Path(rel).parts)
+    # `.venv-wsl`, `.venv312`, ...: any virtualenv variant is a third-party tree, not ours.
+    return any(part in SKIP_DIRS or part.startswith(".venv") for part in Path(rel).parts)
+
+
+def _is_file(p: Path) -> bool:
+    """`Path.is_file()` that survives an entry the OS cannot stat (a symlink written by a
+    WSL venv seen from Windows raises WinError 1920; a dangling link raises too)."""
+    try:
+        return p.is_file()
+    except OSError:
+        return False
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -719,7 +729,8 @@ def scan(root: Path, staged: bool = False, rev: str | None = None) -> list[str]:
                    if rel.startswith(prefix)]
     else:
         entries = [(p.relative_to(root).as_posix(), root)
-                   for p in root.rglob("*") if p.is_file()]
+                   for p in root.rglob("*")
+                   if not _skipped(p.relative_to(root).as_posix()) and _is_file(p)]
 
     for rel, base in entries:
         if _skipped(rel):
