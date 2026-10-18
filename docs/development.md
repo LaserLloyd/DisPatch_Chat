@@ -39,22 +39,55 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 `frontend/static/sw.js`. Miss one and users get a half-updated app: new HTML
 against an old module, which usually shows up as a blank screen.
 
-**The themes are a drop-in folder, not code.** `frontend/static/ui-theme/`
-is the shared theme folder, copied in verbatim: `ui-theme.js` (the theme
-runtime, the first and only blocking script in `<head>`), `ui-theme.css` (the
-tokens for every theme), `adapters/dispatch-compat.css` (DisPatch's own token
-names mapped onto them), and `VERSION` (`ui-theme <revision date> <digest>`,
-the version marker a theme update is checked against). Never edit a file in
-it: a colour fix belongs upstream in the theme repository. **Updating the
-themes is replacing the whole folder** — from the theme repository, `python
-tools/sync_theme.py update --apply` does that for every app on the host.
-Nothing else changes: the folder's URLs carry no `?v=`, the server sends them
-`no-cache` (`main.py`), and `sw.js` is network-first, so a new copy is live on
-the next page load with no `CACHE` bump. DisPatch's own settings for the
-themes are the `data-*` on the runtime's `<script>` tag in `index.html` (the
-picker's themes and order, the default for a new device, and the storage
-key, which must stay `dispatch-palette`). DisPatch-only colour roles and
-layout tokens live in `frontend/static/theme.css`.
+**The themes are a vendored bundle, not code.** `frontend/static/ui-theme/` is
+the ForgeUI 1.2 bundle (the `ThemeForge` repository), copied in whole and
+verified by `files.json`: `ui-theme.js` (the theme runtime, the first and only
+blocking script in `<head>`), `ui-theme.css` (the tokens for every theme),
+`ui-components.css` / `ui-components.js` (the component layer and its
+`UIComponents` helpers) with the `locales/` string tables, and `VERSION`
+(`ThemeForge <version> <digest>`). Never edit a bundle file: a colour fix
+belongs upstream in the theme repository.
+
+Three things live in this repository instead:
+
+- **`forgeui.json`** (repo root) names the folder (`dest`), the bundle versions
+  this app accepts (`"1.2"` is any 1.2.x), the adapters to ship (none: DisPatch
+  has its own element layer) and the theme choice (`settings.themes`, `default`,
+  `storage_key`, which must stay `dispatch-palette`).
+- **The overlay** `frontend/overlays/dispatch-extra.css` (listed in
+  `extra_files`) maps DisPatch's own token names (`--bg-*`, `--user-bubble`,
+  `--md-*`, ...) onto the contract. It is app-owned and copied to
+  `ui-theme/adapters/dispatch-extra.css`; edit the source in `overlays/`, never
+  the copy, and never append anything into a bundle file.
+- **The picker settings** are the `data-*` on the runtime's `<script>` tag in
+  `index.html`. They repeat `settings` from `forgeui.json`; a test fails if the
+  two disagree.
+
+To update the themes, install the `forgeui` package (not from PyPI: that name
+belongs to another project), then replace the folder and commit the result:
+
+```sh
+uv venv .forgeui-venv        # keep it out of git
+uv pip install --python .forgeui-venv "forgeui @ git+https://github.com/LaserLloyd/ThemeForge@v1.2.0"
+.forgeui-venv/bin/python -m forgeui vendor           # write the new copy (VERSION last)
+.forgeui-venv/bin/python -m forgeui vendor --check   # exit 1 when the copy drifted
+.forgeui-venv/bin/python -m forgeui vendor --source forgeui-1.2.0.zip   # offline: a zip, wheel or folder
+```
+
+(On Windows the interpreter is `.forgeui-venv\Scripts\python`.) `vendor` verifies
+every file against the bundle's `files.json` before writing, refuses to overwrite
+a bundle file edited by hand unless you pass `--force`, and removes files the new
+bundle dropped. `--check` is what CI runs (the Lint job) and what
+`backend/tests/test_forgeui_vendor.py` runs when `forgeui` is installed; the same
+test checks the hashes, the overlay and the picker settings with the standard
+library alone. The old `tools/sync_theme.py` registry command is gone; do not
+look for it.
+
+After an update: the folder's URLs carry no `?v=`, the server sends them
+`no-cache` (`main.py`) and `sw.js` is network-first, so a new copy is live on the
+next page load. Bump `CACHE` in `sw.js` only when the list of files in `SHELL`
+changes (a file added, renamed or removed). DisPatch-only colour roles and layout
+tokens live in `frontend/static/theme.css`.
 
 `grep -rn '<module>.js?v=' frontend/static/` finds every reference — a module
 imported by three others has four places to change, not one. A **new** module
