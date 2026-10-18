@@ -81,7 +81,7 @@ def test_the_writer_drops_the_old_key_and_a_reload_round_trips(env):
     env(real_defaults=True)
     _write(env, ROSTER)
     config.save_bot_order([{"id": b.id, "order": i} for i, b in enumerate(config.load_bots())])
-    text = (env.tmp_path / "config.yaml").read_text()
+    text = (env.tmp_path / "config.yaml").read_text(encoding="utf-8")
     assert "visible" not in text
     bots = {b.id: b for b in config.load_bots()}
     assert (bots["ghost"].safe, bots["ghost"].hide_unlocked) == (False, True)

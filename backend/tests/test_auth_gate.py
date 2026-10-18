@@ -9,6 +9,7 @@ Run: cd backend && uv run pytest.
 from __future__ import annotations
 
 import asyncio
+import os
 import stat
 
 import pytest
@@ -329,6 +330,11 @@ def test_empty_security_yaml_fails_closed(gate_env):
 def test_security_yaml_written_0600(gate_env):
     gate_env()
     auth.set_pin("1234")
+    if os.name == "nt":
+        # Windows has no mode bits to assert; check the DACL: no "everyone/users" read.
+        from app import fsperm
+        assert fsperm.others_can_read(auth.SECURITY_PATH) is False
+        return
     mode = stat.S_IMODE(auth.SECURITY_PATH.stat().st_mode)
     assert mode == 0o600, oct(mode)
 
