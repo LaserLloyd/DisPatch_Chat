@@ -1,0 +1,191 @@
+{
+  "$defs": {
+    "SettingField": {
+      "additionalProperties": false,
+      "description": "One setting a plugin contributes to its Settings section (rendered from this).",
+      "properties": {
+        "advanced": {
+          "default": false,
+          "title": "Advanced",
+          "type": "boolean"
+        },
+        "choices": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Choices",
+          "type": "array"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 400,
+          "title": "Description",
+          "type": "string"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Env"
+        },
+        "key": {
+          "pattern": "^[a-z][a-z0-9_]{0,47}$",
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 80,
+          "title": "Label",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "choice",
+            "secret",
+            "url",
+            "path"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "type",
+        "label"
+      ],
+      "title": "SettingField",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A Tool plugin: a static page, a URL, an app package, or a separately installed\nadd-on (``dispatch.extensions`` entry point). The permission a profile needs to\nuse it is declared here, never inferred.",
+  "properties": {
+    "api_version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Api Version",
+      "type": "integer"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 400,
+      "title": "Description",
+      "type": "string"
+    },
+    "entry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Entry"
+    },
+    "id": {
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "static",
+        "url",
+        "app",
+        "extension"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "license": {
+      "default": "MIT",
+      "maxLength": 40,
+      "title": "License",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 80,
+      "title": "Name",
+      "type": "string"
+    },
+    "network": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Network",
+      "type": "array"
+    },
+    "permission": {
+      "default": "use_tools",
+      "title": "Permission",
+      "type": "string"
+    },
+    "restricted_ok": {
+      "default": false,
+      "title": "Restricted Ok",
+      "type": "boolean"
+    },
+    "schema": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema",
+      "type": "integer"
+    },
+    "settings": {
+      "items": {
+        "$ref": "#/$defs/SettingField"
+      },
+      "title": "Settings",
+      "type": "array"
+    },
+    "version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-+][0-9A-Za-z.-]+)?$",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "kind"
+  ],
+  "title": "DisPatch tool-plugin manifest",
+  "type": "object"
+}

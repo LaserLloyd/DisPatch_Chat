@@ -1,0 +1,141 @@
+{
+  "machine_default_scopes": [
+    "machine:advisor",
+    "machine:apps",
+    "machine:avatar_pool",
+    "machine:avatars",
+    "machine:bots_read",
+    "machine:daily",
+    "machine:extensions_read",
+    "machine:files_list",
+    "machine:guide_seed",
+    "machine:health_detail",
+    "machine:image_job_callback",
+    "machine:image_jobs",
+    "machine:inject",
+    "machine:messages",
+    "machine:openapi",
+    "machine:reactions",
+    "machine:threads"
+  ],
+  "machine_scopes": [
+    "machine:advisor",
+    "machine:apps",
+    "machine:avatar_pool",
+    "machine:avatars",
+    "machine:bots_read",
+    "machine:daily",
+    "machine:extensions_read",
+    "machine:files_list",
+    "machine:guide_seed",
+    "machine:health_detail",
+    "machine:image_job_callback",
+    "machine:image_jobs",
+    "machine:inject",
+    "machine:messages",
+    "machine:openapi",
+    "machine:reactions",
+    "machine:threads"
+  ],
+  "naming": {
+    "Safe Mode": "restricted",
+    "Unlocked": "owner",
+    "decoy": "restricted",
+    "full session": "owner",
+    "limited tier": "restricted",
+    "locked device": "restricted",
+    "operator": "owner"
+  },
+  "parametrised": [
+    "use_tools:<tool_id>"
+  ],
+  "permissions": [
+    "use_chat",
+    "use_voice",
+    "use_images",
+    "use_tools",
+    "use_notifications",
+    "manage_history",
+    "dispatch_agents",
+    "approve_agent_actions",
+    "manage_agents",
+    "manage_connections",
+    "manage_characters",
+    "manage_plugins",
+    "manage_users",
+    "manage_settings",
+    "view_activity",
+    "admin_system"
+  ],
+  "restricted_never": [
+    "admin_system",
+    "approve_agent_actions",
+    "dispatch_agents",
+    "manage_agents",
+    "manage_characters",
+    "manage_connections",
+    "manage_history",
+    "manage_plugins",
+    "manage_settings",
+    "manage_users",
+    "use_notifications",
+    "use_tools",
+    "view_activity"
+  ],
+  "role_permissions": {
+    "admin": [
+      "approve_agent_actions",
+      "dispatch_agents",
+      "manage_agents",
+      "manage_characters",
+      "manage_connections",
+      "manage_history",
+      "manage_plugins",
+      "manage_settings",
+      "manage_users",
+      "use_chat",
+      "use_images",
+      "use_notifications",
+      "use_tools",
+      "use_voice",
+      "view_activity"
+    ],
+    "member": [
+      "manage_history",
+      "use_chat",
+      "use_images",
+      "use_notifications",
+      "use_tools",
+      "use_voice"
+    ],
+    "owner": [
+      "admin_system",
+      "approve_agent_actions",
+      "dispatch_agents",
+      "manage_agents",
+      "manage_characters",
+      "manage_connections",
+      "manage_history",
+      "manage_plugins",
+      "manage_settings",
+      "manage_users",
+      "use_chat",
+      "use_images",
+      "use_notifications",
+      "use_tools",
+      "use_voice",
+      "view_activity"
+    ],
+    "restricted": [
+      "use_chat",
+      "use_voice"
+    ]
+  },
+  "roles": [
+    "restricted",
+    "member",
+    "admin",
+    "owner"
+  ],
+  "schema": 1
+}
