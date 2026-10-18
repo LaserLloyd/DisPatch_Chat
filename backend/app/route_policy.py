@@ -148,6 +148,10 @@ _r("GET", "/api/plugins", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/plugins/catalog", _R(P.MANAGE_PLUGINS))
 _r("PUT", "/api/plugins/extensions/{ext_id}", _R(P.MANAGE_PLUGINS))
 _r("PUT", "/api/plugins/livetools", _R(P.MANAGE_PLUGINS))
+_r("GET", "/api/voice/providers", _R(P.MANAGE_PLUGINS, note=(
+    "the voice providers and the installed provider plugins. With the add-on running this is ITS route "
+    "(health, capabilities, settings of each provider); without it the host answers the plugin list "
+    "alone. Listing needs manage_plugins; using a provider is use_voice (/ext, /ws/voice)")))
 
 # --------------------------------------------------------------------------- #
 # Characters

@@ -30,10 +30,11 @@ test('the install line follows the add-on repository and the moving v1 tag', asy
   assert.equal(m.COMMANDS.install,
     'uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice@v1"');
   assert.match(m.COMMANDS.upgrade, /--upgrade "dispatch-voice @ git\+https:\/\/github\.com\/LaserLloyd\/DisPatch_Voice@v1"$/);
-  assert.equal(m.COMMANDS.models, '.venv/bin/dispatch-voice fetch-models');
+  // The models are downloaded from the add-on's own Voice page, never from a shell.
+  assert.equal(m.COMMANDS.models, undefined);
+  assert.equal(m.COMMANDS.dockerModels, undefined);
   // The uv-run variant keeps the two unit flags the live box depends on.
   assert.match(m.COMMANDS.uvRun, /--offline --with-editable .* --ws-max-size 262144$/);
-  assert.equal(m.COMMANDS.dockerModels, 'docker compose exec app dispatch-voice fetch-models');
   assert.match(m.VOICE_GUIDE_URL, /docs\/extensions\.md#voice$/);
   // An exact pin belongs in the docs' reproducible section only.
   assert.doesNotMatch(Object.values(m.COMMANDS).join('\n'), /@v1\.\d/);
@@ -102,11 +103,14 @@ test('absent: what it is, three steps with copyable commands, Check again', dom,
   assert.match(text, /Voice chat is an add-on/);
   assert.match(text, /English only for now/);
   assert.match(text, /1\. Install the latest 1\.x release into DisPatch/);
-  assert.match(text, /2\. Fetch the speech models/);
-  assert.match(text, /3\. Restart DisPatch, then check again/);
+  assert.match(text, /2\. Restart DisPatch, then check again/);
+  assert.match(text, /3\. Download the speech models in Settings/);
+  assert.match(text, /No terminal needed/);
+  assert.doesNotMatch(text, /fetch-models|fetch the speech models/i);
   assert.match(text, /uv sync/);
   const cmds = [...root.querySelectorAll('pre.ext-cmd code')].map((c) => c.textContent);
-  assert.ok(cmds.includes(m.COMMANDS.install) && cmds.includes(m.COMMANDS.models));
+  assert.ok(cmds.includes(m.COMMANDS.install));
+  assert.ok(!cmds.some((c) => /fetch-models/.test(c)), 'no model-fetch command is shown');
   // Commands read left-to-right even under Arabic: the row (command + its
   // Copy button) carries dir="ltr", so the button stays at the line's end.
   for (const pre of root.querySelectorAll('pre.ext-cmd')) {

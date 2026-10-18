@@ -46,11 +46,10 @@ What you get: hands-free voice chat with any bot: speech recognition, turn-takin
 
 What it needs: the add-on, about 1.3 GB of speech models, and a few CPU cores: [github.com/LaserLloyd/DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice).
 
-How: install it into DisPatch's environment, fetch the models once, restart, then switch it on in **Settings → Voice**:
+How: install it into DisPatch's environment and restart, then switch it on in **Settings → Voice** and press **Download** (the models come down from that page):
 
 ```
 uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice@v1"
-dispatch-voice fetch-models
 ```
 
 For faster and better voices the add-on can hand speech to a GPU machine running SpeechForge. SpeechForge is not public yet; the add-on works fully without it.

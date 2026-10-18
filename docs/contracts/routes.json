@@ -1727,6 +1727,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/voice/providers",
+      "requirement": {
+        "note": "the voice providers and the installed provider plugins. With the add-on running this is ITS route (health, capabilities, settings of each provider); without it the host answers the plugin list alone. Listing needs manage_plugins; using a provider is use_voice (/ext, /ws/voice)",
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/apps/{app_id}",
       "requirement": {
         "note": "mounted app",

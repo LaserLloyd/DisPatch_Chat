@@ -7,6 +7,26 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Voice (the host side of DisPatch Voice 1.6)
+
+- **Models folder renamed** `<data>/speech-models` -> `<data>/models` (`ExtPaths.models_dir`); at
+  start the old folder moves across once, never overwriting (`DISPATCH_MODELS_MIGRATE=dry-run|off`).
+- **`ctx.secrets`** for extensions: the OS keyring, else a 0600 file in the extension's `state_dir`
+  (reuses `agents/secrets.py`). The voice add-on keeps its GPU-rig token there, so it lives under
+  `/data`, survives an image update and works with a read-only root.
+- **`ctx.settings_writer(namespace)`** and a start-up call of the add-on's `migrate_voice_yaml`
+  once the settings store exists (a no-op that logs once until then).
+- **`state_dir` and a newly created data folder are owner-only** on Windows too (`app/fsperm.py`).
+- **`GET /api/voice/providers`** answers with the installed `dispatch_voice.providers` plugins when
+  the add-on is not running (the add-on's own route answers when it is); `manage_plugins`.
+- **`PUT /api/bots/order` accepts a partial entry** (`{id, voice_rp}`) without moving that character
+  to the top of the list.
+- **Docker, `VOICE=1`:** installs `ffmpeg` and `libopus0`, takes the add-on from `VOICE_REF` (default
+  the 3.0 refactor branch; `refs/tags/v1.6.0` after release) or a local `--build-context`; the
+  entrypoint's CRLF `sed` workaround became a guard now that `.gitattributes` pins `*.sh` to LF.
+- **Settings -> Voice, add-on absent:** the models are downloaded from the add-on's page, not a
+  terminal command. See [docs/voice.md](docs/voice.md).
+
 ## [3.0.0] — 2026-10-18
 
 Profiles, roles and one policy engine. The binary "PIN or Safe Mode" model is replaced by

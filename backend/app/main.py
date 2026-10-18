@@ -8534,6 +8534,30 @@ def _check_bot_field(field: str, bot_id: str, value: str) -> None:
         raise HTTPException(422, f"Could not check {field}")
 
 
+def _complete_bot_order(items) -> list[dict]:
+    """The rows ``config.save_bot_order`` takes, with partial entries made safe.
+
+    A character card sends ``{id, voice_rp}`` (or ``{id, voice}``) and nothing else. Read as a
+    full row it would carry ``order: 0`` and move that character to the top, so an entry that
+    names no ``order`` keeps the one it has, and every character the request did not mention is
+    listed too (in its current order) so the sequence is renumbered, not reshuffled. Every other
+    field stays ``None`` = "leave unchanged"."""
+    current = config.load_bots()
+    pos = {b.id: i for i, b in enumerate(current)}
+    rows = []
+    for i in items:
+        row = i.model_dump()
+        if "order" not in i.model_fields_set:
+            row["order"] = getattr(next((b for b in current if b.id == i.id), None), "order", 0)
+        rows.append(row)
+    if any("order" not in i.model_fields_set for i in items):
+        mentioned = {r["id"] for r in rows}
+        rows += [{"id": b.id, "order": b.order} for b in current if b.id not in mentioned]
+        # ties keep the file's sequence, not the request's
+        rows.sort(key=lambda r: (r["order"], pos.get(r["id"], len(pos))))
+    return rows
+
+
 @app.put("/api/bots/order")
 async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     _require_full_access(request)      # second lock, see _require_full_access
@@ -8542,7 +8566,7 @@ async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
             value = getattr(item, field, None)
             if value is not None:
                 await asyncio.to_thread(_check_bot_field, field, item.id, value.strip())
-    bots = config.save_bot_order([i.model_dump() for i in payload.bots])
+    bots = config.save_bot_order(_complete_bot_order(payload.bots))
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
     return {"bots": [{**d, "voice": b.voice, "voice_rp": b.voice_rp}
