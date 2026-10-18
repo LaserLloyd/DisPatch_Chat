@@ -257,6 +257,13 @@ async def erase_user(request: Request, profile_id: str):
 
 
 def _without_profile(b, profile_id: str):
+    """``b`` with ``profile_id`` taken off its profiles list. An EMPTY list means "everyone", so a
+    character that was made for this profile alone must not become visible to the whole household
+    (and its chats readable) because that profile was erased: it is left to the Owner instead."""
     from dataclasses import replace
-    return replace(b, profiles=[p for p in b.profiles if p != profile_id])
+    rest = [p for p in b.profiles if p != profile_id]
+    if not rest and b.profiles:
+        owner = accounts.get_owner()
+        rest = [owner.id] if owner is not None else [profile_id]
+    return replace(b, profiles=rest)
 

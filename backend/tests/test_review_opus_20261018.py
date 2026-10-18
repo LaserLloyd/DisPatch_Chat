@@ -264,3 +264,19 @@ def test_a_restore_stops_when_the_current_data_cannot_be_saved_first(tmp_path, m
     assert backups.apply_pending_restore()["applied"] is True
     assert rows() == [("t1",)]
     assert staged and not backups.pending_path().exists()
+
+
+# O-7 ------------------------------------------------------------------------ #
+
+def test_erasing_the_only_profile_on_a_list_does_not_open_the_character(world):
+    owner = world.create_owner(world.client())
+    mia = world.person(owner, "Mia", "restricted")
+    kid = world.person(owner, "Leo", "restricted")
+    assert owner.post("/api/characters", json={"name": "Diary", "audience": "restricted",
+                                               "profiles": [mia["id"]]}).status_code in (200, 201)
+    assert owner.delete(f"/api/users/{mia['id']}").status_code == 200
+    from app import characters
+    leo = policy.profile_principal(accounts.get_profile(kid["id"]))
+    assert not characters.may_use(config.get_bot("diary"), leo)
+    assert not characters.may_use(config.get_bot("diary"), policy.anonymous())
+    assert characters.may_use(config.get_bot("diary"), policy.profile_principal(accounts.get_owner()))
