@@ -96,7 +96,7 @@ async def test_a_protocol_mismatch_fails_the_task_loudly_and_is_never_retried(ma
 
 
 async def test_a_wrong_token_is_auth_failed(gw, tmp_path):
-    be = make_backend(gw, token="not-the-token")
+    be = make_backend(gw, token="not-the-token")  # scrub-ok: a deliberately wrong test token
     tid, ev = await run(be, "simple", tmp_path)
     err = next(e for e in ev if isinstance(e, ErrorEvent))
     assert err.code == ErrorCode.auth_failed and "token mismatch" in err.message

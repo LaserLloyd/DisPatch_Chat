@@ -59,6 +59,158 @@
     },
     {
       "method": "GET",
+      "path": "/api/agents",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/available",
+      "requirement": {
+        "note": "only agents published to the caller's profile (an Owner/Admin sees all)",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/backends",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/credentials/claude",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/credentials/claude",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/credentials/claude",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/profile-budgets",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/profile-budgets/{profile_id}",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/retention/purge",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/secrets",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/secrets/{name}",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/secrets/{name}",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/settings",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agents/settings",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agents/usage",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agents/{agent_id}",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agents/{agent_id}",
+      "requirement": {
+        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "permission": "manage_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/approvals/{request_id}",
+      "requirement": {
+        "note": "allow or deny one tool call; destructive tools are asked every time",
+        "permission": "approve_agent_actions"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/apps/imagestudio/chat-images",
       "requirement": {
         "machine": [
@@ -1563,6 +1715,85 @@
       "path": "/api/studioforge/status",
       "requirement": {
         "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/cancel",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/dismiss",
+      "requirement": {
+        "permission": "approve_agent_actions"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/{task_id}/events",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/interrupt",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/release",
+      "requirement": {
+        "note": "the human Send for a held handoff; a machine may never press it",
+        "permission": "approve_agent_actions"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/resume",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/send",
+      "requirement": {
+        "note": "own tasks; an Owner/Admin sees everyone's",
+        "permission": "dispatch_agents"
       }
     },
     {

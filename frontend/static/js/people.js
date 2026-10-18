@@ -21,7 +21,7 @@
 // `deps` ({ toast, confirm, role, onSelfChanged, api? }), which is also how the
 // tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=34';
+import { api as realApi } from './api.js?v=35';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import {

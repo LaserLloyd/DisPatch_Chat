@@ -113,6 +113,11 @@ class BudgetTracker:
         if self._started_at is None:
             self._started_at = self._clock()
 
+    def reset_clock(self, elapsed_s: float = 0.0) -> None:
+        """Start the wall clock over (a chat turn has its own timeout) or restore what a restart lost."""
+        self._elapsed = max(0.0, float(elapsed_s))
+        self._started_at = None
+
     def pause(self) -> None:
         if self._started_at is not None:
             self._elapsed += self._clock() - self._started_at

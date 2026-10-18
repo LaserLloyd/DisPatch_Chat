@@ -398,11 +398,14 @@ class BaseBackend:
         return rt
 
     def restore_task(self, task_id: str, spec: AgentSpec, ctx: TaskContext, *,
-                     session_id: str | None, last_seq: int = -1, usd_so_far: float = 0.0) -> None:
+                     session_id: str | None, last_seq: int = -1, usd_so_far: float = 0.0,
+                     tokens_so_far: int = 0, turns_so_far: int = 0, elapsed_s_so_far: float = 0.0) -> None:
         """Re-register a task after a restart so ``resume`` works on it.
 
-        W11b calls this for every non-terminal task row at startup. The task
-        comes back idle and resumable iff it has a backend session id.
+        W11b calls this for every non-terminal task row at startup (and lazily for
+        a finished task a person asks to continue). The task comes back idle and
+        resumable iff it has a backend session id; its lifetime totals are restored
+        so the budget keeps counting where it left off.
         """
         self._check_spec(spec)
         rt = self._create(spec, ctx, task_id=task_id, start_seq=last_seq + 1)
@@ -410,6 +413,75 @@ class BaseBackend:
         rt.resumable = bool(session_id)
         rt.state = TaskState.cancelled if session_id else TaskState.failed
         rt.tracker.record_total_cost(usd_so_far if usd_so_far else None)
+        if tokens_so_far:
+            rt.tracker.record_tokens(tokens_so_far, 0, total=True)
+        if turns_so_far:
+            rt.tracker.record_turns(turns_so_far)
+            rt.turns_this_task = int(turns_so_far)
+        if elapsed_s_so_far:
+            rt.tracker.reset_clock(elapsed_s_so_far)       # the wall-clock cap is cumulative across restarts
+
+    def has_task(self, task_id: str) -> bool:
+        return task_id in self._tasks
+
+    def is_active(self, task_id: str) -> bool:
+        """Is a run in progress for this task? (False for an unknown task.)"""
+        rt = self._tasks.get(task_id)
+        return bool(rt is not None and rt.log.active)
+
+    def any_active(self) -> bool:
+        return any(rt.log.active for rt in self._tasks.values())
+
+    def patch_spec(self, task_id: str, **changes: Any) -> None:
+        """Replace parts of a task's spec between runs (a chat turn's model or thinking level,
+        a recomputed budget). The spec was validated when it was built; callers pass whole,
+        already-validated values."""
+        rt = self._rt(task_id)
+        rt.spec = rt.spec.model_copy(update=changes)
+        if "budget" in changes:
+            rt.tracker.budget = rt.spec.budget
+
+    def replace_spec(self, task_id: str, spec: AgentSpec) -> None:
+        """Swap in a freshly built spec between runs (the agent was edited since this task began)."""
+        rt = self._rt(task_id)
+        self._check_spec(spec)
+        rt.spec = spec
+        rt.tracker.budget = spec.budget
+
+    def reset_clock(self, task_id: str) -> None:
+        """A per-turn timeout: this run's wall clock starts again from zero."""
+        self._rt(task_id).tracker.reset_clock(0.0)
+
+    def update_budget(self, task_id: str, budget: Budget, spent_today_usd: float = 0.0) -> None:
+        """Swap in the budget a (re)start should be held to (W11b recomputes it from the
+        spend ledger before every run: the per-day caps move as other tasks spend)."""
+        self.patch_spec(task_id, budget=budget)
+        self._rt(task_id).tracker.spent_today_usd = spent_today_usd
+
+    def stop_for_budget(self, task_id: str, verdict: BudgetVerdict) -> None:
+        """Hard-stop a RUNNING task for a limit the backend cannot see (a per-day cap
+        shared with other tasks). Ends exactly like the watchdog's stop: cost_update,
+        error(budget_exceeded), result(failed, not resumable)."""
+        rt = self._rt(task_id)
+        if not rt.log.active or rt.budget_stop is not None:
+            return
+        rt.budget_stop = verdict
+        rt.interrupt_requested = True
+        self._approvals.deny_all(task_id, reason="budget")
+        self._spawn(self._do_interrupt(rt))
+
+    def forget_task(self, task_id: str) -> bool:
+        """Drop an idle task from the in-memory registry (it can be restored from the
+        database on demand). Returns False if a run is still going."""
+        rt = self._tasks.get(task_id)
+        if rt is None:
+            return True
+        if rt.log.active:
+            return False
+        self._cancel_watchdog(rt)
+        self._approvals.forget_task(task_id)
+        del self._tasks[task_id]
+        return True
 
     def _info(self, rt: TaskRuntime) -> TaskInfo:
         return TaskInfo(

@@ -768,6 +768,95 @@
     {
       "cli": null,
       "http": [
+        "GET /api/agents/available"
+      ],
+      "id": "agents.available",
+      "machine": [],
+      "mcp": null,
+      "permission": "dispatch_agents",
+      "title": "List the agents published to me",
+      "ui": "api.agentsAvailable",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/agents",
+        "POST /api/agents",
+        "PATCH /api/agents/{agent_id}",
+        "DELETE /api/agents/{agent_id}",
+        "GET /api/agents/backends",
+        "GET /api/agents/settings",
+        "PUT /api/agents/settings",
+        "GET /api/agents/profile-budgets",
+        "PUT /api/agents/profile-budgets/{profile_id}",
+        "GET /api/agents/usage",
+        "POST /api/agents/retention/purge"
+      ],
+      "id": "agents.manage",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_agents",
+      "title": "Create, edit, publish, budget and delete agents",
+      "ui": "api.agents",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/agents/credentials/claude",
+        "PUT /api/agents/credentials/claude",
+        "DELETE /api/agents/credentials/claude",
+        "GET /api/agents/secrets",
+        "PUT /api/agents/secrets/{name}",
+        "DELETE /api/agents/secrets/{name}"
+      ],
+      "id": "agents.credentials",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_agents",
+      "title": "Store the Claude API key and MCP secrets (write-only)",
+      "ui": "api.claudeCredentials",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/tasks",
+        "GET /api/tasks",
+        "GET /api/tasks/{task_id}",
+        "GET /api/tasks/{task_id}/events",
+        "POST /api/tasks/{task_id}/send",
+        "POST /api/tasks/{task_id}/interrupt",
+        "POST /api/tasks/{task_id}/resume",
+        "POST /api/tasks/{task_id}/cancel"
+      ],
+      "id": "tasks.dispatch",
+      "machine": [],
+      "mcp": null,
+      "permission": "dispatch_agents",
+      "title": "Assign a task to an agent, watch it, steer or stop it",
+      "ui": "api.createTask",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/approvals/{request_id}",
+        "POST /api/tasks/{task_id}/release",
+        "POST /api/tasks/{task_id}/dismiss"
+      ],
+      "id": "tasks.approve",
+      "machine": [],
+      "mcp": null,
+      "permission": "approve_agent_actions",
+      "title": "Answer an agent's approval request; Send or dismiss a held hand-off",
+      "ui": "api.answerApproval",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
         "POST /api/image-jobs",
         "GET /api/image-jobs/{job_id}"
       ],

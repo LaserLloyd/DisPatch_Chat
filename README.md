@@ -332,9 +332,15 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   in-flight table plus a transcript sweep make sure an accepted run's reply
   lands even after a dropped socket or a restart. The CLI and the transcripts
   are host-filesystem operations, so *that* backend has to live on the same
-  machine — the seam that would make an agent
-  runtime on another host pluggable is designed and not built
-  ([docs/design/agent-backend.md](docs/design/agent-backend.md))
+  machine. Underneath it now sits an `AgentBackend` interface, and a second
+  backend, the **Claude Agent** (Anthropic API key or Bedrock, Google Cloud,
+  Foundry credentials), has no such constraint
+  ([docs/agents.md](docs/agents.md))
+- **Agents and tasks**: an Owner or Admin publishes configured agents to
+  profiles; people assign them tasks from any chat (or `@agent`), watch a live
+  timeline, answer approval cards (destructive tools always ask), steer or stop
+  them, and see costs labelled as estimates, under per-person daily limits. A
+  Restricted profile never sees any of it
 - Agents reply into threads like any other participant, and can push proactive
   messages (a morning briefing, a finished job, an alert)
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with

@@ -6,9 +6,10 @@ adapter. Every design decision cites `RESEARCH.md` (the 2026-10-18 look-up pass)
 item id: `F*` facts, `R-*` extra facts, `C*` conflicts, and `§5 item N` for the
 "implications the plan must honor".
 
-Status: the core is a self-contained library. It is **not yet wired** into the
-app (routes, database, WebSocket frames, UI): that is the next workstream
-(see "What the integration layer must supply" at the end).
+Status: the library in `backend/app/agents/` is self-contained and is wired into the app by
+`app/agents_service.py` (the task manager), `agents_store.py` (tables), `agents_api.py` (routes)
+and `agents_ws.py` (frames); the user-facing description is in [../agents.md](../agents.md).
+"What the integration layer supplies" at the end says how.
 
 ## Concepts
 
@@ -302,17 +303,23 @@ Support bundles exclude prompts and instructions by default.
   (R-SESS). Deleting a task's directory deletes its transcript and memory.
 - OpenClaw keeps its own transcripts in the agent's home.
 - Managed Agents: see above - server-side, until deleted.
-- DisPatch's own task/event retention is configurable by the integration layer
-  (brief); the event log in this library is in-memory and not persistent.
+- DisPatch's own task/event retention is configurable (Settings -> Agents, default 30 days);
+  the event log in this library is in-memory and the task manager persists it by `(task_id, seq)`.
 
-## What the integration layer must supply
+## What the integration layer supplies
 
-See the workstream report; in short: a `tasks` and `task_events` table (persist each
-event by `(task_id, seq)` and call `restore_task` at start-up), routes behind the
-`dispatch_agents` / `approve_agent_actions` / `manage_agents` permissions, WebSocket
-frames for task events and approvals (and the locked-socket allow-list), a per-day
-spend ledger feeding `Budget.max_usd_per_day`, a keyring-backed key setup screen, and
-the Tasks UI.
+`agents_service.TaskManager` is the integration layer. For each task it pumps
+`backend.events(task_id, after_seq=cursor)` into `task_events` by `(task_id, seq)` through one
+batching writer, mirrors the task state, cost and session id into `tasks`, and calls
+`restore_task` for tasks a restart interrupted (they come back `cancelled` with reason
+`restart`, resumable when the backend kept a session). A per-day spend ledger (`agent_spend`)
+feeds `Budget.max_usd_per_day`: before every run the effective budget is recomputed from the
+ledger and the profile's limits (`BaseBackend.update_budget`), and every `cost_update` is
+re-checked against the shared per-day caps, hard-stopping the task through
+`BaseBackend.stop_for_budget`. `BaseBackend.patch_spec`, `any_active`, `has_task`, `is_active`,
+`forget_task` and the `tokens_so_far` / `turns_so_far` arguments of
+`restore_task` were added for it. Routes, frames and the UI are described in
+[../agents.md](../agents.md).
 
 ## Testing
 

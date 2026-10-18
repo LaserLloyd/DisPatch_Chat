@@ -65,6 +65,9 @@ from . import (
     _filelock,
     accounts,
     advisor,
+    agents_api,
+    agents_service,
+    agents_ws,
     apps_loader,
     auth,
     avatar_pool,
@@ -457,6 +460,10 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # Lets the manager demote token-less "full" connections (opened while no
     # PIN existed) the moment a PIN is set. auth.load() is mtime-cached.
     manager.pin_set = lambda: policy.claimed()
+    # Agent tasks (3.0): the task manager reattaches to whatever the last process left
+    # running (those tasks come back cancelled/resumable), starts its writer and the
+    # transcript-retention purge. It talks to no backend until someone dispatches a task.
+    await agents_service.startup()
     cfg = auth.load()
     log.info("DisPatch Chat started. data=%s openclaw=%s lock=%s fts=%s",
              config.DATA_DIR, SETTINGS.openclaw_bin,
@@ -540,6 +547,8 @@ async def _lifespan_shutdown() -> None:
     _shutting_down = True
     with contextlib.suppress(Exception):
         await extensions.run_shutdown()
+    with contextlib.suppress(Exception):
+        await agents_service.shutdown()
     harness.runner.remove_state_hook(_harness_state_changed)
     with contextlib.suppress(Exception):
         await harness.runner.shutdown()
@@ -579,6 +588,7 @@ app = FastAPI(title="DisPatch Chat", version=__version__, lifespan=lifespan,
 #: Resolves (method, path) to the route's declared requirement (app/route_policy.py).
 _route_index = policy.RouteIndex(app)
 app.include_router(people_api.router)
+app.include_router(agents_api.router)         # agents, tasks, approvals (3.0; route_policy.py declares each)
 
 
 def _error_body(status: int, detail, exc: BaseException | None = None) -> dict:
@@ -624,6 +634,10 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
     envelope wrapped around it.
     """
     errs = _encodable(jsonable_encoder(exc.errors()))
+    if request.url.path.startswith(("/api/agents/credentials", "/api/agents/secrets")):
+        # These bodies carry a key: pydantic echoes the offending `input`, which would hand a
+        # too-long key straight back. Write-only means write-only, errors included.
+        errs = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in errs]
     envelope = errors.envelope("validation_error")
     if _wants_problem_json(request):
         doc = problem.body(422, errs, code="validation_error")
@@ -1735,6 +1749,14 @@ _DECOY_FRAME_ALLOW = frozenset({
 })
 
 
+#: Frames that must NEVER reach a Restricted / locked socket, stated explicitly even though
+#: "not in _DECOY_FRAME_ALLOW" already drops them: a task's timeline and an approval card
+#: are the agent feature, and a Restricted profile can never see, start or receive output
+#: from agents or tasks (G17). The tests assert every frame type in agents_ws.FRAME_TYPES is
+#: here and none is in the allow-list.
+_DECOY_FRAME_DENY = frozenset(agents_ws.FRAME_TYPES)
+
+
 def redact_for_decoy(frame: dict):
     """Make a frame safe for a Safe-Mode connection.
 
@@ -1746,7 +1768,7 @@ def redact_for_decoy(frame: dict):
     - Bot-list frames are filtered down to the safe set.
     """
     t = frame.get("type")
-    if t not in _DECOY_FRAME_ALLOW:
+    if t in _DECOY_FRAME_DENY or t not in _DECOY_FRAME_ALLOW:
         return None
 
     safe = _safe_bot_ids()
@@ -7087,6 +7109,12 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
             await advisor.run_turn(thread_id, bot_id, agent_text, **kw)
         return
 
+    # agents.unified_dispatch (default OFF): an OpenClaw chat turn runs as a task on the
+    # agent-dispatch core instead of the legacy transport/watcher/mirror stack below.
+    if bot is not None and agents_service.unified_dispatch_enabled():
+        await _run_unified_agent_turn(thread_id, bot_id, bot, agent_text, opts)
+        return
+
     # `agent_id` is the OpenClaw seat this turn actually runs on — normally
     # identical to `bot_id`, except for a bot configured with `agent:` (e.g.
     # jobboard -> scout), which has its own DisPatch identity (avatar, name,
@@ -7303,6 +7331,66 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
                 _track(task)
 
 
+async def _run_unified_agent_turn(thread_id: str, bot_id: str, bot: config.Bot, agent_text: str,
+                                  opts: TurnOptions | None) -> None:
+    """One OpenClaw chat turn as a task on the agent-dispatch core (``agents.unified_dispatch``).
+
+    Same lock, same typing indicator, same delivery chokepoint and error frames as the legacy
+    path; what it does NOT carry over (docs/agents.md "What the flag changes"): the in-turn
+    transcript watcher (narration between tool calls arrives as the one final reply), the
+    media second look, the post-turn follower for late sub-agent announcements, and the
+    gateway-mirror reconciliation. Those exist to patch the legacy transport; the adapter has
+    its own protocol probe and run bookkeeping (RESEARCH.md section 5 item 26).
+    """
+    agent_id = bot.agent_id
+    _thread_bot[thread_id] = bot_id
+    opts = await _with_thread_model_prefs(thread_id, opts)
+    async with _thread_locks[thread_id]:
+        _turn_holder[thread_id] = asyncio.current_task()
+        _forget_thread_delivery(thread_id)
+        await db.update_thread_status(thread_id, "thinking")
+        await manager.broadcast({"type": "thinking", "thread_id": thread_id, "bot_id": bot_id,
+                                 "status": "started"})
+        await _broadcast_thread_update(thread_id)
+        delivered = False
+        try:
+            agent_text = await _resolve_doc_refs(agent_text)
+            outcome = await agents_service.get_manager().run_chat_turn(
+                thread_id=thread_id, agent_seat=agent_id, text=agent_text,
+                model=opts.model if opts and opts.model else None,
+                thinking=opts.thinking if opts and opts.thinking else None,
+                timeout_s=float(SETTINGS.agent_timeout))
+            if outcome.state == "succeeded":
+                if (outcome.text or "").strip():
+                    msg = await _deliver_assistant_text(thread_id, outcome.text or "", stream=True)
+                    delivered = msg is not None
+                await db.update_thread_status(thread_id, "idle")
+            elif outcome.reason in ("interrupted", "cancelled"):
+                await db.update_thread_status(thread_id, "idle")          # the person pressed Stop
+            else:
+                await db.update_thread_status(thread_id, "error")
+                frame = {"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                         "message": outcome.error_message or "The agent could not answer.",
+                         "detail": outcome.error_code or outcome.reason}
+                if outcome.error_code == "refused":
+                    frame["refused"] = True
+                await manager.broadcast(frame)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("unified agent turn failed (%s/%s)", bot_id, thread_id)
+            if delivered:
+                await db.update_thread_status(thread_id, "idle")
+            else:
+                await db.update_thread_status(thread_id, "error")
+                await manager.broadcast({"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                                         "message": "Something went wrong.", "detail": str(e)[:300]})
+        finally:
+            await manager.broadcast({"type": "thinking", "thread_id": thread_id, "bot_id": bot_id,
+                                     "status": "stopped"})
+            await _broadcast_thread_update(thread_id)
+
+
 # Hand llm_api the five pieces of this module it needs to run a turn.
 #
 # Every one is a lambda rather than a direct reference, and that is deliberate:
@@ -7331,6 +7419,27 @@ llm_api.bind(llm_api.Hooks(
 ))
 
 
+async def _agents_thread_info(thread_id: str) -> dict | None:
+    thread = await db.get_thread(thread_id)
+    if not thread:
+        return None
+    bot = config.get_bot(thread.bot_id)
+    # A character a Restricted profile may chat with (audience all / restricted), or one that no
+    # longer exists, is a thread whose lines they can read: agent prompts and results never go there.
+    visible = bot is None or bot.audience in ("all", "restricted")
+    return {"bot_id": thread.bot_id, "restricted_visible": visible}
+
+
+# Hand the task manager the three pieces of this module it needs. Lambdas re-resolve the
+# globals on every call (see the note on llm_api.bind above: tests replace `db`/`manager`).
+agents_service.bind(agents_service.Hooks(
+    deliver=lambda *a, **kw: _deliver_assistant_text(*a, **kw),
+    push=lambda kind, ref, title: _notify_push(kind, ref, title),
+    thread_info=lambda tid: _agents_thread_info(tid),
+    shutting_down=lambda: _shutting_down,
+))
+
+
 async def _advisor_ask_agent(agent_id: str, session_key: str, message: str,
                                timeout: int) -> str:
     """One background agent turn for an advisor request; returns its text.
@@ -7340,6 +7449,16 @@ async def _advisor_ask_agent(agent_id: str, session_key: str, message: str,
     watching. The session key (`agent:<id>:advisor-<rid>`) names no thread,
     so nothing in the mirror or the router ever tries to deliver it anywhere.
     """
+    if agents_service.unified_dispatch_enabled():
+        # agents.unified_dispatch: the same job as a visible, budgeted, audited task. The
+        # advisor keeps composing the brief, saving the note and posting the report.
+        m = re.search(r":advisor-([A-Za-z0-9_-]+)$", session_key)
+        rid = m.group(1) if m else None
+        req = await asyncio.to_thread(advisor.ledger().get, rid) if rid else None
+        return await agents_service.get_manager().run_handoff(
+            rid, agent_id, message, float(timeout),
+            thread_id=(req or {}).get("thread_id"),
+            kind="research" if (req or {}).get("kind") == "research" else "handoff")
     reply = await openclaw.send_to_agent(agent_id, session_key, message,
                                          timeout=timeout)
     return "\n\n".join(p.text for p in reply.payloads
@@ -7378,6 +7497,8 @@ advisor.bind(advisor.Hooks(
     ask_agent=_advisor_ask_agent,
     threads_since=_advisor_threads_since,
     update_card=_advisor_update_card,
+    on_handoff=lambda req: agents_service.get_manager().propose_handoff(req),
+    on_handoff_dismissed=lambda rid: agents_service.get_manager().dismiss_handoff(rid),
     track=_track,
     data_dir=config.DATA_DIR,
     merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
@@ -9518,6 +9639,10 @@ async def _abort_thread_turn(thread_id: str) -> dict:
     thread = await db.get_thread(thread_id)
     if thread is None:
         raise HTTPException(404, "Thread not found")
+    if agents_service.unified_dispatch_enabled():
+        with contextlib.suppress(Exception):
+            if await agents_service.get_manager().abort_chat(thread_id):
+                return {"ok": True, "thread_id": thread_id, "run_id": None}
     client = _gateway_client
     if client is None or not client.connected.is_set():
         raise HTTPException(503, "The agent gateway is not connected")
@@ -10850,7 +10975,7 @@ async def reaction_reseed(request: Request):
 #: (with a REAL request id and its own body text) would forge a card that
 #: approves somebody else's brief. Matched by prefix so a future advisor_* key
 #: is covered by construction.
-_SERVER_ONLY_META_PREFIXES = ("advisor_",)
+_SERVER_ONLY_META_PREFIXES = ("advisor_", "task_")
 
 
 def _inbound_metadata(meta: Any) -> dict:

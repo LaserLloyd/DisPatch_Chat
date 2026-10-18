@@ -17,6 +17,8 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        ``safe`` + ``hide_unlocked`` flags, which stay readable
 ``004_security_keys``  security.yaml gains the machine / session-timeout keys, written
                        explicitly so the owner can see and change them
+``005_agents``         create the agents / tasks / task_events / approvals / spend-ledger
+                       tables (additive, like 001: a 3.0 binary without agents ignores them)
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml
@@ -38,7 +40,7 @@ from pathlib import Path
 
 import yaml
 
-from . import accounts, auth, config
+from . import accounts, agents_store, auth, config
 
 log = logging.getLogger("local-chat.migrate")
 
@@ -179,6 +181,13 @@ def plan() -> Report:
                 "004_security_keys",
                 "write machine_loopback_trust: true, machine_scopes and per-role session "
                 "timeouts into security.yaml (defaults keep today's behaviour)"))
+
+    if "005_agents" not in done:
+        absent = [t for t in agents_store.TABLES if t not in have]
+        if absent:
+            rep.actions.append(Action(
+                "005_agents", "create tables: " + ", ".join(absent)
+                + " (agent dispatch; nothing existing is altered)"))
     return rep
 
 
@@ -280,6 +289,11 @@ def run(*, dry_run: bool = False, take_backup: bool = True) -> Report:
         auth._write(auth.load())
         auth._bust_cache()
     _record("004_security_keys")
+    if "005_agents" in steps:
+        agents_store.reset_for_tests()
+        with agents_store.connect():                 # creates the tables
+            pass
+    _record("005_agents")
     rep.applied = sorted(steps)
     return rep
 

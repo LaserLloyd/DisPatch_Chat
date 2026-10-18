@@ -24,6 +24,7 @@ from typing import Any
 import aiosqlite
 
 from . import avatar_pool, avatar_snapshots, config
+from .agents_store import SCHEMA as AGENTS_SCHEMA
 from .models import MessageOut, ThreadOut
 
 log = logging.getLogger("local-chat.database")
@@ -412,6 +413,9 @@ class Database:
         # cost is irrelevant at human/agent write rates (one writer, low volume).
         await self._db.execute("PRAGMA synchronous=FULL;")
         await self._db.executescript(SCHEMA)
+        # Agents, tasks, task events, approvals, the spend ledger (3.0, W11b). Additive:
+        # `CREATE TABLE IF NOT EXISTS` only, defined next to their only reader/writer.
+        await self._db.executescript(AGENTS_SCHEMA)
         await self._db.commit()
         # Idempotent migrations: add columns to existing databases.
         for ddl in (

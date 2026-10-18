@@ -52,7 +52,7 @@ VAPID_FILE = "push-vapid.json"
 SUBS_FILE = "push-subscriptions.json"
 
 #: The kinds a ping may be. Titles are built by the caller from names only.
-KINDS = frozenset({"reply", "image", "post"})
+KINDS = frozenset({"reply", "image", "post", "approval", "task_done", "task_failed"})
 TITLE_MAX = 80
 MAX_DEVICES = 50
 #: How long the push service may hold a ping for a phone that is offline.

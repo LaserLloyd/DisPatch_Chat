@@ -152,6 +152,7 @@
   <link rel="stylesheet" href="/static/theme.css?v=7" />
   <link rel="stylesheet" href="/static/app.css?v=107" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
+  <link rel="stylesheet" href="/static/tasks.css?v=1" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
        ties; theme.css holds only what the theme folder does not own. No
@@ -249,6 +250,9 @@
       <!-- Locked-side upload. Safe Mode only: unlocked sessions have the full
            File Server (📁) and the composer ＋, so the rail stays uncluttered. -->
       <button class="gear-btn drop-btn hidden" id="drop-btn" title="Send a file to your assistants" aria-label="Send a file" data-i18n-attr="title=nav.drop_title;aria-label=nav.drop_aria">⬆</button>
+      <!-- 3.0 agents: Tasks. js/tasks.js shows it for a profile that may assign tasks, and
+           paints a dot while an approval is waiting. -->
+      <button class="gear-btn tasks-btn hidden" id="tasks-btn" type="button" title="Tasks" aria-label="Tasks" data-i18n-attr="title=tasks.nav_title;aria-label=tasks.nav_aria">📋</button>
       <button class="gear-btn fs-chip hidden" id="fs-chip" title="File Server — drop files for your assistants" aria-label="Open File Server" data-i18n-attr="title=nav.fileserver_title;aria-label=nav.fileserver_aria">📁</button>
       <!-- ⚡ Reaction manager, 🩺 Host dashboard and 🔌 Connect an AI used to sit
            here. They are tabs inside Settings now: all three are admin surfaces
@@ -340,6 +344,7 @@
         </div>
         <div class="menu" id="thread-menu" hidden>
           <button data-act="model" id="thread-menu-model"><span class="icn" data-icon="chip" aria-hidden="true"></span><span data-i18n="chat.model_chip">Model &amp; thinking</span></button>
+          <button data-act="assign" id="thread-menu-assign" hidden><span class="icn" data-icon="forward" aria-hidden="true"></span><span data-i18n="tasks.menu_assign">Assign task…</span></button>
           <button data-act="pin" id="thread-menu-pin"><span class="icn" data-icon="pin" aria-hidden="true"></span><span data-i18n="chat.pin">Pin</span></button>
           <button data-act="rename"><span class="icn" data-icon="rename" aria-hidden="true"></span><span data-i18n="chat.rename">Rename</span></button>
           <button data-act="sync"><span class="icn" aria-hidden="true">⤓</span><span data-i18n="chat.sync">Recover missing messages</span></button>
@@ -723,6 +728,8 @@
              add it); hidden in Safe Mode like the other admin tabs. -->
         <button class="settings-tab admin-only hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
         <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="plugins.tab">Plugins</span></button>
+        <!-- Agents (3.0): owner and admin only. js/agents.js builds the pane. -->
+        <button class="settings-tab admin-only hidden" id="stab-agents" role="tab" data-tab="agents" aria-selected="false" aria-controls="spane-agents" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="agents.tab">Agents</span></button>
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
@@ -837,6 +844,9 @@
            table (js/tools.js mounts into #plugins-tools-host) and the built-in
            lookups switch. ---- -->
       <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
+
+      <!-- ---- Agents: js/agents.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-agents" role="tabpanel" aria-labelledby="stab-agents" tabindex="0"></section>
 
       <!-- ---- AI models (js/llm.js) ---- -->
       <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
@@ -1311,6 +1321,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=144"></script>
+  <script type="module" src="/static/js/main.js?v=145"></script>
 </body>
 </html>

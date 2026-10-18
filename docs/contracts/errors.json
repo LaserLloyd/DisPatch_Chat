@@ -19,6 +19,56 @@
       "status": 404
     },
     {
+      "code": "agent_backend_rejected",
+      "docs": "agent_backend_rejected",
+      "fix": "The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.",
+      "message": "The agent backend refused that request.",
+      "patterns": [
+        "The agent backend refused that request."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_backend_unavailable",
+      "docs": "agent_backend_unavailable",
+      "fix": "Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.",
+      "message": "The agent backend is not available.",
+      "patterns": [
+        "The agent backend is not available."
+      ],
+      "status": 503
+    },
+    {
+      "code": "agent_budget_exhausted",
+      "docs": "agent_budget_exhausted",
+      "fix": "Raise the daily limit in Settings, Agents, or try again tomorrow. Costs are estimates.",
+      "message": "This agent's budget for today is used up.",
+      "patterns": [
+        "This agent's budget for today is used up."
+      ],
+      "status": 429
+    },
+    {
+      "code": "agent_credentials_invalid",
+      "docs": "agent_credentials_invalid",
+      "fix": "Paste an Anthropic Console API key, or pick Amazon Bedrock, Google Cloud or Microsoft Foundry and configure that provider's own credentials on this machine.",
+      "message": "The credentials were not accepted.",
+      "patterns": [
+        "The credentials were not accepted."
+      ],
+      "status": 422
+    },
+    {
+      "code": "agent_disabled",
+      "docs": "agent_disabled",
+      "fix": "Switch it on in Settings, Agents.",
+      "message": "That agent is switched off.",
+      "patterns": [
+        "That agent is switched off."
+      ],
+      "status": 409
+    },
+    {
       "code": "agent_gateway_down",
       "docs": "agent_gateway_down",
       "fix": "Start the OpenClaw gateway, or switch the character to a direct provider.",
@@ -27,6 +77,56 @@
         "The agent gateway is not connected"
       ],
       "status": 503
+    },
+    {
+      "code": "agent_has_active_tasks",
+      "docs": "agent_has_active_tasks",
+      "fix": "Stop or wait for its tasks, or switch the agent off instead of deleting it.",
+      "message": "That agent has tasks that are still running.",
+      "patterns": [
+        "That agent has tasks that are still running."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_invalid",
+      "docs": "agent_invalid",
+      "fix": "Fix the field named in the message (a tool list, a budget, an MCP server) and save again.",
+      "message": "The agent definition is not valid.",
+      "patterns": [
+        "The agent definition is not valid."
+      ],
+      "status": 422
+    },
+    {
+      "code": "agent_name_taken",
+      "docs": "agent_name_taken",
+      "fix": "Choose a different name.",
+      "message": "An agent with that name already exists.",
+      "patterns": [
+        "An agent with that name already exists."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_needs_owner",
+      "docs": "agent_needs_owner",
+      "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
+      "message": "Only the Owner can give an agent that capability.",
+      "patterns": [
+        "Only the Owner can give an agent that capability."
+      ],
+      "status": 403
+    },
+    {
+      "code": "agent_not_found",
+      "docs": "agent_not_found",
+      "fix": "Pick an agent from the list; it may be switched off, deleted, or not published to your profile.",
+      "message": "Agent not found",
+      "patterns": [
+        "Agent not found"
+      ],
+      "status": 404
     },
     {
       "code": "agents_only",
@@ -48,6 +148,26 @@
         "API key required"
       ],
       "status": 401
+    },
+    {
+      "code": "approval_not_found",
+      "docs": "approval_not_found",
+      "fix": "The task moved on (it was stopped, timed out, or someone else answered). Reload the task.",
+      "message": "That approval request is not pending any more.",
+      "patterns": [
+        "That approval request is not pending any more."
+      ],
+      "status": 404
+    },
+    {
+      "code": "approval_scope_not_allowed",
+      "docs": "approval_scope_not_allowed",
+      "fix": "Destructive tools ask every time. Choose 'once'.",
+      "message": "That approval can only be given for this one call.",
+      "patterns": [
+        "That approval can only be given for this one call."
+      ],
+      "status": 422
     },
     {
       "code": "avatar_not_capturable",
@@ -1689,6 +1809,36 @@
         "Disk write failed"
       ],
       "status": 507
+    },
+    {
+      "code": "task_not_found",
+      "docs": "task_not_found",
+      "fix": "Open the Tasks page and pick a task from the list; it may belong to another profile or have been removed.",
+      "message": "Task not found",
+      "patterns": [
+        "Task not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "task_state_conflict",
+      "docs": "task_state_conflict",
+      "fix": "Reload the task: it may have just finished, or it is still running.",
+      "message": "The task cannot do that in its current state.",
+      "patterns": [
+        "The task cannot do that in its current state."
+      ],
+      "status": 409
+    },
+    {
+      "code": "task_thread_not_allowed",
+      "docs": "task_thread_not_allowed",
+      "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
+      "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
+      "patterns": [
+        "Tasks cannot be assigned from a chat that Restricted profiles can read."
+      ],
+      "status": 409
     },
     {
       "code": "test_flag_invalid",

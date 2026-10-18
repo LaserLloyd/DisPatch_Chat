@@ -81,7 +81,7 @@ declares the permission it needs; and the backend runs on native Windows.
 
 ### Added
 
-- **Agent dispatch core (library only, not wired yet).** A new self-contained package
+- **Agent dispatch core.** A new self-contained package
   `backend/app/agents/` defines the `AgentBackend` interface (`start_task`, `send`,
   `events`, `respond_approval`, `interrupt`, `resume`, `cancel`, `list_sessions`,
   `capabilities`), the normalized event stream (status, text, tool calls and results,
@@ -99,6 +99,37 @@ declares the permission it needs; and the backend runs on native Windows.
   contract. Docs: `docs/agents/backends.md`, `docs/agents/security.md`.
 - Optional extra `agents-claude` (`claude-agent-sdk==0.2.168`, exact pin); it is not in
   the default dependencies and `uv.lock` gains its resolution.
+- **Agents and tasks are first-class** (docs/agents.md). An *agent* is a configured worker
+  (backend, model, instructions, tool allow-list, MCP servers, workspace and approval policy,
+  budget) that an Owner or Admin publishes to profiles; a *task* is one dispatched job with a
+  live timeline, approvals, artifacts, an estimated cost and a state. Backends: **OpenClaw**
+  (unchanged same-host requirement) and **Claude Agent** (API key, Amazon Bedrock, Google
+  Cloud or Microsoft Foundry credentials only; no subscription sign-in).
+  - New tables `agents`, `tasks`, `task_events`, `approvals`, `agent_spend`, `agent_settings`
+    (additive; migration step `005_agents`, with the pre-migration backup and dry run).
+    `python -m app.migrate --dry-run` lists them.
+  - Routes (all declared in `route_policy.py`): `/api/agents*` (`manage_agents`),
+    `/api/agents/available` and `/api/tasks*` (`dispatch_agents`), `/api/approvals/{id}`
+    (`approve_agent_actions`). A Restricted profile gets 403 from every one of them, listing
+    included; a Member sees only agents published to them and only their own tasks; an Owner
+    or Admin sees all. 14 new error codes (`agent_*`, `task_*`, `approval_*`).
+  - WebSocket frames `task.event`, `task.approval`, `task.update`: sent only to sockets whose
+    profile may see the task; added to the locked-socket deny list.
+  - **Budgets**: per task (dollars, turns, minutes, tokens) and per agent and per person per
+    day, hard stop plus a notification at the limit; all figures labelled *estimate*.
+  - **Approvals**: destructive tools (a shell, file writes, anything that sends, posts,
+    deletes or creates) ask every time and offer only "once". Web Push ping (no content),
+    a notice line in the originating chat, and a rail badge on approval-needed / done / failed.
+  - Audit rows for every finished task (who, agent, approvals, estimated cost, duration,
+    outcome); transcript retention setting (default 30 days) with a purge that keeps the audit
+    row; `agents_store.redacted_summary()` for support bundles (no prompts or instructions).
+  - UI: **Tasks** page (rail button, filters), **Assign task** from any chat and `@agent`
+    mentions, live task cards with subagent tree and inline approval cards, **Settings ->
+    Agents** (backends, Claude credentials, agent editor, limits, MCP secrets). Eight locales.
+  - **`agents.unified_dispatch`** (default **off**): runs OpenClaw chat turns and advisor
+    `[[handoff:...]]` cards through the task model. Off, nothing changes. See
+    docs/agents.md for what it does and does not carry over.
+  - Privacy: `docs/privacy.md` says what each backend sends where.
 
 - **Accounts** (`backend/app/accounts.py`, tables `profiles`, `devices`, `sessions`,
   `usage_daily`, `activity`, `schema_migrations` in `chats.db`): Owner (exactly one),
@@ -177,6 +208,10 @@ exist for tests only.
   individual threads (`docs/design/multi-user.md` lists what is deferred).
 - Behind a TLS-terminating proxy that rewrites `Host`, the Origin check will refuse
   state-changing requests; make the proxy preserve `Host`.
+- Agents: the Claude Agent has been exercised against recorded and scripted streams only
+  (no API key was available); the first real run may reveal a field the fakes do not model.
+  Claude Managed Agents (hosted sessions) and the generic CLI adapter are not built. The
+  scheduler cannot yet dispatch recurring tasks. Approved shell commands are not sandboxed.
 
 ## [2.4.2] — 2026-10-17
 

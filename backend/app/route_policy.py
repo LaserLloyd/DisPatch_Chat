@@ -209,6 +209,32 @@ _r("GET", "/api/openclaw/sessions", _R(P.MANAGE_AGENTS))
 _r("GET", "/api/openclaw/transcript", _R(P.MANAGE_AGENTS))
 _r("POST", "/api/openclaw/import", _R(P.MANAGE_AGENTS))
 
+# Agents and tasks (W11b). A Restricted profile can never hold dispatch_agents
+# (RESTRICTED_NEVER), and none of these is `scoped`, so every one answers 403 to it -
+# listing included. A task or agent you may not see is a 404, decided in the handler.
+for _methods, _path in (
+    ("GET", "/api/agents"), ("POST", "/api/agents"), ("PATCH", "/api/agents/{agent_id}"),
+    ("DELETE", "/api/agents/{agent_id}"), ("GET", "/api/agents/backends"),
+    ("GET", "/api/agents/credentials/claude"), ("PUT", "/api/agents/credentials/claude"),
+    ("DELETE", "/api/agents/credentials/claude"), ("GET", "/api/agents/secrets"),
+    ("PUT", "/api/agents/secrets/{name}"), ("DELETE", "/api/agents/secrets/{name}"),
+    ("GET", "/api/agents/settings"), ("PUT", "/api/agents/settings"),
+    ("GET", "/api/agents/profile-budgets"), ("PUT", "/api/agents/profile-budgets/{profile_id}"),
+    ("GET", "/api/agents/usage"), ("POST", "/api/agents/retention/purge"),
+):
+    _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, budgets, retention (write-only secrets)"))
+_r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Owner/Admin sees all)"))
+for _methods, _path in (
+    ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task_id}"),
+    ("GET", "/api/tasks/{task_id}/events"), ("POST", "/api/tasks/{task_id}/send"),
+    ("POST", "/api/tasks/{task_id}/interrupt"), ("POST", "/api/tasks/{task_id}/resume"),
+    ("POST", "/api/tasks/{task_id}/cancel"),
+):
+    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own tasks; an Owner/Admin sees everyone's"))
+_r("POST", "/api/tasks/{task_id}/release", _R(P.APPROVE_AGENT_ACTIONS, note="the human Send for a held handoff; a machine may never press it"))
+_r("POST", "/api/tasks/{task_id}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
+_r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allow or deny one tool call; destructive tools are asked every time"))
+
 # --------------------------------------------------------------------------- #
 # Settings / system / host control (Owner)
 # --------------------------------------------------------------------------- #
