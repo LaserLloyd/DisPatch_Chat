@@ -48,6 +48,7 @@ import os
 import re
 import secrets
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -127,10 +128,13 @@ def _builtin_deny_roots() -> tuple[Path, ...]:
         return _deny_roots_cache[1]
     roots: list[Path] = []
     # Shared with the [[media:]] ingest guard so the two lists cannot drift.
-    # Imported lazily: main imports THIS module to mount the router.
-    with contextlib.suppress(Exception):
-        from .main import _INGEST_DENY_ROOTS
-        roots.extend(_INGEST_DENY_ROOTS)
+    # Imported lazily: main imports THIS module to mount the router. Only read
+    # from an already-loaded main: importing it from here (the `app.migrate`
+    # CLI path) runs main's apps_loader.load_all() -> tools.load_tools() while
+    # the caller already holds tools._lock, and the process deadlocks.
+    main_mod = sys.modules.get(f"{__package__}.main")
+    if main_mod is not None:
+        roots.extend(getattr(main_mod, "_INGEST_DENY_ROOTS", ()))
     roots += [
         home / ".ssh", home / ".gnupg", home / ".config" / "secrets",
         home / ".openclaw" / "secrets", home / ".openclaw" / "agents",

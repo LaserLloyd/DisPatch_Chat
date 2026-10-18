@@ -774,7 +774,15 @@ def _migrate_ext_settings(ext: Extension) -> None:
     if not is_live_writer(writer):
         return
     try:
-        mod = importlib.import_module("dispatch_voice.host.migration")
+        try:
+            mod = importlib.import_module("dispatch_voice.host.migration")
+        except ModuleNotFoundError as e:
+            if e.name not in ("dispatch_voice.host.migration", "dispatch_voice.host"):
+                raise
+            # An add-on older than 1.6 has no settings migration; it keeps reading voice.yaml.
+            log.info("ext %s: the add-on has no settings migration (pre-1.6); voice.yaml stays in use",
+                     ext.id)
+            return
         fn = getattr(mod, "migrate_voice_yaml", None)
         if fn is None:
             return

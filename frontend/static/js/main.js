@@ -5,7 +5,7 @@
 import { api, setOnLocked, setOnPolicyBlock, setOnSignInRequired } from './api.js?v=35';
 import { ChatSocket } from './ws.js?v=10';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
-import { installChecklists, applyChecklistState } from './checklist.js?v=12';
+import { installChecklists, applyChecklistState } from './checklist.js?v=13';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
 import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
@@ -21,9 +21,9 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=26';
+} from './reactions.js?v=27';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=12';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed,
 } from './quick-actions.js?v=2';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=15';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -47,8 +47,8 @@ import {
 } from './ext-sdk.js?v=16';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=15';
-import { mountPluginsSettings } from './plugins.js?v=14';
-import { rowControls, addBotRow } from './bots-edit.js?v=3';
+import { mountPluginsSettings } from './plugins.js?v=15';
+import { rowControls, addBotRow } from './bots-edit.js?v=4';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
 // modules to extend without a cascade).
@@ -70,7 +70,7 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
-} from './tools.js?v=15';
+} from './tools.js?v=16';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=3';
