@@ -112,3 +112,32 @@ def test_a_member_may_not_post_as_a_character_or_the_system(house):
     assert member.post(f"/api/threads/{tid}/messages", json={"role": "user", "content": "mine"}).status_code == 200
     # The Owner (and an agent) still may.
     assert owner.post(f"/api/threads/{tid}/messages", json={"role": "assistant", "content": "ok"}).status_code == 200
+
+
+# O-3 ------------------------------------------------------------------------ #
+
+def test_an_admin_cannot_rewrite_what_the_owner_approved_on_an_agent(aw):
+    from agents_world import spec
+    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+    admin = aw.world.client(("203.0.113.62", 1))
+    assert aw.world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    stdio = {"x": {"transport": "stdio", "command": "node", "args": ["server.js"]}}
+    remote = {"r": {"transport": "http", "url": "https://mcp.example/mcp",
+                    "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
+    r = aw.owner.post("/api/agents", json={"name": "Approved", "spec": spec(
+        tool_allowlist=["Read"], mcp_servers={**stdio, **remote})})
+    assert r.status_code == 201, r.text
+    aid = r.json()["agent"]["id"] if "agent" in r.json() else r.json()["id"]
+
+    def patch(servers):
+        return admin.patch(f"/api/agents/{aid}", json={"spec": spec(tool_allowlist=["Read"], mcp_servers=servers)})
+
+    # Same name, new command line: code execution on the host -> the Owner's call.
+    r = patch({"x": {"transport": "stdio", "command": "sh", "args": ["-c", "id"]}, **remote})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", r.text
+    # Same name, the stored secret sent somewhere else -> the Owner's call.
+    r = patch({**stdio, "r": {**remote["r"], "url": "https://attacker.example/mcp"}})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", r.text
+    # Leaving the approved grants exactly as they are, or removing one, is fine.
+    assert patch({**stdio, **remote}).status_code == 200
+    assert patch(stdio).status_code == 200
