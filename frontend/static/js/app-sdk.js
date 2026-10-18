@@ -55,7 +55,7 @@ const RTL = new Set(['ar', 'he', 'fa', 'ur', 'yi', 'dv', 'ckb']);
 const THEME_CSS = [
   '/static/theme.css?v=7',
   '/static/ui-theme/ui-theme.css',
-  '/static/ui-theme/adapters/dispatch-compat.css',
+  '/static/ui-theme/adapters/dispatch-extra.css',
 ];
 const THEME_ATTRS = ['data-palette', 'data-theme', 'data-contrast-profile'];
 const ID_RE = /^[a-z0-9-]{1,40}$/;
@@ -385,6 +385,7 @@ export function setTitle(text) { return post('set-title', { text: String(text ||
 // opened on its own (a new tab): framed, the shell's own attributes are copied.
 const DATA_THEME = { oled: 'amoled', dark: 'dark', light: 'light' };
 let groundBySlug = null;
+let profileBySlug = null;   // slug -> contrastProfile (standard|high|night), from themes.json
 
 function readShellTheme() {
   // Framed by the shell: copy exactly what its theme runtime stamped.
@@ -404,7 +405,7 @@ function readShellTheme() {
     // Purple is the :root base in ui-theme.css and carries no attribute.
     'data-palette': slug === 'purple' ? null : slug,
     'data-theme': DATA_THEME[ground] || 'dark',
-    'data-contrast-profile': slug === 'night-red' ? 'night' : 'standard',
+    'data-contrast-profile': (profileBySlug && profileBySlug[slug]) || (slug === 'night-red' ? 'night' : 'standard'),
   };
 }
 
@@ -460,6 +461,7 @@ export function theme() {
       .then((j) => {
         if (!j || !Array.isArray(j.themes)) return;
         groundBySlug = Object.fromEntries(j.themes.map((x) => [x.slug, x.ground]));
+        profileBySlug = Object.fromEntries(j.themes.map((x) => [x.slug, x.contrastProfile]));
         applyTheme(readShellTheme());
       })
       .catch(() => {});
@@ -473,4 +475,5 @@ export function _resetForTest() {
   pageWired = false;
   themeWired = false;
   groundBySlug = null;
+  profileBySlug = null;
 }

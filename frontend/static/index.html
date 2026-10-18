@@ -72,13 +72,14 @@
   <!-- The theme runtime. BLOCKING and first on purpose: it reads the stored
        theme and stamps <html data-palette/data-theme/data-contrast-profile>
        plus <meta name="theme-color"> before anything paints.
-       static/ui-theme/ is the shared drop-in theme folder: generated files,
-       never edited here. To update the themes, replace the whole folder —
-       nothing else changes (docs/development.md, "Themes"). It is served
+       static/ui-theme/ is the vendored ForgeUI bundle: generated files, never
+       edited here. forgeui.json (repo root) names the version and the theme
+       choice; `python -m forgeui vendor` replaces the whole folder and
+       `--check` guards it (docs/development.md, "Themes"). It is served
        no-cache, so it needs no ?v=. DisPatch's own settings are the data-*
        below: picker order, the default for a new device, the storage key. -->
   <script src="/static/ui-theme/ui-theme.js"
-          data-themes="glacier,midnight-gold,forest,paper,daylight,purple,electric-yellow,laserlloyd,laserlloyd-light,night-red"
+          data-themes="glacier,midnight-gold,forest,paper,daylight,purple,slate,high-contrast,high-contrast-light,electric-yellow,laserlloyd,laserlloyd-light,night-red"
           data-default="glacier"
           data-storage-key="dispatch-palette"></script>
   <!-- Which locale the last visit settled on. i18n.js keeps it current so an
@@ -149,6 +150,11 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
+  <!-- ForgeUI component layer (ui-dialog, ui-toast, ...). BEFORE app.css so the
+       shell's own .ui-dialog rules win every tie; it reads the tokens below,
+       which resolve whenever they load. ui-components.js adds window.UIComponents
+       and fetches ui-theme/locales/<lang>.json only if asked to. -->
+  <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=7" />
   <link rel="stylesheet" href="/static/app.css?v=107" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
@@ -157,8 +163,9 @@
        ties; theme.css holds only what the theme folder does not own. No
        ui-theme-base.css: DisPatch keeps its own element layer. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
-  <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-compat.css" />
-  <script type="module" src="/static/js/theme.js?v=19"></script>
+  <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-extra.css" />
+  <script src="/static/ui-theme/ui-components.js" defer></script>
+  <script type="module" src="/static/js/theme.js?v=20"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -1311,6 +1318,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=144"></script>
+  <script type="module" src="/static/js/main.js?v=145"></script>
 </body>
 </html>

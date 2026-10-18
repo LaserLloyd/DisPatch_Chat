@@ -44,7 +44,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=14';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=15';
+} from './ext-sdk.js?v=16';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=14';
 import { mountPluginsSettings } from './plugins.js?v=14';
@@ -65,7 +65,7 @@ import {
 } from './tools.js?v=15';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp, api as appApi } from './app-sdk.js?v=2';
+import { forApp, api as appApi } from './app-sdk.js?v=3';
 import { renderLinkRail, linksSection } from './links.js?v=7';
 import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=1';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
