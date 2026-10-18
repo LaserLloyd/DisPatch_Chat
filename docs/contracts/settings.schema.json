@@ -1769,7 +1769,19 @@
     {
       "choice_labels": {},
       "choices": [
-        "glacier"
+        "purple",
+        "midnight-gold",
+        "glacier",
+        "forest",
+        "paper",
+        "daylight",
+        "slate",
+        "high-contrast",
+        "high-contrast-light",
+        "electric-yellow",
+        "laserlloyd",
+        "laserlloyd-light",
+        "night-red"
       ],
       "choices_from": "themes",
       "default": "glacier",

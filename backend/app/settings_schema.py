@@ -495,7 +495,9 @@ def dynamic_choices(kind: str) -> list[str]:
         if kind == "themes":
             doc = json.loads((_frontend_dir() / "ui-theme" / "themes.json").read_text(encoding="utf-8"))
             items = doc.get("themes") if isinstance(doc, dict) else doc
-            ids = [str(t.get("id")) for t in (items or []) if isinstance(t, dict) and t.get("id")]
+            # ForgeUI's themes.json names a theme by `slug` (older bundles: `id`).
+            ids = [str(t.get("slug") or t.get("id")) for t in (items or [])
+                   if isinstance(t, dict) and (t.get("slug") or t.get("id"))]
             return ids
         if kind == "locales":
             return sorted(p.stem for p in (_frontend_dir() / "locales").glob("*.json"))
@@ -664,8 +666,9 @@ def markdown_reference() -> str:
             if d.type == "boolean":
                 default = f"`{str(d.default).lower()}`"
             rng = ""
-            if d.choices:
-                rng = " One of: " + ", ".join(f"`{c}`" for c in d.choices) + "."
+            choices = (dynamic_choices(d.choices_from) if d.choices_from else []) or d.choices
+            if choices:
+                rng = " One of: " + ", ".join(f"`{c}`" for c in choices) + "."
             elif d.min is not None or d.max is not None:
                 lo = "" if d.min is None else f"{d.min:g}"
                 hi = "" if d.max is None else f"{d.max:g}"

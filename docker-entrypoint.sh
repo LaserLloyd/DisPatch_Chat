@@ -151,7 +151,9 @@ import glob, os, shutil, sqlite3, sys, time
 
 data, old, keep = sys.argv[1], sys.argv[2], int(sys.argv[3])
 root = os.path.join(data, "backups")
-stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+# Same `<version>-YYYYMMDD-HHMMSS` shape as app/migrate.py writes, so Settings ->
+# System -> Backups lists this copy as a pre-migration backup and can restore it.
+stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
 dest = os.path.join(root, f"{old}-{stamp}")
 os.makedirs(dest, exist_ok=False)
 copied = []

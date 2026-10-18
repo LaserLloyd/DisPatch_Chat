@@ -475,7 +475,10 @@ def read_archive(path: Path, passphrase: str, *, extract_to: Path | None = None)
 # --------------------------------------------------------------------------- #
 
 _SNAP_RE = re.compile(r"^chats-\d{8}-\d{6}\.db$")
-_PRE_RE = re.compile(r"^\d+\.\d+\.\d+-\d{8}-\d{6}$")
+#: ``<version>-YYYYMMDD-HHMMSS``. The version is whatever wrote the copy: app/migrate.py's
+#: ``3.0.0``, or the container entrypoint's previous image version (``3.0.0-b1``, ``dev``,
+#: ``unrecorded``), so anything up to the stamp is accepted.
+_PRE_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
 
 
 def _archive_row(p: Path) -> dict:

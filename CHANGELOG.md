@@ -148,7 +148,7 @@ declares the permission it needs; and the backend runs on native Windows.
   and with a Restricted session and must be refused; a Restricted turn reaches only
   `audience in (all, restricted)` characters.
 - **Contracts** (`backend/app/contracts/`, `docs/contracts/`, `docs/errors.md`,
-  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (208 codes),
+  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (223 codes),
   capability registry and JSON Schemas for Connection, Tool plugin, Voice provider and
   Character manifests, regenerated and checked in CI (`tests/test_contracts_drift.py`).
 - **Migration with a safety net**: `python -m app.migrate [--dry-run] [--restore DIR]`;
@@ -159,7 +159,7 @@ declares the permission it needs; and the backend runs on native Windows.
   where no CSP frame-ancestors, `no-store` on auth and people APIs, HSTS over TLS).
 - **Native Windows**: the backend imports and the test suite collects on Windows
   (`app/_filelock.py` replaces `fcntl`); `.gitattributes` keeps LF everywhere; the
-  frontend suite (820 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
+  frontend suite (856 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
   PowerShell; `frontend/package-lock.json` is committed.
 - `.claude/agents/`: contract-guardian, security-reviewer, migration-verifier,
   docs-drift-checker, a11y-reviewer.
@@ -215,6 +215,14 @@ declares the permission it needs; and the backend runs on native Windows.
 - `/api/bots*` are thin aliases of `/api/characters*` (same permissions); the bot row gains `connection`,
   `profiles`, `description`, `pack`.
 - A character a profile is not listed for cannot be opened or messaged by that profile; Owner and Admin always see all.
+  The same rule now narrows every WebSocket broadcast per connection (`bots` after an edit, `thread_*` and `message`
+  frames; `ConnectionManager.scoper` / `main.scope_frame_for_principal`), not only the roster and `hello`; `get_messages`
+  over the socket checks it for every profile. Before, a profile left off a character's `profiles` list saw the
+  character's new name and avatar, and its threads being created, in the broadcasts that followed an edit.
+- `deploy/compose/stack.yml` passes `SF_OWNER_USER` / `SF_OWNER_PASSWORD` to StudioForge (its 2.x images refuse to
+  listen beyond loopback without an owner account) and seeds Atlas's provider as `llamacpp`, so the migrated connection
+  is of type `studioforge` rather than a generic OpenAI-compatible server. `docs/deploy/stack.md` says how to give that
+  connection a StudioForge API key.
 - Settings has two new tabs, **Connections** and **All settings**; the Bots tab gains a **Details** button per row and a
   **Starter packs** card; `index.html`'s theme picker lists the three new themes.
 - `GET /api/plugins/manifests` and the approval rule on `PUT /api/plugins/extensions/{id}` (additive: a body of
@@ -225,12 +233,14 @@ declares the permission it needs; and the backend runs on native Windows.
 ### Upgrading from 2.x (exact behaviour)
 
 Start 3.0.0 as usual; the server migrates before it serves. Or look first:
-`python -m app.migrate --dry-run --data-dir <dir>` prints each step and writes nothing.
+`uv run python -m app.migrate --dry-run --data-dir <dir>` (from `backend/`) prints each step and writes
+nothing. `backend/.python-version` pins the interpreter range (3.12–3.14) so a plain `uv sync` no longer
+picks a Python the OCR wheels (`onnxruntime`) do not exist for.
 
 1. **Backup** (only when there is data to protect and a step is pending):
    `<data>/backups/3.0.0-<UTC stamp>/` receives a consistent copy of `chats.db`,
    `config.yaml`, `security.yaml` and `trusted-devices.yaml`. The newest five are kept.
-   Undo with `python -m app.migrate --restore <that directory>` (server stopped).
+   Undo with `uv run python -m app.migrate --restore <that directory>` (server stopped).
 2. `001_accounts` creates the new tables (additive; a 2.x binary still runs on the result).
 3. `002_owner_from_pin` — **an install with a PIN gets an Owner profile built from that
    PIN.** The PIN is unchanged and unlocks as before. The profile has **no password yet**;

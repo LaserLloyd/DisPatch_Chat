@@ -88,7 +88,11 @@ alternatives, and a feature-by-feature matrix of what needs what.
 
 ## Quick start
 
-Three steps. You need [uv](https://docs.astral.sh/uv/) (it fetches Python 3.12 for you) and git.
+Three steps. You need git and [uv](https://docs.astral.sh/uv/), which fetches a Python
+(3.12–3.14; `backend/.python-version` pins the range) for you. Linux and macOS:
+`curl -LsSf https://astral.sh/uv/install.sh | sh` (then open a new shell, or
+`source ~/.local/bin/env`); Windows: `winget install astral-sh.uv`. The backend runs
+natively on Windows, Linux and macOS.
 
 **1. Get it and start it**
 
@@ -97,6 +101,10 @@ git clone https://github.com/LaserLloyd/DisPatch_Chat.git
 cd DisPatch_Chat/backend && uv sync
 uv run uvicorn app.main:app --port 8765
 ```
+
+The server log prints a one-time `SETUP TOKEN: ...` line. From the computer DisPatch runs
+on you will not need it; from another device the setup wizard asks for it, and nothing
+else is reachable from the network until the owner account exists.
 
 **2. Open <http://localhost:8765> and follow the setup wizard.** It creates your
 owner account, looks for a model server on your computer (StudioForge, LM Studio,
@@ -329,13 +337,15 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   ([docs/extensions.md](docs/extensions.md))
 
 **Access control**
-- A PIN unlocks full access; sessions idle-expire, and a device can be trusted
-  for a sliding window if you choose
-- A **limited tier** that can read and send without the PIN — for a family
-  tablet on the kitchen counter — restricted to the conversations you allow,
-  with all media stripped server-side and daily per-device budgets
-- **One-way file drop**: a locked device can send you a file without being able
-  to browse or retrieve anything
+- **Profiles and roles**: an Owner, Admins (password), Members (own PIN) and
+  Restricted profiles; sessions idle-expire per role, and a device can be bound to
+  a profile or remembered for a sliding window if you choose
+- A **Restricted** profile — a family tablet on the kitchen counter, a child, a
+  guest — can read and send to the characters made for it, with all media stripped
+  server-side, daily per-profile budgets and time limits; every management route
+  and WebSocket action declares the permission it needs and answers 403 otherwise
+- **One-way file drop**: a Restricted device can send you a file without being
+  able to browse or retrieve anything
 
 **Operations**
 - Built-in **host dashboard**: health, storage, database integrity, backup
@@ -451,7 +461,7 @@ half of the app is behind a door:
 
 <div align="center">
   <img src="docs/assets/tiers.svg" width="100%"
-       alt="Both tiers funnel through one server-side gate. A kitchen tablet with no PIN reaches Safe Mode: read and send to safe characters only, media stripped server-side, a one-way file drop, daily per-device budgets, and 403 on every mutating endpoint. A phone with the PIN entered reaches everything: full-power agents, files, settings, deletion, the host dashboard, the tools and the coding pane." />
+       alt="Every role funnels through one server-side gate. A kitchen tablet on a Restricted profile reads and sends to the characters made for it only, media stripped server-side, a one-way file drop, daily per-profile budgets, and 403 on every management route. The Owner's phone, signed in, reaches everything: agents, files, settings, deletion, the host dashboard and the tools." />
 </div>
 
 **Restricted** (formerly "Safe Mode") — what a kitchen tablet or a child's profile
@@ -497,12 +507,14 @@ usable server; it builds the image from the checkout — no registry account
 needed — and the file is where you put a data path, a port, or an agent backend
 when you want one.
 
-Open <http://localhost:8765>, then set a PIN under **Settings → Security**.
-Do it now: **the compose file publishes the port on `0.0.0.0`**, so until you
-set a PIN, everyone on your network has full access. Set `BIND_ADDR=127.0.0.1`
+Open <http://localhost:8765> and finish the setup wizard. **The compose file
+publishes the port on `0.0.0.0`**, and a container is never "the computer DisPatch
+runs on" from the browser's point of view, so the wizard asks for the one-time
+setup token from `docker compose logs app` (`SETUP TOKEN: ...`). Until the owner
+account exists the network sees only the sign-in page. Set `BIND_ADDR=127.0.0.1`
 in `.env` if you would rather it were this machine only while you look around.
-(A bare `uvicorn` process with no container is the other way round — it binds
-loopback unless you tell it not to.)
+(A bare `uvicorn` process with no container binds loopback unless you tell it
+not to, and needs no token from that machine.)
 
 **With StudioForge (the local model server) in one command:**
 
@@ -518,7 +530,8 @@ InfoForge. GPU flags for Docker and Podman, and the rest: [docs/deploy/stack.md]
 **Updating and your data.** Everything lives on the `/data` volume (`chats.db` and its WAL, avatars,
 uploads, `config.yaml`, `backups/`); the image holds none of it. `docker compose pull && docker
 compose up -d` keeps your chats. On the first start of a new version the container copies the
-databases and config to `/data/backups/<oldversion>-<time>/` before migrations run (newest 5 kept).
+databases and config to `/data/backups/<newversion>-<time>/` before migrations run (newest 5 kept;
+only when a migration step is actually pending).
 `docker compose down` keeps the volume; **`docker compose down -v` deletes it.** Back up with the
 app stopped:
 `docker run --rm -v dispatch-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/dispatch-data.tgz -C /data .`
@@ -551,12 +564,13 @@ and most corporate gateways work too.
 
 Two honest caveats:
 
-- **Your key is stored in `config.yaml` in the data directory.** Every writer
-  chmods that file to `0600`, so other users on the box cannot read it — but it
-  is not encrypted, and anyone with your account, root, or a copy of your
-  backups has it. If you would rather it were not on disk at all, name an
-  environment variable instead and DisPatch reads the key from there; the
-  environment always wins over the file.
+- **Your key is stored once, in the secret store** — the OS keyring when there
+  is one, else a `0600` file under the data directory (`agents/secrets.json`);
+  never in `config.yaml` (3.0 moves any key it finds there). Other users on the
+  box cannot read it, but it is not encrypted on disk, and anyone with your
+  account, root, or a copy of your backups has it. If you would rather it were
+  not on disk at all, name an environment variable instead and DisPatch reads
+  the key from there; the environment always wins over the store.
 - **A direct-API bot is an assistant, not an agent.** Its lookups only read
   (search, weather, a page, and so on); it cannot touch files or run anything
   on your machine. For that you want an
@@ -571,7 +585,7 @@ Full setup notes, per provider: [docs/llm-providers.md](docs/llm-providers.md).
 |---|---|---|
 | Docker / Compose | [docs/deploy-docker.md](docs/deploy-docker.md) | Recommended. amd64 + arm64 |
 | Raspberry Pi | [docs/deploy-raspberry-pi.md](docs/deploy-raspberry-pi.md) | Pi 4/5. Read the SD-card section |
-| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Docker Desktop or WSL2 |
+| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Native (`uv sync` + `uv run uvicorn`, see Quick start), or Docker Desktop / WSL2 for a 24/7 service |
 | Bare Linux | [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md) | systemd unit, system or user |
 
 ### Reaching it from outside your house
@@ -619,7 +633,7 @@ Everything lives in one directory (`~/.local/share/local-chat` by default,
 
 ```
 data/
-├── chats.db                      # SQLite — messages, threads, users, sessions
+├── chats.db                      # SQLite — messages, threads, profiles, devices, sessions, settings, agents
 ├── media/                        # inline images and video
 ├── files/                        # file-server attachments
 ├── avatars/                      # avatar pools drawn by new threads
@@ -660,18 +674,18 @@ cd backend && uv run pytest -q
 
 ## Roadmap
 
-Designed in detail and not yet built. Both designs are in the repository because
-they are the next things to happen and are worth reviewing before they are:
+3.0 shipped the first half of [the multi-user design](docs/design/multi-user.md):
+profiles, roles, per-profile budgets and the migration that preserves an existing
+install's history. Designed in detail and not yet built:
 
-- **[Per-person accounts](docs/design/multi-user.md)** — real users, roles, and
-  per-conversation access, replacing the single shared PIN. Includes the
-  migration that preserves an existing install's history.
-- **[Password + TOTP, and passkeys](docs/design/remote-access-and-auth.md)** —
-  proper authentication with recovery codes, plus the honest account of where
-  passkeys help and where they cause self-hosting pain.
-
-Until those land, treat DisPatch as a private chat for one household with one
-shared credential. That is what it is today, and it is good at it.
+- **Per-conversation access** — today conversations are one shared household
+  space; roles gate actions and characters, not individual threads
+  ([docs/design/multi-user.md](docs/design/multi-user.md), "deferred").
+- **TOTP and passkeys** ([docs/design/remote-access-and-auth.md](docs/design/remote-access-and-auth.md))
+  — a second factor and the honest account of where passkeys help and where they
+  cause self-hosting pain. Passwords, PINs and recovery codes exist today.
+- **Agents**: Claude Managed Agents (hosted sessions), the generic CLI adapter and
+  scheduled tasks ([docs/agents.md](docs/agents.md), "Known limits").
 
 ## Translating
 

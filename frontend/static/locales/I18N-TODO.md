@@ -1,7 +1,8 @@
 # Locale TODO: strings that still need a real translation
 
-DisPatch Chat 3.0 (profiles, roles and policy) added the keys below. English (`en`) and Japanese (`ja`) are
-complete. For the other six locales every key listed here carries the English text prefixed with the
+DisPatch Chat 3.0 (profiles, roles and policy) added the keys below. English (`en`) is complete. Japanese
+(`ja`) is complete for the profiles/roles strings and still carries placeholders for the 244 W5 keys (last
+section). For the other six locales every key listed here carries the English text prefixed with the
 locale code, for example `[de] Sign in`, so the gap is visible in the UI and greppable:
 
     grep -rn "\"\[de\] " frontend/static/locales/de.json

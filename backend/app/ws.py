@@ -29,6 +29,13 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
         # Injected at startup (avoids a circular import on main).
         self.redactor: Callable[[dict], dict | None] | None = None
+        # (frame, principal) -> frame | None. Applied AFTER the Safe-Mode redactor to
+        # every socket that finished its handshake: per-profile character visibility
+        # (3.0). A Member or Restricted profile left off a character's profile list
+        # must not learn its name, avatar or threads from a later `bots` / `thread_*`
+        # / `message` broadcast - the roster and `hello` were filtered, the broadcasts
+        # were not (the manager had no per-connection identity before 3.0).
+        self.scoper: Callable[[dict, object], dict | None] | None = None
         self.is_session_live: Callable[[str], bool] | None = None
         self.pin_set: Callable[[], bool] | None = None
         # Synchronous observers of every broadcast frame (app/extensions.py:
@@ -100,7 +107,12 @@ class ConnectionManager:
 
     def _frame_for(self, meta: dict, message: dict) -> dict | None:
         if self._is_safe(meta) and self.redactor is not None:
-            return self.redactor(message)   # may be None -> drop
+            message = self.redactor(message)   # may be None -> drop
+            if message is None:
+                return None
+        pr = meta.get("principal")
+        if pr is not None and self.scoper is not None:
+            return self.scoper(message, pr)    # may be None -> drop
         return message
 
     async def send(self, ws: WebSocket, message: dict) -> None:

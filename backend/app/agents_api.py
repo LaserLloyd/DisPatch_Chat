@@ -529,7 +529,7 @@ async def get_profile_budgets(request: Request, _=_MANAGE):
 @router.put("/api/agents/profile-budgets/{profile_id}")
 async def put_profile_budget(profile_id: str, body: AgentProfileBudgetIn, request: Request, _=_MANAGE):
     if accounts.get_profile(profile_id) is None:
-        return _problem(404, "agent_invalid", "published_to: that is not a profile")
+        return _problem(404, "agent_invalid", "profile-budgets: that is not a profile")
     budget = {k: v for k, v in body.model_dump().items() if v is not None}
     store.set_profile_budget(profile_id, budget or None)
     return {"profile_id": profile_id, "budget": budget}

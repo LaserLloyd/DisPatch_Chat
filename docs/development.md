@@ -108,7 +108,7 @@ than adding a `<script>` tag that everyone pays for.
 cd backend && uv run pytest -q
 ```
 
-About 3,000 tests; the backend suite takes 15–22 minutes (it is wall-clock bound).
+About 3,500 tests; the backend suite takes 25–30 minutes on Linux (it is wall-clock bound).
 Three timing/mtime tests are known to flake on a fast box
 (`test_mirror.py::test_state_roundtrip`, `test_reactions.py::test_safe_ids_does_not_rewalk_unchanged_pools`, and one of the
 dashboard/advisor timing tests). The suite is strictly hermetic: every test
@@ -208,8 +208,7 @@ above.
 ### Windows
 
 The backend imports and the whole suite *collects* on native Windows (`uv run pytest --co -q`:
-2,900+ tests). Run it with `PYTHONUTF8=1` (the app reads YAML with the locale encoding in a
-few places). A subset of tests that depend on POSIX paths, `/tmp` semantics or process groups
+3,500+ tests). A subset of tests that depend on POSIX file modes, `/tmp` semantics or process groups
 still fail on Windows; **the full suite is run in WSL** (or any Linux):
 
 ```

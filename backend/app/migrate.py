@@ -56,7 +56,9 @@ log = logging.getLogger("local-chat.migrate")
 
 TARGET_VERSION = "3.0.0"
 KEEP_BACKUPS = 5
-_BACKUP_DIR_RE = re.compile(r"^\d+\.\d+\.\d+-\d{8}-\d{6}$")
+#: ``<version>-YYYYMMDD-HHMMSS``; the container entrypoint writes the same shape with the
+#: previous image version in front (``3.0.0-b1-...``, ``dev-...``), kept in one list here.
+_BACKUP_DIR_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
 
 
 @dataclass
@@ -264,7 +266,7 @@ def backup(version: str = TARGET_VERSION) -> Path:
             with contextlib.suppress(OSError):
                 (dest / p.name).chmod(0o600)
     kept = sorted((d for d in root.iterdir() if d.is_dir() and _BACKUP_DIR_RE.match(d.name)),
-                  key=lambda d: d.name)
+                  key=lambda d: d.name[-15:])            # by stamp, whatever version is in front
     for old in kept[:-KEEP_BACKUPS]:
         shutil.rmtree(old, ignore_errors=True)
     return dest
@@ -306,8 +308,16 @@ def _record(step: str) -> None:
 
 
 def _apply_audience() -> None:
-    bots = config.load_bots()
-    config._write_bots([config._bot_entry(b) for b in bots])
+    """Write ``audience`` on every raw entry and save the roster AS IT IS (like 006): a key
+    this version does not know, or one an add-on owns, survives the upgrade. Re-serialising
+    through ``config._bot_entry`` would have dropped it."""
+    roster = _raw_roster()
+    if roster is None:
+        return
+    for e in roster:
+        if "audience" not in e:
+            e["audience"] = _audience_of(e)
+    config._write_bots(roster)
 
 
 def _apply_connections() -> None:

@@ -23,6 +23,8 @@ checklist is for ``manage_settings``.
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
@@ -288,11 +290,24 @@ async def wizard_network(request: Request, payload: NetworkIn):
     host = config.SETTINGS.host
     wide = host not in ("127.0.0.1", "localhost", "::1")
     mismatch = (payload.exposure == "local" and wide) or (payload.exposure == "lan" and not wide)
+    note = ("DisPatch reports it is listening on " + host +
+            (", which is wider than 'this computer only'." if wide else
+             ", so other devices cannot reach it yet.")) if mismatch else ""
+    if _in_container():
+        # The image always binds 0.0.0.0 inside its own network namespace (Dockerfile CMD,
+        # compose `LOCAL_CHAT_HOST`); who can reach it is decided by the address the port is
+        # published on (`-p 127.0.0.1:8765:8765`, `BIND_ADDR` in compose), which the app cannot
+        # see. Reporting "wider than this computer only" here was wrong for every Docker install.
+        mismatch, note = False, ""
+        notes.append("In Docker the container itself listens on 0.0.0.0; the address you publish the port on "
+                     "decides who can reach it: BIND_ADDR=127.0.0.1 (compose) or -p 127.0.0.1:8765:8765 for "
+                     "this computer only, 0.0.0.0 for your network.")
     return {"exposure": payload.exposure, "reported_host": host, "notes": notes,
-            "mismatch": mismatch,
-            "mismatch_note": ("DisPatch reports it is listening on " + host +
-                              (", which is wider than 'this computer only'." if wide else
-                               ", so other devices cannot reach it yet.")) if mismatch else ""}
+            "mismatch": mismatch, "mismatch_note": note}
+
+
+def _in_container() -> bool:
+    return Path("/.dockerenv").exists() or bool(os.environ.get("DISPATCH_IN_DOCKER"))
 
 
 @router.post("/api/wizard/step/{step}", dependencies=[_SETTINGS])

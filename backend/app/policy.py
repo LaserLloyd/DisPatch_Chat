@@ -135,8 +135,8 @@ def effective_permissions(profile: accounts.Profile) -> frozenset[str]:
             continue
         if role is Role.RESTRICTED and g in {p.value for p in RESTRICTED_NEVER}:
             continue
-        if g == Permission.ADMIN_SYSTEM.value and role is Role.ADMIN:
-            continue                                  # host control is Owner-only
+        if g == Permission.ADMIN_SYSTEM.value:
+            continue                                  # host control is Owner-only, for every other role
         base.add(g)
     for d in profile.denies:
         base.discard(d)

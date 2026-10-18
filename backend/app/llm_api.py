@@ -388,6 +388,15 @@ async def _send_following(client: httpx.AsyncClient, method: str, url: str, *,
             raise ApiError("The provider sent an empty redirect",
                            f"{url} answered {status} with no Location header.")
         url = normalize_base_url(str(httpx.URL(url).join(location)))
+        # Every hop gets the SSRF guard the typed address got (link-local, metadata,
+        # unspecified, multicast; `connections.allow_private_targets` lifts it). A
+        # provider answering `302 Location: http://169.254.169.254/...` used to be
+        # followed, and the Test result quoted the first bytes of what came back.
+        from . import connections as _connections
+        try:
+            _connections.check_target(url)
+        except _connections.ConnectionError_ as e:
+            raise ApiError("The provider redirected to a blocked address", str(e)) from None
         if _origin_of(url) != origin:
             dropped = [h for h in list(hop_headers)
                        if h.lower() in _CREDENTIAL_HEADERS]
