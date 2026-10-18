@@ -322,7 +322,7 @@ def load() -> ViewerConfig:
             return _cache[2]
 
         try:
-            loaded = yaml.safe_load(path.read_text())
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
             if loaded is None:
                 loaded = {}
             if not isinstance(loaded, dict):
@@ -371,7 +371,7 @@ def _write_config(cfg_roots: list[str], show_hidden: bool, keep: ViewerConfig) -
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{CONFIG_NAME}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, path)

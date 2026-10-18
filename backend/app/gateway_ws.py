@@ -172,7 +172,7 @@ def gateway_token(config_path: Path | None = None) -> str | None:
         return env
     p = config_path or (Path.home() / ".openclaw" / "openclaw.json")
     try:
-        cfg = json.loads(p.read_text())
+        cfg = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     gw = cfg.get("gateway") or {}
@@ -208,7 +208,7 @@ def _resolve_secret_input(value, cfg: dict) -> str | None:
     if not isinstance(prov, dict) or prov.get("source") != "file":
         return None
     try:
-        raw = Path(str(prov.get("path", ""))).expanduser().read_text()
+        raw = Path(str(prov.get("path", ""))).expanduser().read_text(encoding="utf-8")
         if prov.get("mode") == "singleValue":
             out = raw.rstrip("\r\n") if ref_id == "value" else None
         else:

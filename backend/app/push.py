@@ -115,7 +115,7 @@ def _write_private(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=1, sort_keys=True)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -134,7 +134,7 @@ def _load_vapid() -> dict:
     path = _path(VAPID_FILE)
     with _lock:
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("private_pem") and data.get("public_key"):
                 return data
             log.error("%s is malformed — generating a new VAPID keypair "
@@ -174,7 +174,7 @@ def _subject() -> str:
 def _load_subs() -> dict[str, dict]:
     path = _path(SUBS_FILE)
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as e:

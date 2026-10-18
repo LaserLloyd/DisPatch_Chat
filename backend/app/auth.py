@@ -310,7 +310,7 @@ def _write(cfg: SecurityConfig, plaintext_pin: str | None = None) -> None:
     SECURITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(SECURITY_PATH.parent), prefix=".security.yaml.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, SECURITY_PATH)
@@ -351,7 +351,8 @@ def _ensure_recovery(cfg: SecurityConfig, rotate: bool) -> None:
             f"    {code}\n\n"
             "That resets the lock so you can set a new PIN (or run without one).\n"
             "Keep this file private — anyone with this code can reset the PIN.\n"
-            "It is regenerated each time you change the PIN.\n"
+            "It is regenerated each time you change the PIN.\n",
+            encoding="utf-8",
         )
         # Owner-only: the code bypasses the PIN, so keep it off any group/other
         # read (write_text honours umask, which is not guaranteed to be 0077).
@@ -405,7 +406,7 @@ def load() -> SecurityConfig:
             return _cache[1]
 
         try:
-            loaded = yaml.safe_load(SECURITY_PATH.read_text())
+            loaded = yaml.safe_load(SECURITY_PATH.read_text(encoding="utf-8"))
             if not isinstance(loaded, dict):
                 # An empty/scalar file is just as suspect as invalid YAML (a
                 # truncated write, a botched hand-edit): fail closed the same
@@ -636,7 +637,7 @@ def _trusted_store() -> dict[str, dict]:
         _trusted = {}
         if TRUSTED_PATH.exists():
             try:
-                raw = yaml.safe_load(TRUSTED_PATH.read_text())
+                raw = yaml.safe_load(TRUSTED_PATH.read_text(encoding="utf-8"))
                 if isinstance(raw, dict) and isinstance(raw.get("devices"), dict):
                     for h, meta in raw["devices"].items():
                         if isinstance(h, str) and isinstance(meta, dict):
@@ -668,7 +669,7 @@ def _save_trusted() -> None:
     TRUSTED_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(TRUSTED_PATH.parent), prefix=".trusted-devices.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, TRUSTED_PATH)

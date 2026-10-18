@@ -312,14 +312,15 @@ def _check_abs_dir(value, index: int, field: str, check_fs: bool) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ToolValidationError(index, field, "required: an absolute directory path")
     v = value.strip()
-    if not v.startswith("/") or "\x00" in v:
+    # POSIX paths start with "/"; on Windows a drive path (C:/site or C:\site) is absolute too.
+    if "\x00" in v or not (v.startswith("/") or (os.name == "nt" and Path(v).is_absolute())):
         raise ToolValidationError(index, field, "must be an absolute path")
     p = Path(v)
     try:
         r = p.resolve(strict=False)
     except (OSError, RuntimeError, ValueError):
         raise ToolValidationError(index, field, "cannot be resolved") from None
-    if r == Path("/"):
+    if r == Path(r.anchor or "/"):
         raise ToolValidationError(index, field, "the whole filesystem is too broad")
     if _in_data_dir(r) or _in_data_dir(p):
         raise ToolValidationError(index, field, DATA_DIR_MSG)
@@ -526,7 +527,7 @@ def load_tools() -> list[Tool]:
                 and _cache[2] == st.st_size):
             return _cache[3]
         try:
-            doc = yaml.safe_load(path.read_text())
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
             if doc is None:
                 doc = {}
             if not isinstance(doc, dict):
@@ -561,7 +562,7 @@ def _raw_doc() -> dict:
     """tools.yaml as a plain mapping ({} when absent). Raises ValueError when
     the file cannot be read as one."""
     try:
-        doc = yaml.safe_load(manifest_path().read_text())
+        doc = yaml.safe_load(manifest_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (yaml.YAMLError, OSError) as e:
@@ -624,7 +625,7 @@ def _write_doc(doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{MANIFEST_NAME}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)

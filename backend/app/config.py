@@ -985,7 +985,7 @@ def load_bots() -> list[Bot]:
 
     raw: dict = {}
     try:
-        raw = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+        raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError):
         raw = {}
 

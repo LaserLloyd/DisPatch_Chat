@@ -108,7 +108,7 @@ def _write_off_list(ids: list[str]) -> None:
     text = yaml.safe_dump({"disabled": sorted(set(ids))}, sort_keys=False)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{extensions.USER_OFF_FILE}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -125,7 +125,7 @@ def _read_off_list_strict() -> set[str]:
     boot; a WRITE must not turn that into a file that drops every other id."""
     path = config.DATA_DIR / extensions.USER_OFF_FILE
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return set()
     except OSError as e:

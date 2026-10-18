@@ -1132,7 +1132,7 @@ def user_disabled() -> set[str]:
     ``{disabled: [ids]}``, written by Settings -> Plugins). An unreadable file
     switches nothing off."""
     try:
-        doc = yaml.safe_load((config.DATA_DIR / USER_OFF_FILE).read_text())
+        doc = yaml.safe_load((config.DATA_DIR / USER_OFF_FILE).read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return set()
     ids = doc.get("disabled") if isinstance(doc, dict) else None
@@ -1364,7 +1364,7 @@ def boot_fails() -> int:
     if not _boot_marker_on():
         return 0
     try:
-        return max(0, int(_boot_marker().read_text().strip() or 0))
+        return max(0, int(_boot_marker().read_text(encoding="utf-8").strip() or 0))
     except (OSError, ValueError):
         return 0
 
@@ -1377,7 +1377,7 @@ def _write_boot_marker(n: int) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         with contextlib.suppress(OSError):
             os.chmod(p.parent, 0o700)
-        p.write_text(f"{n}\n")
+        p.write_text(f"{n}\n", encoding="utf-8")
     except OSError:
         log.warning("ext: cannot write %s (the crash-loop breaker is off this run)", p)
 

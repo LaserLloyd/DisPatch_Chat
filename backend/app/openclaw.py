@@ -262,7 +262,7 @@ def resolve_session_file(bot_id: str, session_key: str) -> Path | None:
         if not idx.is_file():
             continue
         try:
-            data = json.loads(idx.read_text())
+            data = json.loads(idx.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         ent = data.get(session_key)
@@ -354,7 +354,7 @@ def list_agent_sessions(bot_id: str) -> list[dict]:
         if not idx.is_file():
             continue
         try:
-            data = json.loads(idx.read_text())
+            data = json.loads(idx.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(data, dict):

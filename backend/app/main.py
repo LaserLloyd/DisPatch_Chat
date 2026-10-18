@@ -1151,7 +1151,7 @@ def _media_origins_all() -> dict[str, str]:
     global _media_origins
     if _media_origins is None:
         try:
-            data = json.loads(_media_origins_path().read_text())
+            data = json.loads(_media_origins_path().read_text(encoding="utf-8"))
             _media_origins = {str(k): str(v) for k, v in data.items()} \
                 if isinstance(data, dict) else {}
         except (OSError, ValueError):
@@ -1192,7 +1192,7 @@ def _media_origins_record(url: str, src: str) -> None:
             path = _media_origins_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(origins, indent=0))
+            tmp.write_text(json.dumps(origins, indent=0), encoding="utf-8")
             tmp.replace(path)           # atomic: a torn file would read as empty
         except OSError:
             log.warning("could not record media origin for %s", url, exc_info=True)
@@ -6137,7 +6137,7 @@ async def _migrate_transcript_seen_backfill() -> None:
         except Exception:
             log.warning("transcript-seen backfill skipped thread %s", t.id, exc_info=True)
     with contextlib.suppress(OSError):
-        marker.write_text(now_iso())
+        marker.write_text(now_iso(), encoding="utf-8")
     log.info("transcript-seen backfill: %d item(s) across %d thread(s)", marked, threads)
 
 
@@ -6178,7 +6178,7 @@ async def _migrate_sanitize_stored_messages() -> None:
         log.exception("sanitize migration failed (will retry next boot)")
         return
     with contextlib.suppress(OSError):
-        marker.write_text(f"changed={changed} deleted={deleted}\n")
+        marker.write_text(f"changed={changed} deleted={deleted}\n", encoding="utf-8")
     if changed or deleted:
         log.info("sanitize migration: cleaned %d message(s), removed %d scaffolding-only row(s)",
                  changed, deleted)
@@ -6233,7 +6233,7 @@ async def _migrate_machine_notices() -> None:
         log.exception("notice migration failed (will retry next boot)")
         return
     with contextlib.suppress(OSError):
-        marker.write_text(f"changed={changed}\n")
+        marker.write_text(f"changed={changed}\n", encoding="utf-8")
     log.info("notice migration: %d injected status line(s) collapsed to notices", changed)
 
 
@@ -11426,7 +11426,7 @@ def _load_mirror_state() -> dict:
         return cache["data"]
     data: dict = {"version": 1, "sessions": {}}
     try:
-        parsed = json.loads(path.read_text())
+        parsed = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(parsed, dict) and isinstance(parsed.get("sessions"), dict):
             data = parsed
     except (OSError, json.JSONDecodeError):
@@ -11438,7 +11438,7 @@ def _load_mirror_state() -> dict:
 def _save_mirror_state(state: dict) -> None:
     path = _mirror_state_path()
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
+    tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
     tmp.replace(path)
     # Adopt what we just wrote rather than re-reading it on the next event.
     _mirror_state_cache["path"] = path
@@ -13860,7 +13860,7 @@ def _probe_voice_rig(_: str) -> tuple[str, str]:
     if _voice_ext() is None:
         return "not_configured", "Needs the voice add-on first"
     try:
-        doc = yaml.safe_load((config.DATA_DIR / "voice.yaml").read_text()) or {}
+        doc = yaml.safe_load((config.DATA_DIR / "voice.yaml").read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         doc = {}
     rig = doc.get("rig") if isinstance(doc, dict) else None
