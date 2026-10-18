@@ -102,14 +102,15 @@ scripts/scrub-rules.local.txt
 # this rule one `git add -A` would publish one.
 *.log
 
-# Agent scaffolding: parallel worktrees and session state, never part of the app.
-.claude/
+# Agent scaffolding: parallel worktrees and session state are never part of the app.
+# The shared review-subagent definitions in .claude/agents/ ARE (docs/automation).
+.claude/*
+!.claude/agents/
 
 # Local-only working state: agent memory, staging copies, assistant config and
 # private e2e driver scripts. None of it belongs in the public tree.
 memory/
 .staging-*/
-.claude/
 CLAUDE.md
 CLAUDE.local.md
 scripts/e2e-*.sh
