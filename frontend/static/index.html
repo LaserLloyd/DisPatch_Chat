@@ -158,6 +158,7 @@
   <link rel="stylesheet" href="/static/theme.css?v=7" />
   <link rel="stylesheet" href="/static/app.css?v=107" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
+  <link rel="stylesheet" href="/static/w5.css?v=1" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
        ties; theme.css holds only what the theme folder does not own. No
@@ -730,12 +731,16 @@
              add it); hidden in Safe Mode like the other admin tabs. -->
         <button class="settings-tab admin-only hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
         <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="plugins.tab">Plugins</span></button>
+        <!-- 3.0: Connections (the servers DisPatch talks to) - js/connections.js builds it. -->
+        <button class="settings-tab admin-only hidden" id="stab-connections" role="tab" data-tab="connections" aria-selected="false" aria-controls="spane-connections" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔗</span><span class="stab-label" data-i18n="settings.tab_connections">Connections</span></button>
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
         <!-- People & Profiles (3.0): owner and admin only. js/people.js builds it. -->
         <button class="settings-tab admin-only hidden" id="stab-people" role="tab" data-tab="people" aria-selected="false" aria-controls="spane-people" tabindex="-1"><span class="stab-glyph" aria-hidden="true">👥</span><span class="stab-label" data-i18n="people.tab">People &amp; Profiles</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
+        <!-- 3.0: every setting, drawn from the server's schema (js/settings_schema.js), with backups. -->
+        <button class="settings-tab admin-only hidden" id="stab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="spane-settings" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚙️</span><span class="stab-label" data-i18n="settings.tab_all">All settings</span></button>
       </div>
       <button type="button" class="stab-nav stab-next" id="stab-next" tabindex="-1" aria-hidden="true" hidden title="More tabs" data-i18n-attr="title=settings.tabs_next"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
@@ -844,6 +849,9 @@
            table (js/tools.js mounts into #plugins-tools-host) and the built-in
            lookups switch. ---- -->
       <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
+
+      <!-- ---- Connections: js/connections.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-connections" role="tabpanel" aria-labelledby="stab-connections" tabindex="0"></section>
 
       <!-- ---- AI models (js/llm.js) ---- -->
       <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
@@ -966,6 +974,9 @@
           </p>
         </div>
       </section>
+
+      <!-- ---- All settings: js/settings_schema.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-settings" role="tabpanel" aria-labelledby="stab-settings" tabindex="0"></section>
 
       <!-- Contextual footer: exactly one group is visible, chosen by the active
            tab. Tabs whose actions all live inline (Reactions, Device) get no
@@ -1318,6 +1329,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=145"></script>
+  <script type="module" src="/static/js/main.js?v=146"></script>
 </body>
 </html>

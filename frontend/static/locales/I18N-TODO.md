@@ -1598,3 +1598,15 @@ New:
 - `people.machine_trust_hint`
 - `people.machine_trust_on`
 - `people.machine_trust_off`
+
+
+## W5 (settings from one schema, Connections, characters, wizard, backups): 244 new keys in all 8 locales
+
+`settings.tab_connections`, `settings.tab_all` and every key under `schema.`, `cxn.`, `chars.`, `wiz.` and `bkp.`.
+English (`en`) is the source. The seven other locales, **including `ja`**, carry the English text prefixed with the
+locale code (`[de] Connections`) so the gap is visible and greppable:
+
+    grep -rn "\"\[de\] " frontend/static/locales/de.json
+
+`scripts/check-locales.py` accepts them. Replace a value with a real translation and delete its prefix. These are W10's
+(i18n completion) to translate; nothing in W5 depends on them.

@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v168';  // v168: ForgeUI 1.2.0 vendored whole (forgeui.json; docs/development.md, "Themes"): SHELL gains ui-theme/ui-components.css + ui-components.js + locales/en.json + locales/ja.json and adapters/dispatch-compat.css becomes adapters/dispatch-extra.css (the app-owned overlay); index.html links the component layer and adds slate, high-contrast and high-contrast-light to the picker; theme.js?v=19->20 (revision line reads UITheme.version), app-sdk.js?v=2->3 (overlay path, contrast profile from themes.json) and every importer: main.js?v=144->145, ext-sdk.js?v=15->16, apps/jobboard board.js?v=2->3, apps/imagestudio studio.js?v=1->2.
+const CACHE = 'local-chat-v169';  // v169: 3.0 W5 - settings from one schema, Connections, character details + starter packs, the first-run wizard, encrypted backups: new js/w5-api.js, js/settings_schema.js, js/connections.js, js/characters.js, js/wizard.js, js/backup.js and w5.css join SHELL; main.js?v=145->146 (Connections and All settings tabs, Details per Bots row, starter packs, wizard + device defaults at boot), index.html (two tabs, two panes, w5.css); locales schema.*, cxn.*, chars.*, wiz.*, bkp.*, settings.tab_connections, settings.tab_all (see locales/I18N-TODO.md).
+// v168: ForgeUI 1.2.0 vendored whole (forgeui.json; docs/development.md, "Themes"): SHELL gains ui-theme/ui-components.css + ui-components.js + locales/en.json + locales/ja.json and adapters/dispatch-compat.css becomes adapters/dispatch-extra.css (the app-owned overlay); index.html links the component layer and adds slate, high-contrast and high-contrast-light to the picker; theme.js?v=19->20 (revision line reads UITheme.version), app-sdk.js?v=2->3 (overlay path, contrast profile from themes.json) and every importer: main.js?v=144->145, ext-sdk.js?v=15->16, apps/jobboard board.js?v=2->3, apps/imagestudio studio.js?v=1->2.
 // v167: 3.0 profiles, roles and policy - new js/profiles.js (pure helpers), js/signin.js (profile tiles, first-run setup, Restricted strip, rail chip) and js/people.js (Settings -> People & Profiles) join SHELL; api.js?v=33->34 (me/login/switchProfile/setupOwner/people/devices/..., error.code/fix/retryAfter on thrown errors, signin_required + time_limit/quiet_hours hooks) and its importers bots-edit.js, checklist.js, clients.js, plugins.js, reactions.js, tools.js; ws.js?v=9->10 (a 1008 close stops the reconnect loop); about.js?v=20->21 (APP_VERSION 3.0.0) and its importers ext-sdk.js, voice-absent.js; privacy.js?v=10->11 (APP_KEYS: dp-firstrun-dismissed) and its importer pins.js; main.js?v=143->144, app.css?v=106->107, index.html; locales role.*, signin.*, setup.*, password.*, people.*, restricted.*, notice.*, chip.*, Safe Mode -> Restricted wording (see locales/I18N-TODO.md).
 // v166: 2.4.2 — Settings → Bots visibility is two switches, Show locked (safe) and Show unlocked (!hide_unlocked); neither = Hidden (dimmed row, shown on no device); the old visible switch is folded in server-side: main.js?v=142→143, app.css?v=105→106 (.bm-hidden-tag, .bm-row--hidden), about.js?v=19→20 (APP_VERSION 2.4.2) and its importers ext-sdk.js?v=14→15, voice-absent.js?v=13→14, plugins.js?v=13→14; locales settings.show_locked_*, show_unlocked_*, hidden_* (replace safe_badge/safe_title/hide_unlocked_*/show_in_sidebar), settings.show_hidden_desc.
 // v165: 2.4.1 — a bot can opt out of quick actions (bot.quick_actions=false): quick-actions.js?v=1→2 (setAllowed), about.js?v=18→19 (APP_VERSION 2.4.1) and its importers ext-sdk.js?v=13→14, voice-absent.js?v=12→13, plugins.js?v=12→13, main.js?v=141→142.
@@ -327,7 +328,7 @@ const SHELL = [
   '/static/ui-theme/locales/en.json', '/static/ui-theme/locales/ja.json',
   '/static/theme.css',
   '/static/app.css',
-  '/static/dashboard.css',
+  '/static/dashboard.css', '/static/w5.css',
   '/static/js/main.js', '/static/js/api.js', '/static/js/ws.js',
   '/static/js/markdown.js', '/static/js/checklist.js', '/static/js/util.js', '/static/js/theme.js',
   '/static/js/reactions.js', '/static/js/i18n.js',
@@ -378,6 +379,10 @@ const SHELL = [
   // 3.0 profiles, roles and policy: pure helpers, the sign-in / setup / Restricted
   // DOM and Settings -> People & Profiles, all statically imported by main.js.
   '/static/js/profiles.js', '/static/js/signin.js', '/static/js/people.js',
+  // 3.0 W5: Connections, the schema-driven settings page, backups, character details and the
+  // first-run wizard, all statically imported by main.js, plus the REST calls they share.
+  '/static/js/w5-api.js', '/static/js/settings_schema.js', '/static/js/connections.js',
+  '/static/js/characters.js', '/static/js/wizard.js', '/static/js/backup.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

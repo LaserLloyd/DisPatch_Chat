@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import characters, config, connections, policy
+from . import characters, config, connections, policy, settings_store
 from .api_common import audit, fail
 from .contracts.permissions import Permission
 
@@ -92,7 +92,8 @@ async def list_connections():
         return [_public(c) for c in connections.list_all()]
     return {"connections": await asyncio.to_thread(build), "types": connections.types_public(),
             "capabilities": list(connections.CAPABILITIES),
-            "allow_private_targets": connections.allow_private_targets()}
+            "allow_private_targets": connections.allow_private_targets(),
+            "default": settings_store.get("connections.default", "")}
 
 
 @router.get("/api/connections/types", dependencies=[_MANAGE])

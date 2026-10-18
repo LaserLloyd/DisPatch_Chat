@@ -49,6 +49,14 @@ import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=14';
 import { mountPluginsSettings } from './plugins.js?v=14';
 import { rowControls, addBotRow } from './bots-edit.js?v=3';
+// 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
+// first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
+// modules to extend without a cascade).
+import { setOnLocked as w5SetOnLocked } from './w5-api.js?v=1';
+import { mountConnections } from './connections.js?v=1';
+import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=1';
+import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
+import { maybeStartWizard } from './wizard.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -4328,14 +4336,14 @@ function syncLockNimRow() {
 // sprinkled through the seven places that hide it.
 // Order = the tab strip (2.3): day-to-day first, setup after, rare last. Add-in
 // tabs (shell.settings.pane with a new id) are spliced in before 'plugins'.
-const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'people', 'security'];
+const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'connections', 'ai', 'reactions', 'health', 'people', 'security', 'settings'];
 const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
 // voice chat is unlocked-only, and so is the page explaining how to add it).
 // `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
 // 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
 // a Member is signed in but must not be offered tabs that can only 403.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people'];
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'settings'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
@@ -4405,6 +4413,20 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
   if (pane) pane.scrollTop = 0;
 
   switch (id) {
+    case 'bots':
+      if (!state.decoy) mountStarterPacks(pane, characterCtx());
+      break;
+    case 'connections':
+      await mountConnections(pane, {
+        toast, confirm: (msg, o) => uiConfirm(msg, o), openTab: (tab) => setSettingsTab(tab),
+        onChanged: () => {},
+      });
+      break;
+    case 'settings':
+      await mountSettingsSchema(pane, {
+        toast, confirm: (msg, o) => uiConfirm(msg, o), openTab: (tab) => setSettingsTab(tab), role: state.role,
+      });
+      break;
     case 'reactions':
       await mountReactionManager(pane);
       break;
@@ -4760,6 +4782,19 @@ function renderBotManager() {
     list.append(row);
   });
   if (!state.decoy) list.append(addBotRow(botEditCtx()));
+  // 3.0: a Details button per row (connection, model, personality, audience, who may see it).
+  if (!state.decoy) decorateCharacterRows(list, bmBots, characterCtx());
+}
+
+/** What js/characters.js needs from the app: a toast, the tab opener, and a way to redraw the roster. */
+function characterCtx() {
+  return {
+    toast,
+    openTab: (tab) => setSettingsTab(tab),
+    reload: async () => {
+      try { const r = await api.allBots(); bmBots = r.bots.slice(); renderBotManager(); } catch (e) { toast(e.message, true); }
+    },
+  };
 }
 
 /** What js/bots-edit.js reports back through: the roster (bmBots) and the
@@ -9908,6 +9943,7 @@ async function init() {
   wireExtToolView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
+  w5SetOnLocked(() => handleLocked());
   setOnPolicyBlock((code) => showAccessNotice(code));
   setOnSignInRequired(() => signInRequired());
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
@@ -9929,6 +9965,13 @@ async function init() {
     }
   }, 60_000);
   await refreshAuthAndBoot();
+  // 3.0 (W5): the server's default theme / language / avatar style for a device that has none of its
+  // own, and - on an install that is not set up - the first-run wizard (it can be put off for the session).
+  applyDeviceDefaults();
+  maybeStartWizard({
+    toast, openTab: (tab) => openSettingsTab(tab),
+    onFinished: () => { refreshAuthAndBoot(); },
+  });
 
   // Say it out loud when NO dictionary loaded at all. i18n keeps the shipped
   // English markup in that case (applyDom declines to run), which is the right
