@@ -285,6 +285,39 @@ async def test_discovery_finds_each_kind_of_server(tmp_path, monkeypatch):
     assert "169.254.169.254" not in probed
 
 
+async def test_discovery_recognises_an_owner_protected_studioforge_and_says_it_needs_a_key(tmp_path, monkeypatch):
+    """System test 2026-10-18: StudioForge 2.0 in Docker answers 401 on /api/version, so Find servers
+    returned nothing. /health stays public and carries a shape only StudioForge reports."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    health = {"status": "ok", "version": "2.0.0", "instance": "primary", "boot": {"phase": "ready"},
+              "loaded_models": [], "can_serve": True, "engine": {"ok": True}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host != "127.0.0.1" or req.url.port != 1234:
+            raise httpx.ConnectError("no route")
+        if req.url.path == "/health":
+            return httpx.Response(200, json=health)
+        return httpx.Response(401, json={"error": {"code": "invalid_api_key"}})
+    _mock_http(monkeypatch, handler)
+    found = await connections.discover()
+    assert [(f["type"], f["product"], f["version"], f["needs_key"]) for f in found] == [
+        ("studioforge", "StudioForge", "2.0.0", True)]
+    # a plain /health that only says ok is not enough to be called StudioForge
+    _mock_http(monkeypatch, lambda req: httpx.Response(200, json={"status": "ok"})
+               if req.url.path == "/health" and req.url.port == 1234 and req.url.host == "127.0.0.1"
+               else httpx.Response(404))
+    assert await connections.discover() == []
+    # with a key the real /api/version answer wins and no key is requested
+    def keyed(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "127.0.0.1" and req.url.port == 1234 and req.url.path == "/api/version":
+            ok = req.headers.get("authorization") == "Bearer sf-i-test-key"
+            return httpx.Response(200, json={"product": "StudioForge", "version": "2.0.0"}) if ok                 else httpx.Response(401)
+        raise httpx.ConnectError("no route")
+    _mock_http(monkeypatch, keyed)
+    ident = await connections.identify("http://127.0.0.1:1234/v1", key="sf-i-test-key")  # scrub-ok: test fixture
+    assert ident and ident["product"] == "StudioForge" and not ident.get("needs_key")
+
+
 # --------------------------------------------------------------------------- #
 # Adopting the 2.x inline blocks, and resolving through a connection
 # --------------------------------------------------------------------------- #

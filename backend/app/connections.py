@@ -721,6 +721,14 @@ async def identify(base_url: str, *, timeout: float = 2.5, key: str = "") -> dic
         v = await get_json("/api/version")
         if isinstance(v, dict) and str(v.get("product", "")).lower() == "studioforge":
             return {"type": "studioforge", "product": "StudioForge", "version": str(v.get("version") or "")}
+        if v is None and not key:
+            # An owner-protected StudioForge 2.x answers 401 on every /api path and keeps only
+            # /health public, so look for its health shape (these four fields together are not
+            # something LM Studio, Ollama or llama.cpp report). The caller is told a key is needed.
+            h = await get_json("/health")
+            if isinstance(h, dict) and {"instance", "boot", "can_serve", "loaded_models"} <= set(h):
+                return {"type": "studioforge", "product": "StudioForge",
+                        "version": str(h.get("version") or ""), "needs_key": True}
         lm = await get_json("/api/v0/models")
         if isinstance(lm, dict) and isinstance(lm.get("data"), list):
             return {"type": "lmstudio", "product": "LM Studio", "version": "",
@@ -893,6 +901,7 @@ async def discover(*, hosts: list[str] | None = None, lan: bool = False,
         found[api] = {"type": ident["type"], "label": ct.label, "product": ident["product"],
                       "version": ident.get("version") or "", "base_url": api, "host": host, "port": port,
                       "models": (ident.get("models") or [])[:50],
+                      "needs_key": bool(ident.get("needs_key")),
                       "already_added": existing.get(api)}
 
     await asyncio.gather(*(probe(h, p) for h in cand for p in _DISCOVER_PORTS))
