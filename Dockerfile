@@ -115,7 +115,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #   (or `v1` once that tag moves). Move it together with js/voice-absent.js VOICE_TAG.
 ARG VOICE=0
 ARG VOICE_SRC=github
-ARG VOICE_REF=refs/heads/refactor/prosumer-2026
+ARG VOICE_REF=refs/heads/main
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=voice-src,target=/voice-src \
     set -eu; \

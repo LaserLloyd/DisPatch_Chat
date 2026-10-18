@@ -41,7 +41,7 @@ services:
         # unset = the Dockerfile's default. A local checkout is built with `docker build
         # --build-context voice-src=<dir> --build-arg VOICE_SRC=local` (docs/voice.md).
         VOICE: ${VOICE:-0}
-        VOICE_REF: ${VOICE_REF:-refs/heads/refactor/prosumer-2026}
+        VOICE_REF: ${VOICE_REF:-refs/heads/main}
     container_name: dispatch
     hostname: dispatch
 
