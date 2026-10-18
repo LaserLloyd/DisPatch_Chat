@@ -6,7 +6,7 @@ One compose file, [`deploy/compose/stack.yml`](../../deploy/compose/stack.yml), 
 | --- | --- | --- | --- |
 | `studioforge` | `ghcr.io/laserlloyd/studioforge:<v>-cuda` | The GPU-only LLM server | 1234 gateway, 8080 panel, 1235 watchdog |
 | `dispatch-seed` | the DisPatch image | One-shot: writes DisPatch's first connection into a fresh data volume | none |
-| `dispatch` | `dispatch-chat:local` (built from this checkout) or `ghcr.io/laserlloyd/dispatch:<v>` | The chat workspace | 8765 |
+| `dispatch` | `dispatch-chat:local` (built from this checkout) or `ghcr.io/laserlloyd/dispatch_chat:<v>` | The chat workspace | 8765 |
 | `kiwix`, `infoforge-seed`, `infoforge` | Kiwix's image, `ghcr.io/laserlloyd/infoforge` | Optional offline knowledge, **profile `knowledge`** | none (kiwix is private to the network) |
 
 They share one private network (`dispatch-stack`). DisPatch reaches the model server at

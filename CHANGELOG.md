@@ -953,7 +953,7 @@ code; they are kept here as history.
   rejection, spoken acknowledgements, Wake Lock and Media Session keys.
   Unlocked tier and non-safe bots only. New endpoints: `/ws/voice/{thread_id}`
   (inline Origin + session gate), `GET /api/voice/status`, and — when the
-  optional [`dispatch-voice`](docs/voice-drive-mode.md#cloned-voices-dispatch-voice)
+  optional [`dispatch-voice`](docs/voice-drive-mode.md)
   package is present (`DISPATCH_VOICE_PKG`) — the Voices panel at
   `/api/voices` for cloning a voice from a short clip. Optional `voice`
   dependency group (`uv sync --group voice`, then

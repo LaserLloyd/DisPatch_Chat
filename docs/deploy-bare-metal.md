@@ -388,7 +388,7 @@ taken in that state is incomplete.
 ### Avatar upload returns an error on the system unit
 
 `ProtectSystem=strict` making the source tree read-only. See
-[the avatars section](#known-wart-avatars-live-in-the-source-tree).
+[the avatars section](#avatars-live-in-the-data-directory).
 
 ### DNS or outbound HTTP fails only under the system unit
 
