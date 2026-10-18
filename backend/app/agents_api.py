@@ -611,7 +611,8 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
         info = await mgr.hooks.thread_info(thread_id) if mgr.hooks.thread_info else None
         allowed = {b.id for b in config.load_bots()} if pr.is_operator else policy.of(request).allowed_bot_ids(config.load_bots())
         # characters.may_use: per-profile visibility (the character's profiles list), as in the roster.
-        if info is None or info.get("bot_id") not in allowed                 or not characters.may_use_id(info.get("bot_id"), pr):
+        if (info is None or info.get("bot_id") not in allowed
+                or not characters.may_use_id(info.get("bot_id"), pr)):
             raise HTTPException(404, "Thread not found")
         if info.get("restricted_visible", True):
             # What the agent is asked and what it answers is posted into this chat; a Restricted
