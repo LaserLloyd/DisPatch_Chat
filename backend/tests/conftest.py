@@ -419,6 +419,38 @@ def _no_hard_exit_on_failed_startup(monkeypatch):
                         raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_ws_manager():
+    """Each test starts with an empty WebSocket manager.
+
+    `main.manager` is a process-wide singleton. TestClient-based WS tests leave
+    sockets in `_conns` (bound to a finished portal loop) and an `asyncio.Lock`
+    that was contended on that loop, and three suites replace
+    `manager.broadcast` for good, so a later test's broadcast stalled or
+    dropped frames: tests/test_ws_profile_visibility.py passed alone and failed
+    after tests/test_m*..test_o* (review item N-22). Observers are kept: the
+    extension host registers its own at import time.
+    """
+    import asyncio
+
+    from app import main as _main
+    mgr = _main.manager
+
+    def _reset() -> None:
+        # test_mirror / test_media_dedup / test_recovery stub the singleton with
+        # `main.manager.broadcast = _noop` and never undo it; every later test
+        # then broadcast into the void (the real cause of N-22). Drop any
+        # instance-level override so the class method is back.
+        mgr.__dict__.pop("broadcast", None)
+        mgr.__dict__.pop("broadcast_where", None)
+        mgr._conns.clear()
+        mgr._lock = asyncio.Lock()
+
+    _reset()
+    yield
+    _reset()
+
+
 #: The fixed ports of the owner's live services (StudioForge gateway / panel / MCP, SpeechForge,
 #: ClawChat, ClawForge, DisPatch itself). A test must never reach one: a wizard or connection
 #: discovery that is not stubbed would probe the real gateway on 1234.
