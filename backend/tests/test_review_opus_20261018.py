@@ -167,12 +167,14 @@ def test_an_admin_cannot_move_a_saved_key_to_another_host(world):
 
 # O-5 ------------------------------------------------------------------------ #
 
-def _ws_refused(c, path) -> int:
-    with pytest.raises(WebSocketDisconnect) as e:
-        with c.websocket_connect(path, headers=ORIGIN) as ws:
-            ws.receive_text()
-            ws.receive_text()
-    return e.value.code
+def _ws_refused(c, path) -> int | str:
+    """The close code of a refused handshake, or "accepted" (without waiting on the handler,
+    so a regression fails at once instead of hanging the run)."""
+    try:
+        with c.websocket_connect(path, headers=ORIGIN):
+            return "accepted"
+    except WebSocketDisconnect as e:
+        return e.code
 
 
 def _set_bot(bot_id: str, **fields) -> None:
