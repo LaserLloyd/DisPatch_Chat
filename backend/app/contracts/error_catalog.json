@@ -2094,6 +2094,160 @@
     "Disk write failed"
    ],
    "seeded": false
+  },
+  {
+   "code": "agent_not_found",
+   "status": 404,
+   "message": "Agent not found",
+   "fix": "Pick an agent from the list; it may be switched off, deleted, or not published to your profile.",
+   "docs": "agent_not_found",
+   "patterns": [
+    "Agent not found"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_invalid",
+   "status": 422,
+   "message": "The agent definition is not valid.",
+   "fix": "Fix the field named in the message (a tool list, a budget, an MCP server) and save again.",
+   "docs": "agent_invalid",
+   "patterns": [
+    "The agent definition is not valid."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_name_taken",
+   "status": 409,
+   "message": "An agent with that name already exists.",
+   "fix": "Choose a different name.",
+   "docs": "agent_name_taken",
+   "patterns": [
+    "An agent with that name already exists."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_needs_owner",
+   "status": 403,
+   "message": "Only the Owner can give an agent that capability.",
+   "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
+   "docs": "agent_needs_owner",
+   "patterns": [
+    "Only the Owner can give an agent that capability."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_has_active_tasks",
+   "status": 409,
+   "message": "That agent has tasks that are still running.",
+   "fix": "Stop or wait for its tasks, or switch the agent off instead of deleting it.",
+   "docs": "agent_has_active_tasks",
+   "patterns": [
+    "That agent has tasks that are still running."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_disabled",
+   "status": 409,
+   "message": "That agent is switched off.",
+   "fix": "Switch it on in Settings, Agents.",
+   "docs": "agent_disabled",
+   "patterns": [
+    "That agent is switched off."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "task_not_found",
+   "status": 404,
+   "message": "Task not found",
+   "fix": "Open the Tasks page and pick a task from the list; it may belong to another profile or have been removed.",
+   "docs": "task_not_found",
+   "patterns": [
+    "Task not found"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "task_state_conflict",
+   "status": 409,
+   "message": "The task cannot do that in its current state.",
+   "fix": "Reload the task: it may have just finished, or it is still running.",
+   "docs": "task_state_conflict",
+   "patterns": [
+    "The task cannot do that in its current state."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "approval_not_found",
+   "status": 404,
+   "message": "That approval request is not pending any more.",
+   "fix": "The task moved on (it was stopped, timed out, or someone else answered). Reload the task.",
+   "docs": "approval_not_found",
+   "patterns": [
+    "That approval request is not pending any more."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "approval_scope_not_allowed",
+   "status": 422,
+   "message": "That approval can only be given for this one call.",
+   "fix": "Destructive tools ask every time. Choose 'once'.",
+   "docs": "approval_scope_not_allowed",
+   "patterns": [
+    "That approval can only be given for this one call."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_budget_exhausted",
+   "status": 429,
+   "message": "This agent's budget for today is used up.",
+   "fix": "Raise the daily limit in Settings, Agents, or try again tomorrow. Costs are estimates.",
+   "docs": "agent_budget_exhausted",
+   "patterns": [
+    "This agent's budget for today is used up."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_backend_unavailable",
+   "status": 503,
+   "message": "The agent backend is not available.",
+   "fix": "Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.",
+   "docs": "agent_backend_unavailable",
+   "patterns": [
+    "The agent backend is not available."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_backend_rejected",
+   "status": 409,
+   "message": "The agent backend refused that request.",
+   "fix": "The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.",
+   "docs": "agent_backend_rejected",
+   "patterns": [
+    "The agent backend refused that request."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "agent_credentials_invalid",
+   "status": 422,
+   "message": "The credentials were not accepted.",
+   "fix": "Paste an Anthropic Console API key, or pick Amazon Bedrock, Google Cloud or Microsoft Foundry and configure that provider's own credentials on this machine.",
+   "docs": "agent_credentials_invalid",
+   "patterns": [
+    "The credentials were not accepted."
+   ],
+   "seeded": false
   }
  ]
 }

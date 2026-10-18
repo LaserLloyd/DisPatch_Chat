@@ -78,5 +78,5 @@ def _agents_hermetic(monkeypatch):
 @pytest.fixture
 def agent_data(tmp_path):
     d = tmp_path / "data"
-    d.mkdir()
+    d.mkdir(exist_ok=True)   # the parent conftest's _accounts_and_auth_state already made tmp_path/data
     return d

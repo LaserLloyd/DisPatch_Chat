@@ -303,6 +303,44 @@ export const api = {
   // `mid` is the card's own message id; the server refuses any other message.
   advisorSend: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/send`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
   advisorDismiss: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/dismiss`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
+  // Agents and tasks (3.0). Gated server-side: manage_agents (the Agents page),
+  // dispatch_agents (assign, watch, steer, stop) and approve_agent_actions (answer a card).
+  // A Restricted profile gets 403 from every one of these, listing included. The Claude key
+  // and MCP secrets are WRITE-ONLY: nothing here ever returns one.
+  agentsAvailable: () => j('/api/agents/available'),
+  agents: () => j('/api/agents'),
+  agentCreate: (body) => j('/api/agents', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  agentSave: (id, body) => j(`/api/agents/${encodeURIComponent(id)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  agentDelete: (id) => j(`/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  agentBackends: () => j('/api/agents/backends'),
+  claudeCredentials: () => j('/api/agents/credentials/claude'),
+  saveClaudeCredentials: (body) => j('/api/agents/credentials/claude', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  clearClaudeKey: () => j('/api/agents/credentials/claude', { method: 'DELETE' }),
+  agentSecrets: () => j('/api/agents/secrets'),
+  saveAgentSecret: (name, value) => j(`/api/agents/secrets/${encodeURIComponent(name)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ value }) }),
+  deleteAgentSecret: (name) => j(`/api/agents/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  agentSettings: () => j('/api/agents/settings'),
+  saveAgentSettings: (body) => j('/api/agents/settings', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  agentProfileBudgets: () => j('/api/agents/profile-budgets'),
+  saveAgentProfileBudget: (profileId, body) => j(`/api/agents/profile-budgets/${encodeURIComponent(profileId)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  agentUsage: () => j('/api/agents/usage'),
+  purgeAgentTasks: () => j('/api/agents/retention/purge', { method: 'POST' }),
+  tasks: (query) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== '') p.set(k, String(v));
+    const qs = p.toString();
+    return j('/api/tasks' + (qs ? `?${qs}` : ''));
+  },
+  task: (id) => j(`/api/tasks/${encodeURIComponent(id)}`),
+  taskEvents: (id, afterSeq = -1) => j(`/api/tasks/${encodeURIComponent(id)}/events?after_seq=${Number(afterSeq)}`),
+  createTask: (body) => j('/api/tasks', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  taskSend: (id, message) => j(`/api/tasks/${encodeURIComponent(id)}/send`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message }) }),
+  taskInterrupt: (id) => j(`/api/tasks/${encodeURIComponent(id)}/interrupt`, { method: 'POST' }),
+  taskResume: (id, message) => j(`/api/tasks/${encodeURIComponent(id)}/resume`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(message ? { message } : {}) }),
+  taskCancel: (id) => j(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  taskRelease: (id) => j(`/api/tasks/${encodeURIComponent(id)}/release`, { method: 'POST' }),
+  taskDismiss: (id) => j(`/api/tasks/${encodeURIComponent(id)}/dismiss`, { method: 'POST' }),
+  answerApproval: (requestId, decision, scope = 'once') => j(`/api/approvals/${encodeURIComponent(requestId)}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ decision, scope }) }),
   // Takes either a row op ({index, checked, list}) or a whole array. The row
   // op is what the widget sends: the server merges it, so a request cannot
   // carry a stale view of rows it does not mention.

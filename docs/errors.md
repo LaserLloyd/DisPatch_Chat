@@ -18,9 +18,21 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | Code | HTTP | What it means |
 |---|---|---|
 | [`advisor_request_unknown`](#advisor_request_unknown) | 404 | Unknown request |
+| [`agent_backend_rejected`](#agent_backend_rejected) | 409 | The agent backend refused that request. |
+| [`agent_backend_unavailable`](#agent_backend_unavailable) | 503 | The agent backend is not available. |
+| [`agent_budget_exhausted`](#agent_budget_exhausted) | 429 | This agent's budget for today is used up. |
+| [`agent_credentials_invalid`](#agent_credentials_invalid) | 422 | The credentials were not accepted. |
+| [`agent_disabled`](#agent_disabled) | 409 | That agent is switched off. |
 | [`agent_gateway_down`](#agent_gateway_down) | 503 | The agent gateway is not connected |
+| [`agent_has_active_tasks`](#agent_has_active_tasks) | 409 | That agent has tasks that are still running. |
+| [`agent_invalid`](#agent_invalid) | 422 | The agent definition is not valid. |
+| [`agent_name_taken`](#agent_name_taken) | 409 | An agent with that name already exists. |
+| [`agent_needs_owner`](#agent_needs_owner) | 403 | Only the Owner can give an agent that capability. |
+| [`agent_not_found`](#agent_not_found) | 404 | Agent not found |
 | [`agents_only`](#agents_only) | 403 | Only agents may fire reactions |
 | [`api_key_required`](#api_key_required) | 401 | API key required |
+| [`approval_not_found`](#approval_not_found) | 404 | That approval request is not pending any more. |
+| [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
 | [`avatar_not_raster`](#avatar_not_raster) | 400 | Avatar must be a raster image |
@@ -184,6 +196,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`signin_required`](#signin_required) | 401 | Sign in to continue. |
 | [`stalled`](#stalled) | 502 | The image render stalled. |
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
+| [`task_not_found`](#task_not_found) | 404 | Task not found |
+| [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
 | [`test_flag_invalid`](#test_flag_invalid) | 422 | test must be true or false |
 | [`thread_id_required`](#thread_id_required) | 400 | thread_id (or all:true) required |
 | [`thread_not_found`](#thread_not_found) | 404 | Thread not found |
@@ -215,6 +229,46 @@ HTTP **404** - Unknown request
 
 **Fix:** The thing you asked for does not exist; reload and pick it again.
 
+## agent_backend_rejected
+
+<a id="agent_backend_rejected"></a>
+
+HTTP **409** - The agent backend refused that request.
+
+**Fix:** The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.
+
+## agent_backend_unavailable
+
+<a id="agent_backend_unavailable"></a>
+
+HTTP **503** - The agent backend is not available.
+
+**Fix:** Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.
+
+## agent_budget_exhausted
+
+<a id="agent_budget_exhausted"></a>
+
+HTTP **429** - This agent's budget for today is used up.
+
+**Fix:** Raise the daily limit in Settings, Agents, or try again tomorrow. Costs are estimates.
+
+## agent_credentials_invalid
+
+<a id="agent_credentials_invalid"></a>
+
+HTTP **422** - The credentials were not accepted.
+
+**Fix:** Paste an Anthropic Console API key, or pick Amazon Bedrock, Google Cloud or Microsoft Foundry and configure that provider's own credentials on this machine.
+
+## agent_disabled
+
+<a id="agent_disabled"></a>
+
+HTTP **409** - That agent is switched off.
+
+**Fix:** Switch it on in Settings, Agents.
+
 ## agent_gateway_down
 
 <a id="agent_gateway_down"></a>
@@ -222,6 +276,46 @@ HTTP **404** - Unknown request
 HTTP **503** - The agent gateway is not connected
 
 **Fix:** Start the OpenClaw gateway, or switch the character to a direct provider.
+
+## agent_has_active_tasks
+
+<a id="agent_has_active_tasks"></a>
+
+HTTP **409** - That agent has tasks that are still running.
+
+**Fix:** Stop or wait for its tasks, or switch the agent off instead of deleting it.
+
+## agent_invalid
+
+<a id="agent_invalid"></a>
+
+HTTP **422** - The agent definition is not valid.
+
+**Fix:** Fix the field named in the message (a tool list, a budget, an MCP server) and save again.
+
+## agent_name_taken
+
+<a id="agent_name_taken"></a>
+
+HTTP **409** - An agent with that name already exists.
+
+**Fix:** Choose a different name.
+
+## agent_needs_owner
+
+<a id="agent_needs_owner"></a>
+
+HTTP **403** - Only the Owner can give an agent that capability.
+
+**Fix:** Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.
+
+## agent_not_found
+
+<a id="agent_not_found"></a>
+
+HTTP **404** - Agent not found
+
+**Fix:** Pick an agent from the list; it may be switched off, deleted, or not published to your profile.
 
 ## agents_only
 
@@ -238,6 +332,22 @@ HTTP **403** - Only agents may fire reactions
 HTTP **401** - API key required
 
 **Fix:** Send the API key as X-API-Key.
+
+## approval_not_found
+
+<a id="approval_not_found"></a>
+
+HTTP **404** - That approval request is not pending any more.
+
+**Fix:** The task moved on (it was stopped, timed out, or someone else answered). Reload the task.
+
+## approval_scope_not_allowed
+
+<a id="approval_scope_not_allowed"></a>
+
+HTTP **422** - That approval can only be given for this one call.
+
+**Fix:** Destructive tools ask every time. Choose 'once'.
 
 ## avatar_not_capturable
 
@@ -1542,6 +1652,22 @@ HTTP **502** - The image render stalled.
 HTTP **507** - Storage limit reached — free space or delete files
 
 **Fix:** Free disk space or delete files, then retry.
+
+## task_not_found
+
+<a id="task_not_found"></a>
+
+HTTP **404** - Task not found
+
+**Fix:** Open the Tasks page and pick a task from the list; it may belong to another profile or have been removed.
+
+## task_state_conflict
+
+<a id="task_state_conflict"></a>
+
+HTTP **409** - The task cannot do that in its current state.
+
+**Fix:** Reload the task: it may have just finished, or it is still running.
 
 ## test_flag_invalid
 

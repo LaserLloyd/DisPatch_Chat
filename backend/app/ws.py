@@ -174,6 +174,45 @@ class ConnectionManager:
                 for ws in dead:
                     self._conns.pop(ws, None)
 
+    async def broadcast_where(self, message: dict,
+                              wants: Callable[[object], bool]) -> int:
+        """Send ``message`` ONLY to sockets whose principal satisfies ``wants``.
+
+        For frames that are private to a person (agent task events and approval
+        requests, 3.0): the global :meth:`broadcast` is "everyone, redacted for the
+        Restricted", which is the wrong default for something only a task's owner and an
+        Owner/Admin may see. A socket with no principal (it has not finished its
+        handshake) never matches, a Restricted/lapsed socket is also dropped by the
+        redactor (:meth:`_frame_for`), and the observers - the add-on host's open-stream
+        snapshot - are deliberately NOT called: a task frame is not conversation.
+        Returns how many sockets were sent to.
+        """
+        async with self._lock:
+            targets = list(self._conns.items())
+        sends = []
+        for ws, meta in targets:
+            pr = meta.get("principal")
+            if pr is None:
+                continue
+            try:
+                if not wants(pr):
+                    continue
+            except Exception:
+                continue
+            frame = self._frame_for(meta, message)
+            if frame is None:
+                continue
+            sends.append(self._send_or_reap(ws, meta, frame))
+        if not sends:
+            return 0
+        results = await asyncio.gather(*sends)
+        dead = [ws for ws in results if ws is not None]
+        if dead:
+            async with self._lock:
+                for ws in dead:
+                    self._conns.pop(ws, None)
+        return len(sends) - len(dead)
+
     def conn_decoy(self, ws: WebSocket) -> bool:
         """Is this connection effectively Safe Mode (decoy or lapsed session)?"""
         meta = self._conns.get(ws)

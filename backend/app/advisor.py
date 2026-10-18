@@ -671,6 +671,11 @@ class Hooks:
     # cancel path stamps `voice_heard {interrupted}` on a row that was already
     # being written when the turn was interrupted.
     merge_metadata: Callable[[str, dict], Awaitable[Any]] | None = None
+    # agents.unified_dispatch (W11b): a handoff card is mirrored as a task held in `queued`
+    # until the owner presses Send, and a dismissed card cancels it. Both optional; None (or
+    # the flag off) leaves the ledger and the card as the whole story, exactly as before.
+    on_handoff: Callable[[dict], Awaitable[Any]] | None = None
+    on_handoff_dismissed: Callable[[str], Awaitable[Any]] | None = None
 
 
 _hooks: Hooks | None = None
@@ -1635,6 +1640,9 @@ async def _act_on_markers(cfg: AdvisorConfig, thread_id: str,
             if msg is not None and getattr(msg, "id", None):
                 await asyncio.to_thread(ledger().update, req["id"],
                                         card_message_id=msg.id)
+            if h.on_handoff is not None:
+                with contextlib.suppress(Exception):
+                    await h.on_handoff({**req, "card_message_id": getattr(msg, "id", None)})
 
 
 def _public(req: dict) -> dict:
@@ -1888,6 +1896,9 @@ async def dismiss_handoff(rid: str, *, message_id: str) -> dict:
         raise await _already(rid, req["state"])
     req = {**req, "state": "dismissed"}
     await _restamp_card(req)
+    if _h().on_handoff_dismissed is not None:
+        with contextlib.suppress(Exception):
+            await _h().on_handoff_dismissed(rid)
     return _public(req)
 
 
