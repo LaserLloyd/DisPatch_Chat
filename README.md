@@ -6,7 +6,7 @@
 
 **Current release: 3.0.0** (October 2026) · [what changed](CHANGELOG.md#300--2026-10-18)
 
-[Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
+[Install](#install) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
 [Documentation](docs/) · [Changelog](CHANGELOG.md) ·
 [Contributing](CONTRIBUTING.md)
@@ -86,40 +86,260 @@ alternatives, and a feature-by-feature matrix of what needs what.
 | An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
 | Offline Wikipedia ([InfoForge](https://github.com/LaserLloyd/InfoForge)) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
 
-## Quick start
+## Install
 
-Three steps. You need git and [uv](https://docs.astral.sh/uv/), which fetches a Python
-(3.12–3.14; `backend/.python-version` pins the range) for you. Linux and macOS:
-`curl -LsSf https://astral.sh/uv/install.sh | sh` (then open a new shell, or
-`source ~/.local/bin/env`); Windows: `winget install astral-sh.uv`. The backend runs
-natively on Windows, Linux and macOS.
+Pick your platform below. Methods are listed simplest first, and each block runs top to bottom on a
+fresh machine. DisPatch is one Python process with one SQLite file; it needs no GPU and no account.
 
-**1. Get it and start it**
+**Ports:** `8765` (DisPatch: web UI, REST and WebSocket). It is the only port DisPatch opens. Everything
+else in the [Ports](#ports) table is something it connects to.
 
-```bash
+A fresh install is closed to the network until the owner account exists. From the machine DisPatch runs
+on, open <http://localhost:8765> and the setup wizard asks for nothing. From any other device, and from
+a browser talking to a container, the wizard asks for the one-time **setup token** that the server
+prints in its log as `SETUP TOKEN: ...`; each block below says where to read it.
+
+### Windows
+
+#### 1. Docker Desktop (simplest)
+
+Choose this for a PC you can leave signed in. Docker Desktop installs the container runtime, and the
+data lives on a volume that survives updates.
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Docker.DockerDesktop -e
+```
+
+Start Docker Desktop once and accept its first-run prompts (WSL 2 backend), then open a new PowerShell
+window:
+
+```powershell
 git clone https://github.com/LaserLloyd/DisPatch_Chat.git
-cd DisPatch_Chat/backend && uv sync
+cd DisPatch_Chat
+docker compose up -d
+docker compose ps
+docker compose logs app | Select-String "SETUP TOKEN"
+curl.exe -s http://localhost:8765/api/health
+```
+
+The first `up` builds the image from the checkout (two to five minutes, depending on your network and
+Docker's cache) and the container reaches `healthy` within 90 seconds. Open <http://localhost:8765> and paste the token into the setup wizard. No
+`.env` key is required: an empty one starts a usable server. Optional keys are in `.env.example`
+(`HOST_PORT`, `BIND_ADDR=127.0.0.1` to keep it to this PC, `VOICE=1`, `DATA_PATH`). The compose file
+publishes the port on all interfaces by default, so a phone on your network can reach it once Windows
+Firewall allows port 8765 ([docs/deploy-windows.md](docs/deploy-windows.md)). The compose file fixes the
+container name (`dispatch`) and the volume name (`dispatch-data`), so a second copy on the same Docker
+host needs different names.
+
+| Pros | Cons |
+| --- | --- |
+| Data on a named volume; image is rebuilt or replaced without touching it | Image is about 840 MB (about 1.7 GB with voice); Docker Desktop must be running |
+| Upgrade is `git pull` then `up -d --build`; rollback is `git checkout` | Neither Docker Desktop nor WSL 2 starts before a Windows sign-in, so it is not an unattended server |
+| Same setup as Linux | Agent and host-control features cannot see the Windows host from inside the container |
+
+#### 2. Native, with uv (experimental)
+
+Choose this to try or develop DisPatch without Docker. The server imports and runs on Windows, but the
+full test suite only runs on Linux, so treat this as experimental.
+
+```powershell
+winget install --id Git.Git -e
+winget install --id astral-sh.uv -e
+```
+
+Close PowerShell and open a new window so `git` and `uv` are on `PATH`, then:
+
+```powershell
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat\backend
+uv sync
 uv run uvicorn app.main:app --port 8765
 ```
 
-The server log prints a one-time `SETUP TOKEN: ...` line. From the computer DisPatch runs
-on you will not need it; from another device the setup wizard asks for it, and nothing
-else is reachable from the network until the owner account exists.
+`uv` fetches a Python for you (`backend\.python-version` pins 3.12 to 3.14). In a second window:
 
-**2. Open <http://localhost:8765> and follow the setup wizard.** It creates your
-owner account, looks for a model server on your computer (StudioForge, LM Studio,
-Ollama) or takes an API key, optionally adds the family (children get a Restricted
-profile and the *Animal Friends* characters), and asks whether DisPatch is for this
-computer only or the home network. It is six short steps and every one of them can be
-done from the command line too ([docs/first-run.md](docs/first-run.md)).
+```powershell
+curl.exe -s http://localhost:8765/api/health
+```
 
-**3. Chat.** Everything else is in the gear: **Connections** (the servers you talk
-to), **Bots** (characters), **All settings** (every setting, searchable, with a
-Basic / Advanced switch) and **System → Backups**
-([docs/settings.md](docs/settings.md), [docs/connections.md](docs/connections.md),
-[docs/characters.md](docs/characters.md), [docs/backups.md](docs/backups.md)).
-Prefer a container, a Raspberry Pi or a systemd service? See
-[Run it in Docker](#run-it-in-docker) and [Deployment](#deployment).
+Open <http://localhost:8765> on this PC and follow the wizard; it needs no token from this machine.
+
+| Pros | Cons |
+| --- | --- |
+| Smallest install and fastest edit-and-reload loop | Experimental on Windows; no service wrapper, so it stops when you close the window |
+| Sees the host, so agent and file features work | You manage updates; data is in `.local\share\local-chat` under your user folder |
+
+### Linux
+
+On a bare Ubuntu or Debian image `git` and `curl` are missing, so the blocks install them first.
+
+#### 1. Docker Compose (simplest)
+
+Choose this for a home server or Raspberry Pi 4/5. Images build for amd64 and arm64.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -fsSL https://get.docker.com | sh
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
+sudo docker compose up -d
+sudo docker compose ps
+sudo docker compose logs app | grep "SETUP TOKEN"
+curl --retry 30 --retry-connrefused -s http://localhost:8765/api/health
+```
+
+Open <http://localhost:8765> (or `http://<this-machine>:8765` from another device) and paste the token
+into the wizard. Skip the second line if Docker is already installed; add your user to the `docker`
+group to drop `sudo`. No `.env` key is required. To keep it to this machine only, put
+`BIND_ADDR=127.0.0.1` in `.env` before `up`. To add voice chat, see [Add voice chat](#add-voice-chat).
+If you run your own fork, one line repoints
+every image label, the in-app source link and the issue links:
+
+```bash
+grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
+  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
+```
+
+| Pros | Cons |
+| --- | --- |
+| Data on the `dispatch-data` volume, read-only image, a backup before each migration | Image is about 840 MB (about 1.7 GB with voice) |
+| Starts at boot (`restart: unless-stopped`) with no unit files | Agent and host-control features cannot see the host from inside the container |
+| Upgrade and rollback are one command each | Compose published on all interfaces by default; set `BIND_ADDR` if you do not want that |
+
+#### 2. Native, with uv from a clone (hackable)
+
+Choose this to read or change the code, or to run it in a terminal.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat/backend
+uv sync
+uv run uvicorn app.main:app --port 8765
+```
+
+In a second terminal: `curl -s http://localhost:8765/api/health`. The server binds loopback, so the
+wizard needs no token from this machine. Add `--host 0.0.0.0` to reach it from other devices (then the
+wizard on those devices asks for the token printed in this terminal).
+
+| Pros | Cons |
+| --- | --- |
+| Smallest and fastest: reload on change, run the tests | Stops when the terminal closes; no autostart |
+| Sees the host, so agents and file features work | You manage uv, Python and updates |
+
+#### 3. Native, as a systemd user service
+
+Choose this for an always-on box where DisPatch should reach things in your home directory (an agent
+CLI, for example). It is method 2 plus a unit.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git ~/dispatch
+cd ~/dispatch/backend
+uv sync --frozen --no-dev
+mkdir -p ~/.config/systemd/user
+sed "s#__APP_DIR__#$HOME/dispatch#g" ~/dispatch/deploy/systemd/dispatch-user.service > ~/.config/systemd/user/dispatch.service
+systemctl --user daemon-reload
+systemctl --user enable --now dispatch
+sudo loginctl enable-linger "$USER"
+curl --retry 30 --retry-connrefused -s http://localhost:8765/api/health
+journalctl --user -u dispatch | grep "SETUP TOKEN"
+```
+
+`enable-linger` is the step people forget: without it the service stops when your last session ends and
+does not start at boot. The unit binds `0.0.0.0`, so paste the token printed by the last command into the wizard.
+For a locked-down system service run by its own account, see
+[docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
+
+| Pros | Cons |
+| --- | --- |
+| Autostart, restart on failure, logs in `journalctl` | Needs systemd and the linger step; no container isolation |
+| Agent and host features work | You update it by hand (`git pull`, `uv sync`, restart) |
+
+#### 4. Docker stack with StudioForge (a local model server)
+
+Choose this when you want DisPatch and a local GPU model server (StudioForge) on one private network,
+with DisPatch's first connection already pointing at it. It needs an NVIDIA GPU and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+```bash
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
+cp deploy/compose/stack.env.example deploy/compose/stack.env
+sed -i 's/^STACK_MODEL=.*/STACK_MODEL=your-model-id/' deploy/compose/stack.env
+P="sudo docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
+$P up -d
+$P ps
+$P logs dispatch | grep "SETUP TOKEN"
+```
+
+Replace `your-model-id` with the model you will load in StudioForge. `STACK_MODEL` is the one key to
+set; add `SF_OWNER_PASSWORD` (10 or more characters) to `stack.env` to choose the StudioForge owner
+password, otherwise one is generated into `/data/owner-password.initial` on its volume. Put your GGUF
+files in `deploy/compose/models/`, load one at <http://localhost:8080>, and give the DisPatch
+connection a StudioForge key (see [docs/deploy/stack.md](docs/deploy/stack.md)). Podman, AMD and
+no-GPU variants, and the optional offline-Wikipedia profile are in the same page.
+
+| Pros | Cons |
+| --- | --- |
+| Chat and model server wired together, volumes for both | Needs an NVIDIA GPU and the container toolkit |
+| One command to start, update and stop both | Larger download; StudioForge builds its engine on first use |
+
+### macOS
+
+Not tested by us and not part of CI. Docker Desktop for Mac should run Docker method 1 as written
+(`brew install git` and `brew install --cask docker`, then the same `git clone`, `docker compose up -d`
+and `docker compose logs app | grep "SETUP TOKEN"` lines without `sudo`). The native method should work
+with `brew install git uv`, then Linux method 2 from the `git clone` line.
+
+### Add voice chat
+
+Voice is the separate [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) add-on. In Docker,
+build the image with it and ffmpeg and libopus included (about 1.7 GB, and the build takes up to five minutes), then press **Download** under Settings, Voice:
+
+```bash
+echo "VOICE=1" >> .env
+sudo docker compose up -d --build
+```
+
+On a native install, install the add-on into DisPatch's own environment and the two system programs, then
+restart DisPatch and use Settings, Voice (details: [docs/voice.md](docs/voice.md)). Run the last line from your DisPatch clone's top folder. A later `uv sync` removes a pip-installed add-on, so repeat it after one:
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg libopus0
+git clone https://github.com/LaserLloyd/DisPatch_Voice.git ~/DisPatch_Voice
+cd backend && uv pip install --python .venv/bin/python ~/DisPatch_Voice
+```
+
+### Upgrade and uninstall
+
+| Method | Upgrade | Uninstall |
+| --- | --- | --- |
+| Docker Compose | `git pull`, then `docker compose up -d --build` (or `docker compose pull && docker compose up -d` if you set `IMAGE` to a published image). The first start of a new version copies the databases to `/data/backups/<version>-<time>/` and keeps the newest 5. Roll back with `git checkout <tag>` and the same command | `docker compose down` keeps the `dispatch-data` volume; `docker compose down -v` deletes your chats |
+| Native (uv, systemd) | `git pull`, `cd backend && uv sync` (add `--frozen --no-dev` for the service), then restart | Remove the unit (`systemctl --user disable --now dispatch`) and the clone; your data stays in `~/.local/share/local-chat` |
+| Stack | Same as Docker Compose, with the `-f deploy/compose/stack.yml --env-file deploy/compose/stack.env` flags | `down` keeps the four volumes; `down -v` deletes them |
+
+Back up a Docker install with the app stopped:
+`docker run --rm -v dispatch-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/dispatch-data.tgz -C /data .`
+and restore by extracting into a fresh volume, then `chown -R 1000:1000 /data`
+([docs/deploy-docker.md](docs/deploy-docker.md)). `down -v` and `docker volume rm` are the only ways to
+lose the data by accident.
+
+### First run
+
+The wizard has six short steps: the owner account, a model server (it looks for StudioForge, LM Studio
+and Ollama, or takes an API key), voice, the family (children get a Restricted profile and the *Animal
+Friends* characters), network exposure, and a checklist. Every step is also available from the command line
+([docs/first-run.md](docs/first-run.md)). After that, everything is in the gear menu: **Connections**
+(the servers you talk to), **Bots** (characters), **All settings** (every setting, searchable, with a Basic
+and Advanced switch) and **System, Backups** ([docs/settings.md](docs/settings.md),
+[docs/connections.md](docs/connections.md), [docs/characters.md](docs/characters.md),
+[docs/backups.md](docs/backups.md)).
 
 ### Ports
 
@@ -485,61 +705,6 @@ action declares the permission it needs in `backend/app/route_policy.py`, a test
 fails the build if one does not, and a permission problem is never fixed by
 loosening it. The generated reference is [docs/contracts/](docs/contracts/).
 
-## Run it in Docker
-
-```bash
-git clone https://github.com/LaserLloyd/DisPatch_Chat.git
-cd DisPatch_Chat
-cp .env.example .env          # optional: every setting in it has a working default
-docker compose up -d
-```
-
-If you forked, or are running your own copy, one line repoints every reference
-in the tree at your own fork — image labels, the in-app source link, issue links:
-
-```bash
-grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
-  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
-```
-
-There is no secret to generate and no required setting. An empty `.env` starts a
-usable server; it builds the image from the checkout — no registry account
-needed — and the file is where you put a data path, a port, or an agent backend
-when you want one.
-
-Open <http://localhost:8765> and finish the setup wizard. **The compose file
-publishes the port on `0.0.0.0`**, and a container is never "the computer DisPatch
-runs on" from the browser's point of view, so the wizard asks for the one-time
-setup token from `docker compose logs app` (`SETUP TOKEN: ...`). Until the owner
-account exists the network sees only the sign-in page. Set `BIND_ADDR=127.0.0.1`
-in `.env` if you would rather it were this machine only while you look around.
-(A bare `uvicorn` process with no container binds loopback unless you tell it
-not to, and needs no token from that machine.)
-
-**With StudioForge (the local model server) in one command:**
-
-```bash
-cp deploy/compose/stack.env.example deploy/compose/stack.env      # set STACK_MODEL
-docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env up -d
-```
-
-That starts DisPatch and StudioForge on one private network, with DisPatch's first connection already
-pointing at `http://studioforge:1234/v1`, and (profile `knowledge`) optional offline Wikipedia via
-InfoForge. GPU flags for Docker and Podman, and the rest: [docs/deploy/stack.md](docs/deploy/stack.md).
-
-**Updating and your data.** Everything lives on the `/data` volume (`chats.db` and its WAL, avatars,
-uploads, `config.yaml`, `backups/`); the image holds none of it. `docker compose pull && docker
-compose up -d` keeps your chats. On the first start of a new version the container copies the
-databases and config to `/data/backups/<newversion>-<time>/` before migrations run (newest 5 kept;
-only when a migration step is actually pending).
-`docker compose down` keeps the volume; **`docker compose down -v` deletes it.** Back up with the
-app stopped:
-`docker run --rm -v dispatch-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/dispatch-data.tgz -C /data .`
-and restore by extracting into a fresh volume then `chown -R 1000:1000 /data`. See
-[docs/deploy-docker.md](docs/deploy-docker.md) § Backups.
-
-Not using Docker? See [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
-
 ## Bring your own AI
 
 DisPatch ships with no model and talks to no cloud until you tell it to. Making
@@ -585,7 +750,7 @@ Full setup notes, per provider: [docs/llm-providers.md](docs/llm-providers.md).
 |---|---|---|
 | Docker / Compose | [docs/deploy-docker.md](docs/deploy-docker.md) | Recommended. amd64 + arm64 |
 | Raspberry Pi | [docs/deploy-raspberry-pi.md](docs/deploy-raspberry-pi.md) | Pi 4/5. Read the SD-card section |
-| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Native (`uv sync` + `uv run uvicorn`, see Quick start), or Docker Desktop / WSL2 for a 24/7 service |
+| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Native (`uv sync` + `uv run uvicorn`, see Install), or Docker Desktop / WSL2 for a 24/7 service |
 | Bare Linux | [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md) | systemd unit, system or user |
 
 ### Reaching it from outside your house
