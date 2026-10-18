@@ -4,9 +4,9 @@ One compose file, [`deploy/compose/stack.yml`](../../deploy/compose/stack.yml), 
 
 | Service | Image | Role | Host port (default, loopback) |
 | --- | --- | --- | --- |
-| `studioforge` | `ghcr.io/laserlloyd/studioforge:<v>-cuda` | The GPU-only LLM server | 1234 gateway, 8080 panel |
+| `studioforge` | `ghcr.io/laserlloyd/studioforge:<v>-cuda` | The GPU-only LLM server | 1234 gateway, 8080 panel, 1235 watchdog |
 | `dispatch-seed` | the DisPatch image | One-shot: writes DisPatch's first connection into a fresh data volume | none |
-| `dispatch` | `dispatch-chat:local` (built from this checkout) or `ghcr.io/laserlloyd/dispatch:<v>` | The chat workspace | 8765 |
+| `dispatch` | `dispatch-chat:local` (built from this checkout) or `ghcr.io/laserlloyd/dispatch_chat:<v>` | The chat workspace | 8765 |
 | `kiwix`, `infoforge-seed`, `infoforge` | Kiwix's image, `ghcr.io/laserlloyd/infoforge` | Optional offline knowledge, **profile `knowledge`** | none (kiwix is private to the network) |
 
 They share one private network (`dispatch-stack`). DisPatch reaches the model server at
@@ -126,8 +126,10 @@ a running instance: the `-wal` file holds the recent writes.
   container**, which this image does not contain. The `knowledge` profile gives you kiwix and the
   CLI as a separate container (`compose run --rm infoforge …`); wiring the two is the InfoForge
   integration work, not part of this file.
-- StudioForge's `-cuda` image has no compiler: its first start needs an engine supplied or built
-  once (see its [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md)).
+- StudioForge's `-cuda` image has no compiler: on a fresh volume its entrypoint downloads upstream's
+  prebuilt llama.cpp engine once (about 150 MB from github.com; `SF_ENGINE_BOOTSTRAP=0` skips it, and the
+  [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md) covers the
+  offline alternatives). Allow about a minute before the first model load.
 - Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an owner (the setup
   wizard) and the StudioForge connection carries an API key (above).
 - **Find servers** in DisPatch probes loopback and the Docker host, not the compose hostname: use

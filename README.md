@@ -357,15 +357,20 @@ and Advanced switch) and **System, Backups** ([docs/settings.md](docs/settings.m
 
 | Port | Who | Notes |
 |---|---|---|
-| **8765** | DisPatch (this app: web UI, REST and the WebSocket) | The only port to expose. Loopback unless you say otherwise (`--host`, or `BIND_ADDR` in Docker). |
+| **8765** | DisPatch (this app: web UI, REST and the WebSocket) | The only port to expose. Loopback unless you say otherwise (`--host`; in Docker see the bind-address note below). |
 | 1234 | StudioForge's OpenAI-compatible gateway, or LM Studio | Where the wizard looks first. A connection to it, not something DisPatch opens. |
 | 8080 | StudioForge's control panel, or a llama.cpp server | Optional pane (`connections.studioforge_panel`). |
+| 1235 | StudioForge's watchdog sidecar (MCP and `/health`) | Published by the Docker stack (`deploy/compose/stack.yml`), not opened by DisPatch. |
 | 11434 | Ollama | Found by the wizard. |
 | 8090 | InfoForge's offline-Wikipedia server (`kiwix-serve`) | Only the `infoforge` command talks to it; see [docs/integrations.md](docs/integrations.md). |
 | 3080 | `dsh web` (the optional coding-agent pane) | Loopback only. |
 
 DisPatch never opens another port. Everything above except 8765 is somewhere you
 *connect to*.
+
+Bind address in Docker: the plain `docker-compose.yml` publishes 8765 on `0.0.0.0` by default
+(reachable from your LAN; set `BIND_ADDR=127.0.0.1` to keep it to this host), while the
+[stack](docs/deploy/stack.md) (`deploy/compose/stack.yml`) publishes every port on `127.0.0.1` by default.
 
 ## Screenshots
 
@@ -468,6 +473,33 @@ on a phone, in a few of the ten themes.
     <td align="center"><em>Settings — the bot roster</em></td>
   </tr>
 </table>
+
+## What's new in 3.0
+
+- **Closed until it has an owner.** A fresh install answers only the machine it runs on until
+  an owner exists; any other machine finishes setup only with the one-time setup token printed
+  in the server log (`docker compose logs app` in Docker). An install that already has a PIN is
+  unaffected.
+- **Profiles and roles.** Owner, Admin, Member and Restricted replace "PIN or Safe Mode". Each
+  profile has its own PIN or password, budgets and session timeout, and every route declares the
+  permission it needs.
+- **One settings store.** Every user-facing setting is described once (64 documented keys, see
+  [docs/settings.md](docs/settings.md)), kept in `chats.db`, overridable by environment variable
+  and editable in **Settings, All settings** or over `GET`/`PATCH /api/settings`.
+- **Connections.** One record per model server, keys in the secret store, an actionable **Test**
+  and **Find servers**. StudioForge is recognised automatically and sent its bearer key
+  ([docs/connections.md](docs/connections.md)).
+- **Agents and tasks.** Owners and Admins publish configured agents (OpenClaw or Claude Agent);
+  people dispatch tasks with a live timeline, approvals for destructive tools, budgets and an
+  audit row ([docs/agents.md](docs/agents.md)).
+- **Backups you can trust.** Scheduled encrypted archives (AES-256-GCM), a restore that checks
+  first, and an automatic backup plus `--dry-run` before any database migration
+  ([docs/backups.md](docs/backups.md)).
+- **A Docker stack.** `deploy/compose/stack.yml` runs DisPatch with StudioForge, and optionally
+  InfoForge, on one private network ([docs/deploy/stack.md](docs/deploy/stack.md)).
+- **The first-run wizard and settings are driveable over the API** (`/api/wizard/*`,
+  `/api/people*`, `/api/settings`), and the backend now runs on native Windows. The full list,
+  with the breaking changes, is in [CHANGELOG.md](CHANGELOG.md).
 
 ## What's new in 2.3
 
@@ -845,7 +877,7 @@ Before opening a pull request:
 
 ```bash
 python3 scripts/scrub_check.py      # no private data may enter the repo
-python3 scripts/check-locales.py    # translations complete, consistent and safe
+uv run --python 3.12 python scripts/check-locales.py   # translations complete, consistent and safe (needs Python 3.12+)
 cd backend && uv run pytest -q
 ```
 

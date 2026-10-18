@@ -500,6 +500,16 @@ The stop is not optional if you want the tarball to be restorable in one step.
 
 ## Upgrading
 
+Built from source (the default, image `dispatch-chat:local`): `docker compose pull` has nothing to
+fetch, so update the checkout and rebuild:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+With a published image (`IMAGE=ghcr.io/laserlloyd/dispatch_chat:<version>` in `.env`):
+
 ```bash
 docker compose pull
 docker compose up -d
@@ -513,7 +523,7 @@ Before a major version, take a snapshot you can actually roll back to:
 docker compose stop app
 docker run --rm -v dispatch-data:/data -v "$PWD":/out alpine \
   tar czf /out/pre-upgrade.tar.gz -C /data .
-docker compose pull && docker compose up -d
+git pull && docker compose up -d --build     # or, with IMAGE= set: docker compose pull && docker compose up -d
 ```
 
 **Pin a version in production.** `IMAGE=ghcr.io/laserlloyd/dispatch_chat:1.2.3` in `.env`.

@@ -43,7 +43,10 @@ key to another.
 
 StudioForge is recognised by `GET /api/version` answering `{"product": "StudioForge", ...}`. A StudioForge
 connection sends `Authorization: Bearer <key>` from its credential. StudioForge 2.0 requires a key when it is
-reached from another machine; on the same computer it does not.
+reached from another machine (and from another container, so in Docker always); on the same computer it does not.
+An owner-protected StudioForge answers 401 on `/api/version`, so **Find servers** recognises it by its public
+`/health` instead and marks the row `needs_key: true`: add the connection, paste an inference key (StudioForge
+panel, Users & Keys) and press Test.
 
 ## Finding servers
 
