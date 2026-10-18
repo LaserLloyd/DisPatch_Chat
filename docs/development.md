@@ -110,6 +110,24 @@ Note that CI runs `scrub_check.py` **without** the personal-identifier rules —
 never published. Names and hostnames are therefore caught only by the local
 hooks. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+### Dependency audit
+
+CI's `audit` job runs `pip-audit` against the exact locked set and fails on any
+known advisory. Run the same check locally after touching `backend/pyproject.toml`
+or `backend/uv.lock`:
+
+```bash
+cd backend
+uv export --frozen --no-hashes --no-emit-project --all-extras > /tmp/requirements-audit.txt
+uvx pip-audit==2.10.1 -r /tmp/requirements-audit.txt --no-deps --disable-pip --strict
+```
+
+To fix a finding, raise the floor in `pyproject.toml` (a transitive package such
+as `starlette` or `anyio` gets an explicit lower bound with a comment) and move
+only that package: `uv lock --upgrade-package <name>==<fixed version>`. Prefer
+that to an `--ignore-vuln`; if one is ever unavoidable, add it to the CI step
+with a comment naming the advisory, the reason and a date to revisit.
+
 ## Host tools (the nightly timer and the avatar rotator)
 
 Two of DisPatch's moving parts are **not** part of the app and are not copied
