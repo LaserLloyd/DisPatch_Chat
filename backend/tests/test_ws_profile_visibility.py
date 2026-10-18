@@ -36,9 +36,14 @@ def people(world):
     owner = world.create_owner(world.client())
     mia = world.person(owner, "Mia", "restricted")
     world.person(owner, "Max", "member", pin="5555")
-    kid = world.client(LAN)
+    # The extra callers ride the owner's portal (one event loop, as in production): a
+    # second TestClient would run its own lifespan and loop, and a broadcast awaited from
+    # the owner's loop onto a socket bound to another loop stalls under load and is
+    # reaped - tests/agents_world.py's `sibling` exists for exactly this.
+    from agents_world import sibling
+    kid = sibling(world, owner, LAN)
     assert world.login(kid, profile_id=mia["id"]).status_code == 200
-    member = world.client(("203.0.113.61", 41001))
+    member = sibling(world, owner, ("203.0.113.61", 41001))
     assert world.login(member, name="Max", pin="5555").status_code == 200
     # alpha (audience=all) is made for Mia only; beta (audience=all) for Max only.
     assert owner.patch("/api/characters/alpha", json={"profiles": [mia["id"]]}).status_code == 200, \
