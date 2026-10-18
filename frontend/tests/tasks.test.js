@@ -575,7 +575,7 @@ test('Claude credentials: the key is write-only; routes are the four provider op
   key.value = 'sk-ant-api03-secret';
   [...host.querySelectorAll('.agents-claude button')].find((b) => b.textContent === 'Save connection').click();
   await tick(10);
-  assert.deepEqual(api.calls.find((c) => c[0] === 'saveClaudeCredentials'), ['saveClaudeCredentials', { route: 'api_key', api_key: 'sk-ant-api03-secret' }]);
+  assert.deepEqual(api.calls.find((c) => c[0] === 'saveClaudeCredentials'), ['saveClaudeCredentials', { route: 'api_key', api_key: 'sk-ant-api03-secret' }]); // scrub-ok: a fake key typed into a test input
   // choosing a cloud provider hides the key box and sends the route only
   sel.value = 'bedrock';
   sel.dispatchEvent(new host.ownerDocument.defaultView.Event('change'));

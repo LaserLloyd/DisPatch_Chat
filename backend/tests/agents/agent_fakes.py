@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-FAKE_API_KEY = "sk-ant-api03-FAKEFAKEFAKE0123456789abcdefSECRET"
+FAKE_API_KEY = "sk-ant-api03-FAKEFAKEFAKE0123456789abcdefSECRET"  # scrub-ok: a fake key the leak tests plant on purpose
 FAKE_GATEWAY_TOKEN = "gw-token-FAKE-0123456789abcdef"
 TRUNCATED_FULL = "B" * 9000          # what chat.message.get returns for a truncated projection
 TRUNCATED_PROJECTION = "B" * 50 + "...(truncated)..."

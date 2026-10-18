@@ -83,7 +83,7 @@ class OpenClawHarness(Harness):
 
     def prepare(self, scenario: str) -> None:
         if scenario == "error_auth":
-            self.gateway.token = "a-different-token"           # the gateway rejects ours
+            self.gateway.token = "a-different-token"           # the gateway rejects ours  # scrub-ok: a deliberately wrong test token
 
     async def teardown(self) -> None:
         await super().teardown()

@@ -22,7 +22,7 @@ from app.agents.secrets import (
     get_agent_logger,
 )
 
-KEY = "sk-ant-api03-ABCDEFGH12345678-SECRETVALUE"
+KEY = "sk-ant-api03-ABCDEFGH12345678-SECRETVALUE"  # scrub-ok: a fake key
 
 
 def test_the_oauth_token_family_is_scrubbed():
@@ -86,7 +86,7 @@ def test_redactor_masks_registered_values_and_key_shapes():
     r.register("short")                                       # below the minimum length: ignored
     assert r.redact("x tok-registered-123456 y") == f"x {REDACTED} y"
     assert r.redact("short stays") == "short stays"
-    assert REDACTED in r.redact("leaked sk-ant-api03-NEVERREGISTERED999 here")
+    assert REDACTED in r.redact("leaked sk-ant-api03-NEVERREGISTERED999 here")  # scrub-ok: a fake key
     assert r.redact_obj({"a": ["tok-registered-123456", {"b": 3}]}) == {"a": [REDACTED, {"b": 3}]}
 
 

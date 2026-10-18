@@ -124,7 +124,7 @@ async def test_key_shaped_strings_are_redacted_even_if_never_registered(tmp_path
     from app.agents.fake import FakeBackend
     from app.agents.secrets import SecretRedactor
 
-    unknown = "sk-ant-api03-NEVER-REGISTERED-0123456789"
+    unknown = "sk-ant-api03-NEVER-REGISTERED-0123456789"  # scrub-ok: a fake, never-registered key
     be = FakeBackend(scripts={"default": [Say(f"pasted {unknown}"), Finish("x")]}, redactor=SecretRedactor())
     tid = await be.start_task(AgentSpec(backend="fake"), "go", TaskContext(data_dir=tmp_path))
     ev = [e async for e in be.events(tid)]

@@ -1,51 +1,120 @@
-# Agent backends
+# Agents and tasks
 
-DisPatch Chat can route a conversation to an AI agent instead of another person. This
-is **entirely optional**. With no agent configured, DisPatch is a complete
-human-to-human chat — threads, files, search, media, the PWA, all of it — and
-bot replies simply fail with a clear message instead of appearing.
+DisPatch Chat can hand real work to an AI agent: read a repository and propose a change,
+research a question, run a long job on this machine. That is **entirely optional**. With no
+agent configured DisPatch is a complete chat — threads, files, search, media, the PWA — and
+nothing below is switched on.
 
-> **Just want something to talk to?** You do not need any of this. **Connect an
-> AI** (the 🔌 button in the left rail) points a bot straight at an LLM
-> provider's HTTP API — LM Studio, Ollama, OpenAI, Anthropic, or anything
-> OpenAI-compatible — with no runtime installed and no constraint on where
-> DisPatch runs. It takes about a minute; see
-> [llm-providers.md](llm-providers.md).
->
-> The rest of this page is about the *other* kind of backend: a full agent
-> runtime that can use tools and act on the machine. That is a bigger thing,
-> and it comes with the hosting constraint described below.
+> **Just want something to talk to?** You do not need any of this. **Connect an AI** (the
+> 🔌 button in the left rail) points a character straight at an LLM provider's HTTP API — LM
+> Studio, Ollama, OpenAI, Anthropic, or anything OpenAI-compatible — with no agent runtime
+> installed. See [llm-providers.md](llm-providers.md). This page is about the *other* kind of
+> backend: one that can use tools and act on a machine.
 
-Read this page before planning a deployment around agents, because the current
-integration has a real constraint that affects how you can host it.
+## The model in one screen
 
-## How it works today
+| Concept | What it is |
+|---|---|
+| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Owner or Admin defines it (Settings → Agents) and *publishes* it to the profiles that may use it. |
+| **Task** | one dispatched job: a live timeline (what the agent said and did, subagents nested), approvals, artifacts, an **estimated** cost, and one state — `queued`, `running`, `awaiting_approval`, `succeeded`, `failed`, `cancelled`. |
+| **Backend** | what actually runs it. Two ship: **OpenClaw** (the gateway or CLI on this machine) and **Claude Agent** (the Anthropic agent SDK, one supervised process per task). Both speak one interface (`AgentBackend`, [agents/backends.md](agents/backends.md)). |
+| **Approval** | the agent stops and asks before a tool that changes things. You allow it once, allow it for the rest of the task (never for a destructive tool), or deny it. |
 
-A "bot" is a chat participant whose replies come from a local command-line agent
-process. When someone sends a message to a bot's thread, DisPatch:
+The three permissions (see [security.md](security.md)):
 
-1. Writes the message to a temporary file.
-2. Spawns the configured agent binary with a fixed argument vector, passing that
-   file with `--message-file` and a deterministic session key. (A file, not an
-   argument — a long message would otherwise blow past the kernel's argument
-   size limit.)
-3. Tails the agent's session transcript on disk to stream progress into the UI
-   while the turn runs.
-4. Parses the final reply and posts it into the thread.
+| Permission | Lets you | Owner | Admin | Member | Restricted |
+|---|---|---|---|---|---|
+| `manage_agents` | define agents, store the Claude key, set budgets and retention | yes | yes | no | **never** |
+| `dispatch_agents` | assign tasks to the agents published to you, watch, steer, stop | yes | yes | only if granted | **never** |
+| `approve_agent_actions` | answer approval cards; Send a held hand-off | yes | yes | only if granted | **never** |
 
-The ships-with adapter targets [OpenClaw](https://github.com/openclaw). The
-coupling lives in `backend/app/openclaw.py`, and it is the only module that
-knows anything about a specific agent.
+A **Restricted** profile can never see, start or receive output from an agent or a task: every
+route answers 403 (listing included), the WebSocket frames are never sent to it, and a grant
+cannot give it the permission. A **Member** can use only agents an admin has published to
+them; an agent that was not published answers "not found", exactly like one that does not
+exist. An Owner or Admin sees every task; everyone else sees their own.
 
-## The constraint, stated plainly
+## Using it
 
-**The agent must run on the same filesystem as DisPatch.**
+- **Assign task** — in a chat, open ⋯ → *Assign task…*, or type `@agent-name do the thing` at
+  the start of a message (`@code-reviewer` finds "Code Reviewer"). The mention opens the same
+  dialog, filled in; **nothing runs until you press Assign**. The dialog says where the prompt
+  goes (a Claude Agent task sends what it reads and writes to Anthropic's API; an OpenClaw task
+  stays on this machine) and that it will ask before changing anything.
+- The task's **card** appears in the chat and on the **Tasks** page (the 📋 button in the left
+  rail, with a dot while an approval waits for you). It shows the timeline, tool calls that fold
+  open, approval cards inline, artifacts, the cost labelled *estimate*, and the controls:
+  **Stop** (resumable), **Resume**, a **steer** box while it works and a **follow-up** box when
+  it is idle, and **End task** (for good).
+- The Tasks page filters by state, agent, person (Owner/Admin) and date.
+- You are told when a task needs approval, finishes or fails: a Web Push ping with no content
+  (see [privacy.md](privacy.md)), a collapsed notice line in the originating chat, and a
+  badge on the rail.
 
-Two things force this: the message is handed over as a *path*, and progress is
-read by tailing transcript files the agent writes. Neither survives a process
-boundary that does not share a filesystem.
+## Setting it up (Owner / Admin)
 
-The practical consequence for containers:
+**Settings → Agents.**
+
+1. **Backends** shows what can run here and what each can and cannot do. *OpenClaw* needs
+   OpenClaw installed on this machine. *Claude Agent* needs the optional extra
+   (`uv sync --extra agents-claude`) and credentials: an **Anthropic Console API key**, or
+   **Amazon Bedrock**, **Google Cloud** or **Microsoft Foundry** credentials already set up on
+   this machine. The key is write-only: it is stored in the OS keyring when one is usable (otherwise a 0600 file under the
+   data directory) and never shown, logged or put in a support bundle. There is deliberately no
+   "sign in with a subscription" option.
+2. **Agents → New agent.** Name, backend, model, instructions, the tools it may use (one per
+   line; a shell, file writes and anything that sends, posts, deletes or creates always asks),
+   MCP servers, working folder, approval mode, limits, and who it is published to. *Add
+   StudioForge (read-only key)* adds the StudioForge MCP server with the read-only key's secret
+   name; an admin-scope key needs the Owner.
+3. **Limits and history.** Per-person daily dollars, turns, minutes and tokens; how long
+   transcripts are kept (default **30 days**); how many tasks run at once; the
+   `agents.unified_dispatch` switch (below).
+4. **Secrets.** The names MCP servers need (`MCP_…`, `STUDIOFORGE_…`) and whether each is set.
+
+What only the **Owner** may grant an agent, because each is code execution on this machine in
+effect: trusting a repository's own settings (its hooks will run), a local-program MCP server,
+a server marked admin-scope, and pre-approved tools for an agent that never asks.
+
+### Safety rules that are enforced, not advised
+
+- **Isolation.** The Claude Agent runs with an explicit empty settings source, strict MCP
+  config, a private `HOME` and a per-task config directory, so your own `~/.claude`, hooks and
+  plugins are never inherited and a repository's `.claude/settings.json` hooks and `.mcp.json`
+  servers do not execute. See [agents/security.md](agents/security.md).
+- **Permission modes** are `default` (approval cards), `dontAsk` (unattended) and `plan`
+  (investigate only). `bypassPermissions` and `auto` cannot be expressed.
+- **Destructive tools always ask**, every time, and the card offers only "once".
+- **Quarantine.** An agent that reads untrusted content (web pages, email, uploads — a web tool
+  counts) cannot also hold a shell or write tools; split it into a reader and an actor.
+- **Budgets** are a hard stop plus a notification: per task (dollars, turns, minutes, tokens)
+  and per agent and per person per day. Costs are client-side estimates and are labelled so;
+  never bill from them.
+- **Audit.** Every finished task records who, which agent, approvals allowed and denied, the
+  estimated cost, the duration and the outcome (Settings → People → audit); every approval and
+  every change to an agent is logged too.
+- **Retention.** The purge deletes the transcript (prompt, events, result text, the agent's
+  working folder) of finished tasks after the configured days and keeps the audit row.
+
+## Where a task's data goes
+
+| Backend | What leaves this process | Where to |
+|---|---|---|
+| OpenClaw | the prompt and file paths | the local OpenClaw gateway (loopback) or CLI; whatever model provider the OpenClaw agent is configured with then sees it |
+| Claude Agent | prompts, tool results, files the agent reads | Anthropic's API (or the Bedrock / Google Cloud / Foundry account you chose); the working folder and the transcript stay on this machine |
+
+Claude **Managed Agents** (hosted sessions, stored by Anthropic until deleted, not eligible for
+zero-data-retention) are **not built**; they are milestone M2 and would be opt-in. Details:
+[privacy.md](privacy.md).
+
+## OpenClaw: the same-host requirement
+
+OpenClaw is the adapter DisPatch has always had; it now runs behind the same interface and
+shows up as a task backend. Its constraint is unchanged and is stated plainly:
+
+**The agent must run on the same filesystem as DisPatch.** The CLI transport hands OpenClaw a
+file *path*, and transcripts and media are read from the agent's home. The gateway socket alone
+does not carry them.
 
 | Topology | Works? |
 |---|---|
@@ -55,55 +124,93 @@ The practical consequence for containers:
 | Agent on another machine | No |
 | No agent at all | Yes — fully supported |
 
-If you are containerising and want agents, bake the agent into the image. There
-is a documented example in [deploy-docker.md](deploy-docker.md).
+If you are containerising and want OpenClaw agents, bake the agent into the image
+([deploy-docker.md](deploy-docker.md)). A startup probe checks the gateway protocol
+(version 4): an OpenClaw upgrade that changes it fails the task loudly
+(`backend_protocol_mismatch`) instead of misbehaving. DisPatch never edits OpenClaw's
+configuration. OpenClaw reports tokens, not money, and applies its own tool policy, so it shows
+no approval cards and its turn / token limits are checked after each turn.
 
-This is a design limitation we intend to remove, not a deliberate choice — see
-[design/agent-backend.md](design/agent-backend.md) for the planned pluggable
-`AgentBackend` interface with an HTTP implementation, which makes the sibling
-and remote topologies work.
+The Claude Agent has no such constraint on where DisPatch runs; the agent worker runs next to
+DisPatch, and only its API calls leave the machine.
 
-## Configuring bots
+## `agents.unified_dispatch` — the flag, and what it changes
 
-**Content policy follows the tiers.** Safe Mode (the locked tier: `safe: true`
-bots, devices without the PIN) is where family-friendly rules belong. Bots
-reachable only from an unlocked session get no content framing from DisPatch —
-a direct-API bot with no `system_prompt` gets a neutral default, and only a
-safe bot gets the family-friendly one.
+**Default: off.** With it off, DisPatch behaves exactly as before: an OpenClaw character's chat
+turn runs through the existing transport/watcher/mirror stack, and an advisor's
+`[[handoff:…]]` card is only a card and a row in the advisor's ledger.
 
-Bots are defined in `config.yaml` in your data directory. It is created on first
-run and hot-reloads — no restart needed.
+With it **on** (Settings → Agents → Limits, or `DISPATCH_AGENTS_UNIFIED_DISPATCH=1`, which
+overrides the setting either way):
+
+- an OpenClaw character's chat turn runs as a hidden *chat task* whose id is the thread id (so
+  the OpenClaw session key is the same one the old path used) — same lock, typing indicator,
+  delivery funnel and error frames, with limits, a record and the protocol probe;
+- a `[[handoff:<agent>|brief]]` card also becomes a task in `queued`, held until the owner
+  presses Send (the card's button, or Send on the Tasks page — same UX, same
+  `approve_agent_actions` permission); Send runs the advisor's own pipeline (the brief,
+  the saved note, the report) as a visible task, and Dismiss cancels it.
+
+What the flag **does not carry over**, which is why it is off: the in-turn transcript watcher
+(narration between tool calls arrives as the one final reply), the media second look, the
+follower for late sub-agent announcements and the gateway-mirror reconciliation. Those patch
+the legacy transport; the adapter has its own. Turn it on only after trying it on a
+non-critical character.
+
+Three queue implementations exist today — image jobs, the advisor ledger and agent tasks. They
+are documented as converging on the task model; this release does not rewrite image jobs or the
+DeepSeek harness.
+
+## API
+
+All routes are declared in `backend/app/route_policy.py` and listed in
+[contracts/routes.json](contracts/routes.json); errors use the catalogue in [errors.md](errors.md).
+
+| Route | Permission |
+|---|---|
+| `GET/POST /api/agents`, `PATCH/DELETE /api/agents/{id}` | `manage_agents` |
+| `GET /api/agents/backends`, `…/settings`, `…/usage`, `…/profile-budgets`, `POST …/retention/purge` | `manage_agents` |
+| `GET/PUT/DELETE /api/agents/credentials/claude`, `GET/PUT/DELETE /api/agents/secrets/{name}` | `manage_agents` (write-only secrets) |
+| `GET /api/agents/available` | `dispatch_agents` (only agents published to you) |
+| `POST/GET /api/tasks`, `GET /api/tasks/{id}`, `…/events?after_seq=`, `POST …/send`, `…/interrupt`, `…/resume`, `…/cancel` | `dispatch_agents` |
+| `POST /api/approvals/{request_id}` (`allow` / `deny`, scope `once` / `task`), `POST /api/tasks/{id}/release`, `…/dismiss` | `approve_agent_actions` |
+
+WebSocket frames (server to client only): `task.event` (one normalized event with a task
+summary), `task.approval` (pending / allow / deny / expired) and `task.update`. They go only to
+sockets whose profile may see the task, never to a Restricted socket; a client that sees a gap in
+`event.seq` refetches `…/events?after_seq=`.
+
+For the support bundle, `agents_store.redacted_summary()` returns counts and configuration shape
+only — never a prompt, instruction, event, path or secret name. W5's `/api/support-bundle`
+embeds it under `agents`.
+
+## Configuring characters (bots)
+
+A *character* is a chat participant; it is not an agent. A character whose replies come from a
+local OpenClaw agent is configured in `config.yaml` (hot-reloaded):
 
 ```yaml
 bots:
-  - id: assistant          # the agent id passed to the CLI
+  - id: assistant          # the OpenClaw agent id passed to the CLI
     name: Assistant        # what people see
     emoji: "✨"
     avatar: assistant.png  # under frontend/static/avatars/
     order: 0
     visible: true
-    safe: false            # true = also reachable from Safe Mode (no PIN)
+    audience: members      # all | members | restricted
 ```
 
-`safe` is what makes a bot reachable from the limited (no-password) tier, and it
-is enforced on the server: a bot without it is invisible *and* unreachable to a
-Safe-Mode session, not merely hidden. Set it thoughtfully — a bot reachable
-without a password can be talked to by anyone who can reach the port, and each
-message costs you an agent turn.
-
-An **advisor bot** answers from a model API directly, but can delegate research
-and actions to the agents configured here through `[[research:…]]` and
-`[[handoff:…]]` markers, with a Send/Dismiss card for anything that does work.
-See [advisor.md](advisor.md).
+`audience` is enforced on the server: a character a Restricted profile may not see is invisible
+*and* unreachable to it, not merely hidden. An **advisor** character answers from a model API
+and can hand work to agents through `[[research:…]]` and `[[handoff:…]]` markers, with a
+Send/Dismiss card for anything that does work — see [advisor.md](advisor.md).
 
 ## Running without agents
 
-Set no bots, or leave the agent binary unconfigured. Everything else works.
-People can still chat with each other, share files, search history, and install
-the PWA. The dashboard reports "no agent backend configured" as informational,
-not as a fault.
+Set no characters, or leave OpenClaw unconfigured. Everything else works. The Tasks button and
+the Agents tab appear only for people who hold the permissions.
 
-## Pushing messages in from outside
+## Pushing messages in from outside (the machine API)
 
 Independent of the agent integration, anything on the host can post into a
 thread over HTTP — a cron job, a monitoring script, a home-automation hook:
@@ -454,11 +561,13 @@ Rules:
 
 ## Writing your own adapter
 
-The surface an agent backend has to satisfy is small: given a message, a session
-identifier and a timeout, return the reply text and optionally stream progress.
-`backend/app/openclaw.py` is about 600 lines and roughly a third of that is
-defensive parsing of one specific CLI's output shapes.
-
-If you write an adapter for another agent runner, a pull request is very
-welcome — that is the fastest route to the pluggable interface being real rather
-than planned.
+A backend is a class that satisfies `AgentBackend` (`backend/app/agents/interface.py`): start a
+task, stream normalized events (`status`, `text_delta`, `tool_call`, `tool_result`,
+`approval_request`, `subagent_started` / `subagent_finished`, `retry`, `artifact`,
+`cost_update`, `result`, `error`), answer approvals, interrupt, resume, cancel, and say what it
+can do (`capabilities()`). `BaseBackend` supplies the registry, the event log, approvals, the
+wall-clock watchdog and the one definition of how a run ends; an adapter writes `_run` and
+`_do_interrupt`. The contract suite (`backend/tests/agents/contract/`) runs the same assertions
+against every adapter, driven by recorded or scripted streams. The reference is
+[agents/backends.md](agents/backends.md); the threat model is
+[agents/security.md](agents/security.md). A pull request for another runner is very welcome.

@@ -184,8 +184,9 @@ Policy date in RESEARCH.md C3 needs a counsel re-read.
    but may break something the bundled CLI expects; verify on the first live run.
 3. **Approved shell commands are not sandboxed.**
 4. **`trust_repo_settings` executes the repo's hooks.**
-5. **Transcripts are plaintext on disk** (R-SESS). Retention is the integration layer's
-   job.
+5. **Transcripts are plaintext on disk** (R-SESS). DisPatch's retention purge (default 30
+   days, Settings -> Agents) deletes the per-task folder and the database transcript; OpenClaw's
+   own transcripts in the agent's home are not DisPatch's to delete.
 6. **OpenClaw approvals and budgets are weaker** than the Claude backend's (no approval
    round trip; token/turn caps are post-hoc). Capabilities say so.
 7. **Windows secrets file** depends on directory ACLs (section 5).

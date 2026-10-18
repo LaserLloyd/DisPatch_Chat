@@ -50,7 +50,7 @@ const BACKEND_NOTES = {
 };
 
 const ROUTE_LABELS = {
-  api_key: 'agents.route_api_key',
+  api_key: 'agents.route_api_key', // scrub-ok: an i18n key, not a credential
   bedrock: 'agents.route_bedrock',
   google: 'agents.route_google',
   foundry: 'agents.route_foundry',
@@ -408,7 +408,7 @@ function editorEl(form, data, deps, api, ctl) {
   sfBtn.addEventListener('click', () => {
     if (!f.mcp.some((m) => m.name === STUDIOFORGE_PRESET.name)) {
       const s = STUDIOFORGE_PRESET.server;
-      f.mcp.push({ name: STUDIOFORGE_PRESET.name, transport: 'http', url: s.url, command: '', args: '', header: 'Authorization', secret: 'STUDIOFORGE_MCP_KEY_RO', privileged: false });
+      f.mcp.push({ name: STUDIOFORGE_PRESET.name, transport: 'http', url: s.url, command: '', args: '', header: 'Authorization', secret: 'STUDIOFORGE_MCP_KEY_RO', privileged: false }); // scrub-ok: the NAME of a secret, not its value
     }
     addLines(f, 'tools', TOOL_PRESETS.studioforge_read_only);
     tools.value = f.tools;
