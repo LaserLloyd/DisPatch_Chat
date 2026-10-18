@@ -218,3 +218,49 @@ def test_the_voice_socket_honours_the_characters_profiles_list(ext_env):
     lock(c)
     assert _ws_refused(c, f"/ws/voice/{tid}") == 1008                   # not for an anonymous device
     assert KNOBS.sockets == []
+
+
+# O-6 ------------------------------------------------------------------------ #
+
+def test_a_restore_stops_when_the_current_data_cannot_be_saved_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    config._invalidate_bots_cache()
+    accounts.reset_for_tests()
+
+    def rows():
+        c = sqlite3.connect(tmp_path / "chats.db")
+        try:
+            return c.execute("SELECT id FROM threads ORDER BY id").fetchall()
+        finally:
+            c.close()
+
+    con = sqlite3.connect(tmp_path / "chats.db")
+    con.execute("CREATE TABLE threads (id TEXT PRIMARY KEY)")
+    con.execute("INSERT INTO threads VALUES ('t1')")
+    con.commit()
+    con.close()
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"bots": [{"id": "a", "name": "A"}]}), encoding="utf-8")
+    row = backups.create_archive("correct horse battery staple")
+    con = sqlite3.connect(tmp_path / "chats.db")
+    con.execute("INSERT INTO threads VALUES ('t2')")       # written after the backup
+    con.commit()
+    con.close()
+    backups.stage_restore(f"archive:{row['name']}", "correct horse battery staple")
+
+    def disk_full(src, dst):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    real_snapshot = backups._sqlite_snapshot
+    monkeypatch.setattr(backups, "_sqlite_snapshot", disk_full)
+    out = backups.apply_pending_restore()
+    assert out["applied"] is False and "could not save the current data" in out["error"]
+    assert rows() == [("t1",), ("t2",)]                    # nothing was overwritten
+    assert backups.pending_path().exists()                 # still staged: the next start retries
+    staged = json.loads(backups.pending_path().read_text(encoding="utf-8"))["staging"]
+    monkeypatch.setattr(backups, "_sqlite_snapshot", real_snapshot)      # the disk has room again
+    assert backups.apply_pending_restore()["applied"] is True
+    assert rows() == [("t1",)]
+    assert staged and not backups.pending_path().exists()
