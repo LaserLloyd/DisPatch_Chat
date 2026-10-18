@@ -13340,12 +13340,14 @@ async def websocket_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_json()
             mtype = data.get("type")
+            current = principal                  # the profile as it is NOW (its budgets too)
             # A full session that idle-expires drops to Safe Mode: tell the
             # client so it reconnects (as a Safe-Mode connection). A ping is NOT
             # activity (so idle genuinely expires); real actions slide the window.
             if session is not None:
                 live = auth.get_session(session.token)
                 fresh = policy.for_session(live, device_id) if live is not None else None
+                current = fresh or principal
                 if fresh is None:
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
@@ -13367,8 +13369,17 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
             handler = WS_HANDLERS.get(mtype)
             if handler:
-                verdict = policy.authorize(principal, route_policy.ws_action_requirement(mtype)
-                                           or policy.Requirement())
+                ws_req = route_policy.ws_action_requirement(mtype) or policy.Requirement()
+                verdict = policy.authorize(principal, ws_req)
+                if verdict.allowed and current.kind == "profile" and current.is_restricted:
+                    # A Restricted profile's quiet hours and minutes per day hold on the socket
+                    # too - the chat itself runs here, so a gate on HTTP alone left both
+                    # unenforced (and the minutes uncounted) for anyone already connected.
+                    limited = _restricted_limit_denied(current, ws_req)
+                    if limited is not None:
+                        verdict = limited
+                    elif not ws_req.public:
+                        _note_active_time(current)
                 if not verdict.allowed:
                     await manager.send(ws, {
                         "type": "error", "thread_id": data.get("thread_id"),
