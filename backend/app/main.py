@@ -11,7 +11,6 @@ import base64
 import contextlib
 import contextvars
 import errno
-import fcntl
 import inspect
 import io
 import ipaddress
@@ -63,6 +62,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 from . import (
+    _filelock,
     advisor,
     apps_loader,
     auth,
@@ -231,9 +231,10 @@ def _is_trustworthy_base(p: Path) -> bool:
         return False
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         return False
-    if st.st_uid != os.getuid():
+    me = _filelock.current_uid()
+    if me is not None and st.st_uid != me:     # no uid concept on Windows
         log.warning("ignoring media base %s: owned by uid %s, not %s",
-                    p, st.st_uid, os.getuid())
+                    p, st.st_uid, me)
         return False
     return True
 
@@ -270,7 +271,7 @@ def _claim_single_instance() -> io.IOBase | None:
         # exactly the invariant being enforced ("one process per data dir").
         # Worker processes are forked and do NOT inherit the lock, so
         # `--workers 4` still fails on workers 2-4, which is the point.
-        fcntl.lockf(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _filelock.try_lock_exclusive(fh, lock_path)
     except OSError as e:
         # Only a CONTENDED lock means "another instance". Anything else — an
         # unwritable data dir, a full disk, a filesystem with no lock support —
