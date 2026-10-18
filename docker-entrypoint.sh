@@ -62,6 +62,10 @@ if [ "$(id -u)" = "0" ]; then
         chown -R "$PUID:$PGID" "$DATA_DIR"
     fi
 
+    # `--user 0:0` leaves HOME=/root, which the dropped user cannot read (the app
+    # then dies on /root/.local/share/...). Point HOME at the image user's home.
+    chown "$PUID:$PGID" /home/app 2>/dev/null || true
+    export HOME=/home/app
     exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups --inh-caps=-all -- "$0" "$@"
 fi
 
