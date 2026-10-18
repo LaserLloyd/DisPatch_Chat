@@ -1773,6 +1773,26 @@ _BOT_SCOPED_FRAMES = frozenset({
 })
 
 
+#: Broadcast frame types that carry an OPERATOR surface, and the permission a non-operator
+#: socket must hold to receive one. Before profiles existed every unredacted socket was the
+#: owner's; a Member socket is unredacted too (it is not Restricted), so without this it got
+#: the coding harness's job/service/model state (host control), the reaction and avatar pool
+#: telemetry (every bot's id, prompts, rig errors, absolute data-dir paths) and an agent
+#: turn's live tool calls - the very frames the Safe-Mode allow-list leaves out, for the
+#: same reasons.
+_FRAME_PERMISSION = {
+    "harness_state": Permission.ADMIN_SYSTEM,
+    "harness_sessions": Permission.ADMIN_SYSTEM,
+    "reaction_pool": Permission.MANAGE_CHARACTERS,
+    "avatar_pool": Permission.MANAGE_CHARACTERS,
+    "progress": Permission.DISPATCH_AGENTS,
+}
+
+#: Frames about one character that the per-profile scoper narrows besides
+#: :data:`_BOT_SCOPED_FRAMES` (a reaction overlay names its bot; a progress item its thread).
+_PROFILE_SCOPED_EXTRA = frozenset({"reaction", "progress"})
+
+
 def scope_frame_for_principal(frame: dict, principal) -> dict | None:
     """Per-profile character visibility on EVERY outgoing frame (3.0).
 
@@ -1785,8 +1805,11 @@ def scope_frame_for_principal(frame: dict, principal) -> dict | None:
     ``manager.scoper`` and run after the Safe-Mode redactor, per connection:
 
     - ``bots`` / ``hello`` lists keep only the characters this profile may use;
-    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, or an ``error``
-      attributed to one) is dropped when the profile may not use that character.
+    - an operator frame (:data:`_FRAME_PERMISSION`: harness, pool telemetry, agent
+      progress) is dropped unless the profile holds the permission behind it;
+    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` / ``progress``
+      item, or an ``error`` attributed to one) is dropped when the profile may not use that
+      character.
       An UNATTRIBUTED frame passes: for a Restricted socket the redactor has already
       failed closed on it, and a Member's unattributed frames (an ack, a plain error)
       carry nothing about a character.
@@ -1797,11 +1820,14 @@ def scope_frame_for_principal(frame: dict, principal) -> dict | None:
             or getattr(principal, "is_operator", False):
         return frame
     t = frame.get("type")
+    need = _FRAME_PERMISSION.get(t)
+    if need is not None and not principal.can(need):
+        return None
     if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
         return {**frame, "bots": [b for b in frame["bots"]
                                   if not isinstance(b, dict)
                                   or characters.may_use_id(b.get("id"), principal)]}
-    if t in _BOT_SCOPED_FRAMES or t == "error":
+    if t in _BOT_SCOPED_FRAMES or t in _PROFILE_SCOPED_EXTRA or t == "error":
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
