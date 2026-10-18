@@ -45,7 +45,16 @@ no account, no cloud, no telemetry.
 - **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
   chat, pictures and (where offered) knowledge search are set up and tested.
 - **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
-  is installed.
+  is installed and what each one asks to be allowed to do.
+- **Connections and characters.** One record per model server (a key is stored
+  once, in your keyring or a 0600 file, never in a chat's settings), characters that
+  pick a connection, a model, a personality and who may see them, and two starter
+  packs: *Animal Friends* for children and *Assistants*.
+- **Every setting in one place**, described once (`docs/settings.md`), searchable,
+  with Basic and Advanced views and a badge on anything an environment variable sets.
+- **Encrypted backups** on a schedule, a restore that checks before it replaces
+  anything, a redacted support bundle for bug reports, and export / erase of one
+  profile's data.
 
 ## Add-ons
 
@@ -69,15 +78,19 @@ alternatives, and a feature-by-feature matrix of what needs what.
 
 | | What it adds | How it connects |
 |---|---|---|
-| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → AI models |
-| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Connect an AI → Local server |
+| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → Connections |
+| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Settings → Connections (found automatically; sends your key as a bearer token) |
 | [OpenClaw](https://github.com/openclaw/openclaw) | agent bots with tools, files and long jobs | `openclaw` on PATH or its gateway |
 | [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
 | [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
 | An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
-| Offline Wikipedia (InfoForge, not public yet) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
+| Offline Wikipedia ([InfoForge](https://github.com/LaserLloyd/InfoForge)) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
 
 ## Quick start
+
+Three steps. You need [uv](https://docs.astral.sh/uv/) (it fetches Python 3.12 for you) and git.
+
+**1. Get it and start it**
 
 ```bash
 git clone https://github.com/LaserLloyd/DisPatch_Chat.git
@@ -85,11 +98,34 @@ cd DisPatch_Chat/backend && uv sync
 uv run uvicorn app.main:app --port 8765
 ```
 
-Open <http://localhost:8765>, set a PIN under **Settings → Security**, then go to
-**Settings → AI models** and connect Atlas to a provider; **Set up everything with
-one provider** does chat and pictures from a single key. Prefer a container, a
-Raspberry Pi or a systemd service? See [Run it in Docker](#run-it-in-docker) and
-[Deployment](#deployment).
+**2. Open <http://localhost:8765> and follow the setup wizard.** It creates your
+owner account, looks for a model server on your computer (StudioForge, LM Studio,
+Ollama) or takes an API key, optionally adds the family (children get a Restricted
+profile and the *Animal Friends* characters), and asks whether DisPatch is for this
+computer only or the home network. It is six short steps and every one of them can be
+done from the command line too ([docs/first-run.md](docs/first-run.md)).
+
+**3. Chat.** Everything else is in the gear: **Connections** (the servers you talk
+to), **Bots** (characters), **All settings** (every setting, searchable, with a
+Basic / Advanced switch) and **System → Backups**
+([docs/settings.md](docs/settings.md), [docs/connections.md](docs/connections.md),
+[docs/characters.md](docs/characters.md), [docs/backups.md](docs/backups.md)).
+Prefer a container, a Raspberry Pi or a systemd service? See
+[Run it in Docker](#run-it-in-docker) and [Deployment](#deployment).
+
+### Ports
+
+| Port | Who | Notes |
+|---|---|---|
+| **8765** | DisPatch (this app: web UI, REST and the WebSocket) | The only port to expose. Loopback unless you say otherwise (`--host`, or `BIND_ADDR` in Docker). |
+| 1234 | StudioForge's OpenAI-compatible gateway, or LM Studio | Where the wizard looks first. A connection to it, not something DisPatch opens. |
+| 8080 | StudioForge's control panel, or a llama.cpp server | Optional pane (`connections.studioforge_panel`). |
+| 11434 | Ollama | Found by the wizard. |
+| 8090 | InfoForge's offline-Wikipedia server (`kiwix-serve`) | Only the `infoforge` command talks to it; see [docs/integrations.md](docs/integrations.md). |
+| 3080 | `dsh web` (the optional coding-agent pane) | Loopback only. |
+
+DisPatch never opens another port. Everything above except 8765 is somewhere you
+*connect to*.
 
 ## Screenshots
 

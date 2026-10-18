@@ -41,6 +41,35 @@ kept in `extensions.yaml`, see [configuration.md](configuration.md)). The
 sections below, [Writing an extension](#writing-an-extension-the-backend), cover
 the API.
 
+## Manifests, permissions and approval (3.0)
+
+Every way of adding a tool - a directory or URL row in `tools.yaml`, an `apps/<id>/` package, an add-on's
+`dispatch.extensions` entry point - is described by one **Tool manifest**
+(`docs/contracts/manifests/tool-plugin.schema.json`: `id`, `name`, `version`, `publisher`, `entry`, the `permission` a
+profile needs to use it, `permissions_requested`, a `settings` fragment, `min_app_version`). `app/tool_manifests.py`
+reads the existing sources as they are and produces the manifests; nothing about how an add-on or app is written
+changes. `GET /api/plugins/manifests` returns them with the permissions each one asks for, in plain words:
+
+| Id | Means |
+|---|---|
+| `http_routes` / `websocket` / `ui` | adds its own web API, live sockets, pages and scripts |
+| `live_tools` / `panes` / `character_fields` | gives characters tools, adds rail tiles, stores its own settings on characters (a voice) |
+| `background_work` / `large_uploads` | runs at start-up and shutdown, accepts large uploads |
+| `run_code` / `character` / `thread_hook` | an app package runs inside the server, adds a character, adds a panel to its chats |
+| `network:<host>` / `env:<NAME>` | contacts that host / reads that setting |
+
+**Approval.** A plugin that was running when 3.0 first started is approved automatically (`source: upgrade`; the
+migration step `007_plugin_approvals` lists them). One that appears later must be approved by someone with
+`manage_plugins`, who sees what it asks for: turning it on with `PUT /api/plugins/extensions/{id}` answers
+`409 plugin_needs_approval` with the permission list until the request carries `"approve": [<that list>]`. Approval
+is recorded with who gave it; switching a plugin off never needs one. (Loading an installed add-on is still the
+extension host's decision; approval gates the Plugins switch, and the audit log shows who approved what.)
+
+**Settings.** An app's `env:` names, and any `settings` a manifest declares, appear in Settings -> All settings under
+`tools.<id>.` (secrets are write-only) and reach the app through `ctx.env`, whether the value came from the
+environment or from Settings. An add-on registers its own rows with `settings_schema.register(...)` and writes values
+with `settings_store.writer("<namespace>")` - see [settings.md](settings.md#settings_storewriternamespace---for-add-ons).
+
 ## Voice
 
 Voice chat lets you talk to a thread hands-free: DisPatch listens, works out

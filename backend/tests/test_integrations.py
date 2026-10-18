@@ -27,6 +27,7 @@ PUBLIC_REPOS = {
     "https://github.com/LaserLloyd/MailForge",
     "https://github.com/LaserLloyd/CrucibleForge",
     "https://github.com/LaserLloyd/ThemeForge",
+    "https://github.com/LaserLloyd/InfoForge",      # 200 on 2026-10-18
     "https://github.com/openclaw/openclaw",
 }
 
@@ -43,9 +44,10 @@ def test_every_catalog_entry_is_well_formed_and_links_only_public_repos():
     # The private image server is described, never linked or addressed.
     assert "ClawForge" in raw and "github.com/LaserLloyd/ClawForge" not in raw
     assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", raw)
-    for private in ("SpeechForge", "InfoForge"):
-        entry = next(e for e in entries if e["name"] == private)
-        assert not entry["repo"] and entry["repo_note"]
+    entry = next(e for e in entries if e["name"] == "SpeechForge")
+    assert not entry["repo"] and entry["repo_note"]
+    info = next(e for e in entries if e["name"] == "InfoForge")
+    assert info["repo"] == "https://github.com/LaserLloyd/InfoForge" and not info["repo_note"]
 
 
 def test_the_setup_guide_follows_the_catalog():

@@ -2,7 +2,7 @@
 and the daily spend ledger.
 
 Everything lives in ``chats.db`` beside the conversations, so the rotating verified
-backups and the pre-migration backup (``app/migrate.py``, step ``005_agents``) cover it.
+backups and the pre-migration backup (``app/migrate.py``, step ``008_agents``) cover it.
 Like :mod:`app.accounts` this is a synchronous ``sqlite3`` module on purpose: the task
 manager writes small rows in batches from one writer, the routes read small result sets,
 and neither wants the chat database's single shared aiosqlite connection in its way.

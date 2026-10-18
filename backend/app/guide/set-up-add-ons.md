@@ -58,7 +58,7 @@ For faster and better voices the add-on can hand speech to a GPU machine running
 
 What you get: a bot that searches a full offline copy of Wikipedia before it answers and cites the article, with nothing leaving your network.
 
-What it needs: InfoForge and a kiwix server with a Wikipedia file. InfoForge is not public yet. Until it is, a bot can use the online encyclopedia the same way: set `lookup: {kind: wikipedia}` in its `advisor:` block in `config.yaml`. That sends the user's words to wikipedia.org, also from Safe Mode devices.
+What it needs: InfoForge ([github.com/LaserLloyd/InfoForge](https://github.com/LaserLloyd/InfoForge), version 2.1.0 or newer for a read-only lookup) and a kiwix server with a Wikipedia file. Without it, a bot can use the online encyclopedia the same way: set `lookup: {kind: wikipedia}` in its `advisor:` block in `config.yaml`. That sends the user's words to wikipedia.org, also from Safe Mode devices.
 
 How: put the `infoforge` command on PATH and set `lookup: {kind: infoforge}` on the bot.
 

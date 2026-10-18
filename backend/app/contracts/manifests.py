@@ -1,7 +1,7 @@
 """Manifest schemas for the four things DisPatch loads from outside its own code.
 
-SCHEMA ONLY. W5 (Connections, Characters) and W6 (Voice providers) populate and load
-these; W0 freezes the shape so the two workstreams and the Tool plugin API agree. Each
+W5 (Connections, Characters, Tools) populates and loads three of these (``connections.py``,
+``characters.py`` / ``starter_packs.py``, ``tool_manifests.py``); W6 does the Voice provider one; W0 freezes the shape so the two workstreams and the Tool plugin API agree. Each
 model forbids unknown keys (a typo must never silently mean "default"), carries
 ``schema: 1``, and is dumped to ``docs/contracts/manifests/<name>.schema.json`` by
 ``scripts/gen_contracts.py``.
@@ -69,6 +69,13 @@ class ToolPluginManifest(_Manifest):
     network: list[str] = Field(default_factory=list)   # hosts it may call, declared up front
     license: str = Field(default="MIT", max_length=40)
     settings: list[SettingField] = Field(default_factory=list)
+    # Added in 3.0 (W5), all optional so a 3.0.0 manifest stays valid:
+    publisher: str = Field(default="", max_length=80)
+    #: What the plugin asks to be allowed to do, as shown to the person who enables it. Plain
+    #: ids: http_routes, websocket, ui, live_tools, panes, character_fields, background_work,
+    #: large_uploads, network:<host>, env:<NAME>.
+    permissions_requested: list[str] = Field(default_factory=list)
+    min_app_version: str | None = Field(default=None, pattern=r"^\d+\.\d+\.\d+$")
 
 
 class VoiceModelRef(BaseModel):

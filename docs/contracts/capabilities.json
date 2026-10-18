@@ -709,6 +709,242 @@
     {
       "cli": null,
       "http": [
+        "GET /api/connections",
+        "POST /api/connections",
+        "GET /api/connections/types",
+        "POST /api/connections/test",
+        "POST /api/connections/discover",
+        "POST /api/connections/adopt",
+        "GET /api/connections/{connection_id}",
+        "PATCH /api/connections/{connection_id}",
+        "DELETE /api/connections/{connection_id}",
+        "POST /api/connections/{connection_id}/test"
+      ],
+      "id": "connections.registry",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_connections",
+      "title": "Add, change, test and discover connections",
+      "ui": "settings.connections",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/characters/all",
+        "GET /api/characters/personas",
+        "PUT /api/characters/order",
+        "POST /api/characters",
+        "GET /api/characters/{character_id}",
+        "PATCH /api/characters/{character_id}",
+        "DELETE /api/characters/{character_id}"
+      ],
+      "id": "characters.api",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Add and change characters (3.0 name for bots)",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/characters"
+      ],
+      "id": "characters.visible",
+      "machine": [
+        "machine:bots_read"
+      ],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "List the characters I may talk to",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/starter-packs",
+        "POST /api/starter-packs/{pack_id}/install"
+      ],
+      "id": "characters.packs",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "List and install starter packs",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/settings/schema",
+        "GET /api/settings"
+      ],
+      "id": "settings.schema",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Read the settings schema and every value",
+      "ui": "settings.system",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "PATCH /api/settings"
+      ],
+      "id": "settings.change",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Change or reset settings",
+      "ui": "settings.system",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/settings/defaults"
+      ],
+      "id": "settings.defaults",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Read the default theme, language and avatar style",
+      "ui": "settings.appearance",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/wizard"
+      ],
+      "id": "wizard.state",
+      "machine": [],
+      "mcp": null,
+      "permission": null,
+      "title": "Is first-run setup needed, and what is left",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/wizard/detect",
+        "POST /api/wizard/connection"
+      ],
+      "id": "wizard.connection",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_connections",
+      "title": "Detect and add the first connection",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/wizard/family"
+      ],
+      "id": "wizard.family",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Create family profiles and install a pack",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/wizard/step/{step}",
+        "POST /api/wizard/finish"
+      ],
+      "id": "wizard.setup",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Skip a step, finish setup",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/wizard/network"
+      ],
+      "id": "wizard.network",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Choose network exposure",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/backups",
+        "POST /api/backups",
+        "GET /api/backups/pending",
+        "DELETE /api/backups/pending",
+        "POST /api/backups/{backup_id}/verify",
+        "POST /api/backups/{backup_id}/restore",
+        "DELETE /api/backups/{backup_id}"
+      ],
+      "id": "backups.manage",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "List, create, verify, restore and delete backups",
+      "ui": "settings.system",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/support-bundle"
+      ],
+      "id": "support.bundle",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Download a redacted support bundle",
+      "ui": "settings.system",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/users/{profile_id}/export",
+        "DELETE /api/users/{profile_id}"
+      ],
+      "id": "users.data",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_users",
+      "title": "Export or erase one profile's data",
+      "ui": "settings.people",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "GET /api/plugins/manifests"
+      ],
+      "id": "plugins.manifests",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_plugins",
+      "title": "Read every plugin as a Tool manifest with its requested permissions",
+      "ui": "settings.plugins",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
         "POST /api/inject"
       ],
       "id": "agents.inject",

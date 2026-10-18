@@ -29,7 +29,6 @@ import time
 import uuid
 from collections import OrderedDict, defaultdict
 from collections.abc import Sequence
-from dataclasses import replace as dc_replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -72,7 +71,9 @@ from . import (
     auth,
     avatar_pool,
     avatar_snapshots,
+    backups,
     catalog,
+    characters,
     client_links,
     config,
     credentials,
@@ -503,6 +504,8 @@ async def _lifespan_startup(app: FastAPI) -> None:
     _track(purge_task)
     backup_task = asyncio.create_task(_backup_loop())
     _track(backup_task)
+    # 3.0: scheduled encrypted backups (Settings > System > Backups; off until turned on).
+    _track(asyncio.create_task(backups.scheduled_loop()))
     # Continuous gateway-chat mirror (Control-UI webchat + agent main sessions).
     global _mirror_task
     _mirror_task = asyncio.create_task(_gateway_mirror_loop())
@@ -2025,6 +2028,10 @@ def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
     """403 a Safe-Mode request that targets a bot not flagged for Safe Mode."""
     if _is_decoy(request) and bot_id not in _safe_bot_ids():
         raise HTTPException(403, "Unlock for full access")
+    # 3.0 per-profile visibility: a character limited to some profiles is closed to the rest.
+    pr = policy.of(request).principal
+    if not characters.may_use_id(bot_id, pr):
+        raise policy.denied(pr, "character")
 
 
 async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
@@ -8465,22 +8472,27 @@ async def llm_connect(payload: dict = Body(...)):
     return {**row, "bot": row}
 
 
+# /api/bots* are the 2.x names of the character API. The work lives in app/characters.py
+# (shared with /api/characters in characters_api.py); these stay as thin aliases for one
+# release, with the same permissions (route_policy.py).
+
+
+def _character_http_error(e: characters.CharacterError) -> HTTPException:
+    exc = HTTPException(e.status, str(e))
+    exc.code = e.code                      # type: ignore[attr-defined]
+    return exc
+
+
 @app.get("/api/bots", responses=problem.SAFE_MODE)
 async def get_bots(request: Request):
     """The roster as this client is allowed to see it.
 
     Session-exempt for machines so an on-box agent gets the TRUE roster (see
-    _is_inbound) — but _is_safe_mode_caller, not a bare _is_decoy, decides:
-    a browser tab with no full session is Safe Mode even on loopback, which is
-    what this box's own idle-locked tab is.
-    """
-    # Unlocked: the whole roster, "Hidden" bots included -- the client keeps a
-    # bot with Show unlocked off off the rail (per device, with an opt-in), and
-    # its threads must still open by URL. Locked: Show locked bots only.
-    bots = config.load_bots()
-    if _is_safe_mode_caller(request):
-        bots = [b for b in bots if b.safe]   # Safe Mode sees only safe bots
-    return {"bots": [b.to_dict() for b in bots]}
+    _is_inbound). Everyone else sees the characters their audience (and, for a Member or
+    Restricted profile, the character's profile list) allows - characters.may_use."""
+    _is_safe_mode_caller(request)
+    bots = await asyncio.to_thread(config.load_bots)
+    return {"bots": [b.to_dict() for b in characters.visible_to(policy.of(request).principal, bots)]}
 
 
 @app.get("/api/bots/all")
@@ -8494,34 +8506,8 @@ async def get_all_bots(request: Request):
 
 
 def _bot_row(b: config.Bot) -> dict:
-    """One bot as the Bots tab / Connect panel see it (full-access routes only).
-
-    `backend` says which engine answers: "direct" (the advisor backend, a
-    direct-API bot), "legacy-api" (the older `api:` block, no tools), "app"
-    (an app's roster bot) or "agent". `tools` / `connected` are for direct-API
-    bots; `provider` / `model` name the first provider in its chain. No key and
-    no base URL ever leave through here -- that is what makes the row safe to
-    return from the write routes too.
-    """
-    if config.is_direct(b):
-        backend = "direct"
-    elif b.api:
-        backend = "legacy-api"
-    elif apps_loader.owns_bot(b.id):
-        backend = "app"
-    else:
-        backend = "agent"
-    row = {**b.to_dict(), "voice": b.voice, "voice_rp": b.voice_rp,
-           "backend": backend,
-           "tools": config.direct_tools_on(b) if backend == "direct" else False,
-           "connected": config.direct_connected(b)}
-    row.update(personas.row_fields(b))
-    if backend == "direct":
-        first = next((p for p in (b.advisor or {}).get("providers") or []
-                      if isinstance(p, dict)), None)
-        row["provider"] = str((first or {}).get("provider") or "")
-        row["model"] = str((first or {}).get("model") or "")
-    return row
+    """One bot as the Bots tab / Connect panel see it (full-access routes only)."""
+    return characters.bot_row(b)
 
 
 @app.get("/api/bots/personas", dependencies=[Depends(_require_operator)])
@@ -8535,29 +8521,10 @@ async def get_personas():
 async def create_bot(request: Request, payload: BotCreateIn):
     """Add a bot to the roster (direct-API or agent). Operator only."""
     _require_full_access(request)
-    bots = await asyncio.to_thread(config.load_bots)
-    taken = {b.id for b in bots}
-    if payload.id is not None:
-        if payload.id.lower() in {t.lower() for t in taken}:
-            raise HTTPException(409, f"A bot with the id {payload.id!r} already exists")
-        bot_id = payload.id
-    else:
-        bot_id = config.derive_bot_id(payload.name, taken)
-    kw: dict[str, Any] = {}
-    if payload.backend == "direct":
-        kw["advisor"] = {"providers": [],
-                         "tools": True if payload.tools is None else payload.tools}
-    else:
-        kw["agent"] = (payload.agent or "").strip()
-    bot = config.Bot(
-        id=bot_id, name=payload.name,
-        emoji=payload.emoji or ("🌍" if payload.backend == "direct" else "🤖"),
-        model_hint=payload.model_hint
-        or ("Direct API" if payload.backend == "direct" else ""),
-        **config.audience_flags(
-            payload.audience,
-            config.fold_visible(payload.visible, payload.safe, payload.hide_unlocked)), **kw)
-    saved = await asyncio.to_thread(config.upsert_bot, bot)
+    try:
+        saved = await asyncio.to_thread(characters.create, **payload.model_dump())
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
     await _broadcast_roster()
     return JSONResponse(_bot_row(saved), status_code=201)
 
@@ -8567,44 +8534,11 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
     """Change a bot's name / emoji / badge / flags / lookups / personality.
     Operator only."""
     _require_full_access(request)
-
-    def _apply(bot: config.Bot) -> config.Bot:
-        # Runs under config's roster lock with the CURRENT bot, so a save from
-        # another tab (or the Lookups pill racing a persona save on the same
-        # row) is never overwritten by a stale copy of the bot.
-        changes = payload.model_dump(exclude_unset=True)
-        tools = changes.pop("tools", None)
-        if "tools" in payload.model_fields_set:
-            if not config.is_direct(bot):
-                raise HTTPException(422, "tools only applies to direct-API bots")
-            # A hand-picked `tools:` list survives an off/on round trip
-            # (config.set_direct_tools parks it under `tools_picked`).
-            changes["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
-        persona = changes.pop("persona", None)
-        # Pre-2.4.2 `visible`: false = "neither", true = no change.
-        if "visible" in changes:
-            changes.update(config.fold_visible(
-                changes.pop("visible"), changes.get("safe", bot.safe),
-                changes.get("hide_unlocked", bot.hide_unlocked)))
-        # 3.0 `audience` wins over the two flags it summarises.
-        if "audience" in changes:
-            changes.update(config.audience_flags(changes.pop("audience"), {
-                "safe": changes.get("safe", bot.safe),
-                "hide_unlocked": changes.get("hide_unlocked", bot.hide_unlocked)}))
-        updated = dc_replace(bot, **changes)
-        if persona is not None:
-            # advisor.persona / api.system_prompt, the same field the AI models
-            # Connect panel writes. Takes effect on the next turn (load_bots is
-            # mtime-cached); the code-appended rules are not part of it.
-            try:
-                updated = personas.apply(updated, persona)
-            except ValueError as e:
-                raise HTTPException(422, str(e)) from e
-        return updated
-
-    saved = await asyncio.to_thread(config.update_bot, bot_id, _apply)
-    if saved is None:
-        raise HTTPException(404, "Unknown bot")
+    try:
+        saved = await asyncio.to_thread(
+            characters.patch, bot_id, payload.model_dump(exclude_unset=True))
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
     await _broadcast_roster()
     return _bot_row(saved)
 
@@ -8613,14 +8547,10 @@ async def patch_bot(request: Request, bot_id: str, payload: BotPatchIn):
 async def remove_bot_route(request: Request, bot_id: str):
     """Remove a bot from config.yaml. Its threads and messages stay."""
     _require_full_access(request)
-    if await asyncio.to_thread(config.get_bot, bot_id) is None:
-        raise HTTPException(404, "Unknown bot")
-    if apps_loader.owns_bot(bot_id):
-        raise HTTPException(409, "This bot belongs to an app; remove or disable the app instead")
     try:
-        await asyncio.to_thread(config.remove_bot, bot_id)
-    except ValueError as e:
-        raise HTTPException(409, str(e)) from e
+        await asyncio.to_thread(characters.remove, bot_id)
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
     await _broadcast_roster()
     return {"removed": bot_id}
 
@@ -8633,26 +8563,12 @@ async def _broadcast_roster() -> None:
 
 
 def _check_bot_field(field: str, bot_id: str, value: str) -> None:
-    """422 unless an extension's validator accepts ``value`` for this
-    extension-owned bot field (``voice``, ``voice_rp``). With no extension
-    validating the field (the voice add-on is not installed) a save may only
-    carry "" or the value the bot already has — so uninstalling the add-on
-    never breaks the Bots tab, and a stale value in config.yaml is preserved
-    rather than replaced by something nothing can check."""
-    fn = extensions.field_validator(field)
-    if fn is None:
-        bot = config.get_bot(bot_id)
-        current = getattr(bot, field, "") if bot is not None else ""
-        if value not in ("", current):
-            raise HTTPException(422, f"{field} needs the voice add-on, which is not installed")
-        return
+    """422 unless an extension's validator accepts ``value`` for this extension-owned
+    bot field (``voice``, ``voice_rp``); see characters.check_extension_field."""
     try:
-        fn(value)
-    except ValueError as e:
-        raise HTTPException(422, (str(e) or f"Unknown {field}")[:200])
-    except Exception:
-        log.exception("bot field validator for %s failed", field)
-        raise HTTPException(422, f"Could not check {field}")
+        characters.check_extension_field(field, bot_id, value)
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
 
 
 def _complete_bot_order(items) -> list[dict]:
@@ -12457,6 +12373,12 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
     if manager.conn_decoy(ws) and bot_id not in _safe_bot_ids():
         await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
         return False
+    # 3.0 per-profile visibility (characters.may_use): the same character list the roster shows.
+    if not characters.may_use_id(bot_id, manager.principal_of(ws)):
+        await manager.send(ws, {"type": "error", "message": "Unlock for full access"
+                                if manager.conn_decoy(ws) else
+                                "Your profile may not use that character."})
+        return False
     if dispatch:
         pr = manager.principal_of(ws)
         bot = config.get_bot(bot_id) if bot_id else None
@@ -13315,6 +13237,7 @@ async def websocket_endpoint(ws: WebSocket):
         bots = config.load_bots()
         if decoy:
             bots = [b for b in bots if b.safe]
+        bots = characters.visible_to(principal, bots)      # per-profile character visibility
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
@@ -13853,6 +13776,21 @@ app.include_router(localview.router)
 # earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
 app.include_router(plugins_api.router)   # Settings -> Plugins (operator only)
+
+# W5: settings store, connections, characters, starter packs, first-run wizard, backups.
+from . import (  # noqa: E402  (one line per router)
+    backup_api,
+    characters_api,
+    connections_api,
+    settings_api,
+    wizard_api,
+)
+
+app.include_router(settings_api.router)
+app.include_router(connections_api.router)
+app.include_router(characters_api.router)
+app.include_router(wizard_api.router)
+app.include_router(backup_api.router)
 
 # --------------------------------------------------------------------------- #
 # "Works with DisPatch" (2.3.7): app/catalog.yaml + live status, and posting a

@@ -605,6 +605,55 @@
     },
     {
       "method": "GET",
+      "path": "/api/backups",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/backups/pending",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/backups/pending",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/backups/{backup_id}",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/{backup_id}/restore",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/backups/{backup_id}/verify",
+      "requirement": {
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/bots",
       "requirement": {
         "machine": [
@@ -735,6 +784,137 @@
       "path": "/api/bots/{bot_id}/models",
       "requirement": {
         "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/characters",
+      "requirement": {
+        "machine": [
+          "machine:bots_read"
+        ],
+        "note": "the characters this caller may talk to (audience and profile list)",
+        "permission": "use_chat",
+        "scoped": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/characters",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/characters/all",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/characters/order",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/characters/personas",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/characters/{character_id}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/characters/{character_id}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/characters/{character_id}",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/connections",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/adopt",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/discover",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/test",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/connections/types",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/connections/{connection_id}",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/connections/{connection_id}",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/connections/{connection_id}",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/{connection_id}/test",
+      "requirement": {
+        "permission": "manage_connections"
       }
     },
     {
@@ -1511,6 +1691,13 @@
     },
     {
       "method": "GET",
+      "path": "/api/plugins/manifests",
+      "requirement": {
+        "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/practice-links/{client_id}",
       "requirement": {
         "permission": "admin_system"
@@ -1712,9 +1899,59 @@
     },
     {
       "method": "GET",
+      "path": "/api/settings",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/settings",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/defaults",
+      "requirement": {
+        "note": "default theme / language / avatar style for a device that has not signed in; no secrets",
+        "public": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/schema",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/starter-packs",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/starter-packs/{pack_id}/install",
+      "requirement": {
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/studioforge/status",
       "requirement": {
         "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/support-bundle",
+      "requirement": {
+        "permission": "admin_system"
       }
     },
     {
@@ -1957,11 +2194,78 @@
       }
     },
     {
+      "method": "DELETE",
+      "path": "/api/users/{profile_id}",
+      "requirement": {
+        "note": "same rank rules as /api/people",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/{profile_id}/export",
+      "requirement": {
+        "note": "the Owner may export anyone; an Admin only Members and Restricted",
+        "permission": "manage_users"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/voice/providers",
       "requirement": {
         "note": "the voice providers and the installed provider plugins. With the add-on running this is ITS route (health, capabilities, settings of each provider); without it the host answers the plugin list alone. Listing needs manage_plugins; using a provider is use_voice (/ext, /ws/voice)",
         "permission": "manage_plugins"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/wizard",
+      "requirement": {
+        "note": "answers only whether a first-run wizard is needed until the caller holds manage_settings",
+        "public": true
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/connection",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/detect",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/family",
+      "requirement": {
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/finish",
+      "requirement": {
+        "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/network",
+      "requirement": {
+        "note": "network exposure is host control: the Owner's",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/step/{step}",
+      "requirement": {
+        "permission": "manage_settings"
       }
     },
     {

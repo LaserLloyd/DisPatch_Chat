@@ -42,6 +42,12 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`avatar_write_failed`](#avatar_write_failed) | 500 | Could not write the avatar |
 | [`backend_invalid`](#backend_invalid) | 422 | backend must be 'direct' or 'legacy-api' |
 | [`backend_unavailable`](#backend_unavailable) | 503 | The image backend is unavailable. |
+| [`backup_confirm_required`](#backup_confirm_required) | 422 | Restoring replaces your current data |
+| [`backup_corrupt`](#backup_corrupt) | 400 | The backup file is damaged |
+| [`backup_not_found`](#backup_not_found) | 404 | Unknown backup |
+| [`backup_passphrase_required`](#backup_passphrase_required) | 400 | A backup passphrase is required |
+| [`backup_protected`](#backup_protected) | 409 | That backup is protected |
+| [`backup_wrong_key`](#backup_wrong_key) | 400 | The passphrase is wrong, or this is not a DisPatch backup |
 | [`bad_request`](#bad_request) | 400 | Bad request. |
 | [`before_invalid`](#before_invalid) | 400 | before must be an ISO-8601 timestamp |
 | [`before_required`](#before_required) | 400 | before (ISO timestamp) required |
@@ -54,6 +60,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`bot_owned_by_app`](#bot_owned_by_app) | 409 | This bot belongs to an app; remove or disable the app instead |
 | [`budgets_invalid`](#budgets_invalid) | 400 | A budget value is invalid. |
 | [`captioner_unavailable`](#captioner_unavailable) | 503 | The image captioner is unavailable. |
+| [`character_invalid`](#character_invalid) | 422 | That character change is not valid |
+| [`character_last`](#character_last) | 409 | A DisPatch install needs at least one bot |
 | [`check_failed`](#check_failed) | 422 | Could not check {} |
 | [`checked_not_boolean`](#checked_not_boolean) | 400 | checked must be a boolean for a row update |
 | [`checked_not_integers`](#checked_not_integers) | 400 | checked entries must be integers |
@@ -61,6 +69,12 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`client_id_invalid`](#client_id_invalid) | 400 | invalid client id |
 | [`client_quota`](#client_quota) | 429 | Too many image renders in flight. |
 | [`conflict`](#conflict) | 409 | Conflict. |
+| [`connection_blocked_target`](#connection_blocked_target) | 403 | That address is blocked |
+| [`connection_exists`](#connection_exists) | 409 | A connection with that id already exists |
+| [`connection_in_use`](#connection_in_use) | 409 | That connection is used by a character |
+| [`connection_invalid`](#connection_invalid) | 422 | That connection is not valid |
+| [`connection_invalid_url`](#connection_invalid_url) | 422 | That address is not valid |
+| [`connection_not_found`](#connection_not_found) | 404 | Unknown connection |
 | [`content_empty`](#content_empty) | 400 | content must not be empty |
 | [`content_length_invalid`](#content_length_invalid) | 400 | Bad Content-Length |
 | [`content_length_required`](#content_length_required) | 411 | Content-Length required for uploads |
@@ -161,6 +175,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`pin_invalid`](#pin_invalid) | 400 | Pin invalid. |
 | [`pin_not_set`](#pin_not_set) | 400 | No PIN is set |
 | [`pin_too_short`](#pin_too_short) | 400 | PIN must be at least {} characters |
+| [`plugin_needs_approval`](#plugin_needs_approval) | 409 | This plugin needs approval |
 | [`pool_settings_invalid`](#pool_settings_invalid) | 400 | Invalid pool settings |
 | [`practice_unreachable`](#practice_unreachable) | 502 | Clients backend (practice box) is unreachable |
 | [`pref_identifier_invalid`](#pref_identifier_invalid) | 400 | prefs.{} must be a short identifier (letters, digits, . _ : / @ -; not starting with -) |
@@ -195,6 +210,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`setup_required`](#setup_required) | 403 | This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log. |
 | [`signin_required`](#signin_required) | 401 | Sign in to continue. |
 | [`stalled`](#stalled) | 502 | The image render stalled. |
+| [`starter_pack_not_found`](#starter_pack_not_found) | 404 | Unknown starter pack |
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
 | [`task_not_found`](#task_not_found) | 404 | Task not found |
 | [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
@@ -221,6 +237,9 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`unsupported_media_type`](#unsupported_media_type) | 415 | Reaction images must be PNG, JPEG, GIF, WebP or AVIF |
 | [`validation_error`](#validation_error) | 422 | Validation error. |
 | [`voice_addon_missing`](#voice_addon_missing) | 422 | {} needs the voice add-on, which is not installed |
+| [`wizard_owner_required`](#wizard_owner_required) | 409 | Create the owner account first |
+| [`wizard_step_required`](#wizard_step_required) | 409 | That step cannot be skipped |
+| [`wizard_step_unknown`](#wizard_step_unknown) | 404 | Unknown wizard step |
 
 ## advisor_request_unknown
 
@@ -422,6 +441,54 @@ HTTP **503** - The image backend is unavailable.
 
 **Fix:** ComfyUI is starting or briefly down. DisPatch retries.
 
+## backup_confirm_required
+
+<a id="backup_confirm_required"></a>
+
+HTTP **422** - Restoring replaces your current data
+
+**Fix:** Send confirm: true to go ahead.
+
+## backup_corrupt
+
+<a id="backup_corrupt"></a>
+
+HTTP **400** - The backup file is damaged
+
+**Fix:** Try another backup; this one cannot be read or failed its checks.
+
+## backup_not_found
+
+<a id="backup_not_found"></a>
+
+HTTP **404** - Unknown backup
+
+**Fix:** List the backups with GET /api/backups.
+
+## backup_passphrase_required
+
+<a id="backup_passphrase_required"></a>
+
+HTTP **400** - A backup passphrase is required
+
+**Fix:** Send a passphrase (at least 8 characters), or set one in Settings > System.
+
+## backup_protected
+
+<a id="backup_protected"></a>
+
+HTTP **409** - That backup is protected
+
+**Fix:** Pre-migration copies are kept until they age out.
+
+## backup_wrong_key
+
+<a id="backup_wrong_key"></a>
+
+HTTP **400** - The passphrase is wrong, or this is not a DisPatch backup
+
+**Fix:** Enter the passphrase or recovery key the backup was made with.
+
 ## bad_request
 
 <a id="bad_request"></a>
@@ -518,6 +585,22 @@ HTTP **503** - The image captioner is unavailable.
 
 **Fix:** The captioning model is busy. DisPatch retries.
 
+## character_invalid
+
+<a id="character_invalid"></a>
+
+HTTP **422** - That character change is not valid
+
+**Fix:** Check the fields you sent; the message says which one.
+
+## character_last
+
+<a id="character_last"></a>
+
+HTTP **409** - A DisPatch install needs at least one bot
+
+**Fix:** Add another character before removing this one.
+
 ## check_failed
 
 <a id="check_failed"></a>
@@ -573,6 +656,54 @@ HTTP **429** - Too many image renders in flight.
 HTTP **409** - Conflict.
 
 **Fix:** The state changed under you; reload and retry.
+
+## connection_blocked_target
+
+<a id="connection_blocked_target"></a>
+
+HTTP **403** - That address is blocked
+
+**Fix:** The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.
+
+## connection_exists
+
+<a id="connection_exists"></a>
+
+HTTP **409** - A connection with that id already exists
+
+**Fix:** Choose a different id, or change the existing connection.
+
+## connection_in_use
+
+<a id="connection_in_use"></a>
+
+HTTP **409** - That connection is used by a character
+
+**Fix:** Point those characters at another connection first, then delete this one.
+
+## connection_invalid
+
+<a id="connection_invalid"></a>
+
+HTTP **422** - That connection is not valid
+
+**Fix:** Check the type, address, key and capabilities and try again.
+
+## connection_invalid_url
+
+<a id="connection_invalid_url"></a>
+
+HTTP **422** - That address is not valid
+
+**Fix:** Use an http:// or https:// address that names a host, with no user name or password in it.
+
+## connection_not_found
+
+<a id="connection_not_found"></a>
+
+HTTP **404** - Unknown connection
+
+**Fix:** Pick a connection from the list; it may have been deleted.
 
 ## content_empty
 
@@ -1374,6 +1505,14 @@ HTTP **400** - PIN must be at least {} characters
 
 **Fix:** Choose a longer PIN.
 
+## plugin_needs_approval
+
+<a id="plugin_needs_approval"></a>
+
+HTTP **409** - This plugin needs approval
+
+**Fix:** Review the permissions it asks for, then enable it again with approve set to that list.
+
 ## pool_settings_invalid
 
 <a id="pool_settings_invalid"></a>
@@ -1646,6 +1785,14 @@ HTTP **502** - The image render stalled.
 
 **Fix:** The render started and then went quiet. DisPatch retries once; if it keeps stalling, restart the image server.
 
+## starter_pack_not_found
+
+<a id="starter_pack_not_found"></a>
+
+HTTP **404** - Unknown starter pack
+
+**Fix:** List the packs with GET /api/starter-packs.
+
 ## storage_limit
 
 <a id="storage_limit"></a>
@@ -1853,3 +2000,27 @@ HTTP **422** - Validation error.
 HTTP **422** - {} needs the voice add-on, which is not installed
 
 **Fix:** Fix the fields in detail and resend.
+
+## wizard_owner_required
+
+<a id="wizard_owner_required"></a>
+
+HTTP **409** - Create the owner account first
+
+**Fix:** Finish step 1 of the setup wizard (the owner account) before this step.
+
+## wizard_step_required
+
+<a id="wizard_step_required"></a>
+
+HTTP **409** - That step cannot be skipped
+
+**Fix:** Only the optional steps (voice, family) can be skipped.
+
+## wizard_step_unknown
+
+<a id="wizard_step_unknown"></a>
+
+HTTP **404** - Unknown wizard step
+
+**Fix:** The steps are owner, connection, voice, family, network.

@@ -10,6 +10,13 @@ Two places, with a clear split:
 
 Credentials live in neither. They are set through the app and stored hashed.
 
+**3.0: every setting is described once.** [settings.md](settings.md) lists every setting - key,
+type, default, range, whether it needs a restart, and the environment variable that overrides it - and
+Settings -> **All settings** draws the same list, searchable, with a Basic / Advanced switch. Values live in the
+`settings` table of `chats.db`; an environment variable still wins and the page shows *Set by environment*.
+Provider keys are kept by [connections](connections.md), not in `config.yaml`. The rest of this page is still the
+reference for what each variable does.
+
 ## Where your data lives
 
 ```
@@ -30,11 +37,11 @@ delete it and DisPatch Chat starts fresh. There is no hidden state elsewhere.
 
 ```
 data/
-├── chats.db             # SQLite (WAL): messages, threads, users, sessions
+├── chats.db             # SQLite (WAL): messages, threads, profiles, settings, connections
 ├── chats.db-wal         # write-ahead log; folded in on clean shutdown
 ├── media/               # inline images and video
 ├── files/               # file-server attachments
-├── backups/             # rotating snapshots, integrity-checked
+├── backups/             # rotating snapshots, encrypted archives, pre-upgrade copies (docs/backups.md)
 ├── logs/
 ├── config.yaml          # bot roster (hot-reloaded)
 └── .instance.lock       # single-process guard; ignore it

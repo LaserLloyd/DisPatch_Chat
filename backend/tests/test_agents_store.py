@@ -38,7 +38,7 @@ def test_the_dry_run_names_the_new_tables_and_writes_nothing(legacy):
     _drop_agent_tables(legacy)
     before = {p.name: p.read_bytes() for p in legacy.iterdir() if p.is_file()}
     rep = migrate.run(dry_run=True)
-    mine = [a for a in rep.actions if a.step == "005_agents"]
+    mine = [a for a in rep.actions if a.step == "008_agents"]
     assert len(mine) == 1
     for table in store.TABLES:
         assert table in mine[0].text
@@ -54,7 +54,7 @@ def test_applying_it_backs_up_first_then_adds_only_new_tables(legacy):
     threads_before = con.execute("SELECT id, title FROM threads ORDER BY id").fetchall()
     con.close()
     rep = migrate.run()
-    assert "005_agents" in rep.applied
+    assert "008_agents" in rep.applied
     assert rep.backup is not None and (rep.backup / "chats.db").exists()
     # the backup is the original: no agent tables in it
     assert not (_tables_of(rep.backup / "chats.db") & set(store.TABLES))
@@ -63,7 +63,7 @@ def test_applying_it_backs_up_first_then_adds_only_new_tables(legacy):
     assert before <= after, "nothing was dropped"
     con = sqlite3.connect(legacy / "chats.db")
     assert con.execute("SELECT id, title FROM threads ORDER BY id").fetchall() == threads_before
-    assert con.execute("SELECT 1 FROM schema_migrations WHERE id='005_agents'").fetchone()
+    assert con.execute("SELECT 1 FROM schema_migrations WHERE id='008_agents'").fetchone()
     con.close()
     assert migrate.plan().actions == [] and migrate.run().applied == [], "idempotent"
 
@@ -78,7 +78,7 @@ def _tables_of(path):
 
 def test_a_database_that_already_has_the_tables_has_nothing_to_migrate(legacy):
     migrate.run()
-    assert not [a for a in migrate.plan().actions if a.step == "005_agents"]
+    assert not [a for a in migrate.plan().actions if a.step == "008_agents"]
 
 
 # --------------------------------------------------------------------------- #

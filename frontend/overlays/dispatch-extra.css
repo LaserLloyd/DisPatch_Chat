@@ -1,8 +1,9 @@
-/* Theme revision 2026-09-24 — adapter dispatch-compat.css. Generated file, do not edit by hand:
-   replace the whole ui-theme/ folder to update it.
-   body sha256: fe7428b1ecc4815d */
+/* dispatch-extra.css -- app-owned overlay (NOT a ForgeUI bundle file).
+   Source of truth: frontend/overlays/dispatch-extra.css. `python -m forgeui vendor`
+   (forgeui.json, "extra_files") copies it to static/ui-theme/adapters/dispatch-extra.css
+   beside the vendored bundle; edit the source here, never the copy. */
 /* ============================================================================
-   dispatch-compat.css — DisPatch's own token names mapped onto the contract.
+   dispatch-extra.css — DisPatch's own token names mapped onto the contract.
    ----------------------------------------------------------------------------
    DisPatch's component CSS was written against its original token names
    (--bg-*, --user-bubble, --md-*, --accent-grad ...). This block defines each

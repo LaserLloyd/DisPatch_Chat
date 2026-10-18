@@ -43,15 +43,16 @@ ALLOW: list[tuple[str, str, str]] = [
     # bot calls itself. A sub-package needs its own row — `*.py` on
     # backend/app does not descend.
     ("backend/app/livetools",       "backend/app/livetools",       "*.py"),
-    # 3.0: the agent-dispatch core (AgentBackend, events, adapters). Same reason: a sub-package
-    # needs its own row, and a deploy without it would import-fail agents_service.
+    # 3.0: the agent-dispatch core (AgentBackend, events, adapters, secrets). Same reason: a sub-package
+    # needs its own row, and a deploy without it would import-fail agents_service, secret_store and
+    # the extensions that import app.agents.secrets.
     ("backend/app/agents",          "backend/app/agents",          "*.py"),
     # 3.0: the frozen contracts (permissions, error catalog, capabilities, manifests).
     ("backend/app/contracts",       "backend/app/contracts",       "*.py"),
     ("backend/app/contracts",       "backend/app/contracts",       "error_catalog.json"),
-    # 3.0: the agent-dispatch core (AgentBackend, adapters, secrets); extensions import app.agents.secrets.
-    ("backend/app/agents",          "backend/app/agents",          "*.py"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
+    # 3.0: the starter packs (app/starter_packs.py reads the YAML).
+    ("backend/app/starter_packs",   "backend/app/starter_packs",   "*.yaml"),
     # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
     # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).

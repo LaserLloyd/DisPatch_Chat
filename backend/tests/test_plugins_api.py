@@ -47,6 +47,8 @@ def test_aggregate_lists_an_installed_extension(ext_env):
 def test_extension_switch_writes_extensions_yaml(ext_env):
     c, tmp = ext_env
     install()
+    from app import tool_manifests
+    tool_manifests.grandfather_running()          # as the 3.0 migration does for what is running at the upgrade
     r = c.put("/api/plugins/extensions/voice", json={"enabled": False}, headers=ORIGIN)
     assert r.status_code == 200, r.text
     assert r.json() == {"id": "voice", "enabled": False, "restart_required": True}

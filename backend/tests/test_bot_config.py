@@ -12,6 +12,7 @@ Run: cd backend && uv run pytest.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 
 import pytest
@@ -86,6 +87,8 @@ def _non_default(f):
         return not f.default
     if f.type is int or isinstance(f.default, int):
         return 42
+    if f.default_factory is not dataclasses.MISSING and isinstance(f.default_factory(), list):
+        return ["a", "b"]            # a list field (profiles)
     if f.name == "api":
         return {"provider": "openai", "model": "m", "api_key": "k"}
     if f.name == "advisor":

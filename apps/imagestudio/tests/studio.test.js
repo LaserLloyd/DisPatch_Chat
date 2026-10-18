@@ -43,7 +43,7 @@ async function page({ nim = false, state = STATE, generate } = {}) {
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=2');
+  const sdk = await import('/static/js/app-sdk.js?v=3');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -203,7 +203,7 @@ test('the Safe-Mode decoy 403 shows a locked note, never an empty studio', { ski
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=2');
+  const sdk = await import('/static/js/app-sdk.js?v=3');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);

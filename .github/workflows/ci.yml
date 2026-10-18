@@ -104,6 +104,17 @@ jobs:
         # main went red with no code change. Bump deliberately, fix, commit.
         working-directory: backend
         run: uvx ruff@0.17.0 check app tests
+      - name: Vendored ForgeUI bundle matches forgeui.json
+        # frontend/static/ui-theme/ is the ForgeUI (ThemeForge) bundle, vendored whole.
+        # This fails on a different version, a stale or hand-edited bundle file, a
+        # missing or changed overlay, or settings naming a theme the bundle lacks.
+        # Fix: `python -m forgeui vendor` (docs/development.md, "Themes"). forgeui is
+        # installed from a pinned ThemeForge commit, never PyPI (that name belongs to
+        # another project). TODO: switch to `@v1.2.0` once the owner tags that release.
+        run: |
+          uv venv --python 3.12 .forgeui-venv
+          uv pip install --python .forgeui-venv "forgeui @ git+https://github.com/LaserLloyd/ThemeForge@d70f6608bdf386fc095d43fc1caec61e88664795"
+          .forgeui-venv/bin/python -m forgeui vendor --check
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -166,6 +177,29 @@ jobs:
         # written for — a regression here is invisible against real locale files,
         # which are (correctly) clean.
         run: python3 scripts/check-locales.py --selftest
+
+  audit:
+    name: Dependency audit
+    needs: privacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        # Exact version - see the note in the `test` job above.
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: pip-audit the locked set
+        # Audits exactly what `uv sync --frozen` installs: the lockfile exported
+        # with every extra (so the optional agents-claude pin is covered too),
+        # then checked against the PyPI advisory database. `--no-deps` because the
+        # export is already fully resolved and pinned; `--disable-pip` so nothing
+        # is installed or resolved. Any finding exits non-zero and fails the job.
+        # pip-audit is pinned: an unpinned `uvx pip-audit` is "newest that day".
+        # Bump deliberately. Do NOT add `--ignore-vuln` without a comment naming
+        # the advisory, why it cannot be fixed, and when to revisit it.
+        working-directory: backend
+        run: |
+          uv export --frozen --no-hashes --no-emit-project --all-extras > "$RUNNER_TEMP/requirements-audit.txt"
+          uvx --python 3.12 pip-audit==2.10.1 -r "$RUNNER_TEMP/requirements-audit.txt" --no-deps --disable-pip --strict
 
   docker:
     name: Docker image builds

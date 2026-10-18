@@ -72,13 +72,14 @@
   <!-- The theme runtime. BLOCKING and first on purpose: it reads the stored
        theme and stamps <html data-palette/data-theme/data-contrast-profile>
        plus <meta name="theme-color"> before anything paints.
-       static/ui-theme/ is the shared drop-in theme folder: generated files,
-       never edited here. To update the themes, replace the whole folder —
-       nothing else changes (docs/development.md, "Themes"). It is served
+       static/ui-theme/ is the vendored ForgeUI bundle: generated files, never
+       edited here. forgeui.json (repo root) names the version and the theme
+       choice; `python -m forgeui vendor` replaces the whole folder and
+       `--check` guards it (docs/development.md, "Themes"). It is served
        no-cache, so it needs no ?v=. DisPatch's own settings are the data-*
        below: picker order, the default for a new device, the storage key. -->
   <script src="/static/ui-theme/ui-theme.js"
-          data-themes="glacier,midnight-gold,forest,paper,daylight,purple,electric-yellow,laserlloyd,laserlloyd-light,night-red"
+          data-themes="glacier,midnight-gold,forest,paper,daylight,purple,slate,high-contrast,high-contrast-light,electric-yellow,laserlloyd,laserlloyd-light,night-red"
           data-default="glacier"
           data-storage-key="dispatch-palette"></script>
   <!-- Which locale the last visit settled on. i18n.js keeps it current so an
@@ -149,17 +150,24 @@
   <link rel="preload" href="/static/locales/en.json" as="fetch" type="application/json" crossorigin />
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
+  <!-- ForgeUI component layer (ui-dialog, ui-toast, ...). BEFORE app.css so the
+       shell's own .ui-dialog rules win every tie; it reads the tokens below,
+       which resolve whenever they load. ui-components.js adds window.UIComponents
+       and fetches ui-theme/locales/<lang>.json only if asked to. -->
+  <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=7" />
   <link rel="stylesheet" href="/static/app.css?v=107" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=1" />
+  <link rel="stylesheet" href="/static/w5.css?v=1" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
        ties; theme.css holds only what the theme folder does not own. No
        ui-theme-base.css: DisPatch keeps its own element layer. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
-  <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-compat.css" />
-  <script type="module" src="/static/js/theme.js?v=19"></script>
+  <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-extra.css" />
+  <script src="/static/ui-theme/ui-components.js" defer></script>
+  <script type="module" src="/static/js/theme.js?v=20"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -728,6 +736,8 @@
              add it); hidden in Safe Mode like the other admin tabs. -->
         <button class="settings-tab admin-only hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
         <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="plugins.tab">Plugins</span></button>
+        <!-- 3.0: Connections (the servers DisPatch talks to) - js/connections.js builds it. -->
+        <button class="settings-tab admin-only hidden" id="stab-connections" role="tab" data-tab="connections" aria-selected="false" aria-controls="spane-connections" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔗</span><span class="stab-label" data-i18n="settings.tab_connections">Connections</span></button>
         <!-- Agents (3.0): owner and admin only. js/agents.js builds the pane. -->
         <button class="settings-tab admin-only hidden" id="stab-agents" role="tab" data-tab="agents" aria-selected="false" aria-controls="spane-agents" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="agents.tab">Agents</span></button>
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
@@ -736,6 +746,8 @@
         <!-- People & Profiles (3.0): owner and admin only. js/people.js builds it. -->
         <button class="settings-tab admin-only hidden" id="stab-people" role="tab" data-tab="people" aria-selected="false" aria-controls="spane-people" tabindex="-1"><span class="stab-glyph" aria-hidden="true">👥</span><span class="stab-label" data-i18n="people.tab">People &amp; Profiles</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
+        <!-- 3.0: every setting, drawn from the server's schema (js/settings_schema.js), with backups. -->
+        <button class="settings-tab admin-only hidden" id="stab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="spane-settings" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚙️</span><span class="stab-label" data-i18n="settings.tab_all">All settings</span></button>
       </div>
       <button type="button" class="stab-nav stab-next" id="stab-next" tabindex="-1" aria-hidden="true" hidden title="More tabs" data-i18n-attr="title=settings.tabs_next"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
@@ -844,6 +856,9 @@
            table (js/tools.js mounts into #plugins-tools-host) and the built-in
            lookups switch. ---- -->
       <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
+
+      <!-- ---- Connections: js/connections.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-connections" role="tabpanel" aria-labelledby="stab-connections" tabindex="0"></section>
 
       <!-- ---- Agents: js/agents.js mounts it here (owner/admin only) ---- -->
       <section class="settings-pane hidden" id="spane-agents" role="tabpanel" aria-labelledby="stab-agents" tabindex="0"></section>
@@ -969,6 +984,9 @@
           </p>
         </div>
       </section>
+
+      <!-- ---- All settings: js/settings_schema.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-settings" role="tabpanel" aria-labelledby="stab-settings" tabindex="0"></section>
 
       <!-- Contextual footer: exactly one group is visible, chosen by the active
            tab. Tabs whose actions all live inline (Reactions, Device) get no
@@ -1321,6 +1339,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=145"></script>
+  <script type="module" src="/static/js/main.js?v=147"></script>
 </body>
 </html>

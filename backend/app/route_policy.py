@@ -264,6 +264,47 @@ for _methods, _path in (
     _r(_methods, _path, _R(P.ADMIN_SYSTEM, note="code execution on the host"))
 
 # --------------------------------------------------------------------------- #
+# W5: settings store, connections, characters, packs, wizard, backups
+# --------------------------------------------------------------------------- #
+_r("GET", "/api/settings/schema", _R(P.MANAGE_SETTINGS))
+_r("GET", "/api/settings", _R(P.MANAGE_SETTINGS))
+_r("PATCH", "/api/settings", _R(P.MANAGE_SETTINGS))
+for _path, _m in (
+    ("/api/connections", ("GET", "POST")), ("/api/connections/types", "GET"),
+    ("/api/connections/test", "POST"), ("/api/connections/discover", "POST"),
+    ("/api/connections/adopt", "POST"),
+    ("/api/connections/{connection_id}", ("GET", "PATCH", "DELETE")),
+    ("/api/connections/{connection_id}/test", "POST"),
+):
+    _r(_m, _path, _R(P.MANAGE_CONNECTIONS))
+_r("GET", "/api/characters", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ],
+                                note="the characters this caller may talk to (audience and profile list)"))
+for _path, _m in (
+    ("/api/characters/all", "GET"), ("/api/characters/personas", "GET"), ("/api/characters/order", "PUT"),
+    ("/api/characters", "POST"), ("/api/characters/{character_id}", ("GET", "PATCH", "DELETE")),
+    ("/api/starter-packs", "GET"), ("/api/starter-packs/{pack_id}/install", "POST"),
+):
+    _r(_m, _path, _R(P.MANAGE_CHARACTERS))
+_r("GET", "/api/wizard", public("answers only whether a first-run wizard is needed until the caller holds manage_settings"))
+_r("POST", "/api/wizard/detect", _R(P.MANAGE_CONNECTIONS))
+_r("POST", "/api/wizard/connection", _R(P.MANAGE_CONNECTIONS))
+_r("POST", "/api/wizard/family", _R(P.MANAGE_USERS))
+_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's"))
+for _path in ("/api/wizard/step/{step}", "/api/wizard/finish"):
+    _r("POST", _path, _R(P.MANAGE_SETTINGS))
+for _path, _m in (
+    ("/api/backups", ("GET", "POST")), ("/api/backups/pending", ("GET", "DELETE")),
+    ("/api/backups/{backup_id}/verify", "POST"), ("/api/backups/{backup_id}/restore", "POST"),
+    ("/api/backups/{backup_id}", "DELETE"),
+    ("/api/support-bundle", "POST"),
+):
+    _r(_m, _path, _R(P.ADMIN_SYSTEM))
+_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner may export anyone; an Admin only Members and Restricted"))
+_r("DELETE", "/api/users/{profile_id}", _R(P.MANAGE_USERS, note="same rank rules as /api/people"))
+_r("GET", "/api/plugins/manifests", _R(P.MANAGE_PLUGINS))
+_r("GET", "/api/settings/defaults", public("default theme / language / avatar style for a device that has not signed in; no secrets"))
+
+# --------------------------------------------------------------------------- #
 # Mounts (static trees) and dynamic prefixes
 # --------------------------------------------------------------------------- #
 #: (prefix, requirement) for ``Mount`` routes - first match wins.

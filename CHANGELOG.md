@@ -106,7 +106,7 @@ declares the permission it needs; and the backend runs on native Windows.
   (unchanged same-host requirement) and **Claude Agent** (API key, Amazon Bedrock, Google
   Cloud or Microsoft Foundry credentials only; no subscription sign-in).
   - New tables `agents`, `tasks`, `task_events`, `approvals`, `agent_spend`, `agent_settings`
-    (additive; migration step `005_agents`, with the pre-migration backup and dry run).
+    (additive; migration step `008_agents`, with the pre-migration backup and dry run).
     `python -m app.migrate --dry-run` lists them.
   - Routes (all declared in `route_policy.py`): `/api/agents*` (`manage_agents`),
     `/api/agents/available` and `/api/tasks*` (`dispatch_agents`), `/api/approvals/{id}`
@@ -148,7 +148,7 @@ declares the permission it needs; and the backend runs on native Windows.
   and with a Restricted session and must be refused; a Restricted turn reaches only
   `audience in (all, restricted)` characters.
 - **Contracts** (`backend/app/contracts/`, `docs/contracts/`, `docs/errors.md`,
-  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (189 codes),
+  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (208 codes),
   capability registry and JSON Schemas for Connection, Tool plugin, Voice provider and
   Character manifests, regenerated and checked in CI (`tests/test_contracts_drift.py`).
 - **Migration with a safety net**: `python -m app.migrate [--dry-run] [--restore DIR]`;
@@ -159,10 +159,45 @@ declares the permission it needs; and the backend runs on native Windows.
   where no CSP frame-ancestors, `no-store` on auth and people APIs, HSTS over TLS).
 - **Native Windows**: the backend imports and the test suite collects on Windows
   (`app/_filelock.py` replaces `fcntl`); `.gitattributes` keeps LF everywhere; the
-  frontend suite (788 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
+  frontend suite (820 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
   PowerShell; `frontend/package-lock.json` is committed.
 - `.claude/agents/`: contract-guardian, security-reviewer, migration-verifier,
   docs-drift-checker, a11y-reviewer.
+- **One settings schema and store** (`backend/app/settings_schema.py`, `settings_store.py`). Every
+  user-facing setting - key, type, default, range, group, Basic/Advanced, restart-required, environment
+  alias, secret - is described once (`schema: 1`; reference: `docs/settings.md`, generated and drift-tested).
+  Values live in the `settings` table of `chats.db`; an environment variable still wins and is reported as
+  `source: env`; `security.yaml` and `tools.yaml` settings are written through to their files. Import of
+  today's values is idempotent and reports every key it does not recognise instead of dropping it.
+  `GET /api/settings/schema`, `GET`/`PATCH /api/settings` (`manage_settings`; per-key validation,
+  reset-to-default), public `GET /api/settings/defaults`. Add-ons write through
+  `settings_store.writer("<namespace>")`. **Settings -> All settings** is drawn from the schema (ForgeUI
+  `.ui-setting` rows, search, Basic/Advanced, "set by environment" badge); the older tabs stay for what is not in
+  the schema yet.
+- **Connections** (`docs/connections.md`): one record per model server (thirteen types), keys in the secret store
+  (keyring or a `0600` file) and never in `config.yaml`, an actionable **Test** (reachable / key accepted / models /
+  latency), StudioForge recognised by `GET /api/version` and sent `Authorization: Bearer`, **Find servers** for
+  StudioForge / LM Studio / Ollama / OpenAI-style servers, and an SSRF guard that refuses link-local and
+  cloud-metadata addresses unless an admin allows them. Characters refer to a connection (`connection: <id>`).
+- **Characters** (`docs/characters.md`): the 3.0 name and API for bots (`/api/characters`, `manage_characters`;
+  `/api/bots*` stay as aliases for one release). Per-character connection, model, personality preset,
+  `audience`, `profiles` (who may see it), description, and a link to Voice -> Voices. **Starter packs**: *Animal
+  Friends* (six gentle animals for Restricted profiles) and *Assistants*.
+- **First-run wizard** (`docs/first-run.md`): owner, first connection (with auto-detect and Test), voice, family,
+  network exposure, done - fully driveable through `/api/wizard/*`.
+- **Backups** (`docs/backups.md`): scheduled **encrypted** archives (AES-256-GCM, scrypt), restore that checks first
+  and applies at the next start, a **support bundle** with redaction (prompts excluded by default),
+  `GET /api/users/{id}/export` and `DELETE /api/users/{id}`.
+- **Tool manifests**: extensions, apps and `tools.yaml` rows are described as one Tool manifest (back-compat shim),
+  with the permissions each requests; a new plugin must be approved before the Plugins switch turns it on; an app's
+  `env:` names and any manifest `settings` appear under `tools.<id>.*`.
+- **ForgeUI 1.2.0** vendored whole (`forgeui.json`, `forgeui vendor --check` in CI and as a unit test): slate,
+  high-contrast and high-contrast-light themes, the component layer (`ui-components`), the app-owned overlay
+  `adapters/dispatch-extra.css`. Forest, Paper and Purple changed upstream (recorded in `theme-palettes.test.js`).
+- **InfoForge 2.1.0**: the advisor's offline-Wikipedia lookup uses `infoforge search --no-ensure ... --` when the
+  installed version is 2.1.0 or newer (read-only, and a query starting with `-` cannot become an option).
+- **Dependency audit**: Pillow >= 12.3.0, Starlette >= 1.3.1, AnyIO >= 4.14.2 (the audit's 17 advisories) and a
+  `pip-audit` job in CI.
 
 ### Changed
 
@@ -174,6 +209,18 @@ declares the permission it needs; and the backend runs on native Windows.
   the entries still awaiting a translator).
 - `GET /api/tools` has three audiences: the Owner/Admin sees everything, a Member every
   enabled page tool (no host paths), Restricted only tools flagged `safe`.
+- Provider keys leave `config.yaml` on upgrade (see "Upgrading", steps 7-9). `GET /api/llm/providers`, `/api/llm/test`,
+  `/api/llm/connect` and the Connect-an-AI panel work as before and still write inline settings; the next start (or
+  Settings -> Connections -> **Move keys here**) turns them into connections.
+- `/api/bots*` are thin aliases of `/api/characters*` (same permissions); the bot row gains `connection`,
+  `profiles`, `description`, `pack`.
+- A character a profile is not listed for cannot be opened or messaged by that profile; Owner and Admin always see all.
+- Settings has two new tabs, **Connections** and **All settings**; the Bots tab gains a **Details** button per row and a
+  **Starter packs** card; `index.html`'s theme picker lists the three new themes.
+- `GET /api/plugins/manifests` and the approval rule on `PUT /api/plugins/extensions/{id}` (additive: a body of
+  just `{"enabled": ...}` still works for anything already approved).
+- `frontend/static/js/w5-api.js` holds the REST calls of the new pages: `api.js` is imported at one `?v=` by a dozen
+  modules, so extending it would force a version cascade through files other work is editing.
 
 ### Upgrading from 2.x (exact behaviour)
 
@@ -198,6 +245,24 @@ Start 3.0.0 as usual; the server migrates before it serves. Or look first:
    at the values that reproduce 2.x behaviour.
 6. An install with **no PIN** is not migrated into an owner: it stays unclaimed (see
    BREAKING, first item) until you create one.
+7. `005_settings` creates the `settings`, `settings_unknown` and `settings_meta` tables and imports the values it
+   finds in `security.yaml` (lock timeout, remembered-device days, machine trust, anonymous access, session timeouts) and
+   `tools.yaml` (the lookups switch). **A key it does not recognise is kept** in `settings_unknown` and listed by
+   `GET /api/settings` (secret-looking names are masked there); nothing is deleted from your files.
+8. `006_connections` gives every character's inline provider block (`api:` and each `advisor.providers` entry) a
+   connection: one per distinct provider + address + key. **The API key moves into the secret store** (read back
+   before it is removed from `config.yaml`); `provider`, `base_url`, `model` and everything else stay inline beside
+   `connection: <id>`. A key named by `api_key_env` stays a reference to that variable. The pre-migration backup holds the
+   original file, keys included. Downgrading to 2.x after this step: restore that backup (the keys in the secret store
+   are not read by 2.x).
+9. `007_plugin_approvals` approves, with `source: upgrade`, every add-on and app that is running now and asks for
+   permissions; a plugin added later needs approval before the Plugins switch turns it on.
+10. `008_agents` creates the `agents`, `tasks`, `task_events`, `approvals`, `agent_settings` and `agent_spend` tables (additive,
+    nothing existing is altered; a 3.0 binary without agents ignores them).
+11. A restore staged from the app (`POST /api/backups/{id}/restore`) is applied at the start of the migration run, before
+    anything above, after copying the current files to `backups/pre-restore-<time>/`.
+
+Environment variables are not copied into the store: an environment variable keeps winning and is shown as such.
 
 Running it again does nothing. `DISPATCH_ARGON2_MEMORY_KIB` / `DISPATCH_ARGON2_PASSES`
 exist for tests only.
