@@ -7,6 +7,32 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Agent dispatch core (library only, not wired yet).** A new self-contained package
+  `backend/app/agents/` defines the `AgentBackend` interface (`start_task`, `send`,
+  `events`, `respond_approval`, `interrupt`, `resume`, `cancel`, `list_sessions`,
+  `capabilities`), the normalized event stream (status, text, tool calls and results,
+  approval requests, subagent start/finish with parent ids, retries, artifacts, cost
+  updates labelled as estimates, result, error with a catalogued code), a scriptable
+  fake backend, and three adapters: the existing OpenClaw transports wrapped onto the
+  interface (with a protocol-4 probe that fails loudly on a mismatch), a Claude Agent
+  backend built on the Python Agent SDK (one supervised worker process per task, empty
+  `setting_sources`, strict MCP config, explicit permission modes, per-task
+  `CLAUDE_CONFIG_DIR`, `max_budget_usd`/`max_turns`, API-key auth only), and a stub for
+  the generic CLI adapter. Also: per-task workspaces (git worktree for repo tasks) that
+  reject `..` and symlink escapes, budgets, a secret provider (keyring, else a 0600
+  file) with redaction, branding rules and the reader/actor quarantine rule. One suite
+  (`backend/tests/agents`, 300+ tests, runs on Windows) holds every adapter to the same
+  contract. Docs: `docs/agents/backends.md`, `docs/agents/security.md`.
+- Optional extra `agents-claude` (`claude-agent-sdk==0.2.168`, exact pin); it is not in
+  the default dependencies and `uv.lock` gains its resolution.
+
+### Changed
+
+- `openclaw.send_to_agent` takes an optional `on_spawn` callback (default `None`, no
+  behaviour change) so the agent adapter can stop the CLI process on cancel.
+
 ## [2.4.2] — 2026-10-17
 
 ### Changed
