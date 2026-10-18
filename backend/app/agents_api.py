@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,8 +36,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from . import accounts, agents_service, config, policy
 from . import agents_store as store
-from .agents.interface import AgentBackendError, AgentSpec
 from .agents.events import ErrorCode
+from .agents.interface import AgentBackendError, AgentSpec
 from .agents_service import BudgetExhausted, TaskError, public_agent, public_approval, public_task
 from .agents_ws import may_see_task
 from .contracts import errors
@@ -599,7 +599,7 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
     for label, v in (("since", since), ("until", until)):
         if v:
             try:
-                datetime.strptime(v[:10], "%Y-%m-%d")
+                date.fromisoformat(v[:10])
             except ValueError:
                 return _problem(422, "validation_error", f"{label}: use YYYY-MM-DD")
     # Only an Owner/Admin may look at other people's tasks; everyone else is pinned to their own.
@@ -624,8 +624,7 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
 
 
 def _next_day(day: str) -> str:
-    from datetime import timedelta
-    return (datetime.strptime(day[:10], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    return (date.fromisoformat(day[:10]) + timedelta(days=1)).isoformat()
 
 
 @router.get("/api/tasks/{task_id}")

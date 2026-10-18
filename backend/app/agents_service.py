@@ -44,13 +44,12 @@ import asyncio
 import contextlib
 import importlib.util
 import json
-import logging
 import os
 import shutil
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -539,11 +538,11 @@ class TaskManager:
         if problem is not None and hold is None:
             raise AgentBackendError(problem[0], problem[1])
         self.effective_budget(spec, agent["id"], owner, 0.0)          # fail early (429)
-        fields: dict[str, Any] = dict(
-            agent_id=agent["id"], agent_name=agent["name"], backend=spec.backend, owner=owner,
-            kind=kind, state="queued", hold=hold, spec_json=json.dumps(agent["spec"]),
-            prompt=prompt, origin_thread_id=origin_thread_id, origin_message_id=origin_message_id,
-            advisor_request_id=advisor_request_id, repo_path=repo_path)
+        fields: dict[str, Any] = {
+            "agent_id": agent["id"], "agent_name": agent["name"], "backend": spec.backend, "owner": owner,
+            "kind": kind, "state": "queued", "hold": hold, "spec_json": json.dumps(agent["spec"]),
+            "prompt": prompt, "origin_thread_id": origin_thread_id, "origin_message_id": origin_message_id,
+            "advisor_request_id": advisor_request_id, "repo_path": repo_path}
         if task_id:
             fields["task_id"] = task_id
         row = store.create_task(**fields)
@@ -1063,7 +1062,16 @@ class TaskManager:
     def support_summary(self) -> dict[str, Any]:
         """No prompts, no instructions, no events, no secrets (docs/agents.md)."""
         out = store.redacted_summary()
-        out["backends"] = {n: b.support_dump() for n, b in self.backends.items()}
+        # Per backend: how many tasks it holds in memory and in which state - not the spec
+        # (names, MCP addresses, seat ids) that the adapter's own support_dump() would add.
+        backends: dict[str, Any] = {}
+        for name, b in self.backends.items():
+            tasks = (b.support_dump().get("tasks") or {}).values()
+            states: dict[str, int] = {}
+            for t in tasks:
+                states[t["state"]] = states.get(t["state"], 0) + 1
+            backends[name] = {"in_memory": sum(states.values()), "states": states}
+        out["backends"] = backends
         return GLOBAL_REDACTOR.redact_obj(out)
 
     # -- unified dispatch: OpenClaw chat turns ----------------------------------------------------- #
@@ -1106,7 +1114,21 @@ class TaskManager:
                               budget=spec.budget)
                 if be.is_active(thread_id):
                     raise TaskError("task_state_conflict", "The task cannot do that in its current state.")
-                await be.send(thread_id, text)
+                if be.task_info(thread_id).resumable:
+                    await be.send(thread_id, text)
+                else:
+                    # The last turn failed or was stopped for good, so the backend will not
+                    # resume it. The session KEY is deterministic (agent:<seat>:<thread>), so
+                    # starting the task again under the same id continues the same conversation.
+                    be.forget_task(thread_id)
+                    self._cursor[thread_id] = -1
+                    self._cost_seen.pop(thread_id, None)
+                    fresh = {"state": "queued", "reason": None, "finished_at": None, "last_seq": -1}
+                    row.update(fresh)
+                    store.update_task(thread_id, **fresh)
+                    ctx = TaskContext(data_dir=self.data_dir, task_id=thread_id,
+                                      origin_thread_id=thread_id, secrets=self.secrets)
+                    await be.start_task(spec, text, ctx)
                 self._ensure_pump(thread_id)
             return await asyncio.wait_for(fut, timeout=(timeout_s + 30) if timeout_s else None)
         except asyncio.CancelledError:
@@ -1252,6 +1274,22 @@ async def shutdown() -> None:
         await mgr.shutdown()
 
 
-__all__ = ["BACKEND_LABELS", "ChatOutcome", "Hooks", "SecretError", "TaskError", "TaskManager",
-           "TERMINAL_STATES", "args_summary", "bind", "get_manager", "manager", "public_agent",
-           "public_approval", "public_task", "shutdown", "startup", "unified_dispatch_enabled"]
+__all__ = [
+    "BACKEND_LABELS",
+    "TERMINAL_STATES",
+    "ChatOutcome",
+    "Hooks",
+    "SecretError",
+    "TaskError",
+    "TaskManager",
+    "args_summary",
+    "bind",
+    "get_manager",
+    "manager",
+    "public_agent",
+    "public_approval",
+    "public_task",
+    "shutdown",
+    "startup",
+    "unified_dispatch_enabled",
+]

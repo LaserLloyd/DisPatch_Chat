@@ -689,7 +689,7 @@ def redacted_summary() -> dict[str, Any]:
             "trust_repo_settings": bool((spec.get("workspace_policy") or {}).get("trust_repo_settings")),
             "has_budget": bool(spec.get("budget")),
         })
-    settings = {k: v for k, v in all_settings().items()}
+    settings = dict(all_settings().items())
     return {"agents": agents, "tasks_by_state": by_state, "tasks_by_backend": by_backend,
             "task_events": events, "approvals": approvals, "spend_today": spend,
             "settings": settings, "prompts_included": False}

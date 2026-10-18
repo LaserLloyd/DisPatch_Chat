@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from agents_world import TERMINAL, aw, event_types, make_agent, spec, wait_state  # noqa: F401
+from agents_world import TERMINAL, aw, event_types, make_agent, spec, wait_state
 
 from app import agents_service
 from app import agents_store as store
