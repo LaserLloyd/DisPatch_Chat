@@ -126,8 +126,10 @@ a running instance: the `-wal` file holds the recent writes.
   container**, which this image does not contain. The `knowledge` profile gives you kiwix and the
   CLI as a separate container (`compose run --rm infoforge …`); wiring the two is the InfoForge
   integration work, not part of this file.
-- StudioForge's `-cuda` image has no compiler: its first start needs an engine supplied or built
-  once (see its [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md)).
+- StudioForge's `-cuda` image has no compiler: on a fresh volume its entrypoint downloads upstream's
+  prebuilt llama.cpp engine once (about 150 MB from github.com; `SF_ENGINE_BOOTSTRAP=0` skips it, and the
+  [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md) covers the
+  offline alternatives). Allow about a minute before the first model load.
 - Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an owner (the setup
   wizard) and the StudioForge connection carries an API key (above).
 - **Find servers** in DisPatch probes loopback and the Docker host, not the compose hostname: use
