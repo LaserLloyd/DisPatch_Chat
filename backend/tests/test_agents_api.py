@@ -96,6 +96,8 @@ def test_a_member_sees_and_uses_only_agents_published_to_them(aw):
     off = make_agent(aw.owner, "Off", published=["*"], disabled=True)
     seen = {a["name"] for a in aw.eve.get("/api/agents/available").json()["agents"]}
     assert seen == {"Open", "Mine"}
+    assert all("published_to" not in a and "spec" not in a
+               for a in aw.eve.get("/api/agents/available").json()["agents"]), "who else may use it is not for a Member"
     # Fay holds the same permission but was not named: she gets the open one only.
     assert {a["name"] for a in aw.fay.get("/api/agents/available").json()["agents"]} == {"Open"}
     for agent in (hidden, off, mine):

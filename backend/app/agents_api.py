@@ -326,6 +326,7 @@ async def available_agents(request: Request, _=_DISPATCH):
         spec_backend = (a["spec"] or {}).get("backend") or ""
         problem = mgr.backend_problem(spec_backend)
         entry = public_agent(a, full=False)
+        entry.pop("published_to", None)            # who else may use it is the managers' business
         entry["data_leaves_host"] = leaves.get(spec_backend, True)
         entry["available"] = problem is None and not a["disabled"]
         entry["problem"] = None if problem is None else {"code": problem[0].value, "message": problem[1]}
@@ -347,7 +348,7 @@ async def list_backends(request: Request, _=_MANAGE):
 # --------------------------------------------------------------------------- #
 
 
-class ClaudeCredentialsIn(BaseModel):
+class AgentClaudeCredentialsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     route: Literal["api_key", "bedrock", "google", "foundry"] = "api_key"
@@ -373,7 +374,7 @@ async def claude_credentials(request: Request, _=_MANAGE):
 
 
 @router.put("/api/agents/credentials/claude")
-async def put_claude_credentials(body: ClaudeCredentialsIn, request: Request, _=_MANAGE):
+async def put_claude_credentials(body: AgentClaudeCredentialsIn, request: Request, _=_MANAGE):
     mgr = _mgr()
     pr = _principal(request)
     if body.api_key:
@@ -404,7 +405,7 @@ async def delete_claude_key(request: Request, _=_MANAGE):
     return mgr.credential_status()
 
 
-class SecretIn(BaseModel):
+class AgentSecretIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: str = Field(min_length=1, max_length=4096, repr=False)
@@ -422,7 +423,7 @@ async def list_secrets(request: Request, _=_MANAGE):
 
 
 @router.put("/api/agents/secrets/{name}")
-async def put_secret(name: str, body: SecretIn, request: Request, _=_MANAGE):
+async def put_secret(name: str, body: AgentSecretIn, request: Request, _=_MANAGE):
     if not agents_service.mcp_secret_ok(name):
         return _problem(422, "agent_invalid", "A secret name must start with MCP_ or STUDIOFORGE_ "
                         "(capital letters, digits and underscores).")
@@ -487,7 +488,7 @@ async def put_settings(body: AgentSettingsIn, request: Request, _=_MANAGE):
     return _settings_view()
 
 
-class ProfileBudgetIn(BaseModel):
+class AgentProfileBudgetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     usd_per_day: float | None = Field(default=None, gt=0, le=100_000)
@@ -502,7 +503,7 @@ async def get_profile_budgets(request: Request, _=_MANAGE):
 
 
 @router.put("/api/agents/profile-budgets/{profile_id}")
-async def put_profile_budget(profile_id: str, body: ProfileBudgetIn, request: Request, _=_MANAGE):
+async def put_profile_budget(profile_id: str, body: AgentProfileBudgetIn, request: Request, _=_MANAGE):
     if accounts.get_profile(profile_id) is None:
         return _problem(404, "agent_invalid", "published_to: that is not a profile")
     budget = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -526,7 +527,7 @@ async def purge_now(request: Request, _=_MANAGE):
 # --------------------------------------------------------------------------- #
 
 
-class TaskIn(BaseModel):
+class AgentTaskIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str = Field(min_length=1, max_length=80)
@@ -536,19 +537,19 @@ class TaskIn(BaseModel):
     repo_path: str | None = Field(default=None, max_length=1024)
 
 
-class MessageIn(BaseModel):
+class AgentTaskMessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=MESSAGE_MAX)
 
 
-class ResumeIn(BaseModel):
+class AgentTaskResumeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str | None = Field(default=None, max_length=MESSAGE_MAX)
 
 
-class ApprovalIn(BaseModel):
+class AgentApprovalIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["allow", "deny"]
@@ -556,7 +557,7 @@ class ApprovalIn(BaseModel):
 
 
 @router.post("/api/tasks", status_code=201)
-async def create_task(body: TaskIn, request: Request, _=_DISPATCH):
+async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
     pr = _principal(request)
     mgr = _mgr()
     agent = _usable_agent(pr, body.agent_id)
@@ -656,7 +657,7 @@ def _running(row: dict[str, Any]) -> bool:
 
 
 @router.post("/api/tasks/{task_id}/send", status_code=202)
-async def send_to_task(task_id: str, body: MessageIn, request: Request, _=_DISPATCH):
+async def send_to_task(task_id: str, body: AgentTaskMessageIn, request: Request, _=_DISPATCH):
     pr = _principal(request)
     row = _task_for(pr, task_id)
     if row["hold"] or row["state"] == "queued":
@@ -685,7 +686,7 @@ async def interrupt_task(task_id: str, request: Request, _=_DISPATCH):
 
 
 @router.post("/api/tasks/{task_id}/resume", status_code=202)
-async def resume_task(task_id: str, body: ResumeIn, request: Request, _=_DISPATCH):
+async def resume_task(task_id: str, body: AgentTaskResumeIn, request: Request, _=_DISPATCH):
     row = _task_for(_principal(request), task_id)
     if _running(row) or row["hold"] or not row["resumable"]:
         return _problem(409, "task_state_conflict", "The task cannot do that in its current state.")
@@ -753,7 +754,7 @@ async def dismiss_task(task_id: str, request: Request, _=_APPROVE):
 
 
 @router.post("/api/approvals/{request_id}")
-async def answer_approval(request_id: str, body: ApprovalIn, request: Request, _=_APPROVE):
+async def answer_approval(request_id: str, body: AgentApprovalIn, request: Request, _=_APPROVE):
     pr = _principal(request)
     mgr = _mgr()
     await mgr.flush()

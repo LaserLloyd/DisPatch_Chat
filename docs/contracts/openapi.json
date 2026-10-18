@@ -17,6 +17,63 @@
         "title": "AdvisorActionIn",
         "type": "object"
       },
+      "AgentApprovalIn": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "scope": {
+            "default": "once",
+            "enum": [
+              "once",
+              "task"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "AgentApprovalIn",
+        "type": "object"
+      },
+      "AgentClaudeCredentialsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "route": {
+            "default": "api_key",
+            "enum": [
+              "api_key",
+              "bedrock",
+              "google",
+              "foundry"
+            ],
+            "title": "Route",
+            "type": "string"
+          }
+        },
+        "title": "AgentClaudeCredentialsIn",
+        "type": "object"
+      },
       "AgentIn": {
         "additionalProperties": false,
         "properties": {
@@ -128,6 +185,81 @@
         "title": "AgentPatch",
         "type": "object"
       },
+      "AgentProfileBudgetIn": {
+        "additionalProperties": false,
+        "properties": {
+          "max_tokens": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Turns"
+          },
+          "max_wall_clock_s": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 604800.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Wall Clock S"
+          },
+          "usd_per_day": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Per Day"
+          }
+        },
+        "title": "AgentProfileBudgetIn",
+        "type": "object"
+      },
+      "AgentSecretIn": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "AgentSecretIn",
+        "type": "object"
+      },
       "AgentSettingsIn": {
         "additionalProperties": false,
         "properties": {
@@ -172,31 +304,98 @@
         "title": "AgentSettingsIn",
         "type": "object"
       },
-      "ApprovalIn": {
+      "AgentTaskIn": {
         "additionalProperties": false,
         "properties": {
-          "decision": {
-            "enum": [
-              "allow",
-              "deny"
-            ],
-            "title": "Decision",
+          "agent_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Agent Id",
             "type": "string"
           },
-          "scope": {
-            "default": "once",
-            "enum": [
-              "once",
-              "task"
+          "origin_message_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Scope",
+            "title": "Origin Message Id"
+          },
+          "origin_thread_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Thread Id"
+          },
+          "prompt": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repo_path": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Path"
+          }
+        },
+        "required": [
+          "agent_id",
+          "prompt"
+        ],
+        "title": "AgentTaskIn",
+        "type": "object"
+      },
+      "AgentTaskMessageIn": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Message",
             "type": "string"
           }
         },
         "required": [
-          "decision"
+          "message"
         ],
-        "title": "ApprovalIn",
+        "title": "AgentTaskMessageIn",
+        "type": "object"
+      },
+      "AgentTaskResumeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "title": "AgentTaskResumeIn",
         "type": "object"
       },
       "Body_drop_file_api_drop_post": {
@@ -739,36 +938,6 @@
           }
         },
         "title": "BotPatchIn",
-        "type": "object"
-      },
-      "ClaudeCredentialsIn": {
-        "additionalProperties": false,
-        "properties": {
-          "api_key": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key"
-          },
-          "route": {
-            "default": "api_key",
-            "enum": [
-              "api_key",
-              "bedrock",
-              "google",
-              "foundry"
-            ],
-            "title": "Route",
-            "type": "string"
-          }
-        },
-        "title": "ClaudeCredentialsIn",
         "type": "object"
       },
       "CommentIn": {
@@ -1627,22 +1796,6 @@
         "title": "MessageFeedbackIn",
         "type": "object"
       },
-      "MessageIn": {
-        "additionalProperties": false,
-        "properties": {
-          "message": {
-            "maxLength": 8000,
-            "minLength": 1,
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
-        ],
-        "title": "MessageIn",
-        "type": "object"
-      },
       "PasswordIn": {
         "additionalProperties": false,
         "properties": {
@@ -1904,65 +2057,6 @@
         "title": "PersonPatch",
         "type": "object"
       },
-      "ProfileBudgetIn": {
-        "additionalProperties": false,
-        "properties": {
-          "max_tokens": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1000000000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Tokens"
-          },
-          "max_turns": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Turns"
-          },
-          "max_wall_clock_s": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 604800.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Wall Clock S"
-          },
-          "usd_per_day": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Per Day"
-          }
-        },
-        "title": "ProfileBudgetIn",
-        "type": "object"
-      },
       "ReactionPatchIn": {
         "properties": {
           "aliases": {
@@ -2054,25 +2148,6 @@
         "title": "ReactionSettingsIn",
         "type": "object"
       },
-      "ResumeIn": {
-        "additionalProperties": false,
-        "properties": {
-          "message": {
-            "anyOf": [
-              {
-                "maxLength": 8000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          }
-        },
-        "title": "ResumeIn",
-        "type": "object"
-      },
       "ScoreIn": {
         "properties": {
           "brief": {
@@ -2145,6 +2220,25 @@
         "title": "ScoreIn",
         "type": "object"
       },
+      "SecretIn": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          },
+          "pin": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Pin",
+            "type": "string"
+          }
+        },
+        "title": "SecretIn",
+        "type": "object"
+      },
       "TagsIn": {
         "properties": {
           "add": {
@@ -2163,65 +2257,6 @@
           }
         },
         "title": "TagsIn",
-        "type": "object"
-      },
-      "TaskIn": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_id": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Agent Id",
-            "type": "string"
-          },
-          "origin_message_id": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Origin Message Id"
-          },
-          "origin_thread_id": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Origin Thread Id"
-          },
-          "prompt": {
-            "maxLength": 20000,
-            "minLength": 1,
-            "title": "Prompt",
-            "type": "string"
-          },
-          "repo_path": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repo Path"
-          }
-        },
-        "required": [
-          "agent_id",
-          "prompt"
-        ],
-        "title": "TaskIn",
         "type": "object"
       },
       "UpdateBotOrderIn": {
@@ -2331,41 +2366,6 @@
           "signal"
         ],
         "title": "VoteIn",
-        "type": "object"
-      },
-      "app__agents_api__SecretIn": {
-        "additionalProperties": false,
-        "properties": {
-          "value": {
-            "maxLength": 4096,
-            "minLength": 1,
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "value"
-        ],
-        "title": "SecretIn",
-        "type": "object"
-      },
-      "app__people_api__SecretIn": {
-        "additionalProperties": false,
-        "properties": {
-          "password": {
-            "default": "",
-            "maxLength": 256,
-            "title": "Password",
-            "type": "string"
-          },
-          "pin": {
-            "default": "",
-            "maxLength": 128,
-            "title": "Pin",
-            "type": "string"
-          }
-        },
-        "title": "SecretIn",
         "type": "object"
       }
     }
@@ -3034,7 +3034,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ClaudeCredentialsIn"
+                "$ref": "#/components/schemas/AgentClaudeCredentialsIn"
               }
             }
           },
@@ -3097,7 +3097,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProfileBudgetIn"
+                "$ref": "#/components/schemas/AgentProfileBudgetIn"
               }
             }
           },
@@ -3212,7 +3212,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__agents_api__SecretIn"
+                "$ref": "#/components/schemas/AgentSecretIn"
               }
             }
           },
@@ -3407,7 +3407,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApprovalIn"
+                "$ref": "#/components/schemas/AgentApprovalIn"
               }
             }
           },
@@ -10896,7 +10896,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__people_api__SecretIn"
+                "$ref": "#/components/schemas/SecretIn"
               }
             }
           },
@@ -10978,7 +10978,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__people_api__SecretIn"
+                "$ref": "#/components/schemas/SecretIn"
               }
             }
           },
@@ -12403,7 +12403,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TaskIn"
+                "$ref": "#/components/schemas/AgentTaskIn"
               }
             }
           },
@@ -12693,7 +12693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResumeIn"
+                "$ref": "#/components/schemas/AgentTaskResumeIn"
               }
             }
           },
@@ -12740,7 +12740,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MessageIn"
+                "$ref": "#/components/schemas/AgentTaskMessageIn"
               }
             }
           },
