@@ -122,6 +122,17 @@ def _not_found_agent() -> HTTPException:
     return exc
 
 
+def _still_usable(principal: policy.Principal, row: dict[str, Any]) -> None:
+    """Following up on or resuming a task is dispatching again: the agent must still be one this
+    person may use (not unpublished, switched off, deleted or given a stricter permission since)."""
+    if principal.is_operator:
+        return
+    a = store.get_agent(row["agent_id"])
+    if a is None:
+        raise _not_found_agent()
+    _usable_agent(principal, a["id"])
+
+
 def _task_for(principal: policy.Principal, task_id: str) -> dict[str, Any]:
     row = store.get_task(task_id)
     if row is None or row["kind"] == "chat" or not may_see_task(principal, row["owner"]):
@@ -156,6 +167,15 @@ class AgentPatch(BaseModel):
     disabled: bool | None = None
 
 
+def _is_local_url(url: str | None) -> bool:
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+
+
 def owner_only_features(spec: AgentSpec) -> set[str]:
     """Powers that are host-level in effect: only the Owner (``admin_system``) may grant them."""
     out: set[str] = set()
@@ -166,6 +186,10 @@ def owner_only_features(spec: AgentSpec) -> set[str]:
             out.add("stdio_mcp")
         if srv.privileged:
             out.add("privileged_mcp")
+        if srv.header_secrets and not _is_local_url(srv.url):
+            # A stored secret is sent to this address: only to a server on this machine unless the
+            # Owner says otherwise, or an Admin could point a stored key at a host of their choosing.
+            out.add("secret_to_remote_server")
     if spec.approval_policy.unattended_allow:
         out.add("unattended_allow")
     return out
@@ -577,6 +601,11 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
         allowed = {b.id for b in config.load_bots()} if pr.is_operator else policy.of(request).allowed_bot_ids(config.load_bots())
         if info is None or info.get("bot_id") not in allowed:
             raise HTTPException(404, "Thread not found")
+        if info.get("restricted_visible", True):
+            # What the agent is asked and what it answers is posted into this chat; a Restricted
+            # profile can read this one, so the task cannot start from here.
+            return _problem(409, "task_thread_not_allowed",
+                            "Tasks cannot be assigned from a chat that Restricted profiles can read.")
     try:
         row = await mgr.dispatch(agent=agent, prompt=body.prompt, owner=agents_service.principal_key(pr),
                                  origin_thread_id=thread_id, origin_message_id=body.origin_message_id,
@@ -664,6 +693,7 @@ async def send_to_task(task_id: str, body: AgentTaskMessageIn, request: Request,
         return _problem(409, "task_state_conflict", "The task cannot do that in its current state.")
     if not _running(row) and not row["resumable"]:
         return _problem(409, "task_state_conflict", "The task cannot do that in its current state.")
+    _still_usable(pr, row)
     try:
         mode = await _mgr().send(row, body.message)
     except BudgetExhausted as e:
@@ -687,9 +717,11 @@ async def interrupt_task(task_id: str, request: Request, _=_DISPATCH):
 
 @router.post("/api/tasks/{task_id}/resume", status_code=202)
 async def resume_task(task_id: str, body: AgentTaskResumeIn, request: Request, _=_DISPATCH):
-    row = _task_for(_principal(request), task_id)
+    pr = _principal(request)
+    row = _task_for(pr, task_id)
     if _running(row) or row["hold"] or not row["resumable"]:
         return _problem(409, "task_state_conflict", "The task cannot do that in its current state.")
+    _still_usable(pr, row)
     try:
         await _mgr().resume(row, body.message)
     except BudgetExhausted as e:

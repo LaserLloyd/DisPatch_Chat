@@ -6705,6 +6705,12 @@ function renderStreamMarkdown(id) {
   if (isNearBottom(220)) scrollToBottom(true);
 }
 
+// A push ping names a thread - or, for an agent task, `task:<id>`, which opens the Tasks page on it.
+function openFromPing(id) {
+  if (id.startsWith('task:')) tasksUi.openPage({ focusTask: id.slice(5) });
+  else openThreadFromApp(id);
+}
+
 // ===================== Agents and tasks =====================
 // One instance for the page: it owns the Tasks dialog, the Assign dialog, the inline task cards and
 // the routing of `task.*` frames. Built lazily-safe: nothing touches the network until the
@@ -9264,7 +9270,7 @@ async function startApp() {
     const linked = POPOUT_PARAMS.get('thread');
     if (linked) {
       history.replaceState({ view: 'bots' }, '', '/');
-      openThreadFromApp(linked);
+      openFromPing(linked);
     }
   }
   // A tapped notification while the app is already open (sw.js
@@ -9272,7 +9278,7 @@ async function startApp() {
   navigator.serviceWorker?.addEventListener('message', (ev) => {
     const d = ev.data;
     if (d && d.type === 'dispatch:open-thread' && typeof d.thread_id === 'string') {
-      openThreadFromApp(d.thread_id);
+      openFromPing(d.thread_id);
     }
   });
   try { setThreadListCollapsed(localStorage.getItem('tl-collapsed') === '1'); } catch {}

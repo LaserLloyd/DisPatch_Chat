@@ -198,6 +198,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
 | [`task_not_found`](#task_not_found) | 404 | Task not found |
 | [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
+| [`task_thread_not_allowed`](#task_thread_not_allowed) | 409 | Tasks cannot be assigned from a chat that Restricted profiles can read. |
 | [`test_flag_invalid`](#test_flag_invalid) | 422 | test must be true or false |
 | [`thread_id_required`](#thread_id_required) | 400 | thread_id (or all:true) required |
 | [`thread_not_found`](#thread_not_found) | 404 | Thread not found |
@@ -1668,6 +1669,14 @@ HTTP **404** - Task not found
 HTTP **409** - The task cannot do that in its current state.
 
 **Fix:** Reload the task: it may have just finished, or it is still running.
+
+## task_thread_not_allowed
+
+<a id="task_thread_not_allowed"></a>
+
+HTTP **409** - Tasks cannot be assigned from a chat that Restricted profiles can read.
+
+**Fix:** Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.
 
 ## test_flag_invalid
 

@@ -399,7 +399,7 @@ class BaseBackend:
 
     def restore_task(self, task_id: str, spec: AgentSpec, ctx: TaskContext, *,
                      session_id: str | None, last_seq: int = -1, usd_so_far: float = 0.0,
-                     tokens_so_far: int = 0, turns_so_far: int = 0) -> None:
+                     tokens_so_far: int = 0, turns_so_far: int = 0, elapsed_s_so_far: float = 0.0) -> None:
         """Re-register a task after a restart so ``resume`` works on it.
 
         W11b calls this for every non-terminal task row at startup (and lazily for
@@ -418,6 +418,8 @@ class BaseBackend:
         if turns_so_far:
             rt.tracker.record_turns(turns_so_far)
             rt.turns_this_task = int(turns_so_far)
+        if elapsed_s_so_far:
+            rt.tracker.reset_clock(elapsed_s_so_far)       # the wall-clock cap is cumulative across restarts
 
     def has_task(self, task_id: str) -> bool:
         return task_id in self._tasks
@@ -438,6 +440,17 @@ class BaseBackend:
         rt.spec = rt.spec.model_copy(update=changes)
         if "budget" in changes:
             rt.tracker.budget = rt.spec.budget
+
+    def replace_spec(self, task_id: str, spec: AgentSpec) -> None:
+        """Swap in a freshly built spec between runs (the agent was edited since this task began)."""
+        rt = self._rt(task_id)
+        self._check_spec(spec)
+        rt.spec = spec
+        rt.tracker.budget = spec.budget
+
+    def reset_clock(self, task_id: str) -> None:
+        """A per-turn timeout: this run's wall clock starts again from zero."""
+        self._rt(task_id).tracker.reset_clock(0.0)
 
     def update_budget(self, task_id: str, budget: Budget, spent_today_usd: float = 0.0) -> None:
         """Swap in the budget a (re)start should be held to (W11b recomputes it from the

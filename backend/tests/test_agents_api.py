@@ -323,7 +323,7 @@ def test_turn_and_time_limits_come_from_the_tighter_of_agent_and_profile(aw):
 
 def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
     a = make_agent(aw.owner, "Notifier", published=["*"])
-    thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    thread = aw.owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]      # audience: members
     tid = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:approval",
                                             "origin_thread_id": thread}).json()["task"]["id"]
     rid = wait_state(aw.owner, tid, "awaiting_approval")["pending_approvals"][0]["request_id"]
@@ -341,6 +341,68 @@ def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
     assert all(c and c["task_id"] == tid for c in cards)
     # the message that carries the live card is remembered on the task
     assert aw.owner.get(f"/api/tasks/{tid}").json()["task"]["origin_message_id"] == "msg-1"
+
+
+def test_a_task_never_starts_from_a_chat_a_restricted_profile_can_read(aw):
+    """What the agent is asked and answers is posted into the originating chat. A chat with a
+    character a Restricted profile may talk to would hand both to the child."""
+    a = make_agent(aw.owner, published=["*"])
+    kids_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]    # audience: all
+    for who in (aw.owner, aw.eve):
+        r = who.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
+        assert r.status_code == 409 and r.json()["error"]["code"] == "task_thread_not_allowed"
+    assert store.list_tasks() == []
+    members = aw.owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": members})
+    assert ok.status_code == 201
+    # and the manager itself refuses to post into such a thread even if the character changes later
+    mgr = agents_service.get_manager()
+    assert aw.owner.portal.call(mgr._thread_postable, kids_thread) is False
+    assert aw.owner.portal.call(mgr._thread_postable, members) is True
+
+
+def test_unpublishing_an_agent_stops_follow_ups_and_resumes_but_not_the_history(aw):
+    a = make_agent(aw.owner, "Revoked", published=[aw.eve_id])
+    tid = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
+    wait_state(aw.eve, tid, "succeeded")
+    aw.owner.patch(f"/api/agents/{a['id']}", json={"published_to": []})
+    r = aw.eve.post(f"/api/tasks/{tid}/send", json={"message": "more"})
+    assert r.status_code == 404 and r.json()["error"]["code"] == "agent_not_found"
+    assert aw.eve.get(f"/api/tasks/{tid}").status_code == 200, "the history stays readable"
+    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "more"}).status_code == 202
+    wait_state(aw.owner, tid, "succeeded")
+
+
+def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):
+    a = make_agent(aw.owner, "Editable", published=["*"], spec=spec(budget={"max_usd": 5}))
+    tid = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
+    wait_state(aw.owner, tid, "succeeded")
+    assert aw.owner.patch(f"/api/agents/{a['id']}", json={"spec": spec(budget={"max_usd": 0.5})}).status_code == 200
+    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "again"}).status_code == 202
+    time.sleep(0.4)
+    assert aw.mgr.backends["fake"]._tasks[tid].spec.budget.max_usd == 0.5
+
+
+def test_an_admin_cannot_point_a_stored_secret_at_a_server_of_their_choosing(aw):
+    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+    admin = aw.caller(9)
+    assert aw.world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    remote = {"s": {"transport": "http", "url": "https://attacker.example/mcp",
+                    "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
+    local = {"s": {"transport": "http", "url": "http://127.0.0.1:1234/mcp",
+                   "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
+    r = admin.post("/api/agents", json={"name": "Exfil", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner"
+    assert admin.post("/api/agents", json={"name": "Local", "spec": spec(tool_allowlist=["Read"], mcp_servers=local)}).status_code == 201
+    assert aw.owner.post("/api/agents", json={"name": "Remote", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)}).status_code == 201
+
+
+def test_a_rejected_key_is_not_echoed_back_in_the_422(aw):
+    long_key = "sk-ant-api03-" + "Q" * 600
+    r = aw.owner.put("/api/agents/credentials/claude", json={"route": "api_key", "api_key": long_key})
+    assert r.status_code == 422 and "QQQQQQQQ" not in r.text
+    r = aw.owner.put("/api/agents/secrets/MCP_X", json={"value": "V" * 5000})
+    assert r.status_code == 422 and "VVVVVVVV" not in r.text
 
 
 def test_a_task_can_only_attach_to_a_chat_the_caller_may_see(aw):

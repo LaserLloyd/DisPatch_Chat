@@ -634,6 +634,10 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
     envelope wrapped around it.
     """
     errs = _encodable(jsonable_encoder(exc.errors()))
+    if request.url.path.startswith(("/api/agents/credentials", "/api/agents/secrets")):
+        # These bodies carry a key: pydantic echoes the offending `input`, which would hand a
+        # too-long key straight back. Write-only means write-only, errors included.
+        errs = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in errs]
     envelope = errors.envelope("validation_error")
     if _wants_problem_json(request):
         doc = problem.body(422, errs, code="validation_error")
@@ -7417,7 +7421,13 @@ llm_api.bind(llm_api.Hooks(
 
 async def _agents_thread_info(thread_id: str) -> dict | None:
     thread = await db.get_thread(thread_id)
-    return {"bot_id": thread.bot_id} if thread else None
+    if not thread:
+        return None
+    bot = config.get_bot(thread.bot_id)
+    # A character a Restricted profile may chat with (audience all / restricted), or one that no
+    # longer exists, is a thread whose lines they can read: agent prompts and results never go there.
+    visible = bot is None or bot.audience in ("all", "restricted")
+    return {"bot_id": thread.bot_id, "restricted_visible": visible}
 
 
 # Hand the task manager the three pieces of this module it needs. Lambdas re-resolve the

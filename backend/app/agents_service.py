@@ -554,10 +554,24 @@ class TaskManager:
             await self._kick()
         return store.get_task(row["task_id"]) or row
 
+    async def _thread_postable(self, tid: str | None) -> bool:
+        """May the manager write a line about a task into this thread? Only into one that exists
+        and that a Restricted profile cannot read: what an agent was asked, and what it answered,
+        is not for them (the same rule the API applies when a task is attached to a thread)."""
+        if not tid or self.hooks.deliver is None:
+            return False
+        if self.hooks.thread_info is None:
+            return True
+        try:
+            info = await self.hooks.thread_info(tid)
+        except Exception:
+            return False
+        return bool(info) and not info.get("restricted_visible", True)
+
     async def _post_assign_card(self, row: dict[str, Any]) -> None:
         """A line in the originating chat that carries the live task card."""
         tid = row.get("origin_thread_id")
-        if not tid or self.hooks.deliver is None:
+        if not await self._thread_postable(tid):
             return
         snippet = " ".join((row.get("prompt") or "").split())
         snippet = snippet if len(snippet) <= 160 else snippet[:159] + "…"
@@ -589,12 +603,34 @@ class TaskManager:
                     continue
                 await self._start(self._rows.setdefault(row["task_id"], row))
 
+    def _fresh_spec(self, row: dict[str, Any]) -> AgentSpec:
+        """The agent's definition as it is NOW (an edit to tools, approval policy, budget or
+        instructions applies to the next run of an existing task), falling back to the snapshot
+        stored with the task when the agent is gone or is a virtual OpenClaw seat."""
+        spec = AgentSpec.model_validate_json(row["spec_json"])
+        if str(row["agent_id"]).startswith("openclaw:"):
+            return spec
+        agent = store.get_agent(row["agent_id"])
+        if agent is None:
+            return spec
+        try:
+            fresh = AgentSpec.model_validate(agent["spec"])
+        except Exception:
+            return spec
+        if fresh.backend != spec.backend:
+            return spec
+        blob = fresh.model_dump_json()
+        if blob != row["spec_json"]:
+            row["spec_json"] = blob
+            self._enqueue(store.op_task(row["task_id"], spec_json=blob))
+        return fresh
+
     async def _start(self, row: dict[str, Any]) -> None:
         tid = row["task_id"]
         self._live.add(tid)
         self._launched.add(tid)
         try:
-            spec = AgentSpec.model_validate_json(row["spec_json"])
+            spec = self._fresh_spec(row)
             backend = self.backend_for(spec.backend)
             budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0)
             ctx = TaskContext(
@@ -644,7 +680,12 @@ class TaskManager:
                 return
             try:
                 async for ev in backend.events(tid, after_seq=self._cursor.get(tid, -1)):
-                    await self._handle(tid, ev)
+                    try:
+                        await self._handle(tid, ev)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception("task %s: event %s could not be recorded", tid, getattr(ev, "seq", "?"))
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -744,6 +785,8 @@ class TaskManager:
             out["result_text"] = d["text"]
         if d.get("session_id"):
             out["session_id"] = d["session_id"]
+        if d.get("duration_ms") is not None:
+            out["elapsed_s"] = round(int(d["duration_ms"]) / 1000, 3)     # cumulative across resumes
         return out
 
     async def _enforce_shared_limits(self, row: dict[str, Any]) -> None:
@@ -836,7 +879,7 @@ class TaskManager:
                 self.hooks.push(f"task_{kind}" if kind != "approval" else "approval",
                                 f"task:{row['task_id']}", NOTIFY_TITLES[kind])
         tid, deliver = row.get("origin_thread_id"), self.hooks.deliver
-        if not tid or deliver is None:
+        if not await self._thread_postable(tid):
             return
         name = row["agent_name"]
         if kind == "approval":
@@ -911,13 +954,14 @@ class TaskManager:
                               secrets=self.secrets)
             be.restore_task(tid, spec, ctx, session_id=row["session_id"], last_seq=row["last_seq"],
                             usd_so_far=row["cost_usd"] or 0.0, tokens_so_far=row["tokens"] or 0,
-                            turns_so_far=row["turns"] or 0)
+                            turns_so_far=row["turns"] or 0, elapsed_s_so_far=row.get("elapsed_s") or 0.0)
             self._cursor[tid] = max(self._cursor.get(tid, -1), row["last_seq"])
         return be
 
     def _refresh_budget(self, row: dict[str, Any], be: BaseBackend) -> None:
-        spec = AgentSpec.model_validate_json(row["spec_json"])
+        spec = self._fresh_spec(row)
         budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0)
+        be.replace_spec(row["task_id"], spec.model_copy(update={"budget": budget}))
         be.update_budget(row["task_id"], budget, 0.0)
 
     async def interrupt(self, row: dict[str, Any]) -> None:
@@ -931,6 +975,7 @@ class TaskManager:
         active = be.is_active(tid)
         if not active:
             self._refresh_budget(row, be)
+            self._live.add(tid)
         await be.send(tid, message)
         if not active:
             self._ensure_pump(tid)
@@ -940,6 +985,7 @@ class TaskManager:
     async def resume(self, row: dict[str, Any], message: str | None = None) -> None:
         be = self._ensure_registered(row)
         self._refresh_budget(row, be)
+        self._live.add(row["task_id"])
         await be.resume(row["task_id"], message)
         self._ensure_pump(row["task_id"])
 
@@ -1113,6 +1159,7 @@ class TaskManager:
                 be = self._ensure_registered(row)
                 be.patch_spec(thread_id, model=model, backend_options=opts,
                               budget=spec.budget)
+                be.reset_clock(thread_id)                    # the timeout is per turn, not per thread
                 if be.is_active(thread_id):
                     raise TaskError("task_state_conflict", "The task cannot do that in its current state.")
                 if be.task_info(thread_id).resumable:
@@ -1124,7 +1171,8 @@ class TaskManager:
                     be.forget_task(thread_id)
                     self._cursor[thread_id] = -1
                     self._cost_seen.pop(thread_id, None)
-                    fresh = {"state": "queued", "reason": None, "finished_at": None, "last_seq": -1}
+                    fresh = {"state": "queued", "reason": None, "finished_at": None, "last_seq": -1,
+                             "cost_usd": None, "tokens": 0, "turns": 0, "elapsed_s": 0.0}
                     row.update(fresh)
                     store.update_task(thread_id, **fresh)
                     ctx = TaskContext(data_dir=self.data_dir, task_id=thread_id,
@@ -1189,11 +1237,24 @@ class TaskManager:
         spec = spec.model_copy(update={"budget": Budget(max_wall_clock_s=timeout_s)})
         store.update_task(row["task_id"], hold=None, prompt=message, spec_json=spec.model_dump_json())
         row = store.get_task(row["task_id"]) or row
-        self._rows[row["task_id"]] = row
+        tid = row["task_id"]
+        if row["state"] in ("succeeded", "failed", "cancelled"):
+            raise TaskError("task_state_conflict", "The task cannot do that in its current state.")
+        self._rows[tid] = row
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._waiters[row["task_id"]].append(fut)
-        await self._kick()
-        outcome: ChatOutcome = await asyncio.wait_for(fut, timeout=timeout_s + 60)
+        self._waiters[tid].append(fut)
+        try:
+            await self._kick()
+            outcome: ChatOutcome = await asyncio.wait_for(fut, timeout=timeout_s + 60)
+        except (TimeoutError, asyncio.CancelledError):
+            be = self.backends.get(row["backend"])
+            if be is not None and be.has_task(tid):
+                with contextlib.suppress(Exception):
+                    await be.interrupt(tid)
+            raise
+        finally:
+            with contextlib.suppress(ValueError):
+                self._waiters[tid].remove(fut)
         if outcome.state != "succeeded":
             raise TaskError(outcome.error_code or "agent_backend_rejected",
                             outcome.error_message or outcome.reason or "the agent did not finish", 502)

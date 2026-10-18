@@ -453,8 +453,15 @@ export function createTaskCard(deps) {
 
   let steerInput = null;
 
+  let controlsSig = '';
+
   function paintControls() {
     if (!task) return;
+    // Rebuild only when the controls themselves change. A live frame arrives many times a second;
+    // replacing the buttons each time would drop keyboard focus from Stop and the steer box.
+    const sig = [task.state, task.hold, !!task.resumable, !!deps.canApprove].join('|');
+    if (sig === controlsSig) return;
+    controlsSig = sig;
     const state = task.state;
     const active = ACTIVE.has(state);
     const kids = [];

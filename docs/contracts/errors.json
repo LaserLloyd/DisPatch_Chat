@@ -1831,6 +1831,16 @@
       "status": 409
     },
     {
+      "code": "task_thread_not_allowed",
+      "docs": "task_thread_not_allowed",
+      "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
+      "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
+      "patterns": [
+        "Tasks cannot be assigned from a chat that Restricted profiles can read."
+      ],
+      "status": 409
+    },
+    {
       "code": "test_flag_invalid",
       "docs": "test_flag_invalid",
       "fix": "Fix the fields in detail and resend.",

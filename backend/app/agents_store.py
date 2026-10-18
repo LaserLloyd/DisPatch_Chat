@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     cost_usd           REAL,
     tokens             INTEGER NOT NULL DEFAULT 0,
     turns              INTEGER NOT NULL DEFAULT 0,
+    elapsed_s          REAL NOT NULL DEFAULT 0,
     last_seq           INTEGER NOT NULL DEFAULT -1,
     resumable          INTEGER NOT NULL DEFAULT 0,
     created_at         TEXT NOT NULL,
@@ -313,7 +314,7 @@ def agent_by_name(name: str) -> dict[str, Any] | None:
 
 _TASK_COLS = (
     "task_id", "agent_id", "agent_name", "backend", "owner", "kind", "state", "reason", "hold",
-    "spec_json", "prompt", "result_text", "session_id", "cost_usd", "tokens", "turns", "last_seq",
+    "spec_json", "prompt", "result_text", "session_id", "cost_usd", "tokens", "turns", "elapsed_s", "last_seq",
     "resumable", "created_at", "started_at", "finished_at", "origin_thread_id",
     "origin_message_id", "advisor_request_id", "repo_path", "approvals_allowed",
     "approvals_denied", "purged")
@@ -424,7 +425,7 @@ def nonterminal_tasks() -> list[dict[str, Any]]:
 def queued_tasks(limit: int = 50) -> list[dict[str, Any]]:
     """Tasks waiting for a free slot (NOT the ones held for a human's Send)."""
     with connect() as con:
-        rows = con.execute("SELECT * FROM tasks WHERE state='queued' AND hold IS NULL "
+        rows = con.execute("SELECT * FROM tasks WHERE state='queued' AND hold IS NULL AND kind != 'chat' "
                            "ORDER BY created_at, rowid LIMIT ?", (limit,)).fetchall()
     return [_task_row(r) for r in rows]
 

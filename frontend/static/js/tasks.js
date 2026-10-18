@@ -134,6 +134,7 @@ export function createTasksUi(deps = {}) {
     const now = Date.now();
     if (refreshAccess.last && refreshAccess.key === key && now - refreshAccess.last < 3000) return access;
     refreshAccess.last = now;
+    if (refreshAccess.key !== undefined && refreshAccess.key !== key) resetForNewSession();
     refreshAccess.key = key;
     if (deps.isDecoy && deps.isDecoy()) {
       access = NO_ACCESS;
@@ -171,6 +172,21 @@ export function createTasksUi(deps = {}) {
     b.setAttribute('aria-label', waiting
       ? t('tasks.nav_aria_waiting', { count: waiting }) : t('tasks.nav_aria'));
     b.title = t('tasks.nav_title');
+  }
+
+  /** Somebody else is using this browser now: nothing of the last person's tasks may stay on
+   *  screen or in a cache (an inline card holds a prompt, tool output and a result). */
+  function resetForNewSession() {
+    for (const set of cards.values()) for (const c of set) c.dispose();
+    cards.clear();
+    rows.clear();
+    inline.clear();
+    expanded.clear();
+    people = [];
+    filters.state = filters.agent = filters.profile = filters.since = '';
+    if (backdrop) { backdrop.remove(); backdrop = null; listEl = null; emptyEl = null; filterForm = null; }
+    if (assignBackdrop) { assignBackdrop.remove(); assignBackdrop = null; }
+    waiting = 0;
   }
 
   // ---- the Tasks page ----

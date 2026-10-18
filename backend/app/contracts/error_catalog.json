@@ -2248,6 +2248,17 @@
     "The credentials were not accepted."
    ],
    "seeded": false
+  },
+  {
+   "code": "task_thread_not_allowed",
+   "status": 409,
+   "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
+   "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
+   "docs": "task_thread_not_allowed",
+   "patterns": [
+    "Tasks cannot be assigned from a chat that Restricted profiles can read."
+   ],
+   "seeded": false
   }
  ]
 }

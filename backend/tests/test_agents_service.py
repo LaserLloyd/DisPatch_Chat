@@ -150,6 +150,40 @@ async def test_a_finished_task_continues_after_a_restart_from_its_stored_session
 # --------------------------------------------------------------------------- #
 
 
+async def test_a_chat_row_waiting_for_its_backend_is_never_started_by_the_queue(mgr):
+    """The unified chat turn owns its row; the generic queue must not start it as a task."""
+    store.create_task(task_id="thr-q", agent_id="openclaw:alpha", agent_name="alpha", backend="openclaw",
+                      kind="chat", state="queued", spec_json="{}", prompt="")
+    other = await run(mgr, "scenario:simple")
+    await settle(lambda: state(other) == "succeeded")
+    await mgr._kick()
+    assert state("thr-q") == "queued" and "thr-q" not in mgr._launched
+    assert store.queued_tasks() == []
+
+
+async def test_the_wall_clock_survives_a_restart_and_a_chat_turn_gets_a_fresh_one(mgr):
+    tid = await run(mgr, "scenario:simple")
+    await settle(lambda: state(tid) == "succeeded")
+    store.update_task(tid, elapsed_s=123.0)
+    await mgr.flush()
+    mgr.backends["fake"].forget_task(tid)
+    mgr._ensure_registered(store.get_task(tid))
+    assert mgr.backends["fake"]._tasks[tid].tracker.elapsed_s >= 123.0
+    await mgr.run_chat_turn(thread_id="thr-c", agent_seat="alpha", text="scenario:simple", timeout_s=20)
+    be = mgr.backends["openclaw"]
+    be._tasks["thr-c"].tracker.reset_clock(19.0)
+    await mgr.run_chat_turn(thread_id="thr-c", agent_seat="alpha", text="scenario:simple", timeout_s=20)
+    assert be._tasks["thr-c"].tracker.elapsed_s < 5, "each chat turn is timed on its own"
+
+
+async def test_a_handoff_that_was_dismissed_does_not_wait_for_the_agent(mgr, monkeypatch):
+    monkeypatch.setenv("DISPATCH_AGENTS_UNIFIED_DISPATCH", "1")
+    await mgr.propose_handoff(_req("rq9"))
+    await mgr.dismiss_handoff("rq9")
+    with pytest.raises(TaskError):
+        await asyncio.wait_for(mgr.run_handoff("rq9", "lead", "scenario:simple", 20), 3)
+
+
 async def test_tasks_beyond_the_concurrency_limit_wait_their_turn(mgr):
     store.set_setting("agents.max_concurrent", 1)
     agent = make_agent("Slotted")

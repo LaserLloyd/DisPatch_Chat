@@ -351,6 +351,27 @@ test('Stop, steer, Resume and End are real buttons that call the right routes', 
   assert.deepEqual(labels(), []);
 });
 
+test('live frames do not rebuild the controls: focus and a half-typed steer message survive', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const C = await import('../static/js/task_card.js?v=1');
+  const card = C.createTaskCard({ api: fakeApi(), canApprove: true, toast() {}, confirm: async () => true });
+  win.document.body.append(card.el);
+  card.load(TASK({ state: 'running', last_seq: -1 }), [], []);
+  await tick(5);
+  const input = card.el.querySelector('.task-steer-input');
+  const stop = card.el.querySelector('.task-stop');
+  input.focus();
+  input.value = 'half a thought';
+  for (let seq = 0; seq < 5; seq++) {
+    card.applyFrame({ type: 'task.event', task_id: 't1', event: { seq, type: 'text_delta', text: 'x' }, task: { state: 'running', cost_usd: 0.01 * seq } });
+  }
+  await tick(150);
+  assert.equal(card.el.querySelector('.task-steer-input'), input, 'the same textarea node');
+  assert.equal(card.el.querySelector('.task-stop'), stop, 'the same Stop button');
+  assert.equal(win.document.activeElement, input);
+  assert.equal(input.value, 'half a thought');
+});
+
 test('a hand-off card waiting for Send shows Send / Dismiss only to someone who may approve', { skip: dom.skip }, async () => {
   const win = await boot();
   const C = await import('../static/js/task_card.js?v=1');
@@ -504,6 +525,23 @@ test('an inline card mounts under the assigning message only, and survives re-re
   ui.onFrame({ type: 'task.event', task_id: 't1', event: { seq: 4, type: 'text_delta', text: '??' }, task: { state: 'running' } });
   await tick(10);
   assert.deepEqual([...a.querySelectorAll('.task-text')].map((n) => n.textContent), ['hi there', '??']);
+});
+
+test('switching profile drops the previous person cards, caches and open dialog', { skip: dom.skip }, async () => {
+  const { win, Tasks } = await loadTasks();
+  let session = 'owner|false|p1';
+  const ui = Tasks.createTasksUi({ api: fakeApi(), navButton: win.document.getElementById('tasks-btn'), isDecoy: () => false,
+    sessionKey: () => session, toast() {}, confirm: async () => true });
+  await ui.refreshAccess();
+  const first = ui.cardForMessage({ id: 'm', metadata: { task_card: { task_id: 't1', kind: 'assigned' } } });
+  await ui.openPage();
+  assert.ok(win.document.getElementById('tasks-backdrop'));
+  session = 'member|false|p2';
+  await new Promise((r) => setTimeout(r, 3100));                 // past the 3 s debounce
+  await ui.refreshAccess();
+  assert.equal(win.document.getElementById('tasks-backdrop'), null, 'the dialog of the previous person is gone');
+  const second = ui.cardForMessage({ id: 'm', metadata: { task_card: { task_id: 't1', kind: 'assigned' } } });
+  assert.notEqual(second, first, 'no cached card of the previous person is handed to the next');
 });
 
 // ------------------------------------------------------------------ Settings -> Agents

@@ -41,6 +41,9 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
   dialog, filled in; **nothing runs until you press Assign**. The dialog says where the prompt
   goes (a Claude Agent task sends what it reads and writes to Anthropic's API; an OpenClaw task
   stays on this machine) and that it will ask before changing anything.
+- A task starts only from a chat with a character that Members and above alone can see: the
+  prompt, approval requests and the result are written into that chat, so a chat a Restricted
+  profile can read is refused (`task_thread_not_allowed`). From the Tasks page there is no chat.
 - The task's **card** appears in the chat and on the **Tasks** page (the 📋 button in the left
   rail, with a dot while an approval waits for you). It shows the timeline, tool calls that fold
   open, approval cards inline, artifacts, the cost labelled *estimate*, and the controls:
@@ -73,8 +76,13 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
 4. **Secrets.** The names MCP servers need (`MCP_…`, `STUDIOFORGE_…`) and whether each is set.
 
 What only the **Owner** may grant an agent, because each is code execution on this machine in
-effect: trusting a repository's own settings (its hooks will run), a local-program MCP server,
-a server marked admin-scope, and pre-approved tools for an agent that never asks.
+effect or hands out a stored secret: trusting a repository's own settings (its hooks will run),
+a local-program MCP server, a server marked admin-scope, a stored secret sent to an address that
+is not on this machine, and pre-approved tools for an agent that never asks.
+
+An agent is read afresh at every run: editing its tools, limits or approval policy applies to the
+next follow-up or resume of tasks it already has, and unpublishing, switching off or deleting it
+stops a Member from continuing them (they can still read the history; Stop always works).
 
 ### Safety rules that are enforced, not advised
 
