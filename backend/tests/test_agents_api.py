@@ -424,7 +424,6 @@ FAKE_KEY = "sk-ant-api03-" + "A1b2C3d4" * 6
 
 def test_the_claude_key_is_stored_but_never_returned(aw, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    aw.mgr.secrets = __import__("app.agents.secrets", fromlist=["x"]).MemorySecretProvider()
     r = aw.owner.put("/api/agents/credentials/claude", json={"route": "api_key", "api_key": FAKE_KEY})
     assert r.status_code == 200
     assert r.json()["api_key_set"] is True and r.json()["api_key_source"] == "stored"
@@ -449,7 +448,6 @@ def test_there_is_no_subscription_route(aw):
 
 def test_the_backend_list_says_what_each_one_needs(aw, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    aw.mgr.secrets = __import__("app.agents.secrets", fromlist=["x"]).MemorySecretProvider()
     got = {b["name"]: b for b in aw.owner.get("/api/agents/backends").json()["backends"]}
     assert got["claude_sdk"]["label"] == "Claude Agent" and got["openclaw"]["label"] == "OpenClaw"
     assert got["claude_sdk"]["needs_api_key"] is True
@@ -464,7 +462,6 @@ def test_the_backend_list_says_what_each_one_needs(aw, monkeypatch):
 
 def test_a_backend_that_is_not_installed_refuses_the_task_politely(aw, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    aw.mgr.secrets = __import__("app.agents.secrets", fromlist=["x"]).MemorySecretProvider()
     a = make_agent(aw.owner, "NoKey", published=["*"], spec=spec(backend="claude_sdk", tool_allowlist=["Read"]))
     r = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "hi"})
     assert r.status_code == 503 and r.json()["error"]["code"] == "agent_backend_unavailable"

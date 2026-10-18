@@ -2,7 +2,7 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked, setOnPolicyBlock, setOnSignInRequired } from './api.js?v=34';
+import { api, setOnLocked, setOnPolicyBlock, setOnSignInRequired } from './api.js?v=35';
 import { ChatSocket } from './ws.js?v=10';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
 import { installChecklists, applyChecklistState } from './checklist.js?v=12';
@@ -81,6 +81,10 @@ import {
   paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
 } from './signin.js?v=1';
 import { mountPeopleSettings } from './people.js?v=1';
+// 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
+// approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
+import { createTasksUi } from './tasks.js?v=1';
+import { mountAgentsSettings } from './agents.js?v=1';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -2138,6 +2142,10 @@ function noticeMessageEl(msg, notice) {
   });
   details.append(body);
   wrap.append(details);
+  // A task assigned from this chat: the line above is its (collapsed) announcement, and its live
+  // card - timeline, approvals, Stop - sits right under it. Only the assigning line carries one.
+  const taskCard = tasksUi.cardForMessage(msg);
+  if (taskCard) wrap.append(taskCard);
   return wrap;
 }
 
@@ -2657,6 +2665,9 @@ function autosize() {
 function sendMessage() {
   const text = dom['input'].value.trim();
   if ((!text && !state.attachments.length) || !state.activeThreadId) return;
+  // `@agent do the thing` is an Assign task request: confirm it in the dialog instead of sending
+  // it as chat. Anything that is not a mention of an agent you may use sends as before.
+  if (!state.attachments.length && tasksUi.interceptSend(text, state.activeThreadId)) return;
   const draftThread = state.activeThreadId;   // the thread this text belongs to
   // Note: intentionally NOT blocked while a reply is pending — queued sends are
   // serialised server-side, so the user can fire off several in a row.
@@ -3772,6 +3783,8 @@ async function threadAction(act) {
   try {
     if (act === 'model') {
       openModelPicker();
+    } else if (act === 'assign') {
+      await tasksUi.openAssign({ threadId: id });
     } else if (act === 'pin') {
       const pinned = !(state.activeThread && state.activeThread.is_pinned);
       await api.pin(id, pinned);
@@ -4328,14 +4341,14 @@ function syncLockNimRow() {
 // sprinkled through the seven places that hide it.
 // Order = the tab strip (2.3): day-to-day first, setup after, rare last. Add-in
 // tabs (shell.settings.pane with a new id) are spliced in before 'plugins'.
-const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'people', 'security'];
+const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'agents', 'ai', 'reactions', 'health', 'people', 'security'];
 const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
 // voice chat is unlocked-only, and so is the page explaining how to add it).
 // `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
 // 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
 // a Member is signed in but must not be offered tabs that can only 403.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people'];
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'agents'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
@@ -4442,6 +4455,11 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       // The voice add-on's own pane when it is mounted; otherwise the page
       // that says how to add it, from a fresh read of /api/extensions.
       showVoiceTab();
+      break;
+    case 'agents':
+      await mountAgentsSettings(pane, {
+        toast, confirm: (msg, o) => uiConfirm(msg, o), isOwner: state.role === 'owner',
+      });
       break;
     case 'people':
       await mountPeopleSettings(pane, {
@@ -6687,12 +6705,40 @@ function renderStreamMarkdown(id) {
   if (isNearBottom(220)) scrollToBottom(true);
 }
 
+// ===================== Agents and tasks =====================
+// One instance for the page: it owns the Tasks dialog, the Assign dialog, the inline task cards and
+// the routing of `task.*` frames. Built lazily-safe: nothing touches the network until the
+// auth chrome asks it who may do what.
+const tasksUi = createTasksUi({
+  toast: (m, bad) => toast(m, bad),
+  confirm: (msg, o) => uiConfirm(msg, o),
+  announce: (m, assertive) => announce(m, assertive),
+  isDecoy: () => state.decoy,
+  sessionKey: () => `${state.role}|${state.decoy}|${(state.auth.profile && state.auth.profile.id) || ''}`,
+  navButton: document.getElementById('tasks-btn'),
+  onAssigned: (_task, { fromComposer } = {}) => {
+    // A mention in the composer became a task: the words are in the task now, not a draft.
+    if (fromComposer) {
+      const draftThread = state.activeThreadId;
+      dom['input'].value = '';
+      if (draftThread) clearDraftFor(draftThread);
+      autosize();
+      updateSendEnabled();
+    }
+  },
+});
+if (document.getElementById('tasks-btn')) {
+  document.getElementById('tasks-btn').addEventListener('click', () => tasksUi.openPage());
+}
+
 // ===================== WebSocket dispatch =====================
 function handleWs(data) {
   // An app's own live frames (`app:<id>:…`, the only shape an app backend may
   // broadcast): to that app's open pane and to its mounted thread hook. The
   // shell itself never acts on them.
   if (typeof data.type === 'string' && data.type.startsWith('app:')) { dispatchAppFrame(data); return; }
+  // Agent tasks: a task's timeline and approval cards go only to the people allowed to see it.
+  if (typeof data.type === 'string' && data.type.startsWith('task.')) { tasksUi.onFrame(data); return; }
   switch (data.type) {
     case 'hello':
     case 'bots':
@@ -7448,6 +7494,8 @@ function wireEvents() {
     // Re-point the key rather than writing bare text: the next language switch
     // re-runs the DOM pass, which would otherwise reset this to "Pin".
     if (pinLabel) setI18nText(pinLabel, (state.activeThread && state.activeThread.is_pinned) ? 'chat.unpin' : 'chat.pin');
+    const assignItem = document.getElementById('thread-menu-assign');
+    if (assignItem) assignItem.hidden = !tasksUi.access.dispatch;
     toggleThreadMenu();
   });
   dom['thread-menu'].querySelectorAll('button').forEach((b) =>
@@ -7584,6 +7632,7 @@ function getSocket() {
 // not from sending); body class lets CSS adapt the safe view.
 function applyAuthChrome() {
   const full = hasLock() && !state.decoy;
+  tasksUi.refreshAccess();     // who may assign tasks / see the Tasks button (debounced inside)
   // The visible pack differs between Safe Mode and full access, so re-fetch it
   // (and drop any overlay mid-flight) every time that boundary is crossed.
   if (applyAuthChrome._lastDecoy !== state.decoy) {
@@ -8558,6 +8607,7 @@ function closeAllOverlays() {
   // fetched, but the last frame stayed visible, which is exactly what Safe
   // Mode exists to prevent.
   closeToolPanes();
+  tasksUi.closeAll();
   // An app's thread hook (the Job Board's job detail, say) is operator UI
   // painted into the chat: a drop to Safe Mode takes it down with the panes
   // above rather than leaving it on a device that has just been locked.
@@ -9808,6 +9858,7 @@ function reRenderForLocale() {
   applySearchShortcutTitle();
   paintProfileChrome();
   if (settingsOpen('people')) setSettingsTab('people');
+  if (settingsOpen('agents')) setSettingsTab('agents');
   applyRailLabels();
   setConnected(state.connected);
   renderSidebar();

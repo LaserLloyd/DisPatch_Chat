@@ -314,6 +314,8 @@ async def available_agents(request: Request, _=_DISPATCH):
     pr = _principal(request)
     mgr = _mgr()
     owner = agents_service.principal_key(pr)
+    leaves = {b["name"]: bool((b["capabilities"] or {}).get("data_leaves_host", True))
+              for b in mgr.backend_info()}
     out = []
     for a in store.list_agents():
         if not pr.is_operator and (a["disabled"] or not _published(a, pr)):
@@ -324,6 +326,7 @@ async def available_agents(request: Request, _=_DISPATCH):
         spec_backend = (a["spec"] or {}).get("backend") or ""
         problem = mgr.backend_problem(spec_backend)
         entry = public_agent(a, full=False)
+        entry["data_leaves_host"] = leaves.get(spec_backend, True)
         entry["available"] = problem is None and not a["disabled"]
         entry["problem"] = None if problem is None else {"code": problem[0].value, "message": problem[1]}
         out.append(entry)

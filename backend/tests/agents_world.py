@@ -14,6 +14,7 @@ import pytest
 
 from app import agents_service
 from app.agents.fake import FakeBackend
+from app.agents.secrets import MemorySecretProvider
 
 LAN = ("203.0.113.50", 40000)
 TERMINAL = ("succeeded", "failed", "cancelled")
@@ -81,6 +82,8 @@ def aw(world, monkeypatch):
     owner = world.create_owner()
     mgr = agents_service.get_manager()
     mgr.register_backend("fake", FakeBackend())
+    # Hermetic: never the machine's real keyring or secrets file, whatever is installed here.
+    mgr.secrets = MemorySecretProvider()
     notes = Notices()
     # main._shutting_down is set by the first lifespan to end in this process and never
     # reset (production starts once); the manager reads it before notifying.

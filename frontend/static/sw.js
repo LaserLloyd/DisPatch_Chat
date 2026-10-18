@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v167';  // v167: 3.0 profiles, roles and policy - new js/profiles.js (pure helpers), js/signin.js (profile tiles, first-run setup, Restricted strip, rail chip) and js/people.js (Settings -> People & Profiles) join SHELL; api.js?v=33->34 (me/login/switchProfile/setupOwner/people/devices/..., error.code/fix/retryAfter on thrown errors, signin_required + time_limit/quiet_hours hooks) and its importers bots-edit.js, checklist.js, clients.js, plugins.js, reactions.js, tools.js; ws.js?v=9->10 (a 1008 close stops the reconnect loop); about.js?v=20->21 (APP_VERSION 3.0.0) and its importers ext-sdk.js, voice-absent.js; privacy.js?v=10->11 (APP_KEYS: dp-firstrun-dismissed) and its importer pins.js; main.js?v=143->144, app.css?v=106->107, index.html; locales role.*, signin.*, setup.*, password.*, people.*, restricted.*, notice.*, chip.*, Safe Mode -> Restricted wording (see locales/I18N-TODO.md).
+const CACHE = 'local-chat-v168';  // v168: 3.0 agents and tasks - new js/tasks.js (Tasks page, Assign task, @agent, inline task cards), js/task_card.js (live timeline), js/approval_card.js and js/agents.js (Settings -> Agents) join SHELL with tasks.css; api.js?v=34->35 (agents/tasks/approvals calls) and its importers bots-edit.js, checklist.js, clients.js, people.js, plugins.js, reactions.js, tools.js; main.js?v=144->145, index.html; locales tasks.*, approval.*, agents.* (see locales/I18N-TODO.md).
+// v167: 3.0 profiles, roles and policy - new js/profiles.js (pure helpers), js/signin.js (profile tiles, first-run setup, Restricted strip, rail chip) and js/people.js (Settings -> People & Profiles) join SHELL; api.js?v=33->34 (me/login/switchProfile/setupOwner/people/devices/..., error.code/fix/retryAfter on thrown errors, signin_required + time_limit/quiet_hours hooks) and its importers bots-edit.js, checklist.js, clients.js, plugins.js, reactions.js, tools.js; ws.js?v=9->10 (a 1008 close stops the reconnect loop); about.js?v=20->21 (APP_VERSION 3.0.0) and its importers ext-sdk.js, voice-absent.js; privacy.js?v=10->11 (APP_KEYS: dp-firstrun-dismissed) and its importer pins.js; main.js?v=143->144, app.css?v=106->107, index.html; locales role.*, signin.*, setup.*, password.*, people.*, restricted.*, notice.*, chip.*, Safe Mode -> Restricted wording (see locales/I18N-TODO.md).
 // v166: 2.4.2 — Settings → Bots visibility is two switches, Show locked (safe) and Show unlocked (!hide_unlocked); neither = Hidden (dimmed row, shown on no device); the old visible switch is folded in server-side: main.js?v=142→143, app.css?v=105→106 (.bm-hidden-tag, .bm-row--hidden), about.js?v=19→20 (APP_VERSION 2.4.2) and its importers ext-sdk.js?v=14→15, voice-absent.js?v=13→14, plugins.js?v=13→14; locales settings.show_locked_*, show_unlocked_*, hidden_* (replace safe_badge/safe_title/hide_unlocked_*/show_in_sidebar), settings.show_hidden_desc.
 // v165: 2.4.1 — a bot can opt out of quick actions (bot.quick_actions=false): quick-actions.js?v=1→2 (setAllowed), about.js?v=18→19 (APP_VERSION 2.4.1) and its importers ext-sdk.js?v=13→14, voice-absent.js?v=12→13, plugins.js?v=12→13, main.js?v=141→142.
 // v164: 2.4.0 — bots hidden on unlocked devices: menubots.js?v=2→3 (hiddenHere, the per-device "show hidden bots" switch), privacy.js?v=9→10 (wipes that key) and its importer pins.js?v=13→14, about.js?v=17→18 (APP_VERSION 2.4.0) and its importers ext-sdk.js?v=12→13, voice-absent.js?v=11→12, plugins.js?v=11→12, main.js?v=140→141; locales settings.hide_unlocked_*, settings.show_hidden*.
@@ -322,6 +323,7 @@ const SHELL = [
   '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css',
+  '/static/tasks.css',
   '/static/js/main.js', '/static/js/api.js', '/static/js/ws.js',
   '/static/js/markdown.js', '/static/js/checklist.js', '/static/js/util.js', '/static/js/theme.js',
   '/static/js/reactions.js', '/static/js/i18n.js',
@@ -372,6 +374,7 @@ const SHELL = [
   // 3.0 profiles, roles and policy: pure helpers, the sign-in / setup / Restricted
   // DOM and Settings -> People & Profiles, all statically imported by main.js.
   '/static/js/profiles.js', '/static/js/signin.js', '/static/js/people.js',
+  '/static/js/tasks.js', '/static/js/task_card.js', '/static/js/approval_card.js', '/static/js/agents.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

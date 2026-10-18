@@ -833,7 +833,7 @@ test('index.html: the People tab is admin-only, before Security, with its pane',
 test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
   assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
   assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\)\)/);
-  assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'voice', 'people'\];/);
+  assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'agents'\];/);
   assert.match(MAIN, /case 'people':\s+await mountPeopleSettings/);
 });
 
@@ -853,7 +853,7 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v167'/);
+  assert.match(SW, /const CACHE = 'local-chat-v168'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {

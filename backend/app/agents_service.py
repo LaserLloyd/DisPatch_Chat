@@ -565,7 +565,8 @@ class TaskManager:
             msg = await self.hooks.deliver(
                 tid, f"Assigned to **{row['agent_name']}**: {snippet}",
                 metadata={"notice": {"level": "info"},
-                          "task_card": {"task_id": row["task_id"], "agent_name": row["agent_name"]}},
+                          "task_card": {"task_id": row["task_id"], "agent_name": row["agent_name"],
+                                        "kind": "assigned"}},
                 source_id=f"task:{row['task_id']}:assigned", provisional=False,
                 dedup_recent_window=False)
             mid = getattr(msg, "id", None)
@@ -855,7 +856,7 @@ class TaskManager:
         try:
             await deliver(tid, text, metadata={"notice": {"level": level},
                                                "task_card": {"task_id": row["task_id"],
-                                                             "agent_name": name}},
+                                                             "agent_name": name, "kind": kind}},
                           source_id=sid, provisional=False, dedup_recent_window=False)
         except Exception:
             log.warning("could not post a task notice for %s", row["task_id"], exc_info=True)
