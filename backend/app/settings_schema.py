@@ -1,0 +1,734 @@
+"""The settings schema: every user-facing knob DisPatch has, described once.
+
+Before 3.0 a setting could live in an environment variable read at import time, a
+YAML file with its own reader and permissions, a hard-coded constant or a browser's
+``localStorage``, and nothing described any of them (audit section B). This module is
+the one description. Each :class:`SettingDef` carries what a settings page needs to
+draw the control and what the server needs to accept a value:
+
+``key``            dotted, ``<group>.<name>`` (``system.backup_keep``); a plugin's keys
+                   live under ``tools.<id>.`` and a voice provider's under ``voice.``
+``type``           string | integer | number | boolean | choice | url | path | list | secret
+``default``        what applies when nothing is set
+``group``          Characters, Connections, Voice, Tools & Modules, People & Profiles,
+                   Appearance or System - the top-level order of the Settings dialog
+``level``          ``basic`` (shown) or ``advanced`` (behind the toggle)
+``restart_required``  a change takes effect at the next start (import-time readers)
+``env``            the environment variable that overrides it. ``DISPATCH_X`` also answers
+                   to the legacy ``LOCAL_CHAT_X`` (see :func:`env_names`)
+``secret``         write-only: the value goes to the secret store and is never returned
+``min`` / ``max`` / ``choices`` / ``unit``  the range the value must fall in
+
+The schema is versioned (:data:`SCHEMA_VERSION`, the ``schema: N`` in the generated
+documents). A key is never renamed or repurposed inside a major version; one that goes
+away is kept in :data:`RETIRED` so an old database row is reported, not silently lost.
+
+The generated reference is ``docs/settings.md`` (``scripts/gen_contracts.py``); the
+machine-readable copy is ``docs/contracts/settings.schema.json``. Nothing here imports
+the rest of the app, so ``config.py`` can read it while it is still being imported.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+SCHEMA_VERSION = 1
+
+GroupId = Literal["characters", "connections", "voice", "tools", "people", "appearance", "system"]
+
+#: Top-level order of the Settings dialog (the brief's order).
+GROUPS: tuple[tuple[str, str, str], ...] = (
+    ("characters", "Characters", "Who you talk to: personalities, voices, avatars and who may see them."),
+    ("connections", "Connections", "The models and servers DisPatch talks to, and how it finds them."),
+    ("voice", "Voice", "Speech recognition and voices (provided by the voice add-on)."),
+    ("tools", "Tools & Modules", "Plugins, agent runtimes and the optional panes."),
+    ("people", "People & Profiles", "Sign-in, session lengths and what a Restricted profile may do in a day."),
+    ("appearance", "Appearance", "Defaults for a new device: theme, language and avatar style."),
+    ("system", "System", "Network, backups, logs and limits."),
+)
+GROUP_IDS = tuple(g[0] for g in GROUPS)
+
+SettingType = Literal["string", "integer", "number", "boolean", "choice", "url", "path", "list", "secret"]
+
+KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_-]*){1,4}$")
+
+
+class SettingError(ValueError):
+    """A value the schema refuses. ``code`` is a stable slug; the message is for people."""
+
+    def __init__(self, key: str, message: str, code: str = "settings_invalid") -> None:
+        super().__init__(message)
+        self.key = key
+        self.code = code
+
+
+class SettingDef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: str
+    type: SettingType
+    default: Any = None
+    label: str
+    description: str
+    group: GroupId
+    section: str = ""                        # a sub-heading inside the group
+    level: Literal["basic", "advanced"] = "basic"
+    restart_required: bool = False
+    env: str | None = None                   # primary variable name (``DISPATCH_X`` or an exact raw name)
+    legacy_prefix_alias: bool = True         # DISPATCH_X also answers to LOCAL_CHAT_X
+    secret: bool = False
+    choices: list[str] = Field(default_factory=list)
+    choice_labels: dict[str, str] = Field(default_factory=dict)
+    choices_from: Literal["themes", "locales", ""] = ""    # filled at run time from the shipped bundle
+    min: float | None = None
+    max: float | None = None
+    unit: str = ""
+    binding: str = "store"                   # "store" | "file:<adapter>" (see settings_store.ADAPTERS)
+    owner: str = "core"                      # "core" | "voice" | "tool:<id>"
+    since: int = 1
+    placeholder: str = ""
+
+    # ------------------------------------------------------------------ #
+    def env_names(self) -> tuple[str, ...]:
+        """Every variable that overrides this setting, most specific first."""
+        if not self.env:
+            return ()
+        if self.env.startswith("DISPATCH_") and self.legacy_prefix_alias:
+            return (self.env, "LOCAL_CHAT_" + self.env[len("DISPATCH_"):])
+        return (self.env,)
+
+    def public(self) -> dict:
+        d = self.model_dump()
+        d["env"] = self.env
+        d["env_names"] = list(self.env_names())
+        if self.choices_from:
+            d["choices"] = dynamic_choices(self.choices_from) or d["choices"]
+        d.pop("binding", None)
+        return d
+
+
+def _d(key: str, type: SettingType, default: Any, label: str, description: str, group: GroupId,
+       **kw: Any) -> SettingDef:
+    return SettingDef(key=key, type=type, default=default, label=label, description=description,
+                      group=group, **kw)
+
+
+# --------------------------------------------------------------------------- #
+# The schema
+# --------------------------------------------------------------------------- #
+
+_ONOFFAUTO = ["auto", "on", "off"]
+_ONOFFAUTO_LABELS = {"auto": "Automatic", "on": "On", "off": "Off"}
+
+CORE_SETTINGS: tuple[SettingDef, ...] = (
+    # ============================ SYSTEM ================================= #
+    _d("system.public_url", "url", "", "Public address",
+       "The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// "
+       "address tells the Health tab the connection is encrypted.", "system", section="Network",
+       env="DISPATCH_PUBLIC_URL", placeholder="https://chat.example.net"),
+    _d("system.behind_tls", "boolean", False, "A reverse proxy provides HTTPS",
+       "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does "
+       "not warn about plain HTTP.", "system", section="Network", env="DISPATCH_BEHIND_TLS"),
+    _d("system.network_exposure", "choice", "local", "Who can reach DisPatch",
+       "Local only (this computer), or your home network. The listen address itself is set by the "
+       "launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so "
+       "Health can tell you when the two disagree.", "system", section="Network",
+       choices=["local", "lan"], choice_labels={"local": "This computer only", "lan": "My home network"}),
+    _d("system.host", "string", "127.0.0.1", "Listen address (informational)",
+       "What DisPatch reports as its own address. The launcher flag (--host) is what binds the port.",
+       "system", section="Network", level="advanced", env="DISPATCH_HOST", restart_required=True),
+    _d("system.port", "integer", 8765, "Port (informational)",
+       "The port DisPatch reports. The launcher flag (--port) is what binds it.",
+       "system", section="Network", level="advanced", env="DISPATCH_PORT", restart_required=True,
+       min=1, max=65535),
+    _d("system.backup_interval", "integer", 21600, "Database snapshot interval",
+       "Seconds between automatic database snapshots (6 hours by default). 0 turns them off.",
+       "system", section="Backups", env="DISPATCH_BACKUP_INTERVAL", restart_required=True,
+       min=0, max=30 * 86400, unit="seconds"),
+    _d("system.backup_keep", "integer", 12, "Snapshots to keep",
+       "How many rotated database snapshots to keep before the oldest is deleted.",
+       "system", section="Backups", env="DISPATCH_BACKUP_KEEP", restart_required=True,
+       min=1, max=1000),
+    _d("system.encrypted_backup_enabled", "boolean", False, "Scheduled encrypted backups",
+       "Write a complete, encrypted backup (chats, characters, settings, avatars) on a schedule. "
+       "The first one generates a recovery key and shows it once - keep it somewhere safe.",
+       "system", section="Backups"),
+    _d("system.encrypted_backup_interval_hours", "integer", 24, "Encrypted backup interval",
+       "Hours between scheduled encrypted backups.", "system", section="Backups", level="advanced",
+       min=1, max=24 * 30, unit="hours"),
+    _d("system.encrypted_backup_keep", "integer", 7, "Encrypted backups to keep",
+       "Older encrypted backups are deleted beyond this many.", "system", section="Backups",
+       level="advanced", min=1, max=365),
+    _d("system.encrypted_backup_include_media", "boolean", False, "Include pictures and files",
+       "Add the media and File Server folders to encrypted backups. They can be large.",
+       "system", section="Backups", level="advanced"),
+    _d("system.backup_passphrase", "secret", None, "Backup passphrase",
+       "The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. "
+       "Never shown again once saved.", "system", section="Backups", level="advanced", secret=True),
+    _d("system.log_file", "path", "", "Log file",
+       "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
+       "system", section="Diagnostics", level="advanced", env="DISPATCH_LOG_FILE"),
+    _d("system.files_total_max", "integer", 20 * 1024 ** 3, "File Server size limit",
+       "Total bytes the File Server may hold before uploads are refused (20 GiB by default).",
+       "system", section="Limits", level="advanced", env="DISPATCH_FILES_TOTAL_MAX",
+       restart_required=True, min=1024 ** 2, unit="bytes"),
+    _d("system.push_subject", "string", "", "Push notification contact",
+       "A mailto: address push services can reach if your server misbehaves. Empty uses a placeholder.",
+       "system", section="Notifications", level="advanced", env="DISPATCH_PUSH_SUBJECT",
+       legacy_prefix_alias=True, placeholder="mailto:you@example.com"),
+
+    # ============================ PEOPLE ================================= #
+    _d("people.lock_timeout_seconds", "integer", 600, "Owner and Admin auto-lock",
+       "Seconds of inactivity before an Owner or Admin session locks.", "people",
+       section="Sessions", min=30, max=7 * 86400, unit="seconds", binding="file:security"),
+    _d("people.session_timeout_member", "integer", 3600, "Member session length",
+       "Seconds of inactivity before a Member session ends.", "people", section="Sessions",
+       level="advanced", min=30, max=30 * 86400, unit="seconds", binding="file:security"),
+    _d("people.session_timeout_restricted", "integer", 1800, "Restricted session length",
+       "Seconds of inactivity before a Restricted profile's session ends.", "people",
+       section="Sessions", level="advanced", min=30, max=30 * 86400, unit="seconds",
+       binding="file:security"),
+    _d("people.remember_device_days", "integer", 0, "Remember this device (days)",
+       "0 turns it off. A number of days offers a 'keep this device unlocked' box on sign-in; turning "
+       "it off forgets every remembered device.", "people", section="Sessions", min=0, max=365,
+       unit="days", binding="file:security"),
+    _d("people.machine_loopback_trust", "boolean", True, "Trust programs on this computer",
+       "Let programs running on the same computer (agents, cron jobs) call the API without a key. "
+       "Turn off once every program uses the machine API key.", "people", section="Machines",
+       level="advanced", binding="file:security"),
+    _d("people.anonymous_access", "choice", "restricted", "A device that has not signed in",
+       "Restricted shows the Restricted profile's view; None shows only the sign-in screen.",
+       "people", section="Sessions", choices=["restricted", "none"],
+       choice_labels={"restricted": "Restricted view", "none": "Sign-in screen only"},
+       binding="file:security"),
+    _d("people.restricted_daily_turns", "integer", 200, "Restricted: replies per day",
+       "How many messages one Restricted device or profile may send per day.", "people",
+       section="Restricted limits", env="DISPATCH_DECOY_TURN_QUOTA", restart_required=True,
+       min=0, max=100000),
+    _d("people.restricted_daily_threads", "integer", 50, "Restricted: new chats per day",
+       "How many new conversations one Restricted device or profile may start per day.", "people",
+       section="Restricted limits", env="DISPATCH_DECOY_THREAD_QUOTA", restart_required=True,
+       min=0, max=100000),
+    _d("people.restricted_daily_feedback", "integer", 100, "Restricted: ratings per day",
+       "How many reply ratings one Restricted device or profile may give per day.", "people",
+       section="Restricted limits", level="advanced", env="DISPATCH_DECOY_FEEDBACK_QUOTA",
+       restart_required=True, min=0, max=100000),
+    _d("people.restricted_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Restricted: upload bytes per day",
+       "How many bytes of pictures and files one Restricted device or profile may upload per day.",
+       "people", section="Restricted limits", level="advanced", env="DISPATCH_DECOY_UPLOAD_QUOTA",
+       restart_required=True, min=0, unit="bytes"),
+
+    # ========================== CHARACTERS =============================== #
+    _d("characters.default_audience", "choice", "members", "Audience for new characters",
+       "Who a character you add can be seen by unless you pick: Members (signed-in people), "
+       "Restricted (made for Restricted profiles) or Everyone.", "characters",
+       choices=["members", "restricted", "all"],
+       choice_labels={"members": "Members", "restricted": "Restricted profiles", "all": "Everyone"}),
+    _d("characters.greeting", "boolean", False, "Greet new chats",
+       "Show a short canned greeting at the top of a new chat (no model call is made).",
+       "characters", env="DISPATCH_GREETING"),
+
+    # ========================== CONNECTIONS ============================== #
+    _d("connections.allow_private_targets", "boolean", False, "Allow link-local and metadata targets",
+       "Connections to link-local and cloud-metadata addresses (169.254.x.x, fe80::, "
+       "metadata.google.internal) are refused to stop DisPatch being used to reach internal services. "
+       "Turn on only if you really run a model server there.", "connections", section="Safety",
+       level="advanced"),
+    _d("connections.default", "string", "", "Default connection",
+       "The connection a new character uses when you do not pick one.", "connections"),
+    _d("connections.clawforge_url", "url", "", "Image server (MCP) address",
+       "An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp.",
+       "connections", section="Image server", level="advanced", env="DISPATCH_CLAWFORGE_URL",
+       restart_required=True),
+    _d("connections.clawforge_files_url", "url", "", "Image server file address",
+       "Where finished pictures are fetched from. Empty uses /files/ beside the MCP address.",
+       "connections", section="Image server", level="advanced", env="DISPATCH_CLAWFORGE_FILES_URL",
+       restart_required=True),
+    _d("connections.callback_base", "url", "", "Callback address for the image server",
+       "DisPatch's own address as the image server sees it, so it can report a finished picture "
+       "straight away instead of waiting to be asked.", "connections", section="Image server",
+       level="advanced", env="DISPATCH_CALLBACK_BASE", restart_required=True),
+    _d("connections.image_jobs", "choice", "auto", "Picture jobs",
+       "Let characters ask for pictures. Automatic turns it on when an image server or image API is "
+       "configured.", "connections", section="Image server", env="DISPATCH_IMAGE_JOBS",
+       restart_required=True, choices=["auto", "1", "0"],
+       choice_labels={"auto": "Automatic", "1": "On", "0": "Off"}),
+    _d("connections.image_cli", "string", "", "Image command for picture pools",
+       "A command that makes one picture for the avatar and reaction pools. Empty turns the pools' "
+       "automatic top-up off.", "connections", section="Image server", level="advanced",
+       env="DISPATCH_IMAGE_CLI"),
+    _d("connections.image_cli_timeout", "integer", 300, "Image command timeout",
+       "Seconds to wait for one picture from the image command.", "connections",
+       section="Image server", level="advanced", env="DISPATCH_IMAGE_CLI_TIMEOUT", min=10, max=7200,
+       unit="seconds"),
+    _d("connections.gpu_cli", "string", "", "GPU status command",
+       "A command that reports free GPU memory, so pools stay off a busy card.", "connections",
+       section="Image server", level="advanced", env="DISPATCH_GPU_CLI"),
+    _d("connections.gpu_lease_url", "url", "", "GPU lease address",
+       "A lease service the picture pools ask before using a shared GPU.", "connections",
+       section="Image server", level="advanced", env="DISPATCH_GPU_LEASE_URL"),
+    _d("connections.studioforge_panel", "boolean", False, "StudioForge panel tab",
+       "Show StudioForge's control panel as a tool in the left rail. Needs the panel address below.",
+       "connections", section="StudioForge", env="DISPATCH_STUDIOFORGE", restart_required=True),
+    _d("connections.studioforge_panel_url", "url", "", "StudioForge panel address",
+       "Where StudioForge's panel is, e.g. http://192.168.1.20:8080.", "connections",
+       section="StudioForge", env="DISPATCH_STUDIOFORGE_URL", restart_required=True),
+    _d("connections.studioforge_panel_remote_url", "url", "", "StudioForge panel address for other devices",
+       "The address a phone or laptop elsewhere can open (e.g. a Tailscale Serve HTTPS address).",
+       "connections", section="StudioForge", level="advanced", env="DISPATCH_STUDIOFORGE_REMOTE_URL",
+       restart_required=True),
+
+    # ====================== TOOLS & MODULES ============================= #
+    _d("tools.livetools_enabled", "boolean", True, "Built-in lookups",
+       "Web search, weather, Wikipedia, exchange rates and a calculator for direct-API characters. "
+       "Off removes them from every character at once.", "tools", section="Lookups",
+       binding="file:tools"),
+    _d("tools.openclaw_bin", "string", "openclaw", "OpenClaw command",
+       "The openclaw program used for agent characters. Change it when it is not on the PATH.",
+       "tools", section="Agents", level="advanced", env="OPENCLAW_BIN", legacy_prefix_alias=False,
+       restart_required=True),
+    _d("tools.agent_timeout", "integer", 900, "Agent turn timeout",
+       "Seconds an agent may take to answer before the turn is abandoned.", "tools", section="Agents",
+       level="advanced", env="DISPATCH_AGENT_TIMEOUT", restart_required=True, min=10, max=86400,
+       unit="seconds"),
+    _d("tools.agent_max_concurrency", "integer", 3, "Agents running at once",
+       "How many agent turns may run at the same time (protects local models).", "tools",
+       section="Agents", level="advanced", env="DISPATCH_MAX_CONCURRENCY", restart_required=True,
+       min=1, max=64),
+    _d("tools.gateway_ws", "choice", "off", "Agent gateway socket",
+       "Off: replies are read from transcripts. Shadow: connect and compare without delivering. "
+       "On: replies arrive over the gateway socket.", "tools", section="Agents", level="advanced",
+       env="DISPATCH_GATEWAY_WS", restart_required=True, choices=["off", "shadow", "1"],
+       choice_labels={"off": "Off", "shadow": "Shadow (compare only)", "1": "On"}),
+    _d("tools.turn_transport", "choice", "auto", "How turns reach the agent",
+       "Automatic uses the gateway socket when connected, else the command line. Gateway only fails "
+       "a turn rather than falling back; Command line always spawns the agent.", "tools",
+       section="Agents", level="advanced", env="DISPATCH_TURN_TRANSPORT", restart_required=True,
+       choices=["auto", "1", "0"],
+       choice_labels={"auto": "Automatic", "1": "Gateway only", "0": "Command line"}),
+    _d("tools.mirror_enabled", "boolean", True, "Mirror gateway chats",
+       "Copy the agent runtime's own conversations into DisPatch threads.", "tools",
+       section="Agents", level="advanced", env="DISPATCH_MIRROR", restart_required=True),
+    _d("tools.mirror_poll", "integer", 4, "Mirror check interval", "Seconds between checks while busy.",
+       "tools", section="Agents", level="advanced", env="DISPATCH_MIRROR_POLL", restart_required=True,
+       min=1, max=3600, unit="seconds"),
+    _d("tools.mirror_idle_max", "integer", 60, "Mirror idle interval",
+       "The longest the mirror waits between checks when nothing is happening.", "tools",
+       section="Agents", level="advanced", env="DISPATCH_MIRROR_IDLE_MAX", restart_required=True,
+       min=1, max=86400, unit="seconds"),
+    _d("tools.mirror_horizon_h", "integer", 72, "Mirror history window",
+       "Conversations idle for longer than this when first seen are followed from now, not imported.",
+       "tools", section="Agents", level="advanced", env="DISPATCH_MIRROR_HORIZON_H",
+       restart_required=True, min=1, max=24 * 365, unit="hours"),
+    _d("tools.mirror_kinds", "string", "webchat,main", "Mirror these session kinds",
+       "Comma-separated session kinds to mirror (webchat, main, other).", "tools", section="Agents",
+       level="advanced", env="DISPATCH_MIRROR_KINDS", restart_required=True),
+    _d("tools.harness", "choice", "auto", "DeepSeek Harness pane",
+       "A coding-agent pane (needs the dsh program). Automatic turns it on when dsh is installed.",
+       "tools", section="Harness", env="DISPATCH_HARNESS", restart_required=True,
+       choices=_ONOFFAUTO, choice_labels=_ONOFFAUTO_LABELS),
+    _d("tools.harness_unit", "string", "dsh-web.service", "Harness service name",
+       "The systemd user unit that runs dsh web.", "tools", section="Harness", level="advanced",
+       env="DISPATCH_HARNESS_UNIT", restart_required=True),
+    _d("tools.harness_port", "integer", 3080, "Harness port",
+       "The loopback port dsh web listens on.", "tools", section="Harness", level="advanced",
+       env="DISPATCH_HARNESS_PORT", restart_required=True, min=1, max=65535),
+    _d("tools.harness_remote_url", "url", "", "Harness address for other devices",
+       "An address a browser elsewhere can open for the harness page.", "tools", section="Harness",
+       level="advanced", env="DISPATCH_HARNESS_REMOTE_URL", restart_required=True),
+    _d("tools.mail", "choice", "auto", "Emails pane (MailForge)",
+       "Show MailForge's dashboard as a tool. Automatic turns it on when MailForge's runtime files "
+       "are found.", "tools", section="MailForge", env="DISPATCH_MAIL", restart_required=True,
+       choices=_ONOFFAUTO, choice_labels=_ONOFFAUTO_LABELS),
+    _d("tools.mail_data_dir", "path", "", "MailForge data folder",
+       "Where MailForge keeps its runtime files. Empty uses ~/.local/share/mailforge.", "tools",
+       section="MailForge", level="advanced", env="DISPATCH_MAIL_DATA_DIR", restart_required=True),
+    _d("tools.mail_remote_url", "url", "", "MailForge address for other devices",
+       "The address a browser elsewhere can open for MailForge.", "tools", section="MailForge",
+       level="advanced", env="DISPATCH_MAIL_REMOTE_URL", restart_required=True),
+    _d("tools.practice", "choice", "auto", "Clients pane",
+       "A client-pipeline dashboard proxied from another service on this computer. Automatic turns "
+       "it on when its PIN file exists.", "tools", section="Clients pane", level="advanced",
+       env="DISPATCH_PRACTICE", restart_required=True, choices=_ONOFFAUTO,
+       choice_labels=_ONOFFAUTO_LABELS),
+    _d("tools.practice_url", "url", "http://127.0.0.1:8793", "Clients service address",
+       "Where the client-pipeline service listens.", "tools", section="Clients pane", level="advanced",
+       env="DISPATCH_PRACTICE_URL", restart_required=True),
+    _d("tools.practice_pin_file", "path", "", "Clients service PIN file",
+       "A file holding the service's PIN. Empty uses ~/practice/keys/gui-pin.", "tools",
+       section="Clients pane", level="advanced", env="DISPATCH_PRACTICE_PIN_FILE",
+       restart_required=True),
+
+    # =========================== APPEARANCE ============================== #
+    _d("appearance.default_theme", "choice", "glacier", "Default theme",
+       "The theme a device uses until its user picks another.", "appearance", choices_from="themes",
+       choices=["glacier"]),
+    _d("appearance.default_language", "choice", "en", "Default language",
+       "The language a device uses until its user picks another.", "appearance",
+       choices_from="locales", choices=["en"]),
+    _d("appearance.avatar_style", "choice", "rich", "Default avatar style",
+       "Rich shows full pictures, Minimal shows small round avatars. A device can override it.",
+       "appearance", choices=["rich", "minimal"],
+       choice_labels={"rich": "Rich", "minimal": "Minimal"}),
+)
+
+#: key -> reason it was removed, so an old database row is reported rather than dropped.
+RETIRED: dict[str, str] = {}
+
+_registry: dict[str, SettingDef] = {d.key: d for d in CORE_SETTINGS}
+_plugin_keys: dict[str, set[str]] = {}          # owner -> keys it contributed
+
+
+def _check_unique() -> None:
+    keys = [d.key for d in CORE_SETTINGS]
+    assert len(keys) == len(set(keys)), "duplicate setting key"
+    for d in CORE_SETTINGS:
+        assert KEY_RE.match(d.key), d.key
+        assert d.key.split(".", 1)[0] == d.group, f"{d.key}: key prefix must equal its group"
+
+
+_check_unique()
+
+
+# --------------------------------------------------------------------------- #
+# Registry access (the core schema plus what plugins contribute)
+# --------------------------------------------------------------------------- #
+
+
+def all_defs() -> list[SettingDef]:
+    return list(_registry.values())
+
+
+def get_def(key: str) -> SettingDef | None:
+    return _registry.get(key)
+
+
+def by_env() -> dict[str, SettingDef]:
+    """env variable suffix (``BACKUP_KEEP``, ``OPENCLAW_BIN``) -> its definition."""
+    out: dict[str, SettingDef] = {}
+    for d in _registry.values():
+        for name in d.env_names():
+            out[name] = d
+    return out
+
+
+def register(defs: list[SettingDef], owner: str) -> None:
+    """Add a plugin's / the voice add-on's settings. Keys must sit in the owner's namespace."""
+    for d in defs:
+        if d.key in _registry and d.key not in _plugin_keys.get(owner, set()):
+            raise ValueError(f"setting {d.key!r} is already defined")
+        if owner.startswith("tool:") and not d.key.startswith(f"tools.{owner[5:]}."):
+            raise ValueError(f"{d.key!r} must live under tools.{owner[5:]}.")
+        if owner == "voice" and not d.key.startswith("voice."):
+            raise ValueError(f"{d.key!r} must live under voice.")
+    for d in defs:
+        _registry[d.key] = d
+        _plugin_keys.setdefault(owner, set()).add(d.key)
+
+
+def unregister(owner: str) -> None:
+    for k in _plugin_keys.pop(owner, set()):
+        _registry.pop(k, None)
+
+
+def reset_plugins_for_tests() -> None:
+    for owner in list(_plugin_keys):
+        unregister(owner)
+
+
+def from_fragment(fragment: list[dict], *, namespace: str, owner: str,
+                  group: GroupId = "tools") -> list[SettingDef]:
+    """Turn a plugin manifest's ``settings`` fragment (``SettingField`` dicts: key, type, label,
+    description, default, choices, advanced, env) into :class:`SettingDef` rows under ``namespace.``"""
+    out = []
+    for f in fragment:
+        t = f.get("type", "string")
+        mapped: SettingType = {"string": "string", "integer": "integer", "number": "number",
+                               "boolean": "boolean", "choice": "choice", "secret": "secret",
+                               "url": "url", "path": "path"}.get(t, "string")   # type: ignore[assignment]
+        out.append(SettingDef(
+            key=f"{namespace}.{f['key']}", type=mapped, default=f.get("default"),
+            label=f.get("label") or f["key"], description=f.get("description") or "",
+            group=group, section=owner.split(":", 1)[-1],
+            level="advanced" if f.get("advanced") else "basic",
+            choices=list(f.get("choices") or []), env=f.get("env"),
+            legacy_prefix_alias=False, secret=(mapped == "secret"), owner=owner))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Dynamic choices (themes / locales come from the shipped frontend)
+# --------------------------------------------------------------------------- #
+
+
+def _frontend_dir():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[2] / "frontend" / "static"
+
+
+def dynamic_choices(kind: str) -> list[str]:
+    import json
+    try:
+        if kind == "themes":
+            doc = json.loads((_frontend_dir() / "ui-theme" / "themes.json").read_text(encoding="utf-8"))
+            items = doc.get("themes") if isinstance(doc, dict) else doc
+            ids = [str(t.get("id")) for t in (items or []) if isinstance(t, dict) and t.get("id")]
+            return ids
+        if kind == "locales":
+            return sorted(p.stem for p in (_frontend_dir() / "locales").glob("*.json"))
+    except (OSError, ValueError):
+        return []
+    return []
+
+
+# --------------------------------------------------------------------------- #
+# Validation
+# --------------------------------------------------------------------------- #
+
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off", ""}
+_URL_RE = re.compile(r"^https?://[^\s/$.?#][^\s]*$", re.IGNORECASE)
+
+
+def _bad(d: SettingDef, why: str) -> SettingError:
+    return SettingError(d.key, f"{d.label}: {why}")
+
+
+def coerce(d: SettingDef, raw: Any) -> Any:
+    """``raw`` (from JSON, an env variable or a YAML file) as ``d``'s type, or SettingError."""
+    t = d.type
+    if raw is None:
+        if d.secret or t == "secret":
+            return None
+        return d.default
+    if t == "boolean":
+        if isinstance(raw, bool):
+            return raw
+        s = str(raw).strip().lower()
+        if s in _TRUE:
+            return True
+        if s in _FALSE:
+            return False
+        raise _bad(d, "must be true or false")
+    if t in ("integer", "number"):
+        if isinstance(raw, bool):
+            raise _bad(d, "must be a number")
+        try:
+            if t == "integer":
+                if isinstance(raw, int):
+                    n = raw
+                elif isinstance(raw, float) and raw.is_integer():
+                    n = int(raw)
+                else:
+                    n = int(str(raw).strip(), 10)
+            else:
+                n = float(raw)
+        except (TypeError, ValueError):
+            raise _bad(d, "must be a whole number" if t == "integer" else "must be a number") from None
+        if d.min is not None and n < d.min:
+            raise _bad(d, f"must be at least {d.min:g}")
+        if d.max is not None and n > d.max:
+            raise _bad(d, f"must be at most {d.max:g}")
+        return n
+    if t == "choice":
+        s = str(raw).strip()
+        allowed = (dynamic_choices(d.choices_from) if d.choices_from else []) or d.choices
+        if allowed and s not in allowed:
+            raise _bad(d, "must be one of " + ", ".join(allowed))
+        return s
+    if t == "url":
+        s = str(raw).strip()
+        if not s:
+            return ""
+        if not _URL_RE.match(s) or len(s) > 2048:
+            raise _bad(d, "must be an http:// or https:// address")
+        from urllib.parse import urlparse
+        u = urlparse(s)
+        if u.username or u.password:
+            raise _bad(d, "must not contain a user name or password")
+        return s.rstrip("/") if u.path in ("", "/") else s
+    if t == "list":
+        if isinstance(raw, str):
+            raw = [p.strip() for p in raw.split(",") if p.strip()]
+        if not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+            raise _bad(d, "must be a list of text values")
+        return raw
+    if t in ("string", "path", "secret"):
+        if isinstance(raw, (dict, list)):
+            raise _bad(d, "must be text")
+        s = str(raw)
+        if len(s) > 4096 or "\x00" in s:
+            raise _bad(d, "is too long or has an invalid character")
+        s = s.strip()
+        if d.min is not None and len(s) < d.min:
+            raise _bad(d, f"must be at least {d.min:g} characters")
+        return s
+    raise _bad(d, "has an unsupported type")
+
+
+def to_env_text(d: SettingDef, value: Any) -> str:
+    """A stored value as the text the old environment readers parse."""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, list):
+        return ",".join(value)
+    return "" if value is None else str(value)
+
+
+def validate_all(values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """(coerced values, {key: error}) for a PATCH body."""
+    ok: dict[str, Any] = {}
+    errs: dict[str, str] = {}
+    for k, raw in values.items():
+        d = get_def(k)
+        if d is None:
+            errs[k] = "unknown setting"
+            continue
+        try:
+            ok[k] = coerce(d, raw)
+        except SettingError as e:
+            errs[k] = str(e)
+    return ok, errs
+
+
+# --------------------------------------------------------------------------- #
+# Documents
+# --------------------------------------------------------------------------- #
+
+
+def schema_document(defs: list[SettingDef] | None = None) -> dict:
+    """``GET /api/settings/schema`` and ``docs/contracts/settings.schema.json``."""
+    ds = defs if defs is not None else list(CORE_SETTINGS)
+    return {
+        "schema": SCHEMA_VERSION,
+        "groups": [{"id": g, "label": label, "description": desc} for g, label, desc in GROUPS],
+        "settings": [d.public() for d in ds],
+        "retired": dict(RETIRED),
+    }
+
+
+def markdown_reference() -> str:
+    """``docs/settings.md``: one table per group, generated from :data:`CORE_SETTINGS`."""
+    out = [
+        "# Settings reference",
+        "",
+        "<!-- Generated by scripts/gen_contracts.py from backend/app/settings_schema.py."
+        " Do not edit by hand. -->",
+        "",
+        f"Schema version {SCHEMA_VERSION}. Every setting below can be read with `GET /api/settings` and "
+        "changed with `PATCH /api/settings` (the `manage_settings` permission), or in "
+        "**Settings** in the app. How the store works, and how an environment variable "
+        "interacts with it, is in [Settings store](#how-the-store-works) at the end.",
+        "",
+        "**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy "
+        "`LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the "
+        "app and cannot be changed there. **Restart** means the new value is used from the next start.",
+        "",
+    ]
+    for gid, label, desc in GROUPS:
+        rows = [d for d in CORE_SETTINGS if d.group == gid]
+        out += [f"## {label}", "", desc, ""]
+        if not rows:
+            out += ["*Provided by the voice add-on once it is installed; see its documentation.*"
+                    if gid == "voice" else "*None yet.*", ""]
+            continue
+        out += ["| Key | Type | Default | Level | Restart | Env | What it does |",
+                "|---|---|---|---|---|---|---|"]
+        for d in rows:
+            default = "" if d.default in (None, "") else f"`{d.default}`"
+            if d.type == "boolean":
+                default = f"`{str(d.default).lower()}`"
+            rng = ""
+            if d.choices:
+                rng = " One of: " + ", ".join(f"`{c}`" for c in d.choices) + "."
+            elif d.min is not None or d.max is not None:
+                lo = "" if d.min is None else f"{d.min:g}"
+                hi = "" if d.max is None else f"{d.max:g}"
+                rng = f" Range {lo}..{hi}{(' ' + d.unit) if d.unit else ''}."
+            elif d.unit:
+                rng = f" In {d.unit}."
+            env = " / ".join(f"`{n}`" for n in d.env_names()) or ""
+            desc_txt = d.description.replace("|", "\\|") + rng
+            sec = " *(secret, write-only)*" if d.secret else ""
+            out.append(f"| `{d.key}` | {d.type} | {default} | {d.level} | "
+                       f"{'yes' if d.restart_required else ''} | {env} | {desc_txt}{sec} |")
+        out.append("")
+    out += [
+        "## How the store works",
+        "",
+        "Settings live in the `settings` table of `chats.db`. On the first start of 3.0 DisPatch "
+        "imports the values it finds in `security.yaml` and `tools.yaml` (idempotent: it only fills "
+        "keys that have no value yet) and records every key it does not recognise in "
+        "`settings_unknown` so nothing is dropped silently; both are listed by `GET /api/settings`. "
+        "Run `python -m app.migrate --dry-run` to see exactly what would be imported.",
+        "",
+        "Precedence, highest first: **environment variable**, then the **stored value**, then the "
+        "**default**. A value set by the environment is reported with `source: env` and refused by "
+        "`PATCH` (change the environment instead). Settings marked *file* in the app are written "
+        "through to their original file (`security.yaml`, `tools.yaml`) so everything that reads "
+        "that file keeps working.",
+        "",
+        "A plugin's own settings are declared in its manifest (`settings` fragment) and appear under "
+        "`tools.<plugin id>.`; the voice add-on's under `voice.`. Plugins and add-ons write through "
+        "`settings_store.writer(namespace)`, a function `(key, value) -> None` that accepts keys with "
+        "or without the namespace prefix.",
+        "",
+    ]
+    return "\n".join(out)
+
+
+
+# --------------------------------------------------------------------------- #
+# Boot-time bridge for config.py
+# --------------------------------------------------------------------------- #
+
+
+def env_values_from_db(db_path) -> dict[str, str]:
+    """``{env name: text}`` for every stored value whose setting has an environment alias.
+
+    ``config.env()`` consults this AFTER the process environment and BEFORE its own default,
+    so a value changed in Settings reaches the old import-time readers (the frozen
+    ``Settings`` dataclass, the quota constants in main.py) at the next start, and the
+    call-time readers at once. Keys are the variable names with the ``DISPATCH_`` prefix
+    removed (what ``config.env`` is asked for); a raw name (``OPENCLAW_BIN``) keeps its name.
+    Reads ``chats.db`` read-only and never raises: no file, no table, no values.
+    """
+    import json
+    import sqlite3
+    from pathlib import Path
+    p = Path(db_path)
+    if not p.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        con = sqlite3.connect(p.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
+    except sqlite3.Error:
+        return {}
+    try:
+        try:
+            rows = con.execute("SELECT key, value FROM settings").fetchall()
+        except sqlite3.Error:
+            return {}
+        for key, text in rows:
+            d = _registry.get(key)
+            if d is None or not d.env or d.secret:
+                continue
+            try:
+                value = coerce(d, json.loads(text))
+            except (ValueError, SettingError):
+                continue
+            t = to_env_text(d, value)
+            if t == "":
+                continue
+            name = d.env[len("DISPATCH_"):] if d.env.startswith("DISPATCH_") else d.env
+            out[name] = t
+    finally:
+        con.close()
+    return out
+
+# type used by settings_store adapters
+Adapter = tuple[Callable[[], Any], Callable[[Any], None]]

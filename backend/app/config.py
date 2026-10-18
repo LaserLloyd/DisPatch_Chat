@@ -20,7 +20,7 @@ import contextlib
 import os
 import tempfile
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -59,9 +59,52 @@ def env(name: str, default: str = "") -> str:
     ``DISPATCH_PORT`` first, ``LOCAL_CHAT_PORT`` second. Only the DISPATCH_
     names are documented; the fallback exists so an old unit keeps working and
     can be migrated whenever its owner gets round to it.
+
+    3.0: after the environment and before ``default`` comes the settings store
+    (``settings`` table in chats.db, ``settings_schema.py``). The process
+    environment always wins, so a variable in a service unit keeps overriding
+    whatever Settings says; a value changed in Settings applies here without an
+    environment variable existing at all.
     """
-    return os.environ.get(f"DISPATCH_{name}",
-                          os.environ.get(f"LOCAL_CHAT_{name}", default))
+    v = os.environ.get(f"DISPATCH_{name}", os.environ.get(f"LOCAL_CHAT_{name}"))
+    if v is not None:
+        return v
+    stored = _stored_env(name)
+    return stored if stored else default
+
+
+def env_raw(full_name: str, default: str = "") -> str:
+    """Like :func:`env` for a variable that has no DISPATCH_ prefix (``OPENCLAW_BIN``)."""
+    v = os.environ.get(full_name)
+    if v is not None:
+        return v
+    stored = _stored_env(full_name)
+    return stored if stored else default
+
+
+#: DATA_DIR string -> {env name: text} from the settings store (see settings_schema).
+_stored_env_cache: dict[str, dict[str, str]] = {}
+
+
+def invalidate_stored_env() -> None:
+    """Forget what was read from the settings store (called after every settings write)."""
+    _stored_env_cache.clear()
+
+
+def _stored_env(name: str) -> str | None:
+    data_dir = globals().get("DATA_DIR")
+    if data_dir is None or name == "DATA_DIR":
+        return None         # still importing (DATA_DIR itself is being resolved)
+    key = str(data_dir)
+    values = _stored_env_cache.get(key)
+    if values is None:
+        try:
+            from .settings_schema import env_values_from_db
+            values = env_values_from_db(Path(data_dir) / "chats.db")
+        except Exception:                                # never break an import over this
+            values = {}
+        _stored_env_cache[key] = values
+    return values.get(name)
 
 
 def _harness_default(flag: str) -> bool:
@@ -349,7 +392,7 @@ class Settings:
     host: str = env("HOST", "127.0.0.1")
     port: int = _int_env("PORT", 8765)
     # Path to the openclaw CLI. Default resolves via PATH; override for systemd.
-    openclaw_bin: str = os.environ.get("OPENCLAW_BIN", "openclaw")
+    openclaw_bin: str = env_raw("OPENCLAW_BIN", "openclaw")
     # Per-agent turn timeout in seconds (passed to `openclaw agent --timeout`).
     agent_timeout: int = _int_env("AGENT_TIMEOUT", 900)
     # Max number of agent subprocesses running at once (protects local models).
@@ -610,6 +653,14 @@ class Bot:
     # not. Empty = the add-on's default.
     voice: str = ""
     voice_rp: str = ""
+    # 3.0 (characters): profile ids allowed to see this character IN ADDITION to
+    # `audience`. Empty (the default) = everyone the audience allows. The Owner and
+    # Admins always see every character. See app/characters.py.
+    profiles: list = field(default_factory=list)
+    # The starter pack this character was installed from ("" = made by hand).
+    pack: str = ""
+    # One line for the character picker.
+    description: str = ""
 
     @property
     def audience(self) -> str:
@@ -691,6 +742,7 @@ class Bot:
             "safe": self.safe,
             "hide_unlocked": self.hide_unlocked,
             "audience": self.audience,
+            "description": self.description,
             "quick_actions": self.quick_actions,
             "color": self.color,
             "reactions": self.reactions,
@@ -711,7 +763,7 @@ class Bot:
         out = {k: v for k, v in self.advisor.items() if k != "providers"}
         out["providers"] = [
             {**{k: v for k, v in p.items() if k != "api_key"},
-             "has_key": bool(p.get("api_key"))}
+             "has_key": entry_has_key(p)}
             for p in (self.advisor.get("providers") or []) if isinstance(p, dict)]
         emb = out.get("embeddings")
         if isinstance(emb, dict) and "api_key" in emb:
@@ -730,7 +782,7 @@ class Bot:
         if not self.api:
             return None
         out = {k: v for k, v in self.api.items() if k != "api_key"}
-        out["has_key"] = bool(self.api.get("api_key"))
+        out["has_key"] = entry_has_key(self.api)
         return out
 
     def to_admin_dict(self) -> dict:
@@ -740,6 +792,20 @@ class Bot:
         return {**self.to_dict(), "api": self.api_public(),
                 "advisor": self.advisor_public(), "voice": self.voice,
                 "voice_rp": self.voice_rp}
+
+
+def entry_has_key(entry: dict) -> bool:
+    """Does this provider entry have a key stored: inline, or through its connection (3.0)?
+    (An ``api_key_env`` is not counted, as before: it names a variable, not a stored key.)"""
+    if entry.get("api_key"):
+        return True
+    if entry.get("connection"):
+        try:
+            from . import connections
+            return bool(connections.credential_for_block(entry))
+        except Exception:
+            return False
+    return False
 
 
 def shipped_default_bots() -> list[Bot]:
@@ -823,6 +889,14 @@ def _bot_entry(b: Bot) -> dict:
         "voice": b.voice,
         "voice_rp": b.voice_rp,
     }
+    # 3.0 character fields: written only when set, so a roster that never uses them keeps
+    # the file it has always had.
+    if b.profiles:
+        entry["profiles"] = list(b.profiles)
+    if b.pack:
+        entry["pack"] = b.pack
+    if b.description:
+        entry["description"] = b.description
     if b.api:
         entry["api"] = dict(b.api)
     if b.advisor:
@@ -965,6 +1039,10 @@ def load_bots() -> list[Bot]:
                 agent=str(e.get("agent", base.agent if base else "")).strip(),
                 voice=str(e.get("voice", base.voice if base else "") or "").strip()[:80],
                 voice_rp=str(e.get("voice_rp", base.voice_rp if base else "") or "").strip()[:32],
+                profiles=[str(x) for x in (e.get("profiles") or []) if isinstance(x, str)]
+                if isinstance(e.get("profiles"), list) else [],
+                pack=str(e.get("pack") or "")[:48],
+                description=str(e.get("description") or "")[:400],
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,

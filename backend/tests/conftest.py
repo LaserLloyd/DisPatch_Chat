@@ -18,6 +18,10 @@ os.environ.setdefault("DISPATCH_VOICE_PREWARM", "0")
 # start" there. Tests that exercise the marker turn it on themselves.
 os.environ.setdefault("DISPATCH_EXT_BOOT_MARKER", "0")
 
+# Connection keys and secret settings go to a 0600 file under the (per-test) data dir, never to a
+# developer's real OS keyring (app/secret_store.py).
+os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
+
 from app import config as config_module
 from app import openclaw
 
@@ -184,6 +188,24 @@ def _reuse_starter_cards(_starter_cards, monkeypatch):
 
     monkeypatch.setattr(_reactions, "seed_starter_pack", seed_from_cache)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _w5_stores_start_empty(monkeypatch):
+    """Per-test isolation for the 3.0 settings / connections / secret / plugin-approval stores:
+    their schema-ready sets and caches are keyed by data directory, and the plugin settings
+    registry is process-wide. Backups use a cheap scrypt so a round trip takes milliseconds."""
+    from app import backups, connections, secret_store, settings_store, tool_manifests
+
+    def clear():
+        settings_store.reset_for_tests()
+        connections.reset_for_tests()
+        secret_store.reset_for_tests()
+        tool_manifests.reset_for_tests()
+    clear()
+    monkeypatch.setattr(backups, "SCRYPT_N", 2 ** 10)
+    yield
+    clear()
 
 
 @pytest.fixture(autouse=True)
