@@ -167,6 +167,29 @@ jobs:
         # which are (correctly) clean.
         run: python3 scripts/check-locales.py --selftest
 
+  audit:
+    name: Dependency audit
+    needs: privacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        # Exact version - see the note in the `test` job above.
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: pip-audit the locked set
+        # Audits exactly what `uv sync --frozen` installs: the lockfile exported
+        # with every extra (so the optional agents-claude pin is covered too),
+        # then checked against the PyPI advisory database. `--no-deps` because the
+        # export is already fully resolved and pinned; `--disable-pip` so nothing
+        # is installed or resolved. Any finding exits non-zero and fails the job.
+        # pip-audit is pinned: an unpinned `uvx pip-audit` is "newest that day".
+        # Bump deliberately. Do NOT add `--ignore-vuln` without a comment naming
+        # the advisory, why it cannot be fixed, and when to revisit it.
+        working-directory: backend
+        run: |
+          uv export --frozen --no-hashes --no-emit-project --all-extras > "$RUNNER_TEMP/requirements-audit.txt"
+          uvx --python 3.12 pip-audit==2.10.1 -r "$RUNNER_TEMP/requirements-audit.txt" --no-deps --disable-pip --strict
+
   docker:
     name: Docker image builds
     needs: [test, lint]
