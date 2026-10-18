@@ -150,12 +150,12 @@ function buildGallery(ui) {
   });
 }
 
-/** "Theme revision 2026-09-22" under the gallery. The date goes in through
+/** "Theme revision 1.2.0" under the gallery (UITheme.version). The date goes in through
  *  data-i18n-vars so a later language switch re-renders it. */
 function fillRevision(ui) {
   const p = document.getElementById('theme-revision');
   if (!p) return;
-  const rev = typeof ui.revision === 'function' ? ui.revision() : '';
+  const rev = typeof ui.revision === 'function' ? ui.revision() : (ui.version || '');
   if (!rev) { p.hidden = true; return; }
   p.setAttribute('data-i18n-vars', JSON.stringify({ date: rev }));
   p.textContent = `Theme revision ${rev}`;

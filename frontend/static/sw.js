@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v167';  // v167: 3.0 profiles, roles and policy - new js/profiles.js (pure helpers), js/signin.js (profile tiles, first-run setup, Restricted strip, rail chip) and js/people.js (Settings -> People & Profiles) join SHELL; api.js?v=33->34 (me/login/switchProfile/setupOwner/people/devices/..., error.code/fix/retryAfter on thrown errors, signin_required + time_limit/quiet_hours hooks) and its importers bots-edit.js, checklist.js, clients.js, plugins.js, reactions.js, tools.js; ws.js?v=9->10 (a 1008 close stops the reconnect loop); about.js?v=20->21 (APP_VERSION 3.0.0) and its importers ext-sdk.js, voice-absent.js; privacy.js?v=10->11 (APP_KEYS: dp-firstrun-dismissed) and its importer pins.js; main.js?v=143->144, app.css?v=106->107, index.html; locales role.*, signin.*, setup.*, password.*, people.*, restricted.*, notice.*, chip.*, Safe Mode -> Restricted wording (see locales/I18N-TODO.md).
+const CACHE = 'local-chat-v168';  // v168: ForgeUI 1.2.0 vendored whole (forgeui.json; docs/development.md, "Themes"): SHELL gains ui-theme/ui-components.css + ui-components.js + locales/en.json + locales/ja.json and adapters/dispatch-compat.css becomes adapters/dispatch-extra.css (the app-owned overlay); index.html links the component layer and adds slate, high-contrast and high-contrast-light to the picker; theme.js?v=19->20 (revision line reads UITheme.version), app-sdk.js?v=2->3 (overlay path, contrast profile from themes.json) and every importer: main.js?v=144->145, ext-sdk.js?v=15->16, apps/jobboard board.js?v=2->3, apps/imagestudio studio.js?v=1->2.
+// v167: 3.0 profiles, roles and policy - new js/profiles.js (pure helpers), js/signin.js (profile tiles, first-run setup, Restricted strip, rail chip) and js/people.js (Settings -> People & Profiles) join SHELL; api.js?v=33->34 (me/login/switchProfile/setupOwner/people/devices/..., error.code/fix/retryAfter on thrown errors, signin_required + time_limit/quiet_hours hooks) and its importers bots-edit.js, checklist.js, clients.js, plugins.js, reactions.js, tools.js; ws.js?v=9->10 (a 1008 close stops the reconnect loop); about.js?v=20->21 (APP_VERSION 3.0.0) and its importers ext-sdk.js, voice-absent.js; privacy.js?v=10->11 (APP_KEYS: dp-firstrun-dismissed) and its importer pins.js; main.js?v=143->144, app.css?v=106->107, index.html; locales role.*, signin.*, setup.*, password.*, people.*, restricted.*, notice.*, chip.*, Safe Mode -> Restricted wording (see locales/I18N-TODO.md).
 // v166: 2.4.2 — Settings → Bots visibility is two switches, Show locked (safe) and Show unlocked (!hide_unlocked); neither = Hidden (dimmed row, shown on no device); the old visible switch is folded in server-side: main.js?v=142→143, app.css?v=105→106 (.bm-hidden-tag, .bm-row--hidden), about.js?v=19→20 (APP_VERSION 2.4.2) and its importers ext-sdk.js?v=14→15, voice-absent.js?v=13→14, plugins.js?v=13→14; locales settings.show_locked_*, show_unlocked_*, hidden_* (replace safe_badge/safe_title/hide_unlocked_*/show_in_sidebar), settings.show_hidden_desc.
 // v165: 2.4.1 — a bot can opt out of quick actions (bot.quick_actions=false): quick-actions.js?v=1→2 (setAllowed), about.js?v=18→19 (APP_VERSION 2.4.1) and its importers ext-sdk.js?v=13→14, voice-absent.js?v=12→13, plugins.js?v=12→13, main.js?v=141→142.
 // v164: 2.4.0 — bots hidden on unlocked devices: menubots.js?v=2→3 (hiddenHere, the per-device "show hidden bots" switch), privacy.js?v=9→10 (wipes that key) and its importer pins.js?v=13→14, about.js?v=17→18 (APP_VERSION 2.4.0) and its importers ext-sdk.js?v=12→13, voice-absent.js?v=11→12, plugins.js?v=11→12, main.js?v=140→141; locales settings.hide_unlocked_*, settings.show_hidden*.
@@ -318,7 +319,12 @@ const SHELL = [
   // v120). The runtime is the first script in <head> and paints the theme
   // before anything else, so an offline start without it has no theme at all.
   '/static/ui-theme/ui-theme.js', '/static/ui-theme/ui-theme.css',
-  '/static/ui-theme/adapters/dispatch-compat.css',
+  '/static/ui-theme/adapters/dispatch-extra.css',
+  // ForgeUI 1.2.0 component layer (v168): index.html links the sheet and
+  // defers the script; the string tables are fetched on demand by
+  // UIComponents.loadLocale(), so an offline switch of language still works.
+  '/static/ui-theme/ui-components.css', '/static/ui-theme/ui-components.js',
+  '/static/ui-theme/locales/en.json', '/static/ui-theme/locales/ja.json',
   '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css',

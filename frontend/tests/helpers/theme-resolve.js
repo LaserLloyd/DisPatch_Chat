@@ -3,8 +3,8 @@
 // Since the move onto the shared theme folder, no single file holds a palette
 // any more: the contract tokens come from static/ui-theme/ui-theme.css (one
 // :root base block for Purple plus one [data-palette="<slug>"] block per
-// theme), the DisPatch compat adapter static/ui-theme/adapters/
-// dispatch-compat.css aliases --bg-primary & co. onto contract names, and
+// theme), the DisPatch overlay adapter static/ui-theme/adapters/
+// dispatch-extra.css aliases --bg-primary & co. onto contract names, and
 // DisPatch's own roles come from static/theme.css. A test
 // that wants "what is --user-bubble in Forest" has to replay the cascade the
 // browser runs on <html>. This does exactly that, for the handful of selector
@@ -93,7 +93,8 @@ export function manifest() {
 
 export function revision() {
   const js = readFileSync(RUNTIME, 'utf8');
-  const m = /\/\*@revision\*\/"([^"]+)"\/\*@end-revision\*\//.exec(js);
+  // ForgeUI 1.2 dropped the dated revision marker; the runtime's version is the stamp.
+  const m = /\/\*@version\*\/'([^']+)'/.exec(js);
   return m ? m[1] : null;
 }
 
@@ -144,13 +145,13 @@ let cachedRules = null;
 function allRules() {
   if (cachedRules) return cachedRules;
   // Load order in index.html: theme.css, app.css, dashboard.css, then
-  // ui-theme/ui-theme.css and ui-theme/adapters/dispatch-compat.css.
+  // ui-theme/ui-theme.css and ui-theme/adapters/dispatch-extra.css.
   // app.css / dashboard.css declare no tokens on <html> (asserted by a test),
   // so only the three token files matter here.
   cachedRules = [
     ...parseRules(readFileSync(join(STATIC, 'theme.css'), 'utf8'), 0),
     ...parseRules(readFileSync(join(THEME_DIR, 'ui-theme.css'), 'utf8'), 3),
-    ...parseRules(readFileSync(join(THEME_DIR, 'adapters', 'dispatch-compat.css'), 'utf8'), 4),
+    ...parseRules(readFileSync(join(THEME_DIR, 'adapters', 'dispatch-extra.css'), 'utf8'), 4),
   ];
   return cachedRules;
 }

@@ -2,7 +2,7 @@
 //
 // DisPatch's colours come from the shared drop-in theme folder static/ui-theme/:
 // ui-theme.js (the blocking runtime and its registry of themes), ui-theme.css
-// (every theme's contract tokens) and adapters/dispatch-compat.css (DisPatch's
+// (every theme's contract tokens) and adapters/dispatch-extra.css (DisPatch's
 // own token names mapped onto them). DisPatch's settings for it are the data-*
 // on the runtime's <script> tag in index.html. static/theme.css keeps only
 // what the theme folder does not own. Component CSS still reads the legacy names (--bg-primary,
@@ -37,7 +37,7 @@ const THEME_CSS = stripComments(read('theme.css'));
 const APP = stripComments(read('app.css'));
 const DASH = stripComments(read('dashboard.css'));
 const UI_CSS = stripComments(read('ui-theme/ui-theme.css'));
-const COMPAT_CSS = stripComments(read('ui-theme/adapters/dispatch-compat.css'));
+const COMPAT_CSS = stripComments(read('ui-theme/adapters/dispatch-extra.css'));
 const THEME_JS = read('js/theme.js');
 const HTML = read('index.html').replace(/<!--[\s\S]*?-->/g, '');   // comments discuss <script> by name
 const FIXTURE = JSON.parse(readFileSync(join(HERE, 'fixtures', 'palette-parity-2026-09.json'), 'utf8'));
@@ -70,18 +70,45 @@ const PURPLE_EXCEPTIONS = new Set([
   '--scrollbar-thumb', '--user-bubble', '--bot-bubble',
 ]);
 
+// ForgeUI 1.2.0 (the vendored bundle) re-tuned three of the six legacy themes
+// after the parity fixture was cut, so these values differ ON PURPOSE and the
+// fixture is not edited (it stays the record of what shipped before the move):
+//   - Forest was redesigned upstream (true-black grounds with a green accent,
+//     where the fixture has warm brown grounds): every legacy token differs.
+//   - Paper's secondary ink and its four status text inks were darkened to hold
+//     the contrast floors (WCAG AA, ForgeUI contrast gate).
+//   - Purple's hover accent and the gradient that starts from it moved.
+// Each entry must really differ (below), and Forest and Paper must still read.
+const FORGEUI_12_DRIFT = {
+  forest: 'all',
+  paper: new Set(['--text-secondary', '--accent-text', '--success-text', '--error-text', '--warning-text']),
+  purple: new Set(['--accent-hover', '--accent-grad']),
+};
+const drifted = (slug, name) => {
+  const d = FORGEUI_12_DRIFT[slug];
+  return d === 'all' || (d instanceof Set && d.has(name));
+};
 
 // --- the set -----------------------------------------------------------------
 
-test('the runtime offers the ten themes, glacier first-class default', () => {
+test('the runtime offers the thirteen themes, glacier first-class default', () => {
   const m = manifest();
   assert.equal(m.default, 'glacier');
   assert.equal(m.storageKey, 'dispatch-palette',
     'the storage key must stay dispatch-palette, or every device forgets its theme');
-  assert.equal(m.themes.length, 10);
+  assert.equal(m.themes.length, 13);
   for (const slug of m.themes) assert.ok(SLUGS.includes(slug), `${slug} is enabled but not registered`);
   for (const slug of CORE) assert.ok(m.themes.includes(slug), `core theme ${slug} is not enabled`);
-  assert.match(revision() || '', /^\d{4}-\d{2}-\d{2}$/, 'ui-theme.js carries no revision date');
+  // ForgeUI 1.2.0's accessibility themes are offered in the picker.
+  for (const slug of ['slate', 'high-contrast', 'high-contrast-light']) {
+    assert.ok(m.themes.includes(slug), `${slug} is registered by ForgeUI 1.2 but not in index.html's data-themes`);
+  }
+  assert.match(revision() || '', /^\d+\.\d+\.\d+$/, 'ui-theme.js carries no version (UITheme.version)');
+  // The picker setting and forgeui.json (the single source) name the same themes.
+  const fm = JSON.parse(readFileSync(join(HERE, '..', '..', 'forgeui.json'), 'utf8')).settings;
+  assert.deepEqual(m.themes, fm.themes, 'index.html data-themes and forgeui.json settings.themes disagree');
+  assert.equal(m.default, fm.default);
+  assert.equal(m.storageKey, fm.storage_key);
 });
 
 test('ui-theme.css defines a block for every enabled theme', () => {
@@ -111,6 +138,7 @@ for (const slug of CORE) {
     for (const name of LEGACY) {
       if (slug === 'purple' && PURPLE_EXCEPTIONS.has(name)) continue;
       if (slug === 'paper' && name === '--text-muted') continue;
+      if (drifted(slug, name)) continue;
       const a = canon(want[name]);
       const b = got[now(name)];
       if (a !== b) diffs.push(`${name}${RENAMED[name] ? ` (now ${now(name)})` : ''}: ${a} -> ${b}`);
@@ -133,6 +161,33 @@ test('parity: the documented exceptions are real, and still the only ones', () =
   const bg = resolveToken('paper', '--bg-primary');
   assert.ok(contrast(paperMuted, bg) > contrast(FIXTURE.palettes.paper.tokens['--text-muted'], bg),
     'Paper --text-muted was meant to get DARKER');
+});
+
+test('parity: the ForgeUI 1.2 drift is real, and Forest and Paper still read', () => {
+  // A drift entry that no longer differs from the fixture is a hole.
+  for (const slug of Object.keys(FORGEUI_12_DRIFT)) {
+    const got = resolveAll(slug, LEGACY.map(now));
+    const names = FORGEUI_12_DRIFT[slug] === 'all' ? LEGACY : [...FORGEUI_12_DRIFT[slug]];
+    const same = names.filter((n) => got[now(n)] === canon(FIXTURE.palettes[slug].tokens[n]));
+    if (FORGEUI_12_DRIFT[slug] === 'all') {
+      assert.ok(same.length < names.length / 2,
+        `${slug} matches the fixture again (${same.length}/${names.length}) - drop it from FORGEUI_12_DRIFT`);
+    } else {
+      assert.deepEqual(same, [], `${slug}: ${same.join(', ')} no longer differ from the fixture - drop them from FORGEUI_12_DRIFT`);
+    }
+  }
+  // Paper's darkened inks must read at least as well as the old ones on the Paper ground.
+  const bg = resolveToken('paper', '--bg-primary');
+  for (const name of FORGEUI_12_DRIFT.paper) {
+    assert.ok(contrast(resolveToken('paper', name), bg) >= contrast(FIXTURE.palettes.paper.tokens[name], bg),
+      `paper ${name} got lighter, but 1.2 darkened it`);
+  }
+  // Forest: the redesigned grounds still carry AA body text.
+  const fbg = resolveToken('forest', '--bg-primary');
+  for (const name of ['--text-primary', '--text-secondary', '--text-muted']) {
+    assert.ok(contrast(resolveToken('forest', name), fbg) >= 4.5,
+      `forest ${name} on --bg-primary: ${contrast(resolveToken('forest', name), fbg).toFixed(2)}:1`);
+  }
 });
 
 test('the hard-coded colours the sweep replaced keep their core values', () => {
@@ -162,7 +217,7 @@ test('the hard-coded colours the sweep replaced keep their core values', () => {
 
 // --- every theme, every legacy token ----------------------------------------
 
-test('all ten themes resolve every legacy token to a concrete value', () => {
+test('all thirteen themes resolve every legacy token to a concrete value', () => {
   const bad = [];
   for (const slug of SLUGS) {
     const got = resolveAll(slug, [...LEGACY.map(now), ...EXTRA]);
@@ -189,7 +244,7 @@ test('night themes light no blue sub-pixel through any legacy token', () => {
   assert.deepEqual(hits, [], '\n' + hits.join('\n'));
 });
 
-// --- the notification contract (all ten) -------------------------------------
+// --- the notification contract (all thirteen) -------------------------------------
 //
 // --notify is the ONLY thing whose job is to be noticed, --dot-idle the only
 // thing whose job is not to be. Solved as a pair, per theme, against the
@@ -330,9 +385,9 @@ test('ui-theme.js is the first script in <head>, blocking, from the drop-in fold
 test('the theme folder loads after app.css and dashboard.css, adapter last, with no ?v=', () => {
   const at = (re) => { const m = re.exec(HTML); return m ? m.index : -1; };
   const ui = at(/href="\/static\/ui-theme\/ui-theme\.css"/);
-  const compat = at(/href="\/static\/ui-theme\/adapters\/dispatch-compat\.css"/);
+  const compat = at(/href="\/static\/ui-theme\/adapters\/dispatch-extra\.css"/);
   assert.ok(ui > 0, 'index.html does not link ui-theme/ui-theme.css');
-  assert.ok(compat > ui, 'adapters/dispatch-compat.css must load right after ui-theme.css');
+  assert.ok(compat > ui, 'adapters/dispatch-extra.css must load right after ui-theme.css');
   assert.ok(ui > at(/href="\/static\/app\.css/), 'ui-theme.css must load after app.css');
   assert.ok(ui > at(/href="\/static\/dashboard\.css/), 'ui-theme.css must load after dashboard.css');
   assert.ok(ui > at(/href="\/static\/theme\.css/), 'ui-theme.css must load after theme.css');
@@ -350,7 +405,7 @@ test('the server revalidates the theme folder on every load', () => {
 
 test('the service worker precaches the theme folder files the page loads', () => {
   const SW = read('sw.js');
-  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/adapters/dispatch-compat.css']) {
+  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/adapters/dispatch-extra.css']) {
     assert.ok(SW.includes(`'/static/${f}'`), `sw.js SHELL lacks /static/${f}`);
   }
 });
@@ -375,10 +430,33 @@ test('the theme revision line is wired into the Theme pane', () => {
   assert.match(THEME_JS, /revision\(\)/);
 });
 
-test('the theme folder files are free-standing and carry their revision', () => {
-  // The generated files identify themselves only by a revision date.
-  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/adapters/dispatch-compat.css']) {
-    assert.match(read(f), /^\/\* Theme revision \d{4}-\d{2}-\d{2} — [^\n]*Generated file, do not edit by hand/, `${f} header`);
-    assert.ok(!/https?:\/\/|\.git\b/.test(read(f).split('\n').slice(0, 3).join('\n')), `${f} header names a source`);
+test('the vendored bundle files carry the ForgeUI stamp; the overlay is app-owned', () => {
+  // The bundle files identify themselves by version; forgeui.json pins it and
+  // the pytest drift check (tests/unit/test_forgeui_vendor.py) verifies every hash.
+  const version = read('ui-theme/VERSION').trim();
+  assert.match(version, /^ThemeForge 1\.2\.\d+ [0-9a-f]{12}$/, 'VERSION is not a ForgeUI 1.2.x stamp');
+  for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/ui-components.css', 'ui-theme/ui-components.js']) {
+    assert.match(read(f), /^\/\* GENERATED [^\n]*: ThemeForge 1\.2\.\d+, drop-in bundle/, `${f} header`);
   }
+  // The overlay is NOT a bundle file: no generated header, and it matches its source.
+  const overlay = read('ui-theme/adapters/dispatch-extra.css');
+  assert.ok(!/GENERATED|Generated file/.test(overlay.split('\n').slice(0, 3).join('\n')), 'the overlay claims to be generated');
+  assert.equal(overlay.replace(/\r\n/g, '\n'),
+    readFileSync(join(HERE, '..', 'overlays', 'dispatch-extra.css'), 'utf8').replace(/\r\n/g, '\n'),
+    'adapters/dispatch-extra.css is stale: run `python -m forgeui vendor`');
+});
+
+test('index.html wires the component layer and the service worker precaches it', () => {
+  assert.match(HTML, /<link rel="stylesheet" href="\/static\/ui-theme\/ui-components\.css" \/>/);
+  assert.match(HTML, /<script src="\/static\/ui-theme\/ui-components\.js" defer><\/script>/);
+  // Before app.css, so the shell's own .ui-dialog rules win every tie.
+  const at = (re) => { const m = re.exec(HTML); return m ? m.index : -1; };
+  assert.ok(at(/ui-components\.css/) > 0 && at(/ui-components\.css/) < at(/href="\/static\/app\.css/),
+    'ui-components.css must load before app.css');
+  const SW = read('sw.js');
+  for (const f of ['ui-components.css', 'ui-components.js', 'locales/en.json', 'locales/ja.json']) {
+    assert.ok(SW.includes(`'/static/ui-theme/${f}'`), `sw.js SHELL lacks /static/ui-theme/${f}`);
+  }
+  // Inline scripts need CSP hashes; the component layer is loaded as external files only.
+  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>[^<]*UIComponents/.test(HTML), 'an inline script uses UIComponents');
 });

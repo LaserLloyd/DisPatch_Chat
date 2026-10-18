@@ -51,7 +51,7 @@ test('the SDK reads the SAME storage keys, languages and theme sheets as the she
   // The token sheets, at the version index.html links them.
   const themeCss = /href="(\/static\/theme\.css\?v=\d+)"/.exec(INDEX)[1];
   assert.ok(SDK_SRC.includes(`'${themeCss}'`), `app-sdk.js must link ${themeCss}`);
-  for (const href of ['/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-compat.css']) {
+  for (const href of ['/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css']) {
     assert.ok(INDEX.includes(`href="${href}"`) && SDK_SRC.includes(`'${href}'`), href);
   }
 });
@@ -232,7 +232,7 @@ test('theme(): framed, it copies the shell’s own attributes and links the toke
   assert.equal(root.getAttribute('data-palette'), 'forest');
   assert.equal(root.getAttribute('data-theme'), 'dark');
   const links = [...win.document.head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href'));
-  assert.deepEqual(links, ['/static/theme.css?v=7', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-compat.css', '/apps/demo/app.css'],
+  assert.deepEqual(links, ['/static/theme.css?v=7', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css', '/apps/demo/app.css'],
     'tokens first, the app’s own sheet last (it wins ties)');
   sdk.theme();
   assert.equal(win.document.head.querySelectorAll('link[rel="stylesheet"]').length, 4, 'idempotent');
