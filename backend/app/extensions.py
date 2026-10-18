@@ -539,10 +539,6 @@ def websocket_spec(name: str) -> _WsSpec | None:
 
 
 # --------------------------------------------------------------------------- #
-# ExtensionContext
-# --------------------------------------------------------------------------- #
-
-# --------------------------------------------------------------------------- #
 # Private folders, the models folder, the credential store, the settings writer
 # --------------------------------------------------------------------------- #
 
@@ -790,6 +786,10 @@ def _migrate_ext_settings(ext: Extension) -> None:
         log.info("ext %s: settings migration: %s (%s key(s) written)", ext.id, rep.get("status"),
                  rep.get("written"))
 
+
+# --------------------------------------------------------------------------- #
+# ExtensionContext
+# --------------------------------------------------------------------------- #
 
 class ExtensionContext:
     """Everything an extension gets (CONTRACTS §B.1). Registration methods work
