@@ -56,3 +56,11 @@ guide/plugins-tab.png
 guide/quick-actions.png
 guide/safe-mode.png
 guide/voice-screen.png
+
+# README gallery (docs/screenshots/readme/), opened one by one 2026-10-19: Atlas,
+# demo-model, invented household chat, Ada/Mia/Sam letter-block profiles, empty
+# Tasks page; no address, path or real name in frame.
+readme/chat.png
+readme/settings.png
+readme/people-profiles.png
+readme/tasks.png

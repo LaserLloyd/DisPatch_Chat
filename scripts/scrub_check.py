@@ -173,6 +173,12 @@ def _screenshot_allowlist(root: Path) -> set[str]:
 #: they are named in the same file as ``guide/<file>``.
 GUIDE_SHOT_DIR = "frontend/static/guide/"
 
+#: The README's gallery lives one level down, in docs/screenshots/readme/. The
+#: only non-image file allowed there is the paste-in snippet that embeds them;
+#: every picture is listed in ALLOWED.txt as ``readme/<file>``.
+README_SHOT_DIR = "readme/"
+README_SNIPPET = "README_SNIPPET.md"
+
 
 def _unlisted_screenshot(name: str, allowed: set[str]) -> str | None:
     """Why this path is a problem, or None if it is fine."""
@@ -186,6 +192,19 @@ def _unlisted_screenshot(name: str, allowed: set[str]) -> str | None:
     if not name.startswith(SCREENSHOT_DIR):
         return None
     base = name[len(SCREENSHOT_DIR):]
+    if base.startswith(README_SHOT_DIR) and "/" not in base[len(README_SHOT_DIR):]:
+        # The README's pictures: one extra folder, still allowlisted file by
+        # file (as ``readme/<file>``) and still opened by a human first.
+        leaf = base[len(README_SHOT_DIR):]
+        if leaf == README_SNIPPET:
+            return None
+        if Path(leaf).suffix.lower() in SCREENSHOT_SUFFIXES:
+            if f"{README_SHOT_DIR}{leaf}" in allowed:
+                return None
+            return (f"a README picture not listed in {SCREENSHOT_ALLOWLIST} — add "
+                    f"'{README_SHOT_DIR}{leaf}' only after opening it and confirming "
+                    f"it shows no real names, places, addresses, avatars or "
+                    f"message text")
     if "/" in base:
         return ("a screenshot in a subdirectory — keep captures flat in "
                 "docs/screenshots/ so the allowlist can name them")
@@ -864,6 +883,28 @@ def selftest() -> int:
             failures.append("a STAGED avatar was not flagged")
         if not any("someone.png" in p for p in scan(root)):
             failures.append("a TRACKED avatar was not flagged")
+
+        # --- the README gallery under docs/screenshots/readme/ ---------------
+        shots = root / "docs" / "screenshots"
+        png_head = b"\x89PNG\r\n\x1a\n"
+        for rel_name in ("readme/listed.png", "readme/unlisted.png",
+                         "readme/README_SNIPPET.md", "readme/notes.md",
+                         "readme/deeper/x.png", "other/x.png"):
+            f = shots / rel_name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(png_head if rel_name.endswith(".png") else b"# Gallery\n")
+        (shots / "ALLOWED.txt").write_text("readme/listed.png\n", encoding="utf-8")
+        _git(root, "add", "-f", "docs/screenshots")
+        flagged = "\n".join(scan(root, staged=True))
+        if "readme/listed.png" in flagged:
+            failures.append("a listed README picture was flagged")
+        if "readme/README_SNIPPET.md" in flagged:
+            failures.append("the README snippet was flagged")
+        for rel_name in ("readme/unlisted.png", "readme/notes.md",
+                         "readme/deeper/x.png", "other/x.png"):
+            if f"docs/screenshots/{rel_name}" not in flagged:
+                failures.append(f"{rel_name} slipped through the screenshot rules "
+                                "(only listed readme/*.png and the snippet pass)")
 
 
         # --- the LICENCE copyright notice ------------------------------------
