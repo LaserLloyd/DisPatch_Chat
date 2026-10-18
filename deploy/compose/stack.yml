@@ -55,6 +55,13 @@ services:
       TZ: ${TZ:-UTC}
       SF_DATA_DIR: /data
       SF_MODELS__DIR: /models          # first-run default; config.yaml wins afterwards
+      # Owner account for StudioForge's panel, created on the first start of a fresh volume.
+      # Its 2.x images refuse to listen beyond loopback with nothing to sign in with
+      # (`auth_required_for_remote_bind`), and a published port is "beyond loopback". Leave
+      # the password empty for a generated one at /data/owner-password.initial (10+ characters
+      # otherwise). Once an owner exists every API request needs a key: see docs/deploy/stack.md.
+      SF_OWNER_USER: ${SF_OWNER_USER:-owner}
+      SF_OWNER_PASSWORD: ${SF_OWNER_PASSWORD:-}
     volumes:
       - studioforge-data:/data         # config, registry, engines/, logs/
       - ${STUDIOFORGE_MODELS:-./models}:/models:ro,z   # your GGUF library
@@ -112,7 +119,10 @@ services:
           advisor:
             tools: true
             providers:
-            - provider: custom
+            # `llamacpp` is DisPatch's provider id for a local llama.cpp-style server; the 3.0
+            # migration turns this block into a Connection of type `studioforge` (a `custom`
+            # provider would become a generic OpenAI-compatible server instead).
+            - provider: llamacpp
               base_url: http://studioforge:1234/v1
               model: ${STACK_MODEL:-your-model-id}
         CFG

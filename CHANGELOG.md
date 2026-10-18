@@ -215,6 +215,14 @@ declares the permission it needs; and the backend runs on native Windows.
 - `/api/bots*` are thin aliases of `/api/characters*` (same permissions); the bot row gains `connection`,
   `profiles`, `description`, `pack`.
 - A character a profile is not listed for cannot be opened or messaged by that profile; Owner and Admin always see all.
+  The same rule now narrows every WebSocket broadcast per connection (`bots` after an edit, `thread_*` and `message`
+  frames; `ConnectionManager.scoper` / `main.scope_frame_for_principal`), not only the roster and `hello`; `get_messages`
+  over the socket checks it for every profile. Before, a profile left off a character's `profiles` list saw the
+  character's new name and avatar, and its threads being created, in the broadcasts that followed an edit.
+- `deploy/compose/stack.yml` passes `SF_OWNER_USER` / `SF_OWNER_PASSWORD` to StudioForge (its 2.x images refuse to
+  listen beyond loopback without an owner account) and seeds Atlas's provider as `llamacpp`, so the migrated connection
+  is of type `studioforge` rather than a generic OpenAI-compatible server. `docs/deploy/stack.md` says how to give that
+  connection a StudioForge API key.
 - Settings has two new tabs, **Connections** and **All settings**; the Bots tab gains a **Details** button per row and a
   **Starter packs** card; `index.html`'s theme picker lists the three new themes.
 - `GET /api/plugins/manifests` and the approval rule on `PUT /api/plugins/extensions/{id}` (additive: a body of

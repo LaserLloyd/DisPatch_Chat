@@ -20,15 +20,28 @@ docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env u
 docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env ps   # all "healthy"
 ```
 
-Open <http://localhost:8765>, **set a PIN under Settings, Security**, then drop your GGUF files in
-the folder `STUDIOFORGE_MODELS` points at (default `deploy/compose/models/`) and load one from
-StudioForge's panel at <http://localhost:8080>. With the optional knowledge stack:
-`… --profile knowledge up -d`, then `… run --rm infoforge doctor`.
+Open <http://localhost:8765> and finish the **setup wizard**: a fresh container is closed to the
+network until an owner exists, and the wizard asks for the one-time setup token printed by
+`docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env logs dispatch`
+(`SETUP TOKEN: ...`). Then drop your GGUF files in the folder `STUDIOFORGE_MODELS` points at
+(default `deploy/compose/models/`) and load one from StudioForge's panel at <http://localhost:8080>.
+With the optional knowledge stack: `… --profile knowledge up -d`, then `… run --rm infoforge doctor`.
 
-What `up` does: StudioForge starts (read-only root, data on a volume) and must report `healthy`;
-`dispatch-seed` writes `/data/config.yaml` **only if it does not exist** (the Atlas bot with one
-Direct-API provider, `base_url: http://studioforge:1234/v1`, `model: $STACK_MODEL`); then DisPatch
-starts. You can change the connection later in **Settings, AI models**; the seed never overwrites it.
+What `up` does: StudioForge starts (read-only root, data on a volume, an owner account created from
+`SF_OWNER_USER` / `SF_OWNER_PASSWORD` on a fresh volume) and must report `healthy`; `dispatch-seed`
+writes `/data/config.yaml` **only if it does not exist** (the Atlas bot with one `llamacpp` provider,
+`base_url: http://studioforge:1234/v1`, `model: $STACK_MODEL`, which DisPatch's first start turns into
+a Connection of type **StudioForge**); then DisPatch starts. You can change the connection later in
+**Settings, Connections**; the seed never overwrites it.
+
+**Give the connection a key.** Once StudioForge has an owner (every 2.x image on a published port),
+every request to it except `/health` needs an API key, so the seeded connection's **Test** answers
+"the provider rejected the API key" until you create one: sign in to the panel as the owner (the
+password you set, or `docker compose … exec studioforge cat /data/owner-password.initial`), create a
+key under **Users & Keys** (or `docker compose … exec studioforge studioforge keys create --name dispatch
+--scope inference`; the token is printed once) and paste it into **Settings, Connections,
+StudioForge, API key**. The `1.26-09-23` images have no owner bootstrap and need no key; they also
+answer `/api/version` without `product`, so DisPatch labels them "LM Studio" in **Find servers**.
 
 DisPatch's `.env` (the one next to `docker-compose.yml`) is read too, if present.
 
@@ -115,5 +128,8 @@ a running instance: the `-wal` file holds the recent writes.
   integration work, not part of this file.
 - StudioForge's `-cuda` image has no compiler: its first start needs an engine supplied or built
   once (see its [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md)).
-- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after setting a DisPatch PIN and a
-  StudioForge `server.api_key`.
+- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an owner (the setup
+  wizard) and the StudioForge connection carries an API key (above).
+- **Find servers** in DisPatch probes loopback and the Docker host, not the compose hostname: use
+  **Add by address** with `http://studioforge:1234/v1` (or keep the seeded connection) to add the
+  stack's own StudioForge.
