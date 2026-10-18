@@ -443,8 +443,13 @@ def _fresh_ws_manager():
         # instance-level override so the class method is back.
         mgr.__dict__.pop("broadcast", None)
         mgr.__dict__.pop("broadcast_where", None)
-        mgr._conns.clear()
-        mgr._lock = asyncio.Lock()
+        # A test may have monkeypatched these to something else on purpose
+        # (test_dashboard swaps _conns for a string); its own monkeypatch undo
+        # restores the real one, so only touch real containers here.
+        if isinstance(getattr(mgr, "_conns", None), dict):
+            mgr._conns.clear()
+        if isinstance(getattr(mgr, "_lock", None), asyncio.Lock):
+            mgr._lock = asyncio.Lock()
 
     _reset()
     yield

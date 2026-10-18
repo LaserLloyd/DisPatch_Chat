@@ -186,7 +186,8 @@ async def test_pdf_image_only_ocrs_when_available(pdf_env):
     resolved = await main._resolve_doc_refs(f"[[doc:{fid}|scale.pdf]]")
     assert "--- BEGIN DOCUMENT: scale.pdf ---" in resolved
     assert "207.7" in resolved          # OCR'd from the raster
-    assert "Body Fat Mass" in resolved
+    # OCR may wrap or re-space a line; compare on normalised whitespace.
+    assert "Body Fat Mass" in " ".join(resolved.split())
     assert "Attached file" not in resolved
 
 
