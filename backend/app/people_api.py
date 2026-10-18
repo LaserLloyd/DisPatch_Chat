@@ -451,7 +451,7 @@ def clean_permissions(role: str, items: Any, field_name: str) -> list[str]:
         if field_name == "grants" and role == "restricted" and it in never:
             raise accounts.AccountError(
                 "permissions_invalid", f"A Restricted profile can never be granted {it}.")
-        if field_name == "grants" and it == "admin_system" and role == "admin":
+        if field_name == "grants" and it == "admin_system" and role != "owner":
             raise accounts.AccountError("permissions_invalid", "Host control is Owner-only.")
         out.append(it)
     return list(dict.fromkeys(out))
@@ -583,6 +583,13 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
                             "You cannot change your own role or disable yourself.")
         if prof.role == "owner" and set(fields) - {"name", "avatar"}:
             return _problem(409, "owner_immutable", "The owner's role and limits cannot be changed here.")
+        if own and set(fields) - {"name", "avatar"} and not _may_manage(caller, prof.role):
+            # A profile edits its own name and picture, nothing else: grants, denies, budgets
+            # and timeouts are set by someone who may manage it. Without this a Member holding
+            # manage_users could grant itself every permission (host control included).
+            return _problem(403, "permission_denied",
+                            "You can change your own name and picture; limits and permissions are "
+                            "set by the Owner or an Admin.")
         new_role = fields.get("role", prof.role)
         if "role" in fields and new_role != prof.role:
             if not _may_manage(caller, new_role):
@@ -702,6 +709,13 @@ async def people_devices(request: Request):
 async def people_bind_this_device(request: Request, payload: DeviceIn):
     """Bind THIS browser to a default profile (``null`` unbinds): a device bound to a
     Restricted profile opens as that profile with nobody signed in."""
+    caller = _caller(request)
+    if payload.profile_id:
+        target = accounts.get_profile(payload.profile_id)
+        # Binding opens the device as that profile with no credential: only someone who
+        # may manage the profile (or the profile itself) may do it.
+        if target is not None and target.id != caller.profile_id and not _may_manage(caller, target.role):
+            return _problem(403, "permission_denied", "You cannot bind a device to that profile.")
     dev, new_tok = device_for(request)
     try:
         d = accounts.bind_device(dev, payload.profile_id, payload.label)
@@ -716,6 +730,9 @@ async def people_bind_this_device(request: Request, payload: DeviceIn):
 
 @router.delete("/api/people/devices/{device_id}", dependencies=[_MANAGE])
 async def people_forget_device(request: Request, device_id: str):
+    caller = _caller(request)
+    if not caller.is_operator and device_id != device_hash_of(request):
+        return _problem(403, "permission_denied", "You can only forget this device.")
     accounts.delete_device(device_id)
     _audit(request, "device_removed", device_id[:12])
     return {"ok": True}
