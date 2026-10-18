@@ -53,9 +53,12 @@ with the same locked rules as a typed Safe-Mode message. Voice settings stay
 unlocked-only.
 
 **Settings → Voice** tells you which state you are in. Without the add-on it
-explains what voice chat is and shows the commands below, ready to copy, with
-a **Check again** button that mounts the add-on without a page reload once you
-have restarted DisPatch.
+explains what voice chat is and shows the install command below, ready to copy,
+with a **Check again** button that mounts the add-on without a page reload once
+you have restarted DisPatch. With it, that page is the whole setup: the switch,
+the model download (a progress bar and Cancel, no terminal), the providers, the
+microphone test and the voice of each character. [voice.md](voice.md) counts the
+steps from a fresh Docker install and lists what is left.
 
 ### 1. Install it
 
@@ -124,33 +127,49 @@ ExecStart=/path/to/dispatch/scripts/local-chat-launch --uv /path/to/uv \
 own heartbeat rules instead of uvicorn's 20 s keepalive. `dispatch-voice doctor
 --unit <unit>` checks the add-on with the unit's own settings.
 
-**Docker**: build the image with the add-on, then fetch the models into the
-data volume (they are never baked into the image):
+**Docker**: build the image with the add-on. `VOICE=1` also installs `ffmpeg`
+and `libopus0` in the image (the add-on shells out to them: cloning a voice
+decodes the clip you upload; the low-bandwidth link uses Opus). The models are
+never baked in: the add-on's page downloads them into the data volume.
 
 ```bash
 VOICE=1 docker compose build && docker compose up -d
-docker compose exec app dispatch-voice fetch-models
 ```
 
-`--build-arg VOICE_REF=v1.0.0` pins a release.
-
-### 2. Fetch the speech models
-
-About 1.3 GB, once (speech recognition 631 MB, the voice 688 MB, turn
-detection 11 MB):
+`--build-arg VOICE_REF=` picks the add-on's ref: a full ref (`refs/tags/v1.6.0`,
+`refs/heads/<branch>`) or a bare tag name (`v1.6.0`). The default is the 3.0
+refactor branch of the add-on, which carries the 1.6.0 line (the `v1` tag still
+names 1.5.0); it moves to a release tag when 1.6.0 ships. To build from a local
+copy (CI, an air-gapped host, a branch nobody pushed yet) hand the Dockerfile the
+directory as a named build context; export it clean first (`git archive`), the
+whole directory is sent:
 
 ```bash
-.venv/bin/dispatch-voice fetch-models
+git -C /path/to/DisPatch_Voice archive HEAD | tar -x -C /tmp/voice-src
+docker build --build-arg VOICE=1 --build-arg VOICE_SRC=local \
+  --build-context voice-src=/tmp/voice-src -t dispatch:voice .
 ```
 
-They land in `<data>/speech-models` (or `DISPATCH_SPEECH_MODELS`) and the
-add-on's own model directory (`DISPATCH_VOICE_MODELS`).
+### 2. Restart DisPatch
 
-### 3. Restart DisPatch, then turn voice chat on
+Restart the service (or, in Docker, nothing: the image already has it) so the
+entry point is discovered. Everything after this is Settings → Voice.
 
-Restart the service, open **Settings → Voice** and press **Check again** (or
-just reload). The add-on's own settings replace the install page; turn voice
-chat on there. The journal shows `ext voice: DisPatch Voice 1.x.y ok (api 1)`,
+### 3. Turn voice chat on and download the models
+
+Open **Settings → Voice**, press **Check again** if the install page is still
+showing, switch voice on and press **Download** under *Models*: about 1.4 GB,
+once (speech recognition 631 MB, the voice 688 MB, turn detection 11 MB), with a
+progress bar and **Cancel**. Speech works as soon as it finishes; no restart is
+needed to hear a reply. A headless server can do the same from a shell with
+`.venv/bin/dispatch-voice fetch-models`.
+
+The files land in **`<data>/models`** (or `DISPATCH_SPEECH_MODELS`), in a `speech/`
+and a `chatterbox/` subfolder. Before 3.0 that folder was `<data>/speech-models`; at
+start DisPatch moves it across once (never overwriting; see
+[the models folder](#the-models-folder)).
+
+The journal shows `ext voice: DisPatch Voice 1.x.y ok (api 1)`,
 and `curl -s 127.0.0.1:8765/api/extensions` lists `voice` as `ok` (loopback is
 the machine tier for that one route). `/api/voice/*` is operator-only: with a
 PIN set, `curl` it with an unlocked session's cookie, e.g.
@@ -271,7 +290,8 @@ voice_rp, backend, owner, has_persona}` — never a provider block or a prompt;
 an API bot on DisPatch's default system prompt and None for a gateway agent;
 both added in 2.2.0, read them with `getattr`), `paths` (`ExtPaths`: your files
 by name — `voice_yaml`, `acks_yaml`, `voices_dir`, `cache_dir`, `models_dir`,
-and `state_dir` = `<data>/ext/<id>/`, 0700 — never the data directory itself),
+and `state_dir` = `<data>/ext/<id>/`, owner-only — never the data directory itself),
+`secrets` and `settings_writer(namespace)` ([host services](#host-services-folders-credentials-settings)),
 `db()`, `is_operator(request)`, `require_operator(request)`,
 `bot_backend(bot_id)`, `socket_count(name)`, `touch_session(token)`,
 `counters` (host-side counters such as `speculation_stale`).
@@ -424,6 +444,83 @@ read about you, e.g. `{"enabled": True, "ready": True}` for voice. Called per
 > agent could, in principle, quote or narrate it. The wording is chosen to be
 > a quiet standing instruction, and advisor/API bots get it in the system
 > prompt instead.
+
+---
+
+## Host services: folders, credentials, settings
+
+Three things an extension used to do for itself, and kept getting wrong in a
+container, now come from the host. All of them are additive (no `EXT_API`
+bump): feature-test with `hasattr(ctx, "secrets")`.
+
+### The models folder
+
+`ctx.paths.models_dir` is **`<data>/models`**, or `DISPATCH_SPEECH_MODELS` when the
+operator set it. The extension picks its own subfolders (the voice add-on uses
+`speech/` and `chatterbox/`). Until 3.0 the folder was `<data>/speech-models`,
+which also held Chatterbox. When the voice add-on loads, before its `setup`
+runs, DisPatch moves the old folder to the new name once:
+
+| old folder | new folder | what happens |
+|---|---|---|
+| exists | missing, or empty | one rename |
+| exists | has files | the old entries move in one by one; a name that already exists in the new folder stays where it is, and the old folder is kept if anything stayed |
+| a symlink, a mount point, or not renamable | any | left alone, a warning in the log; the add-on still reads files in the old place |
+| any | `DISPATCH_SPEECH_MODELS` set | never touched |
+
+`DISPATCH_MODELS_MIGRATE=dry-run` logs what would move and moves nothing;
+`DISPATCH_MODELS_MIGRATE=off` skips it. The function is
+`extensions.migrate_models_dir(dry_run=True, data=None)` (a dry run by default;
+start-up passes `dry_run=False`). It never overwrites and a second run finds
+nothing.
+
+### Owner-only folders
+
+`ctx.paths.state_dir` (`<data>/ext/<id>/`) and `<data>/ext` are owner-only: mode
+0700 on POSIX, an owner-only ACL on Windows (`app/fsperm.py`, the host's copy of
+the add-on's helper). The data folder itself gets the same treatment only when
+DisPatch is what created it; an existing one may be shared on purpose.
+
+### Credentials: `ctx.secrets`
+
+`ctx.secrets.get(name)`, `.set(name, value)`, `.delete(name)`, `.has(name)` and
+`.backend`. A name is 1-64 letters, digits, `.`, `_`, `-`; a value is a non-empty
+string. It reuses `app/agents/secrets.py`: the OS keyring when one is usable
+(service `dispatch-chat-ext-<id>`), otherwise a 0600 JSON file,
+`<data>/ext/<id>/secrets.json`, which is on the data volume in a container and so
+survives an image update and works with a read-only root. Every stored value is
+registered with the log redactor. No HTTP route returns one. The voice add-on
+keeps its GPU-rig token here (`speechforge_token`) and still reads
+`SPEECHFORGE_TOKEN`, then its own file, as fallbacks; `speechforge.env` is no
+longer written.
+
+### Settings: `ctx.settings_writer(namespace)`
+
+Returns `write(key, value)` for the settings store under `namespace`: the
+extension's own id, or `<id>.<sub>` (another extension's namespace raises
+`ValueError`). When `app/settings_store.py` exists and offers `writer(namespace)`,
+that is what you get. Until then it is a no-op that logs once, so an extension can
+call it today and go live when the store lands. `extensions.is_live_writer(w)` is
+False for the no-op: **do not record a one-way migration as done through it.**
+
+At start (the lifespan, before the extensions' `on_startup` hooks) DisPatch calls
+the voice add-on's `dispatch_voice.host.migration.migrate_voice_yaml(writer,
+dry_run=False)` with the live writer, and only then. The add-on calls
+`writer("voice.speed", 1.1)`-style keys (fully qualified, `voice.<id>`, with `bots`
+as one whole value), keeps a `voice.yaml.migrated` marker so the next start is a
+no-op, copies the file to `voice.yaml.bak` and leaves it in place. A raising
+migration is logged and never stops the start.
+
+### Listing provider plugins: `GET /api/voice/providers`
+
+Voice provider plugins (speech-to-text, text-to-speech, turn-taking) are Python
+packages with an entry point in the `dispatch_voice.providers` group. With the
+add-on running, its own route answers (each provider's health, capabilities and
+settings, and the installed plugins with whether each is switched on). Without it
+the host answers with the installed plugins only, `installed: false` and the
+add-on's state, so Settings → Plugins can still show them; nothing is imported and
+no `module:attr` target is shown. Both need `manage_plugins`
+(`app/route_policy.py`); using a provider is `use_voice` (`/ext/*`, `/ws/voice`).
 
 ---
 

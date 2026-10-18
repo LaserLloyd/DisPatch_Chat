@@ -13,6 +13,10 @@
 // plus `client_failed`: the server says ok but the add-on's own page could not
 // load or handshake in THIS browser.
 //
+// The models are not fetched from a shell: after the restart, the add-on's own page
+// (Settings -> Voice) downloads them with a progress bar and Cancel, and a Docker image built
+// with VOICE=1 already carries ffmpeg and the Opus library.
+//
 // Markup is the Settings modal's own (.dev-group / .dev-row / .btn-*), so it
 // follows every palette with no colour of its own. Shell commands are shown
 // as typed and never translated; the prose is `voice_absent.*`. The install
@@ -37,11 +41,9 @@ export const COMMANDS = Object.freeze({
   install: `uv pip install --python .venv/bin/python "${PKG}"`,
   upgrade: `uv pip install --python .venv/bin/python --upgrade "${PKG}"`,
   editable: 'uv pip install --python .venv/bin/python -e /path/to/DisPatch_Voice',
-  models: '.venv/bin/dispatch-voice fetch-models',
   kokoro: 'uv pip install --python .venv/bin/python /path/to/dispatch-voice-kokoro',
   kokoroEnv: 'DISPATCH_VOICE_EXTENSIONS=dispatch_voice_kokoro:setup',
   dockerBuild: 'VOICE=1 docker compose build && docker compose up -d',
-  dockerModels: 'docker compose exec app dispatch-voice fetch-models',
   uvRun: 'uv run --offline --with-editable /path/to/DisPatch_Voice uvicorn app.main:app --host 0.0.0.0 --port 8765 --ws-max-size 262144',
 });
 
@@ -158,11 +160,13 @@ function stepsGroup(opts) {
       details(t('voice_absent.checkout_variant'), t('voice_absent.checkout_hint'),
         [COMMANDS.editable, COMMANDS.uvRun]),
     ]),
-    row(t('voice_absent.step_models'), [hint(t('voice_absent.models_hint'))], [command(COMMANDS.models)]),
     row(t('voice_absent.step_restart'), [hint(t('voice_absent.restart_hint'))], [
       el('div', { class: 'ext-actions' }, [checkAgainButton(opts.onCheckAgain, opts.busy)]),
       opts.notYet ? hint(t('voice_absent.not_found_yet'), 'ext-note') : null,
     ]),
+    // The models are NOT a terminal step: once the add-on runs, its own Voice page has the
+    // Download button (progress and Cancel). This row only says so.
+    row(t('voice_absent.step_models'), [hint(t('voice_absent.models_hint'))]),
   ]);
 }
 
@@ -176,7 +180,7 @@ function moreGroup() {
         link(VOICE_GUIDE_URL, t('voice_absent.links_guide')),
       ]),
       details(t('voice_absent.docker_note'), t('voice_absent.docker_hint'),
-        [COMMANDS.dockerBuild, COMMANDS.dockerModels]),
+        [COMMANDS.dockerBuild]),
       details(t('voice_absent.bare_metal_note'), t('voice_absent.bare_metal_hint'), [COMMANDS.uvRun]),
     ]),
   ]);

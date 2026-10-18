@@ -157,10 +157,10 @@ same machine (about 1.3 GB of models, CPU is enough).
 
 ```bash
 uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice@v1"
-dispatch-voice fetch-models
 ```
 
-Restart, then **Settings → Voice**. Its install-wide switch is in Settings →
+Restart, then **Settings → Voice**: switch it on and press **Download** (the models
+come down from that page; no terminal). Its install-wide switch is in Settings →
 Plugins → Add-ons. See [extensions.md](extensions.md#voice).
 
 <a id="speechforge"></a>

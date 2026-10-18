@@ -71,18 +71,17 @@ Turn it on: Settings → AI models → Image generation, press Test, Save; then 
 
 ## Voice chat
 
-Talking to a thread hands-free is an add-on, not part of DisPatch. The package is [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice). Install it into DisPatch's environment, fetch its speech models once, and restart:
+Talking to a thread hands-free is an add-on, not part of DisPatch. The package is [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice). Install it into DisPatch's environment and restart; its speech models download from Settings → Voice:
 
 ```
 uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.com/LaserLloyd/DisPatch_Voice@v1"
-dispatch-voice fetch-models
 ```
 
 Speech recognition and voices then run on the same machine. A separate GPU machine can take over for faster, better voices, but it is optional.
 
 ![Voice](/static/guide/voice-screen.png)
 
-Turn it on: install the add-on, restart, then open Settings → Voice and switch it on.
+Turn it on: install the add-on, restart, then open Settings → Voice, switch it on and press Download.
 
 ## Apps and tools
 
