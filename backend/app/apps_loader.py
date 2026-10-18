@@ -638,12 +638,22 @@ def _conflict(m: Manifest) -> str | None:
     return None
 
 
+def _app_env(m: Manifest) -> dict[str, str]:
+    try:
+        from . import tool_manifests
+        return tool_manifests.app_env(m)
+    except Exception:                        # settings must never stop an app from loading
+        log.exception("app %s: reading its settings failed; using the process environment only", m.id)
+        return {n: os.environ[n] for n in m.env if n in os.environ}
+
+
 def _make_context(m: Manifest, hooks: Hooks) -> AppContext:
     return AppContext(
         app_id=m.id, config=config,
         require_operator=require_operator, require_access=require_access,
         bot_id=m.bot.id if m.bot else None,
-        env={n: os.environ[n] for n in m.env if n in os.environ},
+        # 3.0: from the process environment, else from Settings (tools.<id>.<name>).
+        env=_app_env(m),
         log=logging.getLogger(f"local-chat.app.{m.id}"),
         _hooks=hooks)
 
