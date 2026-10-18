@@ -178,7 +178,41 @@ configured inside the add-on (Settings → Voice).
 Offline Wikipedia search: before each answer, a direct-API bot with
 `advisor.lookup` runs `infoforge search --json --text` and gets the matching
 articles as reference notes, so it cites them and nothing leaves your network.
-InfoForge is not public yet.
+InfoForge is at [github.com/LaserLloyd/InfoForge](https://github.com/LaserLloyd/InfoForge).
+
+**Use InfoForge 2.1.0 or newer.** DisPatch runs `infoforge --version` once and,
+from 2.1.0 on, calls `infoforge search --json --text --no-ensure --max-articles N -- "<message>"`:
+`--no-ensure` makes the lookup read-only (it never creates or starts the kiwix
+container; if kiwix-serve is down it fails fast with exit 2 and the turn answers
+without notes) and `--` stops a message that starts with `-` from being read as
+an option. An older InfoForge, or one whose version cannot be read, gets the
+original command without those two, and may start the kiwix container.
+Details: [advisor lookup](advisor.md#lookup-the-bot-reads-reference-material-itself).
+
+**The `[dispatch]` extra.** InfoForge also ships a DisPatch add-on
+(`src/infoforge_dispatch`, entry point `dispatch.extensions` named `infoforge`)
+that registers one live tool, `wiki_search(query, max_articles)`, which a bot
+lists in its `tools:` (and in `tools_locked` to allow it on a Safe Mode device).
+The add-on runs InfoForge in-process, read-only (`ensure=False`, never starts
+podman). Install it from the InfoForge clone into DisPatch's own environment
+(it is not on PyPI):
+
+```bash
+uv pip install --python /path/to/DisPatch_Chat/backend/.venv/bin/python '/path/to/InfoForge[dispatch]'
+```
+
+The `dispatch` extra adds no packages beyond the base install; it only records
+the intent. You do not need it for `advisor.lookup`, which uses the CLI on PATH.
+
+**Ports (8090 vs 8080).** InfoForge opens no port of its own. The kiwix-serve
+container it manages is the only listener: `127.0.0.1:8090` in a fresh config and
+in the compose files, and the CLI (not DisPatch) is what talks to it. DisPatch
+never connects to kiwix directly. `8080` is the **StudioForge panel's** port on
+the Windows rig, which is why fresh InfoForge configs moved to 8090; an
+InfoForge config file that omits `kiwix_port` keeps its 2.0 default of 8080 and
+will collide with a co-located StudioForge panel, so set `kiwix_port: 8090`
+(or `INFOFORGE_KIWIX_PORT`). The two are different services and different
+settings.
 
 **Alternative, built in:** the online encyclopedia does the same job.
 
@@ -243,7 +277,7 @@ What each feature needs, and what a fresh install shows without it.
 | Job Board app | OpenClaw (`scout` agent) | — | ships in `apps/` | Board loads; finding jobs reports the agent unreachable |
 | Voice chat | DisPatch Voice add-on | — | install, restart, Settings → Voice | Settings → Voice shows how to install |
 | GPU speech | SpeechForge (not public) | the add-on's on-machine speech | inside the add-on | the add-on uses this machine |
-| Offline Wikipedia lookup | InfoForge + kiwix (not public) | `lookup: {kind: wikipedia}` | `config.yaml` | no lookup notes |
+| Offline Wikipedia lookup | InfoForge + kiwix | `lookup: {kind: wikipedia}` | `config.yaml` | no lookup notes |
 | Emails tab | MailForge | — | run MailForge | tab hidden |
 | StudioForge panel | `DISPATCH_STUDIOFORGE=1` + URL | — | env vars | tab hidden |
 | DeepSeek Harness panel | the `dsh` command | — | on PATH | tab hidden |

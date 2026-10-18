@@ -75,7 +75,7 @@ alternatives, and a feature-by-feature matrix of what needs what.
 | [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
 | [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
 | An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
-| Offline Wikipedia (InfoForge, not public yet) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
+| Offline Wikipedia ([InfoForge](https://github.com/LaserLloyd/InfoForge)) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
 
 ## Quick start
 

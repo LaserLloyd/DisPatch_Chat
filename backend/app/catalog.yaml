@@ -76,7 +76,7 @@ entries:
   - id: infoforge
     name: InfoForge
     summary: Offline Wikipedia search the Wikipedia-librarian style of bot uses before it answers (advisor lookup).
-    repo_note: Not public yet. Without it, use the built-in online Wikipedia lookup.
+    repo: https://github.com/LaserLloyd/InfoForge
     connects: "The infoforge command on PATH and a kiwix server; advisor.lookup on the bot."
     probe: infoforge
     guide: true
