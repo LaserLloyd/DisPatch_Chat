@@ -1,0 +1,27 @@
+{
+  "dest": "frontend/static/ui-theme",
+  "version": "1.2",
+  "adapters": [],
+  "extra_files": {
+    "adapters/dispatch-extra.css": "frontend/overlays/dispatch-extra.css"
+  },
+  "settings": {
+    "themes": [
+      "glacier",
+      "midnight-gold",
+      "forest",
+      "paper",
+      "daylight",
+      "purple",
+      "slate",
+      "high-contrast",
+      "high-contrast-light",
+      "electric-yellow",
+      "laserlloyd",
+      "laserlloyd-light",
+      "night-red"
+    ],
+    "default": "glacier",
+    "storage_key": "dispatch-palette"
+  }
+}
