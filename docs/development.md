@@ -75,7 +75,10 @@ than adding a `<script>` tag that everyone pays for.
 cd backend && uv run pytest -q
 ```
 
-800+ tests, about a minute. The suite is strictly hermetic: every test
+About 3,000 tests; the backend suite takes 15–22 minutes (it is wall-clock bound).
+Three timing/mtime tests are known to flake on a fast box
+(`test_mirror.py::test_state_roundtrip`, `test_reactions.py::test_safe_ids_does_not_rewalk_unchanged_pools`, and one of the
+dashboard/advisor timing tests). The suite is strictly hermetic: every test
 gets a throwaway database and monkeypatched data directories, and nothing
 touches a real install or the network. `backend/tests/test_auth_gate.py` is the
 best model to copy — access control is the part most worth testing.
@@ -150,3 +153,29 @@ your install as downstream: pull this project onto the box like any other user
 rather than editing the install in place. A backend change needs a restart; a
 frontend-only change needs a hard refresh and the `sw.js` `CACHE` bump described
 above.
+
+### Windows
+
+The backend imports and the whole suite *collects* on native Windows (`uv run pytest --co -q`:
+2,900+ tests). Run it with `PYTHONUTF8=1` (the app reads YAML with the locale encoding in a
+few places). A subset of tests that depend on POSIX paths, `/tmp` semantics or process groups
+still fail on Windows; **the full suite is run in WSL** (or any Linux):
+
+```
+cd backend && uv sync --frozen && DISPATCH_DATA_DIR=$PWD/../.scratch-data python -m pytest -q -p no:cacheprovider
+```
+
+Never point `DISPATCH_DATA_DIR` under `/tmp` for a full run — the suite's write guard treats
+`/tmp` as disposable. Frontend: `cd frontend && npm ci && npm run test:ci` works on Windows,
+macOS and Linux (`CI_REQUIRE_DOM=1` is set by `scripts/test-ci.mjs`). `.gitattributes` forces
+LF endings so a Windows checkout does not break the source-scan tests.
+
+### Contracts and the access-control tests
+
+`python scripts/gen_contracts.py` regenerates `docs/contracts/` and `docs/errors.md`
+(`--check` verifies; `tests/test_contracts_drift.py` runs it). Adding a route means adding it
+to `backend/app/route_policy.py` — `tests/test_route_table.py` fails the build otherwise —
+and any new `HTTPException` message to `backend/app/contracts/error_catalog.json`
+(`tests/test_error_catalog.py`). `tests/test_g5_access.py` calls every protected route with no
+session and with a Restricted session and expects a refusal. Use the `world` fixture
+(`tests/conftest.py`) for tests that need an owner, profiles and clients with chosen peers.
