@@ -23,8 +23,6 @@ checklist is for ``manage_settings``.
 from __future__ import annotations
 
 import asyncio
-import os
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
@@ -307,7 +305,7 @@ async def wizard_network(request: Request, payload: NetworkIn):
 
 
 def _in_container() -> bool:
-    return Path("/.dockerenv").exists() or bool(os.environ.get("DISPATCH_IN_DOCKER"))
+    return connections.in_container()
 
 
 @router.post("/api/wizard/step/{step}", dependencies=[_SETTINGS])

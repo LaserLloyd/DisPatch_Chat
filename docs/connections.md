@@ -51,12 +51,31 @@ panel, Users & Keys) and press Test.
 ## Finding servers
 
 **Find servers** (`POST /api/connections/discover`) looks for StudioForge, LM Studio, Ollama and OpenAI-style
-servers on:
+servers, on ports 1234, 8080 and 11434, in these places:
 
-1. this computer (`127.0.0.1`, ports 1234, 8080, 11434),
-2. the container host (`host.docker.internal`) when DisPatch runs in a container,
-3. any hosts you name, and
+1. the hosts in the setting **`connections.discovery_targets`** (Settings -> Connections -> Safety; environment
+   `DISPATCH_DISCOVERY_TARGETS`, comma separated). The default is `127.0.0.1`, `studioforge`, `lmstudio` and
+   `ollama`: this computer, and the names the compose files give the model servers. A name that does not
+   resolve is **skipped** (nothing is sent to it). Write `host:port` (`[::1]:1234` for IPv6) to probe one port
+   only; an empty list looks nowhere;
+2. the container host (`host.docker.internal`), **only** when DisPatch is running in a container **and**
+   **`connections.discovery_probe_docker_host`** is on (the default; environment
+   `DISPATCH_DISCOVERY_PROBE_DOCKER_HOST=0` turns it off);
+3. any hosts you type into the Find servers dialog, and
 4. with **Also search my home network**, the other addresses in this computer's /24.
+
+DisPatch decides it is in a container when `/.dockerenv` exists or `DISPATCH_IN_CONTAINER=1` is set (the older
+`DISPATCH_IN_DOCKER` still works). Outside a container `host.docker.internal` is **never** probed, whatever the
+settings say, and writing it in `connections.discovery_targets` does nothing there: Docker Desktop adds that name to
+its own computer's hosts file, where it points at whatever else runs on the machine (for example a StudioForge
+that has nothing to do with this install). **To stop DisPatch looking at the Docker host from a container**, turn
+`connections.discovery_probe_docker_host` off; to point it at a model server on the host anyway, add the connection
+by hand with the host's address.
+
+**Never probed, in any list and whatever `connections.allow_private_targets` is set to:** cloud metadata names and
+addresses (`169.254.169.254`, `metadata.google.internal`, ...), link-local addresses (`169.254.0.0/16`,
+`fe80::/10`), `0.0.0.0` and multicast. They are dropped from the list when it is read and refused again by the
+address check on every probe.
 
 Each probe is a few short read-only `GET` requests (`/api/version`, `/api/v0/models`, `/api/tags`, `/v1/models`).
 Nothing is changed on the servers and nothing is saved until you press **Use this** and then **Add connection**.

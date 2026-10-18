@@ -54,6 +54,10 @@ GROUP_IDS = tuple(g[0] for g in GROUPS)
 
 SettingType = Literal["string", "integer", "number", "boolean", "choice", "url", "path", "list", "secret"]
 
+#: The shipped value of ``connections.discovery_targets``: this computer, plus the hostnames the compose
+#: files give the model servers. A name that does not resolve here is skipped, not probed.
+DEFAULT_DISCOVERY_TARGETS = ("127.0.0.1", "studioforge", "lmstudio", "ollama")
+
 KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_-]*){1,4}$")
 
 
@@ -243,6 +247,18 @@ _CORE: tuple[SettingDef, ...] = (
        "metadata.google.internal) are refused to stop DisPatch being used to reach internal services. "
        "Turn on only if you really run a model server there.", "connections", section="Safety",
        level="advanced"),
+    _d("connections.discovery_targets", "list", list(DEFAULT_DISCOVERY_TARGETS), "Find servers: where to look",
+       "The hosts Find servers probes for StudioForge, LM Studio, Ollama and OpenAI-style servers, on ports "
+       "1234, 8080 and 11434 (write host:port to probe one port). The default is this computer and the compose "
+       "names studioforge, lmstudio and ollama (a name that does not resolve is skipped). Cloud-metadata and "
+       "link-local addresses are never probed. host.docker.internal is added only inside a container; see "
+       "the next setting.", "connections", section="Safety", level="advanced",
+       env="DISPATCH_DISCOVERY_TARGETS"),
+    _d("connections.discovery_probe_docker_host", "boolean", True, "Find servers: look on the Docker host",
+       "Inside a container, Find servers also probes host.docker.internal (ports 1234, 8080, 11434), which is "
+       "the computer the container runs on. Turn off to stop that. It never happens outside a container, "
+       "whatever this says.", "connections", section="Safety", level="advanced",
+       env="DISPATCH_DISCOVERY_PROBE_DOCKER_HOST"),
     _d("connections.default", "string", "", "Default connection",
        "The connection a new character uses when you do not pick one.", "connections"),
     _d("connections.clawforge_url", "url", "", "Image server (MCP) address",
