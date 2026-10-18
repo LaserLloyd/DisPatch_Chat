@@ -10,14 +10,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { domSkip } from './_require-dom.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(HERE, '..', 'static');
 
-const { checklistOrder } = await import(join(STATIC, 'js', 'checklist.js'));
+const { checklistOrder } = await import(pathToFileURL(join(STATIC, 'js', 'checklist.js')).href);
 
 // Rows for a 4-exercise workout: Exercise / Sets / Reps / Rest, authored 0..3.
 const rows = [
@@ -97,8 +97,8 @@ async function withDom() {
 
 test('a ```checklist fence renders as a .checklist-widget table, not a code block', { skip: dom.skip }, async () => {
   const win = await withDom();
-  const { renderMarkdown, enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
-  const { installChecklists } = await import(join(STATIC, 'js', 'checklist.js'));
+  const { renderMarkdown, enhanceContent } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
+  const { installChecklists } = await import(pathToFileURL(join(STATIC, 'js', 'checklist.js')).href);
   const md = '```checklist\n| Exercise | Sets | Reps | Rest |\n|---|---|---|---|\n| Squat | 3 | 10 | 60s |\n| Push-up | 3 | 15 | 30s |\n```';
   const div = win.document.createElement('div');
   div.innerHTML = renderMarkdown(md);
@@ -131,8 +131,8 @@ test('a ```checklist fence renders as a .checklist-widget table, not a code bloc
 
 test('readonly (Safe Mode) checkboxes are disabled', { skip: dom.skip }, async () => {
   const win = await withDom();
-  const { renderMarkdown, enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
-  const { installChecklists } = await import(join(STATIC, 'js', 'checklist.js'));
+  const { renderMarkdown, enhanceContent } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
+  const { installChecklists } = await import(pathToFileURL(join(STATIC, 'js', 'checklist.js')).href);
   const div = win.document.createElement('div');
   div.innerHTML = renderMarkdown('```checklist\n| a |\n|---|\n| x |\n```');
   win.document.body.appendChild(div);
@@ -152,8 +152,8 @@ test('a rejected PATCH puts the row back', { skip: dom.skip }, async () => {
   // bottom for good, telling the user something was done that the server never
   // recorded.
   const win = await withDom();
-  const { renderMarkdown, enhanceContent } = await import(join(STATIC, 'js', 'markdown.js'));
-  const { installChecklists } = await import(join(STATIC, 'js', 'checklist.js'));
+  const { renderMarkdown, enhanceContent } = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href);
+  const { installChecklists } = await import(pathToFileURL(join(STATIC, 'js', 'checklist.js')).href);
 
   globalThis.fetch = async () => { throw new Error('403 as a locked device would'); };
 
