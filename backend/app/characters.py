@@ -33,6 +33,9 @@ from .config import Bot
 log = logging.getLogger("local-chat.characters")
 
 
+_UNSET: Any = object()
+
+
 class CharacterError(Exception):
     def __init__(self, code: str, message: str, status: int = 400) -> None:
         super().__init__(message)
@@ -334,7 +337,7 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
         changes["profiles"] = _clean_profiles(changes["profiles"])
     if "description" in changes:
         changes["description"] = str(changes["description"] or "")[:400]
-    connection = changes.pop("connection", None)
+    connection = changes.pop("connection", _UNSET)         # None / "" detaches; absent leaves it alone
     model = changes.pop("model", None)
     personality = changes.pop("personality", None)
 
@@ -370,7 +373,7 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
                 updated = personas.apply(updated, persona)
             except ValueError as e:
                 raise HTTPException(422, str(e)) from e
-        if connection is not None:
+        if connection is not _UNSET:
             updated = with_connection(updated, connection, model) if connection else _detach(updated)
         elif model is not None:
             updated = with_model(updated, model)

@@ -202,6 +202,10 @@ class _DecReader(io.RawIOBase):
         try:
             self._buf = self._gcm.decrypt(nonce, ct, _aad(self._hh, self._n, final))
         except InvalidTag:
+            # Would it have decrypted if this were NOT the last chunk? Then the file was cut short.
+            with contextlib.suppress(InvalidTag):
+                self._gcm.decrypt(nonce, ct, _aad(self._hh, self._n, not final))
+                raise BackupError("backup_corrupt", "The backup file is cut short.") from None
             if self._n == 0:
                 raise BackupError("backup_wrong_key", "The passphrase is wrong, or this is not a DisPatch backup.") from None
             raise BackupError("backup_corrupt", "The backup file is damaged or incomplete.") from None
@@ -298,6 +302,29 @@ def _secrets_document() -> dict[str, str]:
     return out
 
 
+@contextlib.contextmanager
+def encrypted_tar(path: Path, passphrase: str, *, created: str = ""):
+    """Open ``path`` for writing as an encrypted archive and yield the ``tarfile`` to add members to.
+    The file is complete (final chunk written) when the ``with`` block exits cleanly."""
+    salt = os.urandom(16)
+    nonce_prefix = os.urandom(8)
+    kdf = {"name": "scrypt", "n": SCRYPT_N, "r": 8, "p": 1}
+    header = json.dumps({"format": 1, "kdf": kdf, "salt": base64.b64encode(salt).decode(),
+                         "nonce": base64.b64encode(nonce_prefix).decode(),
+                         "created": created or datetime.now(UTC).isoformat(timespec="seconds")},
+                        separators=(",", ":")).encode()
+    key = _derive(passphrase, salt, kdf["n"], kdf["r"], kdf["p"])
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(MAGIC)
+        fh.write(len(header).to_bytes(2, "big"))
+        fh.write(header)
+        writer = _EncWriter(fh, key, hashlib.sha256(header).digest(), nonce_prefix)
+        with tarfile.open(fileobj=writer, mode="w|gz") as tf:
+            yield tf
+        writer.close()
+
+
 def create_archive(passphrase: str, *, include_media: bool = False, dest_dir: Path | None = None) -> dict:
     """Write one encrypted archive and return its listing row. Blocking: run it in a thread."""
     if not passphrase or len(passphrase) < 8:
@@ -340,34 +367,20 @@ def create_archive(passphrase: str, *, include_media: bool = False, dest_dir: Pa
                        "sha256": _sha256(p) if rel in ("chats.db", "secrets.json") or p.stat().st_size < 64 * 1024 ** 2 else None}
                       for p, rel in files],
         }
-        salt = os.urandom(16)
-        nonce_prefix = os.urandom(8)
-        kdf = {"name": "scrypt", "n": SCRYPT_N, "r": 8, "p": 1}
-        header = json.dumps({"format": 1, "kdf": kdf, "salt": base64.b64encode(salt).decode(),
-                             "nonce": base64.b64encode(nonce_prefix).decode(),
-                             "created": manifest["created"]}, separators=(",", ":")).encode()
-        key = _derive(passphrase, salt, kdf["n"], kdf["r"], kdf["p"])
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(MAGIC)
-                fh.write(len(header).to_bytes(2, "big"))
-                fh.write(header)
-                writer = _EncWriter(fh, key, hashlib.sha256(header).digest(), nonce_prefix)
-                with tarfile.open(fileobj=writer, mode="w|gz") as tf:
-                    raw = json.dumps(manifest, indent=1).encode()
-                    ti = tarfile.TarInfo("MANIFEST.json")
-                    ti.size = len(raw)
-                    ti.mtime = int(datetime.now(UTC).timestamp())
-                    tf.addfile(ti, io.BytesIO(raw))
-                    for p, rel in files:
-                        ti = tf.gettarinfo(str(p), arcname=rel)
-                        ti.uid = ti.gid = 0
-                        ti.uname = ti.gname = ""
-                        ti.mode = 0o600
-                        with open(p, "rb") as src:
-                            tf.addfile(ti, src)
-                writer.close()
+            with encrypted_tar(tmp, passphrase, created=manifest["created"]) as tf:
+                raw = json.dumps(manifest, indent=1).encode()
+                ti = tarfile.TarInfo("MANIFEST.json")
+                ti.size = len(raw)
+                ti.mtime = int(datetime.now(UTC).timestamp())
+                tf.addfile(ti, io.BytesIO(raw))
+                for p, rel in files:
+                    ti = tf.gettarinfo(str(p), arcname=rel)
+                    ti.uid = ti.gid = 0
+                    ti.uname = ti.gname = ""
+                    ti.mode = 0o600
+                    with open(p, "rb") as src:
+                        tf.addfile(ti, src)
             os.replace(tmp, out)
         except BaseException:
             with contextlib.suppress(OSError):
