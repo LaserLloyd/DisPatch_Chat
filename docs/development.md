@@ -108,6 +108,7 @@ than adding a `<script>` tag that everyone pays for.
 cd backend && uv run pytest -q
 ```
 
+The full backend suite runs on Linux (on Windows, in WSL; see [Windows](#windows) below). Native Windows runs a subset.
 About 3,500 tests; the backend suite takes 25–30 minutes on Linux (it is wall-clock bound).
 Three timing/mtime tests are known to flake on a fast box
 (`test_mirror.py::test_state_roundtrip`, `test_reactions.py::test_safe_ids_does_not_rewalk_unchanged_pools`, and one of the
@@ -208,8 +209,9 @@ above.
 ### Windows
 
 The backend imports and the whole suite *collects* on native Windows (`uv run pytest --co -q`:
-3,500+ tests). A subset of tests that depend on POSIX file modes, `/tmp` semantics or process groups
-still fail on Windows; **the full suite is run in WSL** (or any Linux):
+3,500+ tests), and a subset runs: `-k` or a file path works (`uv run pytest tests/test_route_table.py -q`). Tests that
+depend on POSIX file modes, `/tmp` semantics or process groups still fail there: **136 failures were seen on a Windows
+host at 3.0.0**. The full backend suite runs on Linux, and on Windows **in WSL** (or any Linux):
 
 ```
 cd backend && uv sync --frozen && DISPATCH_DATA_DIR=$PWD/../.scratch-data python -m pytest -q -p no:cacheprovider
