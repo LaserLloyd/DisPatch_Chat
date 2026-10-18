@@ -47,6 +47,10 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend/app/contracts",       "backend/app/contracts",       "*.py"),
     ("backend/app/contracts",       "backend/app/contracts",       "error_catalog.json"),
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
+    # 3.0: the agent-dispatch library (app/agents; secret_store imports its secret providers) and the
+    # starter packs (app/starter_packs.py reads the YAML).
+    ("backend/app/agents",          "backend/app/agents",          "*.py"),
+    ("backend/app/starter_packs",   "backend/app/starter_packs",   "*.yaml"),
     # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
     # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).
