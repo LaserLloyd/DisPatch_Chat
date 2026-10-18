@@ -36,8 +36,12 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
-        # 1 = include the voice chat add-on (DisPatch Voice) in the image.
+        # 1 = include the voice chat add-on (DisPatch Voice) in the image, plus ffmpeg and
+        # libopus. VOICE_REF picks the add-on's ref (a tag such as v1.6.0, or refs/heads/<branch>);
+        # unset = the Dockerfile's default. A local checkout is built with `docker build
+        # --build-context voice-src=<dir> --build-arg VOICE_SRC=local` (docs/voice.md).
         VOICE: ${VOICE:-0}
+        VOICE_REF: ${VOICE_REF:-refs/heads/refactor/prosumer-2026}
     container_name: dispatch
     hostname: dispatch
 

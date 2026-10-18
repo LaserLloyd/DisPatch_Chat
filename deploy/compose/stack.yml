@@ -87,6 +87,7 @@ services:
       args:
         VERSION: ${VERSION:-dev}
         VOICE: ${VOICE:-0}
+        VOICE_REF: ${VOICE_REF:-refs/heads/refactor/prosumer-2026}
     user: "1000:1000"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
