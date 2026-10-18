@@ -117,18 +117,29 @@ allow-list is redirected to the default for its kind.
 ```
 
 Before every model call the turn runs `infoforge search --json --text
---max-articles N "<the user's latest message>"` itself — a fixed argv, never a
-shell, read-only, about 0.6 s — and the articles join the prompt as reference
+--no-ensure --max-articles N -- "<the user's latest message>"` itself — a fixed
+argv, never a shell, about 0.6 s — and the articles join the prompt as reference
 notes (`### <title> (undated; Wikipedia (offline copy))`), so ONE model call
 answers with a citation. Compare the marker route (`[[research:ds_flash|…]]`),
 which costs an agent turn through the gateway (30 s to minutes) and relies on
 the model writing the marker correctly. Only the user's own words reach the
 search, nothing an LLM wrote is executed, so a locked (Safe-Mode) turn gets the
-same lookup. Any failure (no CLI, timeout, exit 3 "no sources", bad output) is
-logged and the turn answers without notes; it never fails because of them.
+same lookup. The lookup is read-only when InfoForge is **2.1.0 or newer**:
+`--no-ensure` makes the CLI fail fast (exit 2, `kiwix_unreachable`) instead of
+creating or starting the kiwix container, and `--` means a message that starts
+with `-` can never be read as an option. DisPatch checks `infoforge --version`
+once per binary (re-checked if the file changes); with an older InfoForge, or a
+version it cannot read, it sends the original argv
+(`... --max-articles N "<message>"`), and those older versions may start the
+kiwix container on a lookup. Any failure (no CLI, timeout, exit 2 or 3, bad
+output) is logged and the turn answers without notes; it never fails because of
+them.
 Pair it with a persona that says *answer from the notes and cite
 `Source: Wikipedia, "<title>" (offline copy)`; if the notes lack the answer,
-say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`).
+say so*. Needs InfoForge ≥ the 2026-10-13 build (`search --text`); the
+read-only guarantee (`--no-ensure`) and the option-proof query (`--`) need
+InfoForge **>= 2.1.0**. Ports: DisPatch opens none for this; the `infoforge`
+command talks to kiwix-serve, see [InfoForge in integrations](integrations.md#infoforge).
 
 ### Live tools (the model calls lookups itself)
 
