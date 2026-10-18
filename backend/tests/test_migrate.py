@@ -214,7 +214,7 @@ def test_starting_the_server_migrates_and_the_owner_unlocks_with_the_old_pin(leg
     monkeypatch.setattr(config, "LOG_DIR", legacy / "logs")
     temp_db = Database(legacy / "chats.db")
     monkeypatch.setattr(main, "db", temp_db)
-    with TestClient(main.app, client=("192.168.1.50", 40000)) as c:
+    with TestClient(main.app, client=("203.0.113.50", 40000)) as c:
         assert accounts.get_owner() is not None
         assert list((legacy / "backups").iterdir())
         st = c.get("/api/auth/status").json()

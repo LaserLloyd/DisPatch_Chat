@@ -490,10 +490,10 @@ test('sign-in: a "none" tile signs in at once; a password tile asks for the pass
   assert.equal(input.type, 'password');
   assert.equal(host.querySelector('label[for="signin-secret"]').textContent, 'Password for Ops');
   assert.equal(host.querySelector('.signin-toggle'), null, 'an Admin has no PIN to switch to');
-  input.value = 'hunter22hunter22';
+  input.value = 'hunter-22';
   host.querySelector('form').dispatchEvent(new win.Event('submit', { cancelable: true }));
   await tick();
-  assert.deepEqual(sent[1], ['a1', { password: 'hunter22hunter22', remember: false }]);
+  assert.deepEqual(sent[1], ['a1', { password: 'hunter-22', remember: false }]);
 });
 
 test('sign-in: the Owner tile offers password or PIN, and Back returns to the tiles', { skip: dom.skip }, async () => {

@@ -37,7 +37,7 @@ def test_the_shipped_argon2_cost_is_not_weakened(monkeypatch):
     monkeypatch.delenv("DISPATCH_ARGON2_PASSES")
     assert credentials._cost() == (19_456, 2, 1)
     h = credentials.hash_secret("correct horse")
-    assert h.startswith("$argon2id$v=19$m=19456,t=2,p=1$")
+    assert h.startswith("$argon2id$v=19$m=19456,t=2,p=1$")  # scrub-ok: hash FORMAT, no secret
     assert credentials.verify_secret("correct horse", h)
     assert not credentials.needs_rehash(h)
 
@@ -50,7 +50,7 @@ def test_hash_and_verify_round_trip():
     assert not credentials.verify_secret("", h)
     assert not credentials.verify_secret("1234", None)
     assert not credentials.verify_secret("1234", "plaintext")
-    assert not credentials.verify_secret("1234", "$argon2id$garbage")
+    assert not credentials.verify_secret("1234", "$argon2id$garbage")  # scrub-ok: hash FORMAT, no secret
 
 
 def test_a_stored_hash_claiming_a_trivial_cost_is_not_trusted():

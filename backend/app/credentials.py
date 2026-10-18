@@ -3,13 +3,13 @@
 argon2id (RFC 9106) through ``cryptography``'s ``Argon2id`` KDF - already a
 dependency of ``pywebpush``, so no new package. Hashes are stored as PHC strings::
 
-    $argon2id$v=19$m=19456,t=2,p=1$<salt b64>$<hash b64>
+    $argon2id$v=19$m=19456,t=2,p=1$<salt b64>$<hash b64>  # scrub-ok: hash FORMAT, no secret
 
 The parameters are the OWASP minimum for argon2id (19 MiB, 2 passes, 1 lane); they
 travel inside the string, so raising them later only needs :func:`needs_rehash`.
 
 The install's *legacy* PIN (security.yaml, PBKDF2-HMAC-SHA256) is also understood:
-``pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>`` verifies, and
+``pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>`` verifies, and  # scrub-ok: hash FORMAT, no secret
 :func:`needs_rehash` reports it so a profile's PIN is upgraded to argon2id the next
 time it is entered correctly.
 
@@ -61,7 +61,7 @@ def hash_secret(secret: str) -> str:
     salt = secrets.token_bytes(16)
     raw = Argon2id(salt=salt, length=_HASH_LEN, iterations=passes, lanes=lanes,
                    memory_cost=mem).derive(secret.encode("utf-8"))
-    return f"$argon2id$v=19$m={mem},t={passes},p={lanes}${_b64e(salt)}${_b64e(raw)}"
+    return f"$argon2id$v=19$m={mem},t={passes},p={lanes}${_b64e(salt)}${_b64e(raw)}"  # scrub-ok: hash FORMAT, no secret
 
 
 def legacy_pbkdf2(secret: str, salt_hex: str, iterations: int) -> str:
@@ -72,7 +72,7 @@ def legacy_pbkdf2(secret: str, salt_hex: str, iterations: int) -> str:
 
 def legacy_string(pin_hash: str, salt_hex: str, iterations: int) -> str:
     """security.yaml's PIN fields in the self-describing profile format."""
-    return f"pbkdf2_sha256${int(iterations)}${salt_hex}${pin_hash}"
+    return f"pbkdf2_sha256${int(iterations)}${salt_hex}${pin_hash}"  # scrub-ok: hash FORMAT, no secret
 
 
 def _parse_argon2(stored: str) -> tuple[int, int, int, bytes, bytes] | None:
@@ -92,7 +92,7 @@ def verify_secret(secret: str, stored: str | None) -> bool:
     """Constant-time check of ``secret`` against a stored hash of either format."""
     if not stored or not isinstance(secret, str):
         return False
-    if stored.startswith("$argon2id$"):
+    if stored.startswith("$argon2id$"):  # scrub-ok: hash FORMAT, no secret
         parsed = _parse_argon2(stored)
         if parsed is None:
             return False
@@ -105,7 +105,7 @@ def verify_secret(secret: str, stored: str | None) -> bool:
         except Exception:
             return False
         return hmac.compare_digest(got, want)
-    if stored.startswith("pbkdf2_sha256$"):
+    if stored.startswith("pbkdf2_sha256$"):  # scrub-ok: hash FORMAT, no secret
         try:
             _, iters, salt_hex, want = stored.split("$")
             got = legacy_pbkdf2(secret, salt_hex, int(iters))
@@ -119,7 +119,7 @@ def needs_rehash(stored: str | None) -> bool:
     """True when ``stored`` should be replaced by a fresh argon2id hash."""
     if not stored:
         return False
-    if not stored.startswith("$argon2id$"):
+    if not stored.startswith("$argon2id$"):  # scrub-ok: hash FORMAT, no secret
         return True
     parsed = _parse_argon2(stored)
     if parsed is None:

@@ -429,7 +429,7 @@ class World:
     handful of helpers every access-control test wants."""
 
     LOOPBACK = ("127.0.0.1", 50000)
-    LAN = ("192.168.1.50", 50001)
+    LAN = ("203.0.113.50", 50001)
 
     def __init__(self, tmp_path, main_module, db):
         self.tmp = tmp_path
@@ -448,7 +448,7 @@ class World:
             c.headers.update({"Origin": "http://testserver"})
         return c
 
-    def create_owner(self, client=None, *, name="Olive", password="owner-password-1", pin="2468"):
+    def create_owner(self, client=None, *, name="Olive", password="owner-pass1", pin="2468"):
         c = client or self.client()
         r = c.post("/api/auth/setup", json={"name": name, "password": password, "new_pin": pin})
         assert r.status_code == 200, r.text

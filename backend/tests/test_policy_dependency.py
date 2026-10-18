@@ -31,7 +31,7 @@ def _bare_app() -> FastAPI:
 
 
 def _client(world, signed_in_as=None):
-    c = TestClient(_bare_app(), client=("192.168.1.9", 1))
+    c = TestClient(_bare_app(), client=("203.0.113.9", 1))
     if signed_in_as is not None:
         c.cookies.set("lc_session", signed_in_as.cookies.get("lc_session"))
     return c

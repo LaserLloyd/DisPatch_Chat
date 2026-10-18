@@ -21,7 +21,7 @@ def strict(monkeypatch):
     monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)
 
 
-LAN = ("192.168.1.50", 40000)
+LAN = ("203.0.113.50", 40000)
 
 
 def test_a_remote_caller_sees_only_the_shell_and_the_signin_state(world, strict):
@@ -49,13 +49,13 @@ def test_this_machine_is_open_until_the_owner_exists(world, strict):
 def test_a_proxied_request_is_not_this_machine(world, strict):
     """Tailscale Serve and every reverse proxy connect from 127.0.0.1."""
     local = world.client(("127.0.0.1", 40000))
-    r = local.get("/api/bots", headers={"X-Forwarded-For": "100.64.0.9"})
+    r = local.get("/api/bots", headers={"X-Forwarded-For": "198.51.100.9"})
     assert r.status_code == 403 and r.json()["error"]["code"] == "setup_required"
 
 
 def test_setup_from_the_network_needs_the_one_time_token(world, strict):
     lan = world.client(LAN)
-    body = {"name": "Olive", "password": "owner-password-1"}
+    body = {"name": "Olive", "password": "owner-pass1"}
     r = lan.post("/api/auth/setup", json=body)
     assert r.status_code == 403 and r.json()["error"]["code"] == "setup_forbidden"
     assert lan.post("/api/auth/setup", json={**body, "setup_token": "guess"}).status_code == 403
@@ -72,7 +72,7 @@ def test_setup_from_the_network_needs_the_one_time_token(world, strict):
 
 def test_guessing_the_setup_token_is_throttled(world, strict):
     lan = world.client(LAN)
-    codes = [lan.post("/api/auth/setup", json={"password": "owner-password-1",
+    codes = [lan.post("/api/auth/setup", json={"password": "owner-pass1",
                                                "setup_token": f"guess-{i}"}).status_code
              for i in range(8)]
     assert codes[:5] == [403] * 5 and 429 in codes

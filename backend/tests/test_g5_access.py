@@ -20,7 +20,7 @@ from app import config, main, route_policy
 from app.contracts.permissions import ROLE_PERMISSIONS, Role
 
 RESTRICTED = {p.value for p in ROLE_PERMISSIONS[Role.RESTRICTED]}
-LAN = ("192.168.1.50", 40000)
+LAN = ("203.0.113.50", 40000)
 
 #: Gate-level refusal codes: seeing one of these means the policy engine said no.
 GATE_CODES = {"safe_mode", "permission_denied", "route_undeclared", "machine_scope_denied",
@@ -301,7 +301,7 @@ def test_a_restricted_voice_socket_reaches_only_restricted_audience_characters(e
     install()
     KNOBS.handler_mode = "hold"
     # An owner, a Restricted profile, and the profile's own session.
-    assert c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-password-1"}).status_code == 200
+    assert c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1"}).status_code == 200
     mia = c.post("/api/people", json={"name": "Mia", "role": "restricted"}).json()
     members_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience == "members"))
     kids_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience in ("all", "restricted")))

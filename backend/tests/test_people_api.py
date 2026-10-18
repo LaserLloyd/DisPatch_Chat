@@ -25,7 +25,7 @@ def owner(world):
 
 def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
     c = world.client()
-    r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-password-1", "new_pin": "2468"})
+    r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"})
     assert r.status_code == 200
     assert r.json()["claimed"] is True
     st = c.get("/api/auth/status").json()
@@ -42,7 +42,7 @@ def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
 
 def test_setup_with_a_password_only_leaves_no_pin(world):
     c = world.client()
-    assert c.post("/api/auth/setup", json={"password": "owner-password-1"}).status_code == 200
+    assert c.post("/api/auth/setup", json={"password": "owner-pass1"}).status_code == 200
     assert c.get("/api/auth/status").json()["pin_set"] is False
     # Claimed all the same: a stranger is Restricted, not owner.
     stranger = world.client()
@@ -59,7 +59,7 @@ def test_setup_refuses_a_weak_credential(world):
 
 
 def test_a_second_setup_cannot_replace_the_owner(world, owner):
-    r = world.client().post("/api/auth/setup", json={"password": "attacker-password", "new_pin": "9999"})
+    r = world.client().post("/api/auth/setup", json={"password": "attacker-pw1", "new_pin": "9999"})
     assert r.status_code == 403            # claimed: needs the owner's session + current PIN
 
 
@@ -88,12 +88,12 @@ def test_changing_the_owner_pin_does_not_sign_the_children_out(world, owner):
 def test_an_admin_needs_the_owner_to_have_a_password_first(world):
     c = world.client()
     assert c.post("/api/auth/setup", json={"new_pin": "2468"}).status_code == 200   # PIN-only owner
-    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-password-1"})
+    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-pass1"})
     assert r.status_code == 409 and r.json()["error"]["code"] == "password_required"
     # The owner sets a password (confirmed with the install PIN), then it works.
-    r = c.post("/api/auth/password", json={"current_pin": "2468", "new": "owner-password-1"})
+    r = c.post("/api/auth/password", json={"current_pin": "2468", "new": "owner-pass1"})
     assert r.status_code == 200, r.text
-    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-password-1"})
+    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-pass1"})
     assert r.status_code == 201
 
 
@@ -105,12 +105,12 @@ def test_a_member_needs_a_pin_and_a_restricted_profile_does_not(world, owner):
 
 
 def test_an_admin_manages_members_and_restricted_but_not_admins(world, owner):
-    world.person(owner, "Ada", "admin", password="admin-password-1")
+    world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
-    assert world.login(admin, name="Ada", password="admin-password-1").status_code == 200
+    assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
     assert admin.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555"}).status_code == 201
     assert admin.post("/api/people", json={"name": "Mia", "role": "restricted"}).status_code == 201
-    r = admin.post("/api/people", json={"name": "Eve", "role": "admin", "password": "evil-password-1"})
+    r = admin.post("/api/people", json={"name": "Eve", "role": "admin", "password": "evil-pass-1"})
     assert r.status_code == 403
     people = {p["name"]: p for p in admin.get("/api/people").json()["profiles"]}
     assert admin.patch(f"/api/people/{people['Olive']['id']}", json={"name": "Hijack"}).status_code == 403
@@ -166,14 +166,14 @@ def test_budgets_are_validated(world, owner):
 
 
 def test_sign_in_credentials_follow_the_role(world, owner):
-    ada = world.person(owner, "Ada", "admin", password="admin-password-1")
+    ada = world.person(owner, "Ada", "admin", password="admin-pass1")
     max_ = world.person(owner, "Max", "member", pin="5555")
     mia = world.person(owner, "Mia", "restricted")
     pin_kid = world.person(owner, "Kit", "restricted", pin="1212")
 
     c = world.client()
     assert world.login(c, profile_id=ada["id"], pin="5555").status_code == 401       # admin: password only
-    assert world.login(c, profile_id=ada["id"], password="admin-password-1").status_code == 200
+    assert world.login(c, profile_id=ada["id"], password="admin-pass1").status_code == 200
     assert world.login(c, profile_id=max_["id"], pin="0000").status_code == 401
     assert world.login(c, profile_id=max_["id"], pin="5555").json()["role"] == "member"
     assert world.login(c, profile_id=mia["id"]).json()["role"] == "restricted"        # no PIN: just pick it
@@ -181,14 +181,14 @@ def test_sign_in_credentials_follow_the_role(world, owner):
     assert world.login(c, profile_id=pin_kid["id"], pin="1212").status_code == 200
     # The Owner: password or the install PIN.
     me = accounts.get_owner()
-    assert world.login(c, profile_id=me.id, password="owner-password-1").json()["role"] == "owner"
+    assert world.login(c, profile_id=me.id, password="owner-pass1").json()["role"] == "owner"
     assert world.login(c, profile_id=me.id, pin="2468").json()["role"] == "owner"
     assert world.login(c, profile_id=me.id, pin="9999").status_code == 401
     assert world.login(c, profile_id="nope", pin="1").status_code == 401
 
 
 def test_stepping_up_to_admin_needs_their_credential(world, owner):
-    world.person(owner, "Ada", "admin", password="admin-password-1")
+    world.person(owner, "Ada", "admin", password="admin-pass1")
     mia = world.person(owner, "Mia", "restricted")
     c = world.client()
     assert world.login(c, profile_id=mia["id"]).status_code == 200
@@ -196,7 +196,7 @@ def test_stepping_up_to_admin_needs_their_credential(world, owner):
     r = c.post("/api/auth/switch", json={"name": "Ada", "pin": "1234"})
     assert r.status_code == 401
     assert c.get("/api/auth/me").json()["role"] == "restricted"                      # still Mia
-    r = c.post("/api/auth/switch", json={"name": "Ada", "password": "admin-password-1"})
+    r = c.post("/api/auth/switch", json={"name": "Ada", "password": "admin-pass1"})
     assert r.status_code == 200 and c.get("/api/auth/me").json()["role"] == "admin"
     assert c.get("/api/people").status_code == 200
 
@@ -287,46 +287,46 @@ def world_login(client, profile_id, pin):
 
 def test_one_noisy_client_cannot_lock_everyone_out(world, owner):
     max_ = world.person(owner, "Max", "member", pin="5555")
-    noisy = world.client(("192.168.1.99", 40000))
+    noisy = world.client(("203.0.113.99", 40000))
     codes = _bad(noisy, max_["id"], 7)
     assert 429 in codes and codes[:5] == [401] * 5
     # The noisy client is locked out - even with the right PIN ...
     assert world_login(noisy, max_["id"], "5555").status_code == 429
     # ... and a different device is not: the 2.x throttle was process-global.
-    quiet = world.client(("192.168.1.50", 40001))
+    quiet = world.client(("203.0.113.50", 40001))
     assert world_login(quiet, max_["id"], "5555").status_code == 200
 
 
 def test_failures_against_one_profile_do_not_lock_another_on_the_same_device(world, owner):
     a = world.person(owner, "Max", "member", pin="5555")
     b = world.person(owner, "Moe", "member", pin="6666")
-    c = world.client(("192.168.1.99", 40000))
+    c = world.client(("203.0.113.99", 40000))
     _bad(c, a["id"], 6)
     assert world_login(c, a["id"], "5555").status_code == 429
     assert world_login(c, b["id"], "6666").status_code == 200
 
 
 def test_the_unlock_route_is_throttled_too(world, owner):
-    noisy = world.client(("192.168.1.99", 40000))
+    noisy = world.client(("203.0.113.99", 40000))
     codes = [noisy.post("/api/auth/unlock", json={"pin": "0000"}).status_code for _ in range(7)]
     assert 429 in codes
     r = noisy.post("/api/auth/unlock", json={"pin": "2468"})
     assert r.status_code == 429 and "retry_after" in r.json()
-    assert world.client(("192.168.1.50", 40001)).post("/api/auth/unlock", json={"pin": "2468"}).status_code == 200
+    assert world.client(("203.0.113.50", 40001)).post("/api/auth/unlock", json={"pin": "2468"}).status_code == 200
 
 
 def test_the_global_ceiling_stops_a_distributed_guesser(world, owner, monkeypatch):
     monkeypatch.setattr(auth, "_GLOBAL_CEILING", 4)
     max_ = world.person(owner, "Max", "member", pin="5555")
     for i in range(4):
-        world_login(world.client((f"192.168.1.{100 + i}", 40000)), max_["id"], "0000")
-    late = world.client(("192.168.1.10", 40000))
+        world_login(world.client((f"203.0.113.{100 + i}", 40000)), max_["id"], "0000")
+    late = world.client(("203.0.113.10", 40000))
     assert world_login(late, max_["id"], "5555").status_code == 429
 
 
 def test_a_good_login_clears_that_clients_failures(world, owner):
     max_ = world.person(owner, "Max", "member", pin="5555")
-    c = world.client(("192.168.1.99", 40000))
+    c = world.client(("203.0.113.99", 40000))
     _bad(c, max_["id"], 3)
     assert world_login(c, max_["id"], "5555").status_code == 200
     assert _bad(c, max_["id"], 4) == [401] * 4          # the count started again from zero
@@ -350,7 +350,7 @@ def test_a_bound_device_opens_as_its_profile(world, owner):
 
 
 def test_admins_and_the_owner_cannot_be_a_device_default(world, owner):
-    ada = world.person(owner, "Ada", "admin", password="admin-password-1")
+    ada = world.person(owner, "Ada", "admin", password="admin-pass1")
     assert owner.put("/api/people/devices/this", json={"profile_id": ada["id"]}).status_code == 409
     me = accounts.get_owner()
     assert owner.put("/api/people/devices/this", json={"profile_id": me.id}).status_code == 409
@@ -392,7 +392,7 @@ def test_daily_budgets_belong_to_the_profile_and_survive_a_restart(world, owner)
     mia = world.person(owner, "Mia", "restricted", budgets={"threads": 2})
     kit = world.person(owner, "Kit", "restricted", budgets={"threads": 1})
     bot = _safe_bot(world)
-    a, b = world.client(("192.168.1.50", 1)), world.client(("192.168.1.50", 2))   # SAME address
+    a, b = world.client(("203.0.113.50", 1)), world.client(("203.0.113.50", 2))   # SAME address
     world.login(a, profile_id=mia["id"])
     world.login(b, profile_id=kit["id"])
     codes = [a.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(3)]
@@ -490,9 +490,9 @@ def test_admin_actions_are_audited(world, owner):
 
 
 def test_only_the_owner_manages_the_api_key(world, owner):
-    ada = world.person(owner, "Ada", "admin", password="admin-password-1")
+    ada = world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
-    world.login(admin, profile_id=ada["id"], password="admin-password-1")
+    world.login(admin, profile_id=ada["id"], password="admin-pass1")
     assert admin.get("/api/auth/api-token").status_code == 403
     r = owner.post("/api/auth/api-token", json={"rotate": True})
     token = r.json()["api_token"]
@@ -506,7 +506,7 @@ def test_machine_scopes_can_be_narrowed(world, owner):
     token = owner.post("/api/auth/api-token", json={"rotate": True}).json()["api_token"]
     owner.post("/api/auth/api-token", json={"machine_scopes": ["machine:inject", "machine:threads"],
                                             "machine_loopback_trust": False})
-    machine = world.client(("192.168.1.77", 40000), origin=False)
+    machine = world.client(("203.0.113.77", 40000), origin=False)
     h = {"X-API-Key": token}
     # inject is in scope ...
     r = machine.post("/api/inject", headers=h, json={"bot_id": "alpha", "role": "user", "content": "hi"})
@@ -577,7 +577,7 @@ def test_anonymous_access_none_shows_a_signed_out_device_only_the_signin_page(wo
     cfg.anonymous_access = "none"
     auth._write(cfg)
     auth._bust_cache()
-    stranger = world.client(("192.168.1.9", 1))
+    stranger = world.client(("203.0.113.9", 1))
     assert stranger.get("/").status_code == 200
     st = stranger.get("/api/auth/status").json()
     assert st["anonymous_access"] == "none" and any(p["name"] == "Mia" for p in st["profiles"])
@@ -591,7 +591,7 @@ def test_anonymous_access_none_shows_a_signed_out_device_only_the_signin_page(wo
     assert stranger.get("/api/bots").status_code == 200
     # A device bound to a profile is not anonymous.
     owner.put("/api/people/devices/this", json={"profile_id": mia["id"]})
-    tablet = world.client(("192.168.1.10", 1))
+    tablet = world.client(("203.0.113.10", 1))
     tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
     assert tablet.get("/api/bots").status_code == 200
 
@@ -600,11 +600,11 @@ def test_a_profile_override_can_be_cleared_and_the_lock_screen_names_the_credent
     mia = world.person(owner, "Mia", "restricted", session_timeout=600)
     r = owner.patch(f"/api/people/{mia['id']}", json={"session_timeout": None})
     assert r.status_code == 200 and r.json()["session_timeout"] is None
-    tiles = {t["name"]: t["credential"] for t in world.client(("192.168.1.9", 1)).get(
+    tiles = {t["name"]: t["credential"] for t in world.client(("203.0.113.9", 1)).get(
         "/api/auth/status").json()["profiles"]}
     assert tiles == {"Olive": "pin_or_password", "Mia": "none"}
     world.person(owner, "Max", "member", pin="5555")
-    world.person(owner, "Ada", "admin", password="admin-password-1")
+    world.person(owner, "Ada", "admin", password="admin-pass1")
     tiles = {t["name"]: t["credential"] for t in owner.get("/api/auth/status").json()["profiles"]}
     assert tiles["Max"] == "pin" and tiles["Ada"] == "password"
 
@@ -619,5 +619,5 @@ def test_a_members_status_does_not_advertise_host_control_features(world, owner)
     cfg = auth.load()
     assert cfg.pin_set                              # the fixture's owner has a PIN; clear it
     owner.post("/api/auth/setup", json={"new_pin": "", "current_pin": "2468"})
-    stranger = world.client(("192.168.1.9", 1))
+    stranger = world.client(("203.0.113.9", 1))
     assert set(stranger.get("/api/auth/status").json()["features"]) == {"extensions"}

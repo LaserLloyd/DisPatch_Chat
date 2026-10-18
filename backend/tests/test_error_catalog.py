@@ -127,7 +127,7 @@ def test_responses_carry_the_error_object(world):
     r = owner.post("/api/threads", json=[])
     assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
     # ... a gate refusal ...
-    anon = world.client(("192.168.1.9", 1))
+    anon = world.client(("203.0.113.9", 1))
     r = anon.get("/api/dashboard")
     assert r.status_code == 403 and r.json()["error"]["code"] == "safe_mode"
     # ... and a machine caller gets the same object inside the problem document.

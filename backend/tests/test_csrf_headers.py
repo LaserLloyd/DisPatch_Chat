@@ -57,7 +57,7 @@ def test_a_script_without_browser_headers_is_judged_by_its_cookie_alone(world, o
 
 def test_an_anonymous_caller_has_no_cookie_to_abuse(world):
     world.create_owner()
-    anon = world.client(("192.168.1.9", 1))
+    anon = world.client(("203.0.113.9", 1))
     anon.headers.pop("Origin", None)
     r = anon.post("/api/threads", json={"bot_id": "alpha"}, headers=EVIL)
     assert r.status_code == 200          # Restricted may start a thread; no ambient authority
@@ -66,7 +66,7 @@ def test_an_anonymous_caller_has_no_cookie_to_abuse(world):
 def test_a_device_cookie_alone_also_triggers_the_check(world, owner):
     mia = world.person(owner, "Mia", "restricted")
     owner.put("/api/people/devices/this", json={"profile_id": mia["id"]})
-    tablet = world.client(("192.168.1.9", 1))
+    tablet = world.client(("203.0.113.9", 1))
     tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
     assert tablet.post("/api/threads", json={"bot_id": "alpha"}, headers=EVIL).status_code == 403
     assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200      # our own origin
@@ -78,7 +78,7 @@ def _session_cookie(response):
 
 def test_the_session_cookie_is_httponly_and_samesite_strict(world):
     c = world.client()
-    r = c.post("/api/auth/setup", json={"password": "owner-password-1"})
+    r = c.post("/api/auth/setup", json={"password": "owner-pass1"})
     sess = _session_cookie(r)
     assert "HttpOnly" in sess and "SameSite=strict" in sess and "Secure" not in sess    # plain http
     assert "Max-Age" not in sess                                                           # a browser-session cookie
@@ -86,8 +86,8 @@ def test_the_session_cookie_is_httponly_and_samesite_strict(world):
 
 def test_secure_is_set_over_tls_and_behind_a_proxy_that_says_so(world):
     c = world.client()
-    r = c.post("/api/auth/setup", json={"password": "owner-password-1"},
-               headers={"X-Forwarded-For": "100.64.0.9", "X-Forwarded-Proto": "https"})
+    r = c.post("/api/auth/setup", json={"password": "owner-pass1"},
+               headers={"X-Forwarded-For": "198.51.100.9", "X-Forwarded-Proto": "https"})
     assert "Secure" in _session_cookie(r)
     assert r.headers.get("strict-transport-security", "").startswith("max-age=")
 
@@ -95,7 +95,7 @@ def test_secure_is_set_over_tls_and_behind_a_proxy_that_says_so(world):
 def test_x_forwarded_proto_alone_cannot_set_secure_on_a_plain_request(world):
     """A client must not be able to pin Secure on a cookie the browser would then drop."""
     c = world.client()
-    r = c.post("/api/auth/setup", json={"password": "owner-password-1"},
+    r = c.post("/api/auth/setup", json={"password": "owner-pass1"},
                headers={"X-Forwarded-Proto": "https"})
     assert "Secure" not in _session_cookie(r)
     assert "strict-transport-security" not in r.headers
