@@ -150,7 +150,7 @@
   <!-- github-dark.css (highlight.js) loads on demand with the bundle it
        belongs to — see js/util.js loadStyle(). -->
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=106" />
+  <link rel="stylesheet" href="/static/app.css?v=107" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
@@ -214,6 +214,9 @@
     })();
   </script>
 
+  <!-- Restricted profiles: a slim, non-dismissible disclosure (3.0). -->
+  <div class="restricted-banner" id="restricted-banner" role="region" aria-label="Restricted profile" data-i18n-attr="aria-label=restricted.region" hidden></div>
+
   <div id="app" class="app" data-view="bots">
 
     <!-- Bot sidebar -->
@@ -238,6 +241,9 @@
            main.js to open Settings → Theme, which is the one place a palette
            can be changed. The old Dark ☾ ↔ Light ☀ cycle is gone. -->
       <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme" aria-label="Choose a theme" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">🎨</button>
+      <!-- 3.0: who is using this device. Visible for a signed-in or bound profile;
+           opens the Switch profile / Lock menu. main.js paints it. -->
+      <button class="gear-btn profile-chip hidden" id="profile-chip" type="button" title="Profile" aria-label="Profile" data-i18n-attr="title=chip.title;aria-label=chip.title"></button>
       <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
       <button class="gear-btn unlock-btn hidden" id="unlock-btn" title="Enter PIN for admin mode" aria-label="Unlock — enter PIN" data-i18n-attr="title=nav.unlock_title;aria-label=nav.unlock_aria">🔓</button>
       <!-- Locked-side upload. Safe Mode only: unlocked sessions have the full
@@ -720,6 +726,8 @@
         <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
         <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
         <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
+        <!-- People & Profiles (3.0): owner and admin only. js/people.js builds it. -->
+        <button class="settings-tab admin-only hidden" id="stab-people" role="tab" data-tab="people" aria-selected="false" aria-controls="spane-people" tabindex="-1"><span class="stab-glyph" aria-hidden="true">👥</span><span class="stab-label" data-i18n="people.tab">People &amp; Profiles</span></button>
         <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
       </div>
       <button type="button" class="stab-nav stab-next" id="stab-next" tabindex="-1" aria-hidden="true" hidden title="More tabs" data-i18n-attr="title=settings.tabs_next"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -892,9 +900,16 @@
       <!-- ---- Health: dashboard.js mounts the host dashboard here ---- -->
       <section class="settings-pane hidden" id="spane-health" role="tabpanel" aria-labelledby="stab-health" tabindex="0"></section>
 
+      <!-- ---- People & Profiles: js/people.js mounts it here (owner/admin only) ---- -->
+      <section class="settings-pane hidden" id="spane-people" role="tabpanel" aria-labelledby="stab-people" tabindex="0"></section>
+
       <!-- ---- Security & PIN ---- -->
       <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
         <p class="muted modal-hint" id="sec-status-line"></p>
+        <!-- 3.0: filled by main.js (js/signin.js builds the forms). The first holds
+             "Create owner account" while the install is unclaimed; the second the
+             persistent, dismissible "set a password" prompt after a PIN sign-in. -->
+        <div class="sec-body sec-account" id="sec-account" hidden></div>
         <div class="sec-body">
           <!-- Each password field sits in its own <form> (Chromium warns about a
                password input outside one). data-no-submit: main.js cancels the
@@ -1056,6 +1071,9 @@
       <div class="lock-emoji">🔒</div>
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
       <p class="lock-sub" id="lock-sub" data-i18n="lock.enter_pin">Enter your PIN</p>
+      <!-- Profile tiles + credential form (js/signin.js) replace the keypad when
+           the install has more than the Owner's PIN. See lockMode in main.js. -->
+      <div class="lock-tiles" id="lock-tiles" hidden></div>
       <div class="lock-dots" id="lock-dots" aria-hidden="true"></div>
       <div class="lock-error" id="lock-error" role="alert" aria-live="assertive" hidden></div>
       <div class="keypad" id="keypad">
@@ -1109,6 +1127,30 @@
           <button class="btn-primary" id="recover-submit" data-i18n="lock.recover_submit">Reset PIN</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- First-run setup (3.0): shown full page when the install is unclaimed and
+       reached from the network (it then needs the setup token from the server log). -->
+  <div class="lock-screen hidden" id="setup-screen" role="dialog" aria-modal="true" aria-labelledby="setup-title" aria-describedby="setup-sub">
+    <div class="lock-card setup-card" id="setup-card"></div>
+  </div>
+
+  <!-- "Today's time is used up" / "not available right now" (3.0). A signed-in
+       profile that the server refuses for POLICY sees this instead of a UI full
+       of failing buttons. js/signin.js paintAccessNotice fills it. -->
+  <div class="lock-screen hidden" id="access-notice" role="alertdialog" aria-modal="true" aria-labelledby="access-title" aria-describedby="access-sub"></div>
+
+  <!-- Rail chip menu: Switch profile / Lock. -->
+  <div class="menu profile-menu" id="profile-menu" role="menu" aria-label="Profile" data-i18n-attr="aria-label=chip.menu_aria" hidden></div>
+
+  <!-- First-run card: dismissible, loopback installs that have no Owner yet. -->
+  <div class="firstrun-card" id="firstrun-card" role="region" aria-labelledby="firstrun-title" hidden>
+    <strong id="firstrun-title" data-i18n="setup.card_title">Set up your account</strong>
+    <p data-i18n="setup.card_body">Create the owner account so this install can be locked and shared with your household.</p>
+    <div class="bm-actions">
+      <button class="btn-primary" id="firstrun-open" data-i18n="setup.card_open">Set up now</button>
+      <button class="btn-secondary" id="firstrun-dismiss" data-i18n="setup.not_now">Not now</button>
     </div>
   </div>
 
@@ -1269,6 +1311,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=143"></script>
+  <script type="module" src="/static/js/main.js?v=144"></script>
 </body>
 </html>

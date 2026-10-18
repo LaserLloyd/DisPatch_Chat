@@ -6,6 +6,46 @@
 let onLocked = null;
 export function setOnLocked(fn) { onLocked = fn; }
 
+// 3.0: a signed-in profile can be refused for POLICY rather than for lack of a
+// session -- its daily time is used up (`time_limit`) or it is inside its quiet
+// hours (`quiet_hours`). Those arrive as 403s with error.code set. main.js
+// registers a handler that swaps the broken UI for a friendly full-screen
+// notice; it is called with (code, err) for every such failure, any URL.
+let onPolicyBlock = null;
+export function setOnPolicyBlock(fn) { onPolicyBlock = fn; }
+export const POLICY_BLOCK_CODES = ['time_limit', 'quiet_hours'];
+
+// security.yaml `anonymous_access: none`: until somebody signs in, every API
+// call except the public auth/health/static ones answers 401 with error.code
+// "signin_required". That is "show the sign-in screen", not an error to
+// toast, and not the session-expired path either (onLocked would drop to
+// Restricted, which this install does not have).
+let onSignInRequired = null;
+export function setOnSignInRequired(fn) { onSignInRequired = fn; }
+
+/** Pull the machine-readable part out of a failed response body (3.0 envelope:
+ *  `{detail, error:{code,message,fix,docs}}`, plus `retry_after` on a 429 and
+ *  `required_permission` on a permission_denied). Pure; exported for tests. */
+export function errorExtras(body, headers) {
+  const out = {};
+  const env = body && typeof body.error === 'object' && body.error ? body.error : null;
+  if (env) {
+    if (typeof env.code === 'string') out.code = env.code;
+    if (typeof env.fix === 'string' && env.fix) out.fix = env.fix;
+    if (typeof env.docs === 'string' && env.docs) out.docs = env.docs;
+    if (typeof env.message === 'string' && env.message) out.userMessage = env.message;
+  }
+  let retry = body && (body.retry_after ?? (env && env.retry_after));
+  if ((retry == null || retry === '') && headers && typeof headers.get === 'function') {
+    retry = headers.get('Retry-After');
+  }
+  const secs = Math.ceil(Number(retry));
+  if (Number.isFinite(secs) && secs > 0) out.retryAfter = secs;
+  if (body && typeof body.required_permission === 'string') out.requiredPermission = body.required_permission;
+  else if (env && typeof env.required_permission === 'string') out.requiredPermission = env.required_permission;
+  return out;
+}
+
 // Nothing here may hang forever.
 //
 // This wrapper had no timeout at all — no AbortController, no ceiling —
@@ -44,9 +84,14 @@ async function j(url, opts = {}) {
     // If the server has dropped us to Safe Mode (401 Locked, or a 403/flag that
     // says decoy/locked), tell the app to reconcile. Exclude /api/auth so a
     // wrong-PIN 401 doesn't recurse.
-    const downgraded = r.status === 401 || (body && (body.locked || body.decoy));
+    const extras = errorExtras(body, r.headers);
+    const signinRequired = extras.code === 'signin_required';
+    const downgraded = !signinRequired && (r.status === 401 || (body && (body.locked || body.decoy)));
     if (downgraded && onLocked && !url.startsWith('/api/auth')) {
       try { onLocked(); } catch {}
+    }
+    if (signinRequired && onSignInRequired) {
+      try { onSignInRequired(); } catch {}
     }
     let detail = (body && (body.detail || body.error)) || r.statusText;
     // FastAPI HTTPException detail can be an object (some endpoints send
@@ -57,6 +102,8 @@ async function j(url, opts = {}) {
         detail = Object.entries(detail.errors).map(([k, v]) => `${k}: ${v}`).join('; ');
       } else if (typeof detail.detail === 'string') {
         detail = detail.detail;
+      } else if (typeof detail.message === 'string') {
+        detail = detail.message;
       } else {
         try { detail = JSON.stringify(detail); } catch { detail = String(detail); }
       }
@@ -66,6 +113,13 @@ async function j(url, opts = {}) {
     // The parsed body rides along for callers that need more than a message —
     // Settings → Plugins reads a 422's offending row index out of it.
     err.body = body;
+    // 3.0: surface error.code / error.fix / retry_after on the Error itself.
+    // `detail` (and so err.message) is unchanged for every existing caller.
+    Object.assign(err, extras);
+    if (signinRequired) err.signInRequired = true;
+    if (err.code && POLICY_BLOCK_CODES.includes(err.code) && onPolicyBlock) {
+      try { onPolicyBlock(err.code, err); } catch {}
+    }
     throw err;
   }
   return r.status === 204 ? null : r.json();
@@ -118,12 +172,43 @@ function xhrUpload(url, file, onProgress, fields) {
       }
       const err = new Error(`${xhr.status}: ${detail}`);
       err.status = xhr.status;
+      Object.assign(err, errorExtras(body, null));
+      if (err.code && POLICY_BLOCK_CODES.includes(err.code) && onPolicyBlock) {
+        try { onPolicyBlock(err.code, err); } catch {}
+      }
       reject(err);
     };
     xhr.onerror = () => reject(new Error('Network error during upload'));
     xhr.onabort = () => reject(new Error('Upload aborted'));
     xhr.send(fd);
   });
+}
+
+// Drop undefined keys so an optional field is ABSENT from the body rather than
+// sent as null (several of these endpoints treat "absent" and "null" apart).
+function compact(o) {
+  const out = {};
+  for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
+  return out;
+}
+
+/** Body for POST /api/auth/login and /api/auth/switch. `profile` is an id, or
+ *  an object {id} / {name}. Only the secret the caller actually has is sent.
+ *  Pure; exported for tests. */
+export function loginBody(profile, opts = {}) {
+  const o = opts || {};
+  const body = {};
+  if (profile && typeof profile === 'object') {
+    if (profile.id) body.profile_id = profile.id;
+    else if (profile.name) body.name = profile.name;
+  } else if (profile) {
+    body.profile_id = String(profile);
+  }
+  if (o.name && !body.profile_id) body.name = o.name;
+  if (o.pin) body.pin = o.pin;
+  if (o.password) body.password = o.password;
+  if (o.remember) body.remember = true;
+  return body;
 }
 
 export const api = {
@@ -141,6 +226,45 @@ export const api = {
   forgetDevices: () => j('/api/auth/forget-devices', { method: 'POST' }),
   setupPin: (newPin, currentPin) => j('/api/auth/setup', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ new_pin: newPin, current_pin: currentPin }) }),
   recover: (code) => j('/api/auth/recover', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ code }) }),
+
+  // ---- 3.0 profiles, roles and policy -----------------------------------
+  // The session cookie is HttpOnly; nothing here ever reads it. Credentials go
+  // in the body of the call that checks them and nowhere else.
+  me: () => j('/api/auth/me', { timeoutMs: 5000 }),
+  login: (profile, opts = {}) => j('/api/auth/login', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(loginBody(profile, opts)) }),
+  switchProfile: (profile, opts = {}) => j('/api/auth/switch', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(loginBody(profile, opts)) }),
+  // First run: creates the Owner and signs in. `setupToken` is only needed
+  // when the install is reached from the network (see status.setup_required).
+  setupOwner: ({ name, password, newPin, setupToken } = {}) => j('/api/auth/setup', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ name, password, new_pin: newPin, setup_token: setupToken })) }),
+  changePassword: ({ current, currentPin, newPassword } = {}) => j('/api/auth/password', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ current, current_pin: currentPin, new: newPassword })) }),
+  apiTokenInfo: () => j('/api/auth/api-token'),
+  rotateApiToken: () => j('/api/auth/api-token', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ rotate: true }) }),
+  setMachineAccess: ({ machineLoopbackTrust, machineScopes } = {}) => j('/api/auth/api-token', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ machine_loopback_trust: machineLoopbackTrust, machine_scopes: machineScopes })) }),
+
+  people: () => j('/api/people'),
+  createPerson: (body) => j('/api/people', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
+  patchPerson: (id, patch) => j(`/api/people/${encodeURIComponent(id)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch || {}) }),
+  deletePerson: (id) => j(`/api/people/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setPersonPin: (id, pin) => j(`/api/people/${encodeURIComponent(id)}/pin`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ pin }) }),
+  clearPersonPin: (id) => j(`/api/people/${encodeURIComponent(id)}/pin`, { method: 'DELETE' }),
+  setPersonPassword: (id, password) => j(`/api/people/${encodeURIComponent(id)}/password`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ password }) }),
+  signOutPerson: (id) => j(`/api/people/${encodeURIComponent(id)}/sign-out`, { method: 'POST' }),
+
+  devices: () => j('/api/people/devices'),
+  // Binds the CALLING browser; profileId null unbinds it.
+  bindThisDevice: (profileId, label) => j('/api/people/devices/this', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(compact({ profile_id: profileId == null ? null : profileId, label })) }),
+  forgetDevice: (id) => j(`/api/people/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Counts only, never message content.
+  peopleActivity: ({ profileId, days } = {}) => {
+    const q = new URLSearchParams();
+    if (profileId) q.set('profile_id', profileId);
+    if (days) q.set('days', String(days));
+    const qs = q.toString();
+    return j(`/api/people/activity${qs ? `?${qs}` : ''}`);
+  },
+  peopleAudit: () => j('/api/people/audit'),
+  myActivity: (days) => j(`/api/me/activity${days ? `?days=${encodeURIComponent(days)}` : ''}`),
 
   bots: () => j('/api/bots'),
   // Quick actions in use (public; Safe Mode too): {actions: [{id, label, hint, tools}]}.

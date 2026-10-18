@@ -2,8 +2,8 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked } from './api.js?v=33';
-import { ChatSocket } from './ws.js?v=9';
+import { api, setOnLocked, setOnPolicyBlock, setOnSignInRequired } from './api.js?v=34';
+import { ChatSocket } from './ws.js?v=10';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
 import { installChecklists, applyChecklistState } from './checklist.js?v=12';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=12';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=10';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=11';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -72,7 +72,15 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=20';
+import { aboutRow } from './about.js?v=21';
+// 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
+// setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
+import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, audienceOf } from './profiles.js?v=1';
+import {
+  renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
+  paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
+} from './signin.js?v=1';
+import { mountPeopleSettings } from './people.js?v=1';
 import { pushRow } from './push.js?v=2';
 import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -118,8 +126,10 @@ const state = {
   modelChipWarn: {},
   scrollPositions: {}, // thread_id -> last scrollTop when user navigated away
   drafts: new Set(),   // thread ids with unsent composer text (the "Draft" label)
-  auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0 },
-  decoy: false,        // Safe Mode (chat media hidden; safe bots' avatars shown)
+  auth: { pinSet: false, authenticated: false, decoy: false, lockTimeout: 600, minPin: 4, recoveryPath: '', configPath: '', rememberDays: 0, remembered: false, trustedDevices: 0,
+    claimed: false, ownerExists: false, setupRequired: false, signedIn: false, role: 'owner', profile: null, needsPassword: false, profiles: [], disclosure: null, anonymousAccess: 'restricted' },
+  decoy: false,        // Restricted (was Safe Mode): chat media hidden; restricted-audience bots shown
+  role: 'owner',       // 3.0: owner | admin | member | restricted (state.decoy === role is restricted)
   started: false,      // app has booted (bots loaded, socket connected)
   harnessEnabled: false, // server-side feature flag (DISPATCH_HARNESS); full-session only
   // DeepSeek Harness pane: last /api/harness/status payload (service + models),
@@ -267,6 +277,9 @@ const dom = {};
  'sec-note',
  'lock-remember-row', 'lock-remember', 'sec-remember-wrap', 'sec-remember-enable',
  'lock-nim-row', 'lock-nim',
+ // 3.0 profiles: tiles host, rail chip + menu, Restricted strip, setup/notice overlays, first-run card, account block
+ 'lock-tiles', 'profile-chip', 'profile-menu', 'restricted-banner', 'setup-screen', 'setup-card',
+ 'access-notice', 'firstrun-card', 'firstrun-open', 'firstrun-dismiss', 'sec-account',
  'sec-remember-label', 'sec-forget-devices',
  'bm-avatar-minimal', 'bm-avatar-style-row', 'bm-lang-row',
  // Safe-Mode companions panel (the gear when locked)
@@ -670,6 +683,9 @@ function maybeFlashMoodFace(msg, rowEl) {
 // ===================== Toast / overlay =====================
 let toastTimer;
 function toast(msg, isError = false) {
+  // Behind the sign-in gate every failing call is just "sign in first"; the
+  // screen already says so, and a red toast under it helps nobody.
+  if (isError && (gateBusy || gateOverlayOpen())) return;
   dom.toast.textContent = msg;
   dom.toast.className = 'toast' + (isError ? ' error' : '');
   clearTimeout(toastTimer);
@@ -4312,12 +4328,14 @@ function syncLockNimRow() {
 // sprinkled through the seven places that hide it.
 // Order = the tab strip (2.3): day-to-day first, setup after, rare last. Add-in
 // tabs (shell.settings.pane with a new id) are spliced in before 'plugins'.
-const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'security'];
+const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'people', 'security'];
 const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
 // voice chat is unlocked-only, and so is the page explaining how to add it).
 // `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice'];
+// 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
+// a Member is signed in but must not be offered tabs that can only 403.
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people'];
 let settingsTab = 'bots';
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
@@ -4424,6 +4442,11 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       // The voice add-on's own pane when it is mounted; otherwise the page
       // that says how to add it, from a fresh read of /api/extensions.
       showVoiceTab();
+      break;
+    case 'people':
+      await mountPeopleSettings(pane, {
+        toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role,
+      });
       break;
     case 'security':
       activateSecurityPane({ focusField: !focusTab });
@@ -4563,10 +4586,17 @@ function renderBotManager() {
     // Hidden, and its chats still open by URL on an unlocked device.
     const hiddenTag = el('span', { class: 'bm-hidden-tag', text: t('settings.hidden_badge'),
       title: t('settings.hidden_title') });
+    // 3.0: read-only caption of who sees this character, derived from the two
+    // switches below (restricted only = both on the Restricted side, everyone = both audiences,
+    // members = not shown to Restricted at all).
+    const audienceTag = el('span', { class: 'bm-audience', 'data-audience': '' });
     const paintHidden = () => {
       const none = shownNowhere(bmBots[idx]);
       row.classList.toggle('bm-row--hidden', none);
       hiddenTag.hidden = !none;
+      const aud = audienceOf(bmBots[idx]);
+      audienceTag.dataset.audience = aud;
+      audienceTag.textContent = t(`settings.audience_${aud}`);
     };
     const lockedBtn = el('button', {
       class: 'bm-safe-btn bm-vis-locked' + (bot.safe ? ' on' : ''),
@@ -4687,6 +4717,7 @@ function renderBotManager() {
       avatarImg,
       el('span', { class: 'bm-name', text: bot.name }),
       hiddenTag,
+      audienceTag,
       ctl && ctl.badge,
       ctl && ctl.notConnected,
       lockedBtn,
@@ -6669,7 +6700,7 @@ function handleWs(data) {
         // Server says Safe Mode but we thought we were unlocked → the session
         // lapsed (e.g. expiry during a WS reconnect). Do a clean full reset so
         // no already-loaded images linger, rather than just re-skinning.
-        if (data.decoy && state.auth.pinSet && !state.decoy && state.auth.authenticated) {
+        if (data.decoy && hasLock() && !state.decoy && state.auth.authenticated) {
           handleLocked();
           break;
         }
@@ -6679,7 +6710,7 @@ function handleWs(data) {
         // the SAFE tier, so the unlocked outbox was never restored and a send
         // queued before the offline reload sat unsent until the next online
         // reload. Reboot into the real tier; restoreLocalState replays it.
-        if (!data.decoy && state.decoy && state.auth.pinSet) {
+        if (!data.decoy && state.decoy && hasLock()) {
           state.decoy = false;
           state.auth.decoy = false;
           state.auth.authenticated = true;
@@ -6688,6 +6719,11 @@ function handleWs(data) {
         }
         state.decoy = data.decoy;
         state.auth.decoy = data.decoy;
+        // 3.0: the hello frame also names the role and the profile.
+        if (typeof data.role === 'string' && data.role !== state.role) {
+          state.role = data.role; state.auth.role = data.role;
+        }
+        if (data.profile !== undefined) state.auth.profile = data.profile || null;
         applyAuthChrome();
       }
       if (Array.isArray(data.bots)) {
@@ -6877,6 +6913,9 @@ function handleWs(data) {
       break;
     }
     case 'error':
+      // 3.0: a policy refusal (today's time used up / quiet hours) replaces the
+      // UI with a notice; a plain permission refusal gets friendly words.
+      if (wsErrorKind(data).kind === 'notice') { showAccessNotice(wsErrorKind(data).code); break; }
       if (data.code === 'bad_action') {
         // The action was hidden or renamed since this tab loaded the list.
         clearQuickAction();
@@ -6885,8 +6924,13 @@ function handleWs(data) {
         announce(t('quick.rejected'), true);
         break;
       }
-      toast(data.message + (data.detail ? ` (${data.detail})` : ''), true);
-      announce(data.message, true);
+      if (data.code === 'permission_denied') {
+        toast(t('people.err_denied'), true);
+        announce(t('people.err_denied'), true);
+      } else {
+        toast(data.message + (data.detail ? ` (${data.detail})` : ''), true);
+        announce(data.message, true);
+      }
       // AgentRefused — a verdict on the thread's model/thinking choice, not
       // an outage (see main.py's err_frame['refused']). The preference is
       // untouched server-side; this just puts the chip in its warning state
@@ -7278,7 +7322,7 @@ function wireEvents() {
   dom['companions-backdrop'].addEventListener('click', (e) => {
     if (e.target === dom['companions-backdrop']) hideCompanions();
   });
-  dom['comp-more'].addEventListener('click', () => { hideCompanions(); showUnlock(); });
+  dom['comp-more'].addEventListener('click', () => { hideCompanions(); showSignInScreen(); });
 
   // Collapse / expand the thread list (desktop).
   dom['collapse-threads'].addEventListener('click', () => setThreadListCollapsed(true));
@@ -7525,6 +7569,8 @@ function getSocket() {
       // Every open, first connect included — that is what carries the outbox
       // restored from disk at boot, which onReconnect would never see.
       onOpen: () => resendPendingSends(),
+      // anonymous_access: none closes /ws with 1008 until somebody signs in.
+      onSignInRequired: () => onSocketPolicyClose(),
       onReconnect: () => {
         toast(t('toast.reconnected')); resync(); refreshUnread();
       },
@@ -7537,7 +7583,7 @@ function getSocket() {
 // modes (Safe Mode can upload too — media is stripped from the locked *view*,
 // not from sending); body class lets CSS adapt the safe view.
 function applyAuthChrome() {
-  const full = state.auth.pinSet && !state.decoy;
+  const full = hasLock() && !state.decoy;
   // The visible pack differs between Safe Mode and full access, so re-fetch it
   // (and drop any overlay mid-flight) every time that boundary is crossed.
   if (applyAuthChrome._lastDecoy !== state.decoy) {
@@ -7583,11 +7629,13 @@ function applyAuthChrome() {
   // to the Companions panel — see the #manage-bots handler), but the idle lock
   // can land while it is open, and "hidden" has to mean not-in-the-tab-order
   // too. Hence: hide, then fall back to a tab that is still there.
+  // 3.0: "admin" is owner/admin, not merely "signed in" -- a Member keeps the
+  // ordinary tabs but not these.
   for (const tab of ADMIN_TABS) {
     const b = document.getElementById(`stab-${tab}`);
-    if (b) b.classList.toggle('hidden', state.decoy);
+    if (b) b.classList.toggle('hidden', !canAdmin());
   }
-  if (state.decoy) {
+  if (!canAdmin()) {
     unmountDashboard();
     unmountReactionManager();
     if (ADMIN_TABS.includes(settingsTab)) setSettingsTab('bots');
@@ -7603,6 +7651,8 @@ function applyAuthChrome() {
   // Extensions follow the tier: mounted while unlocked, unmounted (and every
   // slot they filled emptied) the moment the device locks.
   syncExtensions();
+  // 3.0: the rail chip, the Restricted strip, the first-run card, the account block.
+  paintProfileChrome();
 }
 
 // ===================== Extensions =====================
@@ -8015,18 +8065,311 @@ function renderPins() {
   renderLinkRail(document.getElementById('gear-row'), { decoy: state.decoy, openViewer });
 }
 
-// ---- Idle auto-lock (full mode only → drops back to Safe Mode) ----
+// ===================== 3.0 profiles, roles and policy =====================
+// Roles: owner > admin > member > restricted. "Restricted" is what 2.x called
+// Safe Mode / a locked device; state.decoy keeps meaning exactly that, so every
+// `!state.decoy` gate in this file still reads "not Restricted". What 3.0 adds
+// is the question underneath it: WHICH non-Restricted role (admin surfaces are
+// for owner/admin only), WHO is signed in (tiles, quick switch), and the
+// policy refusals a profile can hit (time used up, quiet hours).
+//
+// None of this is a security boundary: the server enforces every role, budget
+// and permission. It decides what the UI OFFERS, so nobody is shown a button
+// that could only 403.
+
+/** Does this install have a lock at all? (A claimed install, or a 2.x PIN.) */
+const hasLock = () => !!(state.auth.claimed || state.auth.pinSet);
+/** May this session see the admin surfaces (People & Profiles, Plugins, ...)? */
+const canAdmin = () => !state.decoy && isAdminRole(state.role);
+/** anonymous_access: none and nobody signed in -> only the sign-in screen. */
+const gateActive = () => !!(state.auth.claimed && state.auth.anonymousAccess === 'none' && !state.auth.signedIn);
+
+/** Fold a GET /api/auth/status body into state. One place, so boot, the retry
+ *  after a failed boot, and every sign-in/out read it the same way. */
+function applyAuthStatus(s, { keepFeatures = false } = {}) {
+  const prev = state.auth || {};
+  const pinSet = !!s.pin_set;
+  const authenticated = !!s.authenticated;
+  state.auth = {
+    pinSet,
+    authenticated,
+    decoy: typeof s.decoy === 'boolean' ? s.decoy : (pinSet && !authenticated),
+    lockTimeout: s.lock_timeout_seconds || 600,
+    minPin: s.min_pin_length || 4,
+    recoveryPath: s.recovery_path || '',
+    configPath: s.config_path || '',
+    rememberDays: s.remember_days || 0,
+    remembered: !!s.remembered,
+    trustedDevices: s.trusted_devices || 0,
+    // Optional subsystems this build has on. Absent for a limited session
+    // (both are admin-only), which the probes treat as "unknown" and fall
+    // back to asking.
+    features: s.features || (keepFeatures ? prev.features || null : null),
+    // 3.0
+    claimed: !!s.claimed,
+    ownerExists: !!s.owner_exists,
+    setupRequired: !!s.setup_required,
+    signedIn: !!s.signed_in,
+    role: normalizeRole(s),
+    profile: s.profile || null,
+    needsPassword: !!s.needs_password,
+    profiles: Array.isArray(s.profiles) ? s.profiles : [],
+    disclosure: s.disclosure || null,
+    anonymousAccess: s.anonymous_access === 'none' ? 'none' : 'restricted',
+  };
+  state.role = state.auth.role;
+  state.decoy = state.auth.decoy;
+}
+
+/** Re-read the auth state after a sign-in / sign-out. True when it worked. */
+async function refreshAuthQuiet() {
+  try { applyAuthStatus(await api.authStatus(), { keepFeatures: false }); return true; }
+  catch { return false; }
+}
+
+// ---- Sign-in screen (the lock overlay, in tiles mode) ----
+let lockMode = 'keypad';                           // 'keypad' | 'tiles'
+let lockCtx = { switching: false, gate: false };
+let signInCtl = null;
+let gateBusy = false;
+
+const gateOverlayOpen = () => lockCtx.gate && !dom['lock-screen'].classList.contains('hidden');
+
+/** Sign in as `profile` with the credential its tile asked for. Throws on
+ *  failure so the tile UI can show the message / start the retry countdown. */
+async function signInWith(profile, opts) {
+  const call = state.auth.signedIn ? api.switchProfile : api.login;
+  const r = await call(profile.id, opts);
+  await finishSignIn(r);
+}
+
+async function finishSignIn(r) {
+  // A different person is about to see this browser. The previous session's
+  // cache (drafts, queued sends, cached rows) must not outlive it -- goSafe
+  // does the same on a lock.
+  cancelLocalWrites();
+  try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+  hideUnlock({ force: true });
+  hideSetup();
+  hideAccessNotice();
+  await refreshAuthQuiet();
+  state.auth.remembered = !!(r && r.remembered);
+  if (r && r.profile && !state.auth.profile) state.auth.profile = r.profile;
+  await reboot();
+  armIdleTimer();
+  const name = (state.auth.profile && state.auth.profile.name) || '';
+  toast(name ? t('signin.welcome', { name }) : t(state.auth.remembered ? 'lock.unlocked_remembered' : 'lock.unlocked'));
+  if (state.auth.needsPassword && canAdmin()) toast(t('password.toast'));
+}
+
+/** Show the sign-in screen. gate: nothing behind it (anonymous_access: none),
+ *  so it cannot be dismissed. switching: a signed-in person picking someone else. */
+function showSignInScreen({ gate = false, switching = false } = {}) {
+  lockCtx = { gate, switching };
+  showUnlock();
+}
+
+function enterGate() {
+  closeAllOverlays();
+  hideAccessNotice();
+  showSignInScreen({ gate: true });
+  dismissBootVeil();
+}
+
+/** A 401 "signin_required" from any call, or a /ws closed with 1008. */
+function signInRequired() {
+  if (gateBusy || gateOverlayOpen()) return;
+  gateBusy = true;
+  state.auth.claimed = true;
+  state.auth.anonymousAccess = 'none';
+  state.auth.signedIn = false;
+  state.auth.authenticated = false;
+  state.auth.decoy = true;
+  state.auth.profile = null;
+  state.decoy = true;
+  cancelLocalWrites();
+  (async () => {
+    try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+    await refreshAuthQuiet();
+    await reboot();
+  })().finally(() => { gateBusy = false; });
+}
+
+/** The /ws closed with 1008: confirm it is the sign-in gate before acting on
+ *  it, and otherwise try again slowly (never in a tight loop). */
+async function onSocketPolicyClose() {
+  let s = null;
+  try { s = await api.authStatus(); } catch { /* offline: fall through to a slow retry */ }
+  if (s && s.claimed && s.anonymous_access === 'none' && !s.signed_in) { signInRequired(); return; }
+  setTimeout(() => { if (state.started && socket) socket.connect(); }, 15000);
+}
+
+// ---- "Not available right now" ----
+function showAccessNotice(code) {
+  if (!dom['access-notice'] || !blockNoticeKey(code)) return;
+  if (!dom['access-notice'].classList.contains('hidden')) return;
+  paintAccessNotice(dom['access-notice'], code, {
+    onRetry: async () => {
+      hideAccessNotice();
+      await refreshAuthQuiet();
+      await reboot();
+    },
+    onSwitch: signInMode(state.auth) === 'tiles' && state.auth.claimed
+      ? () => { hideAccessNotice(); showSignInScreen({ switching: true }); }
+      : null,
+  });
+  closeAllOverlays();
+  dom['access-notice'].classList.remove('hidden');
+}
+function hideAccessNotice() {
+  if (dom['access-notice']) dom['access-notice'].classList.add('hidden');
+}
+
+// ---- First-run setup ----
+function showSetupPage() {
+  setupPage(dom['setup-card'], {
+    setupRequired: state.auth.setupRequired,
+    onSubmit: createOwner,
+  });
+  dom['setup-screen'].classList.remove('hidden');
+  dismissBootVeil();
+}
+function hideSetup() { if (dom['setup-screen']) dom['setup-screen'].classList.add('hidden'); }
+
+/** POST /api/auth/setup: creates the Owner and signs in. */
+async function createOwner(vals) {
+  await api.setupOwner(vals);
+  const wasStarted = state.started;
+  hideSetup();
+  await refreshAuthQuiet();
+  state.auth.signedIn = true;
+  if (wasStarted) await reboot(); else await startApp();
+  armIdleTimer();
+  toast(t('setup.done'));
+}
+
+let firstRunDismissed = false;
+function paintFirstRun() {
+  const card = dom['firstrun-card'];
+  if (!card) return;
+  let stored = false;
+  try { stored = localStorage.getItem('dp-firstrun-dismissed') === '1'; } catch { /* private mode */ }
+  const show = !state.auth.claimed && !state.auth.pinSet && !state.auth.setupRequired && !firstRunDismissed && !stored && state.started;
+  card.hidden = !show;
+}
+
+// ---- Settings -> Security: the account block ----
+let passwordPromptDismissed = false;
+function paintAccountBlock() {
+  const host = dom['sec-account'];
+  if (!host) return;
+  const a = state.auth;
+  // Rebuild only when what it shows changes: applyAuthChrome runs on every
+  // hello frame, and a rebuild would wipe a half-typed password.
+  const sig = [a.claimed, a.setupRequired, canAdmin(), a.needsPassword, passwordPromptDismissed, a.pinSet, i18nLang()].join();
+  if (host._sig === sig) return;
+  host._sig = sig;
+  host.replaceChildren();
+  if (!a.claimed && !a.pinSet && !a.setupRequired) {
+    host.append(
+      el('h3', { text: t('setup.card_title') }),
+      el('p', { class: 'muted', text: t('setup.settings_hint') }),
+      renderSetup({ setupRequired: false, onSubmit: createOwner, idPrefix: 'sec-setup' }).form,
+    );
+  } else if (a.claimed && canAdmin() && a.needsPassword) {
+    if (!passwordPromptDismissed) {
+      const form = renderPasswordForm({
+        mode: 'first', needsPin: state.role === 'owner' && a.pinSet, idPrefix: 'sec-pwfirst',
+        onSubmit: async (v) => {
+          await api.changePassword(v);
+          a.needsPassword = false;
+          toast(t('password.saved'));
+          paintAccountBlock();
+        },
+        onDismiss: () => { passwordPromptDismissed = true; paintAccountBlock(); },
+      }).form;
+      host.append(el('div', { class: 'sec-prompt', role: 'region', 'aria-label': t('password.prompt_title') }, [
+        el('h3', { text: t('password.prompt_title') }),
+        el('p', { class: 'muted', text: t('password.prompt_body') }),
+        form,
+      ]));
+    }
+  } else if (a.claimed && canAdmin() && !a.needsPassword) {
+    const form = renderPasswordForm({
+      mode: 'change', idPrefix: 'sec-pwchange',
+      onSubmit: async (v) => {
+        await api.changePassword(v);
+        toast(t('password.saved'));
+      },
+    }).form;
+    host.append(el('details', { class: 'sec-pw-details' }, [
+      el('summary', { text: t('password.change_title') }), form]));
+  }
+  host.hidden = !host.childNodes.length;
+}
+
+// ---- Rail chip, Restricted strip ----
+let chipMenuCtl = null;
+function wireProfileChip() {
+  if (chipMenuCtl || !dom['profile-chip'] || !dom['profile-menu']) return;
+  chipMenuCtl = attachChipMenu(dom['profile-chip'], dom['profile-menu'], {
+    header: () => chipLabel(state.auth.profile, state.role),
+    items: () => {
+      const items = [];
+      if (state.auth.claimed && signInMode(state.auth) === 'tiles') {
+        items.push({ label: t('chip.switch'), onSelect: () => showSignInScreen({ switching: true }) });
+      }
+      if (state.auth.signedIn && hasLock()) items.push({ label: t('chip.lock'), onSelect: () => lockNow() });
+      return items;
+    },
+  });
+}
+
+function openRestrictedInfo() {
+  openRestrictedPanel({ fetchActivity: () => api.myActivity(7) });
+}
+
+function paintProfileChrome() {
+  wireProfileChip();
+  const chip = dom['profile-chip'];
+  const p = state.auth.profile;
+  const showChip = !!(chip && state.auth.claimed && p && !gateActive());
+  if (chip) {
+    chip.classList.toggle('hidden', !showChip);
+    if (showChip) paintChip(chip, p, state.role);
+    else if (chipMenuCtl) chipMenuCtl.close();
+  }
+  const banner = dom['restricted-banner'];
+  if (banner) {
+    const restricted = state.auth.claimed && state.role === 'restricted' && !gateActive();
+    paintRestrictedBanner(banner, { show: restricted, onMore: openRestrictedInfo });
+    document.body.classList.toggle('has-restricted-banner', restricted);
+    if (restricted) {
+      // The strip can wrap to two lines on a phone; the layout below it shrinks
+      // by exactly its height (app.css, body.has-restricted-banner).
+      const fit = () => document.documentElement.style.setProperty('--rb-h', `${banner.offsetHeight}px`);
+      fit();
+      requestAnimationFrame(fit);
+    } else {
+      document.documentElement.style.removeProperty('--rb-h');
+    }
+  }
+  paintFirstRun();
+  paintAccountBlock();
+}
+
+// ---- Idle auto-lock (full mode only → drops back to Restricted) ----
 let idleTimer = null;
 let lastBump = 0;
 function armIdleTimer() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-  if (!state.auth.pinSet || state.decoy) return;   // only while unlocked
+  if (!hasLock() || state.decoy) return;   // only while signed in
   if (state.auth.remembered) return;   // remembered device: no auto-lock
   const ms = Math.max(30, state.auth.lockTimeout || 600) * 1000;
   idleTimer = setTimeout(lockNow, ms);
 }
 function bumpIdle() {
-  if (!state.auth.pinSet || state.decoy || !state.started) return;
+  if (!hasLock() || state.decoy || !state.started) return;
   const now = Date.now();
   if (now - lastBump < 5000) return;   // throttle re-arming
   lastBump = now;
@@ -8123,13 +8466,28 @@ function setLockScreenLabels(titleKey, subKey) {
   setI18nText(dom['lock-sub'], subKey);
 }
 
-// The unlock overlay floats over the running Safe-Mode app (no teardown).
+// The unlock overlay floats over the running Restricted app (no teardown).
+// 3.0: with more than the Owner's PIN on the install it shows profile TILES and
+// asks for the credential the tile says; the 2.x keypad stays for an install
+// whose only profile is the Owner with a PIN. lockCtx says why it is open:
+// gate = anonymous_access none (nothing behind it, cannot be dismissed),
+// switching = a signed-in person picking someone else.
 function showUnlock() {
   lockPin = '';
   renderLockDots();
   setLockError('');
   hideRecover();
-  setLockScreenLabels('lock.unlock_title', 'lock.unlock_sub');
+  lockMode = signInMode(state.auth);
+  if (lockMode === 'keypad' && lockCtx.switching) { lockCtx = { gate: false, switching: false }; return; }
+  const tiles = lockMode === 'tiles';
+  dom['lock-screen'].classList.toggle('lock-mode-tiles', tiles);
+  dom['lock-tiles'].hidden = !tiles;
+  dom['lock-cancel'].hidden = lockCtx.gate;
+  if (tiles) {
+    setLockScreenLabels(lockCtx.switching ? 'signin.switch_title' : 'signin.title', 'signin.sub');
+  } else {
+    setLockScreenLabels('lock.unlock_title', 'lock.unlock_sub');
+  }
   // Remember-this-device: only offered when the server has the feature on;
   // the checkbox re-arms to this device's last choice.
   const offer = (state.auth.rememberDays || 0) > 0 && allowsPersistentSession();
@@ -8141,6 +8499,19 @@ function showUnlock() {
   }
   syncLockNimRow();
   dom['lock-screen'].classList.remove('hidden');
+  if (tiles) {
+    if (signInCtl) signInCtl.destroy();
+    signInCtl = renderSignIn(dom['lock-tiles'], {
+      profiles: state.auth.profiles,
+      currentId: state.auth.profile ? state.auth.profile.id : null,
+      remember: () => {
+        const on = !dom['lock-remember-row'].classList.contains('hidden') && dom['lock-remember'].checked;
+        try { localStorage.setItem('lc-remember', on ? '1' : '0'); } catch {}
+        return on;
+      },
+      onSubmit: signInWith,
+    });
+  }
   // Focus and inert are NOT set here. initModalFocusGuard watches this element
   // alongside the .modal-backdrop set and owns both, which matters because the
   // only route to this screen is `hideCompanions(); showUnlock()` — two class
@@ -8148,8 +8519,16 @@ function showUnlock() {
   // afterwards, saw the companions backdrop closed, and lifted the inert this
   // function had just set.
 }
-function hideUnlock() {
+function hideUnlock({ force = false } = {}) {
+  // The sign-in gate has nothing behind it: Escape / the backdrop must not close it.
+  if (lockCtx.gate && !force) return;
   dom['lock-screen'].classList.add('hidden');
+  dom['lock-screen'].classList.remove('lock-mode-tiles');
+  dom['lock-tiles'].hidden = true;
+  dom['lock-cancel'].hidden = false;
+  if (signInCtl) { signInCtl.destroy(); signInCtl = null; }
+  lockCtx = { gate: false, switching: false };
+  lockMode = 'keypad';
   setLockScreenLabels('lock.locked', 'lock.enter_pin');
   lockPin = '';
   renderLockDots();
@@ -8251,6 +8630,7 @@ async function reboot() {
   progressOpen = false;
   closeAllOverlays();
   clearChatView();
+  if (gateActive()) { enterGate(); return; }   // anonymous_access none: nothing to start
   await startApp();
 }
 
@@ -8278,17 +8658,24 @@ async function goSafe(announce) {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   closeAllOverlays();
   try { await api.lock(); } catch { /* best-effort: clears the cookie/session */ }
+  // 3.0: back to the bound profile, or Restricted -- or, with anonymous_access
+  // none, to the sign-in screen. Ask, rather than assume.
+  if (await refreshAuthQuiet()) {
+    state.decoy = state.auth.decoy || !state.auth.authenticated;
+    state.auth.remembered = false;
+  }
   await reboot();
-  if (announce) toast(announce);
+  if (announce && !gateActive()) toast(announce);
 }
 
 async function lockNow() {
-  if (!state.auth.pinSet || state.decoy) return;
+  // A signed-in Restricted profile (a child who typed their PIN) can sign out too.
+  if (!hasLock() || (state.decoy && !state.auth.signedIn)) return;
   await goSafe(t('lock.locked_toast'));
 }
 
 function handleLocked() {
-  if (!state.auth.pinSet || state.decoy) return;   // already safe / no lock
+  if (!hasLock() || state.decoy) return;   // already Restricted / no lock
   goSafe(t('lock.auto_locked_toast'));
 }
 
@@ -8314,10 +8701,14 @@ async function submitUnlock() {
     state.auth.remembered = !!(r && r.remembered);
     state.decoy = false;
     lockPin = '';
-    hideUnlock();
+    hideUnlock({ force: true });
+    // 3.0: the install PIN signs in as the Owner -- learn the role/profile, and
+    // whether the Owner still has to set a password.
+    if (await refreshAuthQuiet()) state.auth.remembered = !!(r && r.remembered);
     await reboot();
     armIdleTimer();
     toast(t(state.auth.remembered ? 'lock.unlocked_remembered' : 'lock.unlocked'));
+    if (state.auth.needsPassword && canAdmin()) toast(t('password.toast'));
   } catch (e) {
     lockPin = '';
     renderLockDots();
@@ -8346,7 +8737,8 @@ async function submitRecover() {
     state.auth.authenticated = true;
     state.auth.decoy = false;
     state.decoy = false;
-    hideUnlock();
+    hideUnlock({ force: true });
+    await refreshAuthQuiet();
     await reboot();
     toast(t('lock.pin_reset'));
   } catch (e) {
@@ -8395,12 +8787,20 @@ function renderSecurityStrings() {
 // becomes visible — populate, clear, focus the first field somebody types in.
 function activateSecurityPane({ focusField = true } = {}) {
   const pinSet = state.auth.pinSet;
-  dom['sec-current-wrap'].hidden = !pinSet;
-  dom['sec-remove'].hidden = !pinSet;
+  // 3.0: the install PIN is the Owner's. Admins and Members get the rest of the
+  // pane (their password, Lock now) but not a form that would only 403.
+  const ownerView = !state.auth.claimed || state.role === 'owner';
+  for (const inp of [dom['sec-new'], dom['sec-confirm']]) {
+    const f = inp.closest('form');
+    if (f) f.hidden = !ownerView;
+  }
+  dom['sec-save'].hidden = !ownerView;
+  dom['sec-current-wrap'].hidden = !pinSet || !ownerView;
+  dom['sec-remove'].hidden = !pinSet || !ownerView;
   // Remember-device controls: only meaningful once a PIN exists.
-  dom['sec-remember-wrap'].hidden = !pinSet;
+  dom['sec-remember-wrap'].hidden = !pinSet || !ownerView;
   dom['sec-remember-enable'].checked = (state.auth.rememberDays || 0) > 0;
-  dom['sec-forget-devices'].hidden = !(pinSet && (state.auth.trustedDevices || 0) > 0);
+  dom['sec-forget-devices'].hidden = !(pinSet && ownerView && (state.auth.trustedDevices || 0) > 0);
   renderSecurityStrings();
   dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
   setSecError('');
@@ -8432,6 +8832,7 @@ async function saveSecurity() {
     state.auth.decoy = false;
     state.decoy = false;
     dom['botmanager-backdrop'].classList.add('hidden');
+    await refreshAuthQuiet();      // 3.0: claimed / role / needs_password changed with the PIN
     await reboot();
     armIdleTimer();
     toast(t('security.saved'));
@@ -8457,6 +8858,7 @@ async function removePin() {
     state.auth.decoy = false;
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     dom['botmanager-backdrop'].classList.add('hidden');
+    await refreshAuthQuiet();
     await reboot();                // reconnect cleanly with the lock gone
     toast(t('security.removed'));
   } catch (e) {
@@ -8493,17 +8895,27 @@ function wireAuthEvents() {
   window.addEventListener('keydown', (e) => {
     if (dom['lock-screen'].classList.contains('hidden')) return;
     if (e.key === 'Escape') { hideUnlock(); return; }
+    if (lockMode === 'tiles') return;                                // typing into the tile's own field
     if (!dom['lock-recover'].classList.contains('hidden')) return;  // typing a code
     if (/^[0-9]$/.test(e.key)) keypadPress(e.key);
     else if (e.key === 'Backspace') { e.preventDefault(); keypadPress('back'); }
     else if (e.key === 'Enter') submitUnlock();
   });
 
+  // 3.0 first-run card: open Settings -> Security (the Create owner account
+  // form), or put it away on this browser.
+  dom['firstrun-open'].addEventListener('click', () => { dom['firstrun-card'].hidden = true; openSettingsTab('security'); });
+  dom['firstrun-dismiss'].addEventListener('click', () => {
+    firstRunDismissed = true;
+    dom['firstrun-card'].hidden = true;
+    try { localStorage.setItem('dp-firstrun-dismissed', '1'); } catch { /* private mode */ }
+  });
+
   // Lock / logout buttons
   dom['lock-now'].addEventListener('click', lockNow);
   dom['bm-lock'].addEventListener('click', lockNow);
   // Dedicated unlock padlock (locked mode) → the existing PIN overlay.
-  if (dom['unlock-btn']) dom['unlock-btn'].addEventListener('click', showUnlock);
+  if (dom['unlock-btn']) dom['unlock-btn'].addEventListener('click', () => showSignInScreen());
 
   // Remember-device toggle + forget-all (Security modal)
   dom['sec-remember-enable'].addEventListener('change', async () => {
@@ -8566,10 +8978,13 @@ function wireAuthEvents() {
   // as "yes, still unlocked".
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (!(state.auth.pinSet && state.started)) return;
+    if (!(hasLock() && state.started)) return;
     document.body.classList.add('revalidating');
     api.authStatus()
-      .then((s) => { if (!s.authenticated) handleLocked(); })
+      .then((s) => {
+        if (s.claimed && s.anonymous_access === 'none' && !s.signed_in) signInRequired();
+        else if (!s.authenticated) handleLocked();
+      })
       .catch(() => { handleLocked(); })
       .finally(() => { document.body.classList.remove('revalidating'); });
   });
@@ -8630,6 +9045,7 @@ function iconifyChrome() {
     ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
     ['#stab-voice', MIC_ICON, '.stab-glyph'],
     ['#stab-security', RAIL_ICONS.shield, '.stab-glyph'],
+    ['#stab-people', RAIL_ICONS.bots, '.stab-glyph'],
     // Chat header + thread list.
     ['#back-btn', RAIL_ICONS.back, null],
     ['#expand-threads', RAIL_ICONS.forward, null],
@@ -8775,7 +9191,7 @@ async function startApp() {
   // expired) never went through goSafe, so the unlocked tier's drafts, queued
   // sends and cached rows would stay on disk indefinitely. Same promise as
   // goSafe: a locked session deletes what the unlocked one left.
-  if (state.decoy && state.auth.pinSet) {
+  if (state.decoy && hasLock()) {
     try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
   }
   // BEFORE the socket: restored outbox frames have to be in pendingSends by the
@@ -8863,9 +9279,7 @@ function authRecheckSoon(delayMs = 3000) {
     let s;
     try { s = await api.authStatus(); } catch { authRecheckSoon(8000); return; }
     const wasDecoy = state.decoy;
-    state.auth.pinSet = !!s.pin_set;
-    state.auth.authenticated = !!s.authenticated;
-    state.decoy = state.auth.pinSet && !state.auth.authenticated;
+    applyAuthStatus(s, { keepFeatures: true });
     if (state.decoy !== wasDecoy) {
       applyAuthChrome();
       renderSidebar();
@@ -8898,25 +9312,14 @@ async function refreshAuthAndBoot() {
     s = { pin_set: true, authenticated: false };
     authRecheckSoon();
   }
-  state.auth = {
-    pinSet: !!s.pin_set,
-    authenticated: !!s.authenticated,
-    decoy: !!s.decoy,
-    lockTimeout: s.lock_timeout_seconds || 600,
-    minPin: s.min_pin_length || 4,
-    recoveryPath: s.recovery_path || '',
-    configPath: s.config_path || '',
-    rememberDays: s.remember_days || 0,
-    remembered: !!s.remembered,
-    trustedDevices: s.trusted_devices || 0,
-    // Optional subsystems this build has on. Absent for a limited session
-    // (both are admin-only), which the probes below treat as "unknown" and
-    // fall back to asking.
-    features: s.features || null,
-  };
-  // No blocking gate: Safe Mode is the default landing when a PIN is set but
-  // we're not unlocked. Full access requires a valid session.
-  state.decoy = state.auth.pinSet && !state.auth.authenticated;
+  applyAuthStatus(s);
+  // First run on a network install: the Owner is created with the setup token
+  // from the server log, before anything else works. Nothing to start yet.
+  if (!state.auth.claimed && state.auth.setupRequired) { showSetupPage(); return; }
+  // anonymous_access: none -- no Restricted view to land in: the sign-in screen.
+  if (gateActive()) { enterGate(); return; }
+  // Restricted is the default landing when the install is claimed but nobody is
+  // signed in; full access requires a valid session.
   await startApp();
 }
 
@@ -9327,7 +9730,7 @@ function cmdkActions() {
   // canStopReply() already carries the Safe-Mode rule and the "is anything
   // running" one, so the palette cannot offer a Stop the composer would not.
   if (canStopReply()) a.push({ icon: RAIL_ICONS.stop, label: t('cmdk.action_stop'), run: () => stopReply() });
-  if (state.auth && state.auth.pinSet && !state.decoy) a.push({ icon: RAIL_ICONS.lock, label: t('cmdk.action_lock'), run: () => lockNow() });
+  if (state.auth && hasLock() && !state.decoy) a.push({ icon: RAIL_ICONS.lock, label: t('cmdk.action_lock'), run: () => lockNow() });
   return a;
 }
 function cmdkBuild(q) {
@@ -9403,6 +9806,8 @@ function wireCmdk() {
  */
 function reRenderForLocale() {
   applySearchShortcutTitle();
+  paintProfileChrome();
+  if (settingsOpen('people')) setSettingsTab('people');
   applyRailLabels();
   setConnected(state.connected);
   renderSidebar();
@@ -9503,6 +9908,8 @@ async function init() {
   wireExtToolView();
   wireRecoveryUi();
   setOnLocked(() => handleLocked());
+  setOnPolicyBlock((code) => showAccessNotice(code));
+  setOnSignInRequired(() => signInRequired());
   // Periodic re-render: unread dots flip red at the 24h mark, and the thread
   // list's relative timestamps ("5m") drift.
   let lastTick = '';
