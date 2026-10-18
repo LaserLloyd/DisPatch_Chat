@@ -79,3 +79,36 @@ def test_a_member_socket_gets_no_operator_frames_and_no_hidden_character_items(h
     # A reaction overlay names its bot: alpha's is not Max's to see, beta's is.
     assert scope({"type": "reaction", "bot_id": "alpha", "safe": True}, member) is None
     assert scope({"type": "reaction", "bot_id": "beta", "safe": True}, member) is not None
+
+
+# O-2 ------------------------------------------------------------------------ #
+
+def test_a_member_cannot_reach_a_hidden_characters_thread_over_rest(house):
+    owner, member = house["owner"], house["member"]
+    r = owner.post("/api/threads", json={"bot_id": "alpha"})
+    assert r.status_code == 200, r.text
+    tid = r.json()["id"]
+    r = owner.post(f"/api/threads/{tid}/messages", json={"role": "assistant", "content": "Mia's secret"})
+    assert r.status_code == 200, r.text
+    mid = r.json()["id"]
+    # The Owner's unread list has it; the Member's does not (a thread id is the key to the rest).
+    assert tid in {u["thread_id"] for u in owner.get("/api/unread").json()["unread"]}
+    assert tid not in {u["thread_id"] for u in member.get("/api/unread").json()["unread"]}
+    # Every thread/message route refuses the Member (they used to check only Restricted callers).
+    assert member.patch(f"/api/threads/{tid}", json={"title": "pwned"}).status_code == 403
+    assert member.post(f"/api/threads/{tid}/read").status_code == 403
+    assert member.patch(f"/api/messages/{mid}", json={"content": "rewritten"}).status_code == 403
+    assert member.delete(f"/api/messages/{mid}").status_code == 403
+    assert member.post(f"/api/threads/{tid}/messages", json={"role": "user", "content": "hi"}).status_code == 403
+    assert owner.get(f"/api/threads/{tid}").json().get("title") != "pwned"
+
+
+def test_a_member_may_not_post_as_a_character_or_the_system(house):
+    owner, member = house["owner"], house["member"]
+    tid = owner.post("/api/threads", json={"bot_id": "beta"}).json()["id"]      # Max's own character
+    for role in ("assistant", "system"):
+        r = member.post(f"/api/threads/{tid}/messages", json={"role": role, "content": "forged"})
+        assert r.status_code == 403, (role, r.text)
+    assert member.post(f"/api/threads/{tid}/messages", json={"role": "user", "content": "mine"}).status_code == 200
+    # The Owner (and an agent) still may.
+    assert owner.post(f"/api/threads/{tid}/messages", json={"role": "assistant", "content": "ok"}).status_code == 200

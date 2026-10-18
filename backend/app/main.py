@@ -2106,7 +2106,12 @@ def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
 
 
 async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
-    if _is_decoy(request):
+    """403 when the caller may not use the character behind ``thread_id``: a Restricted caller
+    outside the safe set, and (3.0) any profile left off the character's ``profiles`` list. The
+    second half used to run only for Restricted callers, so a Member could rename, archive,
+    mark read, edit or delete messages in a thread of a character made for someone else."""
+    pr = policy.of(request).principal
+    if _is_decoy(request) or not (pr.is_operator or pr.is_machine):
         _deny_decoy_bot(request, await _bot_of_thread(thread_id))
 
 
@@ -9671,6 +9676,9 @@ async def unread_summary(request: Request):
     if _is_decoy(request):
         safe = _safe_bot_ids()
         unread = [u for u in unread if u.get("bot_id") in safe]
+    # Per-profile visibility: a thread id of a character made for someone else is not listed.
+    pr = policy.of(request).principal
+    unread = [u for u in unread if characters.may_use_id(u.get("bot_id"), pr)]
     return {"unread": unread}
 
 
@@ -11165,6 +11173,15 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     role = payload.get("role", "assistant")
     if role not in ("assistant", "user", "system"):
         role = "assistant"
+    pr = policy.of(request).principal
+    if not (pr.is_machine or pr.is_operator):
+        # 3.0: use_chat lets a Member reach this agent route. It must not become a way to
+        # write into a thread of a character made for someone else, or to put words in a
+        # character's (or the system's) mouth: that is the agents' and the Owner's job.
+        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
+        if role != "user":
+            raise policy.denied(pr, Permission.MANAGE_AGENTS,
+                                "Only an agent, the Owner or an Admin may post as a character or the system.")
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
     # silent "" default the caller's mistake persisted an empty bubble.
     #
