@@ -61,7 +61,7 @@ def test_voice_rows_left_the_allowlist_with_voice():
 
 def test_release_notes_cover_drive_mode():
     """M8: the 2.1.0 notes name what shipped then, including the optional voice stack."""
-    changelog = (REPO / "CHANGELOG.md").read_text()
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
     section = changelog.split("## [2.1.0]", 1)[1].split("\n## [", 1)[0]
     for needle in ("Drive mode", "/ws/voice", "/api/voices", "--group voice",
                    "GPL-3.0", "DISPATCH_VOICE", "docs/voice-drive-mode.md"):
@@ -71,13 +71,13 @@ def test_release_notes_cover_drive_mode():
 def test_release_notes_cover_the_voice_split():
     """2.2.0: the notes and the README say where voice went and how to get it
     back, and keep the operator-facing traps (the empty group, the unit flags)."""
-    changelog = (REPO / "CHANGELOG.md").read_text()
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
     section = changelog.split("## [2.2.0]", 1)[1].split("\n## [", 1)[0]
     for needle in ("DisPatch Voice", "docs/extensions.md", "/api/extensions", "/ext/",
                    "DISPATCH_EXTENSIONS", "--group voice", "--offline", "--ws-max-size 262144",
                    "Voice chat", "dormant"):
         assert needle in section, needle
-    readme = (REPO / "README.md").read_text()
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
     whats_new = readme.split("## What's new in 2.2", 1)[1].split("\n## ", 1)[0]
     assert "DisPatch Voice" in whats_new and "docs/extensions.md" in whats_new
     assert "Drive mode" not in whats_new

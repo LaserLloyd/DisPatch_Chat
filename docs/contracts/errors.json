@@ -1,0 +1,2231 @@
+{
+  "envelope": {
+    "error": {
+      "code": "string",
+      "docs": "string",
+      "fix": "string",
+      "message": "string"
+    }
+  },
+  "errors": [
+    {
+      "code": "advisor_request_unknown",
+      "docs": "advisor_request_unknown",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "Unknown request",
+      "patterns": [
+        "Unknown request"
+      ],
+      "status": 404
+    },
+    {
+      "code": "agent_backend_rejected",
+      "docs": "agent_backend_rejected",
+      "fix": "The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.",
+      "message": "The agent backend refused that request.",
+      "patterns": [
+        "The agent backend refused that request."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_backend_unavailable",
+      "docs": "agent_backend_unavailable",
+      "fix": "Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.",
+      "message": "The agent backend is not available.",
+      "patterns": [
+        "The agent backend is not available."
+      ],
+      "status": 503
+    },
+    {
+      "code": "agent_budget_exhausted",
+      "docs": "agent_budget_exhausted",
+      "fix": "Raise the daily limit in Settings, Agents, or try again tomorrow. Costs are estimates.",
+      "message": "This agent's budget for today is used up.",
+      "patterns": [
+        "This agent's budget for today is used up."
+      ],
+      "status": 429
+    },
+    {
+      "code": "agent_credentials_invalid",
+      "docs": "agent_credentials_invalid",
+      "fix": "Paste an Anthropic Console API key, or pick Amazon Bedrock, Google Cloud or Microsoft Foundry and configure that provider's own credentials on this machine.",
+      "message": "The credentials were not accepted.",
+      "patterns": [
+        "The credentials were not accepted."
+      ],
+      "status": 422
+    },
+    {
+      "code": "agent_disabled",
+      "docs": "agent_disabled",
+      "fix": "Switch it on in Settings, Agents.",
+      "message": "That agent is switched off.",
+      "patterns": [
+        "That agent is switched off."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_gateway_down",
+      "docs": "agent_gateway_down",
+      "fix": "Start the OpenClaw gateway, or switch the character to a direct provider.",
+      "message": "The agent gateway is not connected",
+      "patterns": [
+        "The agent gateway is not connected"
+      ],
+      "status": 503
+    },
+    {
+      "code": "agent_has_active_tasks",
+      "docs": "agent_has_active_tasks",
+      "fix": "Stop or wait for its tasks, or switch the agent off instead of deleting it.",
+      "message": "That agent has tasks that are still running.",
+      "patterns": [
+        "That agent has tasks that are still running."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_invalid",
+      "docs": "agent_invalid",
+      "fix": "Fix the field named in the message (a tool list, a budget, an MCP server) and save again.",
+      "message": "The agent definition is not valid.",
+      "patterns": [
+        "The agent definition is not valid."
+      ],
+      "status": 422
+    },
+    {
+      "code": "agent_name_taken",
+      "docs": "agent_name_taken",
+      "fix": "Choose a different name.",
+      "message": "An agent with that name already exists.",
+      "patterns": [
+        "An agent with that name already exists."
+      ],
+      "status": 409
+    },
+    {
+      "code": "agent_needs_owner",
+      "docs": "agent_needs_owner",
+      "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
+      "message": "Only the Owner can give an agent that capability.",
+      "patterns": [
+        "Only the Owner can give an agent that capability."
+      ],
+      "status": 403
+    },
+    {
+      "code": "agent_not_found",
+      "docs": "agent_not_found",
+      "fix": "Pick an agent from the list; it may be switched off, deleted, or not published to your profile.",
+      "message": "Agent not found",
+      "patterns": [
+        "Agent not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "agents_only",
+      "docs": "agents_only",
+      "fix": "This endpoint is for agents holding the API key; a signed-in person cannot call it.",
+      "message": "Only agents may fire reactions",
+      "patterns": [
+        "Only agents may fire reactions",
+        "Only agents may call this."
+      ],
+      "status": 403
+    },
+    {
+      "code": "api_key_required",
+      "docs": "api_key_required",
+      "fix": "Send the API key as X-API-Key.",
+      "message": "API key required",
+      "patterns": [
+        "API key required"
+      ],
+      "status": 401
+    },
+    {
+      "code": "approval_not_found",
+      "docs": "approval_not_found",
+      "fix": "The task moved on (it was stopped, timed out, or someone else answered). Reload the task.",
+      "message": "That approval request is not pending any more.",
+      "patterns": [
+        "That approval request is not pending any more."
+      ],
+      "status": 404
+    },
+    {
+      "code": "approval_scope_not_allowed",
+      "docs": "approval_scope_not_allowed",
+      "fix": "Destructive tools ask every time. Choose 'once'.",
+      "message": "That approval can only be given for this one call.",
+      "patterns": [
+        "That approval can only be given for this one call."
+      ],
+      "status": 422
+    },
+    {
+      "code": "avatar_not_capturable",
+      "docs": "avatar_not_capturable",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "The bot has no capturable avatar right now",
+      "patterns": [
+        "The bot has no capturable avatar right now"
+      ],
+      "status": 409
+    },
+    {
+      "code": "avatar_not_found",
+      "docs": "avatar_not_found",
+      "fix": "The character has no avatar of that kind yet.",
+      "message": "Avatar not found",
+      "patterns": [
+        "Avatar not found",
+        "No such avatar snapshot",
+        "No avatar snapshot for this thread"
+      ],
+      "status": 404
+    },
+    {
+      "code": "avatar_not_raster",
+      "docs": "avatar_not_raster",
+      "fix": "Check the request and resend it.",
+      "message": "Avatar must be a raster image",
+      "patterns": [
+        "Avatar must be a raster image"
+      ],
+      "status": 400
+    },
+    {
+      "code": "avatar_pool_missing",
+      "docs": "avatar_pool_missing",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "No avatar pool for that bot",
+      "patterns": [
+        "No avatar pool for that bot"
+      ],
+      "status": 404
+    },
+    {
+      "code": "avatar_snapshot_failed",
+      "docs": "avatar_snapshot_failed",
+      "fix": "This is a server fault; check the logs (Settings > System) and retry.",
+      "message": "Could not store the avatar snapshot",
+      "patterns": [
+        "Could not store the avatar snapshot"
+      ],
+      "status": 500
+    },
+    {
+      "code": "avatar_source_required",
+      "docs": "avatar_source_required",
+      "fix": "Check the request and resend it.",
+      "message": "Send an image file, or pass source=current",
+      "patterns": [
+        "Send an image file, or pass source=current"
+      ],
+      "status": 400
+    },
+    {
+      "code": "avatar_write_failed",
+      "docs": "avatar_write_failed",
+      "fix": "This is a server fault; check the logs (Settings > System) and retry.",
+      "message": "Could not write the avatar",
+      "patterns": [
+        "Could not write the avatar"
+      ],
+      "status": 500
+    },
+    {
+      "code": "backend_invalid",
+      "docs": "backend_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "backend must be 'direct' or 'legacy-api'",
+      "patterns": [
+        "backend must be 'direct' or 'legacy-api'"
+      ],
+      "status": 422
+    },
+    {
+      "code": "backend_unavailable",
+      "docs": "backend_unavailable",
+      "fix": "ComfyUI is starting or briefly down. DisPatch retries.",
+      "message": "The image backend is unavailable.",
+      "patterns": [
+        "The image backend is unavailable."
+      ],
+      "status": 503
+    },
+    {
+      "code": "backup_confirm_required",
+      "docs": "backup_confirm_required",
+      "fix": "Send confirm: true to go ahead.",
+      "message": "Restoring replaces your current data",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "backup_corrupt",
+      "docs": "backup_corrupt",
+      "fix": "Try another backup; this one cannot be read or failed its checks.",
+      "message": "The backup file is damaged",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "backup_not_found",
+      "docs": "backup_not_found",
+      "fix": "List the backups with GET /api/backups.",
+      "message": "Unknown backup",
+      "patterns": [],
+      "status": 404
+    },
+    {
+      "code": "backup_passphrase_required",
+      "docs": "backup_passphrase_required",
+      "fix": "Send a passphrase (at least 8 characters), or set one in Settings > System.",
+      "message": "A backup passphrase is required",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "backup_protected",
+      "docs": "backup_protected",
+      "fix": "Pre-migration copies are kept until they age out.",
+      "message": "That backup is protected",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "backup_wrong_key",
+      "docs": "backup_wrong_key",
+      "fix": "Enter the passphrase or recovery key the backup was made with.",
+      "message": "The passphrase is wrong, or this is not a DisPatch backup",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "bad_request",
+      "docs": "bad_request",
+      "fix": "Check the request body against the API reference.",
+      "message": "Bad request.",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "before_invalid",
+      "docs": "before_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "before must be an ISO-8601 timestamp",
+      "patterns": [
+        "before must be an ISO-8601 timestamp"
+      ],
+      "status": 400
+    },
+    {
+      "code": "before_required",
+      "docs": "before_required",
+      "fix": "Check the request and resend it.",
+      "message": "before (ISO timestamp) required",
+      "patterns": [
+        "before (ISO timestamp) required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "body_not_object",
+      "docs": "body_not_object",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "body must be an object",
+      "patterns": [
+        "body must be an object"
+      ],
+      "status": 422
+    },
+    {
+      "code": "bot_config_write_failed",
+      "docs": "bot_config_write_failed",
+      "fix": "This is a server fault; check the logs (Settings > System) and retry.",
+      "message": "Failed to update bot config",
+      "patterns": [
+        "Failed to update bot config"
+      ],
+      "status": 500
+    },
+    {
+      "code": "bot_id_missing",
+      "docs": "bot_id_missing",
+      "fix": "Check the request and resend it.",
+      "message": "Unknown or missing bot_id",
+      "patterns": [
+        "Unknown or missing bot_id"
+      ],
+      "status": 400
+    },
+    {
+      "code": "bot_id_taken",
+      "docs": "bot_id_taken",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "A bot with the id {} already exists",
+      "patterns": [
+        "A bot with the id {} already exists"
+      ],
+      "status": 409
+    },
+    {
+      "code": "bot_id_unknown",
+      "docs": "bot_id_unknown",
+      "fix": "Check the request and resend it.",
+      "message": "Unknown bot_id",
+      "patterns": [
+        "Unknown bot_id"
+      ],
+      "status": 400
+    },
+    {
+      "code": "bot_not_found",
+      "docs": "bot_not_found",
+      "fix": "Pick a character from the list; it may have been removed.",
+      "message": "Unknown bot",
+      "patterns": [
+        "Unknown bot",
+        "Bot not found",
+        "bot not found",
+        "Unknown bot: {}"
+      ],
+      "status": 404
+    },
+    {
+      "code": "bot_owned_by_app",
+      "docs": "bot_owned_by_app",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "This bot belongs to an app; remove or disable the app instead",
+      "patterns": [
+        "This bot belongs to an app; remove or disable the app instead"
+      ],
+      "status": 409
+    },
+    {
+      "code": "budgets_invalid",
+      "docs": "budgets_invalid",
+      "fix": "Use whole numbers in range; quiet hours look like 20:30-07:00.",
+      "message": "A budget value is invalid.",
+      "patterns": [
+        "A budget value is invalid."
+      ],
+      "status": 400
+    },
+    {
+      "code": "captioner_unavailable",
+      "docs": "captioner_unavailable",
+      "fix": "The captioning model is busy. DisPatch retries.",
+      "message": "The image captioner is unavailable.",
+      "patterns": [
+        "The image captioner is unavailable."
+      ],
+      "status": 503
+    },
+    {
+      "code": "character_invalid",
+      "docs": "character_invalid",
+      "fix": "Check the fields you sent; the message says which one.",
+      "message": "That character change is not valid",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "character_last",
+      "docs": "character_last",
+      "fix": "Add another character before removing this one.",
+      "message": "A DisPatch install needs at least one bot",
+      "patterns": [
+        "A DisPatch install needs at least one bot"
+      ],
+      "status": 409
+    },
+    {
+      "code": "check_failed",
+      "docs": "check_failed",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "Could not check {}",
+      "patterns": [
+        "Could not check {}"
+      ],
+      "status": 422
+    },
+    {
+      "code": "checked_not_boolean",
+      "docs": "checked_not_boolean",
+      "fix": "Check the request and resend it.",
+      "message": "checked must be a boolean for a row update",
+      "patterns": [
+        "checked must be a boolean for a row update"
+      ],
+      "status": 400
+    },
+    {
+      "code": "checked_not_integers",
+      "docs": "checked_not_integers",
+      "fix": "Check the request and resend it.",
+      "message": "checked entries must be integers",
+      "patterns": [
+        "checked entries must be integers"
+      ],
+      "status": 400
+    },
+    {
+      "code": "checked_not_list",
+      "docs": "checked_not_list",
+      "fix": "Check the request and resend it.",
+      "message": "checked must be a list of row indices",
+      "patterns": [
+        "checked must be a list of row indices"
+      ],
+      "status": 400
+    },
+    {
+      "code": "client_id_invalid",
+      "docs": "client_id_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "invalid client id",
+      "patterns": [
+        "invalid client id"
+      ],
+      "status": 400
+    },
+    {
+      "code": "client_quota",
+      "docs": "client_quota",
+      "fix": "Too many renders from this client are already in flight. They drain by themselves.",
+      "message": "Too many image renders in flight.",
+      "patterns": [
+        "Too many image renders in flight."
+      ],
+      "status": 429
+    },
+    {
+      "code": "conflict",
+      "docs": "conflict",
+      "fix": "The state changed under you; reload and retry.",
+      "message": "Conflict.",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "connection_blocked_target",
+      "docs": "connection_blocked_target",
+      "fix": "The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.",
+      "message": "That address is blocked",
+      "patterns": [],
+      "status": 403
+    },
+    {
+      "code": "connection_exists",
+      "docs": "connection_exists",
+      "fix": "Choose a different id, or change the existing connection.",
+      "message": "A connection with that id already exists",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "connection_in_use",
+      "docs": "connection_in_use",
+      "fix": "Point those characters at another connection first, then delete this one.",
+      "message": "That connection is used by a character",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "connection_invalid",
+      "docs": "connection_invalid",
+      "fix": "Check the type, address, key and capabilities and try again.",
+      "message": "That connection is not valid",
+      "patterns": [
+        "Nothing to change"
+      ],
+      "status": 422
+    },
+    {
+      "code": "connection_invalid_url",
+      "docs": "connection_invalid_url",
+      "fix": "Use an http:// or https:// address that names a host, with no user name or password in it.",
+      "message": "That address is not valid",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "connection_not_found",
+      "docs": "connection_not_found",
+      "fix": "Pick a connection from the list; it may have been deleted.",
+      "message": "Unknown connection",
+      "patterns": [],
+      "status": 404
+    },
+    {
+      "code": "content_empty",
+      "docs": "content_empty",
+      "fix": "Check the request and resend it.",
+      "message": "content must not be empty",
+      "patterns": [
+        "content must not be empty"
+      ],
+      "status": 400
+    },
+    {
+      "code": "content_length_invalid",
+      "docs": "content_length_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Bad Content-Length",
+      "patterns": [
+        "Bad Content-Length"
+      ],
+      "status": 400
+    },
+    {
+      "code": "content_length_required",
+      "docs": "content_length_required",
+      "fix": "Send a Content-Length header.",
+      "message": "Content-Length required for uploads",
+      "patterns": [
+        "Content-Length required for uploads"
+      ],
+      "status": 411
+    },
+    {
+      "code": "content_not_string",
+      "docs": "content_not_string",
+      "fix": "Check the request and resend it.",
+      "message": "content must be a string",
+      "patterns": [
+        "content must be a string"
+      ],
+      "status": 400
+    },
+    {
+      "code": "content_required",
+      "docs": "content_required",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "content is required — the message text field is `content`",
+      "patterns": [
+        "content is required — the message text field is `content`"
+      ],
+      "status": 422
+    },
+    {
+      "code": "content_too_long",
+      "docs": "content_too_long",
+      "fix": "Check the request and resend it.",
+      "message": "content is too long",
+      "patterns": [
+        "content is too long"
+      ],
+      "status": 400
+    },
+    {
+      "code": "content_too_long_detail",
+      "docs": "content_too_long_detail",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "content is too long ({} chars; max {}) — split it across messages rather than letting it be cut",
+      "patterns": [
+        "content is too long ({} chars; max {}) — split it across messages rather than letting it be cut"
+      ],
+      "status": 422
+    },
+    {
+      "code": "crop_invalid",
+      "docs": "crop_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "crop_x/crop_y/crop_size must be fractions in 0..1",
+      "patterns": [
+        "crop_x/crop_y/crop_size must be fractions in 0..1"
+      ],
+      "status": 400
+    },
+    {
+      "code": "csrf_origin",
+      "docs": "csrf_origin",
+      "fix": "The request came from a page on a different origin. Use DisPatch's own page, or call the API without browser headers.",
+      "message": "Cross-origin request refused",
+      "patterns": [
+        "Cross-origin request refused",
+        "cross-origin request refused"
+      ],
+      "status": 403
+    },
+    {
+      "code": "current_pin_incorrect",
+      "docs": "current_pin_incorrect",
+      "fix": "Enter your current PIN to change or remove it.",
+      "message": "Current PIN is incorrect",
+      "patterns": [
+        "Current PIN is incorrect"
+      ],
+      "status": 403
+    },
+    {
+      "code": "daily_limit",
+      "docs": "daily_limit",
+      "fix": "This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.",
+      "message": "Daily limit reached on this device",
+      "patterns": [
+        "Daily limit reached on this device"
+      ],
+      "status": 429
+    },
+    {
+      "code": "daily_upload_limit",
+      "docs": "daily_upload_limit",
+      "fix": "Today's upload allowance is used. It resets at local midnight; the Owner can raise it.",
+      "message": "Daily upload limit reached — try again tomorrow or unlock",
+      "patterns": [
+        "Daily upload limit reached — try again tomorrow or unlock"
+      ],
+      "status": 429
+    },
+    {
+      "code": "day_format",
+      "docs": "day_format",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "day must be YYYY-MM-DD",
+      "patterns": [
+        "day must be YYYY-MM-DD"
+      ],
+      "status": 422
+    },
+    {
+      "code": "days_not_number",
+      "docs": "days_not_number",
+      "fix": "Check the request and resend it.",
+      "message": "days must be a number",
+      "patterns": [
+        "days must be a number"
+      ],
+      "status": 400
+    },
+    {
+      "code": "days_out_of_range",
+      "docs": "days_out_of_range",
+      "fix": "Check the request and resend it.",
+      "message": "days must be 0–365",
+      "patterns": [
+        "days must be 0–365"
+      ],
+      "status": 400
+    },
+    {
+      "code": "deep_check_running",
+      "docs": "deep_check_running",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "A deep check is already running",
+      "patterns": [
+        "A deep check is already running"
+      ],
+      "status": 409
+    },
+    {
+      "code": "device_bind_role",
+      "docs": "device_bind_role",
+      "fix": "Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.",
+      "message": "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.",
+      "patterns": [
+        "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential."
+      ],
+      "status": 409
+    },
+    {
+      "code": "empty_file",
+      "docs": "empty_file",
+      "fix": "Check the request and resend it.",
+      "message": "Empty file",
+      "patterns": [
+        "Empty file"
+      ],
+      "status": 400
+    },
+    {
+      "code": "enabled_flag_invalid",
+      "docs": "enabled_flag_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "body must be {enabled: true|false}",
+      "patterns": [
+        "body must be {enabled: true|false}"
+      ],
+      "status": 422
+    },
+    {
+      "code": "endpoint_required",
+      "docs": "endpoint_required",
+      "fix": "Check the request and resend it.",
+      "message": "endpoint is required",
+      "patterns": [
+        "endpoint is required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "extension_not_found",
+      "docs": "extension_not_found",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "No such extension",
+      "patterns": [
+        "No such extension"
+      ],
+      "status": 404
+    },
+    {
+      "code": "extensions_yaml_unreadable",
+      "docs": "extensions_yaml_unreadable",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "extensions.yaml cannot be read ({}); fix it by hand first",
+      "patterns": [
+        "extensions.yaml cannot be read ({}); fix it by hand first"
+      ],
+      "status": 409
+    },
+    {
+      "code": "face_crop_not_raster",
+      "docs": "face_crop_not_raster",
+      "fix": "Check the request and resend it.",
+      "message": "Face crop must be a raster image",
+      "patterns": [
+        "Face crop must be a raster image"
+      ],
+      "status": 400
+    },
+    {
+      "code": "feedback_target_invalid",
+      "docs": "feedback_target_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Feedback only applies to one of the bot's own replies",
+      "patterns": [
+        "Feedback only applies to one of the bot's own replies"
+      ],
+      "status": 400
+    },
+    {
+      "code": "file_not_found",
+      "docs": "file_not_found",
+      "fix": "The file may have been deleted; reload the list.",
+      "message": "File not found",
+      "patterns": [
+        "File not found",
+        "Blob missing"
+      ],
+      "status": 404
+    },
+    {
+      "code": "folder_path_invalid",
+      "docs": "folder_path_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Each folder must be an absolute path or start with ~/",
+      "patterns": [
+        "Each folder must be an absolute path or start with ~/"
+      ],
+      "status": 400
+    },
+    {
+      "code": "folder_refused",
+      "docs": "folder_refused",
+      "fix": "Check the request and resend it.",
+      "message": "Not an existing folder, or a folder that is always refused",
+      "patterns": [
+        "Not an existing folder, or a folder that is always refused"
+      ],
+      "status": 400
+    },
+    {
+      "code": "folder_too_broad",
+      "docs": "folder_too_broad",
+      "fix": "Check the request and resend it.",
+      "message": "That folder is too broad to share — pick a folder inside it",
+      "patterns": [
+        "That folder is too broad to share — pick a folder inside it"
+      ],
+      "status": 400
+    },
+    {
+      "code": "forbidden",
+      "docs": "forbidden",
+      "fix": "You are not allowed to do this; sign in as a profile with permission.",
+      "message": "Forbidden",
+      "patterns": [
+        "Forbidden"
+      ],
+      "status": 403
+    },
+    {
+      "code": "force_needs_session",
+      "docs": "force_needs_session",
+      "fix": "Sign in first; --force is not available to a machine.",
+      "message": "force needs an unlocked session",
+      "patterns": [
+        "force needs an unlocked session"
+      ],
+      "status": 403
+    },
+    {
+      "code": "frontend_missing",
+      "docs": "frontend_missing",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "no index",
+      "patterns": [
+        "no index"
+      ],
+      "status": 404
+    },
+    {
+      "code": "frontend_missing_2",
+      "docs": "frontend_missing_2",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "frontend not built",
+      "patterns": [
+        "frontend not built"
+      ],
+      "status": 404
+    },
+    {
+      "code": "gateway_abort_failed",
+      "docs": "gateway_abort_failed",
+      "fix": "An upstream service failed; check that it is running.",
+      "message": "The gateway would not stop that turn",
+      "patterns": [
+        "The gateway would not stop that turn"
+      ],
+      "status": 502
+    },
+    {
+      "code": "gateway_models_failed",
+      "docs": "gateway_models_failed",
+      "fix": "An upstream service failed; check that it is running.",
+      "message": "The gateway could not list models",
+      "patterns": [
+        "The gateway could not list models"
+      ],
+      "status": 502
+    },
+    {
+      "code": "gpu_leased",
+      "docs": "gpu_leased",
+      "fix": "The image server's GPU is booked by someone else. DisPatch retries a render or agent lease; a benchmark lease is not waited out. Come back later.",
+      "message": "The image server's GPU is leased.",
+      "patterns": [
+        "The image server's GPU is leased."
+      ],
+      "status": 503
+    },
+    {
+      "code": "guide_exists",
+      "docs": "guide_exists",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "That guide is already in your chats",
+      "patterns": [
+        "That guide is already in your chats"
+      ],
+      "status": 409
+    },
+    {
+      "code": "guide_needs_atlas",
+      "docs": "guide_needs_atlas",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "The guide needs the Atlas bot",
+      "patterns": [
+        "The guide needs the Atlas bot"
+      ],
+      "status": 404
+    },
+    {
+      "code": "guide_unknown",
+      "docs": "guide_unknown",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "Unknown guide",
+      "patterns": [
+        "Unknown guide"
+      ],
+      "status": 404
+    },
+    {
+      "code": "hidden_flag_invalid",
+      "docs": "hidden_flag_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "hidden must be a boolean",
+      "patterns": [
+        "hidden must be a boolean"
+      ],
+      "status": 400
+    },
+    {
+      "code": "image_dimensions_too_large",
+      "docs": "image_dimensions_too_large",
+      "fix": "Check the request and resend it.",
+      "message": "Image dimensions too large (max 64 megapixels)",
+      "patterns": [
+        "Image dimensions too large (max 64 megapixels)"
+      ],
+      "status": 400
+    },
+    {
+      "code": "image_request_failed",
+      "docs": "image_request_failed",
+      "fix": "This is a server fault; check the logs (Settings > System) and retry.",
+      "message": "Could not start the image request",
+      "patterns": [
+        "Could not start the image request"
+      ],
+      "status": 500
+    },
+    {
+      "code": "image_requests_disabled",
+      "docs": "image_requests_disabled",
+      "fix": "You are not allowed to do this; sign in as a profile with permission.",
+      "message": "Image requests aren't enabled for {}",
+      "patterns": [
+        "Image requests aren't enabled for {}"
+      ],
+      "status": 403
+    },
+    {
+      "code": "image_unavailable",
+      "docs": "image_unavailable",
+      "fix": "Configure an image provider in Settings > AI models > Image generation.",
+      "message": "Image generation isn't configured",
+      "patterns": [
+        "Image generation isn't configured",
+        "No image generator is set up for this bot",
+        "Image CLI not available on this box"
+      ],
+      "status": 503
+    },
+    {
+      "code": "image_undecodable",
+      "docs": "image_undecodable",
+      "fix": "Check the request and resend it.",
+      "message": "Could not decode image",
+      "patterns": [
+        "Could not decode image"
+      ],
+      "status": 400
+    },
+    {
+      "code": "imagestudio_a_generation_is_already_running",
+      "docs": "imagestudio_a_generation_is_already_running",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "A generation is already running",
+      "patterns": [
+        "A generation is already running"
+      ],
+      "status": 409
+    },
+    {
+      "code": "imagestudio_no_image_provider_has_an_api",
+      "docs": "imagestudio_no_image_provider_has_an_api",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "No image provider has an API key yet (Settings → AI models → Image generation)",
+      "patterns": [
+        "No image provider has an API key yet (Settings → AI models → Image generation)"
+      ],
+      "status": 409
+    },
+    {
+      "code": "imagestudio_that_chat_image_is_not_in",
+      "docs": "imagestudio_that_chat_image_is_not_in",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "That chat image is not in the media store",
+      "patterns": [
+        "That chat image is not in the media store"
+      ],
+      "status": 404
+    },
+    {
+      "code": "imagestudio_that_model_name_is_not_valid",
+      "docs": "imagestudio_that_model_name_is_not_valid",
+      "fix": "Fix the request and resend it.",
+      "message": "That model name is not valid",
+      "patterns": [
+        "That model name is not valid"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_that_provider_has_no_api_key",
+      "docs": "imagestudio_that_provider_has_no_api_key",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "That provider has no API key yet (Settings → AI models → Image generation)",
+      "patterns": [
+        "That provider has no API key yet (Settings → AI models → Image generation)"
+      ],
+      "status": 409
+    },
+    {
+      "code": "imagestudio_that_result_is_gone",
+      "docs": "imagestudio_that_result_is_gone",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "That result is gone",
+      "patterns": [
+        "That result is gone"
+      ],
+      "status": 404
+    },
+    {
+      "code": "imagestudio_the_aspect_ratio_must_look_like",
+      "docs": "imagestudio_the_aspect_ratio_must_look_like",
+      "fix": "Fix the request and resend it.",
+      "message": "The aspect ratio must look like 16:9",
+      "patterns": [
+        "The aspect ratio must look like 16:9"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_the_prompt_is_characters_the_limit",
+      "docs": "imagestudio_the_prompt_is_characters_the_limit",
+      "fix": "Fix the request and resend it.",
+      "message": "The prompt is {} characters; the limit is {}",
+      "patterns": [
+        "The prompt is {} characters; the limit is {}"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_the_reference_could_not_be_read",
+      "docs": "imagestudio_the_reference_could_not_be_read",
+      "fix": "Fix the request and resend it.",
+      "message": "The reference could not be read",
+      "patterns": [
+        "The reference could not be read"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_the_reference_image_must_be_under",
+      "docs": "imagestudio_the_reference_image_must_be_under",
+      "fix": "Fix the request and resend it.",
+      "message": "The reference image must be under 10 MB",
+      "patterns": [
+        "The reference image must be under 10 MB"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_the_reference_is_not_a_readable",
+      "docs": "imagestudio_the_reference_is_not_a_readable",
+      "fix": "Fix the request and resend it.",
+      "message": "The reference is not a readable image",
+      "patterns": [
+        "The reference is not a readable image"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_the_reference_is_not_an_image",
+      "docs": "imagestudio_the_reference_is_not_an_image",
+      "fix": "Fix the request and resend it.",
+      "message": "The reference is not an image",
+      "patterns": [
+        "The reference is not an image"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_this_provider_does_not_take_a",
+      "docs": "imagestudio_this_provider_does_not_take_a",
+      "fix": "Fix the request and resend it.",
+      "message": "This provider does not take a reference image",
+      "patterns": [
+        "This provider does not take a reference image"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_unknown_image_provider",
+      "docs": "imagestudio_unknown_image_provider",
+      "fix": "Fix the request and resend it.",
+      "message": "Unknown image provider",
+      "patterns": [
+        "Unknown image provider"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_unknown_reference_kind",
+      "docs": "imagestudio_unknown_reference_kind",
+      "fix": "Fix the request and resend it.",
+      "message": "Unknown reference kind",
+      "patterns": [
+        "Unknown reference kind"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_write_a_prompt_first",
+      "docs": "imagestudio_write_a_prompt_first",
+      "fix": "Fix the request and resend it.",
+      "message": "Write a prompt first",
+      "patterns": [
+        "Write a prompt first"
+      ],
+      "status": 422
+    },
+    {
+      "code": "incorrect_credential",
+      "docs": "incorrect_credential",
+      "fix": "Check the PIN or password and try again.",
+      "message": "Incorrect PIN or password",
+      "patterns": [
+        "Incorrect PIN or password"
+      ],
+      "status": 401
+    },
+    {
+      "code": "incorrect_pin",
+      "docs": "incorrect_pin",
+      "fix": "Check the PIN and try again. Five wrong tries lock this device and profile briefly.",
+      "message": "Incorrect PIN",
+      "patterns": [
+        "Incorrect PIN"
+      ],
+      "status": 401
+    },
+    {
+      "code": "incorrect_recovery_code",
+      "docs": "incorrect_recovery_code",
+      "fix": "Enter the code from RECOVERY-CODE.txt in the data directory exactly.",
+      "message": "Incorrect recovery code",
+      "patterns": [
+        "Incorrect recovery code"
+      ],
+      "status": 401
+    },
+    {
+      "code": "index_not_integer",
+      "docs": "index_not_integer",
+      "fix": "Check the request and resend it.",
+      "message": "index must be an integer",
+      "patterns": [
+        "index must be an integer"
+      ],
+      "status": 400
+    },
+    {
+      "code": "index_out_of_range",
+      "docs": "index_out_of_range",
+      "fix": "Check the request and resend it.",
+      "message": "index out of range",
+      "patterns": [
+        "index out of range"
+      ],
+      "status": 400
+    },
+    {
+      "code": "insufficient_compute_cap",
+      "docs": "insufficient_compute_cap",
+      "fix": "The card is too old for this workflow. Pick a lighter workflow.",
+      "message": "The GPU is too old for this workflow.",
+      "patterns": [
+        "The GPU is too old for this workflow."
+      ],
+      "status": 503
+    },
+    {
+      "code": "insufficient_vram",
+      "docs": "insufficient_vram",
+      "fix": "Another process is holding the card. It usually frees up; DisPatch retries. Otherwise pick a lighter workflow.",
+      "message": "The GPU does not have enough free memory.",
+      "patterns": [
+        "The GPU does not have enough free memory."
+      ],
+      "status": 503
+    },
+    {
+      "code": "invalid_api_key",
+      "docs": "invalid_api_key",
+      "fix": "Send the install's API key as X-API-Key or a Bearer token (Settings > Security > API key).",
+      "message": "Invalid or missing API key",
+      "patterns": [
+        "Invalid or missing API key",
+        "Invalid API key"
+      ],
+      "status": 401
+    },
+    {
+      "code": "invalid_callback_token",
+      "docs": "invalid_callback_token",
+      "fix": "The image server must send the per-job token it was given.",
+      "message": "Invalid callback token",
+      "patterns": [
+        "Invalid callback token"
+      ],
+      "status": 403
+    },
+    {
+      "code": "job_lost",
+      "docs": "job_lost",
+      "fix": "The image server forgot the job (it restarted). Ask for the picture again.",
+      "message": "The image server no longer knows this job.",
+      "patterns": [
+        "The image server no longer knows this job."
+      ],
+      "status": 502
+    },
+    {
+      "code": "jobboard_job_not_found",
+      "docs": "jobboard_job_not_found",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "Job not found",
+      "patterns": [
+        "Job not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "jobboard_job_thread_not_found",
+      "docs": "jobboard_job_thread_not_found",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "Job thread not found",
+      "patterns": [
+        "Job thread not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "jobboard_tags_capped_at",
+      "docs": "jobboard_tags_capped_at",
+      "fix": "Check the request and resend it.",
+      "message": "tags capped at {}",
+      "patterns": [
+        "tags capped at {}"
+      ],
+      "status": 400
+    },
+    {
+      "code": "jobboard_unknown_board_bot",
+      "docs": "jobboard_unknown_board_bot",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "Unknown board bot",
+      "patterns": [
+        "Unknown board bot"
+      ],
+      "status": 404
+    },
+    {
+      "code": "json_invalid",
+      "docs": "json_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "invalid JSON body",
+      "patterns": [
+        "invalid JSON body"
+      ],
+      "status": 400
+    },
+    {
+      "code": "list_index_invalid",
+      "docs": "list_index_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "list must be a small non-negative integer",
+      "patterns": [
+        "list must be a small non-negative integer"
+      ],
+      "status": 400
+    },
+    {
+      "code": "machine_scope_denied",
+      "docs": "machine_scope_denied",
+      "fix": "Send an API key whose machine scopes include the one shown in required_permission (security.yaml machine_scopes).",
+      "message": "This API key is not allowed to call that endpoint.",
+      "patterns": [
+        "This API key is not allowed to call that endpoint."
+      ],
+      "status": 403
+    },
+    {
+      "code": "max_tokens_invalid",
+      "docs": "max_tokens_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "max_tokens must be a whole number",
+      "patterns": [
+        "max_tokens must be a whole number"
+      ],
+      "status": 422
+    },
+    {
+      "code": "message_no_mood",
+      "docs": "message_no_mood",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "This message has no mood",
+      "patterns": [
+        "This message has no mood"
+      ],
+      "status": 404
+    },
+    {
+      "code": "message_not_found",
+      "docs": "message_not_found",
+      "fix": "The message may have been deleted; reload the thread.",
+      "message": "Message not found",
+      "patterns": [
+        "Message not found",
+        "message not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "mood_face_missing",
+      "docs": "mood_face_missing",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "No face on file for this mood",
+      "patterns": [
+        "No face on file for this mood"
+      ],
+      "status": 404
+    },
+    {
+      "code": "multi_gpu_required",
+      "docs": "multi_gpu_required",
+      "fix": "The workflow needs more GPUs than the image server's ComfyUI was started with. Pick a single-GPU workflow or restart the server with more cards.",
+      "message": "The workflow needs more GPUs than the image server has.",
+      "patterns": [
+        "The workflow needs more GPUs than the image server has."
+      ],
+      "status": 503
+    },
+    {
+      "code": "not_a_checklist",
+      "docs": "not_a_checklist",
+      "fix": "Check the request and resend it.",
+      "message": "Message is not a checklist",
+      "patterns": [
+        "Message is not a checklist"
+      ],
+      "status": 400
+    },
+    {
+      "code": "not_a_directory",
+      "docs": "not_a_directory",
+      "fix": "Check the request and resend it.",
+      "message": "Not a directory",
+      "patterns": [
+        "Not a directory"
+      ],
+      "status": 400
+    },
+    {
+      "code": "not_found",
+      "docs": "not_found",
+      "fix": "Check the address.",
+      "message": "Not found",
+      "patterns": [
+        "Not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "nothing_to_change",
+      "docs": "nothing_to_change",
+      "fix": "Check the request and resend it.",
+      "message": "Nothing to change",
+      "patterns": [
+        "Nothing to change"
+      ],
+      "status": 400
+    },
+    {
+      "code": "owner_exists",
+      "docs": "owner_exists",
+      "fix": "An owner already exists. Sign in as the owner instead.",
+      "message": "This install already has an owner.",
+      "patterns": [
+        "This install already has an owner."
+      ],
+      "status": 409
+    },
+    {
+      "code": "owner_immutable",
+      "docs": "owner_immutable",
+      "fix": "The owner's role cannot be changed, disabled or deleted here.",
+      "message": "The owner's role cannot be changed.",
+      "patterns": [
+        "The owner's role cannot be changed.",
+        "The owner cannot be deleted.",
+        "The owner cannot be disabled."
+      ],
+      "status": 409
+    },
+    {
+      "code": "owner_required",
+      "docs": "owner_required",
+      "fix": "Create the owner account first (Settings > Security).",
+      "message": "Create the owner account first.",
+      "patterns": [
+        "Create the owner account first."
+      ],
+      "status": 409
+    },
+    {
+      "code": "panel_disabled",
+      "docs": "panel_disabled",
+      "fix": "Enable the feature in Settings > Plugins, or ignore this panel.",
+      "message": "Clients panel disabled",
+      "patterns": [
+        "Clients panel disabled",
+        "Emails panel disabled",
+        "Harness disabled",
+        "StudioForge panel disabled"
+      ],
+      "status": 404
+    },
+    {
+      "code": "password_invalid",
+      "docs": "password_invalid",
+      "fix": "Choose a password of at least 8 characters.",
+      "message": "Password invalid.",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "password_required",
+      "docs": "password_required",
+      "fix": "Set the owner's password first (Settings > People & Profiles > Your account).",
+      "message": "Set a password for the owner first.",
+      "patterns": [
+        "Set a password for the owner first."
+      ],
+      "status": 409
+    },
+    {
+      "code": "password_role",
+      "docs": "password_role",
+      "fix": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
+      "message": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
+      "patterns": [
+        "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN."
+      ],
+      "status": 409
+    },
+    {
+      "code": "path_invalid",
+      "docs": "path_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "invalid path",
+      "patterns": [
+        "invalid path"
+      ],
+      "status": 400
+    },
+    {
+      "code": "payload_too_large",
+      "docs": "payload_too_large",
+      "fix": "Send a smaller file.",
+      "message": "File too large",
+      "patterns": [
+        "File too large",
+        "File too large (max {}MB)",
+        "Image too large (max 25MB)",
+        "Image too large (max {}MB)",
+        "Face crop too large (max 25MB)"
+      ],
+      "status": 413
+    },
+    {
+      "code": "permission_denied",
+      "docs": "permission_denied",
+      "fix": "Ask an Admin or the Owner to grant your profile the permission shown in required_permission.",
+      "message": "Your profile does not have permission to do that.",
+      "patterns": [
+        "Your profile does not have permission to do that."
+      ],
+      "status": 403
+    },
+    {
+      "code": "permissions_invalid",
+      "docs": "permissions_invalid",
+      "fix": "Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.",
+      "message": "A permission is invalid.",
+      "patterns": [
+        "A permission is invalid."
+      ],
+      "status": 400
+    },
+    {
+      "code": "pin_invalid",
+      "docs": "pin_invalid",
+      "fix": "Choose a PIN of at least 4 characters.",
+      "message": "Pin invalid.",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "pin_not_set",
+      "docs": "pin_not_set",
+      "fix": "There is no PIN to check. Create the owner account in Settings > Security.",
+      "message": "No PIN is set",
+      "patterns": [
+        "No PIN is set"
+      ],
+      "status": 400
+    },
+    {
+      "code": "pin_too_short",
+      "docs": "pin_too_short",
+      "fix": "Choose a longer PIN.",
+      "message": "PIN must be at least {} characters",
+      "patterns": [
+        "PIN must be at least {} characters"
+      ],
+      "status": 400
+    },
+    {
+      "code": "plugin_needs_approval",
+      "docs": "plugin_needs_approval",
+      "fix": "Review the permissions it asks for, then enable it again with approve set to that list.",
+      "message": "This plugin needs approval",
+      "patterns": [
+        "approve must be the list of permissions you reviewed"
+      ],
+      "status": 409
+    },
+    {
+      "code": "pool_settings_invalid",
+      "docs": "pool_settings_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Invalid pool settings",
+      "patterns": [
+        "Invalid pool settings"
+      ],
+      "status": 400
+    },
+    {
+      "code": "practice_unreachable",
+      "docs": "practice_unreachable",
+      "fix": "An upstream service failed; check that it is running.",
+      "message": "Clients backend (practice box) is unreachable",
+      "patterns": [
+        "Clients backend (practice box) is unreachable"
+      ],
+      "status": 502
+    },
+    {
+      "code": "pref_identifier_invalid",
+      "docs": "pref_identifier_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "prefs.{} must be a short identifier (letters, digits, . _ : / @ -; not starting with -)",
+      "patterns": [
+        "prefs.{} must be a short identifier (letters, digits, . _ : / @ -; not starting with -)"
+      ],
+      "status": 400
+    },
+    {
+      "code": "pref_model_invalid",
+      "docs": "pref_model_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "prefs.model must be one of this advisor's models: {}",
+      "patterns": [
+        "prefs.model must be one of this advisor's models: {}"
+      ],
+      "status": 400
+    },
+    {
+      "code": "pref_not_string",
+      "docs": "pref_not_string",
+      "fix": "Check the request and resend it.",
+      "message": "prefs.{} must be a string or null",
+      "patterns": [
+        "prefs.{} must be a string or null"
+      ],
+      "status": 400
+    },
+    {
+      "code": "prefs_not_object",
+      "docs": "prefs_not_object",
+      "fix": "Check the request and resend it.",
+      "message": "prefs must be an object",
+      "patterns": [
+        "prefs must be an object"
+      ],
+      "status": 400
+    },
+    {
+      "code": "prefs_unknown_key",
+      "docs": "prefs_unknown_key",
+      "fix": "Check the request and resend it.",
+      "message": "unknown prefs key(s): {}",
+      "patterns": [
+        "unknown prefs key(s): {}"
+      ],
+      "status": 400
+    },
+    {
+      "code": "preview_unavailable",
+      "docs": "preview_unavailable",
+      "fix": "You are not allowed to do this; sign in as a profile with permission.",
+      "message": "Preview not available for this type",
+      "patterns": [
+        "Preview not available for this type"
+      ],
+      "status": 403
+    },
+    {
+      "code": "profile_conflict",
+      "docs": "profile_conflict",
+      "fix": "Choose a different name; there is only ever one owner.",
+      "message": "That profile could not be created (duplicate name or second owner).",
+      "patterns": [
+        "That profile could not be created (duplicate name or second owner)."
+      ],
+      "status": 409
+    },
+    {
+      "code": "profile_field_invalid",
+      "docs": "profile_field_invalid",
+      "fix": "Send only fields the People API documents.",
+      "message": "A profile field cannot be set.",
+      "patterns": [
+        "A profile field cannot be set."
+      ],
+      "status": 400
+    },
+    {
+      "code": "profile_name_invalid",
+      "docs": "profile_name_invalid",
+      "fix": "Use 1 to 40 characters.",
+      "message": "A profile name needs 1 to 40 characters.",
+      "patterns": [
+        "A profile name needs 1 to 40 characters."
+      ],
+      "status": 400
+    },
+    {
+      "code": "profile_name_taken",
+      "docs": "profile_name_taken",
+      "fix": "Choose a different name.",
+      "message": "A profile named {} already exists.",
+      "patterns": [
+        "A profile named {} already exists."
+      ],
+      "status": 409
+    },
+    {
+      "code": "profile_not_found",
+      "docs": "profile_not_found",
+      "fix": "Pick a profile from the list; it may have been deleted.",
+      "message": "No such profile.",
+      "patterns": [
+        "No such profile."
+      ],
+      "status": 404
+    },
+    {
+      "code": "profile_role_invalid",
+      "docs": "profile_role_invalid",
+      "fix": "Use owner, admin, member or restricted.",
+      "message": "Unknown role {}.",
+      "patterns": [
+        "Unknown role {}."
+      ],
+      "status": 400
+    },
+    {
+      "code": "prompt_bank_malformed",
+      "docs": "prompt_bank_malformed",
+      "fix": "Check the request and resend it.",
+      "message": "Malformed prompt bank",
+      "patterns": [
+        "Malformed prompt bank"
+      ],
+      "status": 400
+    },
+    {
+      "code": "push_subscription_invalid",
+      "docs": "push_subscription_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Expected a JSON push subscription",
+      "patterns": [
+        "Expected a JSON push subscription"
+      ],
+      "status": 400
+    },
+    {
+      "code": "quick_action_target_invalid",
+      "docs": "quick_action_target_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "bad_action: a quick action applies to user messages",
+      "patterns": [
+        "bad_action: a quick action applies to user messages"
+      ],
+      "status": 422
+    },
+    {
+      "code": "quick_action_unknown",
+      "docs": "quick_action_unknown",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "bad_action: unknown quick action",
+      "patterns": [
+        "bad_action: unknown quick action"
+      ],
+      "status": 422
+    },
+    {
+      "code": "quiet_hours",
+      "docs": "quiet_hours",
+      "fix": "This profile is not available at this time of day. Ask the Owner to change quiet hours.",
+      "message": "This profile is not available right now.",
+      "patterns": [
+        "This profile is not available right now."
+      ],
+      "status": 403
+    },
+    {
+      "code": "rate_limited",
+      "docs": "rate_limited",
+      "fix": "Slow down and retry after a moment.",
+      "message": "Rate limited.",
+      "patterns": [],
+      "status": 429
+    },
+    {
+      "code": "reaction_not_found",
+      "docs": "reaction_not_found",
+      "fix": "Reload the reaction pack.",
+      "message": "reaction not found",
+      "patterns": [
+        "reaction not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "refresh_running",
+      "docs": "refresh_running",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "A refresh is already running for this tool",
+      "patterns": [
+        "A refresh is already running for this tool"
+      ],
+      "status": 409
+    },
+    {
+      "code": "remember_device_required",
+      "docs": "remember_device_required",
+      "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
+      "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+      "patterns": [
+        "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked."
+      ],
+      "status": 403
+    },
+    {
+      "code": "reply_in_progress_delete",
+      "docs": "reply_in_progress_delete",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "Cannot delete messages while a reply is in progress",
+      "patterns": [
+        "Cannot delete messages while a reply is in progress"
+      ],
+      "status": 409
+    },
+    {
+      "code": "reply_in_progress_edit",
+      "docs": "reply_in_progress_edit",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "Cannot edit messages while a reply is in progress",
+      "patterns": [
+        "Cannot edit messages while a reply is in progress"
+      ],
+      "status": 409
+    },
+    {
+      "code": "route_undeclared",
+      "docs": "route_undeclared",
+      "fix": "This is a bug: the endpoint has no declared permission. Report it; it is refused until it has one.",
+      "message": "This endpoint has no access policy.",
+      "patterns": [
+        "This endpoint has no access policy."
+      ],
+      "status": 403
+    },
+    {
+      "code": "safe_mode",
+      "docs": "safe_mode",
+      "fix": "Sign in as a profile that is allowed to do this (Settings > People & Profiles), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
+      "message": "Unlock for full access",
+      "patterns": [
+        "Unlock for full access"
+      ],
+      "status": 403
+    },
+    {
+      "code": "session_key_required",
+      "docs": "session_key_required",
+      "fix": "Check the request and resend it.",
+      "message": "session_key required",
+      "patterns": [
+        "session_key required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "session_not_found",
+      "docs": "session_not_found",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "no such session",
+      "patterns": [
+        "no such session"
+      ],
+      "status": 404
+    },
+    {
+      "code": "settings_invalid",
+      "docs": "settings_invalid",
+      "fix": "Check the request and resend it.",
+      "message": "Invalid settings",
+      "patterns": [
+        "Invalid settings",
+        "Unknown settings group",
+        "level must be basic or advanced",
+        "Send {\"set\": {key: value}, \"reset\": [key]}",
+        "Nothing to change",
+        "{} cannot be set and reset together"
+      ],
+      "status": 400
+    },
+    {
+      "code": "setup_forbidden",
+      "docs": "setup_forbidden",
+      "fix": "Open DisPatch on the computer it runs on, or send the one-time setup token from the server log.",
+      "message": "Setup is only allowed from this computer or with the setup token.",
+      "patterns": [
+        "Setup is only allowed from this computer or with the setup token."
+      ],
+      "status": 403
+    },
+    {
+      "code": "setup_required",
+      "docs": "setup_required",
+      "fix": "Open DisPatch on the computer it runs on, or finish setup with the one-time setup token printed in the server log (POST /api/auth/setup).",
+      "message": "This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log.",
+      "patterns": [
+        "This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log."
+      ],
+      "status": 403
+    },
+    {
+      "code": "signin_required",
+      "docs": "signin_required",
+      "fix": "Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.",
+      "message": "Sign in to continue.",
+      "patterns": [
+        "Sign in to continue."
+      ],
+      "status": 401
+    },
+    {
+      "code": "stalled",
+      "docs": "stalled",
+      "fix": "The render started and then went quiet. DisPatch retries once; if it keeps stalling, restart the image server.",
+      "message": "The image render stalled.",
+      "patterns": [
+        "The image render stalled."
+      ],
+      "status": 502
+    },
+    {
+      "code": "starter_pack_not_found",
+      "docs": "starter_pack_not_found",
+      "fix": "List the packs with GET /api/starter-packs.",
+      "message": "Unknown starter pack",
+      "patterns": [],
+      "status": 404
+    },
+    {
+      "code": "storage_limit",
+      "docs": "storage_limit",
+      "fix": "Free disk space or delete files, then retry.",
+      "message": "Storage limit reached — free space or delete files",
+      "patterns": [
+        "Storage limit reached — free space or delete files",
+        "Disk write failed"
+      ],
+      "status": 507
+    },
+    {
+      "code": "task_not_found",
+      "docs": "task_not_found",
+      "fix": "Open the Tasks page and pick a task from the list; it may belong to another profile or have been removed.",
+      "message": "Task not found",
+      "patterns": [
+        "Task not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "task_state_conflict",
+      "docs": "task_state_conflict",
+      "fix": "Reload the task: it may have just finished, or it is still running.",
+      "message": "The task cannot do that in its current state.",
+      "patterns": [
+        "The task cannot do that in its current state."
+      ],
+      "status": 409
+    },
+    {
+      "code": "task_thread_not_allowed",
+      "docs": "task_thread_not_allowed",
+      "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
+      "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
+      "patterns": [
+        "Tasks cannot be assigned from a chat that Restricted profiles can read."
+      ],
+      "status": 409
+    },
+    {
+      "code": "test_flag_invalid",
+      "docs": "test_flag_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "test must be true or false",
+      "patterns": [
+        "test must be true or false"
+      ],
+      "status": 422
+    },
+    {
+      "code": "thread_id_required",
+      "docs": "thread_id_required",
+      "fix": "Check the request and resend it.",
+      "message": "thread_id (or all:true) required",
+      "patterns": [
+        "thread_id (or all:true) required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "thread_not_found",
+      "docs": "thread_not_found",
+      "fix": "Pick a thread from the list; it may have been deleted.",
+      "message": "Thread not found",
+      "patterns": [
+        "Thread not found",
+        "thread not found",
+        "Unknown thread",
+        "thread_id not found"
+      ],
+      "status": 404
+    },
+    {
+      "code": "thread_or_bot_required",
+      "docs": "thread_or_bot_required",
+      "fix": "Check the request and resend it.",
+      "message": "Provide thread_id or bot_id",
+      "patterns": [
+        "Provide thread_id or bot_id"
+      ],
+      "status": 400
+    },
+    {
+      "code": "thread_or_session_required",
+      "docs": "thread_or_session_required",
+      "fix": "Check the request and resend it.",
+      "message": "thread_id or session_key required",
+      "patterns": [
+        "thread_id or session_key required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "thread_other_bot",
+      "docs": "thread_other_bot",
+      "fix": "You are not allowed to do this; sign in as a profile with permission.",
+      "message": "That thread belongs to another bot",
+      "patterns": [
+        "That thread belongs to another bot"
+      ],
+      "status": 403
+    },
+    {
+      "code": "thread_update_failed",
+      "docs": "thread_update_failed",
+      "fix": "This is a server fault; check the logs (Settings > System) and retry.",
+      "message": "Could not update the thread",
+      "patterns": [
+        "Could not update the thread"
+      ],
+      "status": 500
+    },
+    {
+      "code": "time_limit",
+      "docs": "time_limit",
+      "fix": "This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.",
+      "message": "Today's time for this profile is used up.",
+      "patterns": [
+        "Today's time for this profile is used up."
+      ],
+      "status": 403
+    },
+    {
+      "code": "title_required",
+      "docs": "title_required",
+      "fix": "Check the request and resend it.",
+      "message": "title required",
+      "patterns": [
+        "title required"
+      ],
+      "status": 400
+    },
+    {
+      "code": "too_many_attempts",
+      "docs": "too_many_attempts",
+      "fix": "Wait the number of seconds in retry_after, then try again.",
+      "message": "Too many attempts — wait {}s.",
+      "patterns": [
+        "Too many attempts — wait {}s."
+      ],
+      "status": 429
+    },
+    {
+      "code": "too_many_entries",
+      "docs": "too_many_entries",
+      "fix": "Check the request and resend it.",
+      "message": "too many entries",
+      "patterns": [
+        "too many entries"
+      ],
+      "status": 400
+    },
+    {
+      "code": "tool_not_found",
+      "docs": "tool_not_found",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "No such tool, or it has no refresh",
+      "patterns": [
+        "No such tool, or it has no refresh"
+      ],
+      "status": 404
+    },
+    {
+      "code": "tools_direct_only",
+      "docs": "tools_direct_only",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "tools only applies to direct-API bots",
+      "patterns": [
+        "tools only applies to direct-API bots"
+      ],
+      "status": 422
+    },
+    {
+      "code": "tools_flag_invalid",
+      "docs": "tools_flag_invalid",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "tools must be true or false",
+      "patterns": [
+        "tools must be true or false"
+      ],
+      "status": 422
+    },
+    {
+      "code": "tools_yaml_unreadable",
+      "docs": "tools_yaml_unreadable",
+      "fix": "The state conflicts with the request; reload and retry.",
+      "message": "tools.yaml cannot be read, fix it first: {}",
+      "patterns": [
+        "tools.yaml cannot be read, fix it first: {}"
+      ],
+      "status": 409
+    },
+    {
+      "code": "transcript_missing",
+      "docs": "transcript_missing",
+      "fix": "The thing you asked for does not exist; reload and pick it again.",
+      "message": "No transcript for that session",
+      "patterns": [
+        "No transcript for that session"
+      ],
+      "status": 404
+    },
+    {
+      "code": "unauthorized",
+      "docs": "unauthorized",
+      "fix": "Provide valid credentials: sign in, or send the API key.",
+      "message": "Authentication required.",
+      "patterns": [
+        "Authentication required."
+      ],
+      "status": 401
+    },
+    {
+      "code": "unknown_image_job",
+      "docs": "unknown_image_job",
+      "fix": "The job id is wrong or the job was cleaned up.",
+      "message": "Unknown image job",
+      "patterns": [
+        "Unknown image job",
+        "no such job"
+      ],
+      "status": 404
+    },
+    {
+      "code": "unlock_first",
+      "docs": "unlock_first",
+      "fix": "Sign in as the owner first, then retry.",
+      "message": "Unlock with your PIN first",
+      "patterns": [
+        "Unlock with your PIN first"
+      ],
+      "status": 403
+    },
+    {
+      "code": "unsupported_media_type",
+      "docs": "unsupported_media_type",
+      "fix": "Send a PNG, JPEG, GIF, WebP or AVIF image.",
+      "message": "Reaction images must be PNG, JPEG, GIF, WebP or AVIF",
+      "patterns": [
+        "Reaction images must be PNG, JPEG, GIF, WebP or AVIF",
+        "That file isn't a readable image"
+      ],
+      "status": 415
+    },
+    {
+      "code": "validation_error",
+      "docs": "validation_error",
+      "fix": "Fix the fields listed in detail and resend.",
+      "message": "Validation error.",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "voice_addon_missing",
+      "docs": "voice_addon_missing",
+      "fix": "Fix the fields in detail and resend.",
+      "message": "{} needs the voice add-on, which is not installed",
+      "patterns": [
+        "{} needs the voice add-on, which is not installed"
+      ],
+      "status": 422
+    },
+    {
+      "code": "wizard_owner_required",
+      "docs": "wizard_owner_required",
+      "fix": "Finish step 1 of the setup wizard (the owner account) before this step.",
+      "message": "Create the owner account first",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "wizard_step_required",
+      "docs": "wizard_step_required",
+      "fix": "Only the optional steps (voice, family) can be skipped.",
+      "message": "That step cannot be skipped",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "wizard_step_unknown",
+      "docs": "wizard_step_unknown",
+      "fix": "The steps are owner, connection, voice, family, network.",
+      "message": "Unknown wizard step",
+      "patterns": [],
+      "status": 404
+    }
+  ],
+  "schema": 1
+}

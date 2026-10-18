@@ -24,9 +24,9 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
 // ---------------------------------------------------------------- tab order
 
-const TAB_ORDER = ['bots', 'theme', 'device', 'voice', 'plugins', 'ai', 'reactions', 'health', 'security'];
+const TAB_ORDER = ['bots', 'theme', 'device', 'voice', 'plugins', 'connections', 'agents', 'ai', 'reactions', 'health', 'people', 'security', 'settings'];
 
-test('the tab strip reads Bots, Theme, Device, Voice, Plugins, AI models, Reactions, Health, Security', () => {
+test('the tab strip reads Bots, Theme, Device, Voice, Plugins, Connections, Agents, AI models, Reactions, Health, People, Security, All settings', () => {
   const tabs = [...HTML.matchAll(/<button class="settings-tab[^"]*" id="stab-([a-z]+)"/g)].map((m) => m[1]);
   assert.deepEqual(tabs, TAB_ORDER);
 });
@@ -48,11 +48,12 @@ test('main.js lists the tabs in the same order and the admin rule is unchanged',
   assert.deepEqual([...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]), TAB_ORDER);
   const a = /const ADMIN_TABS = \[([^\]]*)\];/.exec(MAIN);
   assert.deepEqual([...a[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort(),
-    ['ai', 'health', 'plugins', 'reactions', 'voice']);
-  // The same four tabs are admin-only in the markup (Bots, Theme, Device and
-  // Security stay visible to Safe Mode, exactly as before).
+    ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings', 'voice']);
+  // The same tabs are admin-only in the markup (Bots, Theme, Device and
+  // Security stay visible to a Restricted session, exactly as before; People &
+  // Profiles joined in 3.0 and shows for owner/admin only -- canAdmin()).
   const adminInMarkup = [...HTML.matchAll(/class="settings-tab admin-only[^"]*" id="stab-([a-z]+)"/g)].map((x) => x[1]).sort();
-  assert.deepEqual(adminInMarkup, ['ai', 'health', 'plugins', 'reactions', 'voice']);
+  assert.deepEqual(adminInMarkup, ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings', 'voice']);
 });
 
 test('the first-run card still opens the AI models tab', () => {

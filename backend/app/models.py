@@ -70,6 +70,8 @@ class BotOrderItem(BaseModel):
     visible: bool | None = None   # pre-2.4.2 clients: False = "neither", True = no change
     safe: bool | None = None      # None = leave unchanged ("Show locked", Safe-Mode gate)
     hide_unlocked: bool | None = None  # None = leave unchanged (NOT "Show unlocked", 2.4.0)
+    # 3.0: who the character is for. Wins over `safe`/`hide_unlocked` when present.
+    audience: Literal["all", "members", "restricted"] | None = None
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
@@ -112,6 +114,7 @@ class BotCreateIn(BaseModel):
     model_hint: str = Field(default="", max_length=60)
     safe: bool = False
     hide_unlocked: bool = False
+    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool = True
     visible: bool = True             # pre-2.4.2: False = "neither" (config.fold_visible)
     tools: bool | None = None        # direct-API bots only; default on
@@ -143,6 +146,7 @@ class BotPatchIn(BaseModel):
     visible: bool | None = None      # pre-2.4.2: False = "neither", True = no change
     safe: bool | None = None
     hide_unlocked: bool | None = None
+    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None

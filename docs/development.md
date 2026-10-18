@@ -39,22 +39,55 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 `frontend/static/sw.js`. Miss one and users get a half-updated app: new HTML
 against an old module, which usually shows up as a blank screen.
 
-**The themes are a drop-in folder, not code.** `frontend/static/ui-theme/`
-is the shared theme folder, copied in verbatim: `ui-theme.js` (the theme
-runtime, the first and only blocking script in `<head>`), `ui-theme.css` (the
-tokens for every theme), `adapters/dispatch-compat.css` (DisPatch's own token
-names mapped onto them), and `VERSION` (`ui-theme <revision date> <digest>`,
-the version marker a theme update is checked against). Never edit a file in
-it: a colour fix belongs upstream in the theme repository. **Updating the
-themes is replacing the whole folder** — from the theme repository, `python
-tools/sync_theme.py update --apply` does that for every app on the host.
-Nothing else changes: the folder's URLs carry no `?v=`, the server sends them
-`no-cache` (`main.py`), and `sw.js` is network-first, so a new copy is live on
-the next page load with no `CACHE` bump. DisPatch's own settings for the
-themes are the `data-*` on the runtime's `<script>` tag in `index.html` (the
-picker's themes and order, the default for a new device, and the storage
-key, which must stay `dispatch-palette`). DisPatch-only colour roles and
-layout tokens live in `frontend/static/theme.css`.
+**The themes are a vendored bundle, not code.** `frontend/static/ui-theme/` is
+the ForgeUI 1.2 bundle (the `ThemeForge` repository), copied in whole and
+verified by `files.json`: `ui-theme.js` (the theme runtime, the first and only
+blocking script in `<head>`), `ui-theme.css` (the tokens for every theme),
+`ui-components.css` / `ui-components.js` (the component layer and its
+`UIComponents` helpers) with the `locales/` string tables, and `VERSION`
+(`ThemeForge <version> <digest>`). Never edit a bundle file: a colour fix
+belongs upstream in the theme repository.
+
+Three things live in this repository instead:
+
+- **`forgeui.json`** (repo root) names the folder (`dest`), the bundle versions
+  this app accepts (`"1.2"` is any 1.2.x), the adapters to ship (none: DisPatch
+  has its own element layer) and the theme choice (`settings.themes`, `default`,
+  `storage_key`, which must stay `dispatch-palette`).
+- **The overlay** `frontend/overlays/dispatch-extra.css` (listed in
+  `extra_files`) maps DisPatch's own token names (`--bg-*`, `--user-bubble`,
+  `--md-*`, ...) onto the contract. It is app-owned and copied to
+  `ui-theme/adapters/dispatch-extra.css`; edit the source in `overlays/`, never
+  the copy, and never append anything into a bundle file.
+- **The picker settings** are the `data-*` on the runtime's `<script>` tag in
+  `index.html`. They repeat `settings` from `forgeui.json`; a test fails if the
+  two disagree.
+
+To update the themes, install the `forgeui` package (not from PyPI: that name
+belongs to another project), then replace the folder and commit the result:
+
+```sh
+uv venv .forgeui-venv        # keep it out of git
+uv pip install --python .forgeui-venv "forgeui @ git+https://github.com/LaserLloyd/ThemeForge@v1.2.0"
+.forgeui-venv/bin/python -m forgeui vendor           # write the new copy (VERSION last)
+.forgeui-venv/bin/python -m forgeui vendor --check   # exit 1 when the copy drifted
+.forgeui-venv/bin/python -m forgeui vendor --source forgeui-1.2.0.zip   # offline: a zip, wheel or folder
+```
+
+(On Windows the interpreter is `.forgeui-venv\Scripts\python`.) `vendor` verifies
+every file against the bundle's `files.json` before writing, refuses to overwrite
+a bundle file edited by hand unless you pass `--force`, and removes files the new
+bundle dropped. `--check` is what CI runs (the Lint job) and what
+`backend/tests/test_forgeui_vendor.py` runs when `forgeui` is installed; the same
+test checks the hashes, the overlay and the picker settings with the standard
+library alone. The old `tools/sync_theme.py` registry command is gone; do not
+look for it.
+
+After an update: the folder's URLs carry no `?v=`, the server sends them
+`no-cache` (`main.py`) and `sw.js` is network-first, so a new copy is live on the
+next page load. Bump `CACHE` in `sw.js` only when the list of files in `SHELL`
+changes (a file added, renamed or removed). DisPatch-only colour roles and layout
+tokens live in `frontend/static/theme.css`.
 
 `grep -rn '<module>.js?v=' frontend/static/` finds every reference — a module
 imported by three others has four places to change, not one. A **new** module
@@ -75,7 +108,11 @@ than adding a `<script>` tag that everyone pays for.
 cd backend && uv run pytest -q
 ```
 
-800+ tests, about a minute. The suite is strictly hermetic: every test
+The full backend suite runs on Linux (on Windows, in WSL; see [Windows](#windows) below). Native Windows runs a subset.
+About 3,500 tests; the backend suite takes 25–30 minutes on Linux (it is wall-clock bound).
+Three timing/mtime tests are known to flake on a fast box
+(`test_mirror.py::test_state_roundtrip`, `test_reactions.py::test_safe_ids_does_not_rewalk_unchanged_pools`, and one of the
+dashboard/advisor timing tests). The suite is strictly hermetic: every test
 gets a throwaway database and monkeypatched data directories, and nothing
 touches a real install or the network. `backend/tests/test_auth_gate.py` is the
 best model to copy — access control is the part most worth testing.
@@ -106,6 +143,24 @@ Note that CI runs `scrub_check.py` **without** the personal-identifier rules —
 `scripts/scrub-rules.local.txt` is git-ignored so the list of private words is
 never published. Names and hostnames are therefore caught only by the local
 hooks. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### Dependency audit
+
+CI's `audit` job runs `pip-audit` against the exact locked set and fails on any
+known advisory. Run the same check locally after touching `backend/pyproject.toml`
+or `backend/uv.lock`:
+
+```bash
+cd backend
+uv export --frozen --no-hashes --no-emit-project --all-extras > /tmp/requirements-audit.txt
+uvx pip-audit==2.10.1 -r /tmp/requirements-audit.txt --no-deps --disable-pip --strict
+```
+
+To fix a finding, raise the floor in `pyproject.toml` (a transitive package such
+as `starlette` or `anyio` gets an explicit lower bound with a comment) and move
+only that package: `uv lock --upgrade-package <name>==<fixed version>`. Prefer
+that to an `--ignore-vuln`; if one is ever unavoidable, add it to the CI step
+with a comment naming the advisory, the reason and a date to revisit.
 
 ## Host tools (the nightly timer and the avatar rotator)
 
@@ -150,3 +205,29 @@ your install as downstream: pull this project onto the box like any other user
 rather than editing the install in place. A backend change needs a restart; a
 frontend-only change needs a hard refresh and the `sw.js` `CACHE` bump described
 above.
+
+### Windows
+
+The backend imports and the whole suite *collects* on native Windows (`uv run pytest --co -q`:
+3,500+ tests), and a subset runs: `-k` or a file path works (`uv run pytest tests/test_route_table.py -q`). Tests that
+depend on POSIX file modes, `/tmp` semantics or process groups still fail there: **136 failures were seen on a Windows
+host at 3.0.0**. The full backend suite runs on Linux, and on Windows **in WSL** (or any Linux):
+
+```
+cd backend && uv sync --frozen && DISPATCH_DATA_DIR=$PWD/../.scratch-data python -m pytest -q -p no:cacheprovider
+```
+
+Never point `DISPATCH_DATA_DIR` under `/tmp` for a full run — the suite's write guard treats
+`/tmp` as disposable. Frontend: `cd frontend && npm ci && npm run test:ci` works on Windows,
+macOS and Linux (`CI_REQUIRE_DOM=1` is set by `scripts/test-ci.mjs`). `.gitattributes` forces
+LF endings so a Windows checkout does not break the source-scan tests.
+
+### Contracts and the access-control tests
+
+`python scripts/gen_contracts.py` regenerates `docs/contracts/` and `docs/errors.md`
+(`--check` verifies; `tests/test_contracts_drift.py` runs it). Adding a route means adding it
+to `backend/app/route_policy.py` — `tests/test_route_table.py` fails the build otherwise —
+and any new `HTTPException` message to `backend/app/contracts/error_catalog.json`
+(`tests/test_error_catalog.py`). `tests/test_g5_access.py` calls every protected route with no
+session and with a Restricted session and expects a refusal. Use the `world` fixture
+(`tests/conftest.py`) for tests that need an owner, profiles and clients with chosen peers.

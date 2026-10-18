@@ -388,6 +388,15 @@ async def _send_following(client: httpx.AsyncClient, method: str, url: str, *,
             raise ApiError("The provider sent an empty redirect",
                            f"{url} answered {status} with no Location header.")
         url = normalize_base_url(str(httpx.URL(url).join(location)))
+        # Every hop gets the SSRF guard the typed address got (link-local, metadata,
+        # unspecified, multicast; `connections.allow_private_targets` lifts it). A
+        # provider answering `302 Location: http://169.254.169.254/...` used to be
+        # followed, and the Test result quoted the first bytes of what came back.
+        from . import connections as _connections
+        try:
+            _connections.check_target(url)
+        except _connections.ConnectionError_ as e:
+            raise ApiError("The provider redirected to a blocked address", str(e)) from None
         if _origin_of(url) != origin:
             dropped = [h for h in list(hop_headers)
                        if h.lower() in _CREDENTIAL_HEADERS]
@@ -645,7 +654,17 @@ class Resolved:
 def resolve_key(api: dict) -> str:
     """The key to use: the named environment variable if it is set, else the
     stored one. The env var wins deliberately — an operator who set both has
-    said which one they trust, and it is not the one on disk."""
+    said which one they trust, and it is not the one on disk.
+
+    3.0: a provider entry that names a ``connection`` takes its key from that connection
+    (secret store or the connection's own environment variable) when it has one; the inline
+    ``api_key`` / ``api_key_env`` remain the fallback for an entry that has no connection or
+    whose connection holds no key."""
+    if api.get("connection"):
+        from . import connections
+        from_conn = connections.credential_for_block(api)
+        if from_conn:
+            return from_conn
     env_name = str(api.get("api_key_env") or "").strip()
     if env_name:
         from_env = os.environ.get(env_name, "")
@@ -671,6 +690,11 @@ def resolve_api(api: dict, name: str, bot_id: str = "", *,
     A companion bot carries a CHAIN of these (cloud first, local second); each
     link resolves by exactly the rules a single "Connect an AI" bot uses.
     """
+    if api.get("connection"):
+        # 3.0: a Connection supplies provider, address and key; the entry keeps the model and
+        # any per-character extras (connections.effective_block).
+        from . import connections
+        api = connections.effective_block(api)
     # The two attributes the error messages below read.
     bot = SimpleNamespace(name=name, id=bot_id or name)
     provider = PROVIDER_BY_ID.get(str(api.get("provider") or "").strip())

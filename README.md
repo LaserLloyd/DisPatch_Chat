@@ -4,14 +4,26 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 2.4.0** (October 2026) · [what changed](#whats-new-in-23)
+**Current release: 3.0.0** (October 2026) · [what changed](CHANGELOG.md#300--2026-10-18)
 
-[Quick start](#quick-start) · [Bring your own AI](#bring-your-own-ai) ·
+[Install](#install) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
 [Documentation](docs/) · [Changelog](CHANGELOG.md) ·
 [Contributing](CONTRIBUTING.md)
 
 </div>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/readme/chat.png" alt="DisPatch Chat on the Glacier theme: a conversation with Atlas, the default bot with its shipped avatar, planning dinners for the week"><br><sub><b>Chat.</b> Atlas, the default bot, with its shipped avatar, in the Glacier theme.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/settings.png" alt="DisPatch Settings, All settings tab: searchable settings in categories with a Basic and Advanced switch"><br><sub><b>Settings.</b> Every setting in one searchable place, with Basic and Advanced views.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/readme/people-profiles.png" alt="DisPatch Settings, People and Profiles tab: an Owner, a Member and a Restricted profile"><br><sub><b>People &amp; Profiles.</b> An Owner, Members and Restricted profiles for children and guests.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/tasks.png" alt="DisPatch Tasks page with state, agent, person and date filters and the Assign task button"><br><sub><b>Tasks.</b> Hand work to an agent and follow it here (empty on a fresh install).</sub></td>
+  </tr>
+</table>
+
 
 ---
 
@@ -32,9 +44,10 @@ no account, no cloud, no telemetry.
 - **A personality for every bot.** Settings → Bots → Personality has ten presets
   (Sleek assistant, Cat-girl, Warm friend, Patient tutor and more) and an editor;
   `{name}` and `{user}` in the text are filled in for each reply.
-- **A PIN and a Safe Mode.** Unlocked devices can do everything; locked family
-  devices can only talk to the bots you mark safe, by text or, with the voice
-  add-on, by voice.
+- **Profiles and roles.** An Owner, Admins, Members and Restricted profiles for
+  children and guests, each with their own PIN or password, daily budgets, time
+  limits and a device you can bind to them. A Restricted profile can only talk to
+  the characters made for it, by text or, with the voice add-on, by voice.
 - **Ten themes**, eight languages, and a phone-installable PWA with push pings.
 - **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
   OpenAI-compatible images endpoint) or your own image server, and reaction images.
@@ -44,7 +57,16 @@ no account, no cloud, no telemetry.
 - **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
   chat, pictures and (where offered) knowledge search are set up and tested.
 - **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
-  is installed.
+  is installed and what each one asks to be allowed to do.
+- **Connections and characters.** One record per model server (a key is stored
+  once, in your keyring or a 0600 file, never in a chat's settings), characters that
+  pick a connection, a model, a personality and who may see them, and two starter
+  packs: *Animal Friends* for children and *Assistants*.
+- **Every setting in one place**, described once (`docs/settings.md`), searchable,
+  with Basic and Advanced views and a badge on anything an environment variable sets.
+- **Encrypted backups** on a schedule, a restore that checks before it replaces
+  anything, a redacted support bundle for bug reports, and export / erase of one
+  profile's data.
 
 ## Add-ons
 
@@ -68,27 +90,287 @@ alternatives, and a feature-by-feature matrix of what needs what.
 
 | | What it adds | How it connects |
 |---|---|---|
-| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → AI models |
-| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Connect an AI → Local server |
+| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → Connections |
+| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Settings → Connections (found automatically; sends your key as a bearer token) |
 | [OpenClaw](https://github.com/openclaw/openclaw) | agent bots with tools, files and long jobs | `openclaw` on PATH or its gateway |
 | [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
 | [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
 | An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
-| Offline Wikipedia (InfoForge, not public yet) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
+| Offline Wikipedia ([InfoForge](https://github.com/LaserLloyd/InfoForge)) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
 
-## Quick start
+## Install
 
-```bash
+Pick your platform below. Methods are listed simplest first, and each block runs top to bottom on a
+fresh machine. DisPatch is one Python process with one SQLite file; it needs no GPU and no account.
+
+**Ports:** `8765` (DisPatch: web UI, REST and WebSocket). It is the only port DisPatch opens. Everything
+else in the [Ports](#ports) table is something it connects to.
+
+A fresh install is closed to the network until the owner account exists. From the machine DisPatch runs
+on, open <http://localhost:8765> and the setup wizard asks for nothing. From any other device, and from
+a browser talking to a container, the wizard asks for the one-time **setup token** that the server
+prints in its log as `SETUP TOKEN: ...`; each block below says where to read it.
+
+### Windows
+
+#### 1. Docker Desktop (simplest)
+
+Choose this for a PC you can leave signed in. Docker Desktop installs the container runtime, and the
+data lives on a volume that survives updates.
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Docker.DockerDesktop -e
+```
+
+Start Docker Desktop once and accept its first-run prompts (WSL 2 backend), then open a new PowerShell
+window:
+
+```powershell
 git clone https://github.com/LaserLloyd/DisPatch_Chat.git
-cd DisPatch_Chat/backend && uv sync
+cd DisPatch_Chat
+docker compose up -d
+docker compose ps
+docker compose logs app | Select-String "SETUP TOKEN"
+curl.exe -s http://localhost:8765/api/health
+```
+
+The first `up` builds the image from the checkout (two to five minutes, depending on your network and
+Docker's cache) and the container reaches `healthy` within 90 seconds. Open <http://localhost:8765> and paste the token into the setup wizard. No
+`.env` key is required: an empty one starts a usable server. Optional keys are in `.env.example`
+(`HOST_PORT`, `BIND_ADDR=127.0.0.1` to keep it to this PC, `VOICE=1`, `DATA_PATH`). The compose file
+publishes the port on all interfaces by default, so a phone on your network can reach it once Windows
+Firewall allows port 8765 ([docs/deploy-windows.md](docs/deploy-windows.md)). The compose file fixes the
+container name (`dispatch`) and the volume name (`dispatch-data`), so a second copy on the same Docker
+host needs different names.
+
+| Pros | Cons |
+| --- | --- |
+| Data on a named volume; image is rebuilt or replaced without touching it | Image is about 840 MB (about 1.7 GB with voice); Docker Desktop must be running |
+| Upgrade is `git pull` then `up -d --build`; rollback is `git checkout` | Neither Docker Desktop nor WSL 2 starts before a Windows sign-in, so it is not an unattended server |
+| Same setup as Linux | Agent and host-control features cannot see the Windows host from inside the container |
+
+#### 2. Native, with uv (experimental)
+
+Choose this to try or develop DisPatch without Docker. The server imports and runs on Windows, but the
+full backend test suite runs on Linux (WSL on Windows), not natively, so treat this as experimental.
+
+```powershell
+winget install --id Git.Git -e
+winget install --id astral-sh.uv -e
+```
+
+Close PowerShell and open a new window so `git` and `uv` are on `PATH`, then:
+
+```powershell
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat\backend
+uv sync
 uv run uvicorn app.main:app --port 8765
 ```
 
-Open <http://localhost:8765>, set a PIN under **Settings → Security**, then go to
-**Settings → AI models** and connect Atlas to a provider; **Set up everything with
-one provider** does chat and pictures from a single key. Prefer a container, a
-Raspberry Pi or a systemd service? See [Run it in Docker](#run-it-in-docker) and
-[Deployment](#deployment).
+`uv` fetches a Python for you (`backend\.python-version` pins 3.12 to 3.14). In a second window:
+
+```powershell
+curl.exe -s http://localhost:8765/api/health
+```
+
+Open <http://localhost:8765> on this PC and follow the wizard; it needs no token from this machine.
+
+| Pros | Cons |
+| --- | --- |
+| Smallest install and fastest edit-and-reload loop | Experimental on Windows; no service wrapper, so it stops when you close the window |
+| Sees the host, so agent and file features work | You manage updates; data is in `.local\share\local-chat` under your user folder |
+
+### Linux
+
+On a bare Ubuntu or Debian image `git` and `curl` are missing, so the blocks install them first.
+
+#### 1. Docker Compose (simplest)
+
+Choose this for a home server or Raspberry Pi 4/5. Images build for amd64 and arm64.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -fsSL https://get.docker.com | sh
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
+sudo docker compose up -d
+sudo docker compose ps
+sudo docker compose logs app | grep "SETUP TOKEN"
+curl --retry 30 --retry-connrefused -s http://localhost:8765/api/health
+```
+
+Open <http://localhost:8765> (or `http://<this-machine>:8765` from another device) and paste the token
+into the wizard. Skip the second line if Docker is already installed; add your user to the `docker`
+group to drop `sudo`. No `.env` key is required. To keep it to this machine only, put
+`BIND_ADDR=127.0.0.1` in `.env` before `up`. To add voice chat, see [Add voice chat](#add-voice-chat).
+If you run your own fork, one line repoints
+every image label, the in-app source link and the issue links:
+
+```bash
+grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
+  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
+```
+
+| Pros | Cons |
+| --- | --- |
+| Data on the `dispatch-data` volume, read-only image, a backup before each migration | Image is about 840 MB (about 1.7 GB with voice) |
+| Starts at boot (`restart: unless-stopped`) with no unit files | Agent and host-control features cannot see the host from inside the container |
+| Upgrade and rollback are one command each | Compose published on all interfaces by default; set `BIND_ADDR` if you do not want that |
+
+#### 2. Native, with uv from a clone (hackable)
+
+Choose this to read or change the code, or to run it in a terminal.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat/backend
+uv sync
+uv run uvicorn app.main:app --port 8765
+```
+
+In a second terminal: `curl -s http://localhost:8765/api/health`. The server binds loopback, so the
+wizard needs no token from this machine. Add `--host 0.0.0.0` to reach it from other devices (then the
+wizard on those devices asks for the token printed in this terminal).
+
+| Pros | Cons |
+| --- | --- |
+| Smallest and fastest: reload on change, run the tests | Stops when the terminal closes; no autostart |
+| Sees the host, so agents and file features work | You manage uv, Python and updates |
+
+#### 3. Native, as a systemd user service
+
+Choose this for an always-on box where DisPatch should reach things in your home directory (an agent
+CLI, for example). It is method 2 plus a unit.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git ~/dispatch
+cd ~/dispatch/backend
+uv sync --frozen --no-dev
+mkdir -p ~/.config/systemd/user
+sed "s#__APP_DIR__#$HOME/dispatch#g" ~/dispatch/deploy/systemd/dispatch-user.service > ~/.config/systemd/user/dispatch.service
+systemctl --user daemon-reload
+systemctl --user enable --now dispatch
+sudo loginctl enable-linger "$USER"
+curl --retry 30 --retry-connrefused -s http://localhost:8765/api/health
+journalctl --user -u dispatch | grep "SETUP TOKEN"
+```
+
+`enable-linger` is the step people forget: without it the service stops when your last session ends and
+does not start at boot. The unit binds `0.0.0.0`, so paste the token printed by the last command into the wizard.
+For a locked-down system service run by its own account, see
+[docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
+
+| Pros | Cons |
+| --- | --- |
+| Autostart, restart on failure, logs in `journalctl` | Needs systemd and the linger step; no container isolation |
+| Agent and host features work | You update it by hand (`git pull`, `uv sync`, restart) |
+
+#### 4. Docker stack with StudioForge (a local model server)
+
+Choose this when you want DisPatch and a local GPU model server (StudioForge) on one private network,
+with DisPatch's first connection already pointing at it. It needs an NVIDIA GPU and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+```bash
+git clone https://github.com/LaserLloyd/DisPatch_Chat.git
+cd DisPatch_Chat
+cp deploy/compose/stack.env.example deploy/compose/stack.env
+sed -i 's/^STACK_MODEL=.*/STACK_MODEL=your-model-id/' deploy/compose/stack.env
+P="sudo docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
+$P up -d
+$P ps
+$P logs dispatch | grep "SETUP TOKEN"
+```
+
+Replace `your-model-id` with the model you will load in StudioForge. `STACK_MODEL` is the one key to
+set; add `SF_OWNER_PASSWORD` (10 or more characters) to `stack.env` to choose the StudioForge owner
+password, otherwise one is generated into `/data/owner-password.initial` on its volume. Put your GGUF
+files in `deploy/compose/models/`, load one at <http://localhost:8080>, and give the DisPatch
+connection a StudioForge key (see [docs/deploy/stack.md](docs/deploy/stack.md)). Podman, AMD and
+no-GPU variants, and the optional offline-Wikipedia profile are in the same page.
+
+| Pros | Cons |
+| --- | --- |
+| Chat and model server wired together, volumes for both | Needs an NVIDIA GPU and the container toolkit |
+| One command to start, update and stop both | Larger download; StudioForge builds its engine on first use |
+
+### macOS
+
+Not tested by us and not part of CI. Docker Desktop for Mac should run Docker method 1 as written
+(`brew install git` and `brew install --cask docker`, then the same `git clone`, `docker compose up -d`
+and `docker compose logs app | grep "SETUP TOKEN"` lines without `sudo`). The native method should work
+with `brew install git uv`, then Linux method 2 from the `git clone` line.
+
+### Add voice chat
+
+Voice is the separate [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) add-on. In Docker,
+build the image with it and ffmpeg and libopus included (about 1.7 GB, and the build takes up to five minutes), then press **Download** under Settings, Voice:
+
+```bash
+echo "VOICE=1" >> .env
+sudo docker compose up -d --build
+```
+
+On a native install, install the add-on into DisPatch's own environment and the two system programs, then
+restart DisPatch and use Settings, Voice (details: [docs/voice.md](docs/voice.md)). Run the last line from your DisPatch clone's top folder. A later `uv sync` removes a pip-installed add-on, so repeat it after one:
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg libopus0
+git clone https://github.com/LaserLloyd/DisPatch_Voice.git ~/DisPatch_Voice
+cd backend && uv pip install --python .venv/bin/python ~/DisPatch_Voice
+```
+
+### Upgrade and uninstall
+
+| Method | Upgrade | Uninstall |
+| --- | --- | --- |
+| Docker Compose | `git pull`, then `docker compose up -d --build` (or `docker compose pull && docker compose up -d` if you set `IMAGE` to a published image). The first start of a new version copies the databases to `/data/backups/<version>-<time>/` and keeps the newest 5. Roll back with `git checkout <tag>` and the same command | `docker compose down` keeps the `dispatch-data` volume; `docker compose down -v` deletes your chats |
+| Native (uv, systemd) | `git pull`, `cd backend && uv sync` (add `--frozen --no-dev` for the service), then restart | Remove the unit (`systemctl --user disable --now dispatch`) and the clone; your data stays in `~/.local/share/local-chat` |
+| Stack | Same as Docker Compose, with the `-f deploy/compose/stack.yml --env-file deploy/compose/stack.env` flags | `down` keeps the four volumes; `down -v` deletes them |
+
+Back up a Docker install with the app stopped:
+`docker run --rm -v dispatch-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/dispatch-data.tgz -C /data .`
+and restore by extracting into a fresh volume, then `chown -R 1000:1000 /data`
+([docs/deploy-docker.md](docs/deploy-docker.md)). `down -v` and `docker volume rm` are the only ways to
+lose the data by accident.
+
+### First run
+
+The wizard has six short steps: the owner account, a model server (it looks for StudioForge, LM Studio
+and Ollama, or takes an API key), voice, the family (children get a Restricted profile and the *Animal
+Friends* characters), network exposure, and a checklist. Every step is also available from the command line
+([docs/first-run.md](docs/first-run.md)). After that, everything is in the gear menu: **Connections**
+(the servers you talk to), **Bots** (characters), **All settings** (every setting, searchable, with a Basic
+and Advanced switch) and **System, Backups** ([docs/settings.md](docs/settings.md),
+[docs/connections.md](docs/connections.md), [docs/characters.md](docs/characters.md),
+[docs/backups.md](docs/backups.md)).
+
+### Ports
+
+| Port | Who | Notes |
+|---|---|---|
+| **8765** | DisPatch (this app: web UI, REST and the WebSocket) | The only port to expose. Loopback unless you say otherwise (`--host`; in Docker see the bind-address note below). |
+| 1234 | StudioForge's OpenAI-compatible gateway, or LM Studio | Where the wizard looks first. A connection to it, not something DisPatch opens. |
+| 8080 | StudioForge's control panel, or a llama.cpp server | Optional pane (`connections.studioforge_panel`). |
+| 1235 | StudioForge's watchdog sidecar (MCP and `/health`) | Published by the Docker stack (`deploy/compose/stack.yml`), not opened by DisPatch. |
+| 11434 | Ollama | Found by the wizard. |
+| 8090 | InfoForge's offline-Wikipedia server (`kiwix-serve`) | Only the `infoforge` command talks to it; see [docs/integrations.md](docs/integrations.md). |
+| 3080 | `dsh web` (the optional coding-agent pane) | Loopback only. |
+
+DisPatch never opens another port. Everything above except 8765 is somewhere you
+*connect to*.
+
+Bind address in Docker: the plain `docker-compose.yml` publishes 8765 on `0.0.0.0` by default
+(reachable from your LAN; set `BIND_ADDR=127.0.0.1` to keep it to this host), while the
+[stack](docs/deploy/stack.md) (`deploy/compose/stack.yml`) publishes every port on `127.0.0.1` by default.
 
 ## Screenshots
 
@@ -192,6 +474,33 @@ on a phone, in a few of the ten themes.
   </tr>
 </table>
 
+## What's new in 3.0
+
+- **Closed until it has an owner.** A fresh install answers only the machine it runs on until
+  an owner exists; any other machine finishes setup only with the one-time setup token printed
+  in the server log (`docker compose logs app` in Docker). An install that already has a PIN is
+  unaffected.
+- **Profiles and roles.** Owner, Admin, Member and Restricted replace "PIN or Safe Mode". Each
+  profile has its own PIN or password, budgets and session timeout, and every route declares the
+  permission it needs.
+- **One settings store.** Every user-facing setting is described once (64 documented keys, see
+  [docs/settings.md](docs/settings.md)), kept in `chats.db`, overridable by environment variable
+  and editable in **Settings, All settings** or over `GET`/`PATCH /api/settings`.
+- **Connections.** One record per model server, keys in the secret store, an actionable **Test**
+  and **Find servers**. StudioForge is recognised automatically and sent its bearer key
+  ([docs/connections.md](docs/connections.md)).
+- **Agents and tasks.** Owners and Admins publish configured agents (OpenClaw or Claude Agent);
+  people dispatch tasks with a live timeline, approvals for destructive tools, budgets and an
+  audit row ([docs/agents.md](docs/agents.md)).
+- **Backups you can trust.** Scheduled encrypted archives (AES-256-GCM), a restore that checks
+  first, and an automatic backup plus `--dry-run` before any database migration
+  ([docs/backups.md](docs/backups.md)).
+- **A Docker stack.** `deploy/compose/stack.yml` runs DisPatch with StudioForge, and optionally
+  InfoForge, on one private network ([docs/deploy/stack.md](docs/deploy/stack.md)).
+- **The first-run wizard and settings are driveable over the API** (`/api/wizard/*`,
+  `/api/people*`, `/api/settings`), and the backend now runs on native Windows. The full list,
+  with the breaking changes, is in [CHANGELOG.md](CHANGELOG.md).
+
 ## What's new in 2.3
 
 - **A default bot that just needs a key.** Atlas is the new first bot: a direct-API
@@ -251,11 +560,12 @@ bot at a model provider's API directly. The agent path is still what you want
 if you need a thing that can *use tools and act on the machine*, and it is
 still the one that has to run on the same host.
 
-It is also **single-account today**. One PIN, one shared view of everything.
-Per-person accounts with separate identities, roles and per-conversation access
-are designed in detail and not built — the design is in
-[docs/design/multi-user.md](docs/design/multi-user.md), including the migration
-that keeps an existing install's history.
+Since 3.0 it has **accounts**: an Owner, Admins, Members and Restricted profiles,
+enforced on the server for every route. Conversations are still one shared
+household space (no per-person threads yet); roles decide what each person can
+*do* and which characters they can reach. The design and what is built are in
+[docs/design/multi-user.md](docs/design/multi-user.md); the upgrade that keeps an
+existing install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to-30).
 
 ## Features
 
@@ -291,13 +601,15 @@ that keeps an existing install's history.
   ([docs/extensions.md](docs/extensions.md))
 
 **Access control**
-- A PIN unlocks full access; sessions idle-expire, and a device can be trusted
-  for a sliding window if you choose
-- A **limited tier** that can read and send without the PIN — for a family
-  tablet on the kitchen counter — restricted to the conversations you allow,
-  with all media stripped server-side and daily per-device budgets
-- **One-way file drop**: a locked device can send you a file without being able
-  to browse or retrieve anything
+- **Profiles and roles**: an Owner, Admins (password), Members (own PIN) and
+  Restricted profiles; sessions idle-expire per role, and a device can be bound to
+  a profile or remembered for a sliding window if you choose
+- A **Restricted** profile — a family tablet on the kitchen counter, a child, a
+  guest — can read and send to the characters made for it, with all media stripped
+  server-side, daily per-profile budgets and time limits; every management route
+  and WebSocket action declares the permission it needs and answers 403 otherwise
+- **One-way file drop**: a Restricted device can send you a file without being
+  able to browse or retrieve anything
 
 **Operations**
 - Built-in **host dashboard**: health, storage, database integrity, backup
@@ -330,9 +642,15 @@ that keeps an existing install's history.
   in-flight table plus a transcript sweep make sure an accepted run's reply
   lands even after a dropped socket or a restart. The CLI and the transcripts
   are host-filesystem operations, so *that* backend has to live on the same
-  machine — the seam that would make an agent
-  runtime on another host pluggable is designed and not built
-  ([docs/design/agent-backend.md](docs/design/agent-backend.md))
+  machine. Underneath it now sits an `AgentBackend` interface, and a second
+  backend, the **Claude Agent** (Anthropic API key or Bedrock, Google Cloud,
+  Foundry credentials), has no such constraint
+  ([docs/agents.md](docs/agents.md))
+- **Agents and tasks**: an Owner or Admin publishes configured agents to
+  profiles; people assign them tasks from any chat (or `@agent`), watch a live
+  timeline, answer approval cards (destructive tools always ask), steer or stop
+  them, and see costs labelled as estimates, under per-person daily limits. A
+  Restricted profile never sees any of it
 - Agents reply into threads like any other participant, and can push proactive
   messages (a morning briefing, a finished job, an alert)
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with
@@ -402,59 +720,34 @@ thorough job, and it would tell you cheerfully when it was finished. Nothing in
 that request looks different to an agent from "summarise this email", and by the
 time you read the message the ducks are live.
 
-So the two tiers are not about keeping the family out of the chat. They are
-about which half of the app is behind a door:
+So roles are not about keeping the family out of the chat. They are about which
+half of the app is behind a door:
 
 <div align="center">
   <img src="docs/assets/tiers.svg" width="100%"
-       alt="Both tiers funnel through one server-side gate. A kitchen tablet with no PIN reaches Safe Mode: read and send to safe characters only, media stripped server-side, a one-way file drop, daily per-device budgets, and 403 on every mutating endpoint. A phone with the PIN entered reaches everything: full-power agents, files, settings, deletion, the host dashboard, the tools and the coding pane." />
+       alt="Every role funnels through one server-side gate. A kitchen tablet on a Restricted profile reads and sends to the characters made for it only, media stripped server-side, a one-way file drop, daily per-profile budgets, and 403 on every management route. The Owner's phone, signed in, reaches everything: agents, files, settings, deletion, the host dashboard and the tools." />
 </div>
 
-**Safe Mode — no PIN.** What a kitchen tablet or a kid's phone gets. Read and
-send, but only to the characters you marked safe, with media stripped
-server-side, per-device daily budgets, and a one-way file drop (they can send
-you a file; they cannot browse or retrieve anything). Every mutating endpoint
-answers 403. The app does not even hint that it unlocks.
+**Restricted** (formerly "Safe Mode") — what a kitchen tablet or a child's profile
+gets, signed in or not. Read and send, but only to the characters whose audience
+is *Restricted* or *Everyone*, with media stripped server-side, per-profile daily
+budgets, time limits and quiet hours, and a one-way file drop (they can send you a
+file; they cannot browse or retrieve anything). Every management endpoint answers
+403, and the Owner sees a summary of what the profile did (counts, not content).
 
-**Unlocked — with the PIN.** Everything: the full-power agents, files, settings,
-deletion, the host dashboard, and the DeepSeek Harness pane (when `dsh` is
-installed) if you turned it on.
+**Member, Admin, Owner** — progressively more. A Member chats, uses voice, images
+and the tools you enabled. An Admin also manages characters, connections, plugins
+and the other profiles. The Owner (formerly "Unlocked") also holds host control:
+the full-power agents, files, wipe and export, the host dashboard, and the
+DeepSeek Harness pane (when `dsh` is installed) if you turned it on. Running an
+agent on the host is its own permission (`dispatch_agents`).
 
-The split is enforced on the server, not in the interface — a locked device that
-crafts the request by hand gets the same 403 as one that presses the button.
-That is the invariant to protect if you contribute: new endpoints inherit the
-gate, and a permission problem is never fixed by loosening it.
-
-## Run it in Docker
-
-```bash
-git clone https://github.com/LaserLloyd/DisPatch_Chat.git
-cd DisPatch_Chat
-cp .env.example .env          # optional: every setting in it has a working default
-docker compose up -d
-```
-
-If you forked, or are running your own copy, one line repoints every reference
-in the tree at your own fork — image labels, the in-app source link, issue links:
-
-```bash
-grep -rlE 'LaserLloyd/DisPatch_Chat|ghcr.io/laserlloyd/' --exclude-dir=.git . \
-  | xargs sed -i -e 's|LaserLloyd/DisPatch_Chat|myuser/DisPatch_Chat|g' -e 's|ghcr.io/laserlloyd/|ghcr.io/myuser/|g'
-```
-
-There is no secret to generate and no required setting. An empty `.env` starts a
-usable server; it builds the image from the checkout — no registry account
-needed — and the file is where you put a data path, a port, or an agent backend
-when you want one.
-
-Open <http://localhost:8765>, then set a PIN under **Settings → Security**.
-Do it now: **the compose file publishes the port on `0.0.0.0`**, so until you
-set a PIN, everyone on your network has full access. Set `BIND_ADDR=127.0.0.1`
-in `.env` if you would rather it were this machine only while you look around.
-(A bare `uvicorn` process with no container is the other way round — it binds
-loopback unless you tell it not to.)
-
-Not using Docker? See [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
+The split is enforced on the server, not in the interface — a Restricted device
+that crafts the request by hand gets the same 403 as one that presses the button.
+That is the invariant to protect if you contribute: every route and WebSocket
+action declares the permission it needs in `backend/app/route_policy.py`, a test
+fails the build if one does not, and a permission problem is never fixed by
+loosening it. The generated reference is [docs/contracts/](docs/contracts/).
 
 ## Bring your own AI
 
@@ -480,12 +773,13 @@ and most corporate gateways work too.
 
 Two honest caveats:
 
-- **Your key is stored in `config.yaml` in the data directory.** Every writer
-  chmods that file to `0600`, so other users on the box cannot read it — but it
-  is not encrypted, and anyone with your account, root, or a copy of your
-  backups has it. If you would rather it were not on disk at all, name an
-  environment variable instead and DisPatch reads the key from there; the
-  environment always wins over the file.
+- **Your key is stored once, in the secret store** — the OS keyring when there
+  is one, else a `0600` file under the data directory (`agents/secrets.json`);
+  never in `config.yaml` (3.0 moves any key it finds there). Other users on the
+  box cannot read it, but it is not encrypted on disk, and anyone with your
+  account, root, or a copy of your backups has it. If you would rather it were
+  not on disk at all, name an environment variable instead and DisPatch reads
+  the key from there; the environment always wins over the store.
 - **A direct-API bot is an assistant, not an agent.** Its lookups only read
   (search, weather, a page, and so on); it cannot touch files or run anything
   on your machine. For that you want an
@@ -500,7 +794,7 @@ Full setup notes, per provider: [docs/llm-providers.md](docs/llm-providers.md).
 |---|---|---|
 | Docker / Compose | [docs/deploy-docker.md](docs/deploy-docker.md) | Recommended. amd64 + arm64 |
 | Raspberry Pi | [docs/deploy-raspberry-pi.md](docs/deploy-raspberry-pi.md) | Pi 4/5. Read the SD-card section |
-| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Docker Desktop or WSL2 |
+| Windows | [docs/deploy-windows.md](docs/deploy-windows.md) | Native (`uv sync` + `uv run uvicorn`, see Install), or Docker Desktop / WSL2 for a 24/7 service |
 | Bare Linux | [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md) | systemd unit, system or user |
 
 ### Reaching it from outside your house
@@ -533,9 +827,10 @@ of what you are trusting:
   history and hands text to agent backends. Transport is TLS; storage is your
   filesystem. Anyone claiming otherwise about an app shaped like this is
   selling something.
-- **It is currently single-account, not multi-user.** One PIN grants full
-  access; there are no per-person accounts yet. Everyone who unlocks sees
-  everything. See the roadmap below.
+- **Accounts are roles, not walls.** Members share the household's conversations;
+  there is no per-person thread ownership yet, and an agent-backed character runs
+  with your user's rights on the host (hence the separate `dispatch_agents`
+  permission). See [docs/security.md](docs/security.md).
 - **Privacy mode** lets a device hold nothing locally: no offline cache, no
   saved settings, no persistent session. See
   [docs/security.md](docs/security.md#privacy-mode).
@@ -547,7 +842,7 @@ Everything lives in one directory (`~/.local/share/local-chat` by default,
 
 ```
 data/
-├── chats.db                      # SQLite — messages, threads, users, sessions
+├── chats.db                      # SQLite — messages, threads, profiles, devices, sessions, settings, agents
 ├── media/                        # inline images and video
 ├── files/                        # file-server attachments
 ├── avatars/                      # avatar pools drawn by new threads
@@ -569,9 +864,13 @@ transmitted off the machine unless you configure an agent backend that does so.
 ```bash
 cd backend
 uv sync                 # Python 3.12+
-uv run pytest           # the test suite
+uv run pytest           # the test suite (on Linux, or in WSL on Windows)
 uv run uvicorn app.main:app --reload --port 8765
 ```
+
+The full backend suite runs on Linux (use WSL on Windows). Native Windows runs a subset: everything collects and
+`-k` or a file path works (`uv run pytest tests/test_route_table.py -q`), but 136 tests fail on a Windows host at
+3.0.0 because they depend on POSIX file modes, `/tmp` and process groups. See [docs/development.md](docs/development.md#windows).
 
 The frontend has **no build step** — it is ES modules and CSS served as-is.
 Edit a file, reload the page. Cache busting is two moves, not one: bump the
@@ -582,24 +881,24 @@ Before opening a pull request:
 
 ```bash
 python3 scripts/scrub_check.py      # no private data may enter the repo
-python3 scripts/check-locales.py    # translations complete, consistent and safe
-cd backend && uv run pytest -q
+uv run --python 3.12 python scripts/check-locales.py   # translations complete, consistent and safe (needs Python 3.12+)
+cd backend && uv run pytest -q     # Linux or WSL; on native Windows run a subset (see above)
 ```
 
 ## Roadmap
 
-Designed in detail and not yet built. Both designs are in the repository because
-they are the next things to happen and are worth reviewing before they are:
+3.0 shipped the first half of [the multi-user design](docs/design/multi-user.md):
+profiles, roles, per-profile budgets and the migration that preserves an existing
+install's history. Designed in detail and not yet built:
 
-- **[Per-person accounts](docs/design/multi-user.md)** — real users, roles, and
-  per-conversation access, replacing the single shared PIN. Includes the
-  migration that preserves an existing install's history.
-- **[Password + TOTP, and passkeys](docs/design/remote-access-and-auth.md)** —
-  proper authentication with recovery codes, plus the honest account of where
-  passkeys help and where they cause self-hosting pain.
-
-Until those land, treat DisPatch as a private chat for one household with one
-shared credential. That is what it is today, and it is good at it.
+- **Per-conversation access** — today conversations are one shared household
+  space; roles gate actions and characters, not individual threads
+  ([docs/design/multi-user.md](docs/design/multi-user.md), "deferred").
+- **TOTP and passkeys** ([docs/design/remote-access-and-auth.md](docs/design/remote-access-and-auth.md))
+  — a second factor and the honest account of where passkeys help and where they
+  cause self-hosting pain. Passwords, PINs and recovery codes exist today.
+- **Agents**: Claude Managed Agents (hosted sessions), the generic CLI adapter and
+  scheduled tasks ([docs/agents.md](docs/agents.md), "Known limits").
 
 ## Translating
 

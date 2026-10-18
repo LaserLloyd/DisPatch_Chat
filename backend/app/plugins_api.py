@@ -13,6 +13,12 @@ Contract: docs/design/platform-2-3.md section 3. Three routes, all operator-only
   * ``PUT  /api/plugins/livetools`` -- ``{enabled}`` -> tools.yaml
     ``livetools: {enabled}``. Effective at once: ``tools.livetools_enabled()`` is
     what the advisor consults before offering any tool.
+  * ``GET  /api/plugins/manifests`` -- (3.0) every extension, app and page/URL tool as one
+    Tool manifest, with the permissions it requests (``tool_manifests.py``).
+
+Turning on a plugin that asks for permissions and was not running at the 3.0 upgrade needs
+``{"enabled": true, "approve": [<the permissions it requests>]}``; without it the answer is a 409
+``plugin_needs_approval`` listing them. ``manage_plugins`` is required for all of it.
 
 The module does not import ``main`` (main includes this router).
 """
@@ -24,9 +30,10 @@ import os
 import tempfile
 
 import yaml
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-from . import config, extensions, livetools, tools
+from . import accounts, config, extensions, livetools, policy, tool_manifests, tools
 
 log = logging.getLogger("local-chat.plugins")
 
@@ -81,8 +88,15 @@ def api_plugins(_=_gate):
     }
 
 
+@router.get("/api/plugins/manifests")
+def api_plugin_manifests(_=_gate):
+    """Every plugin as a Tool manifest, with the permissions it requests and whether they were approved."""
+    return {"manifests": tool_manifests.list_manifests(),
+            "permission_labels": tool_manifests.PERMISSION_LABELS}
+
+
 def _enabled_flag(payload) -> bool:
-    if not isinstance(payload, dict) or set(payload) != {"enabled"} \
+    if not isinstance(payload, dict) or not (set(payload) == {"enabled"} or set(payload) == {"enabled", "approve"}) \
             or not isinstance(payload["enabled"], bool):
         raise HTTPException(422, "body must be {enabled: true|false}")
     return payload["enabled"]
@@ -94,7 +108,7 @@ def _write_off_list(ids: list[str]) -> None:
     text = yaml.safe_dump({"disabled": sorted(set(ids))}, sort_keys=False)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{extensions.USER_OFF_FILE}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -111,7 +125,7 @@ def _read_off_list_strict() -> set[str]:
     boot; a WRITE must not turn that into a file that drops every other id."""
     path = config.DATA_DIR / extensions.USER_OFF_FILE
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return set()
     except OSError as e:
@@ -131,10 +145,28 @@ def _read_off_list_strict() -> set[str]:
 
 
 @router.put("/api/plugins/extensions/{ext_id}")
-def api_plugin_extension(ext_id: str, payload: dict = Body(...), _=_gate):
+def api_plugin_extension(request: Request, ext_id: str, payload: dict = Body(...), _=_gate):
     enabled = _enabled_flag(payload)
     if not extensions.ID_RE.match(ext_id) or not any(e.id == ext_id for e in extensions.registry()):
         raise HTTPException(404, "No such extension")
+    approve = payload.get("approve")
+    if approve is not None and (not isinstance(approve, list) or not all(isinstance(a, str) for a in approve)):
+        raise HTTPException(422, "approve must be the list of permissions you reviewed")
+    if enabled:
+        try:
+            tool_manifests.check_enable(ext_id, approve)
+        except tool_manifests.PluginError as e:
+            body = {"detail": str(e), "error": {"code": e.code, "message": str(e),
+                    "fix": "Review the permissions, then enable it again with approve set to that list.",
+                    "docs": e.code}, **e.extra}
+            return JSONResponse(body, status_code=e.status)
+        row = tool_manifests.get_manifest(ext_id)
+        if row is not None and not row["approved"] and row["manifest"]["permissions_requested"]:
+            who = policy.of(request).principal.profile_id
+            tool_manifests.approve(ext_id, row["manifest"]["permissions_requested"], by=who or "")
+            accounts.log_activity("plugin.approve", profile_id=who, subject=ext_id,
+                                  detail=",".join(row["manifest"]["permissions_requested"])[:280],
+                                  category="audit")
     try:
         off = _read_off_list_strict()
     except ValueError as e:

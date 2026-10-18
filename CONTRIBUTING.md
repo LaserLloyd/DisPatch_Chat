@@ -176,7 +176,7 @@ not saying so first.
 ```bash
 cd backend
 uv sync
-uv run pytest              # 800+ tests, about a minute
+uv run pytest              # ~3,500 tests, 25-30 minutes on Linux (docs/development.md)
 uv run uvicorn app.main:app --reload --port 8765
 ```
 

@@ -29,6 +29,19 @@
 
 
 # ---------------------------------------------------------------------------
+#  Stage 0: the voice add-on's source, when the build is given a local copy
+# ---------------------------------------------------------------------------
+# EMPTY unless the build passes a named context (VOICE=1 only):
+#   docker build --build-arg VOICE=1 --build-arg VOICE_SRC=local \
+#       --build-context voice-src=/path/to/DisPatch_Voice .
+# That installs the add-on from a directory instead of GitHub: CI, an air-gapped
+# build, a branch that is not pushed yet. Pass a clean export (`git archive HEAD`),
+# not a working tree with a .venv and node_modules in it: the whole directory is
+# sent to the builder.
+FROM scratch AS voice-src
+
+
+# ---------------------------------------------------------------------------
 #  Stage 1: builder — resolve and install dependencies into /app/.venv
 # ---------------------------------------------------------------------------
 FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS builder
@@ -86,17 +99,35 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # --- Optional: voice chat (the DisPatch Voice add-on, MIT) -----------------
 # `docker compose build --build-arg VOICE=1`. AFTER the `uv sync` above, which
-# is exact and would remove it again. Installed from the release archive of
-# the add-on's moving `v1` tag (the latest 1.x), so the builder needs no git;
-# pin another release with `--build-arg VOICE_REF=v1.0.0`. The speech models
-# are NOT baked in: fetch them into the data volume once with
-# `docker compose exec app dispatch-voice fetch-models` (docs/extensions.md).
+# is exact and would remove it again. The speech models are NOT baked in: the
+# add-on's own page (Settings -> Voice) downloads them into the data volume with
+# a progress bar and Cancel. ffmpeg and libopus, which the add-on shells out to,
+# are installed in the runtime stage below.
+#
+# Which source (VOICE_SRC):
+#   github (default)  the archive of VOICE_REF on GitHub; the builder needs no git.
+#   local             the directory passed as `--build-context voice-src=<dir>`.
+# VOICE_REF is a full ref (`refs/heads/<branch>`, `refs/tags/<tag>`) or a bare tag
+# name. It defaults to the 3.0 refactor branch of the add-on, which carries the
+# 1.6.0 line (one models folder, the host credential store, settings schema). The
+# moving tag `v1` still names 1.5.0.
+#   TODO(release): when 1.6.0 is tagged, default this to `refs/tags/v1.6.0`
+#   (or `v1` once that tag moves). Move it together with js/voice-absent.js VOICE_TAG.
 ARG VOICE=0
-ARG VOICE_REF=v1
+ARG VOICE_SRC=github
+ARG VOICE_REF=refs/heads/refactor/prosumer-2026
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,from=voice-src,target=/voice-src \
+    set -eu; \
     if [ "$VOICE" = "1" ]; then \
-      uv pip install --python /app/.venv/bin/python \
-        "dispatch-voice @ https://github.com/LaserLloyd/DisPatch_Voice/archive/refs/tags/${VOICE_REF}.tar.gz"; \
+      if [ "$VOICE_SRC" = "local" ]; then \
+        [ -f /voice-src/pyproject.toml ] || { echo "VOICE_SRC=local needs --build-context voice-src=<DisPatch_Voice checkout>"; exit 1; }; \
+        uv pip install --python /app/.venv/bin/python /voice-src; \
+      else \
+        case "$VOICE_REF" in refs/*) ref="$VOICE_REF" ;; *) ref="refs/tags/$VOICE_REF" ;; esac; \
+        uv pip install --python /app/.venv/bin/python \
+          "dispatch-voice @ https://github.com/LaserLloyd/DisPatch_Voice/archive/${ref}.tar.gz"; \
+      fi; \
     fi
 
 # Strip caches the previous layers created. Saves ~10-20 MB and, more usefully,
@@ -140,8 +171,16 @@ LABEL org.opencontainers.image.title="DisPatch Chat" \
 # util-linux (setpriv) and passwd (usermod/groupmod) are Essential in Debian
 # and already present — verified, not assumed — which is why the entrypoint
 # can drop privileges without vendoring gosu.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata ca-certificates \
+#   `ffmpeg` and `libopus0` ONLY when built with VOICE=1: the voice add-on decodes
+#           the clip you upload to clone a voice with ffmpeg, and its low-bandwidth
+#           link uses the Opus codec through libopus. Without them cloning fails and
+#           the link stays on raw PCM (Settings -> Voice says which, with the fix).
+ARG VOICE=0
+RUN set -eu; \
+    extra=""; \
+    if [ "$VOICE" = "1" ]; then extra="ffmpeg libopus0"; fi; \
+    apt-get update \
+ && apt-get install -y --no-install-recommends tzdata ca-certificates $extra \
  && rm -rf /var/lib/apt/lists/*
 
 # --- Non-root user ---------------------------------------------------------
@@ -158,6 +197,13 @@ COPY --from=builder --chown=app:app /app/.venv   /app/.venv
 COPY --from=builder --chown=app:app /app/backend /app/backend
 COPY --from=builder --chown=app:app /app/frontend /app/frontend
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# .gitattributes pins `*.sh` to LF (`text eol=lf`), so a checkout on Windows
+# (core.autocrlf=true) no longer hands the build a CRLF script. This guard stays: a
+# CRLF shebang ("#!/bin/sh\r") only shows up at container start as
+# "exec /usr/local/bin/docker-entrypoint.sh: no such file or directory", so a build
+# from a copy that bypassed git (a hand-made archive) fails HERE, with the reason.
+RUN head -n1 /usr/local/bin/docker-entrypoint.sh | grep -qx '#!/bin/sh' \
+ || { echo "docker-entrypoint.sh has CRLF line endings; check out with .gitattributes (*.sh text eol=lf)"; exit 1; }
 
 # Putting the venv's bin first is what lets us call `uvicorn` with no wrapper.
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -175,7 +221,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 ENV LOCAL_CHAT_DATA_DIR=/data \
     LOCAL_CHAT_HOST=0.0.0.0 \
     LOCAL_CHAT_PORT=8765 \
-    TMPDIR=/data/tmp
+    TMPDIR=/data/tmp \
+    DISPATCH_IMAGE_VERSION=${VERSION}
 
 # NOTE ON AVATARS: uploaded avatars are user data and are stored in the data
 # directory (/data/avatars), so the data volume already carries them and no

@@ -224,7 +224,9 @@ def test_context_paths_and_state_dir(ext_env):
     assert p.voice_yaml == tmp / "voice.yaml" and p.acks_yaml == tmp / "voice-acks.yaml"
     assert p.voices_dir == tmp / "voices" and p.cache_dir == tmp / "voice-cache"
     assert p.state_dir == tmp / "ext" / "voice" and p.state_dir.is_dir()
-    assert stat.S_IMODE(p.state_dir.stat().st_mode) == 0o700
+    if os.name != "nt":                      # a Windows folder has no mode bits (fsperm sets an ACL)
+        assert stat.S_IMODE(p.state_dir.stat().st_mode) == 0o700
+    assert p.models_dir == tmp / "models"    # 3.0: was <data>/speech-models
     assert not hasattr(KNOBS.ctx, "data_dir") and not hasattr(KNOBS.ctx, "config")
 
 
@@ -418,8 +420,9 @@ def test_extension_routes_are_operator_only(ext_env):
     assert main._decoy_blocked("GET", "/api/voice/status")
     assert not main._decoy_blocked("GET", "/api/extensions")
     assert not main._decoy_blocked("GET", "/ext/voice/index.js")
-    assert main._decoy_blocked("POST", "/api/extensions")
-    assert main._decoy_blocked("POST", "/ext/voice/index.js")
+    # (A write to those two paths is refused for everyone: there is no such route.)
+    assert c.post("/api/extensions", json={}).status_code in (401, 405)
+    assert c.post("/ext/voice/index.js", json={}).status_code in (401, 405)
     assert not main._is_inbound("GET", "/api/voice/status")
     assert main._is_inbound("GET", "/api/extensions")
     unlock(c)

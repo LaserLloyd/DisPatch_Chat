@@ -10,6 +10,13 @@ Two places, with a clear split:
 
 Credentials live in neither. They are set through the app and stored hashed.
 
+**3.0: every setting is described once.** [settings.md](settings.md) lists every setting - key,
+type, default, range, whether it needs a restart, and the environment variable that overrides it - and
+Settings -> **All settings** draws the same list, searchable, with a Basic / Advanced switch. Values live in the
+`settings` table of `chats.db`; an environment variable still wins and the page shows *Set by environment*.
+Provider keys are kept by [connections](connections.md), not in `config.yaml`. The rest of this page is still the
+reference for what each variable does.
+
 ## Where your data lives
 
 ```
@@ -30,11 +37,11 @@ delete it and DisPatch Chat starts fresh. There is no hidden state elsewhere.
 
 ```
 data/
-├── chats.db             # SQLite (WAL): messages, threads, users, sessions
+├── chats.db             # SQLite (WAL): messages, threads, profiles, settings, connections
 ├── chats.db-wal         # write-ahead log; folded in on clean shutdown
 ├── media/               # inline images and video
 ├── files/               # file-server attachments
-├── backups/             # rotating snapshots, integrity-checked
+├── backups/             # rotating snapshots, encrypted archives, pre-upgrade copies (docs/backups.md)
 ├── logs/
 ├── config.yaml          # bot roster (hot-reloaded)
 └── .instance.lock       # single-process guard; ignore it
@@ -74,9 +81,9 @@ DISPATCH_FILES_TOTAL_MAX=21474836480    # bytes; 20 GiB, the default. 0 disables
 
 The per-file ceiling is fixed at 4 GiB and is not configurable.
 
-Daily per-device budgets for the limited (no-password) tier. These are
-availability guards — they bound what an unauthenticated device on your network
-can spend:
+Daily budgets for **Restricted** callers (the signed-out view, and any Restricted
+profile that has no value of its own). These are availability guards — they bound
+what a device on your network can spend:
 
 ```
 DISPATCH_DECOY_UPLOAD_QUOTA=209715200   # bytes uploaded per day
@@ -86,8 +93,20 @@ DISPATCH_DECOY_FEEDBACK_QUOTA=100       # thumbs-feedback votes cast
 ```
 
 The message budget is the one to think about: each message to a bot spawns an
-agent turn, which may cost real money. In-memory by design — they reset on
-restart, which is fine for a coarse guard.
+agent turn, which may cost real money. Since 3.0 the counters live in `chats.db`
+(they survive a restart) and are charged to the **profile** when a Restricted
+profile is signed in or its device is bound, and to the client address only for an
+anonymous device. A profile's own numbers (Settings → People & Profiles → budgets:
+messages, conversations, ratings, upload MB, minutes per day, quiet hours)
+override these defaults. Counts reset at local midnight.
+
+Access settings (environment; `security.yaml` keys are in [security.md](security.md)):
+
+```
+DISPATCH_ALLOW_OPEN_INSTALL=0   # 1 = keep the 2.x "open to the LAN until a PIN is set" behaviour
+DISPATCH_ARGON2_MEMORY_KIB=19456  # tests only: lower the PIN/password hash cost
+DISPATCH_ARGON2_PASSES=2          # tests only
+```
 
 ## Agents
 
@@ -156,12 +175,22 @@ bots:
     emoji: "✨"
     avatar: assistant.png
     order: 0
-    safe: false          # "Show locked": true = also on Safe-Mode (no PIN) devices
-    hide_unlocked: false # "Show unlocked" off: true = kept off unlocked devices' rail
+    audience: members    # who it is for: all | members | restricted (3.0)
+    safe: false          # legacy: true = reachable by Restricted profiles
+    hide_unlocked: false # legacy: true = kept off the Owner's/Members' rail
 ```
 
-Where a bot shows is two independent switches (Settings → Bots, 2.4.2):
-**Show locked** (`safe`) and **Show unlocked** (`hide_unlocked: false`). With
+`audience` (3.0) says who a character is for: `all`, `members` (signed-in Members,
+Admins and the Owner; never a Restricted profile) or `restricted` (made for Restricted
+profiles; kept off the Owner's rail by default). The two legacy flags are still read
+and written for one release and always agree with it when this app writes the file
+(`restricted` = `safe` + `hide_unlocked`, `all` = `safe`, `members` = neither). If a
+hand edit makes them disagree, the more restrictive reading wins. `python -m
+app.migrate` adds `audience` to an existing roster.
+
+Where a bot shows is two independent switches (Settings → Bots, 2.4.2): **Show to
+Restricted profiles** (`safe`, was "Show locked") and **Show on the Owner's rail**
+(`hide_unlocked: false`, was "Show unlocked"). With
 neither on, the bot is shown on no device — it stays on the roster, the Bots tab
 lists it dimmed as *Hidden*, and its chats still open by link on an unlocked
 device. An unlocked device can bring back every bot with Show unlocked off via

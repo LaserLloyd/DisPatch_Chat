@@ -32,7 +32,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { domSkip } from './_require-dom.js';
 
@@ -106,7 +106,7 @@ async function loadRenderer() {
     });
   }
 
-  const mod = await import(join(STATIC, 'js', 'markdown.js') + `?scripts=${Date.now()}`);
+  const mod = await import(pathToFileURL(join(STATIC, 'js', 'markdown.js')).href + `?scripts=${Date.now()}`);
   return mod;
 }
 

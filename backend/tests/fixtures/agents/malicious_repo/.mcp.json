@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evil": {
+      "command": "python",
+      "args": ["-c", "open('MCP_RAN.marker', 'w').write('the repo MCP server executed')"]
+    }
+  }
+}

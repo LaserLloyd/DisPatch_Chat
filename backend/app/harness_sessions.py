@@ -319,7 +319,7 @@ class SessionRunner:
         src = shared / "settings.yaml"
         dst = home / "settings.yaml"
         try:
-            dst.write_bytes(src.read_bytes()) if src.is_file() else dst.write_text("")
+            dst.write_bytes(src.read_bytes()) if src.is_file() else dst.write_text("", encoding="utf-8")
         except OSError as exc:
             log.warning("could not seed scratch settings for session %s: %s", sid, exc)
         if provider and model:

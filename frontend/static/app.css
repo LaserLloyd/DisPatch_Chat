@@ -4766,3 +4766,138 @@ body.tools-sheet-open::after {
 .cat-links { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; font-size: 13px; }
 .cat-note { color: var(--text-muted); }
 @media (max-width: 480px) { .cat-grid { grid-template-columns: 1fr; } }
+
+/* ===================== 3.0 profiles, roles and policy =====================
+   Sign-in tiles, first-run setup, the Restricted strip, the rail chip and
+   Settings -> People & Profiles. Tokens only (no colour literals), so every
+   palette applies; focus rings come from the global :focus-visible rule. */
+
+/* ---- Lock screen: tiles instead of the keypad ---- */
+.lock-tiles { width: min(420px, 86vw); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.lock-screen.lock-mode-tiles .lock-dots,
+.lock-screen.lock-mode-tiles .keypad,
+.lock-screen.lock-mode-tiles .lock-submit { display: none; }
+.lock-screen.lock-mode-tiles .lock-card { width: min(440px, 100%); max-width: none; }
+.signin-prompt { margin: 0; color: var(--text-secondary); font-size: 13px; text-align: center; }
+.signin-tiles { list-style: none; margin: 0; padding: 0; width: 100%;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.signin-tile { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 6px; min-height: 44px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--bg-tertiary); color: var(--text-primary); }
+.signin-tile:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-hover); }
+.signin-tile:disabled { opacity: .55; cursor: wait; }
+.signin-tile[aria-current="true"] { border-color: var(--accent); }
+.signin-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-size: 22px; font-weight: 600; }
+.signin-name { font-size: 14px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.signin-role { font-size: 12px; color: var(--text-secondary); }
+.signin-form { display: flex; flex-direction: column; gap: 10px; width: min(300px, 100%); align-items: stretch; }
+.signin-who { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.signin-field input { width: 100%; }
+.signin-toggle { align-self: center; }
+.signin-wait { text-align: center; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.signin-go { width: 100%; }
+.signin-back { width: 100%; }
+
+/* ---- First-run setup + the account block in Settings -> Security ---- */
+.setup-card { width: min(420px, 100%); max-width: none; align-items: stretch; text-align: start; }
+.setup-card h2, .setup-card .lock-sub, .setup-card .lock-emoji { text-align: center; align-self: center; }
+.setup-form { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 8px; }
+.setup-field input { width: 100%; }
+.setup-actions { justify-content: flex-start; flex-wrap: wrap; }
+.sec-account { border-bottom: 1px solid var(--border-strong); padding-bottom: 14px; }
+.sec-account[hidden] { display: none; }
+.sec-account h3 { font-size: 14px; margin: 0; }
+.sec-account .muted { margin: 0; font-size: 12.5px; }
+.sec-prompt { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--accent);
+  border-radius: var(--radius-md); background: var(--accent-wash); }
+.firstrun-card { position: fixed; inset-inline-end: 16px; bottom: 16px; z-index: 300; width: min(340px, calc(100vw - 32px));
+  padding: 14px 16px; border: 1px solid var(--accent); border-radius: var(--radius-lg);
+  background: var(--bg-secondary); color: var(--text-primary); box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.firstrun-card p { margin: 6px 0 10px; font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
+@media (max-width: 768px) { .firstrun-card { bottom: calc(68px + env(safe-area-inset-bottom)); inset-inline-end: 16px; } }
+
+/* ---- Restricted strip + panel ---- */
+.restricted-banner { position: relative; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 4px 10px; padding: 6px 16px; font-size: 12.5px; line-height: 1.4; text-align: center;
+  background: var(--bg-tertiary); color: var(--text-primary); border-bottom: 1px solid var(--border-strong); }
+.restricted-more { background: none; border: none; padding: 2px 4px; color: var(--accent-text); text-decoration: underline; font-size: inherit; min-height: 24px; }
+body.has-restricted-banner .app,
+body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
+@media (max-width: 768px) {
+  body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px) - 56px - env(safe-area-inset-bottom)); }
+  body.has-restricted-banner .app[data-view="bots"] .sidebar { height: calc(100dvh - var(--rb-h, 34px) - 56px - env(safe-area-inset-bottom)); }
+}
+.restricted-panel { width: min(560px, 94vw); }
+.restricted-usage { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.restricted-over { color: var(--error-text); }
+.access-card { text-align: center; align-items: center; gap: 8px; max-width: 380px; }
+.access-actions { justify-content: center; flex-wrap: wrap; }
+
+/* ---- Rail chip + menu ---- */
+.profile-chip { overflow: hidden; padding: 0; }
+.profile-chip-text { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-size: 15px; font-weight: 600; }
+.profile-chip-img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
+.profile-menu { position: fixed; inset-inline-end: auto; z-index: 320; min-width: 180px; }
+.profile-menu-head { padding: 10px 14px 6px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); }
+.profile-menu .profile-menu-item { min-height: 40px; }
+
+/* ---- Settings -> People & Profiles ---- */
+.people-row { gap: 12px; }
+.people-row-off { opacity: .7; }
+.people-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; }
+.people-avatar-text { display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 16px; }
+.people-role { display: inline-block; margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  border: 1px solid var(--border-light); color: var(--text-secondary); vertical-align: middle; }
+.people-role-owner, .people-role-admin { border-color: var(--accent); color: var(--accent-text); }
+.people-inds { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.people-disabled { color: var(--warning-text, var(--text-secondary)); font-weight: 600; }
+.people-add-row { padding: 10px 14px; }
+.people-editor { margin: 12px 18px 0; padding: 14px; border: 1px solid var(--accent); border-radius: var(--radius-md);
+  background: var(--bg-tertiary); display: block; }
+.people-editor-host:empty { display: none; }
+.people-editor-title { margin: 0 0 8px; font-size: 15px; }
+.people-form { display: flex; flex-direction: column; gap: 10px; }
+.people-field input, .people-field select { width: 100%; max-width: 360px; }
+.people-field-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+.people-group-label { font-size: 12.5px; color: var(--text-secondary); }
+.people-budgets { border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 10px 12px 12px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.people-budgets legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
+.people-quiet-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.people-quiet-row .people-field { flex: 1 1 130px; }
+.people-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
+.people-actions-extra { border-top: 1px solid var(--border-strong); padding-top: 10px; }
+.people-disabled-row { align-self: flex-start; }
+.people-error[hidden] { display: none; }
+.people-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.people-device { flex-wrap: wrap; }
+.people-device-pick select { max-width: 260px; }
+.people-subtitle { margin: 0 0 6px; font-size: 13.5px; }
+.people-table-wrap { overflow-x: auto; max-width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+.people-table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--text-primary); }
+.people-table th, .people-table td { padding: 6px 10px; border-bottom: 1px solid var(--border-strong); text-align: start; white-space: nowrap; }
+.people-table thead th { color: var(--text-secondary); font-weight: 600; font-size: 12px; }
+.people-table .people-num { text-align: end; font-variant-numeric: tabular-nums; }
+.people-table tfoot th, .people-table tfoot td { font-weight: 700; border-bottom: 0; }
+.people-caption { text-align: start; padding: 6px 10px; font-size: 12px; color: var(--text-secondary); caption-side: top; }
+.people-audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px;
+  max-height: 260px; overflow-y: auto; }
+.people-audit time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.people-audit-detail, .people-audit-sub { color: var(--text-secondary); overflow-wrap: anywhere; }
+.people-key { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.people-key-warn { margin: 0; font-size: 13px; color: var(--warning-text, var(--text-primary)); font-weight: 600; }
+.people-key-input { width: 100%; font-family: var(--font-mono); font-size: 13px; }
+.dev-group-body--block { display: block; }
+@media (max-width: 480px) {
+  .people-editor { margin-inline: 12px; }
+  .people-row-actions .btn-secondary { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-tile { transition: none; }
+}
+.bm-audience { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; }
+.bm-row--hidden .bm-audience { opacity: .45; }

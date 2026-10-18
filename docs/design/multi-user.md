@@ -7,6 +7,24 @@ accounts, ahead of a public open-source release. Written against the code as of
 [← Back to the README](../../README.md) · Companion document:
 [Remote Access & Authentication Design](remote-access-and-auth.md)
 
+> **Status (3.0.0, 2026-10-18): implemented, in part.** The access-control core of this
+> design shipped; the sharing model did not. Read the sections below as the design and
+> this block as what exists. Everything marked *shipped* is enforced on the server and
+> covered by `backend/tests/test_people_api.py`, `test_g5_access.py`, `test_route_table.py`
+> and `test_migrate.py`.
+>
+> | Design | 3.0 | Notes |
+> |---|---|---|
+> | Roles owner > admin > member > guest (§2) | **shipped**, with `guest` named **`restricted`** | The role-to-permission matrix is `backend/app/contracts/permissions.py`; generated reference `docs/contracts/permissions.json`. |
+> | `users` + `user_sessions` tables (§1.2) | **shipped as `profiles`, `devices`, `sessions`** | In `chats.db`, additive, created by `python -m app.migrate` / at startup. `profiles.pin_hash` / `password_hash` are argon2id; the Owner's PIN also stays in `security.yaml` (recovery file, 2.x binary compatibility). No `username`: profiles have a unique display name. |
+> | Retire Safe Mode into `guest` (§5) | **shipped** | Anonymous = Restricted; `safe` / `hide_unlocked` map to `audience` (`all` / `members` / `restricted`); the old flags stay readable for one release. Old -> new names: `docs/security.md`. |
+> | Per-route required permission, route-table test (§2.3, §4) | **shipped** | `backend/app/route_policy.py`, `policy.py`, `tests/test_route_table.py`; WebSocket actions too. Replaces the path deny-list and the eight operator checks. |
+> | Shared devices bound to a profile; quick switch (§4) | **shipped** | `devices.default_profile_id`, `POST /api/auth/switch`; Admin/Owner cannot be a device default. |
+> | Per-profile budgets / time limits (§5) | **shipped** | Daily counts and active minutes in `usage_daily`; quiet hours; activity summary and audit log in `activity`. |
+> | `thread_members`, ownership, sharing (§1.2, §3) | **not built** | Threads are still one shared household space; roles gate *actions* and *characters*, not individual conversations. |
+> | Per-user agent sessions (§6) | **not built** | `dispatch_agents` gates running an agent at all (W11 builds the task model). |
+> | Per-user data export / delete, OIDC | **not built** | Planned (M3). |
+
 > **Historical note (2026-08-26).** The local ComfyUI feature was removed from
 > DisPatch entirely: this box (AMD/ROCm) cannot run ComfyUI, and ClawForge on
 > the remote rig is now the only image path. Every mention below of a ComfyUI

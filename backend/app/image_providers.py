@@ -166,7 +166,7 @@ def save_config(cfg: dict) -> None:
     text = yaml.safe_dump(doc, sort_keys=False) if doc else "{}\n"
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{CONFIG_NAME}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)

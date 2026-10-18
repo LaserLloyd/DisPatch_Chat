@@ -18,6 +18,10 @@ os.environ.setdefault("DISPATCH_VOICE_PREWARM", "0")
 # start" there. Tests that exercise the marker turn it on themselves.
 os.environ.setdefault("DISPATCH_EXT_BOOT_MARKER", "0")
 
+# Connection keys and secret settings go to a 0600 file under the (per-test) data dir, never to a
+# developer's real OS keyring (app/secret_store.py).
+os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
+
 from app import config as config_module
 from app import openclaw
 
@@ -187,6 +191,24 @@ def _reuse_starter_cards(_starter_cards, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _w5_stores_start_empty(monkeypatch):
+    """Per-test isolation for the 3.0 settings / connections / secret / plugin-approval stores:
+    their schema-ready sets and caches are keyed by data directory, and the plugin settings
+    registry is process-wide. Backups use a cheap scrypt so a round trip takes milliseconds."""
+    from app import backups, connections, secret_store, settings_store, tool_manifests
+
+    def clear():
+        settings_store.reset_for_tests()
+        connections.reset_for_tests()
+        secret_store.reset_for_tests()
+        tool_manifests.reset_for_tests()
+    clear()
+    monkeypatch.setattr(backups, "SCRYPT_N", 2 ** 10)
+    yield
+    clear()
+
+
+@pytest.fixture(autouse=True)
 def _cheap_kdf(monkeypatch):
     """Drop the PIN KDF to a token cost for tests.
 
@@ -203,6 +225,47 @@ def _cheap_kdf(monkeypatch):
     monkeypatch.setattr(_auth.SecurityConfig.__dataclass_fields__["iterations"],
                         "default", 1_000)
     yield
+
+@pytest.fixture(autouse=True)
+def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
+    """Per-test isolation for the 3.0 account layer.
+
+    * argon2id at a token cost (the shipped cost is asserted in test_accounts.py);
+    * security.yaml / RECOVERY-CODE.txt / trusted-devices.yaml follow the test's tmp
+      dir unless the test chose its own - they are bound at import time, so without
+      this a test that set a PIN wrote the REAL install's security file;
+    * the profile cache, the throttle buckets, the setup token and the per-profile
+      time counters start empty;
+    * ``DISPATCH_ALLOW_OPEN_INSTALL=1``: most of the suite exercises the product with
+      no owner created, from a TestClient whose peer is not loopback. That is the 2.x
+      "open until a PIN is set" behaviour, which 3.0 keeps only behind this switch
+      (test_open_install.py turns it off to test the secure default).
+    """
+    from _tmpguard import is_disposable
+
+    from app import accounts, auth, limits
+
+    monkeypatch.setenv("DISPATCH_ARGON2_MEMORY_KIB", "8")
+    monkeypatch.setenv("DISPATCH_ARGON2_PASSES", "1")
+    monkeypatch.setenv("DISPATCH_ALLOW_OPEN_INSTALL", "1")
+    base = tmp_path / "data"
+    base.mkdir(parents=True, exist_ok=True)
+    for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
+                        ("TRUSTED_PATH", "trusted-devices.yaml")):
+        if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
+            monkeypatch.setattr(auth, name, base / fname)
+    accounts.reset_for_tests()
+    limits.reset()
+    auth._cache = None
+    auth._trusted = None
+    auth._sessions.clear()
+    auth._buckets.clear()
+    auth._fail_count = 0
+    auth._fail_until = 0.0
+    auth._setup_token = None
+    yield
+    accounts.reset_for_tests()
+
 
 # --------------------------------------------------------------------------- #
 # Tests must never touch a real directory.
@@ -357,6 +420,79 @@ def _no_hard_exit_on_failed_startup(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_ws_manager():
+    """Each test starts with an empty WebSocket manager.
+
+    `main.manager` is a process-wide singleton. TestClient-based WS tests leave
+    sockets in `_conns` (bound to a finished portal loop) and an `asyncio.Lock`
+    that was contended on that loop, and three suites replace
+    `manager.broadcast` for good, so a later test's broadcast stalled or
+    dropped frames: tests/test_ws_profile_visibility.py passed alone and failed
+    after tests/test_m*..test_o* (review item N-22). Observers are kept: the
+    extension host registers its own at import time.
+    """
+    import asyncio
+
+    from app import main as _main
+    mgr = _main.manager
+
+    def _reset() -> None:
+        # test_mirror / test_media_dedup / test_recovery stub the singleton with
+        # `main.manager.broadcast = _noop` and never undo it; every later test
+        # then broadcast into the void (the real cause of N-22). Drop any
+        # instance-level override so the class method is back.
+        mgr.__dict__.pop("broadcast", None)
+        mgr.__dict__.pop("broadcast_where", None)
+        # A test may have monkeypatched these to something else on purpose
+        # (test_dashboard swaps _conns for a string); its own monkeypatch undo
+        # restores the real one, so only touch real containers here.
+        if isinstance(getattr(mgr, "_conns", None), dict):
+            mgr._conns.clear()
+        if isinstance(getattr(mgr, "_lock", None), asyncio.Lock):
+            mgr._lock = asyncio.Lock()
+
+    _reset()
+    yield
+    _reset()
+
+
+#: The fixed ports of the owner's live services (StudioForge gateway / panel / MCP, SpeechForge,
+#: ClawChat, ClawForge, DisPatch itself). A test must never reach one: a wizard or connection
+#: discovery that is not stubbed would probe the real gateway on 1234.
+LIVE_SERVICE_PORTS = frozenset({1234, 1235, 1236, 7865, 8080, 8288, 8700, 8765})
+
+
+@pytest.fixture(autouse=True)
+def _never_reach_live_service_ports(monkeypatch):
+    """Refuse (as a closed port would) any socket connect to a live service's fixed port.
+
+    Tests that need a server start one on an ephemeral port; everything else that reaches for
+    1234/8080/... is a test that forgot its stub, and must fail as 'connection refused' instead
+    of talking to the real thing.
+    """
+    import socket
+
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def _blocked(address) -> bool:
+        return (isinstance(address, tuple) and len(address) >= 2
+                and isinstance(address[1], int) and address[1] in LIVE_SERVICE_PORTS)
+
+    def connect(self, address):
+        if _blocked(address):
+            raise ConnectionRefusedError(111, f"tests never connect to live service port {address[1]}")
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if _blocked(address):
+            return 111
+        return real_connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_systemctl(monkeypatch):
     """The suite never talks to a real systemd.
 
@@ -377,3 +513,88 @@ def _no_real_systemctl(monkeypatch):
         return await real(argv, timeout)
 
     monkeypatch.setattr(harness, "_run", run)
+
+
+# --------------------------------------------------------------------------- #
+# A fully wired app with accounts, for the 3.0 access-control suites.
+# --------------------------------------------------------------------------- #
+
+class World:
+    """An isolated app + a factory for clients with chosen peer addresses, and the
+    handful of helpers every access-control test wants."""
+
+    LOOPBACK = ("127.0.0.1", 50000)
+    LAN = ("203.0.113.50", 50001)
+
+    def __init__(self, tmp_path, main_module, db):
+        self.tmp = tmp_path
+        self.main = main_module
+        self.db = db
+        self._clients: list = []
+
+    def client(self, addr=None, *, origin: bool = True):
+        from fastapi.testclient import TestClient
+        c = TestClient(self.main.app, client=addr or self.LOOPBACK)
+        c.__enter__()
+        self._clients.append(c)
+        if origin:
+            # What our own page sends on a state-changing fetch: the Host the client
+            # talks to and a matching Origin.
+            c.headers.update({"Origin": "http://testserver"})
+        return c
+
+    def create_owner(self, client=None, *, name="Olive", password="owner-pass1", pin="2468"):
+        c = client or self.client()
+        r = c.post("/api/auth/setup", json={"name": name, "password": password, "new_pin": pin})
+        assert r.status_code == 200, r.text
+        return c
+
+    def person(self, owner_client, name, role, *, pin=None, password=None, **extra):
+        body = {"name": name, "role": role, **extra}
+        if pin:
+            body["pin"] = pin
+        if password:
+            body["password"] = password
+        r = owner_client.post("/api/people", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def login(self, client, *, profile_id=None, name=None, pin=None, password=None):
+        body = {k: v for k, v in {"profile_id": profile_id, "name": name, "pin": pin, "password": password}.items() if v}
+        return client.post("/api/auth/login", json=body)
+
+    def close(self):
+        for c in self._clients:
+            c.__exit__(None, None, None)
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    import asyncio
+
+    from app import auth, config, main
+    from app.database import Database
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(config, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(main, "MEDIA_DIR", tmp_path / "media")
+    monkeypatch.setattr(main, "FILES_DIR", tmp_path / "files")
+    monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
+    monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
+    monkeypatch.setattr(auth, "TRUSTED_PATH", tmp_path / "trusted-devices.yaml")
+    config._invalidate_bots_cache()
+    from app import accounts
+    accounts.reset_for_tests()
+    temp_db = Database(tmp_path / "chats.db")
+    monkeypatch.setattr(main, "db", temp_db)
+    main._ACK_SEEN.clear()
+    main._delivered.clear()
+    main._thread_bot.clear()
+    w = World(tmp_path, main, temp_db)
+    yield w
+    w.close()
+    asyncio.run(temp_db.close())

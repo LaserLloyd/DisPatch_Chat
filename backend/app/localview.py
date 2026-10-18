@@ -61,7 +61,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import auth, config
+from . import config
+from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.localview")
 
@@ -321,7 +322,7 @@ def load() -> ViewerConfig:
             return _cache[2]
 
         try:
-            loaded = yaml.safe_load(path.read_text())
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
             if loaded is None:
                 loaded = {}
             if not isinstance(loaded, dict):
@@ -370,7 +371,7 @@ def _write_config(cfg_roots: list[str], show_hidden: bool, keep: ViewerConfig) -
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{CONFIG_NAME}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, path)
@@ -753,14 +754,8 @@ def _require_full_access(request: Request) -> None:
     directory. Browsers only — which is also why these routes are absent from
     ``main._is_inbound``.
     """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
-    session = getattr(request.state, "session", None) or auth.get_session(
-        request.cookies.get(COOKIE_NAME))
-    if session is not None:
-        return
-    if auth.load().pin_set:
-        raise HTTPException(403, "Unlock for full access")
+    from . import policy
+    policy.of(request).require(Permission.ADMIN_SYSTEM)
 
 
 def _roots_body(cfg: ViewerConfig) -> list[dict]:

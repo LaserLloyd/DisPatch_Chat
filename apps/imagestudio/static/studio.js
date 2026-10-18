@@ -12,7 +12,7 @@
 
 import {
   api, t, ready, theme, toast, lightbox, DecoyError, el, railIcon, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=2';
+} from '/static/js/app-sdk.js?v=3';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,

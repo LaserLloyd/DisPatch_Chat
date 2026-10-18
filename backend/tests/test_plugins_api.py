@@ -2,6 +2,7 @@
 their yaml persistence, the operator gate, and the `disabled` extension state."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -47,11 +48,14 @@ def test_aggregate_lists_an_installed_extension(ext_env):
 def test_extension_switch_writes_extensions_yaml(ext_env):
     c, tmp = ext_env
     install()
+    from app import tool_manifests
+    tool_manifests.grandfather_running()          # as the 3.0 migration does for what is running at the upgrade
     r = c.put("/api/plugins/extensions/voice", json={"enabled": False}, headers=ORIGIN)
     assert r.status_code == 200, r.text
     assert r.json() == {"id": "voice", "enabled": False, "restart_required": True}
     assert yaml.safe_load((tmp / "extensions.yaml").read_text()) == {"disabled": ["voice"]}
-    assert (tmp / "extensions.yaml").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":                            # Windows has no 0600; fsperm uses an ACL there
+        assert (tmp / "extensions.yaml").stat().st_mode & 0o777 == 0o600
     # The row shows the choice at once; the state follows at the next start.
     row = next(e for e in c.get("/api/plugins").json()["extensions"] if e["id"] == "voice")
     assert row["enabled"] is False and row["state"] == "ok" and row["restart_pending"] is True

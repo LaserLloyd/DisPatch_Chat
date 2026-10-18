@@ -25,7 +25,7 @@
 import {
   api, t, ready, theme, openThread, toast, onMessage, DecoyError,
   iconLabel, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=2';
+} from '/static/js/app-sdk.js?v=3';
 
 // The router is mounted at /api/apps/jobboard (and, for the scout agent and
 // crons, at the legacy /api/jobs too). The page uses the app path.

@@ -21,7 +21,10 @@
 
 # ------------------------------------------------------- Python build junk --
 **/.venv
+**/.venv-*
+**/.venv*
 **/venv
+**/node_modules
 **/__pycache__
 **/*.py[cod]
 **/*.egg-info
@@ -35,6 +38,7 @@
 # NEVER copy live data into an image. Someone WILL run a build in a checkout
 # that has a symlinked or copied data dir sitting in it.
 data/
+**/.scratch*
 **/*.db
 **/*.db-wal
 **/*.db-shm

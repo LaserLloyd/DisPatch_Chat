@@ -72,7 +72,8 @@ def test_liveness_is_always_answered_without_a_session(on_box):
     """The container healthcheck runs before anyone has ever unlocked."""
     auth.set_pin("1234")
     body = on_box.get("/api/health").json()
-    assert body["status"] == "ok"
+    assert body["status"] == "ok", {k: body.get(k) for k in (
+        "status", "background_loops", "last_backup_ok", "backup_stale", "db_integrity_ok")}
     assert "db_integrity_ok" in body
 
 
@@ -140,7 +141,8 @@ def test_background_loops_are_reported_and_a_live_one_is_not_stale(on_box):
     assert "session_purge" in loops, loops
     beat = loops["session_purge"]
     assert beat["stale"] is False and beat["period_s"] > 0
-    assert body["status"] == "ok"
+    assert body["status"] == "ok", {k: body.get(k) for k in (
+        "status", "background_loops", "last_backup_ok", "backup_stale", "db_integrity_ok")}
 
 
 def test_a_stale_loop_degrades_the_top_level_status(on_box, monkeypatch):

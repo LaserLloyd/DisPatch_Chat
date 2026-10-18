@@ -262,7 +262,7 @@ def resolve_session_file(bot_id: str, session_key: str) -> Path | None:
         if not idx.is_file():
             continue
         try:
-            data = json.loads(idx.read_text())
+            data = json.loads(idx.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         ent = data.get(session_key)
@@ -354,7 +354,7 @@ def list_agent_sessions(bot_id: str) -> list[dict]:
         if not idx.is_file():
             continue
         try:
-            data = json.loads(idx.read_text())
+            data = json.loads(idx.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if not isinstance(data, dict):
@@ -699,7 +699,11 @@ async def send_to_agent(
     timeout: int | None = None,
     model: str | None = None,
     thinking: str | None = None,
+    on_spawn=None,
 ) -> AgentReply:
+    # `on_spawn(proc)` is called once with the asyncio subprocess right after it
+    # starts, so a caller that must be able to stop the run (the agent-dispatch
+    # adapter's cancel/interrupt) can reach it. Default None = old behaviour.
     timeout = timeout or SETTINGS.agent_timeout
     # Pass the message via a temp file (--message-file) instead of an argv element:
     # a single argv string is capped at MAX_ARG_STRLEN (~128KB) regardless of the
@@ -749,6 +753,8 @@ async def send_to_agent(
                 "OpenClaw not available. Is it installed and on PATH?",
                 detail=f"binary: {SETTINGS.openclaw_bin}",
             )
+        if on_spawn is not None:
+            on_spawn(proc)
 
         try:
             stdout_b, stderr_b = await asyncio.wait_for(

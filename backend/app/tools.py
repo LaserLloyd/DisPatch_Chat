@@ -86,7 +86,8 @@ import yaml
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from . import auth, config, localview
+from . import auth, config, localview, policy
+from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.tools")
 
@@ -311,14 +312,15 @@ def _check_abs_dir(value, index: int, field: str, check_fs: bool) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ToolValidationError(index, field, "required: an absolute directory path")
     v = value.strip()
-    if not v.startswith("/") or "\x00" in v:
+    # POSIX paths start with "/"; on Windows a drive path (C:/site or C:\site) is absolute too.
+    if "\x00" in v or not (v.startswith("/") or (os.name == "nt" and Path(v).is_absolute())):
         raise ToolValidationError(index, field, "must be an absolute path")
     p = Path(v)
     try:
         r = p.resolve(strict=False)
     except (OSError, RuntimeError, ValueError):
         raise ToolValidationError(index, field, "cannot be resolved") from None
-    if r == Path("/"):
+    if r == Path(r.anchor or "/"):
         raise ToolValidationError(index, field, "the whole filesystem is too broad")
     if _in_data_dir(r) or _in_data_dir(p):
         raise ToolValidationError(index, field, DATA_DIR_MSG)
@@ -525,7 +527,7 @@ def load_tools() -> list[Tool]:
                 and _cache[2] == st.st_size):
             return _cache[3]
         try:
-            doc = yaml.safe_load(path.read_text())
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
             if doc is None:
                 doc = {}
             if not isinstance(doc, dict):
@@ -560,7 +562,7 @@ def _raw_doc() -> dict:
     """tools.yaml as a plain mapping ({} when absent). Raises ValueError when
     the file cannot be read as one."""
     try:
-        doc = yaml.safe_load(manifest_path().read_text())
+        doc = yaml.safe_load(manifest_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (yaml.YAMLError, OSError) as e:
@@ -623,7 +625,7 @@ def _write_doc(doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{MANIFEST_NAME}.")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
@@ -922,24 +924,29 @@ def _session(request: Request):
 
 
 def _is_operator(request: Request) -> bool:
-    """A real operator: a live PIN session, or anyone when no PIN exists (the
-    whole app is open then). Re-derived here — not trusted from the middleware
-    alone — so the routes fail closed on a bare app. A machine (API-key /
-    loopback) caller is never the operator: tools are a browser feature."""
-    if getattr(request.state, "decoy", False) or getattr(request.state, "machine", False):
-        return False
-    if _session(request) is not None:
-        return True
-    return not auth.load().pin_set
+    """May this caller CONFIGURE tools and plugins (``manage_plugins``)? Owner and
+    Admin sessions, or an open install. A machine is never the operator: tools are
+    a browser feature. The decision is ``policy``'s - this is only its old name."""
+    return policy.of(request).can(Permission.MANAGE_PLUGINS)
+
+
+def _is_member(request: Request) -> bool:
+    """Signed in with the blanket ``use_tools`` (a Member) but not an operator."""
+    pol = policy.of(request)
+    return (not pol.can(Permission.MANAGE_PLUGINS)) and pol.can(Permission.USE_TOOLS)
 
 
 def _require_operator(request: Request) -> None:
-    if not _is_operator(request):
-        raise HTTPException(403, "Unlock for full access")
+    policy.of(request).require(Permission.MANAGE_PLUGINS)
 
 
 def _limited_visible(t: Tool) -> bool:
     return t.kind in ("static", "url") and t.safe and t.enabled
+
+
+def _member_visible(t: Tool) -> bool:
+    """What a Member may open: any enabled static page or URL tool the owner added."""
+    return t.kind in ("static", "url") and t.enabled
 
 
 # --------------------------------------------------------------------------- #
@@ -1017,10 +1024,18 @@ def _mounted_apps() -> list:
     return []
 
 
-def list_out(operator: bool) -> list[dict]:
-    """Builtins first, then apps by `order` (then id), then static/url tools."""
+def list_out(operator: bool, member: bool = False, can_app=None) -> list[dict]:
+    """Builtins first, then apps by `order` (then id), then static/url tools.
+
+    Three audiences: the operator (everything, with paths and refresh commands), a
+    Member (every enabled page or URL tool, no host paths; the apps whose manifest
+    permission they hold) and Restricted (only what is flagged ``safe``)."""
     manifest = load_tools()
     apps = _mounted_apps()
+    if member and not operator:
+        rows = [_app_row(la) for la in apps
+                if _app_enabled(la.manifest.id) and (can_app is None or can_app(la.manifest))]
+        return rows + [_out_limited(t) for t in manifest if _member_visible(t)]
     if not operator:
         rows = [_app_row(la) for la in apps
                 if la.manifest.safe and _app_enabled(la.manifest.id)]
@@ -1190,7 +1205,10 @@ def _err422(e: ToolValidationError) -> JSONResponse:
 @router.get("/api/tools")
 def api_tools(request: Request):
     operator = _is_operator(request)
-    body: dict = {"tools": list_out(operator)}
+    pol = policy.of(request)
+    body: dict = {"tools": list_out(
+        operator, member=_is_member(request),
+        can_app=lambda m: pol.can(m.permission))}
     if operator:
         body["path"] = str(manifest_path())
     return body
@@ -1318,10 +1336,12 @@ def _same_refresh(sent, stored: Refresh) -> bool:
 @router.get("/api/tools/{tool_id}/status")
 async def api_tool_status(request: Request, tool_id: str):
     operator = _is_operator(request)
+    member = _is_member(request)
     from . import apps_loader
     la = apps_loader.get(tool_id)
     if la is not None:
-        visible = la.mounted and la.manifest.safe and _app_enabled(tool_id)
+        visible = la.mounted and _app_enabled(tool_id) and (
+            la.manifest.safe or (member and policy.of(request).can(la.manifest.permission)))
         if not operator and not visible:
             return JSONResponse(DECOY_BODY, status_code=403)
         return {"id": tool_id, "kind": "app", "enabled": _app_enabled(tool_id),
@@ -1335,7 +1355,7 @@ async def api_tool_status(request: Request, tool_id: str):
     if t is None and tool_id in BUILTINS:
         t = Tool(id=tool_id, kind="builtin")
     if not operator:
-        if t is None or not _limited_visible(t):
+        if t is None or not (_member_visible(t) if member else _limited_visible(t)):
             return JSONResponse(DECOY_BODY, status_code=403)
     elif t is None:
         return JSONResponse(NOT_FOUND, status_code=404)
@@ -1404,11 +1424,13 @@ def tool_bare(tool_id: str):
                   include_in_schema=False)
 def tool_file(request: Request, tool_id: str, rel: str):
     operator = _is_operator(request)
+    member = _is_member(request)
     t = get_tool(tool_id)
     if not operator:
-        # Safe Mode: only safe, enabled static tools; everything else answers
-        # the same decoy 403 whether or not it exists.
-        if t is None or t.kind != "static" or not _limited_visible(t):
+        # Restricted: only safe, enabled static tools; a Member: any enabled static
+        # tool. Everything else answers the same decoy 403 whether or not it exists.
+        if t is None or t.kind != "static" or not (
+                _member_visible(t) if member else _limited_visible(t)):
             return JSONResponse(DECOY_BODY, status_code=403)
     elif t is None or t.kind != "static" or not t.enabled:
         return JSONResponse(NOT_FOUND, status_code=404)

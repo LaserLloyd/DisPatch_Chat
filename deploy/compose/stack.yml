@@ -1,0 +1,252 @@
+# DisPatch + StudioForge (+ optional InfoForge and kiwix) on one compose network.
+#
+#   cp deploy/compose/stack.env.example deploy/compose/stack.env      # edit STACK_MODEL
+#   docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env up -d
+#   docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env \
+#       --profile knowledge up -d                      # + kiwix-serve and the InfoForge CLI
+#
+#   Podman: `podman-compose -f deploy/compose/stack.yml --env-file ... up -d`
+#           (use the CDI GPU snippet in docs/deploy/stack.md instead of the nvidia block below)
+#
+# Open http://localhost:8765 (DisPatch). StudioForge's control panel is
+# http://localhost:8080 and its OpenAI-compatible base URL is http://localhost:1234/v1.
+#
+# What is wired for you
+#   * DisPatch's first connection (Atlas -> Direct API) points at
+#     http://studioforge:1234/v1 over the private network. It is written ONCE,
+#     into a fresh data volume, by the `dispatch-seed` service; an existing
+#     config.yaml is never touched.
+#   * DisPatch's StudioForge pane is switched on (panel at http://studioforge:8080
+#     for DisPatch's server-side probe, http://localhost:8080 for your browser).
+#   * Security posture matches ../../docker-compose.yml: non-root, cap_drop ALL,
+#     no-new-privileges, init, log rotation. Ports publish to loopback by default.
+#
+# StudioForge is GPU-only. The block below reserves NVIDIA GPUs (Docker with the
+# NVIDIA Container Toolkit, or Docker Desktop with WSL2 GPU). AMD / Intel / Podman
+# alternatives, and how to run without a GPU for a smoke test, are in
+# docs/deploy/stack.md. Without a GPU every service still starts and is healthy;
+# StudioForge's /health reports can_serve=false.
+#
+# YOUR DATA SURVIVES UPDATES. Every stateful path is on a named volume declared at
+# the bottom of this file (dispatch-data, studioforge-data, infoforge-config,
+# infoforge-state) and the images are read-only. `docker compose pull && up -d`,
+# a rebuild, or `down` (no -v) keep it all. Only `down -v` or `docker volume rm`
+# destroys it. On the first start of a NEW image version, DisPatch and StudioForge
+# copy their databases + config.yaml to <volume>/backups/<oldversion>-<time>/
+# first (newest 5 kept). Backup/restore recipes: docs/deploy/stack.md.
+name: dispatch-stack
+
+x-hardening: &hardening
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
+services:
+  # --- the LLM server ----------------------------------------------------------
+  studioforge:
+    <<: *hardening
+    image: ${STUDIOFORGE_IMAGE:-ghcr.io/laserlloyd/studioforge:2.0.0-cuda}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: ${TZ:-UTC}
+      SF_DATA_DIR: /data
+      SF_MODELS__DIR: /models          # first-run default; config.yaml wins afterwards
+      # Owner account for StudioForge's panel, created on the first start of a fresh volume.
+      # Its 2.x images refuse to listen beyond loopback with nothing to sign in with
+      # (`auth_required_for_remote_bind`), and a published port is "beyond loopback". Leave
+      # the password empty for a generated one at /data/owner-password.initial (10+ characters
+      # otherwise). Once an owner exists every API request needs a key: see docs/deploy/stack.md.
+      SF_OWNER_USER: ${SF_OWNER_USER:-owner}
+      SF_OWNER_PASSWORD: ${SF_OWNER_PASSWORD:-}
+    volumes:
+      - studioforge-data:/data         # config, registry, engines/, logs/
+      - ${STUDIOFORGE_MODELS:-./models}:/models:ro,z   # your GGUF library
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/studioforge:mode=1777   # scrub-ok: the container user's home inside the image
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${STUDIOFORGE_GATEWAY_PORT:-1234}:1234"
+      - "${BIND_ADDR:-127.0.0.1}:${STUDIOFORGE_PANEL_PORT:-8080}:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${STUDIOFORGE_WATCHDOG_PORT:-1235}:1235"   # watchdog sidecar: MCP + /health
+    networks: [stack]
+    # GPU passthrough, NVIDIA + Docker. For other vendors / podman see
+    # docs/deploy/stack.md (ROCm: devices /dev/kfd,/dev/dri; podman: CDI
+    # `nvidia.com/gpu=all`).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # --- one-shot: write DisPatch's first connection into a FRESH data volume -------
+  dispatch-seed:
+    image: ${DISPATCH_IMAGE:-dispatch-chat:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        VOICE: ${VOICE:-0}
+        VOICE_REF: ${VOICE_REF:-refs/heads/refactor/prosumer-2026}
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -f /data/config.yaml ]; then
+          echo "dispatch-seed: /data/config.yaml exists - leaving it alone"; exit 0
+        fi
+        umask 077
+        cat > /data/config.yaml <<'CFG'
+        # Seeded once by deploy/compose/stack.yml. Edit freely in Settings -> AI models.
+        bots:
+        - id: atlas
+          name: Atlas
+          avatar: atlas-face.png
+          emoji: "\U0001F30D"
+          model_hint: Direct API
+          order: 0
+          safe: true
+          advisor:
+            tools: true
+            providers:
+            # `llamacpp` is DisPatch's provider id for a local llama.cpp-style server; the 3.0
+            # migration turns this block into a Connection of type `studioforge` (a `custom`
+            # provider would become a generic OpenAI-compatible server instead).
+            - provider: llamacpp
+              base_url: http://studioforge:1234/v1
+              model: ${STACK_MODEL:-your-model-id}
+        CFG
+        echo "dispatch-seed: wrote /data/config.yaml (connection -> http://studioforge:1234/v1)"
+    volumes:
+      - dispatch-data:/data
+    networks: [stack]
+
+  # --- the chat workspace --------------------------------------------------------
+  dispatch:
+    <<: *hardening
+    image: ${DISPATCH_IMAGE:-dispatch-chat:local}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      dispatch-seed:
+        condition: service_completed_successfully
+      studioforge:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${DISPATCH_PORT:-8765}:8765"
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      TZ: ${TZ:-UTC}
+      PUID: "1000"
+      PGID: "1000"
+      LOCAL_CHAT_DATA_DIR: /data
+      LOCAL_CHAT_HOST: 0.0.0.0
+      LOCAL_CHAT_PORT: "8765"
+      DISPATCH_STUDIOFORGE: "1"
+      DISPATCH_STUDIOFORGE_URL: http://studioforge:8080
+      DISPATCH_STUDIOFORGE_REMOTE_URL: http://localhost:${STUDIOFORGE_PANEL_PORT:-8080}
+    user: "1000:1000"
+    # Nothing stateful lives in the image: chats.db (+ WAL), avatars, uploads,
+    # config.yaml and backups/ are all on the dispatch-data volume. A read-only
+    # root makes any leak fail loudly. TMPDIR is /data/tmp (the volume).
+    read_only: true
+    tmpfs: ["/tmp"]
+    volumes:
+      - dispatch-data:/data
+    networks: [stack]
+    deploy:
+      resources:
+        limits:
+          memory: ${DISPATCH_MEM_LIMIT:-1g}
+          cpus: "${DISPATCH_CPU_LIMIT:-2.0}"
+
+  # --- optional: offline knowledge (profile `knowledge`) --------------------------
+  kiwix:
+    <<: *hardening
+    profiles: [knowledge]
+    image: ghcr.io/kiwix/kiwix-serve:${KIWIX_TAG:-3.8.2}
+    command: ["--skipInvalid", "/data/${ZIM_GLOB:-*.zim}"]
+    user: "${KIWIX_USER:-1001}"      # rootless podman: KIWIX_USER=0 (maps to you)
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    volumes:
+      - ${ZIM_DIR:-./zims}:/data:ro,z
+    networks: [stack]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  infoforge-seed:
+    profiles: [knowledge]
+    image: ${INFOFORGE_IMAGE:-ghcr.io/laserlloyd/infoforge:2.1.0}
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -f /config/config.yaml ]; then echo "infoforge-seed: config exists"; exit 0; fi
+        umask 077
+        cat > /config/config.yaml <<'CFG'
+        model_id: "${STACK_MODEL:-your-model-id}"
+        base_url: "http://studioforge:1234/v1"
+        studioforge: true
+        kiwix_url: "http://kiwix:8080"
+        zim_dir: "/zims"
+        zims:
+          - file: "${ZIM_FILE:-wikipedia_en_simple_all_nopic.zim}"
+            name: "Wikipedia"
+            enabled: true
+        CFG
+        echo "infoforge-seed: wrote /config/config.yaml"
+    volumes:
+      - infoforge-config:/config
+    networks: [stack]
+
+  # A CLI, not a daemon: `docker compose ... run --rm infoforge doctor`
+  infoforge:
+    <<: *hardening
+    profiles: [knowledge]
+    image: ${INFOFORGE_IMAGE:-ghcr.io/laserlloyd/infoforge:2.1.0}
+    command: ["--help"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      infoforge-seed:
+        condition: service_completed_successfully
+      kiwix:
+        condition: service_healthy
+    volumes:
+      - infoforge-config:/config:ro
+      - ${ZIM_DIR:-./zims}:/zims:ro,z
+      - infoforge-state:/state
+    networks: [stack]
+
+networks:
+  stack:
+    name: dispatch-stack
+
+volumes:
+  dispatch-data:
+  studioforge-data:
+  infoforge-config:
+  infoforge-state:

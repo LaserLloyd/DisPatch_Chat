@@ -62,6 +62,10 @@ if [ "$(id -u)" = "0" ]; then
         chown -R "$PUID:$PGID" "$DATA_DIR"
     fi
 
+    # `--user 0:0` leaves HOME=/root, which the dropped user cannot read (the app
+    # then dies on /root/.local/share/...). Point HOME at the image user's home.
+    chown "$PUID:$PGID" /home/app 2>/dev/null || true
+    export HOME=/home/app
     exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups --inh-caps=-all -- "$0" "$@"
 fi
 
@@ -120,6 +124,74 @@ find "$DATA_DIR/tmp" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null || true
 #    makes the whole problem go away -- including the Docker 26+ requirement.
 # -----------------------------------------------------------------------------
 mkdir -p "$DATA_DIR/avatars"
+
+# -----------------------------------------------------------------------------
+# 3b. Pre-migration snapshot. When the image version differs from the one that
+#     last wrote this data directory, copy the databases and config.yaml to
+#     $DATA_DIR/backups/<oldversion>-<UTC timestamp>/ BEFORE the new version's
+#     schema migrations run, and keep the newest DISPATCH_PREMIGRATE_KEEP (5).
+#     The scheduled snapshots (backups/chats-*.db) are separate and untouched.
+#     A failed snapshot warns and starts anyway, leaving the marker alone so the
+#     next start retries -- it must never keep the family's chat down.
+# -----------------------------------------------------------------------------
+NEW_VERSION="${DISPATCH_IMAGE_VERSION:-}"
+if [ -z "$NEW_VERSION" ] || [ "$NEW_VERSION" = "dev" ]; then
+    NEW_VERSION="dev-$(sed -n 's/^version *= *"\(.*\)"/\1/p' /app/backend/pyproject.toml 2>/dev/null | head -n1)"
+fi
+MARKER="$DATA_DIR/.image-version"
+OLD_VERSION="$(cat "$MARKER" 2>/dev/null || true)"
+HAS_DATA=0
+for f in "$DATA_DIR"/*.db; do   # a seeded config.yaml alone is not "data to protect"
+    [ -e "$f" ] && HAS_DATA=1
+done
+if [ "$HAS_DATA" = "1" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+    log "image version ${OLD_VERSION:-<unrecorded>} -> ${NEW_VERSION}: snapshotting before migrations"
+    if python - "$DATA_DIR" "${OLD_VERSION:-unrecorded}" "${DISPATCH_PREMIGRATE_KEEP:-5}" <<'PY'
+import glob, os, shutil, sqlite3, sys, time
+
+data, old, keep = sys.argv[1], sys.argv[2], int(sys.argv[3])
+root = os.path.join(data, "backups")
+# Same `<version>-YYYYMMDD-HHMMSS` shape as app/migrate.py writes, so Settings ->
+# System -> Backups lists this copy as a pre-migration backup and can restore it.
+stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+dest = os.path.join(root, f"{old}-{stamp}")
+os.makedirs(dest, exist_ok=False)
+copied = []
+for db in sorted(glob.glob(os.path.join(data, "*.db"))):
+    out = os.path.join(dest, os.path.basename(db))
+    src = sqlite3.connect(db, timeout=30)
+    try:
+        dst = sqlite3.connect(out)
+        try:
+            src.backup(dst)  # WAL-safe, consistent online copy
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    copied.append(os.path.basename(db))
+cfg = os.path.join(data, "config.yaml")
+if os.path.exists(cfg):
+    shutil.copy2(cfg, dest)
+    copied.append("config.yaml")
+open(os.path.join(dest, ".premigrate"), "w").write(f"from {old}\n")
+print(f"dispatch-entrypoint: wrote {dest}: {', '.join(copied)}", file=sys.stderr)
+
+snaps = sorted(
+    (d for d in glob.glob(os.path.join(root, "*"))
+     if os.path.isfile(os.path.join(d, ".premigrate"))),
+    key=os.path.getmtime, reverse=True)
+for old_dir in snaps[keep:]:
+    shutil.rmtree(old_dir, ignore_errors=True)
+    print(f"dispatch-entrypoint: pruned {old_dir}", file=sys.stderr)
+PY
+    then
+        printf '%s\n' "$NEW_VERSION" > "$MARKER"
+    else
+        log "WARNING: the pre-migration snapshot FAILED; starting anyway (marker not updated, next start retries)."
+    fi
+elif [ "$HAS_DATA" = "0" ]; then
+    printf '%s\n' "$NEW_VERSION" > "$MARKER"
+fi
 
 # -----------------------------------------------------------------------------
 # 4. Sanity warnings for configurations that will disappoint you later

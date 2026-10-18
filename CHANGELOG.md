@@ -7,6 +7,287 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Voice (the host side of DisPatch Voice 1.6)
+
+- **Models folder renamed** `<data>/speech-models` -> `<data>/models` (`ExtPaths.models_dir`); at
+  start the old folder moves across once, never overwriting (`DISPATCH_MODELS_MIGRATE=dry-run|off`).
+- **`ctx.secrets`** for extensions: the OS keyring, else a 0600 file in the extension's `state_dir`
+  (reuses `agents/secrets.py`). The voice add-on keeps its GPU-rig token there, so it lives under
+  `/data`, survives an image update and works with a read-only root.
+- **`ctx.settings_writer(namespace)`** and a start-up call of the add-on's `migrate_voice_yaml`
+  once the settings store exists (a no-op that logs once until then).
+- **`state_dir` and a newly created data folder are owner-only** on Windows too (`app/fsperm.py`).
+- **`GET /api/voice/providers`** answers with the installed `dispatch_voice.providers` plugins when
+  the add-on is not running (the add-on's own route answers when it is); `manage_plugins`.
+- **`PUT /api/bots/order` accepts a partial entry** (`{id, voice_rp}`) without moving that character
+  to the top of the list.
+- **Docker, `VOICE=1`:** installs `ffmpeg` and `libopus0`, takes the add-on from `VOICE_REF` (default
+  the 3.0 refactor branch; `refs/tags/v1.6.0` after release) or a local `--build-context`; the
+  entrypoint's CRLF `sed` workaround became a guard now that `.gitattributes` pins `*.sh` to LF.
+- **Settings -> Voice, add-on absent:** the models are downloaded from the add-on's page, not a
+  terminal command. See [docs/voice.md](docs/voice.md).
+
+## [3.0.0] — 2026-10-18
+
+Profiles, roles and one policy engine. The binary "PIN or Safe Mode" model is replaced by
+an Owner, Admins, Members and Restricted profiles; every route and WebSocket action now
+declares the permission it needs; and the backend runs on native Windows.
+
+### Old name -> new name
+
+| Before | Now |
+|---|---|
+| decoy, Safe Mode, locked device, "limited tier", `request.state.decoy` | **Restricted** |
+| Unlocked, operator, full session | **Owner** (or **Admin**) |
+| the one PIN | the **Owner's PIN** (Members have their own PIN, Admins a password) |
+| bot flags `safe` + `hide_unlocked` | `audience`: `all` / `members` / `restricted` (flags kept for one release) |
+| per-IP in-memory budgets, `DISPATCH_DECOY_*` | per-profile budgets in `chats.db` (`DISPATCH_DECOY_*` still set the defaults) |
+
+### BREAKING
+
+- **A new install is closed to the network until it has an owner.** With no owner and no
+  PIN, only the machine DisPatch runs on may use it; any other machine sees the shell and
+  the sign-in state, and can finish setup only with the one-time **setup token** printed
+  in the server log (`SETUP TOKEN: ...`). Docker users: `docker compose logs app`. This
+  closes the 2.x hole where the first network client to call `POST /api/auth/setup`
+  became the owner. An install that already has a PIN is unaffected. To keep the old
+  "open until a PIN is set" behaviour set `DISPATCH_ALLOW_OPEN_INSTALL=1`.
+- **Authorisation moved from a path deny-list to declared permissions.** `main._decoy_blocked`
+  and the eight operator checks are gone from the request path; `auth_gate` enforces the
+  requirement each route declares in `backend/app/route_policy.py` and refuses a route
+  that declares none. Behaviour for the Owner is unchanged. Responses to a Restricted
+  caller keep `detail: "Unlock for full access"` and `"decoy": true`, and gain
+  `required_permission` and `error`.
+- **Error bodies gain an `error` object** `{code, message, fix, docs}` (additive: `detail`
+  is byte-for-byte what it was). Catalogue: `docs/errors.md`. A machine caller gets the
+  same object inside its `application/problem+json` document.
+- **Cookies are `SameSite=Strict`** (were `Lax`), and a state-changing request that
+  carries a session or device cookie is refused unless its `Origin` is ours and
+  `Sec-Fetch-Site` is not `cross-site` / `same-site` (`error.code: csrf_origin`). A
+  reverse proxy must pass the original `Host` header through.
+- **Machine access is a principal with scopes, not network position.** Agents holding
+  the `api_token` get the named scopes in `docs/contracts/permissions.json`
+  (`machine_scopes` in `security.yaml` narrows them). On-box processes on `127.0.0.1`
+  are still trusted without a key while `machine_loopback_trust: true` (the default
+  after an upgrade); set it to `false` once your crons send the key.
+- **The unlock throttle is per (device, profile) + per address + a global ceiling**, not
+  one process-wide counter. After 5 failures that device and profile wait 5 s, doubling
+  to about 5 minutes.
+- `GET /api/openapi.json` without the key answers `401` (was `403`); `POST
+  /api/auth/setup` answers `403 setup_forbidden` from the network; `/ws` refuses
+  (`1008`) an unclaimed install from the network.
+- `Dockerfile` / compose users: the container binds `0.0.0.0`, so a fresh container
+  needs the setup token from `docker compose logs`.
+
+### Added
+
+- **Agent dispatch core.** A new self-contained package
+  `backend/app/agents/` defines the `AgentBackend` interface (`start_task`, `send`,
+  `events`, `respond_approval`, `interrupt`, `resume`, `cancel`, `list_sessions`,
+  `capabilities`), the normalized event stream (status, text, tool calls and results,
+  approval requests, subagent start/finish with parent ids, retries, artifacts, cost
+  updates labelled as estimates, result, error with a catalogued code), a scriptable
+  fake backend, and three adapters: the existing OpenClaw transports wrapped onto the
+  interface (with a protocol-4 probe that fails loudly on a mismatch), a Claude Agent
+  backend built on the Python Agent SDK (one supervised worker process per task, empty
+  `setting_sources`, strict MCP config, explicit permission modes, per-task
+  `CLAUDE_CONFIG_DIR`, `max_budget_usd`/`max_turns`, API-key auth only), and a stub for
+  the generic CLI adapter. Also: per-task workspaces (git worktree for repo tasks) that
+  reject `..` and symlink escapes, budgets, a secret provider (keyring, else a 0600
+  file) with redaction, branding rules and the reader/actor quarantine rule. One suite
+  (`backend/tests/agents`, 300+ tests, runs on Windows) holds every adapter to the same
+  contract. Docs: `docs/agents/backends.md`, `docs/agents/security.md`.
+- Optional extra `agents-claude` (`claude-agent-sdk==0.2.168`, exact pin); it is not in
+  the default dependencies and `uv.lock` gains its resolution.
+- **Agents and tasks are first-class** (docs/agents.md). An *agent* is a configured worker
+  (backend, model, instructions, tool allow-list, MCP servers, workspace and approval policy,
+  budget) that an Owner or Admin publishes to profiles; a *task* is one dispatched job with a
+  live timeline, approvals, artifacts, an estimated cost and a state. Backends: **OpenClaw**
+  (unchanged same-host requirement) and **Claude Agent** (API key, Amazon Bedrock, Google
+  Cloud or Microsoft Foundry credentials only; no subscription sign-in).
+  - New tables `agents`, `tasks`, `task_events`, `approvals`, `agent_spend`, `agent_settings`
+    (additive; migration step `008_agents`, with the pre-migration backup and dry run).
+    `python -m app.migrate --dry-run` lists them.
+  - Routes (all declared in `route_policy.py`): `/api/agents*` (`manage_agents`),
+    `/api/agents/available` and `/api/tasks*` (`dispatch_agents`), `/api/approvals/{id}`
+    (`approve_agent_actions`). A Restricted profile gets 403 from every one of them, listing
+    included; a Member sees only agents published to them and only their own tasks; an Owner
+    or Admin sees all. 14 new error codes (`agent_*`, `task_*`, `approval_*`).
+  - WebSocket frames `task.event`, `task.approval`, `task.update`: sent only to sockets whose
+    profile may see the task; added to the locked-socket deny list.
+  - **Budgets**: per task (dollars, turns, minutes, tokens) and per agent and per person per
+    day, hard stop plus a notification at the limit; all figures labelled *estimate*.
+  - **Approvals**: destructive tools (a shell, file writes, anything that sends, posts,
+    deletes or creates) ask every time and offer only "once". Web Push ping (no content),
+    a notice line in the originating chat, and a rail badge on approval-needed / done / failed.
+  - Audit rows for every finished task (who, agent, approvals, estimated cost, duration,
+    outcome); transcript retention setting (default 30 days) with a purge that keeps the audit
+    row; `agents_store.redacted_summary()` for support bundles (no prompts or instructions).
+  - UI: **Tasks** page (rail button, filters), **Assign task** from any chat and `@agent`
+    mentions, live task cards with subagent tree and inline approval cards, **Settings ->
+    Agents** (backends, Claude credentials, agent editor, limits, MCP secrets). Eight locales.
+  - **`agents.unified_dispatch`** (default **off**): runs OpenClaw chat turns and advisor
+    `[[handoff:...]]` cards through the task model. Off, nothing changes. See
+    docs/agents.md for what it does and does not carry over.
+  - Privacy: `docs/privacy.md` says what each backend sends where.
+
+- **Accounts** (`backend/app/accounts.py`, tables `profiles`, `devices`, `sessions`,
+  `usage_daily`, `activity`, `schema_migrations` in `chats.db`): Owner (exactly one),
+  Admin, Member, Restricted. argon2id for PINs and passwords (`cryptography`). Per-profile
+  PIN quick-switch; Admin/Owner need their credential; per-role and per-profile session
+  timeouts. Sessions end when a profile is deleted, disabled, re-roled or re-credentialed.
+- **People & Profiles** API (`/api/people*`, `/api/auth/login|switch|me|password|api-token`)
+  and Settings tab: create/edit profiles, budgets (messages, conversations, ratings,
+  upload MB, **minutes per day**, **quiet hours**), grants/denies, sign-out, bind **this
+  device** to a Member or Restricted profile, activity summary, admin audit log.
+- **Policy engine** (`backend/app/policy.py`, `contracts/permissions.py`): the role ->
+  permission matrix, `require_permission(...)`, `request.state.policy`, and
+  `dispatch_agents` as its own permission (a Member cannot run a host agent until granted).
+- **Route-table gate** (`tests/test_route_table.py`) and **access-control suite**
+  (`tests/test_g5_access.py`): every route and WebSocket action is called with no session
+  and with a Restricted session and must be refused; a Restricted turn reaches only
+  `audience in (all, restricted)` characters.
+- **Contracts** (`backend/app/contracts/`, `docs/contracts/`, `docs/errors.md`,
+  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (223 codes),
+  capability registry and JSON Schemas for Connection, Tool plugin, Voice provider and
+  Character manifests, regenerated and checked in CI (`tests/test_contracts_drift.py`).
+- **Migration with a safety net**: `python -m app.migrate [--dry-run] [--restore DIR]`;
+  the server runs it at start. See "Upgrading" below.
+- `anonymous_access: none` in `security.yaml`: a device that has not signed in sees only
+  the sign-in page.
+- Security headers on every response (`nosniff`, `Referrer-Policy`, `X-Frame-Options`
+  where no CSP frame-ancestors, `no-store` on auth and people APIs, HSTS over TLS).
+- **Native Windows**: the backend imports and the test suite collects on Windows
+  (`app/_filelock.py` replaces `fcntl`); `.gitattributes` keeps LF everywhere; the
+  frontend suite (856 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
+  PowerShell; `frontend/package-lock.json` is committed.
+- `.claude/agents/`: contract-guardian, security-reviewer, migration-verifier,
+  docs-drift-checker, a11y-reviewer.
+- **One settings schema and store** (`backend/app/settings_schema.py`, `settings_store.py`). Every
+  user-facing setting - key, type, default, range, group, Basic/Advanced, restart-required, environment
+  alias, secret - is described once (`schema: 1`; reference: `docs/settings.md`, generated and drift-tested).
+  Values live in the `settings` table of `chats.db`; an environment variable still wins and is reported as
+  `source: env`; `security.yaml` and `tools.yaml` settings are written through to their files. Import of
+  today's values is idempotent and reports every key it does not recognise instead of dropping it.
+  `GET /api/settings/schema`, `GET`/`PATCH /api/settings` (`manage_settings`; per-key validation,
+  reset-to-default), public `GET /api/settings/defaults`. Add-ons write through
+  `settings_store.writer("<namespace>")`. **Settings -> All settings** is drawn from the schema (ForgeUI
+  `.ui-setting` rows, search, Basic/Advanced, "set by environment" badge); the older tabs stay for what is not in
+  the schema yet.
+- **Connections** (`docs/connections.md`): one record per model server (thirteen types), keys in the secret store
+  (keyring or a `0600` file) and never in `config.yaml`, an actionable **Test** (reachable / key accepted / models /
+  latency), StudioForge recognised by `GET /api/version` and sent `Authorization: Bearer`, **Find servers** for
+  StudioForge / LM Studio / Ollama / OpenAI-style servers, and an SSRF guard that refuses link-local and
+  cloud-metadata addresses unless an admin allows them. Characters refer to a connection (`connection: <id>`).
+- **Characters** (`docs/characters.md`): the 3.0 name and API for bots (`/api/characters`, `manage_characters`;
+  `/api/bots*` stay as aliases for one release). Per-character connection, model, personality preset,
+  `audience`, `profiles` (who may see it), description, and a link to Voice -> Voices. **Starter packs**: *Animal
+  Friends* (six gentle animals for Restricted profiles) and *Assistants*.
+- **First-run wizard** (`docs/first-run.md`): owner, first connection (with auto-detect and Test), voice, family,
+  network exposure, done - fully driveable through `/api/wizard/*`.
+- **Backups** (`docs/backups.md`): scheduled **encrypted** archives (AES-256-GCM, scrypt), restore that checks first
+  and applies at the next start, a **support bundle** with redaction (prompts excluded by default),
+  `GET /api/users/{id}/export` and `DELETE /api/users/{id}`.
+- **Tool manifests**: extensions, apps and `tools.yaml` rows are described as one Tool manifest (back-compat shim),
+  with the permissions each requests; a new plugin must be approved before the Plugins switch turns it on; an app's
+  `env:` names and any manifest `settings` appear under `tools.<id>.*`.
+- **ForgeUI 1.2.0** vendored whole (`forgeui.json`, `forgeui vendor --check` in CI and as a unit test): slate,
+  high-contrast and high-contrast-light themes, the component layer (`ui-components`), the app-owned overlay
+  `adapters/dispatch-extra.css`. Forest, Paper and Purple changed upstream (recorded in `theme-palettes.test.js`).
+- **InfoForge 2.1.0**: the advisor's offline-Wikipedia lookup uses `infoforge search --no-ensure ... --` when the
+  installed version is 2.1.0 or newer (read-only, and a query starting with `-` cannot become an option).
+- **Dependency audit**: Pillow >= 12.3.0, Starlette >= 1.3.1, AnyIO >= 4.14.2 (the audit's 17 advisories) and a
+  `pip-audit` job in CI.
+
+### Changed
+
+- `openclaw.send_to_agent` takes an optional `on_spawn` callback (default `None`, no
+  behaviour change) so the agent adapter can stop the CLI process on cancel.
+
+- Settings and docs say **Restricted** / **Owner**; the Bots tab shows each character's
+  audience. Strings in all eight languages (`frontend/static/locales/I18N-TODO.md` lists
+  the entries still awaiting a translator).
+- `GET /api/tools` has three audiences: the Owner/Admin sees everything, a Member every
+  enabled page tool (no host paths), Restricted only tools flagged `safe`.
+- Provider keys leave `config.yaml` on upgrade (see "Upgrading", steps 7-9). `GET /api/llm/providers`, `/api/llm/test`,
+  `/api/llm/connect` and the Connect-an-AI panel work as before and still write inline settings; the next start (or
+  Settings -> Connections -> **Move keys here**) turns them into connections.
+- `/api/bots*` are thin aliases of `/api/characters*` (same permissions); the bot row gains `connection`,
+  `profiles`, `description`, `pack`.
+- A character a profile is not listed for cannot be opened or messaged by that profile; Owner and Admin always see all.
+  The same rule now narrows every WebSocket broadcast per connection (`bots` after an edit, `thread_*` and `message`
+  frames; `ConnectionManager.scoper` / `main.scope_frame_for_principal`), not only the roster and `hello`; `get_messages`
+  over the socket checks it for every profile. Before, a profile left off a character's `profiles` list saw the
+  character's new name and avatar, and its threads being created, in the broadcasts that followed an edit.
+- `deploy/compose/stack.yml` passes `SF_OWNER_USER` / `SF_OWNER_PASSWORD` to StudioForge (its 2.x images refuse to
+  listen beyond loopback without an owner account) and seeds Atlas's provider as `llamacpp`, so the migrated connection
+  is of type `studioforge` rather than a generic OpenAI-compatible server. `docs/deploy/stack.md` says how to give that
+  connection a StudioForge API key.
+- Settings has two new tabs, **Connections** and **All settings**; the Bots tab gains a **Details** button per row and a
+  **Starter packs** card; `index.html`'s theme picker lists the three new themes.
+- `GET /api/plugins/manifests` and the approval rule on `PUT /api/plugins/extensions/{id}` (additive: a body of
+  just `{"enabled": ...}` still works for anything already approved).
+- `frontend/static/js/w5-api.js` holds the REST calls of the new pages: `api.js` is imported at one `?v=` by a dozen
+  modules, so extending it would force a version cascade through files other work is editing.
+
+### Upgrading from 2.x (exact behaviour)
+
+Start 3.0.0 as usual; the server migrates before it serves. Or look first:
+`uv run python -m app.migrate --dry-run --data-dir <dir>` (from `backend/`) prints each step and writes
+nothing. `backend/.python-version` pins the interpreter range (3.12–3.14) so a plain `uv sync` no longer
+picks a Python the OCR wheels (`onnxruntime`) do not exist for.
+
+1. **Backup** (only when there is data to protect and a step is pending):
+   `<data>/backups/3.0.0-<UTC stamp>/` receives a consistent copy of `chats.db`,
+   `config.yaml`, `security.yaml` and `trusted-devices.yaml`. The newest five are kept.
+   Undo with `uv run python -m app.migrate --restore <that directory>` (server stopped).
+2. `001_accounts` creates the new tables (additive; a 2.x binary still runs on the result).
+3. `002_owner_from_pin` — **an install with a PIN gets an Owner profile built from that
+   PIN.** The PIN is unchanged and unlocks as before. The profile has **no password yet**;
+   the first time you do something that needs one (create an Admin) the app asks you to
+   set it. Nothing is locked out; remembered devices stay remembered (as the Owner's).
+4. `003_audience` writes `audience` on every character in `config.yaml`, computed from the
+   legacy flags: `safe` + `hide_unlocked` -> `restricted`; `safe` -> `all`; otherwise
+   `members`. The flags are kept and still read; when the two disagree the more
+   restrictive reading wins.
+5. `004_security_keys` writes `machine_loopback_trust: true`, `machine_scopes: null`,
+   `anonymous_access: restricted` and the per-role session timeouts into `security.yaml`
+   at the values that reproduce 2.x behaviour.
+6. An install with **no PIN** is not migrated into an owner: it stays unclaimed (see
+   BREAKING, first item) until you create one.
+7. `005_settings` creates the `settings`, `settings_unknown` and `settings_meta` tables and imports the values it
+   finds in `security.yaml` (lock timeout, remembered-device days, machine trust, anonymous access, session timeouts) and
+   `tools.yaml` (the lookups switch). **A key it does not recognise is kept** in `settings_unknown` and listed by
+   `GET /api/settings` (secret-looking names are masked there); nothing is deleted from your files.
+8. `006_connections` gives every character's inline provider block (`api:` and each `advisor.providers` entry) a
+   connection: one per distinct provider + address + key. **The API key moves into the secret store** (read back
+   before it is removed from `config.yaml`); `provider`, `base_url`, `model` and everything else stay inline beside
+   `connection: <id>`. A key named by `api_key_env` stays a reference to that variable. The pre-migration backup holds the
+   original file, keys included. Downgrading to 2.x after this step: restore that backup (the keys in the secret store
+   are not read by 2.x).
+9. `007_plugin_approvals` approves, with `source: upgrade`, every add-on and app that is running now and asks for
+   permissions; a plugin added later needs approval before the Plugins switch turns it on.
+10. `008_agents` creates the `agents`, `tasks`, `task_events`, `approvals`, `agent_settings` and `agent_spend` tables (additive,
+    nothing existing is altered; a 3.0 binary without agents ignores them).
+11. A restore staged from the app (`POST /api/backups/{id}/restore`) is applied at the start of the migration run, before
+    anything above, after copying the current files to `backups/pre-restore-<time>/`.
+
+Environment variables are not copied into the store: an environment variable keeps winning and is shown as such.
+
+Running it again does nothing. `DISPATCH_ARGON2_MEMORY_KIB` / `DISPATCH_ARGON2_PASSES`
+exist for tests only.
+
+### Known limits
+
+- Conversations are one shared household space; roles gate actions and characters, not
+  individual threads (`docs/design/multi-user.md` lists what is deferred).
+- Behind a TLS-terminating proxy that rewrites `Host`, the Origin check will refuse
+  state-changing requests; make the proxy preserve `Host`.
+- Agents: the Claude Agent has been exercised against recorded and scripted streams only
+  (no API key was available); the first real run may reveal a field the fakes do not model.
+  Claude Managed Agents (hosted sessions) and the generic CLI adapter are not built. The
+  scheduler cannot yet dispatch recurring tasks. Approved shell commands are not sandboxed.
+
 ## [2.4.2] — 2026-10-17
 
 ### Changed
@@ -672,7 +953,7 @@ code; they are kept here as history.
   rejection, spoken acknowledgements, Wake Lock and Media Session keys.
   Unlocked tier and non-safe bots only. New endpoints: `/ws/voice/{thread_id}`
   (inline Origin + session gate), `GET /api/voice/status`, and — when the
-  optional [`dispatch-voice`](docs/voice-drive-mode.md#cloned-voices-dispatch-voice)
+  optional [`dispatch-voice`](docs/voice-drive-mode.md)
   package is present (`DISPATCH_VOICE_PKG`) — the Voices panel at
   `/api/voices` for cloning a voice from a short clip. Optional `voice`
   dependency group (`uv sync --group voice`, then

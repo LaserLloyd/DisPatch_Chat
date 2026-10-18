@@ -125,7 +125,7 @@ _yaml_lock = threading.RLock()
 # at a guessed home path would both assume somebody else's install layout and
 # bake one vendor's binary name into the product. Unset = generation is simply
 # unavailable, and the pools degrade to "runs dry", which they already handle.
-_IMAGE_CLI = os.environ.get("DISPATCH_IMAGE_CLI", "").strip()
+_IMAGE_CLI = config.env("IMAGE_CLI", "").strip()       # 3.0: also answers to LOCAL_CHAT_ and the settings store
 # Generation is a cold-model-load away from slow; the CLI retries once itself.
 IMAGE_CLI_TIMEOUT_S = int(config.env("IMAGE_CLI_TIMEOUT", "300"))
 

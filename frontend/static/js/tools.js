@@ -43,7 +43,7 @@
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
-import { api } from './api.js?v=33';
+import { api } from './api.js?v=35';
 import { t, relTimeLong } from './i18n.js?v=4';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 

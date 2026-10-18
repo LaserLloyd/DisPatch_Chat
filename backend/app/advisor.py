@@ -39,9 +39,12 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import re
+import shutil
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -432,8 +435,10 @@ class AdvisorConfig:
 # Wikka answered every factual question by briefing ds_flash, who ran InfoForge
 # through the gateway: 30 s to 3 min per answer, and a marker contract the
 # model did not always honour. With `lookup` the turn runs
-# `infoforge search --json --text` itself — a fixed argv, no shell, read-only,
-# ~0.6 s — and the articles join the prompt as reference notes, so ONE model
+# `infoforge search --json --text` itself — a fixed argv, no shell, ~0.6 s;
+# read-only with InfoForge >= 2.1.0 (`--no-ensure`: it never creates or starts
+# the kiwix container, it fails fast; older versions may start it) — and the
+# articles join the prompt as reference notes, so ONE model
 # call answers with a citation. Only the user's own words are passed to the
 # search; nothing an LLM wrote is executed, which is why a locked (Safe-Mode)
 # turn gets the same lookup.
@@ -442,6 +447,11 @@ DEFAULT_LOOKUP_ARTICLES = 3
 DEFAULT_LOOKUP_CHARS = 3500       # per article, after InfoForge's own cut
 DEFAULT_LOOKUP_TIMEOUT_S = 8.0
 LOOKUP_KINDS = ("infoforge", "wikipedia")
+#: First InfoForge with `search --no-ensure` and a query that can never be
+#: read as a flag (`--`); see InfoForge CHANGELOG 2.1.0 / docs/reference/cli.md.
+INFOFORGE_SAFE_SEARCH = (2, 1, 0)
+DEFAULT_PROBE_TIMEOUT_S = 3.0
+PROBE_RETRY_S = 60.0              # a failed probe is retried after this long
 LOOKUP_SOURCE = "Wikipedia (offline copy)"
 #: `kind: wikipedia` (2.3.7): the online encyclopedia, for installs without
 #: InfoForge. Note that it sends the user's words to wikipedia.org, also on a
@@ -531,8 +541,14 @@ def _parse_lookup(raw: Any, bot_id: str = "") -> dict | None:
 
 
 async def _run_lookup(argv: list[str], timeout_s: float) -> tuple[int, str, str]:
+    """Run the search `argv`. Swapped in tests."""
+    return await _exec_argv(argv, timeout_s)
+
+
+async def _exec_argv(argv: list[str], timeout_s: float) -> tuple[int, str, str]:
     """Exec `argv` (never a shell) and return (rc, stdout, stderr); kills the
-    process and raises TimeoutError past the budget. Swapped in tests."""
+    process and raises TimeoutError past the budget. Async, so the event loop
+    is never blocked."""
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -545,6 +561,59 @@ async def _run_lookup(argv: list[str], timeout_s: float) -> tuple[int, str, str]
             await proc.wait()
         raise TimeoutError(f"lookup took longer than {timeout_s:g}s") from None
     return proc.returncode or 0, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+# key (argv prefix, resolved binary, its mtime) -> (version | None, probed at)
+_infoforge_versions: dict[tuple, tuple[tuple[int, int, int] | None, float]] = {}
+
+
+def _binary_key(command: list[str]) -> tuple:
+    exe = shutil.which(command[0]) or command[0]
+    try:
+        mtime = os.stat(exe).st_mtime_ns
+    except OSError:
+        mtime = 0
+    return (tuple(command), exe, mtime)
+
+
+async def _infoforge_version(command: list[str]) -> tuple[int, int, int] | None:
+    """The InfoForge CLI's version from `<command> --version` ("infoforge
+    2.1.0"), or None when it cannot be told (binary missing, non-zero exit,
+    timeout, unparsable output). Probed once per binary (path + mtime, so an
+    upgrade is noticed); a failed probe is retried after PROBE_RETRY_S."""
+    key = _binary_key(command)
+    hit = _infoforge_versions.get(key)
+    if hit and (hit[0] is not None or time.monotonic() - hit[1] < PROBE_RETRY_S):
+        return hit[0]
+    version: tuple[int, int, int] | None = None
+    try:
+        rc, out, err = await _exec_argv([*command, "--version"], DEFAULT_PROBE_TIMEOUT_S)
+        m = _VERSION_RE.search(out) or _VERSION_RE.search(err)
+        if rc == 0 and m:
+            version = (int(m[1]), int(m[2]), int(m[3]))
+    except (TimeoutError, OSError, ValueError, NotImplementedError) as e:
+        log.info("advisor: could not probe %s --version (%s); assuming an older InfoForge",
+                 command[0], e)
+    _infoforge_versions[key] = (version, time.monotonic())
+    return version
+
+
+async def _search_argv(command: list[str], max_articles: int, query: str) -> list[str]:
+    """The `infoforge search` argv. InfoForge >= 2.1.0 gets `--no-ensure`
+    (read-only: never creates/starts the kiwix container, fails fast) and `--`
+    (a query starting with `-` is never an option); anything older, or a
+    version that cannot be determined, gets the original argv unchanged."""
+    argv = [*command, "search", "--json", "--text"]
+    version = await _infoforge_version(command)
+    safe = version is not None and version >= INFOFORGE_SAFE_SEARCH
+    if safe:
+        argv.append("--no-ensure")
+    argv += ["--max-articles", str(max_articles)]
+    if safe:
+        argv.append("--")
+    argv.append(query)
+    return argv
 
 
 def _lookup_query(history: list[dict]) -> str:
@@ -565,8 +634,7 @@ async def lookup_hits(cfg: AdvisorConfig, query: str) -> list[knowledge.Hit]:
         return []
     if lk["kind"] == "wikipedia":
         return await _wikipedia_hits(cfg, query)
-    argv = [*lk["command"], "search", "--json", "--text",
-            "--max-articles", str(lk["max_articles"]), query]
+    argv = await _search_argv(lk["command"], lk["max_articles"], query)
     try:
         rc, out, err = await _run_lookup(argv, lk["timeout_s"])
     except TimeoutError as e:
@@ -671,6 +739,11 @@ class Hooks:
     # cancel path stamps `voice_heard {interrupted}` on a row that was already
     # being written when the turn was interrupted.
     merge_metadata: Callable[[str, dict], Awaitable[Any]] | None = None
+    # agents.unified_dispatch (W11b): a handoff card is mirrored as a task held in `queued`
+    # until the owner presses Send, and a dismissed card cancels it. Both optional; None (or
+    # the flag off) leaves the ledger and the card as the whole story, exactly as before.
+    on_handoff: Callable[[dict], Awaitable[Any]] | None = None
+    on_handoff_dismissed: Callable[[str], Awaitable[Any]] | None = None
 
 
 _hooks: Hooks | None = None
@@ -1635,6 +1708,9 @@ async def _act_on_markers(cfg: AdvisorConfig, thread_id: str,
             if msg is not None and getattr(msg, "id", None):
                 await asyncio.to_thread(ledger().update, req["id"],
                                         card_message_id=msg.id)
+            if h.on_handoff is not None:
+                with contextlib.suppress(Exception):
+                    await h.on_handoff({**req, "card_message_id": getattr(msg, "id", None)})
 
 
 def _public(req: dict) -> dict:
@@ -1888,6 +1964,9 @@ async def dismiss_handoff(rid: str, *, message_id: str) -> dict:
         raise await _already(rid, req["state"])
     req = {**req, "state": "dismissed"}
     await _restamp_card(req)
+    if _h().on_handoff_dismissed is not None:
+        with contextlib.suppress(Exception):
+            await _h().on_handoff_dismissed(rid)
     return _public(req)
 
 

@@ -1,0 +1,93 @@
+/* 3.0 settings surfaces: Connections, All settings, Backups, character details, the first-run wizard.
+   Colour comes from the theme tokens only (var(--...)); this file carries none of its own, so every
+   palette - including high contrast - applies. Layout reuses the Settings modal's own vocabulary
+   (.dev-group, .dev-row, .sec-field) and ForgeUI's .ui-setting rows; what is here is the little that
+   those do not already say. */
+
+/* ---- All settings ---------------------------------------------------- */
+.schema-toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 0 0 .75rem; }
+.schema-search { flex: 1 1 14rem; min-width: 0; }
+.schema-nav { display: flex; gap: .25rem; flex-wrap: wrap; margin: 0 0 .75rem; }
+.schema-tab {
+  appearance: none; background: transparent; color: var(--text-primary); border: 1px solid var(--divider);
+  border-radius: var(--radius-sm); padding: .35rem .65rem; cursor: pointer; font: inherit;
+}
+.schema-tab:hover { background: var(--surface-2); }
+.schema-tab.active, .schema-tab[aria-selected="true"] { background: var(--selected); color: var(--on-selected); border-color: transparent; }
+.schema-tab:focus-visible, .schema-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.schema-section { margin: 1rem 0 .25rem; font-size: .95rem; color: var(--text-secondary); }
+.schema-group .ui-settings { margin-bottom: .5rem; }
+.schema-error { color: var(--danger-text, var(--danger)); margin: .25rem 0 0; flex-basis: 100%; }
+.schema-warning { color: var(--warning-text, var(--warning)); }
+.schema-restart, .schema-restart-note { font-weight: 600; }
+.schema-savebar {
+  position: sticky; bottom: 0; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
+  justify-content: flex-end; padding: .6rem 0; background: var(--surface-1);
+  border-top: 1px solid var(--divider); margin-top: 1rem;
+}
+.schema-savemsg { margin-right: auto; color: var(--text-secondary); }
+.schema-extra { margin: .5rem 0; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.schema-other { padding-bottom: 3.5rem; }
+.schema-other-list { list-style: none; margin: .25rem 0 0; padding: 0; display: grid; gap: .25rem; }
+.schema-link { appearance: none; background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; text-align: left; }
+
+/* ---- Connections ----------------------------------------------------- */
+.cxn-bar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .25rem 0 .75rem; }
+.cxn-card { align-items: flex-start; flex-wrap: wrap; }
+.cxn-card .dev-row-text { display: grid; gap: .15rem; min-width: 0; flex: 1 1 18rem; }
+.cxn-url { overflow-wrap: anywhere; }
+.cxn-status.cxn-ok { color: var(--success-text, var(--success)); }
+.cxn-status.cxn-bad { color: var(--danger, var(--text-primary)); }
+.cxn-status.cxn-warn { color: var(--warning-text, var(--warning)); }
+.cxn-result { margin: .35rem 0; padding: .45rem .6rem; border-radius: var(--radius-sm); border: 1px solid var(--divider); }
+.cxn-result.cxn-ok { border-color: var(--success); }
+.cxn-result.cxn-bad { border-color: var(--danger); }
+.cxn-result.cxn-warn { border-color: var(--warning); }
+.cxn-models { display: flex; gap: .35rem; flex-wrap: wrap; }
+.cxn-form { margin: .5rem 0 1rem; }
+.cxn-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0 0; }
+.cxn-capfield { border: 0; padding: 0; margin: .5rem 0; }
+.cxn-caps { display: flex; gap: .75rem; flex-wrap: wrap; }
+.cxn-adv { margin: .35rem 0; }
+.cxn-found { margin: .5rem 0; }
+
+/* ---- Backups --------------------------------------------------------- */
+.bkp-section { margin: 1rem 0; }
+.bkp-form { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .35rem 0; }
+.bkp-check { display: inline-flex; gap: .35rem; align-items: center; }
+.bkp-row { flex-wrap: wrap; }
+.bkp-key { border: 2px solid var(--accent); border-radius: var(--radius-sm); padding: .6rem; margin: .5rem 0; display: grid; gap: .4rem; }
+.bkp-key-input { font-family: var(--font-mono); letter-spacing: .05em; }
+.bkp-pending { border: 1px solid var(--warning); border-radius: var(--radius-sm); padding: .5rem .6rem; margin: .5rem 0; }
+
+/* ---- Character details and starter packs ------------------------------ */
+.chr-panel { margin: .25rem 0 .75rem 1rem; padding-left: .75rem; border-left: 2px solid var(--divider); }
+.chr-visibility { border: 0; padding: 0; margin: .5rem 0; display: grid; gap: .2rem; }
+.chr-details-btn { margin-left: auto; }
+.chr-packs { margin-bottom: 1rem; }
+
+/* ---- First-run wizard -------------------------------------------------- */
+.wizard-backdrop { z-index: 1200; }
+.wizard { max-width: 38rem; width: 100%; max-height: 92vh; overflow: auto; }
+.wizard-steps { list-style: none; margin: 0 0 .75rem; padding: 0 1rem; display: flex; gap: .25rem .75rem; flex-wrap: wrap; font-size: .85rem; color: var(--text-secondary); }
+.wizard-step.current { color: var(--text-primary); font-weight: 700; }
+.wizard-content { padding: 0 1rem 1rem; }
+.wizard .modal-footer { display: flex; justify-content: flex-end; }
+.wizard-people .dev-row { gap: .5rem; flex-wrap: wrap; }
+.wizard-notes { margin: .5rem 0; padding-left: 1.1rem; }
+.wizard-checklist { list-style: none; padding: 0; margin: .5rem 0; display: grid; gap: .25rem; }
+.wizard-checklist li.done { color: var(--success-text, var(--success)); }
+@media (max-width: 40rem) {
+  .schema-savebar { position: static; }
+  .chr-panel { margin-left: 0; }
+}
+
+/* Rows live inside the Settings modal's own .dev-group-body card; keep a badge as wide as its text. */
+.dev-row-text .ui-badge, .dev-row-text > strong .ui-badge { align-self: flex-start; width: fit-content; }
+.dev-group-body.cxn-found:empty, .dev-group-body.bkp-list:empty { display: none; }
+.cxn-card .cxn-result { margin: .4rem 0 0; }
+.cxn-bar, .bkp-form, .cxn-actions { padding-inline: 2px; }
+.cxn-top, .cxn-bar, .cxn-found, .cxn-formhost, .cxn-list, .bkp-head, .bkp-section, .bkp-pending, .schema-toolbar,
+.schema-nav, .schema-body, .schema-savebar, .chr-packs { margin-inline: 18px; }
+.cxn-top .dev-group-title, .bkp-head .dev-group-title { margin-top: 16px; }
+.cxn-form.dev-group, .chr-panel.dev-group { margin-inline: 0; }

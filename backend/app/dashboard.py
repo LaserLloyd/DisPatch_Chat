@@ -230,7 +230,7 @@ def _cpu_seconds() -> float | None:
     """Total CPU time this process has used. Portable: /proc first (cheapest),
     then getrusage, which POSIX guarantees."""
     with contextlib.suppress(OSError, ValueError, IndexError):
-        raw = Path("/proc/self/stat").read_text()
+        raw = Path("/proc/self/stat").read_text(encoding="utf-8")
         # comm can contain spaces AND parens — everything after the LAST ')'
         # is the stable part of the record.
         fields = raw[raw.rindex(")") + 1:].split()
@@ -248,7 +248,7 @@ def _rss_bytes() -> tuple[int | None, bool]:
     only offer the peak, and saying which is which matters when someone is
     chasing a leak."""
     with contextlib.suppress(OSError, ValueError, IndexError):
-        pages = int(Path("/proc/self/statm").read_text().split()[1])
+        pages = int(Path("/proc/self/statm").read_text(encoding="utf-8").split()[1])
         return pages * os.sysconf("SC_PAGE_SIZE"), False
     with contextlib.suppress(Exception):
         import resource
@@ -274,7 +274,7 @@ def _container() -> str | None:
     if env:
         return env                              # systemd-nspawn, podman, lxc…
     with contextlib.suppress(OSError):
-        cgroup = Path("/proc/self/cgroup").read_text()
+        cgroup = Path("/proc/self/cgroup").read_text(encoding="utf-8")
         for needle, name in (("kubepods", "kubernetes"), ("docker", "docker"),
                              ("containerd", "containerd"), ("lxc", "lxc")):
             if needle in cgroup:
@@ -386,7 +386,7 @@ def _listening_addrs(port: int) -> list[str] | None:
     seen = False
     for name, v6 in (("/proc/net/tcp", False), ("/proc/net/tcp6", True)):
         try:
-            text = Path(name).read_text()
+            text = Path(name).read_text(encoding="utf-8")
         except OSError:
             continue
         seen = True

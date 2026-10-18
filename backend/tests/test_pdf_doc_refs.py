@@ -104,12 +104,19 @@ def text_pdf(text: str) -> bytes:
     return _xref(objects)
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont | None:
+def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont | None:
     for p in ("/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf",
-              "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"):
+              "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+              # Debian/Ubuntu layout (the GitHub runners): without these the
+              # page used to come out blank and the OCR test failed on CI.
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
         if Path(p).exists():
             return ImageFont.truetype(p, size)
-    return None
+    try:  # Pillow's bundled scalable font (Pillow >= 10.1, needs FreeType)
+        return ImageFont.load_default(size)
+    except (TypeError, OSError):
+        return None
 
 
 def image_pdf(lines: list[str]) -> bytes:
@@ -179,7 +186,8 @@ async def test_pdf_image_only_ocrs_when_available(pdf_env):
     resolved = await main._resolve_doc_refs(f"[[doc:{fid}|scale.pdf]]")
     assert "--- BEGIN DOCUMENT: scale.pdf ---" in resolved
     assert "207.7" in resolved          # OCR'd from the raster
-    assert "Body Fat Mass" in resolved
+    # OCR may wrap or re-space a line; compare on normalised whitespace.
+    assert "Body Fat Mass" in " ".join(resolved.split())
     assert "Attached file" not in resolved
 
 
