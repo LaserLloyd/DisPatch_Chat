@@ -113,3 +113,7 @@ memory/
 CLAUDE.md
 CLAUDE.local.md
 scripts/e2e-*.sh
+
+# Agent-isolation fixtures: a deliberately hostile repo layout used by backend/tests/agents
+!backend/tests/fixtures/agents/malicious_repo/.claude/
+!backend/tests/fixtures/agents/malicious_repo/CLAUDE.md

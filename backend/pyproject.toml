@@ -35,6 +35,14 @@ dependencies = [
     "ddgs>=9.16,<10",
 ]
 
+[project.optional-dependencies]
+# Agent dispatch, Claude Agent backend (docs/agents/backends.md). OPTIONAL and pinned
+# EXACTLY (RESEARCH.md section 5 item 6): the SDK bundles the Claude CLI binary (~117 MB
+# wheel) and moves fast, so an upgrade is a deliberate change plus a contract-suite run.
+# It is imported lazily, only inside the per-task worker process - the default install
+# and the whole `app.agents` package work without it.
+agents-claude = ["claude-agent-sdk==0.2.168"]
+
 [tool.uv]
 package = false
 
