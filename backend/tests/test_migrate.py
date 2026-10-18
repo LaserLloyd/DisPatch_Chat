@@ -239,3 +239,30 @@ def test_starting_the_server_migrates_and_the_owner_unlocks_with_the_old_pin(leg
         assert {k: bots[k] for k in ("kid", "helper", "work")} == {
             "kid": "restricted", "helper": "all", "work": "members"}
     asyncio.run(temp_db.close())
+
+
+def test_rollback_puts_the_files_back_owner_only(legacy):
+    """L-2: ``--restore DIR`` copies the backup's files over the live ones; they must end up 0600 / an owner-only
+    ACL, not whatever the backup copy or the folder happened to carry."""
+    import os
+
+    from app import fsperm
+    if os.name == "nt":
+        import subprocess
+        subprocess.run(["icacls", str(legacy), "/grant", "*S-1-1-0:(OI)(CI)R"], capture_output=True, check=False)
+    rep = migrate.run()
+    for name in ("config.yaml", "security.yaml", "chats.db"):
+        os.chmod(rep.backup / name, 0o644)
+    old = os.umask(0o022) if os.name != "nt" else None
+    try:
+        names = migrate.restore(rep.backup)
+    finally:
+        if old is not None:
+            os.umask(old)
+    assert set(names) >= {"chats.db", "config.yaml", "security.yaml"}
+    for name in ("config.yaml", "security.yaml", "chats.db"):
+        p = legacy / name
+        if os.name != "nt":
+            assert (p.stat().st_mode & 0o777) == 0o600, name
+        else:
+            assert fsperm.others_can_read(p) is False, name

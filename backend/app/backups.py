@@ -48,7 +48,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-from . import __version__, config, secret_store
+from . import __version__, config, fsperm, secret_store
 
 log = logging.getLogger("local-chat.backups")
 
@@ -74,6 +74,28 @@ MEDIA_DIRS = ("media", "files")
 #: top-level names a restore may write; anything else in an archive is refused.
 ALLOWED_TOP = frozenset({"chats.db", "MANIFEST.json", "secrets.json", *DATA_FILES,
                          "avatars", "reactions", "voices", "media", "files"})
+
+
+def make_private(path: Path, *, directory: bool = False) -> None:
+    """Owner-only, as a fresh write would be: 0600 / 0700 on POSIX, an owner-only ACL on Windows
+    (``app/fsperm.py``). Never raises: a filesystem that cannot hold permissions (a FAT share) is logged
+    by ``fsperm`` and the restore carries on."""
+    with contextlib.suppress(Exception):
+        fsperm.restrict(path, directory=directory)
+
+
+def harden_restored(data: Path, rels: list[str] | tuple[str, ...]) -> None:
+    """After a restore wrote ``rels`` (data-directory-relative, ``/``-separated): every top-level file
+    (``security.yaml``, ``config.yaml``, ``chats.db``, the VAPID key, ``RECOVERY-CODE.txt`` ...) is made
+    owner-only, and so is the secret store's own file (``agents/secrets.json``, the keyring fallback) and its
+    folder. Media and avatars below a folder are left to the folder's permissions: there can be thousands."""
+    for rel in rels:
+        if "/" not in rel:
+            make_private(data / rel)
+    sec = data / "agents" / "secrets.json"
+    if sec.is_file():
+        make_private(sec)
+        make_private(sec.parent, directory=True)
 
 
 class BackupError(Exception):
@@ -446,7 +468,7 @@ def read_archive(path: Path, passphrase: str, *, extract_to: Path | None = None)
                     target = Path(extract_to) / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                 with contextlib.ExitStack() as st:
-                    out = st.enter_context(open(target, "wb")) if target is not None else None
+                    out = st.enter_context(os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb"))                         if target is not None else None
                     for blk in iter(lambda s=src: s.read(1 << 20), b""):
                         h.update(blk)
                         if out is not None:
@@ -539,6 +561,8 @@ def stage_restore(backup_id: str, passphrase: str | None = None) -> dict:
     if stage.exists():
         shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
+    make_private(stage.parent, directory=True)      # decrypted secrets wait here until the next start
+    make_private(stage, directory=True)
     try:
         if kind == "archive":
             pw = passphrase or configured_passphrase()
@@ -609,15 +633,18 @@ def apply_pending_restore() -> dict | None:
         return {"applied": False, "error": str(e)}
     pre = backup_root() / f"pre-restore-{_stamp()}"
     pre.mkdir(parents=True, exist_ok=True)
+    make_private(pre, directory=True)
     cur = data / "chats.db"
     if cur.is_file():
         with contextlib.suppress(Exception):
             _sqlite_snapshot(cur, pre / "chats.db")
+            make_private(pre / "chats.db")
     for name in DATA_FILES:
         p = data / name
         if p.is_file():
             with contextlib.suppress(OSError):
                 shutil.copy2(p, pre / name)
+                make_private(pre / name)
     applied: list[str] = []
     for src in sorted(p for p in stage.rglob("*") if p.is_file()):
         rel = src.relative_to(stage).as_posix()
@@ -631,6 +658,8 @@ def apply_pending_restore() -> dict | None:
                     Path(str(dst) + suffix).unlink()
         tmp = dst.with_name(dst.name + ".restore-new")
         shutil.copy2(src, tmp)
+        if "/" not in rel:
+            make_private(tmp)           # before it is published: no moment when it is world-readable
         os.replace(tmp, dst)
         applied.append(rel)
     sec = stage / "secrets.json"
@@ -640,6 +669,7 @@ def apply_pending_restore() -> dict | None:
                 secret_store.put(str(ref), str(value))
         except Exception:
             log.exception("restoring secrets failed; re-enter the connection keys")
+    harden_restored(data, applied)
     shutil.rmtree(stage, ignore_errors=True)
     mp.unlink(missing_ok=True)
     with contextlib.suppress(Exception):
@@ -680,7 +710,9 @@ def run_scheduled_once() -> dict | None:
     if not pw:
         pw = recovery_key()
         secret_store.put("setting.system.backup_passphrase", pw)
-        log.warning("a backup recovery key was generated and stored; read it in Settings > System > Backups")
+        log.warning("no backup passphrase was set, so a recovery key was generated and saved in this install's secret "
+                    "store as the backup passphrase. It is not shown anywhere: set your own passphrase in "
+                    "Settings > System > Backups to be able to read these archives on another computer")
     row = create_archive(pw, include_media=bool(settings_store.get("system.encrypted_backup_include_media", False)))
     prune_archives(int(settings_store.get("system.encrypted_backup_keep", 7)))
     return row

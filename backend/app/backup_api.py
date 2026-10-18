@@ -118,7 +118,9 @@ async def create_backup(request: Request, payload: BackupCreateIn | None = None)
     audit(request, "backup.create", row["name"])
     out = {"backup": row, "passphrase_source": "request" if p.passphrase else "settings"}
     if generated:
-        out.update(recovery_key=generated, recovery_key_note="Shown once. Write it down; without it the backup cannot be read.",
+        out.update(recovery_key=generated, recovery_key_note=("Shown once. Write it down and keep it OFF this computer: it is also saved in this "
+                                      "install's secret store as the backup passphrase, so only a copy kept elsewhere "
+                                      "opens the backup if this computer is lost."),
                    passphrase_source="generated")
     from fastapi.responses import JSONResponse
     return JSONResponse(out, status_code=201)

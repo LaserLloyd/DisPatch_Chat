@@ -47,6 +47,7 @@ import httpx
 
 from . import config, secret_store, settings_store
 from .contracts.manifests import ConnectionManifest
+from .settings_schema import DEFAULT_DISCOVERY_TARGETS
 
 log = logging.getLogger("local-chat.connections")
 
@@ -818,7 +819,7 @@ async def run_test(c: Connection | None = None, *, type: str = "", base_url: str
 def _unreachable_hint(ct: ConnType, url: str, detail: str) -> str:
     host = urlparse(url).hostname or ""
     hints = [detail]
-    if ct.local and host in ("127.0.0.1", "localhost", "::1") and Path("/.dockerenv").exists():
+    if ct.local and host in _LOOPBACK_HOSTS and in_container():
         hints.append("DisPatch is running in a container, where 127.0.0.1 is the container itself. "
                      "Use host.docker.internal (or the host's LAN address) instead.")
     elif ct.local:
@@ -846,6 +847,128 @@ async def test_and_record(c: Connection) -> dict:
 # --------------------------------------------------------------------------- #
 
 _DISCOVER_PORTS = (1234, 8080, 11434)
+DOCKER_HOST_NAME = "host.docker.internal"
+_TARGET_RE = re.compile(r"^(?:\[(?P<v6>[0-9A-Fa-f:.]+)\]|(?P<bare6>[0-9A-Fa-f]*:[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*)"
+                        r"|(?P<name>[A-Za-z0-9._-]{1,253}))(?::(?P<port>\d{1,5}))?$")
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+_DOCKERENV = Path("/.dockerenv")
+
+
+def in_container() -> bool:
+    """True when DisPatch runs inside a container: ``/.dockerenv`` exists, or ``DISPATCH_IN_CONTAINER=1``
+    (``DISPATCH_IN_DOCKER`` is the older spelling and still counts)."""
+    if _DOCKERENV.exists():
+        return True
+    for name in ("DISPATCH_IN_CONTAINER", "DISPATCH_IN_DOCKER"):
+        if str(os.environ.get(name, "")).strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    return False
+
+
+def probe_docker_host() -> bool:
+    """May Find servers probe ``host.docker.internal``? Only inside a container AND while
+    ``connections.discovery_probe_docker_host`` (on by default) is on. Outside a container the name is never
+    probed: Docker Desktop writes it into the host's own hosts file, where it points at whatever else runs there."""
+    if not in_container():
+        return False
+    try:
+        return bool(settings_store.get("connections.discovery_probe_docker_host", True))
+    except Exception:
+        return True
+
+
+def _target_forbidden(host: str) -> bool:
+    """Cloud metadata names and link-local / unspecified / multicast addresses: never probed, whatever
+    ``connections.allow_private_targets`` says."""
+    h = host.lower().rstrip(".")
+    if h in _METADATA_NAMES:
+        return True
+    try:
+        return bool(_blocked_ip(ipaddress.ip_address(h)))
+    except ValueError:
+        return False
+
+
+def parse_discovery_target(raw: object) -> tuple[str, int | None] | None:
+    """``"host"``, ``"host:port"``, ``"[::1]:1234"`` -> (host, port or None for the usual three). None for
+    anything malformed or forbidden."""
+    s = str(raw or "").strip()
+    s = re.sub(r"^https?://", "", s, flags=re.I).rstrip("/")
+    m = _TARGET_RE.match(s)
+    if not m:
+        return None
+    host = m.group("v6") or m.group("bare6") or m.group("name")
+    port = int(m.group("port")) if m.group("port") else None
+    if m.group("bare6") and port is not None:
+        return None
+    if port is not None and not 1 <= port <= 65535:
+        return None
+    if _target_forbidden(host):
+        return None
+    return host, port
+
+
+def _configured_targets() -> list[str]:
+    try:
+        v = settings_store.get("connections.discovery_targets", list(DEFAULT_DISCOVERY_TARGETS))
+    except Exception:
+        v = None
+    if v is None:
+        return list(DEFAULT_DISCOVERY_TARGETS)
+    return [str(x) for x in v] if isinstance(v, (list, tuple)) else str(v).split(",")
+
+
+def _resolves(host: str) -> bool:
+    try:
+        return bool(socket.getaddrinfo(host, None, type=socket.SOCK_STREAM))
+    except (socket.gaierror, OSError, UnicodeError):
+        return False
+
+
+async def _resolvable(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if host.lower() in _LOOPBACK_HOSTS:
+        return True
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_resolves, host), timeout=1.5)
+    except TimeoutError:
+        return False
+
+
+async def discovery_candidates(*, hosts: list[str] | None = None, lan: bool = False) -> list[tuple[str, int]]:
+    """Every (host, port) Find servers will probe: ``connections.discovery_targets`` (names that do not
+    resolve are dropped), ``host.docker.internal`` when :func:`probe_docker_host`, the hosts the caller named,
+    and (``lan``) this computer's /24. Link-local and metadata addresses never make the list."""
+    docker_ok = probe_docker_host()
+    pairs: list[tuple[str, int | None]] = []
+    for raw in _configured_targets():
+        t = parse_discovery_target(raw)
+        if t is None:
+            continue
+        if t[0].lower() == DOCKER_HOST_NAME and not docker_ok:
+            continue
+        pairs.append(t)
+    names = list(dict.fromkeys(h for h, _ in pairs))
+    ok = dict(zip(names, await asyncio.gather(*(_resolvable(h) for h in names)), strict=True))
+    pairs = [t for t in pairs if ok.get(t[0])]
+    if docker_ok:
+        pairs.append((DOCKER_HOST_NAME, None))
+    for h in hosts or []:                       # named by the person pressing Find servers: their call
+        t = parse_discovery_target(h)
+        if t is not None:
+            pairs.append((t[0], t[1]))
+    if lan:
+        pairs += [(h, None) for h in await asyncio.to_thread(_lan_hosts)]
+    out: list[tuple[str, int]] = []
+    for h, port in pairs:
+        for pt in ((port,) if port else _DISCOVER_PORTS):
+            if (h, pt) not in out:
+                out.append((h, pt))
+    return out
 
 
 def _lan_hosts() -> list[str]:
@@ -866,21 +989,13 @@ def _lan_hosts() -> list[str]:
     return [str(h) for h in net.hosts() if str(h) != str(ip)]
 
 
-async def discover(*, hosts: list[str] | None = None, lan: bool = False,
-                   allow_private: bool | None = None) -> list[dict]:
-    """Find StudioForge, LM Studio, Ollama and OpenAI-style servers on loopback, the container
-    host, any ``hosts`` named, and (``lan=True``) this computer's /24. Short timeouts, bounded
-    concurrency; every candidate passes the SSRF guard. Returns one row per server found."""
-    cand: list[str] = ["127.0.0.1"]
-    if Path("/.dockerenv").exists() or os.environ.get("DISPATCH_IN_DOCKER"):
-        cand.append("host.docker.internal")
-    for h in hosts or []:
-        h = str(h).strip()
-        if h and re.fullmatch(r"[A-Za-z0-9._:-]{1,253}", h):
-            cand.append(h)
-    if lan:
-        cand += await asyncio.to_thread(_lan_hosts)
-    cand = list(dict.fromkeys(cand))
+async def discover(*, hosts: list[str] | None = None, lan: bool = False) -> list[dict]:
+    """Find StudioForge, LM Studio, Ollama and OpenAI-style servers on the places
+    ``connections.discovery_targets`` lists (loopback and the compose hostnames by default), the container
+    host (inside a container, unless ``connections.discovery_probe_docker_host`` is off), any ``hosts`` named,
+    and (``lan=True``) this computer's /24. Short timeouts, bounded concurrency; every candidate passes the SSRF
+    guard with the link-local/metadata exception closed. Returns one row per server found."""
+    cand = await discovery_candidates(hosts=hosts, lan=lan)
     existing = {(c.base_url.rstrip("/")): c.id for c in list_all()}
     sem = asyncio.Semaphore(48)
     found: dict[str, dict] = {}
@@ -889,11 +1004,11 @@ async def discover(*, hosts: list[str] | None = None, lan: bool = False,
         h = f"[{host}]" if ":" in host and not host.startswith("[") else host
         base = f"http://{h}:{port}"
         try:
-            await asyncio.to_thread(check_target, base, allow_private=allow_private)
+            await asyncio.to_thread(check_target, base, allow_private=False)
         except ConnectionError_:
             return
         async with sem:
-            ident = await identify(base, timeout=1.2 if host not in ("127.0.0.1", "host.docker.internal") else 2.0)
+            ident = await identify(base, timeout=2.0 if host in (*_LOOPBACK_HOSTS, DOCKER_HOST_NAME) else 1.2)
         if not ident:
             return
         api = base + "/v1"
@@ -904,7 +1019,7 @@ async def discover(*, hosts: list[str] | None = None, lan: bool = False,
                       "needs_key": bool(ident.get("needs_key")),
                       "already_added": existing.get(api)}
 
-    await asyncio.gather(*(probe(h, p) for h in cand for p in _DISCOVER_PORTS))
+    await asyncio.gather(*(probe(h, p) for h, p in cand))
     order = {"studioforge": 0, "lmstudio": 1, "ollama": 2, "openai_compatible": 3}
     return sorted(found.values(), key=lambda r: (order.get(r["type"], 9), r["host"] != "127.0.0.1", r["base_url"]))
 

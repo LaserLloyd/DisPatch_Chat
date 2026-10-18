@@ -251,6 +251,9 @@ def backup(version: str = TARGET_VERSION) -> Path:
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     dest = root / f"{version}-{stamp}"
     dest.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(Exception):
+        from . import fsperm
+        fsperm.restrict(dest, directory=True)
     dbp = _db_file()
     if dbp.exists():
         src = sqlite3.connect(_ro_uri(dbp), uri=True)
@@ -287,6 +290,10 @@ def restore(src: Path) -> list[str]:
                 with contextlib.suppress(OSError):
                     Path(str(target) + suffix).unlink()
             shutil.copy2(f, target)
+            # A copy keeps the backup's mode (on Windows: the folder's ACL). Put it back to owner-only, the
+            # same as a fresh write: security.yaml has the PIN hash, config.yaml may carry keys, chats.db the chats.
+            from . import backups
+            backups.make_private(Path(target))
             restored.append(name)
     accounts.reset_for_tests()
     settings_store.reset_schema_cache()

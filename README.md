@@ -153,7 +153,7 @@ host needs different names.
 #### 2. Native, with uv (experimental)
 
 Choose this to try or develop DisPatch without Docker. The server imports and runs on Windows, but the
-full test suite only runs on Linux, so treat this as experimental.
+full backend test suite runs on Linux (WSL on Windows), not natively, so treat this as experimental.
 
 ```powershell
 winget install --id Git.Git -e
@@ -864,9 +864,13 @@ transmitted off the machine unless you configure an agent backend that does so.
 ```bash
 cd backend
 uv sync                 # Python 3.12+
-uv run pytest           # the test suite
+uv run pytest           # the test suite (on Linux, or in WSL on Windows)
 uv run uvicorn app.main:app --reload --port 8765
 ```
+
+The full backend suite runs on Linux (use WSL on Windows). Native Windows runs a subset: everything collects and
+`-k` or a file path works (`uv run pytest tests/test_route_table.py -q`), but 136 tests fail on a Windows host at
+3.0.0 because they depend on POSIX file modes, `/tmp` and process groups. See [docs/development.md](docs/development.md#windows).
 
 The frontend has **no build step** — it is ES modules and CSS served as-is.
 Edit a file, reload the page. Cache busting is two moves, not one: bump the
@@ -878,7 +882,7 @@ Before opening a pull request:
 ```bash
 python3 scripts/scrub_check.py      # no private data may enter the repo
 uv run --python 3.12 python scripts/check-locales.py   # translations complete, consistent and safe (needs Python 3.12+)
-cd backend && uv run pytest -q
+cd backend && uv run pytest -q     # Linux or WSL; on native Windows run a subset (see above)
 ```
 
 ## Roadmap
