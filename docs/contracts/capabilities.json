@@ -1032,6 +1032,7 @@
     "GET /api/studioforge/status",
     "GET /api/threads/{thread_id}/avatar",
     "GET /api/tools/{tool_id}/status",
+    "GET /api/voice/providers",
     "GET /apps/{app_id}",
     "GET /apps/{app_id}/{rel:path}",
     "GET /ext/{ext_id}/{rel:path}",

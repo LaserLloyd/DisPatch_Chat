@@ -48,6 +48,7 @@ import contextlib
 import copy
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import logging
 import os
@@ -67,10 +68,10 @@ import yaml
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
-from starlette.routing import WebSocketRoute
+from starlette.routing import Match, WebSocketRoute
 from starlette.websockets import WebSocketState
 
-from . import auth, config, livetools, tools
+from . import auth, config, fsperm, livetools, tools
 from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.ext")
@@ -86,6 +87,14 @@ DETAIL_MAX = 200
 #: Bot fields DisPatch stores for extensions (config.yaml bots[]); their
 #: meaning — and their validation — is the extension's.
 BOT_FIELDS = {"voice": 80, "voice_rp": 32}
+
+#: The folder an extension's model files live in (``ExtPaths.models_dir``): ``<data>/models``,
+#: with a subfolder per family that the add-on chooses (the voice add-on: ``speech/``,
+#: ``chatterbox/``). It was ``<data>/speech-models`` until 3.0, a name that also held the
+#: Chatterbox voice model and confused every support thread; :func:`migrate_models_dir`
+#: moves the old folder across once.
+MODELS_DIRNAME = "models"
+LEGACY_MODELS_DIRNAME = "speech-models"
 
 DECOY_BODY = {"detail": "Unlock for full access", "decoy": True}
 NOT_FOUND = {"detail": "Not found"}
@@ -533,6 +542,255 @@ def websocket_spec(name: str) -> _WsSpec | None:
 # ExtensionContext
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Private folders, the models folder, the credential store, the settings writer
+# --------------------------------------------------------------------------- #
+
+_private_done: set[tuple[str, str]] = set()
+
+
+def _ensure_private_tree(data: Path, state: Path) -> None:
+    """Create ``state`` (and its parents) and make ``<data>/ext`` and ``state`` owner-only. The
+    data folder itself is restricted only when THIS call created it: an existing one may be
+    shared on purpose (a bind mount another service user reads). Once per path per process."""
+    key = (str(data), str(state))
+    if key in _private_done and state.is_dir():
+        return
+    created = not data.exists()
+    with contextlib.suppress(OSError):
+        state.mkdir(parents=True, exist_ok=True)
+    if created:
+        fsperm.ensure_private(data, directory=True)
+    fsperm.ensure_private(data / "ext", directory=True)
+    fsperm.ensure_private(state, directory=True)
+    _private_done.add(key)
+
+
+def migrate_models_dir(*, dry_run: bool = True, data: Path | None = None) -> dict:
+    """Move ``<data>/speech-models`` to ``<data>/models`` (the 3.0 name). Never overwrites:
+
+    * no old folder: nothing to do;
+    * no new folder: one rename;
+    * a new folder that is empty: it is removed, then one rename;
+    * both have files: the old entries move across one by one, a name that already exists in
+      the new folder stays where it is (listed under ``skipped``), the old folder is removed if
+      it ends up empty.
+
+    ``DISPATCH_SPEECH_MODELS`` (an operator's chosen folder) is never touched. Idempotent: a
+    second run finds nothing. ``dry_run`` (the default here; startup passes False) only reports.
+    A folder that is a mount point, or cannot be renamed, is left and reported under ``errors``;
+    the add-on still reads files in the old place. Returns ``{"dry_run", "action", "old", "new",
+    "moved", "skipped", "errors"}`` with ``action`` one of ``none``, ``explicit``, ``rename``,
+    ``merge``, ``error``."""
+    base = Path(data) if data is not None else Path(config.DATA_DIR)
+    old, new = base / LEGACY_MODELS_DIRNAME, base / MODELS_DIRNAME
+    rep: dict = {"dry_run": dry_run, "action": "none", "old": LEGACY_MODELS_DIRNAME, "new": MODELS_DIRNAME,
+                 "moved": [], "skipped": [], "errors": []}
+    if os.environ.get("DISPATCH_SPEECH_MODELS", "").strip():
+        rep["action"] = "explicit"
+        return rep
+    try:
+        if not old.is_dir() or old.is_symlink():
+            return rep
+        if new.exists() and not new.is_dir():
+            rep.update(action="error", errors=[f"{MODELS_DIRNAME} exists and is not a folder"])
+            return rep
+        empty_new = new.is_dir() and not any(new.iterdir())
+        if not new.exists() or empty_new:
+            rep["action"] = "rename"
+            rep["moved"] = sorted(c.name for c in old.iterdir())
+            if not dry_run:
+                if empty_new:
+                    new.rmdir()
+                old.rename(new)
+            return rep
+        rep["action"] = "merge"
+        for child in sorted(old.iterdir(), key=lambda c: c.name):
+            if (new / child.name).exists():
+                rep["skipped"].append(child.name)
+                continue
+            rep["moved"].append(child.name)
+            if not dry_run:
+                os.replace(child, new / child.name)
+        if not dry_run:
+            with contextlib.suppress(OSError):
+                old.rmdir()                      # only when now empty
+    except OSError as e:
+        rep["action"] = "error"
+        rep["errors"].append(f"{type(e).__name__}: {str(e)[:120]}")
+        log.warning("ext: could not move %s to %s (%s); the add-on keeps reading the old folder",
+                    LEGACY_MODELS_DIRNAME, MODELS_DIRNAME, type(e).__name__)
+    return rep
+
+
+def _migrate_models_at_start() -> None:
+    """Startup: the one-time move, before any extension's setup sees ``paths.models_dir``.
+    ``DISPATCH_MODELS_MIGRATE``: ``auto`` (default), ``dry-run`` (log what would move), ``off``."""
+    mode = os.environ.get("DISPATCH_MODELS_MIGRATE", "auto").strip().lower()
+    if mode == "off":
+        return
+    try:
+        rep = migrate_models_dir(dry_run=(mode == "dry-run"))
+    except Exception:           # the shell never fails to boot over a folder move
+        log.exception("ext: models folder migration failed")
+        return
+    if rep["action"] in ("none", "explicit"):
+        return
+    log.info("ext: models folder %s -> %s: %s (%d moved%s, %d kept in place)%s",
+             rep["old"], rep["new"], rep["action"], len(rep["moved"]),
+             " in dry run" if rep["dry_run"] else "", len(rep["skipped"]),
+             f"; errors: {rep['errors']}" if rep["errors"] else "")
+
+
+SECRET_NAME_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+
+
+class ExtSecrets:
+    """``ctx.secrets``: one extension's credentials. ``get`` / ``set`` / ``delete`` / ``has`` by
+    a short name; values are strings. Reuses ``agents/secrets.py`` (the OS keyring when usable,
+    else a 0600 JSON file in the extension's ``state_dir``), registers every value with the
+    redactor so it cannot reach a log line, and never returns one through any HTTP route (the
+    host has none). ``backend`` names where values live: ``keyring`` or ``file``."""
+
+    def __init__(self, ext_id: str) -> None:
+        self._id = ext_id
+        self._provider: Any = None
+        self._lock = threading.Lock()
+
+    def _store(self):
+        with self._lock:
+            if self._provider is None:
+                self._provider = _make_secret_provider(self._id)
+            return self._provider
+
+    @staticmethod
+    def _name(name: str) -> str:
+        if not isinstance(name, str) or not SECRET_NAME_RE.match(name):
+            raise ValueError("a secret name is 1-64 letters, digits, '.', '_' or '-'")
+        return name
+
+    @property
+    def backend(self) -> str:
+        return str(getattr(self._store(), "name", "file"))
+
+    def get(self, name: str) -> str | None:
+        v = self._store().get(self._name(name))
+        if v:
+            _redact(v)
+        return v or None
+
+    def has(self, name: str) -> bool:
+        return bool(self._store().get(self._name(name)))
+
+    def set(self, name: str, value: str) -> None:
+        if not isinstance(value, str) or not value or len(value) > 4096:
+            raise ValueError("a secret value is a non-empty string of at most 4096 characters")
+        store = self._store()
+        store.set(self._name(name), value)
+        _redact(value)
+        path = getattr(store, "path", None)
+        if path is not None:
+            fsperm.ensure_private(path)          # the file provider only chmods; Windows needs the ACL
+
+    def delete(self, name: str) -> None:
+        self._store().delete(self._name(name))
+
+    def __repr__(self) -> str:      # never a value
+        return f"ExtSecrets(ext={self._id!r})"
+
+
+def _redact(value: str) -> None:
+    with contextlib.suppress(Exception):
+        from .agents.secrets import GLOBAL_REDACTOR
+        GLOBAL_REDACTOR.register(value)
+
+
+def _make_secret_provider(ext_id: str):
+    """Keyring (service ``dispatch-chat-ext-<id>``) when importable and backed by something
+    real, else a 0600 JSON file ``<data>/ext/<id>/secrets.json``."""
+    from .agents import secrets as _s
+    state = Path(config.DATA_DIR) / "ext" / ext_id
+    _ensure_private_tree(Path(config.DATA_DIR), state)
+    try:
+        kr = _s.KeyringSecretProvider(f"dispatch-chat-ext-{ext_id}")
+        if kr.usable():
+            return kr
+    except ImportError:
+        pass
+    return _s.FileSecretProvider(state / "secrets.json")
+
+
+_secret_stores: dict[tuple[str, str], ExtSecrets] = {}
+
+
+def _secrets_for(ext_id: str) -> ExtSecrets:
+    key = (str(config.DATA_DIR), ext_id)         # tests move DATA_DIR: a store per data folder
+    st = _secret_stores.get(key)
+    if st is None:
+        st = _secret_stores[key] = ExtSecrets(ext_id)
+    return st
+
+
+class _NoopWriter:
+    """What ``settings_writer`` returns while the settings store does not exist: accepts and
+    drops every write, and says so once."""
+
+    live = False
+
+    def __init__(self, namespace: str) -> None:
+        self.namespace = namespace
+        self._said = False
+
+    def __call__(self, key: str, value: Any) -> None:
+        if not self._said:
+            self._said = True
+            log.info("ext: the settings store is not available yet; writes under %r are ignored", self.namespace)
+
+
+def is_live_writer(writer: Any) -> bool:
+    """False for the no-op stand-in: do not mark a one-way migration done through it."""
+    return not isinstance(writer, _NoopWriter)
+
+
+def _settings_writer(namespace: str) -> Callable[[str, Any], None]:
+    mod_name = f"{__package__}.settings_store"            # lands with the settings work (W5)
+    try:
+        present = importlib.util.find_spec(mod_name) is not None
+    except (ImportError, ValueError):
+        present = False
+    if not present:
+        return _NoopWriter(namespace)
+    try:
+        fn = getattr(importlib.import_module(mod_name), "writer", None)
+        return fn(namespace) if callable(fn) else _NoopWriter(namespace)
+    except Exception:           # a broken store module must not break an extension's start
+        log.exception("ext: the settings store failed to load; writes under %r are ignored", namespace)
+        return _NoopWriter(namespace)
+
+
+def _migrate_ext_settings(ext: Extension) -> None:
+    """Startup, once the settings store is live: hand the add-on's ``migrate_voice_yaml`` the
+    store's writer. Idempotent (the add-on keeps a marker beside voice.yaml); skipped while the
+    writer is the no-op stand-in, because the add-on would record the move as done."""
+    if ext.id != "voice" or ext.ctx is None:
+        return
+    writer = ext.ctx.settings_writer(ext.id)
+    if not is_live_writer(writer):
+        return
+    try:
+        mod = importlib.import_module("dispatch_voice.host.migration")
+        fn = getattr(mod, "migrate_voice_yaml", None)
+        if fn is None:
+            return
+        rep = fn(writer, dry_run=False)
+    except Exception:           # an add-on's migration never stops the shell
+        log.exception("ext %s: settings migration failed", ext.id)
+        return
+    if isinstance(rep, dict) and rep.get("status") not in ("nothing_to_migrate", "already_migrated"):
+        log.info("ext %s: settings migration: %s (%s key(s) written)", ext.id, rep.get("status"),
+                 rep.get("written"))
+
+
 class ExtensionContext:
     """Everything an extension gets (CONTRACTS §B.1). Registration methods work
     during ``setup(ctx)`` only; the context is sealed afterwards."""
@@ -552,24 +810,41 @@ class ExtensionContext:
 
     @property
     def paths(self) -> ExtPaths:
-        """Computed from the live DATA_DIR (tests move it); state_dir is
-        created 0700 on first use."""
+        """Computed from the live DATA_DIR (tests move it). ``state_dir`` is created on first
+        use and is owner-only (0700 on POSIX, an owner-only ACL on Windows); so is the data
+        folder itself when this call is what created it."""
         data = Path(config.DATA_DIR)
         eid = self.ext_id
         models = os.environ.get("DISPATCH_SPEECH_MODELS", "").strip()
         state = data / "ext" / eid
-        with contextlib.suppress(OSError):
-            state.mkdir(parents=True, exist_ok=True)
-            os.chmod(data / "ext", 0o700)
-            os.chmod(state, 0o700)
+        _ensure_private_tree(data, state)
         if eid == "voice":
             names = ("voice.yaml", "voice-acks.yaml", "voices", "voice-cache")
         else:
             names = (f"{eid}.yaml", f"{eid}-acks.yaml", f"{eid}-files", f"{eid}-cache")
         return ExtPaths(voice_yaml=data / names[0], acks_yaml=data / names[1],
                         voices_dir=data / names[2], cache_dir=data / names[3],
-                        models_dir=Path(models) if models else data / "speech-models",
+                        models_dir=Path(models) if models else data / MODELS_DIRNAME,
                         state_dir=state)
+
+    @property
+    def secrets(self) -> ExtSecrets:
+        """The host's credential store for this extension (get / set / delete by name),
+        backed by ``agents/secrets.py``: the OS keyring when one is usable, else a private file
+        in ``state_dir`` (so it is on the data volume in a container and survives an image
+        update). An extension keeps tokens here instead of a dot-file under the user's home."""
+        return _secrets_for(self.ext_id)
+
+    def settings_writer(self, namespace: str | None = None) -> Callable[[str, Any], None]:
+        """``write(key, value)`` into the settings store under ``namespace`` (the extension's own
+        id, or ``<id>.<sub>``; another extension's namespace is refused). Returns the settings
+        store's writer when that module exists; until then a no-op that logs once, so an
+        extension can call this today and become live when the store lands. Test
+        ``is_live_writer(w)`` before a one-way move (a no-op writer must not count as moved)."""
+        ns = (namespace or self.ext_id).strip()
+        if ns != self.ext_id and not ns.startswith(self.ext_id + "."):
+            raise ValueError(f"extension {self.ext_id!r} may only write settings under {self.ext_id!r}")
+        return _settings_writer(ns)
 
     def db(self):
         return _hooks.db()
@@ -1013,6 +1288,8 @@ def load_one(app: FastAPI, cand: Candidate) -> Extension:
             raise
         return _fail(ext, e, what="import of setup")
     env = {n: os.environ[n] for n in meta["env"] if n in os.environ}
+    if ext.id == "voice":
+        _migrate_models_at_start()           # before setup(ctx) reads paths.models_dir
     ctx = ExtensionContext(ext, app, env)
     before = list(app.router.routes)
     try:
@@ -1213,6 +1490,8 @@ async def run_startup() -> None:
     if _boot_marker_on() and _boot_marker().exists():
         with contextlib.suppress(RuntimeError):
             asyncio.get_running_loop().call_later(SETTLE_S, clear_boot_marker)
+    for e in _ok():
+        await asyncio.to_thread(_migrate_ext_settings, e)
     for e in _ok():
         for fn, in_thread in e.startup:
             if in_thread:
@@ -1734,6 +2013,60 @@ def api_extensions(request: Request):
         return JSONResponse(DECOY_BODY, status_code=403)
     return {"extensions": [e.public(operator=operator) for e in _all], "mode": _mode,
             "api": EXT_API}
+
+
+
+#: Voice provider plugins (a speech-to-text, text-to-speech or turn-taking engine for the voice
+#: add-on) are Python packages that declare an entry point in this group. The add-on loads the
+#: ones the operator switched on; the host only LISTS them (Settings -> Plugins).
+VOICE_PROVIDER_GROUP = "dispatch_voice.providers"
+
+
+def voice_provider_plugins() -> list[dict]:
+    """The installed ``dispatch_voice.providers`` entry points: ``[{name, package, version}]``.
+    Nothing is imported (a listing never runs a plugin's code), and the ``module:attr`` target is
+    left out, like everywhere else in the extension surface."""
+    try:
+        eps = list(entry_points(group=VOICE_PROVIDER_GROUP))
+    except Exception:           # a broken metadata dir lists nothing
+        log.exception("ext: could not list %s entry points", VOICE_PROVIDER_GROUP)
+        return []
+    out = []
+    for ep in eps:
+        dist = getattr(ep, "dist", None)
+        out.append({"name": ep.name, "package": getattr(dist, "name", "") or "",
+                    "version": getattr(dist, "version", "") or ""})
+    return sorted(out, key=lambda r: r["name"])
+
+
+class _WhenVoiceAbsent(APIRoute):
+    """A route that exists only while the voice add-on is NOT mounted: with it mounted this one
+    does not match, so the add-on's own route at the same path (its providers' health and
+    settings) is the one that answers."""
+
+    def matches(self, scope):
+        match, child = super().matches(scope)
+        if match != Match.NONE:
+            v = get("voice")
+            if v is not None and v.ok:
+                return Match.NONE, {}
+        return match, child
+
+
+def api_voice_providers_absent():
+    """``GET /api/voice/providers`` while the add-on is not running: nothing to configure, but
+    the plugin page can still show which provider plugins are installed and why none is active.
+    Needs ``manage_plugins`` (the route table says so); using a provider later needs ``use_voice``."""
+    v = _by_id.get("voice")                       # any state: get() answers for a healthy one only
+    return {"installed": v is not None, "state": v.state if v is not None else "absent",
+            "providers": {}, "plugins": [{**p, "enabled": False} for p in voice_provider_plugins()],
+            "permissions": {"list": Permission.MANAGE_PLUGINS.value, "use": Permission.USE_VOICE.value},
+            "install": "docs/extensions.md#voice"}
+
+
+router.add_api_route("/api/voice/providers", api_voice_providers_absent, methods=["GET"],
+                     route_class_override=_WhenVoiceAbsent, include_in_schema=False,
+                     dependencies=[Depends(require_operator)])
 
 
 _etags: dict[str, tuple[int, int, str]] = {}

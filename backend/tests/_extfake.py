@@ -144,6 +144,10 @@ def setup(ctx) -> None:
     def status(request: Request):
         return {"ok": True, "env": sorted(ctx.env), "counters": ctx.counters}
 
+    @router.get("/providers")
+    def providers():
+        return {"from": "addon", "providers": {"stt": [], "tts": []}}
+
     @router.post("/upload")
     async def upload(request: Request):
         body = await request.body()
