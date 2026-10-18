@@ -607,7 +607,12 @@
    "fix": "Check the request and resend it.",
    "docs": "settings_invalid",
    "patterns": [
-    "Invalid settings"
+    "Invalid settings",
+    "Unknown settings group",
+    "level must be basic or advanced",
+    "Send {\"set\": {key: value}, \"reset\": [key]}",
+    "Nothing to change",
+    "{} cannot be set and reset together"
    ],
    "seeded": true
   },
@@ -2093,6 +2098,183 @@
     "Storage limit reached — free space or delete files",
     "Disk write failed"
    ],
+   "seeded": false
+  },
+  {
+   "code": "connection_not_found",
+   "status": 404,
+   "message": "Unknown connection",
+   "fix": "Pick a connection from the list; it may have been deleted.",
+   "docs": "connection_not_found",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "connection_invalid",
+   "status": 422,
+   "message": "That connection is not valid",
+   "fix": "Check the type, address, key and capabilities and try again.",
+   "docs": "connection_invalid",
+   "patterns": [
+    "Nothing to change"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "connection_invalid_url",
+   "status": 422,
+   "message": "That address is not valid",
+   "fix": "Use an http:// or https:// address that names a host, with no user name or password in it.",
+   "docs": "connection_invalid_url",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "connection_blocked_target",
+   "status": 403,
+   "message": "That address is blocked",
+   "fix": "The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.",
+   "docs": "connection_blocked_target",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "connection_exists",
+   "status": 409,
+   "message": "A connection with that id already exists",
+   "fix": "Choose a different id, or change the existing connection.",
+   "docs": "connection_exists",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "connection_in_use",
+   "status": 409,
+   "message": "That connection is used by a character",
+   "fix": "Point those characters at another connection first, then delete this one.",
+   "docs": "connection_in_use",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "character_invalid",
+   "status": 422,
+   "message": "That character change is not valid",
+   "fix": "Check the fields you sent; the message says which one.",
+   "docs": "character_invalid",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "character_last",
+   "status": 409,
+   "message": "A DisPatch install needs at least one bot",
+   "fix": "Add another character before removing this one.",
+   "docs": "character_last",
+   "patterns": [
+    "A DisPatch install needs at least one bot"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "starter_pack_not_found",
+   "status": 404,
+   "message": "Unknown starter pack",
+   "fix": "List the packs with GET /api/starter-packs.",
+   "docs": "starter_pack_not_found",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "plugin_needs_approval",
+   "status": 409,
+   "message": "This plugin needs approval",
+   "fix": "Review the permissions it asks for, then enable it again with approve set to that list.",
+   "docs": "plugin_needs_approval",
+   "patterns": [
+    "approve must be the list of permissions you reviewed"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "backup_not_found",
+   "status": 404,
+   "message": "Unknown backup",
+   "fix": "List the backups with GET /api/backups.",
+   "docs": "backup_not_found",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "backup_wrong_key",
+   "status": 400,
+   "message": "The passphrase is wrong, or this is not a DisPatch backup",
+   "fix": "Enter the passphrase or recovery key the backup was made with.",
+   "docs": "backup_wrong_key",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "backup_corrupt",
+   "status": 400,
+   "message": "The backup file is damaged",
+   "fix": "Try another backup; this one cannot be read or failed its checks.",
+   "docs": "backup_corrupt",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "backup_passphrase_required",
+   "status": 400,
+   "message": "A backup passphrase is required",
+   "fix": "Send a passphrase (at least 8 characters), or set one in Settings > System.",
+   "docs": "backup_passphrase_required",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "backup_confirm_required",
+   "status": 422,
+   "message": "Restoring replaces your current data",
+   "fix": "Send confirm: true to go ahead.",
+   "docs": "backup_confirm_required",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "backup_protected",
+   "status": 409,
+   "message": "That backup is protected",
+   "fix": "Pre-migration copies are kept until they age out.",
+   "docs": "backup_protected",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "wizard_owner_required",
+   "status": 409,
+   "message": "Create the owner account first",
+   "fix": "Finish step 1 of the setup wizard (the owner account) before this step.",
+   "docs": "wizard_owner_required",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "wizard_step_unknown",
+   "status": 404,
+   "message": "Unknown wizard step",
+   "fix": "The steps are owner, connection, voice, family, network.",
+   "docs": "wizard_step_unknown",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "wizard_step_required",
+   "status": 409,
+   "message": "That step cannot be skipped",
+   "fix": "Only the optional steps (voice, family) can be skipped.",
+   "docs": "wizard_step_required",
+   "patterns": [],
    "seeded": false
   }
  ]

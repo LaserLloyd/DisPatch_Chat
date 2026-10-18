@@ -142,6 +142,54 @@
       "status": 503
     },
     {
+      "code": "backup_confirm_required",
+      "docs": "backup_confirm_required",
+      "fix": "Send confirm: true to go ahead.",
+      "message": "Restoring replaces your current data",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "backup_corrupt",
+      "docs": "backup_corrupt",
+      "fix": "Try another backup; this one cannot be read or failed its checks.",
+      "message": "The backup file is damaged",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "backup_not_found",
+      "docs": "backup_not_found",
+      "fix": "List the backups with GET /api/backups.",
+      "message": "Unknown backup",
+      "patterns": [],
+      "status": 404
+    },
+    {
+      "code": "backup_passphrase_required",
+      "docs": "backup_passphrase_required",
+      "fix": "Send a passphrase (at least 8 characters), or set one in Settings > System.",
+      "message": "A backup passphrase is required",
+      "patterns": [],
+      "status": 400
+    },
+    {
+      "code": "backup_protected",
+      "docs": "backup_protected",
+      "fix": "Pre-migration copies are kept until they age out.",
+      "message": "That backup is protected",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "backup_wrong_key",
+      "docs": "backup_wrong_key",
+      "fix": "Enter the passphrase or recovery key the backup was made with.",
+      "message": "The passphrase is wrong, or this is not a DisPatch backup",
+      "patterns": [],
+      "status": 400
+    },
+    {
       "code": "bad_request",
       "docs": "bad_request",
       "fix": "Check the request body against the API reference.",
@@ -263,6 +311,24 @@
       "status": 503
     },
     {
+      "code": "character_invalid",
+      "docs": "character_invalid",
+      "fix": "Check the fields you sent; the message says which one.",
+      "message": "That character change is not valid",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "character_last",
+      "docs": "character_last",
+      "fix": "Add another character before removing this one.",
+      "message": "A DisPatch install needs at least one bot",
+      "patterns": [
+        "A DisPatch install needs at least one bot"
+      ],
+      "status": 409
+    },
+    {
       "code": "check_failed",
       "docs": "check_failed",
       "fix": "Fix the fields in detail and resend.",
@@ -329,6 +395,56 @@
       "message": "Conflict.",
       "patterns": [],
       "status": 409
+    },
+    {
+      "code": "connection_blocked_target",
+      "docs": "connection_blocked_target",
+      "fix": "The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.",
+      "message": "That address is blocked",
+      "patterns": [],
+      "status": 403
+    },
+    {
+      "code": "connection_exists",
+      "docs": "connection_exists",
+      "fix": "Choose a different id, or change the existing connection.",
+      "message": "A connection with that id already exists",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "connection_in_use",
+      "docs": "connection_in_use",
+      "fix": "Point those characters at another connection first, then delete this one.",
+      "message": "That connection is used by a character",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "connection_invalid",
+      "docs": "connection_invalid",
+      "fix": "Check the type, address, key and capabilities and try again.",
+      "message": "That connection is not valid",
+      "patterns": [
+        "Nothing to change"
+      ],
+      "status": 422
+    },
+    {
+      "code": "connection_invalid_url",
+      "docs": "connection_invalid_url",
+      "fix": "Use an http:// or https:// address that names a host, with no user name or password in it.",
+      "message": "That address is not valid",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "connection_not_found",
+      "docs": "connection_not_found",
+      "fix": "Pick a connection from the list; it may have been deleted.",
+      "message": "Unknown connection",
+      "patterns": [],
+      "status": 404
     },
     {
       "code": "content_empty",
@@ -1342,6 +1458,16 @@
       "status": 400
     },
     {
+      "code": "plugin_needs_approval",
+      "docs": "plugin_needs_approval",
+      "fix": "Review the permissions it asks for, then enable it again with approve set to that list.",
+      "message": "This plugin needs approval",
+      "patterns": [
+        "approve must be the list of permissions you reviewed"
+      ],
+      "status": 409
+    },
+    {
       "code": "pool_settings_invalid",
       "docs": "pool_settings_invalid",
       "fix": "Check the request and resend it.",
@@ -1635,7 +1761,12 @@
       "fix": "Check the request and resend it.",
       "message": "Invalid settings",
       "patterns": [
-        "Invalid settings"
+        "Invalid settings",
+        "Unknown settings group",
+        "level must be basic or advanced",
+        "Send {\"set\": {key: value}, \"reset\": [key]}",
+        "Nothing to change",
+        "{} cannot be set and reset together"
       ],
       "status": 400
     },
@@ -1678,6 +1809,14 @@
         "The image render stalled."
       ],
       "status": 502
+    },
+    {
+      "code": "starter_pack_not_found",
+      "docs": "starter_pack_not_found",
+      "fix": "List the packs with GET /api/starter-packs.",
+      "message": "Unknown starter pack",
+      "patterns": [],
+      "status": 404
     },
     {
       "code": "storage_limit",
@@ -1912,6 +2051,30 @@
         "{} needs the voice add-on, which is not installed"
       ],
       "status": 422
+    },
+    {
+      "code": "wizard_owner_required",
+      "docs": "wizard_owner_required",
+      "fix": "Finish step 1 of the setup wizard (the owner account) before this step.",
+      "message": "Create the owner account first",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "wizard_step_required",
+      "docs": "wizard_step_required",
+      "fix": "Only the optional steps (voice, family) can be skipped.",
+      "message": "That step cannot be skipped",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "wizard_step_unknown",
+      "docs": "wizard_step_unknown",
+      "fix": "The steps are owner, connection, voice, family, network.",
+      "message": "Unknown wizard step",
+      "patterns": [],
+      "status": 404
     }
   ],
   "schema": 1

@@ -139,6 +139,19 @@
       "title": "License",
       "type": "string"
     },
+    "min_app_version": {
+      "anyOf": [
+        {
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Min App Version"
+    },
     "name": {
       "maxLength": 80,
       "title": "Name",
@@ -154,6 +167,19 @@
     "permission": {
       "default": "use_tools",
       "title": "Permission",
+      "type": "string"
+    },
+    "permissions_requested": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Permissions Requested",
+      "type": "array"
+    },
+    "publisher": {
+      "default": "",
+      "maxLength": 80,
+      "title": "Publisher",
       "type": "string"
     },
     "restricted_ok": {

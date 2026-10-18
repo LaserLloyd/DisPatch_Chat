@@ -17,6 +17,16 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        ``safe`` + ``hide_unlocked`` flags, which stay readable
 ``004_security_keys``  security.yaml gains the machine / session-timeout keys, written
                        explicitly so the owner can see and change them
+``005_settings``       the settings tables (chats.db) are created and filled from security.yaml and
+                       tools.yaml; keys the schema does not know are carried into
+                       ``settings_unknown`` and reported, never dropped
+``007_plugin_approvals`` add-ons and apps that are running at the upgrade are approved (the
+                       permissions they request are recorded); a plugin added later needs approval
+                       before it can be switched on
+``006_connections``    every character's inline provider block (``api:`` / ``advisor.providers``)
+                       gets a Connection: the API key moves into the secret store, the character
+                       keeps ``connection: <id>`` beside its (still readable) inline provider,
+                       address and model
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml
@@ -38,7 +48,7 @@ from pathlib import Path
 
 import yaml
 
-from . import accounts, auth, config
+from . import accounts, auth, config, connections, settings_store, tool_manifests
 
 log = logging.getLogger("local-chat.migrate")
 
@@ -179,7 +189,40 @@ def plan() -> Report:
                 "004_security_keys",
                 "write machine_loopback_trust: true, machine_scopes and per-role session "
                 "timeouts into security.yaml (defaults keep today's behaviour)"))
+
+    if "005_settings" not in done:
+        imp = settings_store.import_legacy(dry_run=True)
+        missing_s = [t for t in settings_store.TABLES if t not in have]
+        if missing_s:
+            rep.actions.append(Action("005_settings", "create tables: " + ", ".join(missing_s)))
+        for line in imp.lines():
+            rep.actions.append(Action("005_settings", line))
+
+    if "006_connections" not in done and roster is not None:
+        plan6 = connections.adopt_inline([_copy_entry(e) for e in roster], dry_run=True)
+        if plan6.linked or plan6.actions:
+            if "connections" not in have:
+                rep.actions.append(Action("006_connections", "create table: connections"))
+            for line in plan6.actions:
+                rep.actions.append(Action("006_connections", line))
+
+    if "007_plugin_approvals" not in done:
+        running = [r for r in tool_manifests.list_manifests()
+                   if r["manifest"]["permissions_requested"] and not r["approved"]
+                   and r["state"] not in ("failed", "incompatible") and r["enabled"]]
+        if "plugin_approvals" not in have and (running or tool_manifests.list_manifests()):
+            rep.actions.append(Action("007_plugin_approvals", "create table: plugin_approvals"))
+        for r in running:
+            rep.actions.append(Action(
+                "007_plugin_approvals",
+                f"approve {r['manifest']['kind']} {r['manifest']['id']!r}, already running "
+                f"(it asks for: {', '.join(r['manifest']['permissions_requested'])})"))
     return rep
+
+
+def _copy_entry(e: dict) -> dict:
+    import copy
+    return copy.deepcopy(e)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,6 +278,9 @@ def restore(src: Path) -> list[str]:
             shutil.copy2(f, target)
             restored.append(name)
     accounts.reset_for_tests()
+    settings_store.reset_schema_cache()
+    connections.reset_schema_cache()
+    tool_manifests.reset_schema_cache()
     auth._cache = None
     return restored
 
@@ -255,8 +301,26 @@ def _apply_audience() -> None:
     config._write_bots([config._bot_entry(b) for b in bots])
 
 
+def _apply_connections() -> None:
+    """Give every inline provider block a connection, writing the ROSTER AS IT IS (raw entries,
+    so a key this version does not know survives) with the API keys moved to the secret store."""
+    roster = _raw_roster()
+    if roster is None:
+        return
+    plan6 = connections.adopt_inline(roster)
+    if plan6.linked:
+        config._write_bots(roster)
+        log.info("connections: %d provider block(s) now refer to a connection (%d created)",
+                 plan6.linked, len(plan6.created))
+
+
 def run(*, dry_run: bool = False, take_backup: bool = True) -> Report:
     """Apply (or, with ``dry_run``, just describe) every pending step."""
+    if not dry_run:
+        # A restore staged from the app (Settings > System > Backups) is applied now, before the
+        # database is opened and before anything below looks at the files.
+        from . import backups
+        backups.apply_pending_restore()
     rep = plan()
     rep.dry_run = dry_run
     if dry_run:
@@ -280,6 +344,15 @@ def run(*, dry_run: bool = False, take_backup: bool = True) -> Report:
         auth._write(auth.load())
         auth._bust_cache()
     _record("004_security_keys")
+    if "005_settings" in steps:
+        settings_store.import_legacy()
+    _record("005_settings")
+    if "006_connections" in steps:
+        _apply_connections()
+    _record("006_connections")
+    if "007_plugin_approvals" in steps:
+        tool_manifests.grandfather_running()
+    _record("007_plugin_approvals")
     rep.applied = sorted(steps)
     return rep
 

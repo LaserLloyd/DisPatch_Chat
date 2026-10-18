@@ -13,6 +13,8 @@ Outputs (all deterministic: sorted keys, LF endings, no timestamps):
     capabilities.json            the capability registry + the routes no capability claims yet
     manifests/*.schema.json      JSON Schemas of the Connection / Tool plugin / Voice provider /
                                  Character manifests
+    settings.schema.json         every setting: key, type, default, range, group, level, env, restart
+    ../settings.md               the settings reference (one table per group)
     ../errors.md                 the error reference (one anchor per code)
 
 CI runs ``--check`` (tests/test_contracts_drift.py does it in a subprocess), so an API,
@@ -137,6 +139,9 @@ def build() -> dict[Path, str]:
     for name, doc in manifests.schema_documents().items():
         out[CONTRACTS / "manifests" / f"{name}.schema.json"] = _dump(doc)
     out[DOCS / "errors.md"] = errors_markdown(catalog)
+    from app import settings_schema
+    out[CONTRACTS / "settings.schema.json"] = _dump(settings_schema.schema_document())
+    out[DOCS / "settings.md"] = settings_schema.markdown_reference()
     return out
 
 

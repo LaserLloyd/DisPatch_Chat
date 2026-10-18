@@ -66,6 +66,10 @@ def legacy(tmp_path, monkeypatch):
     return d
 
 
+def text_of(rep):
+    return chr(10).join(rep.lines())
+
+
 def _snapshot(d):
     return {str(p.relative_to(d)): (p.stat().st_size, p.read_bytes() if p.is_file() else None)
             for p in sorted(d.rglob("*"))}
@@ -76,7 +80,9 @@ def test_the_dry_run_describes_every_step_and_changes_nothing(legacy):
     rep = migrate.run(dry_run=True)
     assert _snapshot(legacy) == before, "a dry run wrote something"
     steps = {a.step for a in rep.actions}
-    assert steps == {"001_accounts", "002_owner_from_pin", "003_audience", "004_security_keys"}
+    assert steps >= {"001_accounts", "002_owner_from_pin", "003_audience", "004_security_keys",
+                     "005_settings", "006_connections"}
+    assert "connection" in text_of(rep) and "'work'" in text_of(rep)
     text = "\n".join(rep.lines())
     assert "character 'kid'" in text and "audience=restricted" in text
     assert "character 'helper'" in text and "audience=all" in text
@@ -98,8 +104,13 @@ def test_applying_does_what_the_dry_run_said(legacy):
     assert {k: v["audience"] for k, v in roster.items()} == {
         "kid": "restricted", "helper": "all", "work": "members"}
     assert roster["kid"]["safe"] is True and roster["kid"]["hide_unlocked"] is True
-    # Nothing that was in config.yaml was lost on the way through (a provider key, say).
-    assert roster["work"]["api"]["api_key"] == "sk-test-not-real"
+    # Nothing that was in config.yaml was lost on the way through: the provider block stays
+    # readable, and the API key moved to the secret store behind a connection that resolves to it.
+    from app import connections, llm_api
+    api = roster["work"]["api"]
+    assert api["provider"] == "openai" and api["model"] == "m" and "api_key" not in api
+    assert api["connection"] and connections.get(api["connection"]) is not None
+    assert llm_api.resolve_key(api) == "sk-test-not-real"
     # security.yaml now spells out the new keys, at their compatible defaults.
     sec = yaml.safe_load((legacy / "security.yaml").read_text())
     assert sec["machine_loopback_trust"] is True and sec["machine_scopes"] is None
@@ -109,7 +120,8 @@ def test_applying_does_what_the_dry_run_said(legacy):
     assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     ids = {r[0] for r in con.execute("SELECT id FROM schema_migrations")}
     con.close()
-    assert ids >= {"001_accounts", "002_owner_from_pin", "003_audience", "004_security_keys"}
+    assert ids >= {"001_accounts", "002_owner_from_pin", "003_audience", "004_security_keys",
+                   "005_settings", "006_connections", "007_plugin_approvals"}
 
 
 def test_a_backup_is_taken_first_and_it_is_complete(legacy):
@@ -149,8 +161,8 @@ def test_rollback_restores_the_original_files(legacy):
     con.close()
     assert "profiles" not in tables
     # ... and migrating again from the restored state works (the upgrade is repeatable).
-    assert set(migrate.run().applied) == {"001_accounts", "002_owner_from_pin", "003_audience",
-                                          "004_security_keys"}
+    assert set(migrate.run().applied) >= {"001_accounts", "002_owner_from_pin", "003_audience",
+                                          "004_security_keys", "005_settings", "006_connections"}
 
 
 def test_only_the_newest_five_backups_are_kept(legacy):
