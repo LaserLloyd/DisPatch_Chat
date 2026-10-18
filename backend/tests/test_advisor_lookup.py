@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from app import advisor, config
 from tests.test_advisor import _rec_hooks, _run_with_reply, adv_env
 
@@ -24,6 +26,16 @@ SEARCH_JSON = json.dumps({"query": "q", "sources": [
     {"title": "Louvre", "url": "http://127.0.0.1:8080/content/x/Louvre",
      "score": 7.5, "chars": 30, "text": "The Louvre is a museum in Paris."},
 ]})
+
+
+@pytest.fixture(autouse=True)
+def _no_real_probe(monkeypatch):
+    """Never exec a real `infoforge --version` from the suite: the probe says
+    "cannot tell" (=> the original argv) unless a test installs its own."""
+    async def unknown(command):
+        return None
+    monkeypatch.setattr(advisor, "_infoforge_version", unknown)
+    advisor._infoforge_versions.clear()
 
 
 def _with_lookup(extra: dict | None = None) -> None:
@@ -178,3 +190,91 @@ def test_a_failed_online_lookup_is_empty_not_an_error(adv_env, monkeypatch):
     _with_lookup({"kind": "wikipedia"})
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
     assert asyncio.run(advisor.lookup_hits(cfg, "anything")) == []
+
+
+# --------------------------------------------------------------------------- #
+# InfoForge >= 2.1.0: `--no-ensure` + `--`, gated on a version probe
+# --------------------------------------------------------------------------- #
+NEW_ARGV = ["infoforge", "search", "--json", "--text", "--no-ensure",
+            "--max-articles", "2", "--", "-5 degrees in kelvin?"]
+OLD_ARGV = ["infoforge", "search", "--json", "--text",
+            "--max-articles", "2", "-5 degrees in kelvin?"]
+
+
+def _lookup_argv(adv_env, monkeypatch, version) -> list[str]:
+    _with_lookup()
+    calls = _capture_runner(monkeypatch)
+
+    async def probe(command):
+        return version
+    monkeypatch.setattr(advisor, "_infoforge_version", probe)
+    cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
+    hits = asyncio.run(advisor.lookup_hits(cfg, "-5 degrees in kelvin?"))
+    assert hits, "the lookup still answers"
+    return calls[0][0]
+
+
+def test_a_new_infoforge_gets_no_ensure_and_a_double_dash_before_the_query(adv_env, monkeypatch):
+    assert _lookup_argv(adv_env, monkeypatch, (2, 1, 0)) == NEW_ARGV
+    assert _lookup_argv(adv_env, monkeypatch, (3, 0, 2)) == NEW_ARGV
+
+
+def test_an_old_infoforge_keeps_the_original_argv(adv_env, monkeypatch):
+    assert _lookup_argv(adv_env, monkeypatch, (2, 0, 9)) == OLD_ARGV
+    assert _lookup_argv(adv_env, monkeypatch, (1, 9, 0)) == OLD_ARGV
+
+
+def test_an_unknown_version_keeps_the_original_argv(adv_env, monkeypatch):
+    assert _lookup_argv(adv_env, monkeypatch, None) == OLD_ARGV
+
+
+def _probe_with(monkeypatch, command, result, *, calls=None):
+    """Drive the real `_infoforge_version` with a fake exec."""
+    async def fake_exec(argv, timeout_s):
+        if calls is not None:
+            calls.append((list(argv), timeout_s))
+        if isinstance(result, Exception):
+            raise result
+        return result
+    monkeypatch.setattr(advisor, "_exec_argv", fake_exec)
+    return asyncio.run(_REAL_PROBE(command))
+
+
+#: Captured at import, before the autouse fixture stubs the module attribute.
+_REAL_PROBE = advisor._infoforge_version
+
+
+def test_the_version_probe_parses_the_cli_output_and_is_cached(monkeypatch):
+    advisor._infoforge_versions.clear()
+    calls: list = []
+    cmd = ["infoforge-probe-test"]
+    assert _probe_with(monkeypatch, cmd, (0, "infoforge 2.1.0", ""), calls=calls) == (2, 1, 0)
+    assert calls == [(["infoforge-probe-test", "--version"], advisor.DEFAULT_PROBE_TIMEOUT_S)]
+    # second look: served from the cache, nothing exec'd
+    assert _probe_with(monkeypatch, cmd, RuntimeError("must not run"), calls=calls) == (2, 1, 0)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("result", [
+    FileNotFoundError("infoforge"),            # binary missing
+    TimeoutError("slow"),                      # probe timed out
+    (2, "", "boom"),                           # non-zero exit
+    (0, "infoforge dev-build", ""),          # unparsable
+    (1, "infoforge 2.1.0", ""),              # parsable but failed => not trusted
+])
+def test_a_failed_version_probe_means_unknown(monkeypatch, result):
+    advisor._infoforge_versions.clear()
+    assert _probe_with(monkeypatch, ["infoforge-probe-fail"], result) is None
+
+
+def test_a_failed_probe_is_retried_later_but_not_every_turn(monkeypatch):
+    advisor._infoforge_versions.clear()
+    calls: list = []
+    cmd = ["infoforge-probe-retry"]
+    assert _probe_with(monkeypatch, cmd, FileNotFoundError("x"), calls=calls) is None
+    assert _probe_with(monkeypatch, cmd, (0, "infoforge 2.1.0", ""), calls=calls) is None
+    assert len(calls) == 1, "no re-probe inside the retry window"
+    key = next(iter(advisor._infoforge_versions))
+    ver, _ = advisor._infoforge_versions[key]
+    advisor._infoforge_versions[key] = (ver, -1e9)    # window elapsed
+    assert _probe_with(monkeypatch, cmd, (0, "infoforge 2.1.0", ""), calls=calls) == (2, 1, 0)
