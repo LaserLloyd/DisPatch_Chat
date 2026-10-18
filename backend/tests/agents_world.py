@@ -48,6 +48,17 @@ def wait_state(client, task_id, states, timeout=8.0):
     raise AssertionError(f"task {task_id} stayed {last and last['state']!r}, wanted {want}")
 
 
+def eventually(pred, timeout=5.0):
+    """The task state is visible a moment before the notification and audit row that follow it."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        v = pred()
+        if v:
+            return v
+        time.sleep(0.02)
+    raise AssertionError("condition not reached in time")
+
+
 def event_types(client, task_id):
     return [e["type"] for e in client.get(f"/api/tasks/{task_id}/events").json()["events"]]
 

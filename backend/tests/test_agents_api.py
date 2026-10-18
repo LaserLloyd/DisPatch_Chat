@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from agents_world import TERMINAL, aw, event_types, make_agent, spec, wait_state
+from agents_world import TERMINAL, aw, event_types, eventually, make_agent, spec, wait_state
 
 from app import agents_service
 from app import agents_store as store
@@ -271,12 +271,13 @@ def test_a_budget_stop_fails_the_task_and_notifies(aw):
     assert types[-3:] == ["cost_update", "error", "result"]
     err = [e for e in aw.owner.get(f"/api/tasks/{tid}/events").json()["events"] if e["type"] == "error"][0]
     assert err["code"] == "budget_exceeded"
-    assert ("task_failed", f"task:{tid}", "A task failed") in aw.notes.pushes
+    eventually(lambda: ("task_failed", f"task:{tid}", "A task failed") in aw.notes.pushes)
     # resuming a budget stop is refused: raising the budget is a deliberate act, not a click
     assert aw.owner.post(f"/api/tasks/{tid}/resume", json={}).status_code == 409
     # the audit row says who, which agent, what happened and what it cost (an estimate)
     from app import accounts
-    audit = [r for r in accounts.recent_activity(category="audit") if r["kind"] == "agent_task"]
+    audit = eventually(lambda: [r for r in accounts.recent_activity(category="audit")
+                                if r["kind"] == "agent_task"])
     assert audit and '"outcome":"failed"' in audit[0]["detail"] and "Frugal" in audit[0]["subject"]
 
 
@@ -329,6 +330,12 @@ def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
     rid = wait_state(aw.owner, tid, "awaiting_approval")["pending_approvals"][0]["request_id"]
     aw.owner.post(f"/api/approvals/{rid}", json={"decision": "allow"})
     wait_state(aw.owner, tid, "succeeded")
+    # the state is visible a moment before the notification that follows it has been sent
+    end = time.monotonic() + 5
+    while time.monotonic() < end and not (
+            any(k == "task_done" for k, _, _ in aw.notes.pushes)
+            and any("finished" in t for _, t, _ in aw.notes.posts)):
+        time.sleep(0.02)
     kinds = [k for k, _, _ in aw.notes.pushes]
     assert "approval" in kinds and "task_done" in kinds
     assert all(title in ("A task needs your approval", "A task finished", "A task failed")
