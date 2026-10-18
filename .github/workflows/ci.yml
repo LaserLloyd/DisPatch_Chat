@@ -104,6 +104,17 @@ jobs:
         # main went red with no code change. Bump deliberately, fix, commit.
         working-directory: backend
         run: uvx ruff@0.17.0 check app tests
+      - name: Vendored ForgeUI bundle matches forgeui.json
+        # frontend/static/ui-theme/ is the ForgeUI (ThemeForge) bundle, vendored whole.
+        # This fails on a different version, a stale or hand-edited bundle file, a
+        # missing or changed overlay, or settings naming a theme the bundle lacks.
+        # Fix: `python -m forgeui vendor` (docs/development.md, "Themes"). forgeui is
+        # installed from a pinned ThemeForge commit, never PyPI (that name belongs to
+        # another project). TODO: switch to `@v1.2.0` once the owner tags that release.
+        run: |
+          uv venv --python 3.12 .forgeui-venv
+          uv pip install --python .forgeui-venv "forgeui @ git+https://github.com/LaserLloyd/ThemeForge@d70f6608bdf386fc095d43fc1caec61e88664795"
+          .forgeui-venv/bin/python -m forgeui vendor --check
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
