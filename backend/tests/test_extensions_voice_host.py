@@ -264,7 +264,15 @@ def test_the_secret_store_is_usable_after_setup_has_sealed_the_context(ext_env):
 # ctx.settings_writer
 # --------------------------------------------------------------------------- #
 
-def test_without_a_settings_store_the_writer_is_a_no_op_that_logs_once(ext_env, caplog):
+def _no_store(monkeypatch):
+    """Hide app.settings_store (it ships with W5 now), to test the host as it behaves without one."""
+    real = extensions.importlib.util.find_spec
+    monkeypatch.setattr(extensions.importlib.util, "find_spec",
+                        lambda name, *a, **k: None if str(name).endswith(".settings_store") else real(name, *a, **k))
+
+
+def test_without_a_settings_store_the_writer_is_a_no_op_that_logs_once(ext_env, caplog, monkeypatch):
+    _no_store(monkeypatch)
     install()
     w = KNOBS.ctx.settings_writer("voice")
     assert not extensions.is_live_writer(w)
@@ -346,6 +354,7 @@ def _fake_migration(monkeypatch, calls):
 
 
 def test_the_voice_yaml_migration_waits_for_a_live_store(ext_env, monkeypatch):
+    _no_store(monkeypatch)
     ext = install()
     calls: list = []
     _fake_migration(monkeypatch, calls)

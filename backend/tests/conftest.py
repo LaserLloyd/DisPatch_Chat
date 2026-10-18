@@ -419,6 +419,42 @@ def _no_hard_exit_on_failed_startup(monkeypatch):
                         raising=False)
 
 
+#: The fixed ports of the owner's live services (StudioForge gateway / panel / MCP, SpeechForge,
+#: ClawChat, ClawForge, DisPatch itself). A test must never reach one: a wizard or connection
+#: discovery that is not stubbed would probe the real gateway on 1234.
+LIVE_SERVICE_PORTS = frozenset({1234, 1235, 1236, 7865, 8080, 8288, 8700, 8765})
+
+
+@pytest.fixture(autouse=True)
+def _never_reach_live_service_ports(monkeypatch):
+    """Refuse (as a closed port would) any socket connect to a live service's fixed port.
+
+    Tests that need a server start one on an ephemeral port; everything else that reaches for
+    1234/8080/... is a test that forgot its stub, and must fail as 'connection refused' instead
+    of talking to the real thing.
+    """
+    import socket
+
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def _blocked(address) -> bool:
+        return (isinstance(address, tuple) and len(address) >= 2
+                and isinstance(address[1], int) and address[1] in LIVE_SERVICE_PORTS)
+
+    def connect(self, address):
+        if _blocked(address):
+            raise ConnectionRefusedError(111, f"tests never connect to live service port {address[1]}")
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if _blocked(address):
+            return 111
+        return real_connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_systemctl(monkeypatch):
     """The suite never talks to a real systemd.
