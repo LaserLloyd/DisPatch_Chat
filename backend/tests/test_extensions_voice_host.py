@@ -13,7 +13,7 @@ import types
 from pathlib import Path
 
 import pytest
-from _extfake import KNOBS, ext_env, install  # noqa: F401  (ext_env is a fixture)
+from _extfake import KNOBS, ext_env, install
 
 from app import config, extensions
 

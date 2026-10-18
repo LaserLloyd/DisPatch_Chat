@@ -207,5 +207,5 @@ def _dacl_sids(path: str) -> list[str] | None:
         finally:
             k32.LocalFree.argtypes = [ctypes.c_void_p]
             k32.LocalFree(psd)
-    except Exception:         
+    except Exception:
         return None
