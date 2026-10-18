@@ -352,7 +352,7 @@ def _save(c: Connection) -> None:
 
 _METADATA_NAMES = frozenset({"metadata", "metadata.google.internal", "metadata.goog",
                              "instance-data", "instance-data.ec2.internal"})
-_METADATA_IPS = frozenset({"169.254.169.254", "169.254.170.2", "100.100.100.200",
+_METADATA_IPS = frozenset({"169.254.169.254", "169.254.170.2", "100.100.100.200",  # scrub-ok: Alibaba Cloud's metadata address, which the guard must refuse
                            "fd00:ec2::254", "192.0.0.192"})
 _resolved_hosts: dict[str, tuple[float, list[str]]] = {}
 _DNS_TTL_S = 60.0
@@ -845,7 +845,7 @@ def _lan_hosts() -> list[str]:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            s.connect(("10.255.255.255", 1))          # no packet is sent for a UDP connect
+            s.connect(("192.0.2.1", 9))                 # no packet is sent for a UDP connect
             me = s.getsockname()[0]
         finally:
             s.close()

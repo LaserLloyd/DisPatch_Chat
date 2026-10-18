@@ -9,7 +9,7 @@
 //
 // It appears only when the server says it is needed (GET /api/wizard: a fresh install, or one that
 // is not yet set up) and can be dismissed for the session with "Set up later". Every call is the
-// same one a script would make, so what the page does is what docs/wizard.md says an API client can.
+// same one a script would make, so what the page does is what docs/first-run.md says an API client can.
 //
 // Pure helpers are exported for the tests; nothing runs at import time.
 
@@ -172,7 +172,7 @@ export function openWizard(initial, ctx = {}) {
 
   async function stepConnection() {
     const status = el('p', { class: 'muted', role: 'status', text: t('wiz.searching') });
-    const list = el('div', { class: 'cxn-found' });
+    const list = el('div', { class: 'cxn-found dev-group-body' });
     const manual = el('div', { class: 'cxn-manual' });
     content.append(el('p', { text: t('wiz.conn_intro') }), status, list, manual);
     const result = el('div', { class: 'cxn-result', role: 'status', hidden: '' });
@@ -221,7 +221,7 @@ export function openWizard(initial, ctx = {}) {
 
   function stepFamily() {
     const rows = [];
-    const host = el('div', { class: 'wizard-people' });
+    const host = el('div', { class: 'wizard-people dev-group-body' });
     const addRow = (role) => {
       const name = el('input', { type: 'text', class: 'ui-input', maxlength: '40', 'aria-label': t('wiz.family_name') });
       const pin = el('input', { type: 'password', class: 'ui-input', inputmode: 'numeric', 'aria-label': t('wiz.family_pin'), hidden: role === 'restricted' ? '' : null });

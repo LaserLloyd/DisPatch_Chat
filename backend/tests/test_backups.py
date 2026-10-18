@@ -60,7 +60,7 @@ def _threads(path: Path):
 
 
 def test_an_archive_round_trips_and_hides_its_contents(data):
-    connections.create(type="openai", api_key="sk-live-planted-0123456789")
+    connections.create(type="openai", api_key="sk-live-planted-0123456789")  # scrub-ok: test fixture, not a real credential
     row = backups.create_archive(PASS)
     p = backups.archive_dir() / row["name"]
     raw = p.read_bytes()
@@ -190,7 +190,7 @@ def test_list_shows_archives_snapshots_and_premigration_copies(data):
 
 
 def test_a_staged_restore_is_applied_at_the_next_start_and_the_old_state_is_kept(data):
-    connections.create(type="openai", api_key="sk-original-0123456789")
+    connections.create(type="openai", api_key="sk-original-0123456789")  # scrub-ok: test fixture, not a real credential
     row = backups.create_archive(PASS)
     # the world moves on: new chat, new roster, the key rotated, an avatar gone
     c = sqlite3.connect(data / "chats.db")
@@ -289,7 +289,7 @@ def test_recovery_keys_are_long_and_unambiguous():
 
 SECRETS = {
     "connection key": "sk-live-SUPPORT-planted-0123456789abcdef",
-    "bearer in a log": "Bearer eyJhbGciOiJIUzI1NiJ9.planted.signature123",
+    "bearer in a log": "Bearer eyJhbGciOiJIUzI1NiJ9.planted.signature123",  # scrub-ok: test fixture, not a real credential
     "api key in a log": "api_key=plantedlogkey0123456789",
     "password in a log": "password: hunter2-planted-pw",
     "pin in a log": "pin=424242",

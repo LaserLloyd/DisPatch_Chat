@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 
-from . import policy, settings_schema, settings_store
+from . import policy, settings_schema, settings_store, tool_manifests
 from .api_common import actor, audit, fail
 from .contracts.permissions import Permission
 
@@ -26,8 +26,14 @@ router = APIRouter()
 _MANAGE = Depends(policy.require_permission(Permission.MANAGE_SETTINGS))
 
 
+def _with_plugins() -> None:
+    """Make sure every plugin's settings fragment (tools.<id>.*) is in the schema before it is read."""
+    tool_manifests.register_fragments()
+
+
 @router.get("/api/settings/schema", dependencies=[_MANAGE])
 async def settings_schema_get():
+    _with_plugins()
     return settings_schema.schema_document(settings_schema.all_defs())
 
 
@@ -38,6 +44,7 @@ async def settings_get(group: str | None = Query(None), level: str | None = Quer
         raise fail(422, "settings_invalid", "Unknown settings group")
     if level and level not in ("basic", "advanced"):
         raise fail(422, "settings_invalid", "level must be basic or advanced")
+    _with_plugins()
     return settings_store.values_document(group=group, level=level, q=q)
 
 
@@ -46,6 +53,7 @@ async def settings_patch(request: Request, payload: dict[str, Any] = Body(...)):
     unknown_top = set(payload) - {"set", "reset"}
     if unknown_top:
         raise fail(422, "settings_invalid", "Send {\"set\": {key: value}, \"reset\": [key]}")
+    _with_plugins()
     changes = payload.get("set") or {}
     reset = payload.get("reset") or []
     if not isinstance(changes, dict) or not isinstance(reset, list) \

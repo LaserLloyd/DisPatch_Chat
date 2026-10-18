@@ -1053,7 +1053,7 @@
       "choices": [],
       "choices_from": "",
       "default": "",
-      "description": "Where StudioForge's panel is, e.g. http://192.168.1.20:8080.",
+      "description": "Where StudioForge's panel is, e.g. http://192.0.2.20:8080.",
       "env": "DISPATCH_STUDIOFORGE_URL",
       "env_names": [
         "DISPATCH_STUDIOFORGE_URL",

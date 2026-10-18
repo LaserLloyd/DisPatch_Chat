@@ -63,7 +63,7 @@ export function mountBackups(host, deps = {}) {
   const head = el('div', { class: 'bkp-head' }, [el('h3', { class: 'dev-group-title', text: t('bkp.title') })]);
   const summary = el('p', { class: 'muted', role: 'status' });
   const pending = el('div', { class: 'bkp-pending', role: 'status', hidden: '' });
-  const list = el('div', { class: 'bkp-list' });
+  const list = el('div', { class: 'bkp-list dev-group-body' });
   const pass = el('input', { type: 'password', class: 'ui-input', autocomplete: 'new-password',
     placeholder: t('bkp.passphrase_placeholder'), 'aria-label': t('bkp.passphrase_label') });
   const media = el('input', { type: 'checkbox', id: 'bkp-media', class: 'ui-checkbox' });

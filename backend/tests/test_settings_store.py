@@ -69,7 +69,7 @@ def test_schema_document_is_versioned_and_complete():
     ("system.behind_tls", "yes", True), ("system.behind_tls", "maybe", False),
     ("system.network_exposure", "lan", True), ("system.network_exposure", "world", False),
     ("system.public_url", "https://chat.example.net", True), ("system.public_url", "ftp://x", False),
-    ("system.public_url", "https://u:p@x.net", False), ("system.public_url", "", True),
+    ("system.public_url", "https://u:p@example.net", False), ("system.public_url", "", True),
     ("people.lock_timeout_seconds", 600, True), ("people.lock_timeout_seconds", 5, False),
     ("tools.mirror_kinds", "webchat,main", True),
 ])

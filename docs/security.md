@@ -177,6 +177,19 @@ plain text, as before; it is shown once when generated and never returned by the
 `Tailscale-*` headers) is never treated as on-box. The image server's completion
 callback is the one other machine route; it carries its own per-job token.
 
+## Connections, keys and backups (3.0)
+
+- **Provider keys** live in the secret store (the OS keyring, else a `0600` file) behind a [connection](connections.md);
+  no route returns one and `config.yaml` no longer holds them after the upgrade migrates them.
+- **Connection addresses** are validated and re-checked on every use: link-local and cloud-metadata addresses are refused
+  (`connections.allow_private_targets` is the admin's explicit opt-out), so a model-server address cannot be used to
+  reach internal services.
+- **Backups** are encrypted (AES-256-GCM, scrypt) and restore refuses anything outside DisPatch's own files; the
+  **support bundle** removes keys, tokens, PINs and passwords and leaves out character prompts unless asked
+  ([backups.md](backups.md)). These, and per-profile export / erase, are Owner-only.
+- **Plugins** declare what they ask for and a new one must be approved before the Plugins switch turns it on
+  ([extensions.md](extensions.md#manifests-permissions-and-approval-30)).
+
 ## Checklist
 
 **Create the owner account immediately.** With no owner, the app answers only

@@ -204,6 +204,8 @@ export async function mountStarterPacks(host, ctx = {}) {
     ...conns.map((c) => el('option', { value: c.id, text: c.name }))]);
   if (conns.length) connSel.value = conns[0].id;
   box.append(el('div', { class: 'bkp-form' }, [el('label', { text: t('chars.packs_connection') }), connSel]));
+  const body = el('div', { class: 'dev-group-body' });
+  box.append(body);
   for (const p of packs) {
     const btn = el('button', { type: 'button', class: 'btn-secondary',
       text: p.installed ? t('chars.pack_installed') : (p.partly_installed ? t('chars.pack_install_rest') : t('chars.pack_install')) });
@@ -217,9 +219,9 @@ export async function mountStarterPacks(host, ctx = {}) {
         await mountStarterPacks(host, ctx);
       } catch (e) { ctx.toast && ctx.toast(errorText(e), true); btn.disabled = false; }
     });
-    box.append(el('div', { class: 'dev-row chr-pack', dataset: { pack: p.id } }, [
+    body.append(el('div', { class: 'dev-row chr-pack', dataset: { pack: p.id } }, [
       el('span', { class: 'dev-row-text' }, [
-        el('strong', { text: p.name }), ' ', el('span', { class: 'ui-badge', text: audienceLabel(p.audience) }),
+        el('strong', {}, [p.name, ' ', el('span', { class: 'ui-badge', text: audienceLabel(p.audience) })]),
         el('span', { class: 'dev-row-hint', text: p.description }),
         el('span', { class: 'dev-row-hint', text: p.characters.map((c) => `${c.emoji} ${c.name}`).join('  ') }),
       ]), btn]));

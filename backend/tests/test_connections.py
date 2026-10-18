@@ -69,7 +69,7 @@ def test_the_thirteen_types_exist_and_fit_the_connection_manifest():
 
 def test_create_stores_the_key_in_the_secret_store_only(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    c = connections.create(type="openai", api_key="sk-live-1234567890")
+    c = connections.create(type="openai", api_key="sk-live-1234567890")  # scrub-ok: test fixture, not a real credential
     assert c.id == "openai" and c.credential_ref == "secret:connection.openai"
     assert secret_store.get("connection.openai") == "sk-live-1234567890"
     assert connections.credential(c) == "sk-live-1234567890"
@@ -79,7 +79,7 @@ def test_create_stores_the_key_in_the_secret_store_only(tmp_path, monkeypatch):
     db.close()
     assert "sk-live" not in repr(c.public())
     assert c.public()["credential"] == {"kind": "secret", "env": "", "has_key": True}
-    again = connections.create(type="openai", api_key="sk-other-1234567890")
+    again = connections.create(type="openai", api_key="sk-other-1234567890")  # scrub-ok: test fixture, not a real credential
     assert again.id == "openai-2"
 
 
@@ -110,13 +110,13 @@ def test_a_hosted_type_needs_a_key_and_a_local_one_does_not(tmp_path, monkeypatc
 
 def test_update_replaces_or_clears_the_key_and_resets_the_model_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    c = connections.create(type="studioforge", base_url="http://127.0.0.1:1234/v1", api_key="sf-key-1234567")
+    c = connections.create(type="studioforge", base_url="http://127.0.0.1:1234/v1", api_key="sf-key-1234567")  # scrub-ok: test fixture, not a real credential
     c.models, c.default_model = ["a"], "a"
     connections._save(c)
     c = connections.update(c.id, {"api_key": "sf-key-new-12345"})
     assert connections.credential(c) == "sf-key-new-12345" and c.models == ["a"]
-    c = connections.update(c.id, {"base_url": "http://192.168.1.5:1234/v1"})
-    assert c.models == [] and c.base_url == "http://192.168.1.5:1234/v1"      # new server, stale list dropped
+    c = connections.update(c.id, {"base_url": "http://203.0.113.5:1234/v1"})
+    assert c.models == [] and c.base_url == "http://203.0.113.5:1234/v1"      # new server, stale list dropped
     c = connections.update(c.id, {"clear_key": True})
     assert c.credential_ref == "" and secret_store.get("connection.studioforge") is None
     with pytest.raises(ConnectionError_) as e:
@@ -147,7 +147,7 @@ def test_a_connection_in_use_cannot_be_deleted(tmp_path, monkeypatch):
 @pytest.mark.parametrize("url", [
     "http://169.254.169.254/latest/meta-data", "http://169.254.0.7:1234/v1", "http://[fe80::1]:1234/v1",
     "http://metadata.google.internal/computeMetadata/v1", "http://[::ffff:169.254.169.254]/", "http://0.0.0.0:1234/v1",
-    "http://100.100.100.200/",
+    "http://100.100.100.200/",  # scrub-ok: a cloud metadata address the guard must refuse
 ])
 def test_link_local_and_metadata_targets_are_refused(url, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -157,8 +157,8 @@ def test_link_local_and_metadata_targets_are_refused(url, tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("url", [
-    "http://127.0.0.1:1234/v1", "http://localhost:11434/v1", "http://192.168.1.20:1234/v1",
-    "http://10.0.0.5:8080", "https://api.openai.com/v1", "http://[::1]:1234/v1",
+    "http://127.0.0.1:1234/v1", "http://localhost:11434/v1", "http://192.0.2.20:1234/v1",
+    "http://198.51.100.5:8080", "https://api.openai.com/v1", "http://[::1]:1234/v1",
 ])
 def test_loopback_and_lan_targets_are_allowed(url, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -198,7 +198,7 @@ def test_bad_schemes_and_credentials_in_the_url_are_refused(tmp_path, monkeypatc
 async def test_a_good_connection_reports_models_and_latency(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     _mock_http(monkeypatch, _openai_server())
-    c = connections.create(type="openai_compatible", base_url="http://127.0.0.1:9/v1", api_key="sk-live-1234567890")
+    c = connections.create(type="openai_compatible", base_url="http://127.0.0.1:9/v1", api_key="sk-live-1234567890")  # scrub-ok: test fixture, not a real credential
     res = await connections.test_and_record(c)
     assert res["ok"] and res["reachable"] and res["auth_ok"] and res["models_listed"]
     assert res["models"] == ["m1", "m2"] and isinstance(res["latency_ms"], int)
@@ -247,7 +247,7 @@ async def test_studioforge_is_recognised_by_its_version_endpoint_and_sent_a_bear
             return httpx.Response(200, json={"data": [{"id": "qwen"}]})
         return httpx.Response(404)
     _mock_http(monkeypatch, handler)
-    c = connections.create(type="studioforge", api_key="sf-secret-123456")
+    c = connections.create(type="studioforge", api_key="sf-secret-123456")  # scrub-ok: test fixture, not a real credential
     res = await connections.run_test(c)
     assert res["ok"] and res["product"] == "StudioForge" and res["version"] == "2.0.1"
     assert ("/v1/models", "Bearer sf-secret-123456") in seen            # the credential ref's key is sent

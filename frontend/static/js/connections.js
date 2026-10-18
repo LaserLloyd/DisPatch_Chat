@@ -119,9 +119,9 @@ export async function mountConnections(pane, deps = {}) {
   const lanBox = el('input', { type: 'checkbox', id: 'cxn-lan', class: 'ui-checkbox' });
   const adoptBtn = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.adopt'), title: t('cxn.adopt_title') });
   const bar = el('div', { class: 'cxn-bar' }, [addBtn, findBtn, el('label', { class: 'bkp-check', for: 'cxn-lan' }, [lanBox, ' ', t('cxn.lan')]), adoptBtn]);
-  const found = el('div', { class: 'cxn-found', hidden: '' });
+  const found = el('div', { class: 'cxn-found dev-group-body', hidden: '' });
   const formHost = el('div', { class: 'cxn-formhost' });
-  const listHost = el('div', { class: 'cxn-list' });
+  const listHost = el('div', { class: 'cxn-list dev-group-body' });
   pane.append(top, bar, found, formHost, listHost);
 
   async function load() {

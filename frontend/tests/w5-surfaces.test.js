@@ -442,7 +442,7 @@ test('Wizard: owner step validates before it calls the server', { skip: dom.skip
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.owner_create).click();
   await tick(); await tick();
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0], { name: 'Owner', password: 'long-enough-pw' });
+  assert.deepEqual(seen[0], { name: 'Owner', password: 'long-enough-pw' });  // scrub-ok: test fixture, not a real credential
   // "Set up later" dismisses for the session and the wizard is not offered again
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.later).click();
   assert.equal(win.document.querySelector('.wizard'), null);

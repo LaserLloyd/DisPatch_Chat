@@ -275,7 +275,7 @@ CORE_SETTINGS: tuple[SettingDef, ...] = (
        "Show StudioForge's control panel as a tool in the left rail. Needs the panel address below.",
        "connections", section="StudioForge", env="DISPATCH_STUDIOFORGE", restart_required=True),
     _d("connections.studioforge_panel_url", "url", "", "StudioForge panel address",
-       "Where StudioForge's panel is, e.g. http://192.168.1.20:8080.", "connections",
+       "Where StudioForge's panel is, e.g. http://192.0.2.20:8080.", "connections",
        section="StudioForge", env="DISPATCH_STUDIOFORGE_URL", restart_required=True),
     _d("connections.studioforge_panel_remote_url", "url", "", "StudioForge panel address for other devices",
        "The address a phone or laptop elsewhere can open (e.g. a Tailscale Serve HTTPS address).",
@@ -673,9 +673,28 @@ def markdown_reference() -> str:
         "that file keeps working.",
         "",
         "A plugin's own settings are declared in its manifest (`settings` fragment) and appear under "
-        "`tools.<plugin id>.`; the voice add-on's under `voice.`. Plugins and add-ons write through "
-        "`settings_store.writer(namespace)`, a function `(key, value) -> None` that accepts keys with "
-        "or without the namespace prefix.",
+        "`tools.<plugin id>.`; the voice add-on's under `voice.`.",
+        "",
+        "### `settings_store.writer(namespace)` - for add-ons",
+        "",
+        "An add-on moves its own settings into the store with a function it gets from the store:",
+        "",
+        "```python",
+        "from app import settings_store",
+        "",
+        'write = settings_store.writer("voice")        # -> Callable[[str, Any], None]',
+        'write("voice.speed", 1.1)                      # a qualified key (what migrate_voice_yaml passes)',
+        'write("speed", 1.1)                            # a bare key gets the namespace: the same key',
+        "```",
+        "",
+        "Signature: `writer(namespace: str) -> Callable[[str, Any], None]`; the namespace is lower-case "
+        "dotted words (`voice`, `tools.weather`). `write(key, value)` raises `ValueError` for a key that is "
+        "not shaped like a settings key and `settings_schema.SettingError` for a value the schema refuses "
+        "or a key an environment variable currently sets. A key the schema defines is validated exactly like "
+        "a `PATCH /api/settings`; a key it does not define is stored as given (JSON) and listed under `extra` by "
+        "`GET /api/settings`. To have the Settings page draw an add-on's rows, register definitions once with "
+        "`settings_schema.register(defs, owner)` (see `from_fragment`). Read back with "
+        "`settings_store.get(key, default)`.",
         "",
     ]
     return "\n".join(out)
