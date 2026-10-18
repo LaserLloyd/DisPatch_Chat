@@ -158,6 +158,12 @@ COPY --from=builder --chown=app:app /app/.venv   /app/.venv
 COPY --from=builder --chown=app:app /app/backend /app/backend
 COPY --from=builder --chown=app:app /app/frontend /app/frontend
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Strip CR from the entrypoint. The repo has no .gitattributes, so a checkout on
+# Windows (core.autocrlf=true) hands the build a CRLF script, its shebang becomes
+# "#!/bin/sh\r", and the container dies at start with
+# "exec /usr/local/bin/docker-entrypoint.sh: no such file or directory".
+# A no-op for an LF checkout.
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh
 
 # Putting the venv's bin first is what lets us call `uvicorn` with no wrapper.
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -175,7 +181,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 ENV LOCAL_CHAT_DATA_DIR=/data \
     LOCAL_CHAT_HOST=0.0.0.0 \
     LOCAL_CHAT_PORT=8765 \
-    TMPDIR=/data/tmp
+    TMPDIR=/data/tmp \
+    DISPATCH_IMAGE_VERSION=${VERSION}
 
 # NOTE ON AVATARS: uploaded avatars are user data and are stored in the data
 # directory (/data/avatars), so the data volume already carries them and no

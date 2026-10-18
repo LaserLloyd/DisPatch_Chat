@@ -454,6 +454,27 @@ in `.env` if you would rather it were this machine only while you look around.
 (A bare `uvicorn` process with no container is the other way round — it binds
 loopback unless you tell it not to.)
 
+**With StudioForge (the local model server) in one command:**
+
+```bash
+cp deploy/compose/stack.env.example deploy/compose/stack.env      # set STACK_MODEL
+docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env up -d
+```
+
+That starts DisPatch and StudioForge on one private network, with DisPatch's first connection already
+pointing at `http://studioforge:1234/v1`, and (profile `knowledge`) optional offline Wikipedia via
+InfoForge. GPU flags for Docker and Podman, and the rest: [docs/deploy/stack.md](docs/deploy/stack.md).
+
+**Updating and your data.** Everything lives on the `/data` volume (`chats.db` and its WAL, avatars,
+uploads, `config.yaml`, `backups/`); the image holds none of it. `docker compose pull && docker
+compose up -d` keeps your chats. On the first start of a new version the container copies the
+databases and config to `/data/backups/<oldversion>-<time>/` before migrations run (newest 5 kept).
+`docker compose down` keeps the volume; **`docker compose down -v` deletes it.** Back up with the
+app stopped:
+`docker run --rm -v dispatch-data:/data:ro -v "$PWD":/backup alpine tar czf /backup/dispatch-data.tgz -C /data .`
+and restore by extracting into a fresh volume then `chown -R 1000:1000 /data`. See
+[docs/deploy-docker.md](docs/deploy-docker.md) § Backups.
+
 Not using Docker? See [docs/deploy-bare-metal.md](docs/deploy-bare-metal.md).
 
 ## Bring your own AI
