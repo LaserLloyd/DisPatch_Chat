@@ -428,7 +428,9 @@ def test_per_user_export_and_erase(world, owner):
     erased = owner.delete(f"/api/users/{mia['id']}").json()
     assert erased["erased"] == mia["id"] and erased["activity_rows"] >= 1 and erased["usage_rows"] == 1
     assert accounts.get_profile(mia["id"]) is None
-    assert config.get_bot("mias").profiles == []
+    # Off Mia's list - but an empty list means "everyone", so the character she alone could use
+    # is left to the Owner rather than opened to every profile and every anonymous device.
+    assert config.get_bot("mias").profiles == [accounts.get_owner().id]
     assert owner.get(f"/api/users/{mia['id']}/export").status_code == 404
 
 

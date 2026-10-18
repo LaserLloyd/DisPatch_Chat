@@ -1888,15 +1888,29 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         return
     # 2. The tier, as the main /ws decides it: a live unlocked session when a
     # PIN is set, else a LOCKED (Safe-Mode) device (pre-accept).
-    from . import policy
+    from . import characters, policy
     cfg = auth.load()
     token = None
     locked = False
-    if policy.claimed(cfg):
+    principal = None
+    if not policy.claimed(cfg):
+        # Nobody owns this install yet: like /ws and the HTTP gate, only this computer (or an
+        # install that opted into DISPATCH_ALLOW_OPEN_INSTALL) gets in - not the whole network.
+        client = getattr(ws, "client", None)
+        local = policy.is_loopback_origin(client.host if client else "",
+                                          any(ws.headers.get(h) for h in policy.PROXY_MARKER_HEADERS))
+        if not (local or policy.allow_open_install()):
+            await ws.close(code=POLICY)
+            return
+    else:
         session = auth.get_session(ws.cookies.get(_hooks.cookie_name))
         principal = policy.for_session(session)
         if principal is None:
+            if cfg.anonymous_access == "none":
+                await ws.close(code=POLICY)    # "nothing but the sign-in page" covers voice too
+                return
             locked = True
+            principal = policy.anonymous()
         elif not principal.can(Permission.USE_VOICE):
             await ws.close(code=POLICY)        # a signed-in profile without voice
             return
@@ -1914,7 +1928,10 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
     if (thread is None or bot is None or thread_id in _deleted_threads
-            or (locked and not locked_may_see(bot))):
+            or (locked and not locked_may_see(bot))
+            or (principal is not None and not characters.may_use(bot, principal))):
+        # may_use: a character made for other profiles (its `profiles` list) is closed to
+        # this one here exactly as in the roster, /ws and the REST thread routes.
         await ws.close(code=POLICY)
         return
     # Rule 9: nothing claims this name — the gate ran, so say why with a real

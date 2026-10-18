@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from . import accounts, agents_service, config, policy
+from . import accounts, agents_service, characters, config, policy
 from . import agents_store as store
 from .agents.events import ErrorCode
 from .agents.interface import AgentBackendError, AgentSpec
@@ -177,21 +177,32 @@ def _is_local_url(url: str | None) -> bool:
 
 
 def owner_only_features(spec: AgentSpec) -> set[str]:
-    """Powers that are host-level in effect: only the Owner (``admin_system``) may grant them."""
+    """Powers that are host-level in effect: only the Owner (``admin_system``) may grant them.
+
+    Each entry names the power AND what it is granted over (the stdio command line, the remote
+    address a secret goes to, the tool run unattended), so that an edit is compared grant by
+    grant. Comparing bare names let an Admin keep an Owner-approved ``stdio_mcp`` entry and
+    rewrite its command - arbitrary code on the host - or move an approved remote server, with
+    its stored secrets, to an address of their choosing."""
+    import json as _json
+
+    def _fp(*parts: object) -> str:
+        return _json.dumps(parts, sort_keys=True, separators=(",", ":"), default=str)
+
     out: set[str] = set()
     if spec.workspace_policy.trust_repo_settings:
         out.add("trust_repo_settings")
-    for srv in spec.mcp_servers.values():
+    for name, srv in spec.mcp_servers.items():
         if srv.transport == "stdio":
-            out.add("stdio_mcp")
+            out.add("stdio_mcp:" + _fp(name, srv.command, list(srv.args), dict(srv.env)))
         if srv.privileged:
-            out.add("privileged_mcp")
+            out.add("privileged_mcp:" + _fp(name, srv.transport, srv.url, srv.command, list(srv.args)))
         if srv.header_secrets and not _is_local_url(srv.url):
             # A stored secret is sent to this address: only to a server on this machine unless the
             # Owner says otherwise, or an Admin could point a stored key at a host of their choosing.
-            out.add("secret_to_remote_server")
-    if spec.approval_policy.unattended_allow:
-        out.add("unattended_allow")
+            out.add("secret_to_remote_server:" + _fp(name, srv.url, dict(srv.header_secrets)))
+    for tool in spec.approval_policy.unattended_allow:
+        out.add("unattended_allow:" + tool)
     return out
 
 
@@ -599,7 +610,9 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
     if thread_id:
         info = await mgr.hooks.thread_info(thread_id) if mgr.hooks.thread_info else None
         allowed = {b.id for b in config.load_bots()} if pr.is_operator else policy.of(request).allowed_bot_ids(config.load_bots())
-        if info is None or info.get("bot_id") not in allowed:
+        # characters.may_use: per-profile visibility (the character's profiles list), as in the roster.
+        if (info is None or info.get("bot_id") not in allowed
+                or not characters.may_use_id(info.get("bot_id"), pr)):
             raise HTTPException(404, "Thread not found")
         if info.get("restricted_visible", True):
             # What the agent is asked and what it answers is posted into this chat; a Restricted

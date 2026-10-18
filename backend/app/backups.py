@@ -632,19 +632,27 @@ def apply_pending_restore() -> dict | None:
         log.error("a restore was staged but cannot be applied (%s); leaving it for you to look at", e)
         return {"applied": False, "error": str(e)}
     pre = backup_root() / f"pre-restore-{_stamp()}"
-    pre.mkdir(parents=True, exist_ok=True)
-    make_private(pre, directory=True)
-    cur = data / "chats.db"
-    if cur.is_file():
-        with contextlib.suppress(Exception):
+    # The copy of what is about to be replaced is the only way back from a wrong restore, so a
+    # failure here (disk full, an unreadable database) STOPS the restore: the staged files and the
+    # marker stay, nothing is overwritten, and the next start tries again. It used to be
+    # suppressed, and the restore then replaced the live chats.db with no copy left anywhere.
+    try:
+        pre.mkdir(parents=True, exist_ok=True)
+        make_private(pre, directory=True)
+        cur = data / "chats.db"
+        if cur.is_file():
             _sqlite_snapshot(cur, pre / "chats.db")
             make_private(pre / "chats.db")
-    for name in DATA_FILES:
-        p = data / name
-        if p.is_file():
-            with contextlib.suppress(OSError):
+        for name in DATA_FILES:
+            p = data / name
+            if p.is_file():
                 shutil.copy2(p, pre / name)
                 make_private(pre / name)
+    except (OSError, sqlite3.Error) as e:
+        log.error("a restore is staged but the copy of the current data to %s failed (%s); NOT restoring. "
+                  "Free some space or fix the error and restart, or cancel it with DELETE /api/backups/pending",
+                  pre, e)
+        return {"applied": False, "error": f"could not save the current data first: {e}"}
     applied: list[str] = []
     for src in sorted(p for p in stage.rglob("*") if p.is_file()):
         rel = src.relative_to(stage).as_posix()

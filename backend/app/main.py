@@ -1773,6 +1773,26 @@ _BOT_SCOPED_FRAMES = frozenset({
 })
 
 
+#: Broadcast frame types that carry an OPERATOR surface, and the permission a non-operator
+#: socket must hold to receive one. Before profiles existed every unredacted socket was the
+#: owner's; a Member socket is unredacted too (it is not Restricted), so without this it got
+#: the coding harness's job/service/model state (host control), the reaction and avatar pool
+#: telemetry (every bot's id, prompts, rig errors, absolute data-dir paths) and an agent
+#: turn's live tool calls - the very frames the Safe-Mode allow-list leaves out, for the
+#: same reasons.
+_FRAME_PERMISSION = {
+    "harness_state": Permission.ADMIN_SYSTEM,
+    "harness_sessions": Permission.ADMIN_SYSTEM,
+    "reaction_pool": Permission.MANAGE_CHARACTERS,
+    "avatar_pool": Permission.MANAGE_CHARACTERS,
+    "progress": Permission.DISPATCH_AGENTS,
+}
+
+#: Frames about one character that the per-profile scoper narrows besides
+#: :data:`_BOT_SCOPED_FRAMES` (a reaction overlay names its bot; a progress item its thread).
+_PROFILE_SCOPED_EXTRA = frozenset({"reaction", "progress"})
+
+
 def scope_frame_for_principal(frame: dict, principal) -> dict | None:
     """Per-profile character visibility on EVERY outgoing frame (3.0).
 
@@ -1785,8 +1805,11 @@ def scope_frame_for_principal(frame: dict, principal) -> dict | None:
     ``manager.scoper`` and run after the Safe-Mode redactor, per connection:
 
     - ``bots`` / ``hello`` lists keep only the characters this profile may use;
-    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, or an ``error``
-      attributed to one) is dropped when the profile may not use that character.
+    - an operator frame (:data:`_FRAME_PERMISSION`: harness, pool telemetry, agent
+      progress) is dropped unless the profile holds the permission behind it;
+    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` / ``progress``
+      item, or an ``error`` attributed to one) is dropped when the profile may not use that
+      character.
       An UNATTRIBUTED frame passes: for a Restricted socket the redactor has already
       failed closed on it, and a Member's unattributed frames (an ack, a plain error)
       carry nothing about a character.
@@ -1797,11 +1820,14 @@ def scope_frame_for_principal(frame: dict, principal) -> dict | None:
             or getattr(principal, "is_operator", False):
         return frame
     t = frame.get("type")
+    need = _FRAME_PERMISSION.get(t)
+    if need is not None and not principal.can(need):
+        return None
     if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
         return {**frame, "bots": [b for b in frame["bots"]
                                   if not isinstance(b, dict)
                                   or characters.may_use_id(b.get("id"), principal)]}
-    if t in _BOT_SCOPED_FRAMES or t == "error":
+    if t in _BOT_SCOPED_FRAMES or t in _PROFILE_SCOPED_EXTRA or t == "error":
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
@@ -2080,7 +2106,12 @@ def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
 
 
 async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
-    if _is_decoy(request):
+    """403 when the caller may not use the character behind ``thread_id``: a Restricted caller
+    outside the safe set, and (3.0) any profile left off the character's ``profiles`` list. The
+    second half used to run only for Restricted callers, so a Member could rename, archive,
+    mark read, edit or delete messages in a thread of a character made for someone else."""
+    pr = policy.of(request).principal
+    if _is_decoy(request) or not (pr.is_operator or pr.is_machine):
         _deny_decoy_bot(request, await _bot_of_thread(thread_id))
 
 
@@ -8101,11 +8132,14 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
     if not policy.claimed(cfg):
         local = policy.is_loopback_origin(request.client.host if request.client else "",
                                           _proxied_request(request))
-        if not (local or policy.allow_open_install()
-                or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
+        trusted = local or policy.allow_open_install()
+        if not trusted:
+            # The throttle is asked BEFORE the token is compared: checked after a miss, a client
+            # past its limit was still having every guess verified (only the answer was a 429).
             blocked = people_api._throttled(request, "setup")
             if blocked is not None:
                 return blocked
+        if not (trusted or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
             people_api._failed(request, "setup", "setup token")
             return JSONResponse(
                 {"detail": "Setup is only allowed from the computer DisPatch runs on, "
@@ -9645,6 +9679,9 @@ async def unread_summary(request: Request):
     if _is_decoy(request):
         safe = _safe_bot_ids()
         unread = [u for u in unread if u.get("bot_id") in safe]
+    # Per-profile visibility: a thread id of a character made for someone else is not listed.
+    pr = policy.of(request).principal
+    unread = [u for u in unread if characters.may_use_id(u.get("bot_id"), pr)]
     return {"unread": unread}
 
 
@@ -11139,6 +11176,15 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     role = payload.get("role", "assistant")
     if role not in ("assistant", "user", "system"):
         role = "assistant"
+    pr = policy.of(request).principal
+    if not (pr.is_machine or pr.is_operator):
+        # 3.0: use_chat lets a Member reach this agent route. It must not become a way to
+        # write into a thread of a character made for someone else, or to put words in a
+        # character's (or the system's) mouth: that is the agents' and the Owner's job.
+        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
+        if role != "user":
+            raise policy.denied(pr, Permission.MANAGE_AGENTS,
+                                "Only an agent, the Owner or an Admin may post as a character or the system.")
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
     # silent "" default the caller's mistake persisted an empty bubble.
     #
@@ -13294,12 +13340,14 @@ async def websocket_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_json()
             mtype = data.get("type")
+            current = principal                  # the profile as it is NOW (its budgets too)
             # A full session that idle-expires drops to Safe Mode: tell the
             # client so it reconnects (as a Safe-Mode connection). A ping is NOT
             # activity (so idle genuinely expires); real actions slide the window.
             if session is not None:
                 live = auth.get_session(session.token)
                 fresh = policy.for_session(live, device_id) if live is not None else None
+                current = fresh or principal
                 if fresh is None:
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
@@ -13321,8 +13369,17 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
             handler = WS_HANDLERS.get(mtype)
             if handler:
-                verdict = policy.authorize(principal, route_policy.ws_action_requirement(mtype)
-                                           or policy.Requirement())
+                ws_req = route_policy.ws_action_requirement(mtype) or policy.Requirement()
+                verdict = policy.authorize(principal, ws_req)
+                if verdict.allowed and current.kind == "profile" and current.is_restricted:
+                    # A Restricted profile's quiet hours and minutes per day hold on the socket
+                    # too - the chat itself runs here, so a gate on HTTP alone left both
+                    # unenforced (and the minutes uncounted) for anyone already connected.
+                    limited = _restricted_limit_denied(current, ws_req)
+                    if limited is not None:
+                        verdict = limited
+                    elif not ws_req.public:
+                        _note_active_time(current)
                 if not verdict.allowed:
                     await manager.send(ws, {
                         "type": "error", "thread_id": data.get("thread_id"),
