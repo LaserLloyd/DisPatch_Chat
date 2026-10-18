@@ -234,6 +234,22 @@ async def test_a_key_in_a_tool_call_never_reaches_a_row_a_frame_or_a_summary(mgr
     assert "INSTRUCTIONS-NEVER-IN-A-BUNDLE" not in bundle
 
 
+async def test_a_key_in_an_error_reaches_neither_the_log_nor_the_timeline(mgr, caplog):
+    import logging
+
+    from app.agents.events import ErrorCode
+    from app.agents.fake import Fail
+    caplog.set_level(logging.DEBUG)
+    GLOBAL_REDACTOR.register(KEY)
+    mgr.backends["fake"].scripts["keyerr"] = [Fail(ErrorCode.backend_error, f"the backend said {KEY}")]
+    tid = await run(mgr, "scenario:keyerr", make_agent("KeyErr"))
+    await settle(lambda: state(tid) == "failed")
+    await mgr.flush()
+    assert KEY not in caplog.text
+    assert KEY not in json.dumps(store.list_events(tid)) + json.dumps(store.get_task(tid))
+    assert "***redacted***" in json.dumps(store.list_events(tid))
+
+
 async def test_the_support_summary_has_counts_and_shapes_but_no_prompt(mgr):
     agent = make_agent("Counted", instructions="SECRET-INSTRUCTIONS")
     tid = await run(mgr, "scenario:simple", agent)

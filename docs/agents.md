@@ -571,3 +571,9 @@ wall-clock watchdog and the one definition of how a run ends; an adapter writes 
 against every adapter, driven by recorded or scripted streams. The reference is
 [agents/backends.md](agents/backends.md); the threat model is
 [agents/security.md](agents/security.md). A pull request for another runner is very welcome.
+
+For development, `DISPATCH_AGENTS_FAKE=1` registers the scripted fake backend
+(`backend/app/agents/fake.py`): create an agent with backend `fake` and send a task whose prompt
+is `scenario:simple`, `scenario:approval`, `scenario:long` (steerable), `scenario:subagent`,
+`scenario:budget` or `scenario:error_refused` to watch every state of the card without a
+model. It never appears in a normal install.

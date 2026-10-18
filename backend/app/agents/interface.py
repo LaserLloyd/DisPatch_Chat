@@ -199,9 +199,6 @@ class TaskContext:
     repo_path: Path | None = None          # the repo this task targets, if any
     secrets: SecretProvider | None = None
     extra_env: dict[str, str] = field(default_factory=dict)
-    # What the integration layer's spend ledger says is already spent today for the
-    # tightest per-day limit; seeds the BudgetTracker (W11b, TaskManager).
-    spent_today_usd: float = 0.0
 
 
 class Capabilities(BaseModel):
@@ -390,8 +387,7 @@ class BaseBackend:
         rt = TaskRuntime(
             task_id=tid, spec=spec, ctx=ctx,
             log=EventLog(tid, redact=self.redactor.redact, clock=self._clock, start_seq=start_seq),
-            tracker=BudgetTracker(spec.budget, spent_today_usd=ctx.spent_today_usd),
-            created_at=self._clock())
+            tracker=BudgetTracker(spec.budget), created_at=self._clock())
         self._tasks[tid] = rt
         return rt
 

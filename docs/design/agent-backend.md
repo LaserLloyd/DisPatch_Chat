@@ -3,10 +3,12 @@
 [← Back to the README](../../README.md) · Related:
 [agents.md](../agents.md) · [llm-providers.md](../llm-providers.md)
 
-Status: **designed, not built.** This is the seam that would let an agent
-runtime live in another container or on another machine. Today the agent
-integration is bound to the host filesystem, which is why the only supported
-agent topology is "same host as DisPatch".
+Status: **the interface is built (3.0); the remote HTTP backend is not.**
+`backend/app/agents/` defines `AgentBackend`, the normalized events and the OpenClaw
+and Claude Agent adapters ([agents.md](../agents.md),
+[agents/backends.md](../agents/backends.md)). OpenClaw is still bound to the host
+filesystem, which is why the only supported OpenClaw topology is "same host as
+DisPatch"; the `http` backend this page designs, a remote agent, is still unbuilt.
 
 ## The problem, and the fix
 
