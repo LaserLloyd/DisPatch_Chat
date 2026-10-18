@@ -172,7 +172,8 @@ _CORE: tuple[SettingDef, ...] = (
        "system", section="Backups", level="advanced"),
     _d("system.backup_passphrase", "secret", None, "Backup passphrase",
        "The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. "
-       "Never shown again once saved.", "system", section="Backups", level="advanced", secret=True),
+       "Either way it is kept in this install's secret store (the schedule needs it) and never shown again, "
+       "so keep your own copy somewhere else.", "system", section="Backups", level="advanced", secret=True),
     _d("system.log_file", "path", "", "Log file",
        "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
        "system", section="Diagnostics", level="advanced", env="DISPATCH_LOG_FILE"),

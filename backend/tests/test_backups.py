@@ -536,3 +536,33 @@ def test_the_offline_restore_command_is_owner_only_too(data, lax_umask):
         assert (p.stat().st_mode & 0o777) == 0o600
     else:
         assert _others_can_read(p) is False
+
+
+# --------------------------------------------------------------------------- #
+# L-4: the recovery key is also the install's passphrase, and every surface says so
+# --------------------------------------------------------------------------- #
+
+
+def test_the_recovery_key_note_says_it_is_also_kept_by_the_install(world, owner):
+    body = owner.post("/api/backups", json={}).json()
+    key = body["recovery_key"]
+    assert secret_store.get("setting.system.backup_passphrase") == key       # the behaviour the note describes
+    note = body["recovery_key_note"].lower()
+    assert "shown once" in note and "secret store" in note and "off this computer" in note
+
+
+def test_a_scheduled_archive_without_a_passphrase_does_not_promise_a_place_to_read_the_key(data, caplog):
+    settings_store.set_many({"system.encrypted_backup_enabled": True})
+    with caplog.at_level("WARNING", logger="local-chat.backups"):
+        assert backups.run_scheduled_once() is not None
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "not shown anywhere" in text and "set your own passphrase" in text
+    assert backups.configured_passphrase() not in text                       # and never the key itself
+
+
+def test_the_docs_and_the_setting_describe_the_stored_key():
+    doc = (Path(__file__).resolve().parents[2] / "docs" / "backups.md").read_text(encoding="utf-8")
+    assert "also this install's backup passphrase" in doc and "off this computer" in doc.lower()
+    from app import settings_schema
+    d = next(x for x in settings_schema.all_defs() if x.key == "system.backup_passphrase")
+    assert "secret store" in d.description and "keep your own copy" in d.description

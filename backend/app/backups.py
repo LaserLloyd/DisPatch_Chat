@@ -710,7 +710,9 @@ def run_scheduled_once() -> dict | None:
     if not pw:
         pw = recovery_key()
         secret_store.put("setting.system.backup_passphrase", pw)
-        log.warning("a backup recovery key was generated and stored; read it in Settings > System > Backups")
+        log.warning("no backup passphrase was set, so a recovery key was generated and saved in this install's secret "
+                    "store as the backup passphrase. It is not shown anywhere: set your own passphrase in "
+                    "Settings > System > Backups to be able to read these archives on another computer")
     row = create_archive(pw, include_media=bool(settings_store.get("system.encrypted_backup_include_media", False)))
     prune_archives(int(settings_store.get("system.encrypted_backup_keep", 7)))
     return row

@@ -343,7 +343,7 @@
       "choices": [],
       "choices_from": "",
       "default": null,
-      "description": "The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Never shown again once saved.",
+      "description": "The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Either way it is kept in this install's secret store (the schedule needs it) and never shown again, so keep your own copy somewhere else.",
       "env": null,
       "env_names": [],
       "group": "system",

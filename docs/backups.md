@@ -21,6 +21,19 @@ Backups; stored in the secret store, never shown again), or do neither and DisPa
 `ABCDE-FGHJK-MNPQR-STUVW-XYZ23` and shows it **once**. Keep it somewhere safe: without it an archive cannot be read, by
 anyone, including us.
 
+**The recovery key is also this install's backup passphrase.** A generated recovery key is saved in the install's secret
+store as `system.backup_passphrase` (as a passphrase you set in Settings is), because the schedule and a restore that
+types nothing both need it. That has three consequences:
+
+- Encryption protects an archive that is **off this computer**. Anyone who holds the install itself (the data folder
+  *and* its keyring or `agents/secrets.json`) already holds the key to the archives next to it; they gain nothing from
+  stealing a `.dpbk`, and the archive does not protect you from a compromised install.
+- The key you were shown is the copy that matters when this computer is lost. Keep it away from it (a password manager,
+  paper); an archive copied elsewhere is useless without it.
+- A schedule that starts with no passphrase makes a recovery key **nobody is shown**. Set your own passphrase first
+  (Settings -> System -> Backups) if you want to restore on another computer. A new passphrase applies to new archives;
+  an older archive still needs the one it was made with. A passphrase typed into *Back up now* is never saved.
+
 **The schedule**: turn on `system.encrypted_backup_enabled` (off by default). DisPatch checks every ten minutes and
 writes one when the last is older than `system.encrypted_backup_interval_hours` (24), keeping the newest
 `system.encrypted_backup_keep` (7). `system.encrypted_backup_include_media` adds the media and File Server folders.

@@ -113,7 +113,7 @@ Network, backups, logs and limits.
 | `system.encrypted_backup_interval_hours` | integer | `24` | advanced |  |  | Hours between scheduled encrypted backups. Range 1..720 hours. *(Owner only)* |
 | `system.encrypted_backup_keep` | integer | `7` | advanced |  |  | Older encrypted backups are deleted beyond this many. Range 1..365. *(Owner only)* |
 | `system.encrypted_backup_include_media` | boolean | `false` | advanced |  |  | Add the media and File Server folders to encrypted backups. They can be large. *(Owner only)* |
-| `system.backup_passphrase` | secret |  | advanced |  |  | The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Never shown again once saved. *(secret, write-only)* *(Owner only)* |
+| `system.backup_passphrase` | secret |  | advanced |  |  | The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Either way it is kept in this install's secret store (the schedule needs it) and never shown again, so keep your own copy somewhere else. *(secret, write-only)* *(Owner only)* |
 | `system.log_file` | path |  | advanced |  | `DISPATCH_LOG_FILE` / `LOCAL_CHAT_LOG_FILE` | Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log. *(Owner only)* |
 | `system.files_total_max` | integer | `21474836480` | advanced | yes | `DISPATCH_FILES_TOTAL_MAX` / `LOCAL_CHAT_FILES_TOTAL_MAX` | Total bytes the File Server may hold before uploads are refused (20 GiB by default). Range 1.04858e+06.. bytes. *(Owner only)* |
 | `system.push_subject` | string |  | advanced |  | `DISPATCH_PUSH_SUBJECT` / `LOCAL_CHAT_PUSH_SUBJECT` | A mailto: address push services can reach if your server misbehaves. Empty uses a placeholder. *(Owner only)* |
