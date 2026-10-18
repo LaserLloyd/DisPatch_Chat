@@ -44,9 +44,8 @@ def test_an_extension_manifest_lists_what_it_registered(ext_env):
     assert all(p["label"] for p in row["permissions"])
 
 
-def test_tools_yaml_rows_are_manifests_too(world, tmp_path):
-    root = tmp_path / "page"
-    root.mkdir()
+def test_tools_yaml_rows_are_manifests_too(world, tmp_path_factory):
+    root = tmp_path_factory.mktemp("page")          # outside the data directory, which is never served
     (root / "index.html").write_text("<p>hi</p>")
     rows = [{"id": "bench", "title": "Bench", "icon": "b", "kind": "url", "url": "https://bench.example.net/",
              "enabled": True, "safe": False}]

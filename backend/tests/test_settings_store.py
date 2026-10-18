@@ -365,3 +365,46 @@ def test_a_settings_change_is_audited_by_key_not_value(world, owner):
     audit = owner.get("/api/people/audit").json()
     text = str(audit)
     assert "settings.change" in text and "system.public_url" in text and "secret-host" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Owner-only settings: host control is the Owner's, not an Admin's
+# --------------------------------------------------------------------------- #
+
+
+def test_owner_only_flags_cover_the_host_control_settings():
+    flagged = {d.key for d in settings_schema.CORE_SETTINGS if d.owner_only}
+    assert all(k in flagged for k in (
+        "system.host", "system.network_exposure", "connections.allow_private_targets",
+        "connections.image_cli", "tools.openclaw_bin", "people.machine_loopback_trust"))
+    assert settings_schema.get_def("characters.greeting").owner_only is False
+    assert settings_schema.get_def("appearance.default_theme").owner_only is False
+    doc = settings_schema.schema_document()
+    row = next(s for s in doc["settings"] if s["key"] == "system.host")
+    assert row["owner_only"] is True
+
+
+def test_set_many_refuses_owner_only_keys_for_a_non_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("DISPATCH_DATA_DIR", str(tmp_path))
+    res = settings_store.set_many({"connections.image_cli": "/bin/evil", "characters.greeting": True}, owner=False)
+    assert "connections.image_cli" in res.errors and "Owner" in res.errors["connections.image_cli"]
+    assert settings_store.resolve("connections.image_cli").source == "default"
+    assert settings_store.resolve("characters.greeting").source == "default"      # all or nothing
+    ok = settings_store.set_many({"connections.image_cli": "/bin/ok"})
+    assert not ok.errors and settings_store.resolve("connections.image_cli").value == "/bin/ok"
+
+
+def test_an_admin_cannot_change_a_host_control_setting(world, owner):
+    boss = world.person(owner, "Boss", "admin", password="boss-password-1")  # scrub-ok: throwaway test fixture
+    admin = world.client(("203.0.113.60", 40010))
+    world.login(admin, profile_id=boss["id"], password="boss-password-1")  # scrub-ok: throwaway test fixture
+    assert admin.get("/api/settings").status_code == 200
+    ok = admin.patch("/api/settings", json={"set": {"characters.greeting": True}})
+    assert ok.status_code == 200, ok.text
+    for body in ({"set": {"connections.image_cli": "/bin/evil"}}, {"set": {"tools.openclaw_bin": "/bin/evil"}},
+                 {"reset": ["system.backup_keep"]}):
+        r = admin.patch("/api/settings", json=body)
+        assert r.status_code == 403, (body, r.text)
+    assert owner.get("/api/settings").json()["values"]["connections.image_cli"]["is_default"] is True
+    assert owner.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}}).status_code == 200
+    assert admin.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403

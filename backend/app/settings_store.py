@@ -376,9 +376,12 @@ def _del_row(key: str) -> None:
         con.execute("DELETE FROM settings WHERE key=?", (key,))
 
 
-def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | None = None) -> ChangeResult:
+def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | None = None,
+             owner: bool = True) -> ChangeResult:
     """Validate everything, then apply. ALL-or-nothing on validation: one bad value rejects the
-    whole request so a form is never half-saved. ``reset`` returns keys to their default."""
+    whole request so a form is never half-saved. ``reset`` returns keys to their default.
+    ``owner`` is whether the caller may change ``owner_only`` settings (server code: yes; the API passes
+    whether the caller holds ``admin_system``)."""
     res = ChangeResult()
     reset = list(reset or [])
     coerced, errs = settings_schema.validate_all(changes)
@@ -389,6 +392,9 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
     for k in {*coerced, *reset}:
         d = settings_schema.get_def(k)
         if d is None:
+            continue
+        if d.owner_only and not owner:
+            res.errors[k] = f"{d.label}: only the Owner can change this"
             continue
         hit = _env_hit(d)
         if hit is not None:

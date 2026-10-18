@@ -859,7 +859,6 @@
     {
       "cli": null,
       "http": [
-        "POST /api/wizard/network",
         "POST /api/wizard/step/{step}",
         "POST /api/wizard/finish"
       ],
@@ -867,7 +866,20 @@
       "machine": [],
       "mcp": null,
       "permission": "manage_settings",
-      "title": "Choose network exposure, skip a step, finish setup",
+      "title": "Skip a step, finish setup",
+      "ui": "settings.wizard",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/wizard/network"
+      ],
+      "id": "wizard.network",
+      "machine": [],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Choose network exposure",
       "ui": "settings.wizard",
       "ws": []
     },

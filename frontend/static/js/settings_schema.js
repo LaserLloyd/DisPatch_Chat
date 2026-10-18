@@ -140,7 +140,7 @@ const labelOf = (def) => def.label;
 function controlFor(row, ctx) {
   const { def } = row;
   const id = `st-${def.key.replace(/[^a-z0-9]+/gi, '-')}`;
-  const locked = row.source === 'env';
+  const locked = row.source === 'env' || (def.owner_only && !ctx.owner);
   const common = { id, 'aria-describedby': `${id}-desc` };
   if (locked) common.disabled = '';
   let input;
@@ -197,6 +197,7 @@ function rowNode(row, ctx) {
         el('label', { for: id, text: labelOf(def) }),
         el('span', { class: 'ui-badge ui-setting__level' }),
         el('span', { class: 'ui-badge ui-badge--info ui-setting__env', title: row.env ? t('schema.env_title', { name: row.env }) : '' }),
+        def.owner_only && !ctx.owner ? el('span', { class: 'ui-badge schema-owner-only', text: t('schema.owner_only') }) : null,
         ...tags,
       ]),
       el('p', { class: 'ui-setting__desc', id: `${id}-desc`, text: def.description }),
@@ -253,6 +254,8 @@ export async function mountSettingsSchema(pane, deps = {}) {
   };
 
   const ctx = {
+    // The server refuses an Admin's change to an owner-only setting; the page just doesn't offer it.
+    owner: deps.role === 'owner' || deps.role == null,
     edit(row, value) {
       if (value === undefined) return;
       state.resets.delete(row.def.key);

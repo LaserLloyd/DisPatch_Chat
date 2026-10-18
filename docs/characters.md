@@ -30,6 +30,12 @@ sees `audience: restricted | all` characters; a Member or Restricted profile tha
 The Owner and Admins see all of them. `GET /api/characters/all` (with `manage_characters`) returns every character
 with its settings.
 
+**Limit (live updates).** The list, a chat and the first WebSocket frame (`hello`) all apply the per-profile
+visibility. The live `bots`/`thread` broadcast frames that arrive later on an open WebSocket are still redacted only
+by audience (`ws.py` has no per-connection identity), so a profile that is not on a character's `profiles` list can
+see that character's name and avatar in a broadcast after it is edited, though it still cannot chat with it. Use
+`audience: restricted | all` plus `profiles` for privacy between family members, not as a security boundary.
+
 ## Changing a character
 
 **Settings -> Bots -> Details** on a row, or `PATCH /api/characters/{id}`:

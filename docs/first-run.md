@@ -10,7 +10,7 @@ away for good when you press **Finish**. Every step is an API call, so a script 
 | 2 | **A model** | Looks for StudioForge, LM Studio and Ollama on this computer, or takes an address and key; **Test and save** tests it, makes it the default and points the default character at it | `POST /api/wizard/detect`, `POST /api/wizard/connection` |
 | 3 | **Voice** (optional) | A link to Settings -> Voice; voice chat is a separate add-on | - |
 | 4 | **Family** (optional) | Creates Members and Restricted profiles; ticks *Install the Animal Friends characters* for children | `POST /api/wizard/family` |
-| 5 | **Network** | *This computer only* (the default) or *my home network*, with the HTTPS note | `POST /api/wizard/network` |
+| 5 | **Network** | *This computer only* (the default) or *my home network*, with the HTTPS note | `POST /api/wizard/network` (Owner only) |
 | 6 | **Done** | A checklist of what is left (a working model, encrypted backups, saving your recovery code) | `GET /api/wizard`, `POST /api/wizard/finish` |
 
 `GET /api/wizard` answers `{needed, claimed}` to anyone and the full checklist to someone who may manage settings.

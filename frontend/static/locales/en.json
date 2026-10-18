@@ -1629,6 +1629,7 @@
     "restart_pending": "Restart to apply",
     "needs_restart": "Needs a restart",
     "env_title": "Set by the environment variable {name}. Change it there.",
+    "owner_only": "Owner only",
     "secret_set": "A value is saved. Type to replace it.",
     "secret_unset": "Not set",
     "open_voice": "Open Voice settings",

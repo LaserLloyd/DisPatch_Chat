@@ -1604,6 +1604,7 @@
     "restart_pending": "[zh] Restart to apply",
     "needs_restart": "[zh] Needs a restart",
     "env_title": "[zh] Set by the environment variable {name}. Change it there.",
+    "owner_only": "[zh] Owner only",
     "secret_set": "[zh] A value is saved. Type to replace it.",
     "secret_unset": "[zh] Not set",
     "open_voice": "[zh] Open Voice settings",

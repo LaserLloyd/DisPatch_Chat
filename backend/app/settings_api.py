@@ -64,7 +64,14 @@ async def settings_patch(request: Request, payload: dict[str, Any] = Body(...)):
     overlap = set(changes) & set(reset)
     if overlap:
         raise fail(422, "settings_invalid", f"{sorted(overlap)[0]} cannot be set and reset together")
-    res = settings_store.set_many(changes, actor=actor(request), reset=reset)
+    is_owner = policy.of(request).can(Permission.ADMIN_SYSTEM)
+    if not is_owner:
+        locked = [k for k in {*changes, *reset}
+                  if (d := settings_schema.get_def(k)) is not None and d.owner_only]
+        if locked:
+            raise fail(403, "permission_denied",
+                       f"Only the Owner can change {settings_schema.get_def(sorted(locked)[0]).label}.")
+    res = settings_store.set_many(changes, actor=actor(request), reset=reset, owner=is_owner)
     if res.errors:
         from fastapi.responses import JSONResponse
 

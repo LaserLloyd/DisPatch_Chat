@@ -1729,6 +1729,7 @@
     "restart_pending": "[ar] Restart to apply",
     "needs_restart": "[ar] Needs a restart",
     "env_title": "[ar] Set by the environment variable {name}. Change it there.",
+    "owner_only": "[ar] Owner only",
     "secret_set": "[ar] A value is saved. Type to replace it.",
     "secret_unset": "[ar] Not set",
     "open_voice": "[ar] Open Voice settings",

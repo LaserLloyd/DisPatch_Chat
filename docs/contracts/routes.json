@@ -2018,7 +2018,8 @@
       "method": "POST",
       "path": "/api/wizard/network",
       "requirement": {
-        "permission": "manage_settings"
+        "note": "network exposure is host control: the Owner's",
+        "permission": "admin_system"
       }
     },
     {

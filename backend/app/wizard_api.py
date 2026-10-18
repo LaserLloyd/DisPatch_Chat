@@ -46,6 +46,7 @@ router = APIRouter()
 
 _SETTINGS = Depends(policy.require_permission(Permission.MANAGE_SETTINGS))
 _CONN = Depends(policy.require_permission(Permission.MANAGE_CONNECTIONS))
+_HOST = Depends(policy.require_permission(Permission.ADMIN_SYSTEM))
 _USERS = Depends(policy.require_permission(Permission.MANAGE_USERS))
 
 STEPS = ("owner", "connection", "voice", "family", "network", "done")
@@ -259,7 +260,7 @@ async def wizard_family(request: Request, payload: FamilyIn):
     return out
 
 
-@router.post("/api/wizard/network", dependencies=[_SETTINGS])
+@router.post("/api/wizard/network", dependencies=[_HOST])
 async def wizard_network(request: Request, payload: NetworkIn):
     notes: list[str] = []
     changes: dict[str, Any] = {"system.network_exposure": payload.exposure}

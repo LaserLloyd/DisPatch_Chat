@@ -13088,6 +13088,7 @@ async def websocket_endpoint(ws: WebSocket):
         bots = config.load_bots()
         if decoy:
             bots = [b for b in bots if b.safe]
+        bots = characters.visible_to(principal, bots)      # per-profile character visibility
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],

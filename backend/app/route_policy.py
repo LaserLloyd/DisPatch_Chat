@@ -259,7 +259,8 @@ _r("GET", "/api/wizard", public("answers only whether a first-run wizard is need
 _r("POST", "/api/wizard/detect", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/connection", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/family", _R(P.MANAGE_USERS))
-for _path in ("/api/wizard/network", "/api/wizard/step/{step}", "/api/wizard/finish"):
+_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's"))
+for _path in ("/api/wizard/step/{step}", "/api/wizard/finish"):
     _r("POST", _path, _R(P.MANAGE_SETTINGS))
 for _path, _m in (
     ("/api/backups", ("GET", "POST")), ("/api/backups/pending", ("GET", "DELETE")),

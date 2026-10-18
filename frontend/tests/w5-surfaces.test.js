@@ -535,3 +535,24 @@ test('the new strings exist in every locale with the same keys (English in en, [
     assert.equal(L.settings.tab_connections, `[${lang}] ${EN.settings.tab_connections}`);
   }
 });
+
+test('All settings: an owner-only row is shown read-only to an Admin, editable to the Owner', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const { mountSettingsSchema } = await fresh('settings_schema.js');
+  const schema = { ...SCHEMA, settings: SCHEMA.settings.map((d) => (d.key === 'system.backup_keep' ? { ...d, owner_only: true } : d)) };
+  const api = {
+    settingsSchema: async () => schema, settings: async () => VALUES, patchSettings: async () => ({ ok: true, changed: [] }),
+    backups: async () => ({ backups: [], schedule: { enabled: false } }), pendingRestore: async () => ({ pending: false }),
+    people: async () => ({ profiles: [] }),
+  };
+  const pane = win.document.getElementById('spane-settings');
+  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'admin', group: 'system' });
+  const row = pane.querySelector('[data-key="system.backup_keep"]');
+  assert.equal(row.querySelector('input').disabled, true);
+  assert.ok(row.querySelector('.schema-owner-only'), 'the row says why');
+  pane.textContent = '';
+  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'owner', group: 'system' });
+  const row2 = pane.querySelector('[data-key="system.backup_keep"]');
+  assert.equal(row2.querySelector('input').disabled, false);
+  assert.equal(row2.querySelector('.schema-owner-only'), null);
+});

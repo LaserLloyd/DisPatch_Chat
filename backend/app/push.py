@@ -167,7 +167,7 @@ def vapid_public_key() -> str:
 
 
 def _subject() -> str:
-    sub = (os.environ.get("DISPATCH_PUSH_SUBJECT") or "").strip()
+    sub = (config.env("PUSH_SUBJECT") or "").strip()
     return sub if sub.startswith("mailto:") and "@" in sub else DEFAULT_SUBJECT
 
 

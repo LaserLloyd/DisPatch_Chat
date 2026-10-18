@@ -1629,6 +1629,7 @@
     "restart_pending": "[de] Restart to apply",
     "needs_restart": "[de] Needs a restart",
     "env_title": "[de] Set by the environment variable {name}. Change it there.",
+    "owner_only": "[de] Owner only",
     "secret_set": "[de] A value is saved. Type to replace it.",
     "secret_unset": "[de] Not set",
     "open_voice": "[de] Open Voice settings",

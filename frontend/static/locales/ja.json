@@ -1604,6 +1604,7 @@
     "restart_pending": "[ja] Restart to apply",
     "needs_restart": "[ja] Needs a restart",
     "env_title": "[ja] Set by the environment variable {name}. Change it there.",
+    "owner_only": "[ja] Owner only",
     "secret_set": "[ja] A value is saved. Type to replace it.",
     "secret_unset": "[ja] Not set",
     "open_voice": "[ja] Open Voice settings",
