@@ -78,7 +78,7 @@ declares the permission it needs; and the backend runs on native Windows.
   and with a Restricted session and must be refused; a Restricted turn reaches only
   `audience in (all, restricted)` characters.
 - **Contracts** (`backend/app/contracts/`, `docs/contracts/`, `docs/errors.md`,
-  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (188 codes),
+  `scripts/gen_contracts.py`): OpenAPI, permissions, routes, error catalogue (189 codes),
   capability registry and JSON Schemas for Connection, Tool plugin, Voice provider and
   Character manifests, regenerated and checked in CI (`tests/test_contracts_drift.py`).
 - **Migration with a safety net**: `python -m app.migrate [--dry-run] [--restore DIR]`;
@@ -89,7 +89,7 @@ declares the permission it needs; and the backend runs on native Windows.
   where no CSP frame-ancestors, `no-store` on auth and people APIs, HSTS over TLS).
 - **Native Windows**: the backend imports and the test suite collects on Windows
   (`app/_filelock.py` replaces `fcntl`); `.gitattributes` keeps LF everywhere; the
-  frontend suite (731 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
+  frontend suite (788 tests) passes on Windows; `npm run test:ci` works under cmd.exe and
   PowerShell; `frontend/package-lock.json` is committed.
 - `.claude/agents/`: contract-guardian, security-reviewer, migration-verifier,
   docs-drift-checker, a11y-reviewer.
