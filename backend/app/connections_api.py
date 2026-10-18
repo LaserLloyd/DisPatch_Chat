@@ -179,6 +179,14 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
         need = existing.required_permission
         if need != "manage_connections":
             policy.of(request).require(need)
+        if _moves_key_to_another_host(existing, changes) and not policy.of(request).can(Permission.ADMIN_SYSTEM):
+            # The key is write-only for an Admin; repointing the address while keeping it would
+            # hand it to a server of their choosing on the next Test or chat turn (the same rule
+            # the agent editor applies to MCP header secrets, and POST /api/connections/test to a
+            # borrowed key).
+            raise fail(403, "permission_denied",
+                       "Changing this connection's server keeps its saved key, so only the Owner can do it. "
+                       "Paste the key again (or clear it) to change the address.")
     try:
         c = await asyncio.to_thread(connections.update, connection_id, changes)
     except connections.ConnectionError_ as e:
@@ -187,6 +195,24 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
         await asyncio.to_thread(characters.refresh_inline_mirrors, c)
     audit(request, "connection.update", c.id, ",".join(sorted(k for k in changes if "key" not in k)))
     return await asyncio.to_thread(_public, c)
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    try:
+        return (urlparse(url or "").hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+def _moves_key_to_another_host(existing: connections.Connection, changes: dict[str, Any]) -> bool:
+    """Would this PATCH send the connection's EXISTING credential to a different host?"""
+    if "base_url" not in changes or not existing.credential_ref:
+        return False
+    if str(changes.get("api_key") or "").strip() or changes.get("clear_key"):
+        return False                     # a new key, or no key: nothing is carried over
+    new = str(changes.get("base_url") or existing.ctype.base_url)
+    return _host_of(new) != _host_of(existing.base_url)
 
 
 @router.delete("/api/connections/{connection_id}", dependencies=[_MANAGE])

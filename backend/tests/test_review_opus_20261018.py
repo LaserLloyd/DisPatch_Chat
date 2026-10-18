@@ -141,3 +141,25 @@ def test_an_admin_cannot_rewrite_what_the_owner_approved_on_an_agent(aw):
     # Leaving the approved grants exactly as they are, or removing one, is fine.
     assert patch({**stdio, **remote}).status_code == 200
     assert patch(stdio).status_code == 200
+
+
+# O-4 ------------------------------------------------------------------------ #
+
+def test_an_admin_cannot_move_a_saved_key_to_another_host(world):
+    owner = world.create_owner(world.client())
+    world.person(owner, "Ada", "admin", password="admin-pass1")
+    admin = world.client(("203.0.113.63", 1))
+    assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    r = owner.post("/api/connections", json={"type": "openai_compatible", "name": "Box",
+                                              "base_url": "http://127.0.0.1:9/v1",
+                                              "api_key": "sk-house-key-0123456789"})  # scrub-ok: test fixture
+    assert r.status_code == 201, r.text
+    cid = r.json()["id"]
+    r = admin.patch(f"/api/connections/{cid}", json={"base_url": "http://203.0.113.99:9/v1"})
+    assert r.status_code == 403, r.text
+    # Same host (another port), a fresh key, or no key: nothing is carried to a stranger.
+    assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://127.0.0.1:10/v1"}).status_code == 200
+    assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://203.0.113.99:9/v1",
+                                                        "api_key": "sk-admins-own-0123456789"}).status_code == 200  # scrub-ok
+    # The Owner may move it.
+    assert owner.patch(f"/api/connections/{cid}", json={"base_url": "http://198.51.100.7:9/v1"}).status_code == 200
