@@ -154,6 +154,22 @@ def test_family_input_is_validated(world):
     assert dup.status_code == 409
 
 
+def test_in_docker_the_published_address_decides_so_local_is_not_a_mismatch(world, monkeypatch):
+    """The image binds 0.0.0.0 inside the container by design; `-p 127.0.0.1:8765:8765` /
+    BIND_ADDR is what "this computer only" means there, and the app cannot see it."""
+    from dataclasses import replace
+    monkeypatch.setattr(config, "SETTINGS", replace(config.SETTINGS, host="0.0.0.0"))
+    c = world.create_owner()
+    net = c.post("/api/wizard/network", json={"exposure": "local"}).json()
+    assert net["mismatch"] is True and "wider" in net["mismatch_note"]        # bare metal: a real mismatch
+    monkeypatch.setenv("DISPATCH_IN_DOCKER", "1")
+    net = c.post("/api/wizard/network", json={"exposure": "local"}).json()
+    assert net["mismatch"] is False and net["mismatch_note"] == ""
+    assert any("BIND_ADDR" in n for n in net["notes"])
+    net = c.post("/api/wizard/network", json={"exposure": "lan"}).json()
+    assert net["mismatch"] is False
+
+
 @pytest.mark.parametrize("path", ["/api/wizard/detect", "/api/wizard/finish"])
 def test_posting_junk_never_crashes(world, path):
     c = world.create_owner()

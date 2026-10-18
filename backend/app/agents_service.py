@@ -976,7 +976,12 @@ class TaskManager:
         if not active:
             self._refresh_budget(row, be)
             self._live.add(tid)
-        await be.send(tid, message)
+        try:
+            await be.send(tid, message)
+        except Exception:
+            if not active:
+                self._live.discard(tid)          # the slot was reserved for a run that never started
+            raise
         if not active:
             self._ensure_pump(tid)
             return "resumed"
@@ -986,7 +991,11 @@ class TaskManager:
         be = self._ensure_registered(row)
         self._refresh_budget(row, be)
         self._live.add(row["task_id"])
-        await be.resume(row["task_id"], message)
+        try:
+            await be.resume(row["task_id"], message)
+        except Exception:
+            self._live.discard(row["task_id"])   # same: a failed resume must not hold a slot
+            raise
         self._ensure_pump(row["task_id"])
 
     async def cancel(self, row: dict[str, Any]) -> None:

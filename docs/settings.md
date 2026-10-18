@@ -92,8 +92,8 @@ Defaults for a new device: theme, language and avatar style.
 
 | Key | Type | Default | Level | Restart | Env | What it does |
 |---|---|---|---|---|---|---|
-| `appearance.default_theme` | choice | `glacier` | basic |  |  | The theme a device uses until its user picks another. One of: `glacier`. |
-| `appearance.default_language` | choice | `en` | basic |  |  | The language a device uses until its user picks another. One of: `en`. |
+| `appearance.default_theme` | choice | `glacier` | basic |  |  | The theme a device uses until its user picks another. One of: `purple`, `midnight-gold`, `glacier`, `forest`, `paper`, `daylight`, `slate`, `high-contrast`, `high-contrast-light`, `electric-yellow`, `laserlloyd`, `laserlloyd-light`, `night-red`. |
+| `appearance.default_language` | choice | `en` | basic |  |  | The language a device uses until its user picks another. One of: `ar`, `de`, `en`, `es`, `fr`, `ja`, `pt`, `zh`. |
 | `appearance.avatar_style` | choice | `rich` | basic |  |  | Rich shows full pictures, Minimal shows small round avatars. A device can override it. One of: `rich`, `minimal`. |
 
 ## System
