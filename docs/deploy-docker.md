@@ -50,10 +50,11 @@ docker compose ps               # STATUS should reach "healthy" within ~90s
                                 # (the first boot seeds assets; start_period is 90s)
 ```
 
-**Set a PIN immediately.** With no PIN configured the app is *completely open* to
-anyone who can reach the port — that is deliberate (it makes first-run painless) but
-it is not a state to leave it in. Open the app, go to Security, set a PIN, and write
-down the recovery code it shows you.
+**Finish the setup wizard.** A fresh container is closed to the network until an owner
+account exists: the sign-in page is all anyone sees. The wizard asks for the one-time
+setup token the server printed (`docker compose logs app`, the `SETUP TOKEN: ...` line),
+creates the owner, and shows the recovery code once; write it down. (3.0; a 2.x
+container was open until a PIN was set.)
 
 ---
 
@@ -64,7 +65,7 @@ A single container running one uvicorn process:
 | | |
 |---|---|
 | Base image | `python:3.13-slim-trixie` |
-| Size | ~178 MB (measured, amd64) |
+| Size | ~840 MB (measured, amd64, 3.0.0; most of it is the optional PDF-OCR stack `rapidocr-onnxruntime` + `opencv`) |
 | Runs as | UID/GID 1000, non-root |
 | Data | one volume at `/data` |
 | Port | 8765 |

@@ -96,7 +96,8 @@ character's inline provider block - `api:` or each entry of `advisor.providers` 
   start (or **Settings -> Connections -> Move keys here**, `POST /api/connections/adopt`) turns those into
   connections too.
 
-`python -m app.migrate --dry-run` prints exactly which connections would be created.
+`uv run python -m app.migrate --dry-run` (from `backend/`; `docker compose run --rm app python -m app.migrate --dry-run`
+in Docker) prints exactly which connections would be created.
 
 If the secret store is unavailable when a connection is used, the character fails with a message that names the
 connection; the pre-migration backup in `<data>/backups/3.0.0-<time>/` has the original `config.yaml` with its keys.

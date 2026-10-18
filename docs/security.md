@@ -393,9 +393,9 @@ The exact steps, the backup location and the rollback are in the
 [3.0.0 changelog entry](../CHANGELOG.md#300--2026-10-18). In short:
 
 ```
-python -m app.migrate --dry-run --data-dir <your data dir>   # what would change; writes nothing
-python -m app.migrate --data-dir <your data dir>             # or just start the server
-python -m app.migrate --restore <data dir>/backups/3.0.0-<stamp>   # undo (server stopped)
+uv run python -m app.migrate --dry-run --data-dir <your data dir>   # what would change; writes nothing
+uv run python -m app.migrate --data-dir <your data dir>             # or just start the server
+uv run python -m app.migrate --restore <data dir>/backups/3.0.0-<stamp>   # undo (server stopped)
 ```
 
 An existing PIN becomes the Owner's PIN and keeps working; set the Owner's password the
