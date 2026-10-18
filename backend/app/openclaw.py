@@ -699,7 +699,11 @@ async def send_to_agent(
     timeout: int | None = None,
     model: str | None = None,
     thinking: str | None = None,
+    on_spawn=None,
 ) -> AgentReply:
+    # `on_spawn(proc)` is called once with the asyncio subprocess right after it
+    # starts, so a caller that must be able to stop the run (the agent-dispatch
+    # adapter's cancel/interrupt) can reach it. Default None = old behaviour.
     timeout = timeout or SETTINGS.agent_timeout
     # Pass the message via a temp file (--message-file) instead of an argv element:
     # a single argv string is capped at MAX_ARG_STRLEN (~128KB) regardless of the
@@ -749,6 +753,8 @@ async def send_to_agent(
                 "OpenClaw not available. Is it installed and on PATH?",
                 detail=f"binary: {SETTINGS.openclaw_bin}",
             )
+        if on_spawn is not None:
+            on_spawn(proc)
 
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
