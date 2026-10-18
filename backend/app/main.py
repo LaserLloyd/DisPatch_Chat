@@ -457,6 +457,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # Safe-Mode connections get image/media stripped from every frame; a full
     # connection whose session lapses is redacted from that moment too.
     manager.redactor = redact_for_decoy
+    # Every socket is then narrowed to the characters ITS profile may use (3.0
+    # per-profile visibility), broadcasts included - not only the roster and hello.
+    manager.scoper = scope_frame_for_principal
     manager.is_session_live = lambda tok: auth.get_session(tok) is not None
     # Lets the manager demote token-less "full" connections (opened while no
     # PIN existed) the moment a PIN is set. auth.load() is mtime-cached.
@@ -1759,6 +1762,51 @@ _DECOY_FRAME_ALLOW = frozenset({
 #: here and none is in the allow-list.
 _DECOY_FRAME_DENY = frozenset(agents_ws.FRAME_TYPES)
 
+#: Frames that are about ONE character (directly by ``bot_id`` or through the thread they
+#: name). Both narrowing passes below scope them: the Safe-Mode redactor to the safe set,
+#: the per-profile scoper to what the socket's profile may use.
+_BOT_SCOPED_FRAMES = frozenset({
+    "message", "message_update", "stream_done", "thread_update",
+    "thread_created", "thread_deleted", "thinking", "message_deleted",
+    "checklist_update", "stream_start", "stream_chunk", "turn_status",
+    "message_feedback",
+})
+
+
+def scope_frame_for_principal(frame: dict, principal) -> dict | None:
+    """Per-profile character visibility on EVERY outgoing frame (3.0).
+
+    ``characters.may_use`` decides who sees a character: its ``audience`` and, when set,
+    its ``profiles`` list. The roster (``GET /api/bots``) and the ``hello`` frame were
+    already filtered with it; the broadcasts that follow (a Bot Manager save, an avatar
+    upload, a thread created or renamed, a reply landing) were sent to every socket
+    unfiltered, so a Member - or a Restricted profile - left off a character's list
+    learned its new name and avatar the moment the Owner edited it. Installed as
+    ``manager.scoper`` and run after the Safe-Mode redactor, per connection:
+
+    - ``bots`` / ``hello`` lists keep only the characters this profile may use;
+    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, or an ``error``
+      attributed to one) is dropped when the profile may not use that character.
+      An UNATTRIBUTED frame passes: for a Restricted socket the redactor has already
+      failed closed on it, and a Member's unattributed frames (an ack, a plain error)
+      carry nothing about a character.
+
+    Owner, Admin, the open install and machines see everything (``may_use`` says so).
+    """
+    if principal is None or getattr(principal, "kind", "") in ("open", "machine") \
+            or getattr(principal, "is_operator", False):
+        return frame
+    t = frame.get("type")
+    if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
+        return {**frame, "bots": [b for b in frame["bots"]
+                                  if not isinstance(b, dict)
+                                  or characters.may_use_id(b.get("id"), principal)]}
+    if t in _BOT_SCOPED_FRAMES or t == "error":
+        bot = _frame_bot(frame)
+        if bot is not None and not characters.may_use_id(bot, principal):
+            return None
+    return frame
+
 
 def redact_for_decoy(frame: dict):
     """Make a frame safe for a Safe-Mode connection.
@@ -1797,10 +1845,7 @@ def redact_for_decoy(frame: dict):
     # unknown attribution drops the frame (safe default). Plain "error" frames
     # are only dropped when they're attributed to an unsafe bot — validation
     # errors with no bot context must still reach the requester.
-    if t in ("message", "message_update", "stream_done", "thread_update",
-             "thread_created", "thread_deleted", "thinking", "message_deleted",
-             "checklist_update", "stream_start", "stream_chunk", "turn_status",
-             "message_feedback"):
+    if t in _BOT_SCOPED_FRAMES:
         bot = _frame_bot(frame)
         if bot not in safe:
             return None
@@ -12706,9 +12751,10 @@ async def _handle_get_messages(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    if manager.conn_decoy(ws):
-        if not await _ws_bot_allowed(ws, await _bot_of_thread(thread_id)):
-            return
+    # Every connection, not only a Restricted one: a Member left off a character's
+    # profile list may not read its threads by id either (characters.may_use).
+    if not await _ws_bot_allowed(ws, await _bot_of_thread(thread_id)):
+        return
     try:
         limit = max(1, min(500, int(data.get("limit") or 200)))
     except (TypeError, ValueError):
