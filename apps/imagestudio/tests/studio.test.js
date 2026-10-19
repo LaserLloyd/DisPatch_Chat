@@ -308,7 +308,7 @@ test('a 409 (pictures changed since the count) deletes nothing, re-counts and as
     clear: (opts) => {
       const b = JSON.parse(opts.body);
       if (b.dry_run) { dry += 1; return [200, { count: dry === 1 ? 1 : 2, in_chat: 0, dry_run: true }]; }
-      return b.expect === 2 ? [200, { deleted: 2, files: 2, in_chat: 0 }] : [409, { detail: 'The pictures changed since you confirmed; count again' }];
+      return b.expect === 2 ? [200, { deleted: 2, files: 2, in_chat: 0 }] : [409, { detail: 'The pictures changed since you confirmed; count again', error: { code: 'imagestudio_pictures_changed', message: 'The pictures changed since you confirmed; count again' } }];
     },
   });
   const { doc } = env;
@@ -323,4 +323,44 @@ test('a 409 (pictures changed since the count) deletes nothing, re-counts and as
   doc.querySelector('.st-dlg .st-danger').click();
   await flush(30);
   assert.deepEqual(clears(env).filter((c) => !c.body.dry_run).map((c) => c.body.expect), [1, 2]);
+});
+
+test('the other 409 (a generation is running) shows the server message and does not re-count', { skip: dom.skip }, async () => {
+  let dry = 0;
+  const msg = 'A generation is running; try again when it is done';
+  const env = await page({
+    state: { ...STATE, can_clear: true },
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) { dry += 1; return [200, { count: 1, in_chat: 0, dry_run: true }]; }
+      return [409, { detail: msg, error: { code: 'imagestudio_generation_running_clear', message: msg } }];
+    },
+  });
+  const { doc } = env;
+  doc.querySelectorAll('.st-tile')[1].querySelector('.st-icon-danger').click();
+  await flush();
+  doc.querySelector('.st-dlg .st-danger').click();
+  await flush(30);
+  assert.equal(dry, 1, 'no second count');
+  assert.match(doc.querySelector('.st-status').textContent, /generation is running/);
+  assert.equal(doc.querySelector('.st-dlg .st-danger').disabled, false, 'the dialog stays, its button usable again');
+});
+
+test('a recount whose picture list fails says so instead of throwing', { skip: dom.skip }, async () => {
+  let imagesCalls = 0;
+  const env = await page({
+    state: { ...STATE, can_clear: true },
+    images: () => { imagesCalls += 1; return imagesCalls === 1 ? [200, { images: ROWS }] : [500, { detail: 'disk gone' }]; },
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) return [200, { count: 1, in_chat: 0, dry_run: true }];
+      return [409, { detail: 'changed', error: { code: 'imagestudio_pictures_changed', message: 'changed' } }];
+    },
+  });
+  const { doc } = env;
+  doc.querySelectorAll('.st-tile')[1].querySelector('.st-icon-danger').click();
+  await flush();
+  doc.querySelector('.st-dlg .st-danger').click();
+  await flush(30);
+  assert.match(doc.querySelector('.st-status').textContent, /disk gone/);
 });

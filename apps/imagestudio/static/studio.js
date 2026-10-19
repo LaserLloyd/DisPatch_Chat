@@ -399,12 +399,17 @@ async function openClear(r) {
       setStatus(t('clear.done', { n: res.deleted }));
       toast(t('clear.done', { n: res.deleted }));
     } catch (e) {
-      // 409: a picture came or went since the count (another tab) -- nothing was
+      // A picture came or went since the count (another tab): nothing was
       // deleted; count again and ask again rather than delete what was not seen.
-      if (e && e.status === 409) {
+      // The route's other 409 (a generation is running) is not a recount: it
+      // falls through to the server's own message below.
+      const code = e && e.body && e.body.error && e.body.error.code;
+      if (code === 'imagestudio_pictures_changed') {
         closeDialog();
         setStatus(t('clear.changed'));
-        S.images = (await api(`${API}/images`)).images;
+        try {
+          S.images = (await api(`${API}/images`)).images;
+        } catch (e2) { setStatus(t('clear.failed', { error: e2.message }), true); return; }
         renderGrid();
         openClear(r);
         return;
