@@ -526,6 +526,7 @@ def set_pin(new_pin: str) -> None:
         _bust_cache()
         _revoke_owner_sessions()
         _sync_owner_pin(cfg)
+        burn_setup_token()               # the install is claimed: a pending setup token is void
 
 
 def clear_pin() -> None:
@@ -937,11 +938,17 @@ def revoke_profile(profile_id: str) -> int:
     """Sign a profile out everywhere (live sessions and remembered devices)."""
     n = 0
     with _lock:
-        for t in [t for t, s in _sessions.items() if s.profile_id == profile_id]:
+        owner = accounts.get_owner()
+        # A session or remembered device minted before accounts existed (no profile id) is the
+        # Owner's (see _Session.profile_id), so signing the Owner out ends those too.
+        legacy = owner is not None and owner.id == profile_id
+        for t in [t for t, s in _sessions.items()
+                  if s.profile_id == profile_id or (legacy and s.profile_id is None)]:
             _sessions.pop(t, None)
             n += 1
         store = _trusted_store()
-        gone = [h for h, e in store.items() if e.get("profile_id") == profile_id]
+        gone = [h for h, e in store.items()
+                if e.get("profile_id") == profile_id or (legacy and not e.get("profile_id"))]
         for h in gone:
             store.pop(h, None)
         if gone:
@@ -1116,6 +1123,8 @@ def set_profile_password(profile_id: str, password: str) -> None:
                                     "Members and Restricted profiles use a PIN.", 409)
     accounts.update_profile(profile_id, password_hash=credentials.hash_secret(password))
     revoke_profile(profile_id)
+    if p.role == "owner":
+        burn_setup_token()               # the install is claimed: a pending setup token is void
 
 
 # --------------------------------------------------------------------------- #
@@ -1126,12 +1135,24 @@ _setup_token: str | None = None
 _SETUP_TOKEN_MIN = 16
 
 
+def _is_claimed() -> bool:
+    """policy.claimed() without importing policy (which imports this module): a PIN is set, or
+    the owner has a password."""
+    if load().pin_set:
+        return True
+    owner = accounts.get_owner()
+    return bool(owner is not None and owner.has_password)
+
+
 def _file_setup_token() -> str | None:
     """The token ``python -m app owner reset`` left in ``SETUP-TOKEN.txt``, or None.
 
     The file is the offline equivalent of the log line: whoever can write the data directory
     can already do anything, and nothing on the network can create it. A symlink or an odd
-    file is ignored, not followed."""
+    file is ignored, not followed. A CLAIMED install has no setup token at all: a leftover file
+    (the owner set a password by another route) is never honoured."""
+    if _is_claimed():
+        return None
     try:
         if SETUP_TOKEN_PATH.is_symlink() or not SETUP_TOKEN_PATH.is_file():
             return None
@@ -1182,7 +1203,9 @@ def verify_setup_token(candidate: str | None) -> bool:
     if not candidate:
         return False
     with _lock:
-        known = [t for t in (_setup_token, _file_setup_token()) if t]
+        from_file = _file_setup_token()
+        # When the file exists it IS the token; the in-memory one is the file-less default.
+        known = [from_file] if from_file else ([_setup_token] if _setup_token else [])
     cand = str(candidate)
     ok = False
     for tok in known:
@@ -1191,6 +1214,16 @@ def verify_setup_token(candidate: str | None) -> bool:
         except TypeError:
             continue
     return ok
+
+
+def discard_stale_setup_token() -> bool:
+    """Delete ``SETUP-TOKEN.txt`` when the install is claimed (called at start-up). True if removed."""
+    with _lock:
+        if _is_claimed() and (SETUP_TOKEN_PATH.is_symlink() or SETUP_TOKEN_PATH.exists()):
+            with contextlib.suppress(OSError):
+                SETUP_TOKEN_PATH.unlink()
+                return True
+    return False
 
 
 def burn_setup_token() -> None:

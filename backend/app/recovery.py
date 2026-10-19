@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import codecs
 import contextlib
+import hashlib
 import logging
 import os
 import stat
@@ -140,9 +141,18 @@ def set_owner_password(name: str, password: str, *, via: str) -> tuple[accounts.
 # --------------------------------------------------------------------------- #
 
 
+def _discard(path: Path, why: str) -> None:
+    log.warning("login recovery: %s %s; deleted without being used", path.name, why)
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
 def _read_sentinel(path: Path) -> str | None:
     """The sentinel's first line after the file has been shredded and removed, or None when
-    it must not be acted on (and has been dealt with)."""
+    it must not be acted on (and has been dealt with).
+
+    Everything is decided on ONE descriptor (opened without following a symlink) so the file
+    that was checked is the file that was read; the name is only used to delete it."""
     try:
         st = path.lstat()
     except OSError:
@@ -150,31 +160,47 @@ def _read_sentinel(path: Path) -> str | None:
     if not stat.S_ISREG(st.st_mode):
         log.warning("login recovery: %s is not a plain file; ignored (remove it)", path.name)
         return None
-    if sys.platform != "win32":
-        if st.st_mode & stat.S_IWOTH or st.st_uid not in (0, os.geteuid()):
-            log.warning("login recovery: %s is world-writable or owned by another user; "
-                        "deleted without being used", path.name)
-            with contextlib.suppress(OSError):
-                path.unlink()
+    flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    writable = True
+    try:
+        fd = os.open(path, os.O_RDWR | flags)
+    except OSError:
+        writable = False
+        try:
+            fd = os.open(path, os.O_RDONLY | flags)
+        except OSError as e:
+            log.warning("login recovery: cannot open %s (%s); left in place", path.name, e)
             return None
-    if st.st_size > SENTINEL_MAX_BYTES:
-        log.warning("login recovery: %s is larger than %d bytes; deleted without being used",
-                    path.name, SENTINEL_MAX_BYTES)
-        with contextlib.suppress(OSError):
-            path.unlink()
+    refuse: str | None = None
+    raw = b""
+    try:
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode):
+            log.warning("login recovery: %s is not a plain file; ignored (remove it)", path.name)
+            return None
+        if sys.platform != "win32" and (fst.st_mode & stat.S_IWOTH or fst.st_uid not in (0, os.geteuid())):
+            refuse = "is world-writable or owned by another user"
+        elif sys.platform != "win32" and fst.st_nlink != 1:
+            refuse = "has more than one hard link"
+        elif fst.st_size > SENTINEL_MAX_BYTES:
+            refuse = f"is larger than {SENTINEL_MAX_BYTES} bytes"
+        else:
+            raw = os.read(fd, SENTINEL_MAX_BYTES + 1)
+            if len(raw) > SENTINEL_MAX_BYTES:
+                refuse = f"is larger than {SENTINEL_MAX_BYTES} bytes"
+            elif writable:
+                # Consume FIRST. If the file cannot be removed (a read-only mount) it is not acted
+                # on: a sentinel that survives would replay on every start.
+                with contextlib.suppress(OSError):
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    os.write(fd, bytes(len(raw)))
+                    os.fsync(fd)
+    finally:
+        os.close(fd)                     # closed before any delete: Windows cannot unlink an open file
+    if refuse is not None:
+        _discard(path, refuse)
         return None
     try:
-        raw = path.read_bytes()
-    except OSError as e:
-        log.warning("login recovery: cannot read %s (%s); left in place", path.name, e)
-        return None
-    # Consume FIRST. If the file cannot be removed (a read-only mount) it is not acted on:
-    # a sentinel that survives would replay on every start.
-    try:
-        with contextlib.suppress(OSError), path.open("r+b") as f:
-            f.write(b"\0" * len(raw))
-            f.flush()
-            os.fsync(f.fileno())
         path.unlink()
     except OSError as e:
         log.warning("login recovery: cannot delete %s (%s); NOT acting on it", path.name, e)
@@ -193,8 +219,11 @@ def _read_sentinel(path: Path) -> str | None:
 def _apply_sentinel() -> bool:
     """Act on ``<data>/RESET_LOGIN`` if there is one. True when a sentinel was present."""
     found = [p for p in sentinel_paths() if p.exists() or p.is_symlink()]
-    for path in found:
-        _apply_one(path)
+    for path in found[1:]:
+        # Two files are two answers to "what should happen"; act on the first, delete the rest.
+        _discard(path, f"was found next to {found[0].name}")
+    if found:
+        _apply_one(found[0])
     return bool(found)
 
 
@@ -204,6 +233,7 @@ def _apply_one(path: Path) -> None:
         return
     name, colon, password = line.partition(":")
     name = name.strip()
+    password = password.rstrip()         # an editor's trailing space or tab is not part of it
     via = f"{SENTINEL_NAME} file"
     try:
         if colon and password:
@@ -227,20 +257,27 @@ def _apply_one(path: Path) -> None:
         log.exception("login recovery: %s consumed but failed", SENTINEL_NAME)
 
 
+def _env_fingerprint(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _apply_env() -> None:
     value = os.environ.get(ENV_NAME, "").strip()
     if value.lower() in _OFF:
         return
+    # The value is a "run it again" nonce, not a secret, but people do type odd things into
+    # environment files: it is never logged, and the marker keeps only its hash.
+    fingerprint = _env_fingerprint(value)
     marker = applied_path()
     with contextlib.suppress(OSError):
-        if marker.read_text(encoding="utf-8").strip() == value:
-            log.warning("login recovery: %s=%s was already applied on an earlier start and is "
+        if marker.read_text(encoding="utf-8").strip() == fingerprint:
+            log.warning("login recovery: %s was already applied on an earlier start and is "
                         "ignored; remove it from the environment (a different value runs it again)",
-                        ENV_NAME, value)
+                        ENV_NAME)
             return
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(value + "\n", encoding="utf-8")
+        marker.write_text(fingerprint + "\n", encoding="utf-8")
     except OSError as e:
         log.warning("login recovery: cannot record %s in %s (%s); NOT acting on it",
                     ENV_NAME, marker.name, e)
@@ -260,8 +297,10 @@ def apply_startup_reset() -> None:
     migrations and before the "no owner yet" banner. Never raises: a broken recovery file must
     not keep the chat down."""
     try:
-        if _apply_sentinel():
-            return                       # a sentinel wins; the variable waits for the next start
-        _apply_env()
+        if not _apply_sentinel():        # a sentinel wins; the variable waits for the next start
+            _apply_env()
     except Exception:
         log.exception("login recovery failed")
+    finally:
+        with contextlib.suppress(Exception):
+            auth.discard_stale_setup_token()

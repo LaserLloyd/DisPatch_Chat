@@ -115,7 +115,7 @@ DisPatch. While it starts, the server reads the file, **deletes it first**, and 
 | --- | --- |
 | *(empty file)* | the same as `owner reset`: owner credentials cleared, new setup token logged and written to `SETUP-TOKEN.txt` |
 | `Olive` | the same, but only if `Olive` is the owner's name (any case); otherwise nothing is reset |
-| `Olive:new-password` | `Olive`'s password is set to everything after the first colon (so it may contain colons and spaces). Creates the owner when there is none. The owner's sessions end. |
+| `Olive:new-password` | `Olive`'s password is set to everything after the first colon (so it may contain colons and spaces; trailing whitespace from an editor is dropped). Creates the owner when there is none. The owner's sessions end. |
 
 The server logs exactly one line, `login recovery: RESET_LOGIN consumed; ...`, and never the password.
 
@@ -123,7 +123,7 @@ Rules, so it cannot be abused or replayed:
 
 - The file is deleted **before** it is acted on. If it cannot be deleted (a read-only mount), it is **not** acted on and
   the log says so: a file that stayed would repeat on every start.
-- It must be a plain file under 1 KB. A directory, a symlink (never followed), a larger file or text that is not UTF-8/UTF-16 is
+- It must be a plain file under 1 KB. Everything is decided on one open file descriptor. A directory, a symlink (never followed), a hard-linked file, a larger file or text that is not UTF-8/UTF-16 is
   ignored, and on Linux and macOS a file that is world-writable or owned by another user (not root, not the user DisPatch
   runs as) is deleted unused. Windows PowerShell 5's UTF-16 and Notepad's UTF-8 BOM are understood.
 - A refusal (wrong owner name, too-short password) still consumes the file and logs `NOT applied` with the reason.
@@ -171,12 +171,12 @@ docker compose logs app | grep -E "login recovery|SETUP TOKEN"
 ```
 
 Any value except empty, `0`, `false`, `no` and `off` triggers the same as an empty `RESET_LOGIN`: it opens setup, it never sets
-a password (an environment variable is visible to `docker inspect` and the process list). The value is recorded in
+a password (an environment variable is visible to `docker inspect` and the process list). The value is never logged; a hash of it is recorded in
 `<data>/.reset-owner-applied` when it is used, and **the same value is ignored on later starts** (the log says `already
 applied`), so leaving it in a `.env` file does not wipe the owner on every restart. A different value (`2`, a date) runs it
 again. Only the real process environment counts: the legacy `LOCAL_CHAT_` spelling and the settings store, which an Admin can
 write over the network, are not consulted. If a `RESET_LOGIN` file is also present, the file is handled and the variable waits
-for the next start.
+for the next start. If both `RESET_LOGIN` and `RESET_LOGIN.txt` exist, the first is used and the other is deleted unused.
 
 ## What is reset, what is kept
 

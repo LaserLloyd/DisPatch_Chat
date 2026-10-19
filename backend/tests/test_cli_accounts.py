@@ -171,7 +171,7 @@ def test_a_secret_can_never_be_an_argument(data, run, capsys):
     for flag in ("--password", "--pin"):
         code, out, err = run("users", "add", "Noor", "--profile", "member", flag, "4321")
         assert code == 2
-        assert "unrecognized arguments" in err
+        assert "unrecognized argument" in err and "4321" not in err      # the stray word is not echoed
     assert accounts.get_by_name("Noor") is None
 
 
@@ -438,3 +438,14 @@ def test_python_dash_m_app_runs_as_a_process(tmp_path):
     cp = subprocess.run([sys.executable, "-m", "app", "users", "list"], cwd=BACKEND, env=env,
                         capture_output=True, text=True, timeout=120)
     assert cp.returncode == 0 and "Olive" in cp.stdout and "owner-pass1" not in cp.stdout + cp.stderr
+
+
+def test_a_locked_or_unusable_database_is_a_message_not_a_traceback(data, run, monkeypatch):
+    import sqlite3
+    make_owner()
+
+    def boom(*a, **kw):
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+    monkeypatch.setattr(accounts, "create_profile", boom)
+    code, _, err = run("users", "add", "Kit")
+    assert code == 1 and "database could not be used" in err and "readonly" in err

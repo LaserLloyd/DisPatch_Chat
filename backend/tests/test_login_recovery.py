@@ -230,7 +230,9 @@ def test_the_variable_resets_once_per_value(world, monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         lan = world.client(LAN)
     assert status(lan)["claimed"] is False and auth.SETUP_TOKEN_PATH.exists()
-    assert (world.tmp / recovery.APPLIED_NAME).read_text().strip() == "1"
+    marker = (world.tmp / recovery.APPLIED_NAME).read_text().strip()
+    assert marker == recovery._env_fingerprint("1") and marker != "1"        # a hash, never the value
+    assert not any(" 1 " in ln or "=1 " in ln for ln in recovery_lines(caplog))
     assert len(recovery_lines(caplog)) == 1
 
     # The owner sets a new password in the wizard; the variable is still in the .env file...
@@ -409,3 +411,97 @@ def test_owner_reset_is_also_available_to_code(world):
     res = recovery.reset_owner(via="test")
     assert res.had_password and res.had_pin and res.owner_name == "Olive"
     assert not policy.claimed() and auth.verify_setup_token(res.setup_token)
+
+
+# --------------------------------------------------------------------------- #
+# Review hardening (2026-10-19)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_setup_token_file_is_void_once_the_install_is_claimed(world):
+    """A leftover SETUP-TOKEN.txt must not let a network caller set up a claimed install."""
+    world.create_owner()
+    recovery.reset_owner(via="test")
+    token = auth.SETUP_TOKEN_PATH.read_text().strip()
+    assert auth.verify_setup_token(token)
+    auth.set_profile_password(accounts.get_owner().id, "claimed-again-1")      # claimed another way
+    assert not auth.SETUP_TOKEN_PATH.exists()                                 # burned with the claim
+    auth.SETUP_TOKEN_PATH.write_text(token + "\n")                            # a stale copy comes back
+    assert not auth.verify_setup_token(token) and auth._file_setup_token() is None
+    assert auth.discard_stale_setup_token() and not auth.SETUP_TOKEN_PATH.exists()
+
+
+def test_a_stale_token_file_is_removed_at_start(world):
+    world.create_owner()
+    auth.SETUP_TOKEN_PATH.write_text("stale-token-stale-token\n")
+    world.client(LAN)
+    assert not auth.SETUP_TOKEN_PATH.exists()
+
+
+def test_the_token_file_replaces_the_in_memory_token(world):
+    world.create_owner()
+    memory = auth.setup_token()
+    res = recovery.reset_owner(via="test")
+    assert auth.verify_setup_token(res.setup_token)
+    assert not auth.verify_setup_token(memory)
+
+
+def test_setting_the_owner_pin_also_spends_the_token(world):
+    world.create_owner()
+    recovery.reset_owner(via="test")
+    auth.set_pin("1357")
+    assert not auth.SETUP_TOKEN_PATH.exists()
+
+
+def test_signing_the_owner_out_ends_pre_accounts_devices(world):
+    """A remembered device or session from before profiles existed has no profile id; it is the Owner's."""
+    world.create_owner()
+    auth.set_remember_days(30)
+    legacy = auth.issue_session(persistent=True, profile_id=None)
+    store = auth._trusted_store()
+    for entry in store.values():
+        entry["profile_id"] = ""                              # as written by a 2.x install
+    auth._save_trusted()
+    owner = accounts.get_owner()
+    legacy_plain = auth.issue_session(profile_id=None)
+    auth._sessions[legacy_plain].profile_id = None
+    auth.set_profile_password(owner.id, "a-brand-new-pass1")
+    assert auth.get_session(legacy_plain) is None
+    assert auth.trusted_count() == 0 and auth.get_session(legacy) is None
+
+
+def test_two_sentinel_files_act_on_one_and_delete_the_other(world):
+    world.create_owner()
+    a = sentinel(world, "Olive:first-choice-pass1")
+    b = sentinel(world, "Olive:second-choice-pass2", name="RESET_LOGIN.txt")
+    world.client(LAN)
+    assert not a.exists() and not b.exists()
+    assert login(world, world.client(LAN), "first-choice-pass1").status_code == 200
+    assert login(world, world.client(LAN), "second-choice-pass2").status_code == 401
+
+
+def test_trailing_whitespace_after_the_password_is_ignored(world):
+    world.create_owner()
+    sentinel(world, "Olive:brand-new-pass1 \t \r\n")
+    world.client(LAN)
+    assert login(world, world.client(LAN), "brand-new-pass1").status_code == 200
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="hard links to a planted file are a POSIX concern here")
+def test_a_hard_linked_sentinel_is_not_acted_on(world, tmp_path_factory):
+    world.create_owner()
+    other = tmp_path_factory.mktemp("elsewhere") / "twin"
+    other.write_text("Olive:brand-new-pass1")
+    os.link(other, world.tmp / recovery.SENTINEL_NAME)
+    world.client(LAN)
+    assert login(world, world.client(LAN), OLD).status_code == 200
+
+
+def test_the_variable_value_is_never_logged(world, monkeypatch, caplog):
+    world.create_owner()
+    monkeypatch.setenv(recovery.ENV_NAME, "nonce-ABC-123")
+    with caplog.at_level(logging.DEBUG):
+        world.client(LAN)
+        world.client(LAN)                                   # the "already applied" line too
+    assert "nonce-ABC-123" not in caplog.text
+    assert "nonce-ABC-123" not in (world.tmp / recovery.APPLIED_NAME).read_text()

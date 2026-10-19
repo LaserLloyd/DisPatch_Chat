@@ -27,7 +27,7 @@ machine. Reference and copy-paste commands for every install: [docs/accounts.md]
   `name` = `owner reset`; `name:new-password` = set the owner's password (creating the owner when there is none). It is read
   once, while the server starts, **deleted before it is acted on** (a file that cannot be deleted is not acted on), refuses
   symlinks, directories, files over 1 KB and (POSIX) world-writable or foreign-owned files, understands UTF-8 BOMs and
-  PowerShell's UTF-16, and logs one line without the password. **`DISPATCH_RESET_OWNER=<value>`** does the empty-file reset
+  PowerShell's UTF-16, decides everything on one open descriptor, and logs one line without the password. **`DISPATCH_RESET_OWNER=<value>`** does the empty-file reset
   once per value (remembered in `.reset-owner-applied`, so leaving it in `.env` does not wipe the owner on every restart). Neither is
   reachable over the network: only the lifespan start-up calls the hook, the variable is read from the process environment
   and not from the settings store.

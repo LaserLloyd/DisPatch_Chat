@@ -761,6 +761,7 @@ def test_lease_read_sends_the_rig_connection_key(monkeypatch):
     connection to the same server."""
     import io
     import json as _json
+
     from app import connections, pool_guard
 
     seen = {}
@@ -785,6 +786,7 @@ def test_lease_read_sends_the_rig_connection_key(monkeypatch):
 
 def test_lease_read_without_a_key_sends_no_header(monkeypatch):
     import io
+
     from app import connections, pool_guard
 
     seen = {}

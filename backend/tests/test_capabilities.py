@@ -1,8 +1,8 @@
 """Gate G6 - parity: every surface a capability declares exists, and its permission is
 the one the route table enforces.
 
-``cli`` and ``mcp`` are ``None`` on every capability today (DisPatch has no CLI or MCP
-server yet - audit P11); this test pins that so the day one appears the registry has to
+``cli`` and ``mcp`` are ``None`` on every capability today (DisPatch has no capability CLI or MCP
+server yet - audit P11; `python -m app` is the host-access accounts tool, not a capability surface); this test pins that so the day one appears the registry has to
 say so.
 """
 from __future__ import annotations
@@ -88,4 +88,8 @@ def test_permissions_named_by_capabilities_are_real():
 
 def test_no_cli_or_mcp_surface_exists_yet():
     assert all(c.cli is None and c.mcp is None for c in capabilities.CAPABILITIES)
-    assert not (ROOT / "backend" / "app" / "cli.py").exists()
+    assert not (ROOT / "backend" / "app" / "mcp.py").exists()
+    # app/cli.py (3.1) is the host-access accounts / lock-out recovery tool, not a capability surface:
+    # it is not an API client and no capability maps to it.
+    cli_src = (ROOT / "backend" / "app" / "cli.py").read_text(encoding="utf-8")
+    assert "capabilities" not in cli_src and "python -m app users" in cli_src

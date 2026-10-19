@@ -31,6 +31,7 @@ import getpass
 import json
 import os
 import secrets
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -60,7 +61,7 @@ def _data_dir_source(explicit: str | None) -> str:
 
 
 def _repoint(data_dir: Path) -> None:
-    from . import migrate               # the same repointing the other command-line tools use
+    from . import migrate  # the same repointing the other command-line tools use
     migrate._repoint(data_dir)
 
 
@@ -359,12 +360,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args, extras = parser.parse_known_args(argv)
+    if extras:
+        # argparse would echo the stray words back, and a stray word may be somebody's PIN
+        # (`--password 1234`). Say how many, not what.
+        parser.error(f"{len(extras)} unrecognized argument(s) (not echoed). A PIN or password is never "
+                     "an argument: use --password-stdin, --password-env VAR, or the prompt.")
     try:
         open_data_dir(args.verb_data_dir or args.data_dir)
         return args.fn(args)
     except CliError as e:
         print(f"error: {e}", file=sys.stderr)
+        return 1
+    except accounts.AccountError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as e:
+        print(f"error: the database could not be used ({e}). Is the folder read-only, on a network share, "
+              "or owned by another user? Run this as the user DisPatch runs as.", file=sys.stderr)
         return 1
 
 
