@@ -855,7 +855,7 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v171'/);
+  assert.match(SW, /const CACHE = 'local-chat-v172'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {
