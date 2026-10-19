@@ -1687,7 +1687,7 @@
     "lock": "[es] Lock"
   },
   "restricted": {
-    "banner": "[es] The owner can see a summary of this profile's activity (how many chats and uploads, not what was said).",
+    "banner": "El owner ve un resumen de la actividad de este perfil. Los chats se guardan en el ordenador anfitrión, y los adultos que usan DisPatch aquí pueden abrirlos.",
     "region": "[es] Restricted profile",
     "more": "[es] What can the owner see?",
     "panel_title": "[es] Your activity summary",
@@ -2100,5 +2100,17 @@
     "erase": "[es] Erase",
     "erase_confirm": "[es] Erase {name} and everything attached to the profile? This cannot be undone.",
     "erased": "[es] Profile erased."
+  },
+  "host_notice": {
+    "upload_title": "Los archivos se guardan en el ordenador anfitrión",
+    "upload_body": "Los archivos que envías se guardan en el ordenador donde funciona DisPatch, no en este dispositivo. Otras personas que usan DisPatch aquí, y cualquiera con acceso a ese ordenador, podrían abrirlos.",
+    "fileserver_title": "Archivos guardados en el ordenador anfitrión",
+    "fileserver_body": "Los archivos de aquí están en el ordenador donde funciona DisPatch. Todas las personas que pueden abrir el File Server los ven, igual que cualquiera con acceso a ese ordenador.",
+    "images_title": "Imágenes guardadas en el ordenador anfitrión",
+    "images_body": "Las imágenes que añades aquí se guardan en el ordenador donde funciona DisPatch, no en este dispositivo. Cualquiera con acceso a ese ordenador puede abrirlas, y todas las personas que ven este personaje ven sus imágenes.",
+    "chats_title": "Los chats se guardan en el ordenador anfitrión",
+    "chats_body": "Cada chat se guarda en el ordenador donde funciona DisPatch, no en este dispositivo. Los chats no son privados ni tienen cifrado de extremo a extremo. Un chat pertenece a su personaje, no a una persona: todas las personas que pueden usar un personaje pueden abrir sus chats, y el Owner y los Admins pueden usar todos los personajes, así que pueden leer todos los chats, también los de los perfiles restringidos. Cualquiera con acceso a ese ordenador, a sus archivos o a sus copias de seguridad también puede leerlos.",
+    "chats_restricted_title": "Tus chats se guardan en el ordenador anfitrión",
+    "chats_restricted_body": "Tus chats se guardan en el ordenador donde funciona DisPatch. No son secretos: los adultos que usan DisPatch aquí pueden leerlos."
   }
 }

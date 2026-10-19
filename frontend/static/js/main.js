@@ -21,14 +21,14 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=27';
+} from './reactions.js?v=28';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=10';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=12';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=11';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=12';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed,
 } from './quick-actions.js?v=2';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=15';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=16';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -46,6 +46,7 @@ import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
 } from './ext-sdk.js?v=18';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
+import { hostNotice } from './host-notice.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
 import { mountPluginsSettings } from './plugins.js?v=16';
 import { rowControls, addBotRow } from './bots-edit.js?v=4';
@@ -56,7 +57,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?
 import { mountConnections } from './connections.js?v=1';
 import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=2';
 import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
-import { maybeStartWizard } from './wizard.js?v=1';
+import { maybeStartWizard } from './wizard.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -87,8 +88,8 @@ import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, au
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
   paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
-} from './signin.js?v=2';
-import { mountPeopleSettings } from './people.js?v=2';
+} from './signin.js?v=3';
+import { mountPeopleSettings } from './people.js?v=3';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=1';
@@ -3203,6 +3204,8 @@ function renderAttachments() {
     const chip = el('div', { class: 'chip' + (asFile ? ' doc-chip' : '') }, children);
     p.append(chip);
   });
+  // Only while something is queued: the composer stays clean otherwise.
+  if (state.attachments.length) p.append(hostNotice('upload', { compact: true }));
 }
 function clearAttachments() {
   state.attachments.forEach((a) => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });

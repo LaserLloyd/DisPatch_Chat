@@ -24,6 +24,7 @@ import { api } from './api.js?v=35';
 import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { nimEnabled } from './nim.js?v=5';
+import { hostNotice } from './host-notice.js?v=1';
 
 // ===================== State =====================
 
@@ -446,6 +447,7 @@ function renderManager() {
   // ---- Add: upload + generate ----
   const add = el('section', { class: 'rx-section' });
   add.append(el('h3', { class: 'rx-h3', text: t('reactions.add_heading') }));
+  add.append(hostNotice('images'));
 
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   const uploadBtn = el('button', { class: 'btn-secondary', text: t('reactions.upload') });

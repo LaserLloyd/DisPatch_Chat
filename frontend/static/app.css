@@ -4903,3 +4903,22 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 }
 .bm-audience { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; }
 .bm-row--hidden .bm-audience { opacity: .45; }
+
+/* ---------------------------------------------------------------------------
+   Host-storage notices (js/host-notice.js; static ones in index.html). The
+   LaserLloyd footer disclaimer's shape -- a red outlined bubble, a bold title,
+   a plain sentence -- in the ACTIVE theme's danger tokens, so it follows the
+   palette (and its contrast checks) instead of a fixed red.
+   --------------------------------------------------------------------------- */
+.host-notice {
+  display: block; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+  font-size: 12.5px; line-height: 1.5; text-align: start;
+  color: var(--danger-text, var(--error-text)); border: 1px solid var(--danger-border, var(--danger));
+  background: var(--danger-subtle, transparent); overflow-wrap: anywhere;
+}
+.host-notice-title { display: block; font-weight: 700; }
+.host-notice-body { display: block; margin-top: 2px; }
+.host-notice-compact { flex: 1 0 100%; margin: 2px 0 0; padding: 6px 10px; font-size: 12px; }
+.host-notice-compact .host-notice-title, .host-notice-compact .host-notice-body { display: inline; margin: 0; }
+.modal .host-notice { margin: 10px 18px 6px; }
+.settings-pane > .host-notice:first-child { margin-top: 4px; }

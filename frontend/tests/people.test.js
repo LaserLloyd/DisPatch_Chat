@@ -591,7 +591,7 @@ test('restricted banner: slim, non-dismissible, with the disclosure and a link t
   paintRestrictedBanner(host, { show: true, onMore: () => { opened++; } });
   assert.equal(host.hidden, false);
   assert.equal(host.querySelector('.restricted-text').textContent,
-    'The owner can see a summary of this profile\'s activity (how many chats and uploads, not what was said).');
+    'The owner sees a summary of this profile\'s activity. Chats are kept on the host computer, and the grown-ups who use DisPatch here can open them.');
   assert.equal(host.querySelectorAll('button').length, 1, 'only the link; there is no close button');
   host.querySelector('.restricted-more').click();
   assert.equal(opened, 1);
@@ -866,5 +866,5 @@ test('the retired terms are gone from the strings a user reads', () => {
   assert.equal(EN.role.restricted, 'Restricted');
   assert.equal(EN.reactions.safe_label, 'Restricted');
   assert.equal(EN.restricted.banner,
-    'The owner can see a summary of this profile\'s activity (how many chats and uploads, not what was said).');
+    'The owner sees a summary of this profile\'s activity. Chats are kept on the host computer, and the grown-ups who use DisPatch here can open them.');
 });

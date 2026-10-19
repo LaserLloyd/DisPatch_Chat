@@ -65,6 +65,14 @@ const sources = () => {
   for (const f of readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))) {
     out.push([`js/${f}`, readFileSync(join(JS_DIR, f), 'utf8')]);
   }
+  // Repo apps (apps/<id>/static/*.js) run on the shell's origin, so their keys
+  // share its localStorage and a privacy wipe must cover them too.
+  const APPS = join(STATIC, '..', '..', 'apps');
+  for (const id of readdirSync(APPS, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
+    let files = [];
+    try { files = readdirSync(join(APPS, id, 'static')).filter((f) => f.endsWith('.js')); } catch { continue; }
+    for (const f of files) out.push([`apps/${id}/static/${f}`, readFileSync(join(APPS, id, 'static', f), 'utf8')]);
+  }
   return out;
 };
 

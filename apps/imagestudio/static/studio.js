@@ -16,7 +16,7 @@ import {
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
-  SORTS, SORT_KEY, normalizeSort, sortRows,
+  SORTS, normalizeSort, sortRows,
 } from './studio-logic.js?v=2';
 
 export const API = '/api/apps/imagestudio';
@@ -33,6 +33,8 @@ const S = {
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
+// The grid's order on this device (privacy.js APP_KEYS wipes it in privacy mode).
+const SORT_KEY = 'dispatch-imagestudio-sort';
 
 function nimOn() {
   try { return localStorage.getItem('dispatch-nim') === '1'; } catch { return false; }

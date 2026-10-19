@@ -22,10 +22,19 @@ backends. Transport is protected by TLS. Storage is protected by your
 filesystem. Anyone marketing an app like this one as "E2E encrypted" is
 misleading you about one of those three.
 
-**Multi-user is isolation, not adversarial separation.** One member must not be
-able to read another's conversations; if they can, it is a bug and we want the
-report. But DisPatch is built for a household or small team, and it is not
-designed to resist a determined insider who also controls the host.
+**Multi-user is isolation, not adversarial separation.** Conversations belong to
+a *character*, not to a person: everyone who can use a character opens the same
+chats with it, and the Owner and Admins can use every character, so they can read
+every chat, a Restricted profile's included. To keep one person's chats away from
+the others, give them a character limited to their profile (the character's
+`profiles` list); a profile left off that list must not be able to read those
+chats, and if they can, it is a bug and we want the report. DisPatch is built for
+a household or small team, and it is not designed to resist a determined insider
+who also controls the host. The app says this where people will read it: a
+host-storage notice in Settings -> Security, People & Profiles and the first-run
+wizard's last step, and beside every upload or picture you create (Image Studio,
+the File Server, the send-a-file sheet, composer attachments, avatars, reaction
+images).
 
 **Agent backends run as your user.** A bot is a local process with your
 permissions. Who you let talk to a bot is a real privilege decision, not a
@@ -146,8 +155,11 @@ or other profiles. A running server follows within a second. Commands for every 
   the output filter hook stay in place.
 - **Activity summary.** The Owner (and Admins with `view_activity`) can see counts
   per day — logins, messages, new conversations, uploads, limits hit — never the
-  content. The Restricted UI shows a banner saying so, and a "my activity" panel
-  with the same numbers.
+  content. The summary is not the only view, though: the chats themselves belong
+  to the characters, so the Owner, Admins and any Member who can use the same
+  character can open them. The Restricted UI shows a banner saying both, and a
+  "my activity" panel with the same numbers and a plain "your chats are not
+  secret" notice.
 
 ### Sign-in protection
 

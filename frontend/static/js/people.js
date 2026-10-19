@@ -24,6 +24,7 @@
 import { api as realApi } from './api.js?v=35';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
+import { hostNotice } from './host-notice.js?v=1';
 import {
   ACTIVITY_COLUMNS, activityRows, activityTotals, bindableProfiles, budgetsToForm, canManage,
   createPayload, patchPayload, roleOptions, avatarSpec, isAdminRole,
@@ -585,7 +586,10 @@ function showKey(host, key, ctx) {
 export async function mountPeopleSettings(pane, deps) {
   const a = deps.api || realApi;
   const mine = ++seq;
-  const intro = el('p', { class: 'muted modal-hint', text: t('people.hint') });
+  // The chats notice leads the pane: whoever sets up profiles should know what
+  // each of them can read (host-notice.js; the same wording as Security).
+  const intro = el('div', { class: 'people-intro' }, [
+    hostNotice('chats'), el('p', { class: 'muted modal-hint', text: t('people.hint') })]);
   pane.replaceChildren(intro, el('p', { class: 'muted modal-hint', text: t('common.loading') }));
   let data;
   let devices = null;

@@ -1637,7 +1637,7 @@
     "lock": "[zh] Lock"
   },
   "restricted": {
-    "banner": "[zh] The owner can see a summary of this profile's activity (how many chats and uploads, not what was said).",
+    "banner": "管理者能看到这个资料的活动摘要。聊天保存在主机电脑上，在这里使用 DisPatch 的大人可以打开它们。",
     "region": "[zh] Restricted profile",
     "more": "[zh] What can the owner see?",
     "panel_title": "[zh] Your activity summary",
@@ -2050,5 +2050,17 @@
     "erase": "[zh] Erase",
     "erase_confirm": "[zh] Erase {name} and everything attached to the profile? This cannot be undone.",
     "erased": "[zh] Profile erased."
+  },
+  "host_notice": {
+    "upload_title": "文件保存在主机电脑上",
+    "upload_body": "你发送的文件保存在运行 DisPatch 的电脑上，而不是这台设备上。在这里使用 DisPatch 的其他人，以及能访问那台电脑的人，可能都能打开它们。",
+    "fileserver_title": "文件保存在主机电脑上",
+    "fileserver_body": "这里的文件保存在运行 DisPatch 的电脑上。所有能打开 File Server 的人都能看到它们，能访问那台电脑的人也可以。",
+    "images_title": "图片保存在主机电脑上",
+    "images_body": "你在这里添加的图片保存在运行 DisPatch 的电脑上，而不是这台设备上。能访问那台电脑的人可以打开它们，看到这个角色的人都能看到它的图片。",
+    "chats_title": "聊天保存在主机电脑上",
+    "chats_body": "每段聊天都保存在运行 DisPatch 的电脑上，而不是这台设备上。聊天不是私密的，也没有端到端加密。聊天属于角色，而不属于某一个人：能使用某个角色的人都能打开它的聊天；Owner 和 Admin 能使用所有角色，所以能读到所有聊天，包括受限资料的聊天。能访问那台电脑、它的文件或备份的人也能读到。",
+    "chats_restricted_title": "你的聊天保存在主机电脑上",
+    "chats_restricted_body": "你的聊天保存在运行 DisPatch 的电脑上。它们不是秘密：在这里使用 DisPatch 的大人可以读到。"
   }
 }

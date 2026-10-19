@@ -97,7 +97,6 @@ export function isMetered(provider) {
 /** The two orders the results grid offers. Oldest first (newest at the bottom,
  *  like a chat) is the default and what the grid always did. */
 export const SORTS = ['oldest', 'newest'];
-export const SORT_KEY = 'dispatch-imagestudio-sort';
 
 /** A stored or picked sort value -> one of SORTS. */
 export function normalizeSort(value) {
