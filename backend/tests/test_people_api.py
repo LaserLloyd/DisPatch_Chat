@@ -625,3 +625,36 @@ def test_a_members_status_does_not_advertise_host_control_features(world, owner)
     owner.post("/api/auth/setup", json={"new_pin": "", "current_pin": "2468"})
     stranger = world.client(("203.0.113.9", 1))
     assert set(stranger.get("/api/auth/status").json()["features"]) == {"extensions"}
+
+
+def test_the_restricted_disclosure_matches_who_can_read_a_childs_chats(world, owner):
+    """The banner a Restricted profile reads (people_api.DISCLOSURE, and the UI's
+    restricted.banner) must say what characters.may_use actually allows: a chat
+    belongs to its character, so other profiles that can use that character -- a
+    second Restricted one, a Member -- and, while anonymous_access is "restricted",
+    a device nobody signed in on can all read it. A character limited to one
+    profile keeps its chats from the other profiles."""
+    from app import people_api
+    mia = world.person(owner, "Mia", "restricted")
+    leo = world.person(owner, "Leo", "restricted")
+    world.person(owner, "Max", "member", pin="5555")
+    owner.post("/api/characters", json={"name": "Kids", "audience": "restricted"})
+    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
+    c_mia = world.client(("203.0.113.70", 42000))
+    assert world.login(c_mia, profile_id=mia["id"]).status_code == 200
+    shared = c_mia.post("/api/threads", json={"bot_id": "kids"}).json()["id"]
+    own = c_mia.post("/api/threads", json={"bot_id": "mias"}).json()["id"]
+    c_leo = world.client(("203.0.113.71", 42001))
+    assert world.login(c_leo, profile_id=leo["id"]).status_code == 200
+    c_max = world.client(("203.0.113.72", 42002))
+    assert world.login(c_max, name="Max", pin="5555").status_code == 200
+    stranger = world.client(("203.0.113.73", 42003))          # nobody signed in on it
+    for who, c in (("another Restricted profile", c_leo), ("a Member", c_max),
+                   ("a device that is not signed in", stranger), ("the Owner", owner)):
+        assert c.get(f"/api/threads/{shared}/messages").status_code == 200, who
+    assert c_leo.get(f"/api/threads/{own}/messages").status_code == 403
+    assert stranger.get(f"/api/threads/{own}/messages").status_code == 403
+    text = people_api.DISCLOSURE.lower()
+    assert "owner can see" in text
+    assert "same character" in text and "other profiles" in text
+    assert "haven't signed in" in text

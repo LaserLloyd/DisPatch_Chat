@@ -1667,7 +1667,7 @@
     "lock": "[de] Lock"
   },
   "restricted": {
-    "banner": "Der Owner sieht eine Zusammenfassung der Aktivität dieses Profils. Chats liegen auf dem Host-Computer, und die Erwachsenen, die DisPatch hier nutzen, können sie öffnen.",
+    "banner": "Der Owner sieht eine Zusammenfassung der Aktivität dieses Profils. Chats liegen auf dem Host-Computer und sind geteilt: Alle, die dieselbe Figur nutzen können, können sie lesen, auch andere Profile und Geräte ohne Anmeldung, wenn diese Installation das erlaubt.",
     "region": "[de] Restricted profile",
     "more": "[de] What can the owner see?",
     "panel_title": "[de] Your activity summary",
@@ -2084,10 +2084,10 @@
   "host_notice": {
     "title": "Auf dem Host-Computer gespeichert",
     "files_body": "Dateien, Bilder und Avatare, die du hier hochlädst oder erstellst (in Chats, im File Server, im Image Studio und in den Einstellungen), werden auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf deinem Gerät. Andere Personen, die DisPatch hier nutzen, und jeder mit Zugriff auf diesen Computer können sie unter Umständen öffnen.",
-    "chats_body": "Jeder Chat wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Chats sind nicht privat und nicht Ende-zu-Ende-verschlüsselt. Ein Chat gehört zu seiner Figur, nicht zu einer Person: Alle, die eine Figur nutzen können, können ihre Chats öffnen, und Owner und Admins können jede Figur nutzen, also jeden Chat lesen, auch die Chats eingeschränkter Profile. Jeder mit Zugriff auf diesen Computer, seine Dateien oder seine Backups kann sie ebenfalls lesen.",
+    "chats_body": "Jeder Chat wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Chats sind nicht privat und nicht Ende-zu-Ende-verschlüsselt. Ein Chat gehört zu seiner Figur, nicht zu einer Person: Alle, die diese Figur nutzen können, können ihre Chats öffnen, auch andere Profile (eingeschränkte eingeschlossen) und Geräte ohne Anmeldung, wenn diese Installation das erlaubt. Mitglieder können jede Figur nutzen, die nicht auf bestimmte Profile beschränkt ist; Owner und Admins können jede Figur nutzen und daher jeden Chat lesen. Um die Chats einer Person getrennt zu halten, beschränke eine Figur auf ihr Profil. Jeder mit Zugriff auf diesen Computer, seine Dateien oder seine Backups kann sie ebenfalls lesen.",
     "card_title": "Bevor du anfängst",
     "card_files": "Was du hier hochlädst oder erstellst, wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät.",
-    "card_chats": "Auch die Chats liegen dort. Sie sind nicht privat: Die Personen, die DisPatch betreiben, und jeder mit Zugriff auf diesen Computer können sie lesen.",
+    "card_chats": "Auch die Chats liegen dort, und sie sind nicht privat: Alle, die dieselbe Figur nutzen können, können sie lesen, auch andere Profile und Geräte ohne Anmeldung (wenn diese Installation das erlaubt), ebenso jeder mit Zugriff auf diesen Computer.",
     "card_more": "Details stehen unter Einstellungen → Sicherheit.",
     "card_ok": "Verstanden"
   },

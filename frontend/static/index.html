@@ -252,7 +252,7 @@
       <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme" aria-label="Choose a theme" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">🎨</button>
       <!-- 3.0: who is using this device. Visible for a signed-in or bound profile;
            opens the Switch profile / Lock menu. main.js paints it. -->
-      <button class="gear-btn profile-chip hidden" id="profile-chip" type="button" title="Profile" aria-label="Profile" data-i18n-attr="title=chip.title;aria-label=chip.title"></button>
+      <button class="gear-btn profile-chip hidden" id="profile-chip" type="button" aria-controls="profile-menu" title="Profile" aria-label="Profile" data-i18n-attr="title=chip.title;aria-label=chip.title"></button>
       <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
       <button class="gear-btn unlock-btn hidden" id="unlock-btn" title="Enter PIN for admin mode" aria-label="Unlock — enter PIN" data-i18n-attr="title=nav.unlock_title;aria-label=nav.unlock_aria">🔓</button>
       <!-- Locked-side upload. Safe Mode only: unlocked sessions have the full
@@ -940,7 +940,7 @@
         <aside class="host-notice" role="note" id="sec-host-notice">
           <strong class="host-notice-title" data-i18n="host_notice.title">Stored on the host computer</strong>
           <p class="host-notice-body" data-i18n="host_notice.files_body">Files, pictures and avatars you upload or create here are saved on the computer that runs DisPatch, not on your device.</p>
-          <p class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch. Chats are not private and not end-to-end encrypted.</p>
+          <p class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: anyone who can use that character can open its chats, other profiles (Restricted ones included) and devices that haven&#39;t signed in if this install lets them. Members can use every character that isn&#39;t limited to certain profiles; the Owner and Admins can use every character, so they can read every chat. To keep someone&#39;s chats apart, limit a character to their profile. Anyone with access to that computer, its files or its backups can read them too.</p>
         </aside>
         <p class="muted modal-hint" id="sec-status-line"></p>
         <!-- 3.0: filled by main.js (js/signin.js builds the forms). The first holds

@@ -591,7 +591,7 @@ test('restricted banner: slim, non-dismissible, with the disclosure and a link t
   paintRestrictedBanner(host, { show: true, onMore: () => { opened++; } });
   assert.equal(host.hidden, false);
   assert.equal(host.querySelector('.restricted-text').textContent,
-    'The owner sees a summary of this profile\'s activity. Chats are kept on the host computer, and the grown-ups who use DisPatch here can open them.');
+    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
   assert.equal(host.querySelectorAll('button').length, 1, 'only the link; there is no close button');
   host.querySelector('.restricted-more').click();
   assert.equal(opened, 1);
@@ -856,7 +856,7 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v175'/);
+  assert.match(SW, /const CACHE = 'local-chat-v176'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {
@@ -866,5 +866,5 @@ test('the retired terms are gone from the strings a user reads', () => {
   assert.equal(EN.role.restricted, 'Restricted');
   assert.equal(EN.reactions.safe_label, 'Restricted');
   assert.equal(EN.restricted.banner,
-    'The owner sees a summary of this profile\'s activity. Chats are kept on the host computer, and the grown-ups who use DisPatch here can open them.');
+    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
 });

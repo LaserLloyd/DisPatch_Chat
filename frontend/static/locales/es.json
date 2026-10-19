@@ -1692,7 +1692,7 @@
     "lock": "[es] Lock"
   },
   "restricted": {
-    "banner": "El owner ve un resumen de la actividad de este perfil. Los chats se guardan en el ordenador anfitrión, y los adultos que usan DisPatch aquí pueden abrirlos.",
+    "banner": "El owner puede ver un resumen de la actividad de este perfil. Los chats se guardan en el ordenador anfitrión y son compartidos: cualquiera que pueda usar el mismo personaje puede leerlos, también otros perfiles y los dispositivos sin sesión iniciada si esta instalación lo permite.",
     "region": "[es] Restricted profile",
     "more": "[es] What can the owner see?",
     "panel_title": "[es] Your activity summary",
@@ -2109,10 +2109,10 @@
   "host_notice": {
     "title": "Guardado en el ordenador anfitrión",
     "files_body": "Los archivos, imágenes y avatares que subes o creas aquí (en los chats, el File Server, Image Studio y los Ajustes) se guardan en el ordenador donde funciona DisPatch, no en tu dispositivo. Otras personas que usan DisPatch aquí, y cualquiera con acceso a ese ordenador, podrían abrirlos.",
-    "chats_body": "Cada chat se guarda en el ordenador donde funciona DisPatch, no en este dispositivo. Los chats no son privados ni tienen cifrado de extremo a extremo. Un chat pertenece a su personaje, no a una persona: todas las personas que pueden usar un personaje pueden abrir sus chats, y el Owner y los Admins pueden usar todos los personajes, así que pueden leer todos los chats, también los de los perfiles restringidos. Cualquiera con acceso a ese ordenador, a sus archivos o a sus copias de seguridad también puede leerlos.",
+    "chats_body": "Cada chat se guarda en el ordenador donde funciona DisPatch, no en este dispositivo. Los chats no son privados ni tienen cifrado de extremo a extremo. Un chat pertenece a su personaje, no a una persona: cualquiera que pueda usar ese personaje puede abrir sus chats, también otros perfiles (incluidos los restringidos) y los dispositivos sin sesión iniciada si esta instalación lo permite. Los miembros pueden usar todos los personajes que no estén limitados a ciertos perfiles; el Owner y los Admins pueden usar todos los personajes, así que pueden leer todos los chats. Para mantener aparte los chats de alguien, limita un personaje a su perfil. Cualquiera con acceso a ese ordenador, a sus archivos o a sus copias de seguridad también puede leerlos.",
     "card_title": "Antes de empezar",
     "card_files": "Lo que subes o creas aquí se guarda en el ordenador donde funciona DisPatch, no en este dispositivo.",
-    "card_chats": "Los chats también se guardan allí. No son privados: quienes administran DisPatch, y cualquiera con acceso a ese ordenador, pueden leerlos.",
+    "card_chats": "Los chats también se guardan allí y no son privados: cualquiera que pueda usar el mismo personaje puede leerlos, incluidos otros perfiles y los dispositivos sin sesión iniciada (si esta instalación lo permite), y también cualquiera con acceso a ese ordenador.",
     "card_more": "Los detalles están en Ajustes → Seguridad.",
     "card_ok": "Entendido"
   },

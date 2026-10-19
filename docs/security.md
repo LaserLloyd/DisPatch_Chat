@@ -24,8 +24,11 @@ misleading you about one of those three.
 
 **Multi-user is isolation, not adversarial separation.** Conversations belong to
 a *character*, not to a person: everyone who can use a character opens the same
-chats with it, and the Owner and Admins can use every character, so they can read
-every chat, a Restricted profile's included. To keep one person's chats away from
+chats with it. That includes other Restricted profiles and Members, and, while
+`anonymous_access` is `restricted` (the default), any device nobody has signed in
+on, for every character whose audience is "Everyone" or "Restricted only" and
+that has no `profiles` list. The Owner and Admins can use every character, so
+they can read every chat, a Restricted profile's included. To keep one person's chats away from
 the others, give them a character limited to their profile (the character's
 `profiles` list); a profile left off that list must not be able to read those
 chats, and if they can, it is a bug and we want the report. DisPatch is built for
@@ -154,8 +157,11 @@ or other profiles. A running server follows within a second. Commands for every 
 - **Activity summary.** The Owner (and Admins with `view_activity`) can see counts
   per day — logins, messages, new conversations, uploads, limits hit — never the
   content. The summary is not the only view, though: the chats themselves belong
-  to the characters, so the Owner, Admins and any Member who can use the same
-  character can open them. The Restricted UI shows a banner saying both, and a
+  to the characters, so anyone who can use the same character can open them: the
+  Owner, Admins, Members, other Restricted profiles and, with `anonymous_access:
+  restricted`, a device nobody signed in on. Limit a character to one profile
+  (its `profiles` list) to keep a child's chats with it to that child (and the
+  Owner and Admins). The Restricted UI shows a banner saying both, and a
   "my activity" panel with the same numbers.
 
 ### Sign-in protection

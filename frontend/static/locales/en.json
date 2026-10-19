@@ -1667,7 +1667,7 @@
     "lock": "Lock"
   },
   "restricted": {
-    "banner": "The owner sees a summary of this profile's activity. Chats are kept on the host computer, and the grown-ups who use DisPatch here can open them.",
+    "banner": "The owner can see a summary of this profile's activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven't signed in if this install lets them.",
     "region": "Restricted profile",
     "more": "What can the owner see?",
     "panel_title": "Your activity summary",
@@ -2084,10 +2084,10 @@
   "host_notice": {
     "title": "Stored on the host computer",
     "files_body": "Files, pictures and avatars you upload or create here (in chats, the File Server, Image Studio and Settings) are saved on the computer that runs DisPatch, not on your device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.",
-    "chats_body": "Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: everyone who can use a character can open its chats, and the Owner and Admins can use every character, so they can read every chat, Restricted profiles' chats included. Anyone with access to that computer, its files or its backups can read them too.",
+    "chats_body": "Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: anyone who can use that character can open its chats, other profiles (Restricted ones included) and devices that haven't signed in if this install lets them. Members can use every character that isn't limited to certain profiles; the Owner and Admins can use every character, so they can read every chat. To keep someone's chats apart, limit a character to their profile. Anyone with access to that computer, its files or its backups can read them too.",
     "card_title": "Before you start",
     "card_files": "What you upload or create here is saved on the computer that runs DisPatch, not on this device.",
-    "card_chats": "Chats are kept there too. They are not private: the people who run DisPatch, and anyone with access to that computer, can read them.",
+    "card_chats": "Chats are kept there too, and they are not private: anyone who can use the same character can read them, including other profiles and devices that haven't signed in (if this install lets them), and so can anyone with access to that computer.",
     "card_more": "The details are in Settings → Security.",
     "card_ok": "Got it"
   },

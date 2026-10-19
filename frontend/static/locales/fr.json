@@ -1692,7 +1692,7 @@
     "lock": "[fr] Lock"
   },
   "restricted": {
-    "banner": "L’owner voit un résumé de l’activité de ce profil. Les discussions sont gardées sur l’ordinateur hôte, et les adultes qui utilisent DisPatch ici peuvent les ouvrir.",
+    "banner": "L’owner voit un résumé de l’activité de ce profil. Les discussions sont gardées sur l’ordinateur hôte et sont partagées : toute personne qui peut utiliser le même personnage peut les lire, y compris les autres profils et les appareils non connectés si cette installation le permet.",
     "region": "[fr] Restricted profile",
     "more": "[fr] What can the owner see?",
     "panel_title": "[fr] Your activity summary",
@@ -2109,10 +2109,10 @@
   "host_notice": {
     "title": "Enregistré sur l’ordinateur hôte",
     "files_body": "Les fichiers, images et avatars que vous envoyez ou créez ici (dans les discussions, le File Server, Image Studio et les Réglages) sont enregistrés sur l’ordinateur qui fait tourner DisPatch, pas sur votre appareil. Les autres personnes qui utilisent DisPatch ici, et toute personne ayant accès à cet ordinateur, peuvent éventuellement les ouvrir.",
-    "chats_body": "Chaque discussion est enregistrée sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Les discussions ne sont ni privées ni chiffrées de bout en bout. Une discussion appartient à son personnage, pas à une personne : toute personne qui peut utiliser un personnage peut ouvrir ses discussions, et l’Owner et les Admins peuvent utiliser tous les personnages, donc lire toutes les discussions, y compris celles des profils restreints. Toute personne ayant accès à cet ordinateur, à ses fichiers ou à ses sauvegardes peut aussi les lire.",
+    "chats_body": "Chaque discussion est enregistrée sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Les discussions ne sont ni privées ni chiffrées de bout en bout. Une discussion appartient à son personnage, pas à une personne : toute personne qui peut utiliser ce personnage peut ouvrir ses discussions, y compris les autres profils (restreints compris) et les appareils non connectés si cette installation le permet. Les membres peuvent utiliser tous les personnages qui ne sont pas limités à certains profils ; l’Owner et les Admins peuvent utiliser tous les personnages, donc lire toutes les discussions. Pour garder à part les discussions de quelqu’un, limitez un personnage à son profil. Toute personne ayant accès à cet ordinateur, à ses fichiers ou à ses sauvegardes peut aussi les lire.",
     "card_title": "Avant de commencer",
     "card_files": "Ce que vous envoyez ou créez ici est enregistré sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil.",
-    "card_chats": "Les discussions y sont aussi gardées. Elles ne sont pas privées : les personnes qui gèrent DisPatch, et toute personne ayant accès à cet ordinateur, peuvent les lire.",
+    "card_chats": "Les discussions y sont aussi gardées, et elles ne sont pas privées : toute personne qui peut utiliser le même personnage peut les lire, y compris les autres profils et les appareils non connectés (si cette installation le permet), ainsi que toute personne ayant accès à cet ordinateur.",
     "card_more": "Les détails sont dans Réglages → Sécurité.",
     "card_ok": "Compris"
   },

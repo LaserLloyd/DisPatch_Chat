@@ -54,10 +54,14 @@ SESSION_COOKIE = policy.SESSION_COOKIE
 DEVICE_COOKIE = policy.DEVICE_COOKIE
 _DEVICE_MAX_AGE = 2 * 365 * 86400
 
-#: The one sentence the Restricted UI shows so a child (and a parent) know the
-#: activity summary exists. The UI renders its own localised copy of it.
-DISCLOSURE = ("The owner can see a summary of what happens in this profile. Chats are kept on the host computer, "
-              "and the grown-ups who use DisPatch here can open them.")
+#: What the Restricted UI tells a child (and a parent): the activity summary exists,
+#: and the chats themselves are shared per character (characters.may_use: other
+#: profiles, and anonymous devices while anonymous_access is "restricted").
+#: tests/test_people_api.py pins this against the access rules. The UI renders its
+#: own localised copy.
+DISCLOSURE = ("The owner can see a summary of what happens in this profile. Chats are kept on the host computer "
+              "and are shared: anyone who can use the same character can read them, other profiles too, and "
+              "devices that haven't signed in if this install lets them.")
 
 
 # --------------------------------------------------------------------------- #

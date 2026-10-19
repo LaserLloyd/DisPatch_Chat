@@ -1692,7 +1692,7 @@
     "lock": "[pt] Lock"
   },
   "restricted": {
-    "banner": "O owner vê um resumo da atividade deste perfil. As conversas ficam no computador anfitrião, e os adultos que usam o DisPatch aqui podem abri-las.",
+    "banner": "O owner pode ver um resumo da atividade deste perfil. As conversas ficam no computador anfitrião e são partilhadas: qualquer pessoa que possa usar a mesma personagem pode lê-las, também outros perfis e dispositivos sem sessão iniciada, se esta instalação o permitir.",
     "region": "[pt] Restricted profile",
     "more": "[pt] What can the owner see?",
     "panel_title": "[pt] Your activity summary",
@@ -2109,10 +2109,10 @@
   "host_notice": {
     "title": "Guardado no computador anfitrião",
     "files_body": "Os arquivos, imagens e avatares que você carrega ou cria aqui (nas conversas, no File Server, no Image Studio e nas Definições) são guardados no computador que executa o DisPatch, não no seu dispositivo. Outras pessoas que usam o DisPatch aqui, e qualquer pessoa com acesso a esse computador, podem conseguir abri-los.",
-    "chats_body": "Cada conversa é guardada no computador que executa o DisPatch, não neste dispositivo. As conversas não são privadas nem têm criptografia de ponta a ponta. Uma conversa pertence à sua personagem, não a uma pessoa: todos que podem usar uma personagem podem abrir as conversas dela, e o Owner e os Admins podem usar todas as personagens, então podem ler todas as conversas, incluindo as dos perfis restritos. Qualquer pessoa com acesso a esse computador, aos seus arquivos ou às suas cópias de segurança também pode lê-las.",
+    "chats_body": "Cada conversa é guardada no computador que executa o DisPatch, não neste dispositivo. As conversas não são privadas nem têm criptografia de ponta a ponta. Uma conversa pertence à sua personagem, não a uma pessoa: qualquer pessoa que possa usar essa personagem pode abrir as conversas dela, também outros perfis (incluindo os restritos) e dispositivos sem sessão iniciada, se esta instalação o permitir. Os membros podem usar todas as personagens que não estejam limitadas a certos perfis; o Owner e os Admins podem usar todas as personagens, então podem ler todas as conversas. Para manter à parte as conversas de alguém, limite uma personagem ao perfil dessa pessoa. Qualquer pessoa com acesso a esse computador, aos seus arquivos ou às suas cópias de segurança também pode lê-las.",
     "card_title": "Antes de começar",
     "card_files": "O que você carrega ou cria aqui é guardado no computador que executa o DisPatch, não neste dispositivo.",
-    "card_chats": "As conversas também ficam lá. Não são privadas: quem administra o DisPatch, e qualquer pessoa com acesso a esse computador, pode lê-las.",
+    "card_chats": "As conversas também ficam lá e não são privadas: qualquer pessoa que possa usar a mesma personagem pode lê-las, incluindo outros perfis e dispositivos sem sessão iniciada (se esta instalação o permitir), e também qualquer pessoa com acesso a esse computador.",
     "card_more": "Os detalhes estão em Definições → Segurança.",
     "card_ok": "Entendi"
   },
