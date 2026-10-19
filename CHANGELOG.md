@@ -16,6 +16,8 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/data`, survives an image update and works with a read-only root.
 - **`ctx.settings_writer(namespace)`** and a start-up call of the add-on's `migrate_voice_yaml`
   once the settings store exists (a no-op that logs once until then).
+  DisPatch Voice 1.6 answers `deferred` (it still reads `voice.yaml` only), which the host
+  does not log.
 - **`state_dir` and a newly created data folder are owner-only** on Windows too (`app/fsperm.py`).
 - **`GET /api/voice/providers`** answers with the installed `dispatch_voice.providers` plugins when
   the add-on is not running (the add-on's own route answers when it is); `manage_plugins`.

@@ -541,7 +541,9 @@ dry_run=False)` with the live writer, and only then. The add-on calls
 `writer("voice.speed", 1.1)`-style keys (fully qualified, `voice.<id>`, with `bots`
 as one whole value), keeps a `voice.yaml.migrated` marker so the next start is a
 no-op, copies the file to `voice.yaml.bak` and leaves it in place. A raising
-migration is logged and never stops the start.
+migration is logged and never stops the start. DisPatch Voice 1.6 still reads and
+writes `voice.yaml` only, so it answers `deferred` and writes nothing until the
+release that reads the store (the host logs nothing for it).
 
 ### Listing provider plugins: `GET /api/voice/providers`
 

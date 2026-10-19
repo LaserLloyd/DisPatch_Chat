@@ -372,6 +372,19 @@ def test_the_voice_yaml_migration_runs_for_real_once_the_store_exists(ext_env, m
     assert calls == [False] and written == [("voice.speed", 1.0)]
 
 
+def test_a_deferred_migration_is_not_reported_as_news(ext_env, monkeypatch, caplog):
+    """DisPatch Voice 1.6 answers ``deferred`` (it still reads voice.yaml only) on every start; the
+    add-on says why once, the host adds nothing (ops check 2026-10-19)."""
+    ext = install()
+    _fake_migration(monkeypatch, [])
+    sys.modules["dispatch_voice.host.migration"].migrate_voice_yaml = (
+        lambda w, dry_run=True: {"status": "deferred", "written": 0})
+    monkeypatch.setattr(extensions, "_settings_writer", lambda ns: (lambda k, v: None))
+    with caplog.at_level(logging.INFO, logger="local-chat.ext"):
+        extensions._migrate_ext_settings(ext)
+    assert "settings migration" not in caplog.text
+
+
 def test_a_failing_migration_never_stops_the_shell(ext_env, monkeypatch, caplog):
     ext = install()
     _fake_migration(monkeypatch, [])
