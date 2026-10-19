@@ -44,7 +44,7 @@ def test_a_member_cannot_grant_itself_anything(family):
     assert family["max"].patch(f"/api/people/{family['max_id']}", json={"name": "Maxi"}).status_code == 200
 
 
-def test_host_control_cannot_be_granted_to_anyone_but_the_owner(family):
+def test_host_control_cannot_be_granted_below_admin(family):
     r = family["owner"].patch(f"/api/people/{family['max_id']}", json={"grants": ["admin_system"]})
     assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid"
     # And a grant that reaches the database some other way is still not effective.
@@ -52,8 +52,8 @@ def test_host_control_cannot_be_granted_to_anyone_but_the_owner(family):
     forged = dataclasses.replace(prof, grants=["admin_system", "manage_settings"])
     perms = policy.effective_permissions(forged)
     assert "admin_system" not in perms and "manage_settings" in perms
-    admin = dataclasses.replace(prof, role="admin", grants=["admin_system"])
-    assert "admin_system" not in policy.effective_permissions(admin)
+    admin = dataclasses.replace(prof, role="admin", grants=[])
+    assert "admin_system" in policy.effective_permissions(admin)   # an Admin holds it by role
 
 
 def test_a_member_cannot_bind_its_device_to_another_profile_or_forget_other_devices(family):

@@ -398,8 +398,9 @@ _CORE: tuple[SettingDef, ...] = (
 )
 
 #: Settings that run a program, name a file or a server the host will contact, or change who can
-#: reach DisPatch and how: host control, which is the Owner's (docs/design/multi-user.md section 0),
-#: not an Admin's. Everything under ``system.`` is here; the rest are the named ones.
+#: reach DisPatch and how: host control (``admin_system``), which the Owner and Admins hold and a
+#: profile merely granted ``manage_settings`` does not. The flag keeps its 3.0 name ``owner_only``.
+#: Everything under ``system.`` is here; the rest are the named ones.
 OWNER_ONLY_PREFIXES: tuple[str, ...] = (
     "system.", "tools.openclaw_bin", "tools.agent_", "tools.gateway_ws", "tools.turn_transport",
     "tools.mirror_", "tools.harness", "tools.mail", "tools.practice",
@@ -665,8 +666,8 @@ def markdown_reference() -> str:
         "**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy "
         "`LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the "
         "app and cannot be changed there. **Restart** means the new value is used from the next start. "
-        "*Owner only* settings run a program, name a server the host contacts, or change who can reach DisPatch: "
-        "an Admin (who holds `manage_settings`) cannot change them.",
+        "*Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: "
+        "they need `admin_system` (the Owner and Admins); a profile granted only `manage_settings` cannot change them.",
         "",
     ]
     for gid, label, desc in GROUPS:
@@ -694,7 +695,7 @@ def markdown_reference() -> str:
                 rng = f" In {d.unit}."
             env = " / ".join(f"`{n}`" for n in d.env_names()) or ""
             desc_txt = d.description.replace("|", "\\|") + rng
-            sec = (" *(secret, write-only)*" if d.secret else "") + (" *(Owner only)*" if d.owner_only else "")
+            sec = (" *(secret, write-only)*" if d.secret else "") + (" *(host control)*" if d.owner_only else "")
             out.append(f"| `{d.key}` | {d.type} | {default} | {d.level} | "
                        f"{'yes' if d.restart_required else ''} | {env} | {desc_txt}{sec} |")
         out.append("")

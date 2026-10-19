@@ -7,6 +7,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Permissions (owner's order, 2026-10-19)
+
+- **Admins have full permissions.** An Admin now holds every permission the Owner has, host control
+  (`admin_system`) included: Health (the dashboard), backups and restore, the machine API key, every
+  setting (the host-control rows are no longer read-only), plugins, connections, agents and their
+  shell approvals, the local viewer, and every profile, other Admins included (create, edit,
+  password, sign out, delete). One structural exception stays: an Admin cannot delete, disable,
+  demote, sign out or change the credentials of THE Owner profile, nor change the install PIN,
+  so nobody can lock the household's owner out. `admin_system` still cannot be granted to a Member.
+
 ### Voice (the host side of DisPatch Voice 1.6)
 
 - **Models folder renamed** `<data>/speech-models` -> `<data>/models` (`ExtPaths.models_dir`); at

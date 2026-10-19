@@ -365,8 +365,8 @@ class MachineIn(BaseModel):
 
 @router.get("/api/auth/api-token", dependencies=[_SETTINGS])
 async def api_token_get(request: Request):
-    if not _caller(request).is_owner:
-        return _problem(403, "permission_denied", "Only the Owner manages the API key.")
+    if not _caller(request).is_operator:
+        return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
     cfg = auth.load()
     return {"has_token": bool(cfg.api_token), "machine_loopback_trust": cfg.machine_loopback_trust,
             "machine_scopes": cfg.machine_scopes if cfg.machine_scopes is not None
@@ -377,9 +377,9 @@ async def api_token_get(request: Request):
 @router.post("/api/auth/api-token", dependencies=[_SETTINGS])
 async def api_token_set(request: Request, payload: MachineIn):
     """Rotate the machine API key (shown once) and/or change how machines are
-    recognised. Owner only."""
-    if not _caller(request).is_owner:
-        return _problem(403, "permission_denied", "Only the Owner manages the API key.")
+    recognised. The Owner and Admins."""
+    if not _caller(request).is_operator:
+        return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
     cfg = auth.load()
     token = None
     with auth._lock:
@@ -451,8 +451,9 @@ def clean_permissions(role: str, items: Any, field_name: str) -> list[str]:
         if field_name == "grants" and role == "restricted" and it in never:
             raise accounts.AccountError(
                 "permissions_invalid", f"A Restricted profile can never be granted {it}.")
-        if field_name == "grants" and it == "admin_system" and role != "owner":
-            raise accounts.AccountError("permissions_invalid", "Host control is Owner-only.")
+        if field_name == "grants" and it == "admin_system" and role not in ("owner", "admin"):
+            raise accounts.AccountError("permissions_invalid",
+                                        "Host control belongs to the Owner and Admins; it cannot be granted.")
         out.append(it)
     return list(dict.fromkeys(out))
 
@@ -489,11 +490,14 @@ class SecretIn(BaseModel):
 
 
 def _may_manage(caller: policy.Principal, target_role: str) -> bool:
-    """The Owner manages every other profile; an Admin manages Members and Restricted."""
-    if caller.is_owner:
+    """The Owner and every Admin manage every profile but THE Owner's.
+
+    That one exception is structural, not a permission: an Admin who could delete,
+    disable, demote or re-credential the Owner could lock the household's owner out of
+    their own install (and there is exactly one owner row). Everything else an Owner
+    may do to a profile - other Admins included - an Admin may do too."""
+    if caller.is_operator:
         return target_role != Role.OWNER.value
-    if caller.role == Role.ADMIN.value:
-        return role_rank(target_role) < role_rank(Role.ADMIN)
     return False
 
 
@@ -515,7 +519,7 @@ async def people_list(request: Request):
         "me": caller.profile_id,
         "roles": [r.value for r in ROLE_ORDER],
         "role_permissions": {r.value: sorted(p.value for p in ROLE_PERMISSIONS[r]) for r in ROLE_ORDER},
-        "can_create_admin": caller.is_owner,
+        "can_create_admin": caller.is_operator,
         "owner_has_password": _owner_has_password(),
         "disclosure": DISCLOSURE,
     }
@@ -529,7 +533,7 @@ async def people_create(request: Request, payload: PersonIn):
     if not accounts.has_owner():
         return _problem(409, "owner_required", "Create the owner account first (Settings > Security).")
     if not _may_manage(caller, payload.role):
-        return _problem(403, "permission_denied", "Only the Owner can create Admins.")
+        return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
     try:
         if payload.role == "admin":
             if not _owner_has_password():
@@ -593,7 +597,7 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
         new_role = fields.get("role", prof.role)
         if "role" in fields and new_role != prof.role:
             if not _may_manage(caller, new_role):
-                return _problem(403, "permission_denied", "Only the Owner can create Admins.")
+                return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
             if new_role == "admin" and not prof.has_password:
                 return _problem(409, "password_required",
                                 "Set the new Admin's password first (People > the profile > Password).")
@@ -665,13 +669,14 @@ async def people_clear_pin(request: Request, profile_id: str):
 
 @router.post("/api/people/{profile_id}/password", dependencies=[_MANAGE])
 async def people_set_password(request: Request, profile_id: str, payload: SecretIn):
-    """Set an Admin's password (Owner only). Your own is /api/auth/password."""
+    """Set another Admin's password (the Owner or an Admin). Your own is /api/auth/password;
+    the Owner's is the Owner's alone."""
     caller = _caller(request)
     prof, err = _target(request, profile_id)
     if err is not None:
         return err
     assert prof is not None
-    if prof.id == caller.profile_id or prof.role == "owner" or not caller.is_owner:
+    if prof.id == caller.profile_id or prof.role == "owner" or not caller.is_operator:
         return _problem(409, "permission_denied", "Use Settings > Security to change your own password.")
     try:
         auth.set_profile_password(profile_id, payload.password)

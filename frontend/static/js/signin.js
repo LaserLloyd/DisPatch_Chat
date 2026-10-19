@@ -21,7 +21,7 @@ import { el } from './util.js?v=20';
 import {
   ACTIVITY_COLUMNS, activityRows, avatarSpec, blockNoticeKey, createCountdown, credentialModes,
   credentialOptions, formatCountdown, sortTiles, usageLines,
-} from './profiles.js?v=1';
+} from './profiles.js?v=2';
 
 const roleLabel = (role) => t(`role.${role}`);
 

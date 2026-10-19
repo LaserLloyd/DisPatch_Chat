@@ -65,7 +65,7 @@ _r("GET", "/tools/_t/{ticket}/{rel:path}", public("capability URL: the random, e
 _r("POST", "/api/auth/remember-config", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/forget-devices", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only the Owner and Admins have one"))
-_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="Owner only (checked in the handler)"))
+_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="the Owner and Admins (checked in the handler); shown once"))
 _r("GET", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="reports whether a token exists; never the token"))
 
 # People & profiles
@@ -236,7 +236,7 @@ _r("POST", "/api/tasks/{task_id}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
 _r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allow or deny one tool call; destructive tools are asked every time"))
 
 # --------------------------------------------------------------------------- #
-# Settings / system / host control (Owner)
+# Settings / system / host control (Owner and Admins: admin_system)
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/openapi.json", _R(P.MANAGE_SETTINGS, machine=[M.OPENAPI]))
 _r("POST", "/api/guide/seed", _R(P.MANAGE_SETTINGS, machine=[M.GUIDE_SEED]))
@@ -289,7 +289,7 @@ _r("GET", "/api/wizard", public("answers only whether a first-run wizard is need
 _r("POST", "/api/wizard/detect", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/connection", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/family", _R(P.MANAGE_USERS))
-_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's"))
+_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's and the Admins'"))
 for _path in ("/api/wizard/step/{step}", "/api/wizard/finish"):
     _r("POST", _path, _R(P.MANAGE_SETTINGS))
 for _path, _m in (
@@ -299,7 +299,7 @@ for _path, _m in (
     ("/api/support-bundle", "POST"),
 ):
     _r(_m, _path, _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner may export anyone; an Admin only Members and Restricted"))
+_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner and Admins may export anyone; the Owner's own export is the Owner's"))
 _r("DELETE", "/api/users/{profile_id}", _R(P.MANAGE_USERS, note="same rank rules as /api/people"))
 _r("GET", "/api/plugins/manifests", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/settings/defaults", public("default theme / language / avatar style for a device that has not signed in; no secrets"))

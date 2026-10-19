@@ -11,7 +11,7 @@
 //                 Restricted profile) and the devices the server knows.
 //   Activity      per-profile counts for the last 7 days (never message
 //                 content) and the admin audit log.
-//   Machine access (Owner only) the API key, rotated on demand and shown once,
+//   Machine access (Owner and Admins) the API key, rotated on demand and shown once,
 //                 and the on-box trust switch.
 //
 // The server enforces everything here (role, budgets, who may create an
@@ -26,8 +26,8 @@ import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import {
   ACTIVITY_COLUMNS, activityRows, activityTotals, bindableProfiles, budgetsToForm, canManage,
-  createPayload, patchPayload, roleOptions, avatarSpec,
-} from './profiles.js?v=1';
+  createPayload, patchPayload, roleOptions, avatarSpec, isAdminRole,
+} from './profiles.js?v=2';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 let uid = 0;
@@ -159,10 +159,10 @@ function editorPanel(ctx, person) {
   const pwField = field(t(creating ? 'people.password_new' : 'people.password_change'), password, t('people.password_hint'));
   const syncCredFields = () => {
     const r = role.value;
-    // Member and Restricted use a PIN; an Admin uses a password (the Owner
-    // sets it). Members must have a PIN, a Restricted profile may go without.
+    // Member and Restricted use a PIN; an Admin uses a password (the Owner or
+    // another Admin sets it). Members must have a PIN, a Restricted profile may go without.
     pinField.hidden = !(r === 'member' || r === 'restricted');
-    pwField.hidden = r !== 'admin' || (!creating && ctx.role !== 'owner');
+    pwField.hidden = r !== 'admin' || (!creating && !isAdminRole(ctx.role));
   };
   role.addEventListener('change', syncCredFields);
   syncCredFields();
@@ -237,7 +237,7 @@ function editorPanel(ctx, person) {
         extra.splice(1, 0, clr);
       }
     }
-    if (person.role === 'admin' && ctx.role === 'owner') {
+    if (person.role === 'admin' && isAdminRole(ctx.role) && person.id !== (ctx.data && ctx.data.me)) {
       const setPw = el('button', { type: 'button', class: 'btn-secondary', text: t('people.password_save') });
       setPw.addEventListener('click', async () => {
         if (String(password.value).length < 8) { showErr(t('people.err_password_short')); return; }
@@ -494,7 +494,7 @@ function activityGroup(ctx) {
     ]));
 }
 
-// ---- Machine access (Owner only) -----------------------------------------------
+// ---- Machine access (Owner and Admins) -----------------------------------------------
 
 async function machineGroup(ctx) {
   let info;
@@ -657,7 +657,7 @@ export async function mountPeopleSettings(pane, deps) {
   renderDevices();
   renderActivity();
   const parts = [intro, listHost, editorHost, deviceHost, activityHost];
-  if (role === 'owner') {
+  if (isAdminRole(role)) {
     const g = await machineGroup(ctx);
     if (mine !== seq) return;
     if (g) machineHost.replaceChildren(g);

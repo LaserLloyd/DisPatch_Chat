@@ -495,12 +495,15 @@ test('Backups: a recovery key is shown once; restore asks first and stages', { s
   assert.deepEqual(staged, [['archive:b.dpbk', 'my-passphrase']]);
 });
 
-test('Backups: only the owner is offered them', { skip: dom.skip }, async () => {
+test('Backups: the Owner and Admins are offered them, a Member is not', { skip: dom.skip }, async () => {
   const win = await boot();
   const { mountBackups } = await fresh('backup.js');
   const host = win.document.createElement('div');
-  mountBackups(host, { api: {}, role: 'admin' });
-  assert.match(host.textContent, /managed by the owner/);
+  mountBackups(host, { api: {}, role: 'member' });
+  assert.match(host.textContent, /managed by the Owner and Admins/);
+  const admin = win.document.createElement('div');
+  mountBackups(admin, { api: { backups: async () => ({ backups: [], schedule: { enabled: false } }), pendingRestore: async () => ({ pending: false }), people: async () => ({ profiles: [] }) }, role: 'admin' });
+  assert.doesNotMatch(admin.textContent, /managed by the Owner and Admins/);
 });
 
 // ------------------------------------------------------------------ 4. wiring
@@ -536,7 +539,7 @@ test('the new strings exist in every locale with the same keys (English in en, [
   }
 });
 
-test('All settings: an owner-only row is shown read-only to an Admin, editable to the Owner', { skip: dom.skip }, async () => {
+test('All settings: a host-control row is read-only to a Member granted manage_settings, editable to an Admin and the Owner', { skip: dom.skip }, async () => {
   const win = await boot();
   const { mountSettingsSchema } = await fresh('settings_schema.js');
   const schema = { ...SCHEMA, settings: SCHEMA.settings.map((d) => (d.key === 'system.backup_keep' ? { ...d, owner_only: true } : d)) };
@@ -546,10 +549,15 @@ test('All settings: an owner-only row is shown read-only to an Admin, editable t
     people: async () => ({ profiles: [] }),
   };
   const pane = win.document.getElementById('spane-settings');
-  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'admin', group: 'system' });
+  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'member', group: 'system' });
   const row = pane.querySelector('[data-key="system.backup_keep"]');
   assert.equal(row.querySelector('input').disabled, true);
   assert.ok(row.querySelector('.schema-owner-only'), 'the row says why');
+  pane.textContent = '';
+  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'admin', group: 'system' });
+  const rowA = pane.querySelector('[data-key="system.backup_keep"]');
+  assert.equal(rowA.querySelector('input').disabled, false, 'an Admin edits host-control rows');
+  assert.equal(rowA.querySelector('.schema-owner-only'), null);
   pane.textContent = '';
   await mountSettingsSchema(pane, { api, toast: () => {}, role: 'owner', group: 'system' });
   const row2 = pane.querySelector('[data-key="system.backup_keep"]');

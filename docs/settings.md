@@ -4,7 +4,7 @@
 
 Schema version 1. Every setting below can be read with `GET /api/settings` and changed with `PATCH /api/settings` (the `manage_settings` permission), or in **Settings** in the app. How the store works, and how an environment variable interacts with it, is in [Settings store](#how-the-store-works) at the end.
 
-**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy `LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the app and cannot be changed there. **Restart** means the new value is used from the next start. *Owner only* settings run a program, name a server the host contacts, or change who can reach DisPatch: an Admin (who holds `manage_settings`) cannot change them.
+**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy `LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the app and cannot be changed there. **Restart** means the new value is used from the next start. *Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: they need `admin_system` (the Owner and Admins); a profile granted only `manage_settings` cannot change them.
 
 ## Characters
 
@@ -21,21 +21,21 @@ The models and servers DisPatch talks to, and how it finds them.
 
 | Key | Type | Default | Level | Restart | Env | What it does |
 |---|---|---|---|---|---|---|
-| `connections.allow_private_targets` | boolean | `false` | advanced |  |  | Connections to link-local and cloud-metadata addresses (169.254.x.x, fe80::, metadata.google.internal) are refused to stop DisPatch being used to reach internal services. Turn on only if you really run a model server there. *(Owner only)* |
+| `connections.allow_private_targets` | boolean | `false` | advanced |  |  | Connections to link-local and cloud-metadata addresses (169.254.x.x, fe80::, metadata.google.internal) are refused to stop DisPatch being used to reach internal services. Turn on only if you really run a model server there. *(host control)* |
 | `connections.discovery_targets` | list | `['127.0.0.1', 'studioforge', 'lmstudio', 'ollama']` | advanced |  | `DISPATCH_DISCOVERY_TARGETS` / `LOCAL_CHAT_DISCOVERY_TARGETS` | The hosts Find servers probes for StudioForge, LM Studio, Ollama and OpenAI-style servers, on ports 1234, 8080 and 11434 (write host:port to probe one port). The default is this computer and the compose names studioforge, lmstudio and ollama (a name that does not resolve is skipped). Cloud-metadata and link-local addresses are never probed. host.docker.internal is added only inside a container; see the next setting. |
 | `connections.discovery_probe_docker_host` | boolean | `true` | advanced |  | `DISPATCH_DISCOVERY_PROBE_DOCKER_HOST` / `LOCAL_CHAT_DISCOVERY_PROBE_DOCKER_HOST` | Inside a container, Find servers also probes host.docker.internal (ports 1234, 8080, 11434), which is the computer the container runs on. Turn off to stop that. It never happens outside a container, whatever this says. |
 | `connections.default` | string |  | basic |  |  | The connection a new character uses when you do not pick one. |
-| `connections.clawforge_url` | url |  | advanced | yes | `DISPATCH_CLAWFORGE_URL` / `LOCAL_CHAT_CLAWFORGE_URL` | An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp. *(Owner only)* |
-| `connections.clawforge_files_url` | url |  | advanced | yes | `DISPATCH_CLAWFORGE_FILES_URL` / `LOCAL_CHAT_CLAWFORGE_FILES_URL` | Where finished pictures are fetched from. Empty uses /files/ beside the MCP address. *(Owner only)* |
-| `connections.callback_base` | url |  | advanced | yes | `DISPATCH_CALLBACK_BASE` / `LOCAL_CHAT_CALLBACK_BASE` | DisPatch's own address as the image server sees it, so it can report a finished picture straight away instead of waiting to be asked. *(Owner only)* |
-| `connections.image_jobs` | choice | `auto` | basic | yes | `DISPATCH_IMAGE_JOBS` / `LOCAL_CHAT_IMAGE_JOBS` | Let characters ask for pictures. Automatic turns it on when an image server or image API is configured. One of: `auto`, `1`, `0`. *(Owner only)* |
-| `connections.image_cli` | string |  | advanced |  | `DISPATCH_IMAGE_CLI` / `LOCAL_CHAT_IMAGE_CLI` | A command that makes one picture for the avatar and reaction pools. Empty turns the pools' automatic top-up off. *(Owner only)* |
-| `connections.image_cli_timeout` | integer | `300` | advanced |  | `DISPATCH_IMAGE_CLI_TIMEOUT` / `LOCAL_CHAT_IMAGE_CLI_TIMEOUT` | Seconds to wait for one picture from the image command. Range 10..7200 seconds. *(Owner only)* |
-| `connections.gpu_cli` | string |  | advanced |  | `DISPATCH_GPU_CLI` / `LOCAL_CHAT_GPU_CLI` | A command that reports free GPU memory, so pools stay off a busy card. *(Owner only)* |
-| `connections.gpu_lease_url` | url |  | advanced |  | `DISPATCH_GPU_LEASE_URL` / `LOCAL_CHAT_GPU_LEASE_URL` | A lease service the picture pools ask before using a shared GPU. *(Owner only)* |
-| `connections.studioforge_panel` | boolean | `false` | basic | yes | `DISPATCH_STUDIOFORGE` / `LOCAL_CHAT_STUDIOFORGE` | Show StudioForge's control panel as a tool in the left rail. Needs the panel address below. *(Owner only)* |
-| `connections.studioforge_panel_url` | url |  | basic | yes | `DISPATCH_STUDIOFORGE_URL` / `LOCAL_CHAT_STUDIOFORGE_URL` | Where StudioForge's panel is, e.g. http://192.0.2.20:8080. *(Owner only)* |
-| `connections.studioforge_panel_remote_url` | url |  | advanced | yes | `DISPATCH_STUDIOFORGE_REMOTE_URL` / `LOCAL_CHAT_STUDIOFORGE_REMOTE_URL` | The address a phone or laptop elsewhere can open (e.g. a Tailscale Serve HTTPS address). *(Owner only)* |
+| `connections.clawforge_url` | url |  | advanced | yes | `DISPATCH_CLAWFORGE_URL` / `LOCAL_CHAT_CLAWFORGE_URL` | An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp. *(host control)* |
+| `connections.clawforge_files_url` | url |  | advanced | yes | `DISPATCH_CLAWFORGE_FILES_URL` / `LOCAL_CHAT_CLAWFORGE_FILES_URL` | Where finished pictures are fetched from. Empty uses /files/ beside the MCP address. *(host control)* |
+| `connections.callback_base` | url |  | advanced | yes | `DISPATCH_CALLBACK_BASE` / `LOCAL_CHAT_CALLBACK_BASE` | DisPatch's own address as the image server sees it, so it can report a finished picture straight away instead of waiting to be asked. *(host control)* |
+| `connections.image_jobs` | choice | `auto` | basic | yes | `DISPATCH_IMAGE_JOBS` / `LOCAL_CHAT_IMAGE_JOBS` | Let characters ask for pictures. Automatic turns it on when an image server or image API is configured. One of: `auto`, `1`, `0`. *(host control)* |
+| `connections.image_cli` | string |  | advanced |  | `DISPATCH_IMAGE_CLI` / `LOCAL_CHAT_IMAGE_CLI` | A command that makes one picture for the avatar and reaction pools. Empty turns the pools' automatic top-up off. *(host control)* |
+| `connections.image_cli_timeout` | integer | `300` | advanced |  | `DISPATCH_IMAGE_CLI_TIMEOUT` / `LOCAL_CHAT_IMAGE_CLI_TIMEOUT` | Seconds to wait for one picture from the image command. Range 10..7200 seconds. *(host control)* |
+| `connections.gpu_cli` | string |  | advanced |  | `DISPATCH_GPU_CLI` / `LOCAL_CHAT_GPU_CLI` | A command that reports free GPU memory, so pools stay off a busy card. *(host control)* |
+| `connections.gpu_lease_url` | url |  | advanced |  | `DISPATCH_GPU_LEASE_URL` / `LOCAL_CHAT_GPU_LEASE_URL` | A lease service the picture pools ask before using a shared GPU. *(host control)* |
+| `connections.studioforge_panel` | boolean | `false` | basic | yes | `DISPATCH_STUDIOFORGE` / `LOCAL_CHAT_STUDIOFORGE` | Show StudioForge's control panel as a tool in the left rail. Needs the panel address below. *(host control)* |
+| `connections.studioforge_panel_url` | url |  | basic | yes | `DISPATCH_STUDIOFORGE_URL` / `LOCAL_CHAT_STUDIOFORGE_URL` | Where StudioForge's panel is, e.g. http://192.0.2.20:8080. *(host control)* |
+| `connections.studioforge_panel_remote_url` | url |  | advanced | yes | `DISPATCH_STUDIOFORGE_REMOTE_URL` / `LOCAL_CHAT_STUDIOFORGE_REMOTE_URL` | The address a phone or laptop elsewhere can open (e.g. a Tailscale Serve HTTPS address). *(host control)* |
 
 ## Voice
 
@@ -50,26 +50,26 @@ Plugins, agent runtimes and the optional panes.
 | Key | Type | Default | Level | Restart | Env | What it does |
 |---|---|---|---|---|---|---|
 | `tools.livetools_enabled` | boolean | `true` | basic |  |  | Web search, weather, Wikipedia, exchange rates and a calculator for direct-API characters. Off removes them from every character at once. |
-| `tools.openclaw_bin` | string | `openclaw` | advanced | yes | `OPENCLAW_BIN` | The openclaw program used for agent characters. Change it when it is not on the PATH. *(Owner only)* |
-| `tools.agent_timeout` | integer | `900` | advanced | yes | `DISPATCH_AGENT_TIMEOUT` / `LOCAL_CHAT_AGENT_TIMEOUT` | Seconds an agent may take to answer before the turn is abandoned. Range 10..86400 seconds. *(Owner only)* |
-| `tools.agent_max_concurrency` | integer | `3` | advanced | yes | `DISPATCH_MAX_CONCURRENCY` / `LOCAL_CHAT_MAX_CONCURRENCY` | How many agent turns may run at the same time (protects local models). Range 1..64. *(Owner only)* |
-| `tools.gateway_ws` | choice | `off` | advanced | yes | `DISPATCH_GATEWAY_WS` / `LOCAL_CHAT_GATEWAY_WS` | Off: replies are read from transcripts. Shadow: connect and compare without delivering. On: replies arrive over the gateway socket. One of: `off`, `shadow`, `1`. *(Owner only)* |
-| `tools.turn_transport` | choice | `auto` | advanced | yes | `DISPATCH_TURN_TRANSPORT` / `LOCAL_CHAT_TURN_TRANSPORT` | Automatic uses the gateway socket when connected, else the command line. Gateway only fails a turn rather than falling back; Command line always spawns the agent. One of: `auto`, `1`, `0`. *(Owner only)* |
-| `tools.mirror_enabled` | boolean | `true` | advanced | yes | `DISPATCH_MIRROR` / `LOCAL_CHAT_MIRROR` | Copy the agent runtime's own conversations into DisPatch threads. *(Owner only)* |
-| `tools.mirror_poll` | integer | `4` | advanced | yes | `DISPATCH_MIRROR_POLL` / `LOCAL_CHAT_MIRROR_POLL` | Seconds between checks while busy. Range 1..3600 seconds. *(Owner only)* |
-| `tools.mirror_idle_max` | integer | `60` | advanced | yes | `DISPATCH_MIRROR_IDLE_MAX` / `LOCAL_CHAT_MIRROR_IDLE_MAX` | The longest the mirror waits between checks when nothing is happening. Range 1..86400 seconds. *(Owner only)* |
-| `tools.mirror_horizon_h` | integer | `72` | advanced | yes | `DISPATCH_MIRROR_HORIZON_H` / `LOCAL_CHAT_MIRROR_HORIZON_H` | Conversations idle for longer than this when first seen are followed from now, not imported. Range 1..8760 hours. *(Owner only)* |
-| `tools.mirror_kinds` | string | `webchat,main` | advanced | yes | `DISPATCH_MIRROR_KINDS` / `LOCAL_CHAT_MIRROR_KINDS` | Comma-separated session kinds to mirror (webchat, main, other). *(Owner only)* |
-| `tools.harness` | choice | `auto` | basic | yes | `DISPATCH_HARNESS` / `LOCAL_CHAT_HARNESS` | A coding-agent pane (needs the dsh program). Automatic turns it on when dsh is installed. One of: `auto`, `on`, `off`. *(Owner only)* |
-| `tools.harness_unit` | string | `dsh-web.service` | advanced | yes | `DISPATCH_HARNESS_UNIT` / `LOCAL_CHAT_HARNESS_UNIT` | The systemd user unit that runs dsh web. *(Owner only)* |
-| `tools.harness_port` | integer | `3080` | advanced | yes | `DISPATCH_HARNESS_PORT` / `LOCAL_CHAT_HARNESS_PORT` | The loopback port dsh web listens on. Range 1..65535. *(Owner only)* |
-| `tools.harness_remote_url` | url |  | advanced | yes | `DISPATCH_HARNESS_REMOTE_URL` / `LOCAL_CHAT_HARNESS_REMOTE_URL` | An address a browser elsewhere can open for the harness page. *(Owner only)* |
-| `tools.mail` | choice | `auto` | basic | yes | `DISPATCH_MAIL` / `LOCAL_CHAT_MAIL` | Show MailForge's dashboard as a tool. Automatic turns it on when MailForge's runtime files are found. One of: `auto`, `on`, `off`. *(Owner only)* |
-| `tools.mail_data_dir` | path |  | advanced | yes | `DISPATCH_MAIL_DATA_DIR` / `LOCAL_CHAT_MAIL_DATA_DIR` | Where MailForge keeps its runtime files. Empty uses ~/.local/share/mailforge. *(Owner only)* |
-| `tools.mail_remote_url` | url |  | advanced | yes | `DISPATCH_MAIL_REMOTE_URL` / `LOCAL_CHAT_MAIL_REMOTE_URL` | The address a browser elsewhere can open for MailForge. *(Owner only)* |
-| `tools.practice` | choice | `auto` | advanced | yes | `DISPATCH_PRACTICE` / `LOCAL_CHAT_PRACTICE` | A client-pipeline dashboard proxied from another service on this computer. Automatic turns it on when its PIN file exists. One of: `auto`, `on`, `off`. *(Owner only)* |
-| `tools.practice_url` | url | `http://127.0.0.1:8793` | advanced | yes | `DISPATCH_PRACTICE_URL` / `LOCAL_CHAT_PRACTICE_URL` | Where the client-pipeline service listens. *(Owner only)* |
-| `tools.practice_pin_file` | path |  | advanced | yes | `DISPATCH_PRACTICE_PIN_FILE` / `LOCAL_CHAT_PRACTICE_PIN_FILE` | A file holding the service's PIN. Empty uses ~/practice/keys/gui-pin. *(Owner only)* |
+| `tools.openclaw_bin` | string | `openclaw` | advanced | yes | `OPENCLAW_BIN` | The openclaw program used for agent characters. Change it when it is not on the PATH. *(host control)* |
+| `tools.agent_timeout` | integer | `900` | advanced | yes | `DISPATCH_AGENT_TIMEOUT` / `LOCAL_CHAT_AGENT_TIMEOUT` | Seconds an agent may take to answer before the turn is abandoned. Range 10..86400 seconds. *(host control)* |
+| `tools.agent_max_concurrency` | integer | `3` | advanced | yes | `DISPATCH_MAX_CONCURRENCY` / `LOCAL_CHAT_MAX_CONCURRENCY` | How many agent turns may run at the same time (protects local models). Range 1..64. *(host control)* |
+| `tools.gateway_ws` | choice | `off` | advanced | yes | `DISPATCH_GATEWAY_WS` / `LOCAL_CHAT_GATEWAY_WS` | Off: replies are read from transcripts. Shadow: connect and compare without delivering. On: replies arrive over the gateway socket. One of: `off`, `shadow`, `1`. *(host control)* |
+| `tools.turn_transport` | choice | `auto` | advanced | yes | `DISPATCH_TURN_TRANSPORT` / `LOCAL_CHAT_TURN_TRANSPORT` | Automatic uses the gateway socket when connected, else the command line. Gateway only fails a turn rather than falling back; Command line always spawns the agent. One of: `auto`, `1`, `0`. *(host control)* |
+| `tools.mirror_enabled` | boolean | `true` | advanced | yes | `DISPATCH_MIRROR` / `LOCAL_CHAT_MIRROR` | Copy the agent runtime's own conversations into DisPatch threads. *(host control)* |
+| `tools.mirror_poll` | integer | `4` | advanced | yes | `DISPATCH_MIRROR_POLL` / `LOCAL_CHAT_MIRROR_POLL` | Seconds between checks while busy. Range 1..3600 seconds. *(host control)* |
+| `tools.mirror_idle_max` | integer | `60` | advanced | yes | `DISPATCH_MIRROR_IDLE_MAX` / `LOCAL_CHAT_MIRROR_IDLE_MAX` | The longest the mirror waits between checks when nothing is happening. Range 1..86400 seconds. *(host control)* |
+| `tools.mirror_horizon_h` | integer | `72` | advanced | yes | `DISPATCH_MIRROR_HORIZON_H` / `LOCAL_CHAT_MIRROR_HORIZON_H` | Conversations idle for longer than this when first seen are followed from now, not imported. Range 1..8760 hours. *(host control)* |
+| `tools.mirror_kinds` | string | `webchat,main` | advanced | yes | `DISPATCH_MIRROR_KINDS` / `LOCAL_CHAT_MIRROR_KINDS` | Comma-separated session kinds to mirror (webchat, main, other). *(host control)* |
+| `tools.harness` | choice | `auto` | basic | yes | `DISPATCH_HARNESS` / `LOCAL_CHAT_HARNESS` | A coding-agent pane (needs the dsh program). Automatic turns it on when dsh is installed. One of: `auto`, `on`, `off`. *(host control)* |
+| `tools.harness_unit` | string | `dsh-web.service` | advanced | yes | `DISPATCH_HARNESS_UNIT` / `LOCAL_CHAT_HARNESS_UNIT` | The systemd user unit that runs dsh web. *(host control)* |
+| `tools.harness_port` | integer | `3080` | advanced | yes | `DISPATCH_HARNESS_PORT` / `LOCAL_CHAT_HARNESS_PORT` | The loopback port dsh web listens on. Range 1..65535. *(host control)* |
+| `tools.harness_remote_url` | url |  | advanced | yes | `DISPATCH_HARNESS_REMOTE_URL` / `LOCAL_CHAT_HARNESS_REMOTE_URL` | An address a browser elsewhere can open for the harness page. *(host control)* |
+| `tools.mail` | choice | `auto` | basic | yes | `DISPATCH_MAIL` / `LOCAL_CHAT_MAIL` | Show MailForge's dashboard as a tool. Automatic turns it on when MailForge's runtime files are found. One of: `auto`, `on`, `off`. *(host control)* |
+| `tools.mail_data_dir` | path |  | advanced | yes | `DISPATCH_MAIL_DATA_DIR` / `LOCAL_CHAT_MAIL_DATA_DIR` | Where MailForge keeps its runtime files. Empty uses ~/.local/share/mailforge. *(host control)* |
+| `tools.mail_remote_url` | url |  | advanced | yes | `DISPATCH_MAIL_REMOTE_URL` / `LOCAL_CHAT_MAIL_REMOTE_URL` | The address a browser elsewhere can open for MailForge. *(host control)* |
+| `tools.practice` | choice | `auto` | advanced | yes | `DISPATCH_PRACTICE` / `LOCAL_CHAT_PRACTICE` | A client-pipeline dashboard proxied from another service on this computer. Automatic turns it on when its PIN file exists. One of: `auto`, `on`, `off`. *(host control)* |
+| `tools.practice_url` | url | `http://127.0.0.1:8793` | advanced | yes | `DISPATCH_PRACTICE_URL` / `LOCAL_CHAT_PRACTICE_URL` | Where the client-pipeline service listens. *(host control)* |
+| `tools.practice_pin_file` | path |  | advanced | yes | `DISPATCH_PRACTICE_PIN_FILE` / `LOCAL_CHAT_PRACTICE_PIN_FILE` | A file holding the service's PIN. Empty uses ~/practice/keys/gui-pin. *(host control)* |
 
 ## People & Profiles
 
@@ -81,8 +81,8 @@ Sign-in, session lengths and what a Restricted profile may do in a day.
 | `people.session_timeout_member` | integer | `3600` | advanced |  |  | Seconds of inactivity before a Member session ends. Range 30..2.592e+06 seconds. |
 | `people.session_timeout_restricted` | integer | `1800` | advanced |  |  | Seconds of inactivity before a Restricted profile's session ends. Range 30..2.592e+06 seconds. |
 | `people.remember_device_days` | integer | `0` | basic |  |  | 0 turns it off. A number of days offers a 'keep this device unlocked' box on sign-in; turning it off forgets every remembered device. Range 0..365 days. |
-| `people.machine_loopback_trust` | boolean | `true` | advanced |  |  | Let programs running on the same computer (agents, cron jobs) call the API without a key. Turn off once every program uses the machine API key. *(Owner only)* |
-| `people.anonymous_access` | choice | `restricted` | basic |  |  | Restricted shows the Restricted profile's view; None shows only the sign-in screen. One of: `restricted`, `none`. *(Owner only)* |
+| `people.machine_loopback_trust` | boolean | `true` | advanced |  |  | Let programs running on the same computer (agents, cron jobs) call the API without a key. Turn off once every program uses the machine API key. *(host control)* |
+| `people.anonymous_access` | choice | `restricted` | basic |  |  | Restricted shows the Restricted profile's view; None shows only the sign-in screen. One of: `restricted`, `none`. *(host control)* |
 | `people.restricted_daily_turns` | integer | `200` | basic | yes | `DISPATCH_DECOY_TURN_QUOTA` / `LOCAL_CHAT_DECOY_TURN_QUOTA` | How many messages one Restricted device or profile may send per day. Range 0..100000. |
 | `people.restricted_daily_threads` | integer | `50` | basic | yes | `DISPATCH_DECOY_THREAD_QUOTA` / `LOCAL_CHAT_DECOY_THREAD_QUOTA` | How many new conversations one Restricted device or profile may start per day. Range 0..100000. |
 | `people.restricted_daily_feedback` | integer | `100` | advanced | yes | `DISPATCH_DECOY_FEEDBACK_QUOTA` / `LOCAL_CHAT_DECOY_FEEDBACK_QUOTA` | How many reply ratings one Restricted device or profile may give per day. Range 0..100000. |
@@ -104,21 +104,21 @@ Network, backups, logs and limits.
 
 | Key | Type | Default | Level | Restart | Env | What it does |
 |---|---|---|---|---|---|---|
-| `system.public_url` | url |  | basic |  | `DISPATCH_PUBLIC_URL` / `LOCAL_CHAT_PUBLIC_URL` | The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// address tells the Health tab the connection is encrypted. *(Owner only)* |
-| `system.behind_tls` | boolean | `false` | basic |  | `DISPATCH_BEHIND_TLS` / `LOCAL_CHAT_BEHIND_TLS` | Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does not warn about plain HTTP. *(Owner only)* |
-| `system.network_exposure` | choice | `local` | basic |  |  | Local only (this computer), or your home network. The listen address itself is set by the launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so Health can tell you when the two disagree. One of: `local`, `lan`. *(Owner only)* |
-| `system.host` | string | `127.0.0.1` | advanced | yes | `DISPATCH_HOST` / `LOCAL_CHAT_HOST` | What DisPatch reports as its own address. The launcher flag (--host) is what binds the port. *(Owner only)* |
-| `system.port` | integer | `8765` | advanced | yes | `DISPATCH_PORT` / `LOCAL_CHAT_PORT` | The port DisPatch reports. The launcher flag (--port) is what binds it. Range 1..65535. *(Owner only)* |
-| `system.backup_interval` | integer | `21600` | basic | yes | `DISPATCH_BACKUP_INTERVAL` / `LOCAL_CHAT_BACKUP_INTERVAL` | Seconds between automatic database snapshots (6 hours by default). 0 turns them off. Range 0..2.592e+06 seconds. *(Owner only)* |
-| `system.backup_keep` | integer | `12` | basic | yes | `DISPATCH_BACKUP_KEEP` / `LOCAL_CHAT_BACKUP_KEEP` | How many rotated database snapshots to keep before the oldest is deleted. Range 1..1000. *(Owner only)* |
-| `system.encrypted_backup_enabled` | boolean | `false` | basic |  |  | Write a complete, encrypted backup (chats, characters, settings, avatars) on a schedule. The first one generates a recovery key and shows it once - keep it somewhere safe. *(Owner only)* |
-| `system.encrypted_backup_interval_hours` | integer | `24` | advanced |  |  | Hours between scheduled encrypted backups. Range 1..720 hours. *(Owner only)* |
-| `system.encrypted_backup_keep` | integer | `7` | advanced |  |  | Older encrypted backups are deleted beyond this many. Range 1..365. *(Owner only)* |
-| `system.encrypted_backup_include_media` | boolean | `false` | advanced |  |  | Add the media and File Server folders to encrypted backups. They can be large. *(Owner only)* |
-| `system.backup_passphrase` | secret |  | advanced |  |  | The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Either way it is kept in this install's secret store (the schedule needs it) and never shown again, so keep your own copy somewhere else. *(secret, write-only)* *(Owner only)* |
-| `system.log_file` | path |  | advanced |  | `DISPATCH_LOG_FILE` / `LOCAL_CHAT_LOG_FILE` | Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log. *(Owner only)* |
-| `system.files_total_max` | integer | `21474836480` | advanced | yes | `DISPATCH_FILES_TOTAL_MAX` / `LOCAL_CHAT_FILES_TOTAL_MAX` | Total bytes the File Server may hold before uploads are refused (20 GiB by default). Range 1.04858e+06.. bytes. *(Owner only)* |
-| `system.push_subject` | string |  | advanced |  | `DISPATCH_PUSH_SUBJECT` / `LOCAL_CHAT_PUSH_SUBJECT` | A mailto: address push services can reach if your server misbehaves. Empty uses a placeholder. *(Owner only)* |
+| `system.public_url` | url |  | basic |  | `DISPATCH_PUBLIC_URL` / `LOCAL_CHAT_PUBLIC_URL` | The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// address tells the Health tab the connection is encrypted. *(host control)* |
+| `system.behind_tls` | boolean | `false` | basic |  | `DISPATCH_BEHIND_TLS` / `LOCAL_CHAT_BEHIND_TLS` | Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does not warn about plain HTTP. *(host control)* |
+| `system.network_exposure` | choice | `local` | basic |  |  | Local only (this computer), or your home network. The listen address itself is set by the launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so Health can tell you when the two disagree. One of: `local`, `lan`. *(host control)* |
+| `system.host` | string | `127.0.0.1` | advanced | yes | `DISPATCH_HOST` / `LOCAL_CHAT_HOST` | What DisPatch reports as its own address. The launcher flag (--host) is what binds the port. *(host control)* |
+| `system.port` | integer | `8765` | advanced | yes | `DISPATCH_PORT` / `LOCAL_CHAT_PORT` | The port DisPatch reports. The launcher flag (--port) is what binds it. Range 1..65535. *(host control)* |
+| `system.backup_interval` | integer | `21600` | basic | yes | `DISPATCH_BACKUP_INTERVAL` / `LOCAL_CHAT_BACKUP_INTERVAL` | Seconds between automatic database snapshots (6 hours by default). 0 turns them off. Range 0..2.592e+06 seconds. *(host control)* |
+| `system.backup_keep` | integer | `12` | basic | yes | `DISPATCH_BACKUP_KEEP` / `LOCAL_CHAT_BACKUP_KEEP` | How many rotated database snapshots to keep before the oldest is deleted. Range 1..1000. *(host control)* |
+| `system.encrypted_backup_enabled` | boolean | `false` | basic |  |  | Write a complete, encrypted backup (chats, characters, settings, avatars) on a schedule. The first one generates a recovery key and shows it once - keep it somewhere safe. *(host control)* |
+| `system.encrypted_backup_interval_hours` | integer | `24` | advanced |  |  | Hours between scheduled encrypted backups. Range 1..720 hours. *(host control)* |
+| `system.encrypted_backup_keep` | integer | `7` | advanced |  |  | Older encrypted backups are deleted beyond this many. Range 1..365. *(host control)* |
+| `system.encrypted_backup_include_media` | boolean | `false` | advanced |  |  | Add the media and File Server folders to encrypted backups. They can be large. *(host control)* |
+| `system.backup_passphrase` | secret |  | advanced |  |  | The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. Either way it is kept in this install's secret store (the schedule needs it) and never shown again, so keep your own copy somewhere else. *(secret, write-only)* *(host control)* |
+| `system.log_file` | path |  | advanced |  | `DISPATCH_LOG_FILE` / `LOCAL_CHAT_LOG_FILE` | Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log. *(host control)* |
+| `system.files_total_max` | integer | `21474836480` | advanced | yes | `DISPATCH_FILES_TOTAL_MAX` / `LOCAL_CHAT_FILES_TOTAL_MAX` | Total bytes the File Server may hold before uploads are refused (20 GiB by default). Range 1.04858e+06.. bytes. *(host control)* |
+| `system.push_subject` | string |  | advanced |  | `DISPATCH_PUSH_SUBJECT` / `LOCAL_CHAT_PUSH_SUBJECT` | A mailto: address push services can reach if your server misbehaves. Empty uses a placeholder. *(host control)* |
 
 ## How the store works
 

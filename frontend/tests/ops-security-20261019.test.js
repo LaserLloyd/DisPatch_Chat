@@ -66,9 +66,9 @@ test('main.js imports the fixed dashboard at a new ?v=', () => {
   assert.match(MAIN, /from '\.\/dashboard\.js\?v=10'/);
 });
 
-test('main.js: Health is the Owner\'s tab even among admins', () => {
-  assert.match(MAIN, /const OWNER_TABS = \['health'\];/);
-  assert.match(MAIN, /const isOwnerRole = \(\) => !state\.decoy && state\.role === 'owner';/);
+test('main.js: since 2026-10-19 Health is an Admin\'s tab too (Admins hold admin_system)', () => {
+  assert.match(MAIN, /const OWNER_TABS = \[\];/);
+  assert.match(MAIN, /const isHostRole = \(\) => canAdmin\(\);/);
 });
 
 // S-4 ---------------------------------------------------------------------------
@@ -85,16 +85,16 @@ test('main.js: Settings opens for a Member without the character list, on a tab 
 
 // S-5 ---------------------------------------------------------------------------
 
-test('main.js: the local viewer section is built for the Owner only', () => {
-  assert.match(MAIN, /if \(isOwnerRole\(\) && filesBody\) filesBody\.append\(viewerSection\(\)\);/);
-  assert.match(MAIN, /if \(filesGroup\) filesGroup\.hidden = !isOwnerRole\(\);/);
+test('main.js: the local viewer section is built for the Owner and Admins (admin_system)', () => {
+  assert.match(MAIN, /if \(isHostRole\(\) && filesBody\) filesBody\.append\(viewerSection\(\)\);/);
+  assert.match(MAIN, /if \(filesGroup\) filesGroup\.hidden = !isHostRole\(\);/);
 });
 
 // S-2 ---------------------------------------------------------------------------
 
 test('index.html: the recovery form has a New PIN field, labelled', () => {
   assert.match(HTML, /<input type="password" id="recover-new-pin"[^>]*aria-label="New PIN"/);
-  assert.match(HTML, /\/static\/js\/main\.js\?v=148/);
+  assert.match(HTML, /\/static\/js\/main\.js\?v=\d+/);
 });
 
 test('main.js: recovery sends new_pin and keeps the code when only the PIN is missing', () => {

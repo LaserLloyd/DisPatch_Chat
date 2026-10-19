@@ -110,7 +110,7 @@ def test_state_changing_routes_are_never_public_without_a_stated_reason():
 def test_restricted_never_holds_a_management_permission():
     from app.contracts.permissions import RESTRICTED_NEVER, ROLE_PERMISSIONS, Role
     assert not (ROLE_PERMISSIONS[Role.RESTRICTED] & RESTRICTED_NEVER)
-    assert Permission.ADMIN_SYSTEM not in ROLE_PERMISSIONS[Role.ADMIN]
+    assert set(ROLE_PERMISSIONS[Role.ADMIN]) == set(Permission)      # Admin is full (2026-10-19)
     assert set(ROLE_PERMISSIONS[Role.OWNER]) == set(Permission)
 
 

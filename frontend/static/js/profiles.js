@@ -25,22 +25,21 @@ export function normalizeRole(s) {
 export const isAdminRole = (role) => role === 'owner' || role === 'admin';
 export const isRestrictedRole = (role) => role === 'restricted';
 
-/** Mirrors the server's rule (people_api._may_manage): the Owner manages every
- *  other profile; an Admin manages Members and Restricted only. */
+/** Mirrors the server's rule (people_api._may_manage): the Owner and every Admin
+ *  manage every profile except THE Owner's (nobody may lock the owner out). */
 export function canManage(actorRole, targetRole) {
-  if (actorRole === 'owner') return targetRole !== 'owner';
-  if (actorRole === 'admin') return roleRank(targetRole) >= 0 && roleRank(targetRole) < RANK.admin;
+  if (isAdminRole(actorRole)) return roleRank(targetRole) >= 0 && targetRole !== 'owner';
   return false;
 }
 
-/** Roles a create/edit form may offer. Admin only for the Owner, and only once
+/** Roles a create/edit form may offer. Admin only for the Owner or an Admin, and only once
  *  the Owner has a password of their own (the server answers 409
  *  `password_required` otherwise). `adminBlocked` says why it is missing so the
  *  form can explain rather than silently omit it. */
 export function roleOptions(actorRole, ownerHasPassword) {
   const options = ['member', 'restricted'];
   let adminBlocked = null;
-  if (actorRole !== 'owner') adminBlocked = 'not_owner';
+  if (!isAdminRole(actorRole)) adminBlocked = 'not_owner';
   else if (!ownerHasPassword) adminBlocked = 'owner_needs_password';
   else options.unshift('admin');
   return { options, adminBlocked };

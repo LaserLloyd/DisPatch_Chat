@@ -104,18 +104,19 @@ def test_a_member_needs_a_pin_and_a_restricted_profile_does_not(world, owner):
     assert owner.post("/api/people", json={"name": "mia", "role": "restricted"}).status_code == 409   # unique, case-folded
 
 
-def test_an_admin_manages_members_and_restricted_but_not_admins(world, owner):
+def test_an_admin_manages_everyone_but_the_owner(world, owner):
     world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
     assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
     assert admin.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555"}).status_code == 201
     assert admin.post("/api/people", json={"name": "Mia", "role": "restricted"}).status_code == 201
-    r = admin.post("/api/people", json={"name": "Eve", "role": "admin", "password": "evil-pass-1"})
-    assert r.status_code == 403
+    r = admin.post("/api/people", json={"name": "Eve", "role": "admin", "password": "eve-pass-12"})
+    assert r.status_code == 201, r.text                 # 2026-10-19: an Admin may add Admins
     people = {p["name"]: p for p in admin.get("/api/people").json()["profiles"]}
     assert admin.patch(f"/api/people/{people['Olive']['id']}", json={"name": "Hijack"}).status_code == 403
     assert admin.delete(f"/api/people/{people['Olive']['id']}").status_code == 403
-    assert admin.patch(f"/api/people/{people['Max']['id']}", json={"role": "admin"}).status_code == 403
+    assert admin.post(f"/api/people/{people['Max']['id']}/password", json={"password": "max-pass-123"}).status_code == 409
+    assert admin.patch(f"/api/people/{people['Eve']['id']}", json={"disabled": True}).status_code == 200
 
 
 def test_members_and_restricted_cannot_open_the_people_api(world, owner):
@@ -489,11 +490,11 @@ def test_admin_actions_are_audited(world, owner):
 # --------------------------------------------------------------------------- #
 
 
-def test_only_the_owner_manages_the_api_key(world, owner):
+def test_the_owner_and_admins_manage_the_api_key(world, owner):
     ada = world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
     world.login(admin, profile_id=ada["id"], password="admin-pass1")
-    assert admin.get("/api/auth/api-token").status_code == 403
+    assert admin.get("/api/auth/api-token").status_code == 200
     r = owner.post("/api/auth/api-token", json={"rotate": True})
     token = r.json()["api_token"]
     assert len(token) >= 32

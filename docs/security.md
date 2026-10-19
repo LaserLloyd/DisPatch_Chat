@@ -39,8 +39,8 @@ what it may do.
 
 | Role | Who it is for | What it can do |
 |---|---|---|
-| **Owner** | You. Exactly one. | Everything, including host control (the coding harness, wiping files, full export, logs) and the machine API key. |
-| **Admin** | A trusted adult. | Everything except host control and ownership: manage characters, connections, plugins, people (Members and Restricted), settings, approve agent actions, see the activity summary. Needs a password. |
+| **Owner** | You. Exactly one. | Everything, including host control (the coding harness, wiping files, full export, logs, Health, backups) and the machine API key. |
+| **Admin** | A trusted adult. | Everything the Owner can do: host control, the machine API key, every setting, characters, connections, plugins, agents (shell approvals included), backups, Health, and every profile, other Admins included. The one exception is THE Owner profile: an Admin cannot delete, disable, demote, sign out or change the credentials of it (nor change the install PIN, which is the Owner's), so nobody can lock the owner out. Needs a password. |
 | **Member** | An adult or teen household member. | Chat, voice, images, the tools you enabled, notifications, rename/delete their conversations. **Not** agents (see below) and not configuration. Needs a PIN. |
 | **Restricted** | A child or a guest. | Chat and voice with the characters whose *audience* is "Restricted only" or "Everyone". No tools (unless you flag one `safe`), no agents, no settings, no file access, no history management. Daily budgets and time limits apply. |
 
@@ -54,8 +54,9 @@ permission each route and WebSocket action requires is in
 
 - **Per-profile grants and denies.** The Owner can give one Member
   `dispatch_agents`, or take `use_voice` away from one profile. A Restricted
-  profile can never be granted a management permission, and `admin_system` is
-  Owner-only whatever anyone types.
+  profile can never be granted a management permission, and `admin_system`
+  (host control) belongs to the Owner and Admins: it cannot be granted to a Member,
+  whatever anyone types.
 - **Dispatching an agent is its own permission.** A character backed by an agent
   on the host (OpenClaw) runs with your user's rights. A Member cannot talk to
   one until you grant `dispatch_agents`; a Restricted profile's turn on such a
@@ -186,7 +187,8 @@ callback is the one other machine route; it carries its own per-job token.
   reach internal services.
 - **Backups** are encrypted (AES-256-GCM, scrypt) and restore refuses anything outside DisPatch's own files; the
   **support bundle** removes keys, tokens, PINs and passwords and leaves out character prompts unless asked
-  ([backups.md](backups.md)). These, and per-profile export / erase, are Owner-only.
+  ([backups.md](backups.md)). These, and per-profile export / erase, are host control (`admin_system`): the
+  Owner's and the Admins'. Nobody but the Owner may export or erase the Owner's own profile.
 - **Plugins** declare what they ask for and a new one must be approved before the Plugins switch turns it on
   ([extensions.md](extensions.md#manifests-permissions-and-approval-30)).
 
@@ -244,8 +246,8 @@ file blobs — copy the whole data directory.
 The local viewer hands a browser bytes from the host's filesystem, which makes
 it the widest read surface in the app. Its threat model, in full:
 
-- **Owner only (`admin_system`).** A Restricted profile never sees the affordance, *and* the
-  server refuses every viewer route for any role below Owner. Both halves are
+- **Owner and Admins only (`admin_system`).** A Restricted profile never sees the affordance, *and* the
+  server refuses every viewer route for any role below Admin. Both halves are
   required; neither is sufficient. It is also deliberately absent from the
   machine-inbound surface, so the inbound API token — which belongs to on-box
   automation and, in some setups, a separate render machine — is not a key to

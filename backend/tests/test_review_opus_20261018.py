@@ -116,11 +116,13 @@ def test_a_member_may_not_post_as_a_character_or_the_system(house):
 
 # O-3 ------------------------------------------------------------------------ #
 
-def test_an_admin_cannot_rewrite_what_the_owner_approved_on_an_agent(aw):
+def test_a_manage_agents_grant_cannot_rewrite_what_host_control_approved_on_an_agent(aw):
+    # Since 2026-10-19 an Admin holds admin_system; the guard is for a profile only granted
+    # manage_agents.
     from agents_world import spec
-    aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
+    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
     admin = aw.world.client(("203.0.113.62", 1))
-    assert aw.world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     stdio = {"x": {"transport": "stdio", "command": "node", "args": ["server.js"]}}
     remote = {"r": {"transport": "http", "url": "https://mcp.example/mcp",
                     "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
@@ -145,11 +147,13 @@ def test_an_admin_cannot_rewrite_what_the_owner_approved_on_an_agent(aw):
 
 # O-4 ------------------------------------------------------------------------ #
 
-def test_an_admin_cannot_move_a_saved_key_to_another_host(world):
+def test_a_manage_connections_grant_cannot_move_a_saved_key_to_another_host(world):
+    # Since 2026-10-19 an Admin holds admin_system and may; a Member granted
+    # manage_connections may not.
     owner = world.create_owner(world.client())
-    world.person(owner, "Ada", "admin", password="admin-pass1")
+    world.person(owner, "Max", "member", pin="5555", grants=["manage_connections"])
     admin = world.client(("203.0.113.63", 1))
-    assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    assert world.login(admin, name="Max", pin="5555").status_code == 200
     r = owner.post("/api/connections", json={"type": "openai_compatible", "name": "Box",
                                               "base_url": "http://127.0.0.1:9/v1",
                                               "api_key": "sk-house-key-0123456789"})  # scrub-ok: test fixture
@@ -161,8 +165,12 @@ def test_an_admin_cannot_move_a_saved_key_to_another_host(world):
     assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://127.0.0.1:10/v1"}).status_code == 200
     assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://203.0.113.99:9/v1",
                                                         "api_key": "sk-admins-own-0123456789"}).status_code == 200  # scrub-ok
-    # The Owner may move it.
+    # The Owner may move it, and so may an Admin.
     assert owner.patch(f"/api/connections/{cid}", json={"base_url": "http://198.51.100.7:9/v1"}).status_code == 200
+    world.person(owner, "Ada", "admin", password="admin-pass1")
+    ada = world.client(("203.0.113.64", 1))
+    assert world.login(ada, name="Ada", password="admin-pass1").status_code == 200
+    assert ada.patch(f"/api/connections/{cid}", json={"base_url": "http://198.51.100.8:9/v1"}).status_code == 200
 
 
 # O-5 ------------------------------------------------------------------------ #

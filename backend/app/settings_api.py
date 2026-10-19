@@ -70,7 +70,7 @@ async def settings_patch(request: Request, payload: dict[str, Any] = Body(...)):
                   if (d := settings_schema.get_def(k)) is not None and d.owner_only]
         if locked:
             raise fail(403, "permission_denied",
-                       f"Only the Owner can change {settings_schema.get_def(sorted(locked)[0]).label}.")
+                       f"Only the Owner or an Admin can change {settings_schema.get_def(sorted(locked)[0]).label}.")
     res = settings_store.set_many(changes, actor=actor(request), reset=reset, owner=is_owner)
     if res.errors:
         from fastapi.responses import JSONResponse

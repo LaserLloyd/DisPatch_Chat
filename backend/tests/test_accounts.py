@@ -231,8 +231,8 @@ def test_the_matrix():
     owner, admin = ROLE_PERMISSIONS[Role.OWNER], ROLE_PERMISSIONS[Role.ADMIN]
     member, kid = ROLE_PERMISSIONS[Role.MEMBER], ROLE_PERMISSIONS[Role.RESTRICTED]
     assert owner == set(Permission)
-    assert admin == set(Permission) - {Permission.ADMIN_SYSTEM}
-    assert kid < member < admin < owner
+    assert admin == set(Permission)                    # 2026-10-19: Admin is full
+    assert kid < member < admin == owner
     assert kid == {Permission.USE_CHAT, Permission.USE_VOICE}
     assert Permission.DISPATCH_AGENTS not in member
     assert not (kid & RESTRICTED_NEVER)
@@ -249,8 +249,8 @@ def test_grants_and_denies_stay_inside_the_role_ceiling():
     kid = policy.effective_permissions(_prof("restricted", grants=["manage_settings", "use_images",
                                                                    tool_permission("weather")]))
     assert "manage_settings" not in kid and "use_images" in kid and "use_tools:weather" in kid
-    adm = policy.effective_permissions(_prof("admin", grants=["admin_system"]))
-    assert "admin_system" not in adm
+    adm = policy.effective_permissions(_prof("admin"))
+    assert "admin_system" in adm                       # an Admin holds host control itself
     own = policy.effective_permissions(_prof("owner", denies=["manage_users"]))
     assert "manage_users" in own                       # the owner cannot be restricted
 

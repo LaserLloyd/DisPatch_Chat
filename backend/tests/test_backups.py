@@ -392,12 +392,16 @@ def test_the_api_creates_lists_verifies_and_restores(world, owner):
     assert owner.post("/api/backups/archive:ghost.dpbk/verify", json={}).json()["error"]["code"] == "backup_not_found"
 
 
-def test_backups_and_the_bundle_are_owner_only(world, owner):
+def test_backups_and_the_bundle_are_owner_and_admin_only(world, owner):
     world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
     assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    assert admin.get("/api/backups").status_code == 200   # admin_system: the Owner's and the Admins'
+    world.person(owner, "Max", "member", pin="5555")
+    member = world.client(("203.0.113.72", 42002))
+    assert world.login(member, name="Max", pin="5555").status_code == 200
     stranger = world.client(("203.0.113.71", 42001))
-    for c in (admin, stranger):                       # admin_system is the Owner's
+    for c in (member, stranger):
         assert c.get("/api/backups").status_code == 403
         assert c.post("/api/backups", json={}).status_code == 403
         assert c.post("/api/support-bundle").status_code == 403
@@ -441,11 +445,12 @@ def test_erase_follows_the_rank_rules(world, owner):
     admin = world.client()
     assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
     people = {p["name"]: p for p in owner.get("/api/people").json()["profiles"]}
-    assert admin.delete(f"/api/users/{people['Bob']['id']}").status_code == 403      # an Admin cannot touch an Admin
-    assert admin.get(f"/api/users/{people['Olive']['id']}/export").status_code == 403
+    assert admin.get(f"/api/users/{people['Olive']['id']}/export").status_code == 403  # THE Owner is off limits
+    assert admin.delete(f"/api/users/{people['Olive']['id']}").status_code == 403
     assert admin.delete(f"/api/users/{people['Ada']['id']}").status_code == 409     # not yourself
     assert owner.delete(f"/api/users/{people['Olive']['id']}").status_code == 409    # not the owner
     assert admin.delete(f"/api/users/{max_['id']}").status_code == 200
+    assert admin.delete(f"/api/users/{people['Bob']['id']}").status_code == 200      # another Admin: allowed
 
 
 # --------------------------------------------------------------------------- #

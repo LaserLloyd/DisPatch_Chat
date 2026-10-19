@@ -54,7 +54,7 @@ import { rowControls, addBotRow } from './bots-edit.js?v=4';
 // modules to extend without a cascade).
 import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?v=1';
 import { mountConnections } from './connections.js?v=1';
-import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=1';
+import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=2';
 import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
 import { maybeStartWizard } from './wizard.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
@@ -83,12 +83,12 @@ import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './vi
 import { aboutRow } from './about.js?v=21';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
-import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, audienceOf } from './profiles.js?v=1';
+import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, audienceOf } from './profiles.js?v=2';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
   paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
-} from './signin.js?v=1';
-import { mountPeopleSettings } from './people.js?v=1';
+} from './signin.js?v=2';
+import { mountPeopleSettings } from './people.js?v=2';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=1';
@@ -4099,9 +4099,9 @@ function mountLanguagePicker() {
   // reflect the current session and server config. Unlocked only.
   document.getElementById('viewer-row')?.remove();
   const filesGroup = document.getElementById('dev-group-files');
-  if (filesGroup) filesGroup.hidden = !isOwnerRole();
-  // The local viewer is host control (admin_system): the Owner's, not an Admin's or a Member's.
-  if (isOwnerRole() && filesBody) filesBody.append(viewerSection());
+  if (filesGroup) filesGroup.hidden = !isHostRole();
+  // The local viewer is host control (admin_system): the Owner's and the Admins', not a Member's.
+  if (isHostRole() && filesBody) filesBody.append(viewerSection());
 
   // About: version + the source link. In the Device pane on purpose — it is the
   // one settings tab a Safe-Mode session can open, so every user of the running
@@ -4358,14 +4358,15 @@ const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
 // a Member is signed in but must not be offered tabs that can only 403.
 const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'];
-// 3.0: tabs that are host control (admin_system) - the Owner's even among admins. Health is the
-// dashboard (logs, paths, process detail); an Admin would only collect 403s there.
-const OWNER_TABS = ['health'];
+// Tabs that need host control (admin_system) on top of being an admin. Since 2026-10-19 an Admin
+// holds every permission the Owner has, so this is empty: Health (the dashboard) is theirs too.
+const OWNER_TABS = [];
 // 3.0: the Bots tab is the character editor (GET /api/bots/all needs manage_characters). A Member
 // opens Settings for Theme / Device / Security and lands on the first of those instead.
 const CHARACTER_TABS = ['bots'];
 let settingsTab = 'bots';
-const isOwnerRole = () => !state.decoy && state.role === 'owner';
+/** Host control (admin_system): the Owner and Admins. */
+const isHostRole = () => canAdmin();
 /** Where Settings opens when no tab (or a tab this profile cannot have) is asked for. */
 const homeSettingsTab = () => (state.decoy || canAdmin() ? 'bots' : 'theme');   // Restricted never opens Settings
 
@@ -4490,7 +4491,7 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       break;
     case 'agents':
       await mountAgentsSettings(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), isOwner: state.role === 'owner',
+        toast, confirm: (msg, o) => uiConfirm(msg, o), isOwner: isHostRole(),
       });
       break;
     case 'people':
@@ -7740,17 +7741,17 @@ function applyAuthChrome() {
   // ordinary tabs but not these.
   for (const tab of ADMIN_TABS) {
     const b = document.getElementById(`stab-${tab}`);
-    if (b) b.classList.toggle('hidden', !canAdmin() || (OWNER_TABS.includes(tab) && !isOwnerRole()));
+    if (b) b.classList.toggle('hidden', !canAdmin() || (OWNER_TABS.includes(tab) && !isHostRole()));
   }
   for (const tab of CHARACTER_TABS) {
     const b = document.getElementById(`stab-${tab}`);
     if (b) b.classList.toggle('hidden', !state.decoy && !canAdmin());
   }
-  if (!isOwnerRole()) unmountDashboard();
+  if (!isHostRole()) unmountDashboard();
   if (!canAdmin()) {
     unmountReactionManager();
     if (ADMIN_TABS.includes(settingsTab) || (!state.decoy && CHARACTER_TABS.includes(settingsTab))) setSettingsTab(homeSettingsTab());
-  } else if (OWNER_TABS.includes(settingsTab) && !isOwnerRole()) {
+  } else if (OWNER_TABS.includes(settingsTab) && !isHostRole()) {
     setSettingsTab(homeSettingsTab());
   }
   // Dedicated unlock padlock: visible ONLY in locked/Safe Mode so family

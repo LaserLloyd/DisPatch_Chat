@@ -7,7 +7,7 @@
 //   Support bundle      a redacted zip for a bug report; prompts are left out unless ticked.
 //   Profile data        export or erase what DisPatch holds about one profile.
 //
-// Owner-only server side (admin_system); this module only decides what to OFFER. Everything that can
+// Owner and Admins server side (admin_system); this module only decides what to OFFER. Everything that can
 // lose data asks first, and a recovery key is shown exactly once.
 
 import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=1';
@@ -54,7 +54,7 @@ export function mountBackups(host, deps = {}) {
   const toast = deps.toast || (() => {});
   const ask = deps.confirm || (async () => true);
   host.textContent = '';
-  const owner = deps.role === 'owner' || deps.role == null;     // the server decides; admins just get a 403
+  const owner = deps.role === 'owner' || deps.role === 'admin' || deps.role == null;   // admin_system; the server decides
   if (!owner) {
     host.append(el('p', { class: 'muted', text: t('bkp.owner_only') }));
     return;

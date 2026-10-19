@@ -172,10 +172,11 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
         raise fail(422, "connection_invalid", "Nothing to change")
     existing = await asyncio.to_thread(connections.get, connection_id)
     if existing is not None:
-        # A connection may raise the permission needed to manage it, but only an Owner lowers it.
+        # A connection may raise the permission needed to manage it, but only the Owner or an
+        # Admin (host control) lowers it.
         perm = changes.get("required_permission")
         if perm and perm != existing.required_permission:
-            policy.of(request).require_owner()
+            policy.of(request).require(Permission.ADMIN_SYSTEM)
         need = existing.required_permission
         if need != "manage_connections":
             policy.of(request).require(need)
@@ -185,7 +186,7 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
             # the agent editor applies to MCP header secrets, and POST /api/connections/test to a
             # borrowed key).
             raise fail(403, "permission_denied",
-                       "Changing this connection's server keeps its saved key, so only the Owner can do it. "
+                       "Changing this connection's server keeps its saved key, so only the Owner or an Admin can do it. "
                        "Paste the key again (or clear it) to change the address.")
     try:
         c = await asyncio.to_thread(connections.update, connection_id, changes)

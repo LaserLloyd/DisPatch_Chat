@@ -54,9 +54,12 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     # Everything. Ownership transfer / owner deletion are owner-only checks in the
     # People API (they are not permissions: there is exactly one owner role).
     Role.OWNER: _ALL,
-    # Everything except host control. multi-user.md section 0: a host-control surface
-    # (the coding harness, wipe, full export, log tail) is Owner, not Admin.
-    Role.ADMIN: _ALL - {Permission.ADMIN_SYSTEM},
+    # Everything the Owner has, host control included (the owner, 2026-10-19: "Admin
+    # should have full permissions"). The one structural difference is not a
+    # permission: an Admin may not delete, disable, demote or change the credentials of
+    # THE Owner profile (people_api._may_manage), so nobody can lock the household's
+    # owner out of their own install.
+    Role.ADMIN: _ALL,
     # Chat, voice, images, tools the owner has enabled, push. No agent dispatch and no
     # configuration; an Owner/Admin can grant dispatch_agents per profile.
     Role.MEMBER: frozenset({

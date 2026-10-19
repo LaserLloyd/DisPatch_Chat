@@ -394,17 +394,22 @@ def test_set_many_refuses_owner_only_keys_for_a_non_owner(tmp_path, monkeypatch)
     assert not ok.errors and settings_store.resolve("connections.image_cli").value == "/bin/ok"
 
 
-def test_an_admin_cannot_change_a_host_control_setting(world, owner):
+def test_a_manage_settings_grant_is_not_host_control(world, owner):
+    """Host-control settings need admin_system: the Owner's and (since 2026-10-19) every
+    Admin's. A Member merely granted manage_settings is refused them."""
     boss = world.person(owner, "Boss", "admin", password="boss-password-1")  # scrub-ok: throwaway test fixture
     admin = world.client(("203.0.113.60", 40010))
     world.login(admin, profile_id=boss["id"], password="boss-password-1")  # scrub-ok: throwaway test fixture
-    assert admin.get("/api/settings").status_code == 200
-    ok = admin.patch("/api/settings", json={"set": {"characters.greeting": True}})
+    r = admin.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}})
+    assert r.status_code == 200, r.text
+    max_ = world.person(owner, "Max", "member", pin="5555", grants=["manage_settings"])
+    member = world.client(("203.0.113.61", 40011))
+    world.login(member, profile_id=max_["id"], pin="5555")
+    assert member.get("/api/settings").status_code == 200
+    ok = member.patch("/api/settings", json={"set": {"characters.greeting": True}})
     assert ok.status_code == 200, ok.text
     for body in ({"set": {"connections.image_cli": "/bin/evil"}}, {"set": {"tools.openclaw_bin": "/bin/evil"}},
                  {"reset": ["system.backup_keep"]}):
-        r = admin.patch("/api/settings", json=body)
+        r = member.patch("/api/settings", json=body)
         assert r.status_code == 403, (body, r.text)
-    assert owner.get("/api/settings").json()["values"]["connections.image_cli"]["is_default"] is True
-    assert owner.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}}).status_code == 200
-    assert admin.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403
+    assert member.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403

@@ -49,21 +49,22 @@ test('admin surfaces are for owner and admin only; a Member is signed in but not
   assert.equal(P.isAdminRole(undefined), false);
 });
 
-test('canManage mirrors the server: Owner manages all others, Admin only Member/Restricted', () => {
+test('canManage mirrors the server: the Owner and Admins manage everyone but THE Owner', () => {
   assert.equal(P.canManage('owner', 'admin'), true);
   assert.equal(P.canManage('owner', 'owner'), false);
   assert.equal(P.canManage('admin', 'member'), true);
   assert.equal(P.canManage('admin', 'restricted'), true);
-  assert.equal(P.canManage('admin', 'admin'), false);
+  assert.equal(P.canManage('admin', 'admin'), true);
   assert.equal(P.canManage('admin', 'owner'), false);
   assert.equal(P.canManage('member', 'restricted'), false);
   assert.equal(P.canManage('restricted', 'member'), false);
 });
 
-test('the Admin role is offered only to the Owner, and only once the Owner has a password', () => {
+test('the Admin role is offered to the Owner and Admins, once the Owner has a password', () => {
   assert.deepEqual(P.roleOptions('owner', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
   assert.deepEqual(P.roleOptions('owner', false), { options: ['member', 'restricted'], adminBlocked: 'owner_needs_password' });
-  assert.deepEqual(P.roleOptions('admin', true), { options: ['member', 'restricted'], adminBlocked: 'not_owner' });
+  assert.deepEqual(P.roleOptions('admin', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
+  assert.deepEqual(P.roleOptions('member', true), { options: ['member', 'restricted'], adminBlocked: 'not_owner' });
 });
 
 // ------------------------------------------------------------- credentials
@@ -679,14 +680,14 @@ test('People tab: a row per profile with role badge and PIN / password / disable
   assert.ok(rows[1].querySelector('button[aria-label="Edit Ops"]'));
 });
 
-test('People tab: an Admin manages Members and Restricted, not other Admins, and has no Machine access', { skip: dom.skip }, async () => {
+test('People tab: an Admin manages everyone but the Owner, other Admins included, and has Machine access', { skip: dom.skip }, async () => {
   const { pane } = await mountPeople('admin');
   const editable = [...pane.querySelectorAll('.people-row')].filter((r) => r.querySelector('button')).map((r) => r.dataset.person);
-  assert.deepEqual(editable, ['m1', 'r1']);
-  assert.equal(pane.querySelector('#people-machine'), null);
+  assert.ok(!editable.includes('o1'), 'THE Owner is never editable by an Admin');
+  assert.ok(editable.includes('m1') && editable.includes('r1'), editable.join());
   pane.querySelector('#people-add').click();
   const roles = [...pane.querySelectorAll('#people-editor select option')].map((o) => o.value);
-  assert.deepEqual(roles, ['member', 'restricted'], 'only the Owner can add an Admin');
+  assert.deepEqual(roles, ['admin', 'member', 'restricted'], 'an Admin can add an Admin');
 });
 
 test('People tab: the Owner sees the Admin role only when they have a password', { skip: dom.skip }, async () => {
@@ -832,9 +833,9 @@ test('index.html: the People tab is admin-only, before Security, with its pane',
 
 test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
   assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
-  // 2026-10-19: !canAdmin() still hides every admin tab; Health (OWNER_TABS) is also hidden
-  // from an Admin, because the dashboard is host control (admin_system).
-  assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isOwnerRole\(\)\)\)/);
+  // !canAdmin() hides every admin tab. OWNER_TABS is empty since Admins hold admin_system
+  // (2026-10-19).
+  assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isHostRole\(\)\)\)/);
   assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'\];/);
   assert.match(MAIN, /case 'people':\s+await mountPeopleSettings/);
 });

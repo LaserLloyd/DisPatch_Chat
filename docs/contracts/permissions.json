@@ -84,6 +84,7 @@
   ],
   "role_permissions": {
     "admin": [
+      "admin_system",
       "approve_agent_actions",
       "dispatch_agents",
       "manage_agents",
