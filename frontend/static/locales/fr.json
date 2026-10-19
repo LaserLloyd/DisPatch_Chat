@@ -1694,8 +1694,10 @@
   "restricted": {
     "banner": "L’owner voit un résumé de l’activité de ce profil. Les discussions sont gardées sur l’ordinateur hôte et sont partagées : toute personne qui peut utiliser le même personnage peut les lire, y compris les autres profils et les appareils non connectés si cette installation le permet.",
     "region": "[fr] Restricted profile",
-    "more": "[fr] What can the owner see?",
-    "panel_title": "[fr] Your activity summary",
+    "more": "Qui peut voir quoi ?",
+    "panel_title": "Qui peut voir quoi",
+    "panel_chats": "L’owner et les admins peuvent aussi ouvrir les discussions de ce profil, comme toute personne qui peut utiliser le même personnage. Voici le résumé qu’ils voient.",
+    "summary_title": "Le résumé de votre activité",
     "today": "[fr] Today",
     "today_empty": "[fr] Nothing used yet today.",
     "week": "[fr] Last 7 days",

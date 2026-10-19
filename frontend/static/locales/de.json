@@ -1669,8 +1669,10 @@
   "restricted": {
     "banner": "Der Owner sieht eine Zusammenfassung der Aktivität dieses Profils. Chats liegen auf dem Host-Computer und sind geteilt: Alle, die dieselbe Figur nutzen können, können sie lesen, auch andere Profile und Geräte ohne Anmeldung, wenn diese Installation das erlaubt.",
     "region": "[de] Restricted profile",
-    "more": "[de] What can the owner see?",
-    "panel_title": "[de] Your activity summary",
+    "more": "Wer sieht was?",
+    "panel_title": "Wer sieht was",
+    "panel_chats": "Der Owner und die Admins können die Chats dieses Profils ebenfalls öffnen, wie alle anderen, die dieselbe Figur nutzen können. Unten steht die Zusammenfassung, die sie sehen.",
+    "summary_title": "Deine Aktivitätsübersicht",
     "today": "[de] Today",
     "today_empty": "[de] Nothing used yet today.",
     "week": "[de] Last 7 days",

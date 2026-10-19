@@ -332,6 +332,10 @@ export async function openRestrictedPanel({ fetchActivity }) {
   body.append(
     el('h3', { class: 'ui-dialog-title', id: 'restricted-title', text: t('restricted.panel_title') }),
     el('p', { class: 'ui-dialog-msg', text: t('restricted.banner') }),
+    // The banner's link promises "who can see what": the activity summary is only
+    // part of it, so say plainly that the Owner and Admins can open the chats too.
+    el('p', { class: 'ui-dialog-msg', text: t('restricted.panel_chats') }),
+    el('h4', { class: 'people-subtitle', text: t('restricted.summary_title') }),
   );
   const holder = el('div', { class: 'restricted-holder', 'aria-live': 'polite' }, [
     el('p', { class: 'muted', text: t('common.loading') })]);

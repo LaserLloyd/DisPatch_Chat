@@ -1669,8 +1669,10 @@
   "restricted": {
     "banner": "The owner can see a summary of this profile's activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven't signed in if this install lets them.",
     "region": "Restricted profile",
-    "more": "What can the owner see?",
-    "panel_title": "Your activity summary",
+    "more": "Who can see what?",
+    "panel_title": "Who can see what",
+    "panel_chats": "The Owner and Admins can open this profile's chats too, like anyone else who can use the same character. Below is the summary they see.",
+    "summary_title": "Your activity summary",
     "today": "Today",
     "today_empty": "Nothing used yet today.",
     "week": "Last 7 days",

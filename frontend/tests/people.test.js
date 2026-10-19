@@ -600,6 +600,22 @@ test('restricted banner: slim, non-dismissible, with the disclosure and a link t
   assert.equal(host.childNodes.length, 0);
 });
 
+test('restricted panel: the link says who can see what, and the panel says the Owner and Admins can open the chats', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const { paintRestrictedBanner, openRestrictedPanel } = await import(`../static/js/signin.js?t=${Math.random()}`);
+  const host = win.document.getElementById('restricted-banner');
+  paintRestrictedBanner(host, { show: true, onMore: () => {} });
+  assert.equal(host.querySelector('.restricted-more').textContent, 'Who can see what?');
+  const D = win.HTMLDialogElement && win.HTMLDialogElement.prototype;
+  if (D && !D.showModal) { D.showModal = function () { this.open = true; }; D.close = function () { this.open = false; }; }
+  const dlg = await openRestrictedPanel({ fetchActivity: async () => ({ today: {}, limits: {}, summary: [] }) });
+  assert.equal(dlg.querySelector('.ui-dialog-title').textContent, 'Who can see what');
+  const text = dlg.textContent;
+  assert.match(text, /The Owner and Admins can open this profile's chats too/);
+  assert.match(text, /Your activity summary/, 'the summary keeps its own heading');
+  dlg.remove();
+});
+
 test('access notice: time_limit and quiet_hours each get their own words', { skip: dom.skip }, async () => {
   const win = await boot();
   const { paintAccessNotice } = await import(`../static/js/signin.js?t=${Math.random()}`);

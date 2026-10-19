@@ -122,8 +122,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
@@ -386,8 +384,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
@@ -650,8 +646,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
@@ -914,8 +908,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
@@ -1178,8 +1170,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
@@ -1442,8 +1432,6 @@ New:
 - `chip.lock`
 - `restricted.banner`
 - `restricted.region`
-- `restricted.more`
-- `restricted.panel_title`
 - `restricted.today`
 - `restricted.today_empty`
 - `restricted.week`
