@@ -108,26 +108,39 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #   github (default)  the archive of VOICE_REF on GitHub; the builder needs no git.
 #   local             the directory passed as `--build-context voice-src=<dir>`.
 # VOICE_REF is a full ref (`refs/heads/<branch>`, `refs/tags/<tag>`) or a bare tag
-# name. It defaults to the 3.0 refactor branch of the add-on, which carries the
+# name. It defaults to `refs/heads/main` of the add-on, which carries the
 # 1.6.0 line (one models folder, the host credential store, settings schema). The
 # moving tag `v1` still names 1.5.0.
 #   TODO(release): when 1.6.0 is tagged, default this to `refs/tags/v1.6.0`
 #   (or `v1` once that tag moves). Move it together with js/voice-absent.js VOICE_TAG.
+# A ref older than 1.6.0 (v1.5.0) has no packages/forge-voice-core and cannot be built this way.
 ARG VOICE=0
 ARG VOICE_SRC=github
 ARG VOICE_REF=refs/heads/main
+# The add-on is two packages from one repository: `dispatch-voice` and the host-independent engines it
+# depends on, `forge-voice-core` (packages/forge-voice-core/). Both are installed from the SAME source
+# through an uv override, so a tag or branch builds against its own copy of the engines whatever the
+# add-on's pyproject says, and `--no-sources` stops uv from honouring the add-on's `[tool.uv.sources]`
+# path entry. That entry is an EDITABLE install: under VOICE_SRC=local it would leave a .pth pointing at
+# /voice-src, a bind mount that exists only during this RUN, and the runtime image would fail with
+# `No module named 'forge_voice_core'`. The last line imports both so a broken install fails the build.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=voice-src,target=/voice-src \
     set -eu; \
     if [ "$VOICE" = "1" ]; then \
       if [ "$VOICE_SRC" = "local" ]; then \
         [ -f /voice-src/pyproject.toml ] || { echo "VOICE_SRC=local needs --build-context voice-src=<DisPatch_Voice checkout>"; exit 1; }; \
-        uv pip install --python /app/.venv/bin/python /voice-src; \
+        [ -f /voice-src/packages/forge-voice-core/pyproject.toml ] || { echo "VOICE_SRC=local: /voice-src has no packages/forge-voice-core (needs DisPatch_Voice 1.6 or newer)"; exit 1; }; \
+        echo "forge-voice-core[speechforge] @ file:///voice-src/packages/forge-voice-core" > /tmp/voice-override.txt; \
+        uv pip install --python /app/.venv/bin/python --no-sources --override /tmp/voice-override.txt /voice-src; \
       else \
         case "$VOICE_REF" in refs/*) ref="$VOICE_REF" ;; *) ref="refs/tags/$VOICE_REF" ;; esac; \
-        uv pip install --python /app/.venv/bin/python \
-          "dispatch-voice @ https://github.com/LaserLloyd/DisPatch_Voice/archive/${ref}.tar.gz"; \
+        url="https://github.com/LaserLloyd/DisPatch_Voice/archive/${ref}.tar.gz"; \
+        echo "forge-voice-core[speechforge] @ ${url}#subdirectory=packages/forge-voice-core" > /tmp/voice-override.txt; \
+        uv pip install --python /app/.venv/bin/python --no-sources --override /tmp/voice-override.txt "dispatch-voice @ ${url}"; \
       fi; \
+      rm -f /tmp/voice-override.txt; \
+      /app/.venv/bin/python -I -c "import dispatch_voice, forge_voice_core"; \
     fi
 
 # Strip caches the previous layers created. Saves ~10-20 MB and, more usefully,
