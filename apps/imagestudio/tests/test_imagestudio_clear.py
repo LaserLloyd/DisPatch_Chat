@@ -66,7 +66,7 @@ def test_oldest_first_clears_the_picture_and_every_newer_one(world):
 def test_the_order_is_required_never_guessed(world):
     owner = world.create_owner()
     rows = _seed(3)
-    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"})
+    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"]})   # no order
     assert r.status_code == 422, r.text
     assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
 
