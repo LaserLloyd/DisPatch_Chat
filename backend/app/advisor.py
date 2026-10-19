@@ -771,9 +771,21 @@ _index_lock = threading.Lock()
 def _embed_config(raw: dict | None) -> knowledge.EmbedConfig | None:
     if not raw or not raw.get("base_url") or not raw.get("model"):
         return None
+    key = llm_api.resolve_key(raw)
+    if not key and not raw.get("connection"):
+        # 3.0 moved provider keys into connections but left `embeddings:` blocks as
+        # they were; a rig that now wants a key answered every embedding with 401 and
+        # search went keyword-only, silently. Borrow the key of the connection for
+        # the same server (ops check 2026-10-19).
+        try:
+            from . import connections
+            key = connections.credential_for_url(str(raw["base_url"])) or ""
+        except Exception:
+            log.warning("could not look up a connection key for the embeddings server",
+                        exc_info=True)
     return knowledge.EmbedConfig(
         base_url=str(raw["base_url"]), model=str(raw["model"]),
-        api_key=llm_api.resolve_key(raw),
+        api_key=key,
         timeout_s=float(raw.get("timeout_s") or 2.0),
         voice_timeout_s=float(raw.get("voice_timeout_s") or knowledge.VOICE_TIMEOUT_S),
         extra_body=dict(raw.get("extra_body") or {}))
