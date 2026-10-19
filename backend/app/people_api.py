@@ -3,8 +3,8 @@
 * ``/api/auth/login`` and ``/api/auth/switch`` - sign in as a profile (Owner PIN or
   password, Admin password, Member/Restricted PIN) or, for a Restricted profile with
   no PIN, simply pick it. Throttled per (device, profile), per address, and globally.
-* ``/api/auth/me``, ``/api/auth/password``, ``/api/auth/api-token`` - who am I, change
-  my password, the machine API key.
+* ``/api/auth/me``, ``/api/auth/password``, ``/api/auth/pin``, ``/api/auth/api-token`` - who
+  am I, change my password or my own PIN, the machine API key.
 * ``/api/people`` - list / create / change / delete profiles, set PINs and passwords,
   sign a profile out, bind this device to a default profile, the activity summary and
   the admin audit log. Declared ``manage_users`` (or ``view_activity``) in
@@ -389,6 +389,51 @@ async def auth_password(request: Request, payload: PasswordIn):
     return session_response(request, {"ok": True}, fresh, persistent=False)
 
 
+class OwnPinIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current: str = Field(default="", max_length=256)
+    new: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/api/auth/pin", dependencies=[_CHAT])
+async def auth_own_pin(request: Request, payload: OwnPinIn):
+    """Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.
+
+    Confirmed with the current PIN (an Admin without a PIN yet confirms with the password).
+    The Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted
+    profile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like
+    every other credential check."""
+    pr = _caller(request)
+    prof = pr.profile
+    if prof is None:
+        return _problem(403, "permission_denied", "Sign in to a profile to change its PIN.")
+    if prof.role == "owner":
+        return _problem(409, "owner_immutable", "The Owner's PIN is the install PIN; change it in Settings > Account.")
+    if prof.role not in ("member", "admin"):
+        return _problem(403, "permission_denied", "The Owner or an Admin sets this profile's PIN.")
+    pkey = prof.id
+    blocked = _throttled(request, pkey)
+    if blocked is not None:
+        return blocked
+    if prof.has_pin:
+        ok = bool(payload.current) and auth.verify_profile_secret(prof, "pin", payload.current)
+    elif prof.has_password:
+        ok = bool(payload.current) and auth.verify_profile_secret(prof, "password", payload.current)
+    else:
+        ok = False
+    if not ok:
+        return _failed(request, pkey, prof.name)
+    _succeeded(request, pkey)
+    try:
+        auth.set_profile_pin(prof.id, payload.new)
+    except accounts.AccountError as e:
+        return _account_error(e)
+    accounts.log_activity("pin_changed", profile_id=prof.id, category="audit")
+    # set_profile_pin signs the profile out everywhere; keep THIS device in.
+    fresh = accounts.get_profile(prof.id)
+    return session_response(request, {"ok": True}, fresh, persistent=False)
+
+
 class MachineIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rotate: bool = False
@@ -564,7 +609,7 @@ async def people_create(request: Request, payload: PersonIn):
     if not accounts.has_owner():
         auth.ensure_owner_for_pin()
     if not accounts.has_owner():
-        return _problem(409, "owner_required", "Create the owner account first (Settings > Security).")
+        return _problem(409, "owner_required", "Create the owner account first (Settings > Account).")
     if not _may_manage(caller, payload.role):
         return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
     try:
@@ -675,7 +720,7 @@ async def people_set_pin(request: Request, profile_id: str, payload: SecretIn):
         return err
     assert prof is not None
     if prof.role == "owner":
-        return _problem(409, "owner_immutable", "Change the Owner's PIN in Settings > Security.")
+        return _problem(409, "owner_immutable", "Change the Owner's PIN in Settings > Account.")
     try:
         auth.set_profile_pin(profile_id, payload.pin)
     except accounts.AccountError as e:
@@ -710,7 +755,7 @@ async def people_set_password(request: Request, profile_id: str, payload: Secret
         return err
     assert prof is not None
     if prof.id == caller.profile_id or prof.role == "owner" or not caller.is_operator:
-        return _problem(409, "permission_denied", "Use Settings > Security to change your own password.")
+        return _problem(409, "permission_denied", "Use Settings > Account to change your own password.")
     try:
         auth.set_profile_password(profile_id, payload.password)
     except accounts.AccountError as e:

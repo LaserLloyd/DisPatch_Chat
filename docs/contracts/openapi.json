@@ -2643,6 +2643,28 @@
         "title": "NetworkIn",
         "type": "object"
       },
+      "OwnPinIn": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Current",
+            "type": "string"
+          },
+          "new": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "New",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new"
+        ],
+        "title": "OwnPinIn",
+        "type": "object"
+      },
       "PasswordIn": {
         "additionalProperties": false,
         "properties": {
@@ -5613,6 +5635,43 @@
           }
         },
         "summary": "Auth Password"
+      }
+    },
+    "/api/auth/pin": {
+      "post": {
+        "description": "Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.\n\nConfirmed with the current PIN (an Admin without a PIN yet confirms with the password).\nThe Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted\nprofile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like\nevery other credential check.",
+        "operationId": "auth_own_pin_api_auth_pin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnPinIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Own Pin"
       }
     },
     "/api/auth/recover": {

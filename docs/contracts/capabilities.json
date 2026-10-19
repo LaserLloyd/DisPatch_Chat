@@ -1379,6 +1379,7 @@
     "POST /api/apps/jobboard/{job_id}/feedback",
     "POST /api/apps/jobboard/{job_id}/tags",
     "POST /api/apps/jobboard/{job_id}/vote",
+    "POST /api/auth/pin",
     "POST /api/avatar-pool/{bot_id}/refill",
     "POST /api/guide/seed",
     "POST /api/harness/jobs/cancel",

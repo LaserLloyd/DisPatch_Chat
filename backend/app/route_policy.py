@@ -65,6 +65,7 @@ _r("GET", "/tools/_t/{ticket}/{rel:path}", public("capability URL: the random, e
 _r("POST", "/api/auth/remember-config", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/forget-devices", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only the Owner and Admins have one"))
+_r("POST", "/api/auth/pin", _R(P.USE_CHAT, note="YOUR OWN PIN (a Member or an Admin; current credential required, throttled); the Owner's is the install PIN"))
 _r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="the Owner and Admins (checked in the handler); shown once"))
 _r("GET", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="reports whether a token exists; never the token"))
 

@@ -658,3 +658,48 @@ def test_the_restricted_disclosure_matches_who_can_read_a_childs_chats(world, ow
     assert "owner can see" in text
     assert "same character" in text and "other profiles" in text
     assert "haven't signed in" in text
+
+
+# --------------------------------------------------------------------------- #
+# 3.2: a Member changes their own PIN (Settings -> Account)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_member_changes_their_own_pin_with_the_current_one(world, owner):
+    world.person(owner, "Max", "member", pin="5555")
+    c = world.client()
+    assert world.login(c, name="Max", pin="5555").status_code == 200
+    r = c.post("/api/auth/pin", json={"current": "0000", "new": "7777"})
+    assert r.status_code == 401 and r.json()["error"]["code"] == "incorrect_credential"
+    r = c.post("/api/auth/pin", json={"current": "5555", "new": "7777"})
+    assert r.status_code == 200, r.text
+    # This device stays signed in; the new PIN is the one that works.
+    assert c.get("/api/auth/me").json()["profile"]["name"] == "Max"
+    assert world.login(world.client(), name="Max", pin="5555").status_code == 401
+    assert world.login(world.client(), name="Max", pin="7777").status_code == 200
+    kinds = [e["kind"] for e in owner.get("/api/people/audit").json()["entries"]]
+    assert "pin_changed" in kinds
+
+
+def test_own_pin_refuses_a_weak_pin_and_the_owner_and_restricted(world, owner):
+    world.person(owner, "Max", "member", pin="5555")
+    world.person(owner, "Mia", "restricted")
+    c = world.client()
+    assert world.login(c, name="Max", pin="5555").status_code == 200
+    assert c.post("/api/auth/pin", json={"current": "5555", "new": "12"}).status_code == 400
+    # The Owner's PIN is the install PIN: its own route.
+    r = owner.post("/api/auth/pin", json={"current": "2468", "new": "1357"})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "owner_immutable"
+    kid = world.client()
+    assert world.login(kid, name="Mia").status_code == 200
+    assert kid.post("/api/auth/pin", json={"current": "", "new": "1234"}).status_code == 403
+    # A device nobody signed in on has no profile to change.
+    assert world.client().post("/api/auth/pin", json={"current": "", "new": "1234"}).status_code in (401, 403)
+
+
+def test_own_pin_attempts_are_throttled(world, owner):
+    world.person(owner, "Max", "member", pin="5555")
+    c = world.client()
+    assert world.login(c, name="Max", pin="5555").status_code == 200
+    codes = [c.post("/api/auth/pin", json={"current": "0000", "new": "7777"}).status_code for _ in range(12)]
+    assert 429 in codes
