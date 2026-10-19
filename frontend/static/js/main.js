@@ -34,7 +34,7 @@ import {
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
-} from './quick-actions.js?v=3';
+} from './quick-actions.js?v=4';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=16';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
