@@ -1642,7 +1642,7 @@
     "lock": "[zh] Lock"
   },
   "restricted": {
-    "banner": "管理者能看到这个资料的活动摘要。聊天保存在主机电脑上，并且是共享的：能使用同一个角色的人都能读到，其他资料也可以；如果此安装允许，未登录的设备也可以。",
+    "banner": "Owner 能看到这个资料的活动摘要。聊天保存在主机电脑上，并且是共享的：能使用同一个角色的人都能读到，其他资料也可以；如果此安装允许，未登录的设备也可以。",
     "region": "[zh] Restricted profile",
     "more": "[zh] What can the owner see?",
     "panel_title": "[zh] Your activity summary",
