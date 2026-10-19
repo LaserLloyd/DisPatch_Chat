@@ -1992,6 +1992,9 @@
     "feat_voice_hint": "How this character sounds in voice chat.",
     "more_title": "More",
     "more_aria": "More for {name}",
+    "menu_park": "Move to Tools & more (this device)",
+    "menu_unpark": "Move back to the menu bar (this device)",
+    "parked": "· in Tools & more",
     "reactions_hint": "Pictures a character can show to say how it feels",
     "pools_status": {
       "one": "{count} pool",

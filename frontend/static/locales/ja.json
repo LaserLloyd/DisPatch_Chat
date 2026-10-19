@@ -1964,6 +1964,9 @@
     "feat_voice_hint": "音声チャットでのこのキャラクターの声です。",
     "more_title": "その他",
     "more_aria": "{name} のその他の操作",
+    "menu_park": "「ツールとその他」に移動（この端末）",
+    "menu_unpark": "メニューバーに戻す（この端末）",
+    "parked": "・「ツールとその他」内",
     "reactions_hint": "キャラクターが気持ちを伝えるために見せる画像",
     "pools_status": {
       "other": "プール {count} 件"

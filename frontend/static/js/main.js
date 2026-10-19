@@ -4835,6 +4835,7 @@ function renderBotManager() {
         undo: () => { Object.assign(bmBots[idx], flagsForWho(from)); renderBotManager(); saveRoster({ quiet: true }); },
       });
     });
+    const parkedTag = isMenuBot(bot.id) ? el('span', { class: 'bm-parked', text: t('chars.parked') }) : null;
     const narrowed = (bot.profiles || []).length
       ? el('span', { class: 'bm-narrow', title: t('chars.who_profiles_title'), text: t('chars.who_profiles', { count: bot.profiles.length }) })
       : null;
@@ -4889,6 +4890,13 @@ function renderBotManager() {
       if (!nimEnabled()) items.push({ label: t('settings.change_photo_short'), run: () => pickAvatarFile(bot.id) });
       items.push({ label: t('bots_edit.edit_title'), run: () => ctl.edit.click() });
       if (ctl.persona) items.push({ label: t('persona.button_title'), run: () => ctl.persona.click() });
+      // Where the character sits on THIS device: the menu bar, or parked in Tools & more
+      // (device-local, like the rail layout; nothing on the server changes).
+      const parked = isMenuBot(bot.id);
+      items.push({
+        label: t(parked ? 'chars.menu_unpark' : 'chars.menu_park'),
+        run: () => { toggleMenuBot(bot.id); renderSidebar(); renderBotManager(); },
+      });
       items.push({ label: t('bots_edit.remove'), run: () => ctl.remove.click(), danger: true });
       openRowMenu(moreBtn, items);
     });
@@ -4899,7 +4907,7 @@ function renderBotManager() {
       avatarImg,
       el('div', { class: 'bm-name-block' }, [
         el('span', { class: 'bm-name', text: bot.name }),
-        el('span', { class: 'bm-meta' }, [ctl.badge, ...icons, narrowed, ctl.notConnected]),
+        el('span', { class: 'bm-meta' }, [ctl.badge, ...icons, narrowed, parkedTag, ctl.notConnected]),
       ]),
       who,
       detailsBtn,

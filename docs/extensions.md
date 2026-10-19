@@ -33,8 +33,9 @@ How an extension differs from the other two ways of adding to DisPatch:
 
 An extension can add a tab of its own to Settings: ask the shell for a Settings
 pane with a new id (lowercase letters, digits and hyphens) and a title, and the
-tab and its pane are created for you, placed after Voice. Ids the shell already
-knows keep their place. A package can also add lookups for the bots to use, by
+tab and its pane are created for you, in an **Add-ons** group after the household
+sections. Ids the shell already knows (the sections and every tab id earlier versions
+had) keep their place and open the section that holds those controls now. A package can also add lookups for the bots to use, by
 registering tool specs on the extension context (`register_live_tools`). Settings →
 Plugins & Apps lists every installed add-on and lets you switch one off (the choice is
 kept in `extensions.yaml`, see [configuration.md](configuration.md)). The
@@ -725,15 +726,18 @@ every palette applies; keep your stylesheet to what nothing in the shell has.
 
 `shell.settings.pane(id, spec)` has two modes:
 
-- **`'voice'`** is pre-declared: the tab always exists (it shows the install
-  page until the voice add-on claims it) and keeps its place in the strip.
-- **Any other id** matching `[a-z][a-z0-9-]{1,30}` (and not one of the built-in
-  tabs: `bots`, `theme`, `device`, `voice`, `plugins`, `ai`, `reactions`,
-  `health`, `security`) creates a tab on demand. The shell builds the tab
-  button (`stab-<id>`) and the pane (`spane-<id>`) and places them **after
-  Voice and before Plugins**, so the strip reads: core tabs, add-in tabs, setup
-  tabs. `dispose()` (or your `unmount()`, a lock, or a failed mount) removes
+- **`'voice'`** is pre-declared: the section always exists (it shows the install
+  page until the voice add-on claims it) and keeps its place in the nav.
+- **Any other id** matching `[a-z][a-z0-9-]{1,30}` (and not a section id or one of
+  the old tab ids, which stay reserved as aliases: `appearance`, `account`, `voice`,
+  `characters`, `connections`, `people`, `plugins`, `system`, `bots`, `theme`,
+  `device`, `ai`, `agents`, `reactions`, `health`, `security`, `settings`) creates a
+  tab on demand. The shell builds the nav button (`stab-<id>`) and the pane
+  (`spane-<id>`) and places them in the **Add-ons** group, after the household
+  sections. `dispose()` (or your `unmount()`, a lock, or a failed mount) removes
   both again.
+- **`settings.open(id)`** takes a section id, an old tab id (`'theme'` opens
+  Appearance, `'bots'` Characters) or `'section#anchor'` to open a subsection.
 
 ```js
 const dispose = shell.settings.pane('stats', {

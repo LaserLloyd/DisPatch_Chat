@@ -5064,7 +5064,8 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .bm-narrow { white-space: nowrap; }
 .bm-who { flex: 0 1 190px; min-width: 0; max-width: 210px; }
 .bm-details-btn { flex: none; min-height: 34px; }
-.bm-more-btn { flex: none; }
+.bm-more-btn { flex: none; color: var(--text-secondary); }
+.bm-more-btn:hover, .bm-more-btn[aria-expanded="true"] { color: var(--text-primary); }
 /* ▲/▼: on a desktop the drag handle does it (the buttons stay for the keyboard,
    shown while the row has focus or the pointer); on a phone only in Reorder mode. */
 .bm-move { display: none; }
@@ -5219,3 +5220,4 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 }
 #spane-account > .host-notice { margin-top: 12px; }
 @media (max-width: 899px) { #spane-account > .host-notice { margin-inline: 12px; } }
+.bm-parked { white-space: nowrap; }

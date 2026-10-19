@@ -291,6 +291,8 @@ test('main.js builds every Characters row: who-can-see select, Details, the ⋯ 
   assert.match(MAIN, /run: \(\) => ctl\.edit\.click\(\)/);
   assert.match(MAIN, /run: \(\) => ctl\.persona\.click\(\)/);
   assert.match(MAIN, /run: \(\) => ctl\.remove\.click\(\), danger: true/);
+  // Parking a character in Tools & more (this device only) moved from the ⌥ pill into the ⋯ menu.
+  assert.match(MAIN, /label: t\(parked \? 'chars\.menu_unpark' : 'chars\.menu_park'\),\s+run: \(\) => \{ toggleMenuBot\(bot\.id\); renderSidebar\(\); renderBotManager\(\); \},/);
   // Add is a menu: a blank character, or a starter pack.
   assert.match(MAIN, /showAddCharacter\(\)/);
   assert.match(MAIN, /const row = addBotRow\(\{/);

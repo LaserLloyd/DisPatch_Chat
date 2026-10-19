@@ -2017,6 +2017,9 @@
     "feat_voice_hint": "La voix de ce personnage en chat vocal.",
     "more_title": "Plus",
     "more_aria": "Plus pour {name}",
+    "menu_park": "Déplacer dans Outils et plus (cet appareil)",
+    "menu_unpark": "Remettre dans la barre de menu (cet appareil)",
+    "parked": "· dans Outils et plus",
     "reactions_hint": "Des images qu’un personnage peut montrer pour dire ce qu’il ressent",
     "pools_status": {
       "one": "{count} réserve",

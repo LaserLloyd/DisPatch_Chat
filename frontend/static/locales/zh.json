@@ -1964,6 +1964,9 @@
     "feat_voice_hint": "这个角色在语音聊天中的声音。",
     "more_title": "更多",
     "more_aria": "{name} 的更多选项",
+    "menu_park": "移到“工具和更多”（此设备）",
+    "menu_unpark": "移回菜单栏（此设备）",
+    "parked": "· 在“工具和更多”中",
     "reactions_hint": "角色用来表达心情的图片",
     "pools_status": {
       "other": "{count} 个头像池"

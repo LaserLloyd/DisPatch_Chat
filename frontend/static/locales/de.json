@@ -1992,6 +1992,9 @@
     "feat_voice_hint": "Wie diese Figur im Sprachchat klingt.",
     "more_title": "Mehr",
     "more_aria": "Mehr für {name}",
+    "menu_park": "In „Tools & mehr“ verschieben (dieses Gerät)",
+    "menu_unpark": "Zurück in die Menüleiste (dieses Gerät)",
+    "parked": "· in „Tools & mehr“",
     "reactions_hint": "Bilder, mit denen eine Figur zeigt, wie sie sich fühlt",
     "pools_status": {
       "one": "{count} Pool",

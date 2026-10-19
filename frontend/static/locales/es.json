@@ -2017,6 +2017,9 @@
     "feat_voice_hint": "Cómo suena este personaje en el chat de voz.",
     "more_title": "Más",
     "more_aria": "Más opciones de {name}",
+    "menu_park": "Mover a Herramientas y más (este dispositivo)",
+    "menu_unpark": "Volver a la barra de menú (este dispositivo)",
+    "parked": "· en Herramientas y más",
     "reactions_hint": "Imágenes que un personaje puede mostrar para expresar cómo se siente",
     "pools_status": {
       "one": "{count} reserva",
