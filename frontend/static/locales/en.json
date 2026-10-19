@@ -141,7 +141,10 @@
     "removed": "Quick action removed",
     "picked": "{name}. Type or paste the text, then press Enter.",
     "sent_with": "Sent with the quick action “{name}”",
-    "rejected": "That quick action is no longer available. The list was refreshed."
+    "rejected": "That quick action is no longer available. The list was refreshed.",
+    "upload": "Upload a file",
+    "upload_title": "Attach a file to your next message",
+    "upload_chip": "Upload to chat"
   },
   "composer": {
     "attach": "Attach file",

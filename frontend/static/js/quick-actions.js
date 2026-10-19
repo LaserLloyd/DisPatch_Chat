@@ -10,7 +10,12 @@
 //     placeholder to the action's hint, and the next send carries
 //     `action: "<id>"` in its WS frame. The pill is cleared by sending, by the
 //     x, and by Backspace in an empty box;
-//   * a sent message shows a small tag with the action's label over its bubble.
+//   * a sent message shows a small tag with the action's label over its bubble;
+//   * "Upload a file" heads the menu and "Upload to chat" leads the chips: the
+//     composer's attach flow (main.js hands it over with setUpload). While the
+//     bolt button is shown it IS the attach button -- the standalone paperclip
+//     folds away (class qa-folded) -- and where the bolt is hidden (a bot with
+//     `quick_actions: false`) the paperclip stays.
 //
 // This module owns the action list and the pill; main.js owns the sending (it
 // asks `currentAction()` and calls `clearComposerAction()` once the frame is
@@ -29,6 +34,7 @@ let current = null;      // the action picked in the composer, or null
 let wired = false;
 let allowed = true;      // false while the open chat's bot opted out (`quick_actions: false`)
 let announceFn = () => {};
+let uploadFn = null;     // main.js's "open the attach picker", or null when uploads are off
 
 const $ = (id) => document.getElementById(id);
 
@@ -59,8 +65,30 @@ export function setAllowed(on) {
     if (current) setComposerAction(null, { focus: false });
     closeQuickMenu({ focusButton: false });
   }
+  syncButtons();
+}
+
+/** Show the bolt when it has something to offer, and fold the paperclip into it
+ *  while it is shown (upload is its first item). Where the bolt is hidden the
+ *  paperclip stays, so attaching is always one button away. */
+function syncButtons() {
   const btn = $('quick-btn');
-  if (btn) btn.hidden = !allowed || !actions.length;
+  const off = !allowed || (!actions.length && !uploadFn);
+  if (btn) btn.hidden = off;
+  const attach = $('attach-btn');
+  if (attach) attach.classList.toggle('qa-folded', !off && !!uploadFn);
+}
+
+/** main.js: the attach flow (`fn()` opens the same picker as the paperclip), or
+ *  null to take the upload entries out. */
+export function setUpload(fn) {
+  uploadFn = typeof fn === 'function' ? fn : null;
+  syncButtons();
+}
+
+function startUpload() {
+  closeQuickMenu({ focusButton: false });
+  if (uploadFn) uploadFn();
 }
 
 export function getActions() { return actions.slice(); }
@@ -80,9 +108,8 @@ export function setActions(list) {
     if (!now) setComposerAction(null, { focus: false });
     else if (now.label !== current.label || now.hint !== current.hint) setComposerAction(now, { focus: false });
   }
-  const btn = $('quick-btn');
-  if (btn) btn.hidden = !allowed || !actions.length;
-  if (!actions.length || !allowed) closeQuickMenu({ focusButton: false });
+  syncButtons();
+  if ((!actions.length && !uploadFn) || !allowed) closeQuickMenu({ focusButton: false });
 }
 
 /** Fetch the list with `fetchJson` (resolving {actions}) and apply it. Never throws. */
@@ -153,6 +180,13 @@ export function chooseAction(action) {
 export function welcomeChips() {
   if (!allowed || !actions.length) return [];
   const grid = el('div', { class: 'qa-grid', role: 'group', 'aria-label': t('quick.title') });
+  if (uploadFn) {
+    const up = el('button', { class: 'qa-chip qa-upload', type: 'button', title: t('quick.upload_title'), dataset: { upload: '1' } }, [
+      railIcon(RAIL_ICONS.attach), el('span', { class: 'qa-label', text: t('quick.upload_chip') }),
+    ]);
+    up.addEventListener('click', () => startUpload());
+    grid.append(up);
+  }
   for (const a of actions) {
     const b = el('button', { class: 'qa-chip', type: 'button', title: a.hint || a.label, dataset: { action: a.id } }, [
       railIcon(ICON_BOLT), el('span', { class: 'qa-label', text: a.label }),
@@ -195,15 +229,26 @@ function buildMenu() {
     b.addEventListener('click', () => chooseAction(a));
     return b;
   });
+  const upload = uploadFn ? [el('button', {
+    class: 'qm-item qm-upload', type: 'button', role: 'menuitem', tabindex: '-1',
+    title: t('quick.upload_title'), dataset: { upload: '1' },
+  }, [
+    el('span', { class: 'qm-check qm-icon', 'aria-hidden': 'true' }, [railIcon(RAIL_ICONS.attach)]),
+    el('span', { class: 'qm-label', text: t('quick.upload') }),
+  ])] : [];
+  if (upload.length) upload[0].addEventListener('click', () => startUpload());
   menu().replaceChildren(
-    el('div', { class: 'qm-head', 'aria-hidden': 'true', text: t('quick.title') }),
-    ...(items.length ? items : [el('div', { class: 'qm-empty', text: t('quick.none') })]),
+    ...upload,
+    ...(upload.length && items.length ? [el('div', { class: 'qm-sep', role: 'separator' })] : []),
+    ...(items.length ? [el('div', { class: 'qm-head', 'aria-hidden': 'true', text: t('quick.title') }), ...items]
+      : upload.length ? [] : [el('div', { class: 'qm-head', 'aria-hidden': 'true', text: t('quick.title') }),
+        el('div', { class: 'qm-empty', text: t('quick.none') })]),
   );
 }
 
 export function openQuickMenu() {
   const m = menu();
-  if (!m || !actions.length || !allowed) return;
+  if (!m || (!actions.length && !uploadFn) || !allowed) return;
   buildMenu();
   m.hidden = false;
   $('quick-btn')?.setAttribute('aria-expanded', 'true');
@@ -269,5 +314,5 @@ export function repaintQuickActions() {
 
 /** Test hook: forget module state. */
 export function _reset() {
-  actions = []; current = null; wired = false; allowed = true; announceFn = () => {};
+  actions = []; current = null; wired = false; allowed = true; announceFn = () => {}; uploadFn = null;
 }

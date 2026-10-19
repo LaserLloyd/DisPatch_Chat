@@ -141,7 +141,10 @@
     "removed": "Schnellaktion entfernt",
     "picked": "{name}. Text eingeben oder einfügen und Enter drücken.",
     "sent_with": "Mit der Schnellaktion „{name}“ gesendet",
-    "rejected": "Diese Schnellaktion ist nicht mehr verfügbar. Die Liste wurde aktualisiert."
+    "rejected": "Diese Schnellaktion ist nicht mehr verfügbar. Die Liste wurde aktualisiert.",
+    "upload": "Datei hochladen",
+    "upload_title": "Eine Datei an die nächste Nachricht anhängen",
+    "upload_chip": "In den Chat hochladen"
   },
   "composer": {
     "attach": "Datei anhängen",

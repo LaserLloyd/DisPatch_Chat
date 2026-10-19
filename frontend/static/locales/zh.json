@@ -140,7 +140,10 @@
     "removed": "已移除快捷操作",
     "picked": "{name}。输入或粘贴文本,然后按回车键。",
     "sent_with": "已使用快捷操作“{name}”发送",
-    "rejected": "该快捷操作已不可用,列表已刷新。"
+    "rejected": "该快捷操作已不可用,列表已刷新。",
+    "upload": "上传文件",
+    "upload_title": "为下一条消息附加文件",
+    "upload_chip": "上传到聊天"
   },
   "composer": {
     "attach": "添加文件",

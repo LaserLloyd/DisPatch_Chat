@@ -142,7 +142,10 @@
     "removed": "Action rapide retirée",
     "picked": "{name}. Saisissez ou collez le texte, puis appuyez sur Entrée.",
     "sent_with": "Envoyé avec l’action rapide « {name} »",
-    "rejected": "Cette action rapide n’est plus disponible. La liste a été actualisée."
+    "rejected": "Cette action rapide n’est plus disponible. La liste a été actualisée.",
+    "upload": "Envoyer un fichier",
+    "upload_title": "Joindre un fichier à votre prochain message",
+    "upload_chip": "Envoyer dans la discussion"
   },
   "composer": {
     "attach": "Joindre un fichier",

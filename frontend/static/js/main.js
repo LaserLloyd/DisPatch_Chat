@@ -33,8 +33,8 @@ import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
-  setAllowed as setQuickAllowed,
-} from './quick-actions.js?v=2';
+  setAllowed as setQuickAllowed, setUpload as setQuickUpload,
+} from './quick-actions.js?v=3';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=16';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
@@ -7600,6 +7600,10 @@ function wireEvents() {
     f.addEventListener('submit', (e) => e.preventDefault()));
 
   dom['attach-btn'].addEventListener('click', () => dom['file-input'].click());
+  // The ⚡ menu's "Upload a file" and the empty chat's "Upload to chat" chip are
+  // this same picker (js/quick-actions.js folds the paperclip into ⚡ while ⚡
+  // is shown, and leaves it where ⚡ is hidden, e.g. quick_actions: false).
+  setQuickUpload(() => { if (!dom['attach-btn'].disabled) dom['file-input'].click(); });
   // ⚡ pack curation, 🩺 host dashboard and 🔌 Connect an AI are Settings tabs
   // now — see wireSettingsTabs() and openSettingsTab().
   dom['file-input'].addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });

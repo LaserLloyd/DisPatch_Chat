@@ -142,7 +142,10 @@
     "removed": "Acción rápida quitada",
     "picked": "{name}. Escribe o pega el texto y pulsa Intro.",
     "sent_with": "Enviado con la acción rápida «{name}»",
-    "rejected": "Esa acción rápida ya no está disponible. Se actualizó la lista."
+    "rejected": "Esa acción rápida ya no está disponible. Se actualizó la lista.",
+    "upload": "Subir un archivo",
+    "upload_title": "Adjuntar un archivo al próximo mensaje",
+    "upload_chip": "Subir al chat"
   },
   "composer": {
     "attach": "Adjuntar archivo",

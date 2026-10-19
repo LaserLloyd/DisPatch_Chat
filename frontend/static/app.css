@@ -4964,3 +4964,9 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .rail-arrange-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rail-arrange-name { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
 .rail-arrange-btn { padding: 4px 10px; min-height: 32px; }
+
+/* The paperclip folded into the ⚡ menu (js/quick-actions.js syncButtons). */
+.attach-btn.qa-folded { display: none !important; }
+.quick-menu .qm-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }
+.quick-menu .qm-icon .rail-icon { width: 15px; height: 15px; display: block; }
+.qa-chip.qa-upload { border-style: dashed; }

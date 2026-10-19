@@ -142,7 +142,10 @@
     "removed": "Ação rápida removida",
     "picked": "{name}. Digite ou cole o texto e pressione Enter.",
     "sent_with": "Enviado com a ação rápida “{name}”",
-    "rejected": "Essa ação rápida já não está disponível. A lista foi atualizada."
+    "rejected": "Essa ação rápida já não está disponível. A lista foi atualizada.",
+    "upload": "Carregar um arquivo",
+    "upload_title": "Anexar um arquivo à próxima mensagem",
+    "upload_chip": "Carregar para o chat"
   },
   "composer": {
     "attach": "Anexar ficheiro",

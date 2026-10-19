@@ -300,3 +300,82 @@ test('main.js gates the chips and the suggestions on the bot flag', () => {
   assert.match(MAIN, /quick_actions === false/);
   assert.match(MAIN, /setQuickAllowed/);
 });
+
+// ---------------------------------------------------------------- upload in ⚡
+
+const PAGE_UP = PAGE.replace('<textarea id="input"></textarea>', '<button id="attach-btn" class="attach-btn"></button><textarea id="input"></textarea>');
+function setupUp() {
+  const win = new jsdom.JSDOM(PAGE_UP, { url: 'http://localhost/' }).window;
+  const put = (k, v) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  put('window', win); put('document', win.document); put('localStorage', win.localStorage); put('navigator', win.navigator);
+  return win;
+}
+
+test('"Upload a file" heads the ⚡ menu and opens the attach flow; the paperclip folds into ⚡', dom, async () => {
+  setupUp();
+  const m = await load();
+  m.wireQuickActions();
+  m.setActions(ACTIONS);
+  let opened = 0;
+  m.setUpload(() => { opened++; });
+  assert.equal($('quick-btn').hidden, false);
+  assert.ok($('attach-btn').classList.contains('qa-folded'), 'one button in the bar, not two');
+  m.openQuickMenu();
+  const items = [...$('quick-menu').querySelectorAll('[role="menuitem"]')];
+  assert.equal(items[0].dataset.upload, '1', 'upload is the first item');
+  assert.equal(items.length, ACTIONS.length + 1);
+  assert.equal(document.activeElement, items[0], 'keyboard lands on it');
+  items[0].click();
+  assert.equal(opened, 1);
+  assert.equal($('quick-menu').hidden, true, 'the menu closes');
+});
+
+test('a bot with quick actions off keeps a standalone paperclip; switching back folds it again', dom, async () => {
+  setupUp();
+  const m = await load();
+  m.setActions(ACTIONS);
+  m.setUpload(() => {});
+  m.setAllowed(false);
+  assert.equal($('quick-btn').hidden, true);
+  assert.equal($('attach-btn').classList.contains('qa-folded'), false, 'upload stays reachable');
+  m.setAllowed(true);
+  assert.ok($('attach-btn').classList.contains('qa-folded'));
+  m.setUpload(null);
+  assert.equal($('attach-btn').classList.contains('qa-folded'), false, 'no upload in ⚡ -> the paperclip is back');
+});
+
+test('with no served actions the ⚡ menu still offers upload alone', dom, async () => {
+  setupUp();
+  const m = await load();
+  m.setActions([]);
+  m.setUpload(() => {});
+  assert.equal($('quick-btn').hidden, false);
+  m.openQuickMenu();
+  const items = [...$('quick-menu').querySelectorAll('[role="menuitem"]')];
+  assert.deepEqual(items.map((b) => b.dataset.upload), ['1']);
+  assert.equal($('quick-menu').querySelector('.qm-empty'), null);
+});
+
+test('the empty chat leads with an "Upload to chat" chip that opens the attach flow', dom, async () => {
+  setupUp();
+  const m = await load();
+  m.setActions(ACTIONS);
+  let opened = 0;
+  m.setUpload(() => { opened++; });
+  const [, grid] = m.welcomeChips();
+  const first = grid.querySelector('.qa-chip');
+  assert.equal(first.dataset.upload, '1');
+  first.click();
+  assert.equal(opened, 1);
+  m.setAllowed(false);
+  assert.deepEqual(m.welcomeChips(), [], 'quick_actions: false keeps the chips off');
+});
+
+test('main.js hands the paperclip flow to ⚡; the strings exist in all eight locales', () => {
+  assert.match(MAIN, /setQuickUpload\(\(\) => \{ if \(!dom\['attach-btn'\]\.disabled\) dom\['file-input'\]\.click\(\); \}\);/);
+  assert.match(CSS, /\.attach-btn\.qa-folded \{ display: none !important; \}/);
+  for (const f of readdirSync(join(STATIC, 'locales')).filter((x) => x.endsWith('.json'))) {
+    const q = JSON.parse(readFileSync(join(STATIC, 'locales', f), 'utf8')).quick;
+    for (const k of ['upload', 'upload_title', 'upload_chip']) assert.ok(q[k] && q[k].trim(), `${f}: quick.${k}`);
+  }
+});
