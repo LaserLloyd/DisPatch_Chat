@@ -26,6 +26,16 @@ read from that ledger. ``prompts.json`` holds the recent prompts; when it does
 not exist yet, an optional ``seed-prompts.json`` (never shipped in the repo)
 supplies the first list.
 
+CLEARING
+--------
+``POST /clear`` is the studio's "Clear from here down": the picture named and
+every picture after it in the order the page shows (``newest`` first, the
+default, or ``oldest`` first) leave the ledger, and their files leave the media
+store -- except a file a chat message still shows (sent to chat), which stays so
+the chat keeps its picture. ``dry_run`` answers the count for the confirmation.
+It needs ``manage_history`` on top of the app's ``use_images`` (the permission
+that lets a profile delete its conversations); Restricted never holds either.
+
 COST
 ----
 One accepted request is one provider call. Nothing here retries, warms up or
@@ -47,7 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from app import image_jobs, image_providers
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 log = logging.getLogger("local-chat.app.imagestudio")
@@ -264,6 +274,29 @@ class GenerateIn(BaseModel):
     reference: dict | None = None
 
 
+class ClearIn(BaseModel):
+    id: str = Field(min_length=32, max_length=32)
+    order: str = Field(default="newest", pattern=r"^(newest|oldest)$")
+    dry_run: bool = False
+
+
+def _clear_rows(rows: list[dict], iid: str, order: str) -> tuple[list[dict], list[dict]] | None:
+    """(kept, removed) for "this picture and everything after it" in ``order``.
+    ``rows`` is the ledger, oldest first. None when ``iid`` is not in it."""
+    idx = next((i for i, r in enumerate(rows) if r.get("id") == iid), None)
+    if idx is None:
+        return None
+    if order == "oldest":                 # shown oldest first: "down" is newer
+        return rows[:idx], rows[idx:]
+    return rows[idx + 1:], rows[:idx + 1]  # shown newest first: "down" is older
+
+
+def _rewrite_ledger(rows: list[dict]) -> None:
+    tmp = _ledger().with_name(_ledger().name + ".tmp")
+    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    os.replace(tmp, _ledger())
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -275,7 +308,8 @@ def build(ctx):
     op = [Depends(ctx.require_operator)]
 
     @router.get("/state", dependencies=op)
-    async def state():
+    async def state(request: Request):
+        from app import policy
         providers, default = _provider_rows()
         rows = await asyncio.to_thread(_read_ledger)
         days: dict[str, int] = {}
@@ -290,6 +324,8 @@ def build(ctx):
             "days": recent_days, "total": len(rows),
             "prompts": await asyncio.to_thread(_recent_prompts),
             "busy": _lock.locked(),
+            # "Clear from here down" is offered only to a profile that may delete.
+            "can_clear": policy.of(request).can("manage_history"),
         }
 
     @router.get("/images", dependencies=op)
@@ -346,6 +382,39 @@ def build(ctx):
                 body.seed if caps["seed"] else None,
                 bool(body.optimizer and caps["optimizer"]), wants_ref)
         return {"images": [_public_row(r) for r in rows], "asked": n}
+
+    @router.post("/clear", dependencies=op)
+    async def clear(body: ClearIn, request: Request):
+        from app import policy
+        if not policy.of(request).can("manage_history"):
+            raise HTTPException(403, "Your profile cannot delete pictures")
+        if not IMAGE_ID_RE.match(body.id):
+            raise HTTPException(422, "That is not a picture id")
+        if _lock.locked():
+            raise HTTPException(409, "A generation is running; try again when it is done")
+        async with _lock:
+            rows = await asyncio.to_thread(_read_ledger)
+            split = _clear_rows(rows, body.id, body.order)
+            if split is None:
+                raise HTTPException(404, "That picture is already gone")
+            kept, removed = split
+            urls = [str(r.get("url") or "") for r in removed]
+            in_chat = await ctx.db.media_urls_in_messages(urls)
+            still_used = in_chat | {str(r.get("url") or "") for r in kept}
+            if body.dry_run:
+                return {"count": len(removed), "in_chat": len(in_chat), "dry_run": True}
+            await asyncio.to_thread(_rewrite_ledger, kept)
+            files = 0
+            for url in dict.fromkeys(urls):
+                m = MEDIA_URL_RE.match(url)
+                path = _media_file(m.group(1)) if m and url not in still_used else None
+                if path is not None:
+                    with contextlib.suppress(OSError):
+                        path.unlink()
+                        files += 1
+        log.info("image studio: cleared %d picture(s) (%d file(s); %d kept for chats)",
+                 len(removed), files, len(in_chat))
+        return {"deleted": len(removed), "files": files, "in_chat": len(in_chat)}
 
     @router.get("/chat-images", dependencies=op)
     async def chat_images(limit: int = Query(48, ge=1, le=120)):

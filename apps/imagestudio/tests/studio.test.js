@@ -30,15 +30,17 @@ const ROWS = [
   { id: ID('b'), url: `/media/${ID('b')}.jpg`, prompt: 'second', provider: 'minimax', model: 'image-01', ratio: '16:9', seed: 5 },
 ];
 
-async function page({ nim = false, state = STATE, generate } = {}) {
+async function page({ nim = false, state = STATE, generate, clear, images, sort } = {}) {
   const posted = [];
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
     'GET /api/apps/imagestudio/state': () => [200, state],
-    'GET /api/apps/imagestudio/images': () => [200, { images: ROWS }],
+    'GET /api/apps/imagestudio/images': images || (() => [200, { images: ROWS }]),
     'POST /api/apps/imagestudio/generate': generate || (() => [200, { images: [], asked: 1 }]),
+    'POST /api/apps/imagestudio/clear': clear || (() => [404, { detail: 'no' }]),
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
+  if (sort) env.win.localStorage.setItem('dispatch-imagestudio-sort', sort);
   if (nim) env.win.localStorage.setItem('dispatch-nim', '1');
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
@@ -210,4 +212,100 @@ test('the Safe-Mode decoy 403 shows a locked note, never an empty studio', { ski
   await mod.mount(env.win.document.getElementById('st-root'));
   assert.equal(env.win.document.querySelector('.st-locked').textContent, EN.locked);
   assert.equal(env.win.document.querySelectorAll('.st-tile').length, 0);
+});
+
+// ---------------------------------------------------------------- sort, clear, notice
+
+const tiles = (doc) => [...doc.querySelectorAll('.st-tile')].map((t) => t.dataset.id);
+const clears = (env) => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/clear');
+
+test('the sort control reorders the grid, is remembered per device, and the lightbox follows it', { skip: dom.skip }, async () => {
+  const env = await page();
+  const { doc, win } = env;
+  const sel = doc.getElementById('st-sort');
+  assert.ok(sel, 'there is a sort control');
+  assert.equal(sel.value, 'oldest');
+  assert.deepEqual([...sel.options].map((o) => o.textContent), ['Oldest first', 'Newest first']);
+  assert.match(sel.closest('label').textContent, /^Sort:/);
+  assert.deepEqual(tiles(doc), [ID('a'), ID('b')]);
+  sel.value = 'newest';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.deepEqual(tiles(doc), [ID('b'), ID('a')]);
+  assert.equal(win.localStorage.getItem('dispatch-imagestudio-sort'), 'newest');
+  doc.querySelectorAll('.st-open')[0].click();
+  const msg = env.posted.map(([m]) => m).find((m) => m.type === 'dispatch:lightbox');
+  assert.equal(msg.index, 0);
+  assert.deepEqual(msg.items.map((i) => i.src), [`/media/${ID('b')}.jpg`, `/media/${ID('a')}.png`]);
+});
+
+test('a remembered sort is used on the next visit', { skip: dom.skip }, async () => {
+  const { doc } = await page({ sort: 'newest' });
+  assert.equal(doc.getElementById('st-sort').value, 'newest');
+  assert.deepEqual(tiles(doc), [ID('b'), ID('a')]);
+});
+
+test('"Clear from here down" counts first, asks in a danger dialog, then clears in the shown order', { skip: dom.skip }, async () => {
+  let rows = ROWS;
+  const env = await page({
+    state: { ...STATE, can_clear: true },
+    images: () => [200, { images: rows }],
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) return [200, { count: 2, in_chat: 1, dry_run: true }];
+      rows = [];
+      return [200, { deleted: 2, files: 1, in_chat: 1 }];
+    },
+  });
+  const { doc, win } = env;
+  const sel = doc.getElementById('st-sort');
+  sel.value = 'newest';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const btn = doc.querySelectorAll('.st-tile')[0].querySelector('.st-icon-danger');
+  assert.ok(btn, 'each tile has the clear action');
+  assert.equal(btn.getAttribute('aria-label'), 'Clear from here down');
+  btn.click();
+  await flush();
+  assert.deepEqual(clears(env)[0].body, { id: ID('b'), order: 'newest', dry_run: true });
+  const dlg = doc.querySelector('.st-dlg');
+  assert.ok(dlg, 'a confirmation opens');
+  assert.match(dlg.textContent, /every older one/);
+  assert.match(dlg.textContent, /Pictures to delete: 2/);
+  assert.match(dlg.textContent, /still shown in a chat: 1/);
+  assert.equal(clears(env).length, 1, 'nothing is deleted before the confirmation');
+  dlg.querySelector('.st-danger').click();
+  await flush();
+  assert.deepEqual(clears(env)[1].body, { id: ID('b'), order: 'newest' });
+  assert.equal(doc.querySelectorAll('.st-tile').length, 0, 'the grid reloads from the server');
+  assert.match(doc.querySelector('.st-status').textContent, /Pictures deleted: 2/);
+});
+
+test('cancelling the confirmation deletes nothing', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, can_clear: true }, clear: () => [200, { count: 1, in_chat: 0, dry_run: true }] });
+  env.doc.querySelectorAll('.st-tile')[1].querySelector('.st-icon-danger').click();
+  await flush();
+  assert.match(env.doc.querySelector('.st-dlg').textContent, /every newer one/);
+  [...env.doc.querySelectorAll('.st-dlg .st-btn')].find((b) => b.textContent === 'Cancel').click();
+  await flush();
+  assert.equal(clears(env).length, 1);
+  assert.deepEqual(clears(env)[0].body, { id: ID('b'), order: 'oldest', dry_run: true });
+  assert.equal(env.doc.querySelectorAll('.st-tile').length, 2);
+});
+
+test('a profile that may not delete gets no clear action', { skip: dom.skip }, async () => {
+  const { doc } = await page({ state: { ...STATE, can_clear: false } });
+  assert.equal(doc.querySelectorAll('.st-icon-danger').length, 0);
+});
+
+test('the host-storage notice is on the page, titled, in the theme danger style', { skip: dom.skip }, async () => {
+  const { doc } = await page();
+  const note = doc.querySelector('.st-privacy');
+  assert.ok(note, 'the notice is shown');
+  assert.equal(note.getAttribute('role'), 'note');
+  assert.equal(note.querySelector('strong').textContent, 'Images stored on the host computer');
+  assert.match(note.textContent, /saved on the computer that runs DisPatch/);
+  const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8');
+  const rule = /\.st-privacy\s*\{([^}]*)\}/.exec(css)[1];
+  assert.match(rule, /var\(--danger-text/);
+  assert.match(rule, /var\(--danger-border/);
+  assert.doesNotMatch(rule, /#f00|#ff0000|\bred\b/i, 'a theme token, not a hard-coded red');
 });

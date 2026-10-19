@@ -1514,6 +1514,20 @@ class Database:
         await self.db.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
         await self.db.commit()
 
+    async def media_urls_in_messages(self, urls: list[str]) -> set[str]:
+        """Which of ``urls`` (``/media/<name>``) a chat message still shows, as
+        its attachment or inside its text. Image Studio asks before it deletes a
+        picture's file, so "send to chat" never leaves a broken image behind."""
+        found: set[str] = set()
+        for url in dict.fromkeys(u for u in urls if u):
+            pattern = "%" + url.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            cur = await self.db.execute(
+                "SELECT 1 FROM messages WHERE media_url = ? OR content LIKE ? ESCAPE '\\' LIMIT 1",
+                (url, pattern))
+            if await cur.fetchone():
+                found.add(url)
+        return found
+
     async def update_message_content(self, msg_id: str, content: str) -> None:
         await self.db.execute(
             "UPDATE messages SET content = ? WHERE id = ?", (content, msg_id))

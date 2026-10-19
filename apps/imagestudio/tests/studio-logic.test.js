@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
+  SORTS, normalizeSort, sortRows, clearFromHere,
 } from '../static/studio-logic.js';
 
 const key = (over = {}) => ({ key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, ...over });
@@ -94,4 +95,24 @@ test('only a provider with a price note is called metered', () => {
   assert.equal(isMetered({ price_note: 'Billed per image.' }), true);
   assert.equal(isMetered({ price_note: '' }), false);
   assert.equal(isMetered(null), false);
+});
+
+test('the grid sorts oldest first by default or newest first, without touching the input', () => {
+  const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  assert.deepEqual(SORTS, ['oldest', 'newest']);
+  assert.equal(normalizeSort(null), 'oldest');
+  assert.equal(normalizeSort('junk'), 'oldest');
+  assert.equal(normalizeSort('newest'), 'newest');
+  assert.deepEqual(sortRows(rows, 'oldest').map((r) => r.id), ['a', 'b', 'c']);
+  assert.deepEqual(sortRows(rows, 'newest').map((r) => r.id), ['c', 'b', 'a']);
+  assert.deepEqual(rows.map((r) => r.id), ['a', 'b', 'c'], 'the input is not reordered in place');
+  assert.deepEqual(sortRows(null, 'newest'), []);
+});
+
+test('"clear from here down" is the picture and everything after it in the shown order', () => {
+  const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+  assert.deepEqual(clearFromHere(rows, 'b', 'oldest'), ['b', 'c', 'd']);
+  assert.deepEqual(clearFromHere(rows, 'b', 'newest'), ['b', 'a']);
+  assert.deepEqual(clearFromHere(rows, 'd', 'newest'), ['d', 'c', 'b', 'a']);
+  assert.deepEqual(clearFromHere(rows, 'zz', 'oldest'), []);
 });

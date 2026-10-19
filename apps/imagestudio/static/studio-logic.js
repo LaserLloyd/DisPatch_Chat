@@ -91,3 +91,29 @@ export function galleryItems(rows) {
 export function isMetered(provider) {
   return !!(provider && provider.price_note);
 }
+
+// ---------------------------------------------------------------- sort + clear
+
+/** The two orders the results grid offers. Oldest first (newest at the bottom,
+ *  like a chat) is the default and what the grid always did. */
+export const SORTS = ['oldest', 'newest'];
+export const SORT_KEY = 'dispatch-imagestudio-sort';
+
+/** A stored or picked sort value -> one of SORTS. */
+export function normalizeSort(value) {
+  return SORTS.includes(value) ? value : 'oldest';
+}
+
+/** Rows (as /images returns them, oldest first) in display order. Never mutates. */
+export function sortRows(rows, order) {
+  const list = Array.isArray(rows) ? rows.slice() : [];
+  return normalizeSort(order) === 'newest' ? list.reverse() : list;
+}
+
+/** "Clear from here down": the ids of the picture `id` and every picture after
+ *  it in the grid's order -- what POST /clear removes for the same order. */
+export function clearFromHere(rows, id, order) {
+  const shown = sortRows(rows, order);
+  const i = shown.findIndex((r) => r && r.id === id);
+  return i < 0 ? [] : shown.slice(i).map((r) => r.id);
+}

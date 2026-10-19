@@ -16,7 +16,8 @@ import {
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
-} from './studio-logic.js?v=1';
+  SORTS, SORT_KEY, normalizeSort, sortRows,
+} from './studio-logic.js?v=2';
 
 export const API = '/api/apps/imagestudio';
 
@@ -28,12 +29,25 @@ const S = {
   status: '',
   statusError: false,
   nim: false,
+  sort: 'oldest',        // the grid's order (SORTS), remembered per device
 };
 const R = {};            // DOM refs
+const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
 
 function nimOn() {
   try { return localStorage.getItem('dispatch-nim') === '1'; } catch { return false; }
 }
+
+function loadSort() {
+  try { return normalizeSort(localStorage.getItem(SORT_KEY)); } catch { return 'oldest'; }
+}
+
+function saveSort(value) {
+  try { localStorage.setItem(SORT_KEY, value); } catch { /* private window: this tab only */ }
+}
+
+/** The pictures in the order the grid shows them. */
+function shown() { return sortRows(S.images, S.sort); }
 
 function provider() {
   const id = R.provider ? R.provider.value : '';
@@ -191,7 +205,8 @@ function iconBtn(icon, label, onClick) {
 function renderGrid() {
   R.grid.replaceChildren();
   R.empty.hidden = S.images.length > 0;
-  S.images.forEach((r, i) => {
+  R.sortWrap.hidden = S.images.length < 2;
+  shown().forEach((r, i) => {
     const media = S.nim
       ? el('div', { class: 'st-noimg', text: t('nim.hidden') })
       : el('img', { src: r.url, alt: r.prompt, loading: 'lazy' });
@@ -206,6 +221,11 @@ function renderGrid() {
       iconBtn(RAIL_ICONS.user, t('tile.avatar'), () => openAvatar(r)),
     ]);
     if (!caps().reference) actions.children[2].hidden = true;
+    if (S.info && S.info.can_clear) {
+      const clear = iconBtn(RAIL_ICONS.trash, t('tile.clear'), () => openClear(r));
+      clear.classList.add('st-icon-danger');
+      actions.append(clear);
+    }
     R.grid.append(el('li', { class: 'st-tile', dataset: { id: r.id } }, [
       open, actions,
       el('div', { class: 'st-tilemeta' }, [
@@ -218,7 +238,7 @@ function renderGrid() {
 
 function openFull(index) {
   if (S.nim) { setStatus(t('nim.hidden')); return; }
-  lightbox(galleryItems(S.images), index);
+  lightbox(galleryItems(shown()), index);
 }
 
 async function copyPrompt(r) {
@@ -351,6 +371,39 @@ async function openAvatar(r) {
   ], [cancel, go]);
 }
 
+// ---------------------------------------------------------------- clear from here down
+//
+// The File Server's "Delete this & older" for the studio: this picture and every
+// picture after it in the grid's current order. The server counts first (dry run,
+// so the number covers pictures beyond the grid's last 60 too), the person
+// confirms in a danger dialog, then the same request runs for real.
+
+async function openClear(r) {
+  let plan;
+  try {
+    plan = await api(`${API}/clear`, { method: 'POST', body: { id: r.id, order: S.sort, dry_run: true } });
+  } catch (e) { setStatus(t('clear.failed', { error: e.message }), true); return; }
+  const go = el('button', { type: 'button', class: 'st-btn st-danger', text: t('clear.go') });
+  const cancel = el('button', { type: 'button', class: 'st-btn', text: t('common.cancel') });
+  cancel.addEventListener('click', closeDialog);
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      const res = await api(`${API}/clear`, { method: 'POST', body: { id: r.id, order: S.sort } });
+      closeDialog();
+      S.images = (await api(`${API}/images`)).images;
+      await reloadState(false);
+      renderGrid();
+      setStatus(t('clear.done', { n: res.deleted }));
+      toast(t('clear.done', { n: res.deleted }));
+    } catch (e) { go.disabled = false; setStatus(t('clear.failed', { error: e.message }), true); }
+  });
+  const body = [el('p', { class: 'st-clear-msg', text: t(S.sort === 'newest' ? 'clear.confirm_newest' : 'clear.confirm_oldest', { n: plan.count }) })];
+  if (plan.in_chat) body.push(el('p', { class: 'st-muted', text: t('clear.in_chat', { n: plan.in_chat }) }));
+  dialog(t('clear.title'), body, [cancel, go]);
+  cancel.focus();
+}
+
 // ---------------------------------------------------------------- generate
 
 async function generate() {
@@ -367,7 +420,7 @@ async function generate() {
     setStatus(r.images.length < r.asked
       ? t('results.partial', { got: r.images.length, asked: r.asked })
       : t('results.done', { n: r.images.length }));
-    R.grid.lastElementChild?.scrollIntoView?.({ block: 'nearest' });
+    (S.sort === 'newest' ? R.grid.firstElementChild : R.grid.lastElementChild)?.scrollIntoView?.({ block: 'nearest' });
   } catch (e) {
     setStatus(e instanceof DecoyError ? t('locked') : e.message, true);
   } finally {
@@ -424,14 +477,23 @@ function build(root) {
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
     R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost,
   ]);
+  R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
+  R.sort.value = S.sort;
+  R.sortWrap = el('label', { class: 'st-sortwrap', for: 'st-sort' }, [`${t('sort.label')}: `, R.sort]);
+  R.privacy = el('aside', { class: 'st-privacy', role: 'note' }, [
+    el('strong', { class: 'st-privacy-title', text: t('privacy.title') }),
+    el('p', { text: t('privacy.body') }),
+  ]);
   R.grid = el('ul', { class: 'st-grid' });
   R.empty = el('p', { class: 'st-muted st-emptynote', text: t('results.empty') });
   R.dlg = el('div', { class: 'st-dlgwrap', hidden: '' });
   root.append(
     el('header', { class: 'st-head' }, [R.today]),
     el('div', { class: 'st-layout' }, [
-      el('section', { class: 'st-controls' }, [R.none, R.form, R.status]),
-      el('section', { class: 'st-results' }, [el('h2', { text: t('results.title') }), R.empty, R.grid]),
+      el('section', { class: 'st-controls' }, [R.privacy, R.none, R.form, R.status]),
+      el('section', { class: 'st-results' }, [
+        el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), R.sortWrap]),
+        R.empty, R.grid]),
     ]),
     R.dlg,
   );
@@ -446,6 +508,11 @@ function build(root) {
   R.provider.addEventListener('change', refreshForm);
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); });
   R.go.addEventListener('click', generate);
+  R.sort.addEventListener('change', () => {
+    S.sort = normalizeSort(R.sort.value);
+    saveSort(S.sort);
+    renderGrid();
+  });
   refUp.addEventListener('click', () => R.file.click());
   R.file.addEventListener('change', onUpload);
   refChat.addEventListener('click', openChatPicker);
@@ -459,6 +526,7 @@ export async function mount(root = document.getElementById('st-root')) {
   theme();
   await ready();
   S.nim = nimOn();
+  S.sort = loadSort();
   document.title = t('title');
   root.setAttribute('aria-label', t('title'));
   document.documentElement.lang = document.documentElement.lang || 'en';
