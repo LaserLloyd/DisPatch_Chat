@@ -278,9 +278,12 @@ class OpenClawBackend(BaseBackend):
         if event == "chat":
             state = payload.get("state")
             if state == "delta":
-                msg = payload.get("message")
-                text = gateway_router.text_of(msg) if isinstance(msg, dict) else ""
-                self._emit_delta(rt, text, replace=bool(payload.get("replace")))
+                # 2026.10: only the first delta carries `message`; the rest are
+                # append-only `deltaText` (gateway_router.merge_delta_text).
+                text = gateway_router.merge_delta_text(rt.extras.get("raw"), payload)
+                if text is not None:
+                    rt.extras["raw"] = text
+                    self._emit_delta(rt, text, replace=bool(payload.get("replace")))
             elif state == "status" and isinstance(payload.get("phase"), str):
                 rt.log.emit(StatusEvent, state=TaskState.running, detail=payload["phase"])
         elif event in ("session.tool", "agent"):

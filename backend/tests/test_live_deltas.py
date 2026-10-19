@@ -9,9 +9,11 @@ Three properties make that safe, and each of them has a failure mode that looks
 exactly like success:
 
 1. A DROPPED DELTA COSTS NOTHING. The text a client receives is derived from
-   the gateway's CUMULATIVE snapshot on every event, never accumulated from
-   `deltaText` — otherwise one dropped frame silently corrupts the rest of the
-   reply with nothing to compare it against.
+   the gateway's CUMULATIVE snapshot whenever a frame carries one. OpenClaw
+   2026.10 sends that snapshot only on a run's first delta and append-only
+   `deltaText` after it, so those are appended to the last snapshot (the
+   gateway client's own merge rule); the persisted row that closes the bubble
+   is the repair for any frame lost in between.
 
 2. A LOCKED DEVICE SEES NO MORE THAN IT WOULD HAVE. Delta text is raw model
    output: absolute paths inside `[[media:…]]`, `:react:` markers, internal
@@ -143,6 +145,69 @@ async def test_a_dropped_delta_cannot_corrupt_the_reply():
     await router.handle("chat", {"state": "final", "runId": "r1",
                                  "sessionKey": "agent:main:t1", "seq": 9})
     assert bus.text() == "one two three"
+
+
+def _append(text, *, run="r1", key="agent:main:t1", replace=False, seq=2):
+    """An OpenClaw 2026.10 follow-up frame: `deltaText` only, no `message`."""
+    frame = {"state": "delta", "runId": run, "sessionKey": key, "seq": seq,
+             "deltaText": text}
+    if replace:
+        frame["replace"] = True
+    return frame
+
+
+@pytest.mark.asyncio
+async def test_append_only_frames_after_the_first_snapshot_keep_streaming():
+    """2026.10.3 live wire: one snapshot, then `deltaText`-only frames.
+
+    Reading only `message` showed the first words, then nothing for the whole
+    run, then the full reply at once (ops check 2026-10-19).
+    """
+    bus, rec = _Bus(), _Recorder()
+    router = _router(bus, rec)
+    await router.handle("chat", _delta("Most owls"))
+    for i, piece in enumerate((" hunt by night,", " eyes wide", ".")):
+        await asyncio.sleep(gr.CHUNK_MIN_INTERVAL_S * 1.5)
+        await router.handle("chat", _append(piece, seq=3 + i))
+    await router.handle("chat", {"state": "final", "runId": "r1",
+                                 "sessionKey": "agent:main:t1", "seq": 9})
+    assert bus.text() == "Most owls hunt by night, eyes wide."
+    assert len(bus.of("stream_chunk")) >= 4, "each append must reach the client"
+    assert not [f for f in bus.of("stream_chunk") if f.get("replace")]
+
+
+@pytest.mark.asyncio
+async def test_an_append_only_replace_restarts_the_text():
+    bus, rec = _Bus(), _Recorder()
+    router = _router(bus, rec)
+    await router.handle("chat", _delta("draft"))
+    await asyncio.sleep(gr.CHUNK_MIN_INTERVAL_S * 1.5)
+    await router.handle("chat", _append("Final answer", replace=True))
+    await router.handle("chat", {"state": "final", "runId": "r1",
+                                 "sessionKey": "agent:main:t1", "seq": 9})
+    assert bus.text() == "Final answer"
+
+
+@pytest.mark.asyncio
+async def test_an_append_with_no_baseline_is_ignored_not_shown_as_the_reply():
+    bus, rec = _Bus(), _Recorder()
+    router = _router(bus, rec)
+    await router.handle("chat", _append(" tail end"))
+    await router.handle("chat", {"state": "final", "runId": "r1",
+                                 "sessionKey": "agent:main:t1", "seq": 9})
+    assert bus.text() == ""
+
+
+def test_merge_delta_text_matches_the_gateway_client_rule():
+    m = gr.merge_delta_text
+    snap = {"message": {"role": "assistant", "content": [{"type": "text", "text": "ab"}]},
+            "deltaText": "ab"}
+    assert m(None, snap) == "ab"
+    assert m("ab", {"deltaText": "c"}) == "abc"
+    assert m("ab", {"deltaText": ""}) is None
+    assert m("ab", {"deltaText": "x", "replace": True}) == "x"
+    assert m(None, {"deltaText": "x"}) is None
+    assert m("ab", {}) is None
 
 
 @pytest.mark.asyncio

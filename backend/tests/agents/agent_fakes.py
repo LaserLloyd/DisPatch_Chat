@@ -177,6 +177,14 @@ class FakeGateway:
         if scenario == "simple":
             await delta("Hello")
             await delta("Hello world")
+        elif scenario == "append_only":
+            # OpenClaw 2026.10 wire: a snapshot on the first delta, then
+            # append-only `deltaText` frames with no `message`.
+            await self._event(ws, "chat", {"runId": run_id, "sessionKey": key, "state": "delta",
+                                           "deltaText": "Hello",
+                                           "message": {"content": [{"type": "text", "text": "Hello"}]}})
+            await self._event(ws, "chat", {"runId": run_id, "sessionKey": key, "state": "delta",
+                                           "deltaText": " world"})
         elif scenario == "tools":
             await self._event(ws, "session.tool", {"runId": run_id, "sessionKey": key, "stream": "tool",
                                                    "data": {"phase": "start", "name": "Read",

@@ -93,9 +93,11 @@ KNOWN_ROLES = ("user", "assistant", "system", "tool", "toolResult")
 # channel: the transcript event (`session.message`) remains the only thing
 # anything is ever persisted from. A dropped delta must therefore be able to
 # cost nothing, which is why the text a client receives is derived from the
-# CUMULATIVE `message.content[].text` snapshot on every event rather than from
-# `deltaText`. Accumulating deltaText makes one dropped frame corrupt the rest
-# of the reply, silently, with no way to notice.
+# CUMULATIVE `message.content[].text` snapshot whenever a frame carries one.
+# OpenClaw 2026.10 carries it only on a run's FIRST delta; later frames are
+# append-only `deltaText` (see merge_delta_text). Those are appended to the last
+# snapshot, and the persisted row that closes the bubble repairs any frame the
+# gateway dropped in between.
 
 # Smallest gap between two outgoing chunk frames for one run. The gateway
 # already paces itself, but a fast local model still out-runs what a phone can
@@ -125,6 +127,7 @@ class _ChatRun:
     __slots__ = (
         "flush",
         "pending",
+        "raw",
         "replace",
         "sent",
         "settle",
@@ -136,6 +139,7 @@ class _ChatRun:
         self.target = target
         self.sent: str = ""          # sanitized cumulative text already sent
         self.pending: str | None = None
+        self.raw: str | None = None  # unsanitized cumulative text (the merge baseline)
         self.replace: bool = False   # the gateway said this is not an extension
         self.flush: asyncio.Task | None = None
         self.started: bool = False   # stream_start has been broadcast
@@ -158,6 +162,30 @@ def text_of(message: dict) -> str:
         return "\n\n".join(p for p in parts if p.strip())
     txt = message.get("text")
     return txt if isinstance(txt, str) else ""
+
+
+def merge_delta_text(previous: str | None, payload: dict) -> str | None:
+    """The cumulative text after one `chat` delta frame, or None for "no change".
+
+    OpenClaw 2026.10 sends the whole reply as ``message`` only on a run's first
+    delta; the frames after it are append-only ``deltaText`` (coalesced by the
+    gateway), with ``replace: true`` when the text is a restart rather than an
+    extension. This is the gateway client's own ``mergeChatStreamMessage`` rule.
+    Reading only ``message`` made every later frame look empty: a reply showed
+    its first few words, sat still for the whole run, then appeared in one go.
+    """
+    message = payload.get("message")
+    if isinstance(message, dict):
+        return text_of(message)
+    delta = payload.get("deltaText")
+    if not isinstance(delta, str):
+        return None
+    replace = payload.get("replace") is True
+    if replace:
+        return delta
+    if not delta or previous is None:
+        return None                     # append-only needs a baseline
+    return previous + delta
 
 
 def source_id_of(message: dict, session_key: str = "") -> str | None:
@@ -442,8 +470,10 @@ class SessionRouter:
                                   "phase": phase})
             return
         if state == "delta":
-            message = payload.get("message")
-            text = text_of(message) if isinstance(message, dict) else ""
+            text = merge_delta_text(run.raw, payload)
+            if text is None:
+                return                      # nothing new, or no baseline yet
+            run.raw = text
             if payload.get("replace"):
                 run.replace = True
             await self._queue_chunk(run_id, run, text)

@@ -176,6 +176,15 @@ async def test_cumulative_chat_snapshots_become_incremental_deltas(gw, tmp_path)
     await be.aclose()
 
 
+async def test_append_only_delta_text_frames_are_not_lost(gw, tmp_path):
+    """OpenClaw 2026.10 sends `message` only on the first delta (ops check 2026-10-19)."""
+    be = make_backend(gw)
+    tid, ev = await run(be, "append_only", tmp_path)
+    deltas = [e for e in ev if isinstance(e, TextDeltaEvent)]
+    assert [d.text for d in deltas] == ["Hello", " world"] and not any(d.replace for d in deltas)
+    await be.aclose()
+
+
 async def test_the_transcript_event_supplies_text_when_no_chat_deltas_arrive(gw, tmp_path):
     be = make_backend(gw)
     tid, ev = await run(be, "no_deltas", tmp_path)
