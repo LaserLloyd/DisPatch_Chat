@@ -1,4 +1,4 @@
-// Settings -> Connections: the servers DisPatch talks to.
+// Settings -> AI & Connections: the servers DisPatch talks to.
 //
 // One card per connection (name, type, address, the result of its last Test, the characters that use
 // it) with Test / Edit / Delete, an "Add a connection" form (pick a type, address, key, Test before you
@@ -23,10 +23,11 @@ export function describeTest(r) {
     if (typeof r.latency_ms === 'number') bits.push(t('cxn.latency', { ms: r.latency_ms }));
     if (r.product) bits.push(r.version ? `${r.product} ${r.version}` : r.product);
     const n = (r.models && r.models.length) || 0;
-    const head = r.models_listed === false
-      ? t('cxn.ok_no_models')
-      : t('cxn.ok_models', { count: n });
-    return ['ok', head, bits.join(' · ')];
+    if (r.models_listed === false) return ['ok', t('cxn.ok_no_models'), bits.join(' · ')];
+    // Reachable but offering nothing is not a success (3.2): usually a key without
+    // access, or the wrong address.
+    if (!n) return ['warn', t('cxn.ok_models', { count: 0 }), [t('cxn.check_key_url'), ...bits].join(' · ')];
+    return ['ok', t('cxn.ok_models', { count: n }), bits.join(' · ')];
   }
   switch (r.problem) {
     case 'auth': return ['bad', t('cxn.bad_auth'), r.fix || r.message || ''];
@@ -40,6 +41,19 @@ export function describeTest(r) {
 
 /** The stored last_test of a connection, in the same shape. */
 export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length ? c.last_test : null);
+
+/** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id. */
+export function usedByText(ids, nameOf = (id) => id, max = 5) {
+  const list = (ids || []).map((id) => nameOf(id) || id);
+  if (!list.length) return t('cxn.unused');
+  const shown = list.slice(0, max).join(', ');
+  return list.length > max
+    ? t('cxn.used_by_more', { names: shown, count: list.length - max })
+    : t('cxn.used_by', { names: shown });
+}
+
+/** Does the connection's name already say its type? Then the type chip is noise. */
+export const nameSaysType = (c) => !!(c && c.type_label && String(c.name || '').toLowerCase().includes(String(c.type_label).toLowerCase()));
 
 /** The values the "Add" form starts with for a type. */
 const CAP_KEYS = {
@@ -102,7 +116,8 @@ function paintResult(box, r, onPickModel) {
 }
 
 /**
- * Mount into `pane`. deps: { api?, toast, confirm(msg, opts), openTab(tab), onChanged() }
+ * Mount into `pane`. deps: { api?, toast, confirm(msg, opts), openTab(tab), onChanged(),
+ * botName(id) -> the character's display name for "Used by" }
  */
 export async function mountConnections(pane, deps = {}) {
   const api = deps.api || realApi;
@@ -168,10 +183,10 @@ export async function mountConnections(pane, deps = {}) {
       try { await api.deleteConnection(c.id); toast(t('cxn.deleted')); deps.onChanged && deps.onChanged(); load(); }
       catch (e) { toast(errorText(e), true); }
     });
-    const users = c.in_use_by && c.in_use_by.length ? t('cxn.used_by', { names: c.in_use_by.join(', ') }) : t('cxn.unused');
+    const users = usedByText(c.in_use_by, deps.botName);
     return el('div', { class: 'dev-row cxn-card', dataset: { connection: c.id } }, [
       el('span', { class: 'dev-row-text' }, [
-        el('strong', { text: c.name }), ' ', el('span', { class: 'ui-badge', text: c.type_label }),
+        el('strong', { text: c.name }), ' ', nameSaysType(c) ? null : el('span', { class: 'ui-badge', text: c.type_label }),
         c.is_default ? el('span', { class: 'ui-badge ui-badge--info', text: t('cxn.default') }) : null,
         el('span', { class: 'dev-row-hint cxn-url', text: c.base_url }),
         el('span', { class: `dev-row-hint cxn-status cxn-${kind}`, text: detail ? `${head} · ${detail}` : head }),
@@ -326,5 +341,5 @@ export async function mountConnections(pane, deps = {}) {
   });
 
   await load();
-  return { reload: load, openForm };
+  return { reload: load, openForm, count: () => state.list.length };
 }

@@ -18,7 +18,9 @@ const MAIN = read('js/main.js');
 const SDK = read('js/ext-sdk.js');
 
 test('Voice is not an admin tab: a Member who holds use_voice gets it once the add-on owns the pane', () => {
-  assert.doesNotMatch(/const ADMIN_TABS = \[([^\]]*)\];/.exec(MAIN)[1], /'voice'/);
+  // The admin sections are the household ones (settings-nav.js perm 'admin'); Voice's perm is its own.
+  assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)/);
+  assert.match(read('js/settings-nav.js'), /\{ id: 'voice', group: 'you', icon: 'mic', label: 'settings\.sec_voice', perm: 'voice' \}/);
   assert.match(HTML, /class="settings-tab hidden" id="stab-voice"/);
   assert.match(MAIN, /const voiceTabAllowed = \(\) => !state\.decoy\s+&& \(canAdmin\(\) \|\| \(sessionCan\('use_voice'\) && !!\(paneHost\('voice'\) && paneHost\('voice'\)\.owned\(\)\)\)\);/);
   // Re-decided when the add-on claims or gives back the pane, and on every auth change.

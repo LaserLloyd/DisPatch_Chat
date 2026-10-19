@@ -132,10 +132,11 @@ const SCHEMA = {
   schema: 1,
   groups: [{ id: 'system', label: 'System', description: 's' }, { id: 'people', label: 'People & Profiles', description: 'p' }],
   settings: [
-    { key: 'system.backup_keep', type: 'integer', default: 12, label: 'Snapshots to keep', description: 'How many snapshots.', group: 'system', section: 'Backups', level: 'basic', restart_required: true, min: 1 },
+    { key: 'system.backup_keep', type: 'integer', default: 12, label: 'Snapshots to keep', description: 'How many snapshots.', group: 'system', section: 'Backups', level: 'basic', restart_required: true, min: 1, ui_section: 'system#backups' },
     { key: 'system.host', type: 'string', default: '127.0.0.1', label: 'Listen address', description: 'Informational.', group: 'system', section: 'Network', level: 'advanced' },
-    { key: 'people.lock_timeout_seconds', type: 'integer', default: 600, label: 'Auto-lock', description: 'Idle seconds.', group: 'people', section: 'Sessions', level: 'basic' },
-    { key: 'system.backup_passphrase', type: 'secret', default: null, label: 'Backup passphrase', description: 'Write only.', group: 'system', section: 'Backups', level: 'advanced', secret: true },
+    { key: 'people.lock_timeout_seconds', type: 'integer', default: 600, label: 'Auto-lock', description: 'Idle seconds.', group: 'people', section: 'Sessions', level: 'basic',
+      unit: 'seconds', min: 30, presets: [300, 600, 900, 3600], ui_section: 'people#signin-rules' },
+    { key: 'system.backup_passphrase', type: 'secret', default: null, label: 'Backup passphrase', description: 'Write only.', group: 'system', section: 'Backups', level: 'advanced', secret: true, ui_section: 'system#backups' },
   ],
 };
 const VALUES = { schema: 1, values: {
@@ -215,6 +216,22 @@ test('connection test results become plain sentences', async () => {
   assert.equal(C.describeTest({ ok: false, problem: 'blocked_target', message: 'm' })[0], 'bad');
 });
 
+test('connections list: reachable with no models is a warning, Used by shows names, a type chip only when the name lacks it', { skip: dom.skip }, async () => {
+  await boot();
+  const C = await fresh('connections.js');
+  // 3.2: "0 models available" was painted green.
+  const zero = C.describeTest({ ok: true, models: [], models_listed: true, latency_ms: 231 });
+  assert.equal(zero[0], 'warn');
+  assert.match(zero[2], /check the key or the address/);
+  assert.equal(C.describeTest({ ok: true, models_listed: false })[0], 'ok', 'a server that does not list models is fine');
+  const names = { a: 'Ann', b: 'Bob' };
+  assert.equal(C.usedByText(['a', 'b'], (id) => names[id]), 'Used by Ann, Bob');
+  assert.equal(C.usedByText(['a', 'b', 'c', 'd', 'e', 'f', 'g'], (id) => names[id], 5), 'Used by Ann, Bob, c, d, e and 2 more');
+  assert.equal(C.usedByText([], (id) => id), EN.cxn.unused);
+  assert.equal(C.nameSaysType({ name: 'OpenAI-compatible server (api.example/v1)', type_label: 'OpenAI-compatible server' }), true);
+  assert.equal(C.nameSaysType({ name: 'Rig', type_label: 'StudioForge' }), false);
+});
+
 test('connection form payload: a blank key keeps the stored one; clear and env are explicit', async () => {
   const C = await fresh('connections.js').catch(() => null);
   if (!C) return;
@@ -279,64 +296,144 @@ test('backup: what each row offers, and the schedule sentence', async () => {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test('All settings: renders ForgeUI rows from the schema, locks env rows, saves only changes', { skip: dom.skip }, async () => {
+// mountSchemaRows (3.2): the rows of one slot of a section, applied as they change.
+const slotHost = (win) => {
+  const h = win.document.createElement('div');
+  h.className = 'schema-host';
+  win.document.body.append(h);
+  return h;
+};
+
+test('schema rows: a slot draws its section#anchor rows, the anchor-less slot the rest, env rows locked', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { mountSettingsSchema } = await fresh('settings_schema.js');
-  const patched = [];
-  const api = {
-    settingsSchema: async () => SCHEMA,
-    settings: async () => VALUES,
-    patchSettings: async (set, reset) => { patched.push({ set, reset }); return { ok: true, changed: Object.keys(set), restart_required: ['system.backup_keep'] }; },
-    backups: async () => ({ backups: [], schedule: { enabled: false } }),
-    pendingRestore: async () => ({ pending: false }),
-    people: async () => ({ profiles: [] }),
-  };
-  const pane = win.document.getElementById('spane-settings');
-  const toasts = [];
-  const ctl = await mountSettingsSchema(pane, { api, toast: (m) => toasts.push(m), role: 'owner', group: 'system' });
-  const rows = [...pane.querySelectorAll('.ui-setting')];
-  assert.ok(rows.length >= 1);
-  const keep = pane.querySelector('[data-key="system.backup_keep"]');
-  assert.ok(keep, 'the Basic row is drawn');
-  assert.equal(pane.querySelector('[data-key="system.host"]'), null, 'advanced rows start hidden');
-  assert.ok(pane.querySelector('.schema-tab[aria-selected="true"]'));
-  // Advanced shows the env-locked row with a disabled control
-  [...pane.querySelectorAll('button')].find((b) => b.textContent === EN.schema.show_advanced).click();
-  const host = pane.querySelector('[data-key="system.host"]');
+  const S = await fresh('settings_schema.js');
+  const api = { settingsSchema: async () => SCHEMA, settings: async () => VALUES, patchSettings: async () => ({ ok: true }) };
+  const backups = slotHost(win);
+  const advanced = slotHost(win);
+  const claimed = new Set(['backups']);
+  await S.mountSchemaRows(backups, { api, section: 'system', anchor: 'backups', claimed, role: 'owner' });
+  await S.mountSchemaRows(advanced, { api, section: 'system', anchor: '', claimed, role: 'owner' });
+  assert.deepEqual([...backups.querySelectorAll('.ui-setting')].map((n) => n.dataset.key), ['system.backup_keep', 'system.backup_passphrase']);
+  assert.deepEqual([...advanced.querySelectorAll('.ui-setting')].map((n) => n.dataset.key), ['system.host'], 'no row twice');
+  const host = advanced.querySelector('[data-key="system.host"]');
   assert.equal(host.getAttribute('data-source'), 'env');
   assert.equal(host.querySelector('input').disabled, true);
-  // edit one, save: only that key is sent
-  const input = pane.querySelector('[data-key="system.backup_keep"] input');
-  input.value = '30';
-  input.dispatchEvent(new win.Event('input', { bubbles: true }));
-  const save = [...pane.querySelectorAll('.schema-savebar button')].find((b) => /Save 1 change/.test(b.textContent));
-  assert.ok(save && !save.disabled);
-  save.click();
-  await tick(); await tick();
-  assert.deepEqual(patched, [{ set: { 'system.backup_keep': 30 }, reset: [] }]);
-  assert.match(pane.querySelector('.schema-savemsg').textContent, /needs a restart/);
-  void ctl;
+  // A slot with nothing for it hides itself.
+  const empty = slotHost(win);
+  assert.equal(await S.mountSchemaRows(empty, { api, section: 'characters', anchor: '', role: 'owner' }), null);
+  assert.equal(empty.hidden, true);
 });
 
-test('All settings: a refused value is shown on its row and nothing else changes', { skip: dom.skip }, async () => {
+test('schema rows: a change applies at once (one PATCH for that key), says a restart is needed, and can be undone', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { mountSettingsSchema } = await fresh('settings_schema.js');
+  const S = await fresh('settings_schema.js');
+  const patched = [];
+  const toasts = [];
+  const api = {
+    settingsSchema: async () => SCHEMA, settings: async () => VALUES,
+    patchSettings: async (set, reset) => { patched.push({ set, reset }); return { ok: true, changed: Object.keys(set), restart_required: ['system.backup_keep'] }; },
+  };
+  const host = slotHost(win);
+  await S.mountSchemaRows(host, { api, section: 'system', anchor: 'backups', claimed: new Set(['backups']), role: 'owner',
+    toast: (m, err, o) => toasts.push([m, !!err, o && o.undo]) });
+  const input = host.querySelector('[data-key="system.backup_keep"] input');
+  input.value = '30';
+  input.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(patched.length, 0, 'typing alone sends nothing');
+  input.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(); await tick(); await tick();
+  assert.deepEqual(patched, [{ set: { 'system.backup_keep': 30 }, reset: [] }]);
+  assert.match(toasts.at(-1)[0], /Snapshots to keep saved\. It applies after DisPatch restarts\./);
+  assert.equal(typeof toasts.at(-1)[2], 'function', 'the toast offers Undo');
+  await toasts.at(-1)[2]();
+  await tick(); await tick();
+  assert.deepEqual(patched.at(-1), { set: { 'system.backup_keep': 20 }, reset: [] }, 'Undo writes the value it had');
+});
+
+test('schema rows: a refused value is shown on its row', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const S = await fresh('settings_schema.js');
   const api = {
     settingsSchema: async () => SCHEMA, settings: async () => VALUES,
     patchSettings: async () => { const e = new Error('422: x'); e.errors = { 'system.backup_keep': 'Snapshots to keep: must be at least 1' }; throw e; },
-    backups: async () => ({ backups: [], schedule: {} }), pendingRestore: async () => ({ pending: false }), people: async () => ({ profiles: [] }),
   };
-  const pane = win.document.getElementById('spane-settings');
-  await mountSettingsSchema(pane, { api, toast() {}, role: 'owner', group: 'system' });
-  const input = pane.querySelector('[data-key="system.backup_keep"] input');
+  const host = slotHost(win);
+  await S.mountSchemaRows(host, { api, section: 'system', anchor: 'backups', claimed: new Set(['backups']), role: 'owner' });
+  const input = host.querySelector('[data-key="system.backup_keep"] input');
   input.value = '0';
-  input.dispatchEvent(new win.Event('input', { bubbles: true }));
-  [...pane.querySelectorAll('.schema-savebar button')].find((b) => /Save/.test(b.textContent) && !b.disabled).click();
+  input.dispatchEvent(new win.Event('change', { bubbles: true }));
   await tick(); await tick();
-  const err = pane.querySelector('[data-key="system.backup_keep"] .schema-error');
+  const err = host.querySelector('[data-key="system.backup_keep"] .schema-error');
   assert.equal(err.hidden, false);
   assert.match(err.textContent, /must be at least 1/);
-  assert.equal(pane.querySelector('[data-key="system.backup_keep"] input').getAttribute('aria-invalid'), 'true');
+  assert.equal(input.getAttribute('aria-invalid'), 'true');
+});
+
+test('schema rows: a duration is a dropdown of presets with Custom…, written in the row\'s own unit', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const S = await fresh('settings_schema.js');
+  const patched = [];
+  const api = { settingsSchema: async () => SCHEMA, settings: async () => VALUES,
+    patchSettings: async (set) => { patched.push(set); return { ok: true, restart_required: [] }; } };
+  const host = slotHost(win);
+  await S.mountSchemaRows(host, { api, section: 'people', anchor: 'signin-rules', claimed: new Set(['signin-rules']), role: 'owner' });
+  const sel = host.querySelector('[data-key="people.lock_timeout_seconds"] select');
+  assert.deepEqual([...sel.options].map((o) => o.textContent), ['5 minutes', '10 minutes', '15 minutes', '1 hour', 'Custom…']);
+  assert.equal(sel.value, '600');
+  sel.value = '3600';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(); await tick();
+  assert.deepEqual(patched.at(-1), { 'people.lock_timeout_seconds': 3600 });
+  // The row is redrawn from the server's answer after a write: look it up again.
+  const sel2 = host.querySelector('[data-key="people.lock_timeout_seconds"] select');
+  sel2.value = 'custom';
+  sel2.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const custom = host.querySelector('.schema-measure-custom');
+  assert.equal(custom.hidden, false);
+  custom.querySelector('input').value = '2';
+  custom.querySelector('select').value = 'hours';
+  custom.querySelector('select').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(); await tick();
+  assert.deepEqual(patched.at(-1), { 'people.lock_timeout_seconds': 7200 });
+});
+
+test('durations and sizes: split, join and format round-trip', async () => {
+  await boot().catch(() => null);
+  const S = await fresh('settings_schema.js').catch(() => null);
+  if (!S) return;
+  const secs = { type: 'integer', unit: 'seconds', min: 30 };
+  assert.deepEqual(S.splitMeasure(secs, 600), { n: 10, unit: 'minutes' });
+  assert.deepEqual(S.splitMeasure(secs, 7200), { n: 2, unit: 'hours' });
+  assert.deepEqual(S.splitMeasure(secs, 90), { n: 90, unit: 'seconds' });
+  assert.equal(S.joinMeasure(secs, 10, 'minutes'), 600);
+  assert.equal(S.joinMeasure(secs, '', 'minutes'), undefined);
+  const hours = { type: 'integer', unit: 'hours' };
+  assert.deepEqual(S.splitMeasure(hours, 48), { n: 2, unit: 'days' });
+  assert.equal(S.joinMeasure(hours, 2, 'days'), 48);
+  assert.equal(S.joinMeasure(hours, 30, 'minutes'), undefined, 'not a whole number of hours');
+  assert.deepEqual(S.customUnits(hours), ['hours', 'days']);
+  const bytes = { type: 'integer', unit: 'bytes' };
+  assert.deepEqual(S.splitMeasure(bytes, 20 * 1024 ** 3), { n: 20, unit: 'gigabytes' });
+  assert.equal(S.joinMeasure(bytes, 200, 'megabytes'), 200 * 1024 ** 2);
+  assert.equal(S.measureOf({ type: 'integer', unit: 'days' }), 'duration');
+  assert.equal(S.measureOf({ type: 'string', unit: 'seconds' }), '');
+  assert.equal(S.formatMeasure({ ...secs, presets: [0, 60] }, 0, 'en'), 'Off');
+  assert.equal(S.formatMeasure(secs, 3600, 'en'), '1 hour');
+});
+
+test('which rows go where: a row whose anchor has no slot falls back to the section\'s Advanced', async () => {
+  const S = await fresh('settings_schema.js').catch(() => null);
+  if (!S) return;
+  const defs = [
+    { key: 'a.x', ui_section: 'system#network' }, { key: 'a.y', ui_section: 'system' },
+    { key: 'a.z', ui_section: 'system#nowhere' }, { key: 'people.machine_loopback_trust', ui_section: 'people#machine' },
+    { key: 'b.q', group: 'tools' },
+  ];
+  const claimed = new Set(['network']);
+  assert.deepEqual(S.rowsForSlot(defs, 'system', 'network', claimed).map((d) => d.key), ['a.x']);
+  assert.deepEqual(S.rowsForSlot(defs, 'system', '', claimed).map((d) => d.key), ['a.y', 'a.z']);
+  assert.deepEqual(S.rowsForSlot(defs, 'people', '', new Set()).map((d) => d.key), [], 'drawn by the section itself');
+  assert.deepEqual(S.uiTarget({ group: 'tools' }), ['plugins', '']);
 });
 
 const CONN_TYPES = [
@@ -508,11 +605,14 @@ test('Backups: the Owner and Admins are offered them, a Member is not', { skip: 
 
 // ------------------------------------------------------------------ 4. wiring
 
-test('index.html: the two new tabs and panes exist, hidden for non-admins like the others', () => {
+test('index.html: AI & Connections is a household section; All settings is gone (its rows live in the sections)', () => {
   assert.match(HTML, /id="stab-connections"[^>]*aria-controls="spane-connections"/);
-  assert.match(HTML, /id="stab-settings"[^>]*aria-controls="spane-settings"/);
-  assert.match(HTML, /class="settings-tab admin-only hidden" id="stab-connections"/);
-  assert.match(HTML, /class="settings-tab admin-only hidden" id="stab-settings"/);
+  assert.match(HTML, /class="settings-tab admin-only" id="stab-connections"/);
+  assert.doesNotMatch(HTML, /id="stab-settings"|id="spane-settings"/);
+  // Every section that holds schema rows has an anchor-less slot under its Advanced disclosure.
+  for (const sec of ['appearance', 'characters', 'connections', 'system']) {
+    assert.match(HTML, new RegExp(`<div class="schema-host" data-schema="${sec}"></div>`), sec);
+  }
   assert.match(HTML, /<link rel="stylesheet" href="\/static\/w5\.css\?v=\d+"/);
 });
 
@@ -524,43 +624,38 @@ test('main.js: hooks the new modules, registers the locked handler and starts th
   assert.ok(SW.includes("'/static/w5.css'"));
   assert.match(MAIN, /w5SetOnLocked\(\(\) => handleLocked\(\)\);/);
   assert.match(MAIN, /await refreshAuthAndBoot\(\);\s+[\s\S]{0,400}applyDeviceDefaults\(\);\s+(?:const wizard = await )?maybeStartWizard\(/);
-  assert.match(MAIN, /decorateCharacterRows\(list, bmBots, characterCtx\(\)\)/);
-  assert.match(MAIN, /case 'connections':[\s\S]{0,200}mountConnections\(pane/);
-  assert.match(MAIN, /case 'settings':[\s\S]{0,200}mountSettingsSchema\(pane/);
+  assert.match(MAIN, /characterPanel\(bot, \{ \.\.\.characterCtx\(\), skip: \['audience', 'personality'\]/);
+  assert.match(MAIN, /case 'connections':\s+await mountConnectionsSection\(pane\)/);
+  assert.match(MAIN, /const ctl = await mountConnections\(host, \{/);
+  assert.match(MAIN, /function mountSchemaHosts\(pane/);
 });
 
-test('the new strings exist in every locale with the same keys (English in en, [xx] elsewhere)', () => {
+test('the W5 strings exist in every locale with the same keys', () => {
   for (const lang of ['ar', 'de', 'es', 'fr', 'ja', 'pt', 'zh']) {
     const L = JSON.parse(read(`locales/${lang}.json`));
     for (const ns of ['schema', 'cxn', 'chars', 'wiz', 'bkp']) {
       assert.deepEqual(Object.keys(L[ns]).sort(), Object.keys(EN[ns]).sort(), `${lang}.${ns}`);
     }
-    assert.equal(L.settings.tab_connections, `[${lang}] ${EN.settings.tab_connections}`);
   }
 });
 
-test('All settings: a host-control row is read-only to a Member granted manage_settings, editable to an Admin and the Owner', { skip: dom.skip }, async () => {
+test('schema rows: a host-control row is read-only to a Member granted manage_settings, editable to an Admin and the Owner', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { mountSettingsSchema } = await fresh('settings_schema.js');
+  const S = await fresh('settings_schema.js');
   const schema = { ...SCHEMA, settings: SCHEMA.settings.map((d) => (d.key === 'system.backup_keep' ? { ...d, owner_only: true } : d)) };
-  const api = {
-    settingsSchema: async () => schema, settings: async () => VALUES, patchSettings: async () => ({ ok: true, changed: [] }),
-    backups: async () => ({ backups: [], schedule: { enabled: false } }), pendingRestore: async () => ({ pending: false }),
-    people: async () => ({ profiles: [] }),
+  const api = { settingsSchema: async () => schema, settings: async () => VALUES, patchSettings: async () => ({ ok: true, changed: [] }) };
+  const draw = async (role) => {
+    const h = slotHost(win);
+    await S.mountSchemaRows(h, { api, section: 'system', anchor: 'backups', claimed: new Set(['backups']), role, force: true });
+    return h.querySelector('[data-key="system.backup_keep"]');
   };
-  const pane = win.document.getElementById('spane-settings');
-  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'member', group: 'system' });
-  const row = pane.querySelector('[data-key="system.backup_keep"]');
+  const row = await draw('member');
   assert.equal(row.querySelector('input').disabled, true);
   assert.ok(row.querySelector('.schema-owner-only'), 'the row says why');
-  pane.textContent = '';
-  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'admin', group: 'system' });
-  const rowA = pane.querySelector('[data-key="system.backup_keep"]');
+  const rowA = await draw('admin');
   assert.equal(rowA.querySelector('input').disabled, false, 'an Admin edits host-control rows');
   assert.equal(rowA.querySelector('.schema-owner-only'), null);
-  pane.textContent = '';
-  await mountSettingsSchema(pane, { api, toast: () => {}, role: 'owner', group: 'system' });
-  const row2 = pane.querySelector('[data-key="system.backup_keep"]');
+  const row2 = await draw('owner');
   assert.equal(row2.querySelector('input').disabled, false);
   assert.equal(row2.querySelector('.schema-owner-only'), null);
 });

@@ -46,8 +46,8 @@ export const APP_DATABASES = [
 // pins.js shipped 'dispatch-pinned-settings' and nobody added it here, so a
 // wiped device still advertised which settings the last user had pinned.
 export const APP_KEYS = [
-  'dispatch-palette',         // theme.js (Settings → Theme)
-  'dispatch-avatar-style',    // main.js (Settings → minimal avatars)
+  'dispatch-palette',         // theme.js (Settings → Appearance → Theme)
+  'dispatch-avatar-style',    // main.js (Settings → Appearance → Avatar style)
   'dispatch-lang',            // i18n.js
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)
   // pins.js (default-on pins the user turned OFF — e.g. the 🎨 theme button).
@@ -59,6 +59,8 @@ export const APP_KEYS = [
   'dispatch-show-hidden-bots', // menubots.js (show bots hidden on unlocked devices here)
   'dispatch-imagestudio-sort', // apps/imagestudio studio.js (the results grid's order)
   'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
+  'dispatch-settings-last',   // main.js (the Settings section this device opened last)
+  'dispatch-settings-adv',    // main.js (which Settings "Advanced" disclosures were left open)
   // NOT 'dispatch-privacy-ack' (host-notice.js): it only records that this device
   // dismissed the one-time "stored on the host computer" card. It is not personal
   // data, and wiping it would show that card again on every visit of a privacy-mode

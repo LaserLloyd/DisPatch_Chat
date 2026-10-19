@@ -83,6 +83,7 @@ function wire(mod, over = {}) {
     navigate: (v) => rec.navigated.push(v),
     toast: (m, err) => rec.toasts.push([m, !!err]),
     isBotId: (id) => id === 'main',
+    openSettings: (target) => (rec.settings ||= []).push(target),
   });
   return { rec, state };
 }
@@ -1109,4 +1110,51 @@ test('phone sheet: a scrim tap with the profile chip\'s menu open closes that me
   assert.equal(sheet.hidden, true, 'the sheet closes');
   assert.equal(pm.hidden, true, 'and the menu opened from it does not stay floating');
   assert.equal(chip.getAttribute('aria-expanded'), 'false');
+});
+
+
+test('Settings → Plugins & Apps: a row saves on its own (no Save button), and ⚙ opens a built-in tool\'s settings', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod);
+  const doc = win.document;
+  const pane = doc.createElement('div');
+  doc.getElementById('spane-plugins').append(pane);
+  const opened = [];
+  await mod.mountToolsSettings(pane, {
+    features: ['harness'],
+    toolSettings: async (feature, host) => { opened.push(feature); host.textContent = `ROWS-${feature}`; return { rows: [1] }; },
+  });
+  let puts = 0;
+  routes['PUT /api/tools'] = (opts) => { puts += 1; return [200, { tools: JSON.parse(opts.body).tools.map((x) => ({ ...FIXTURE.tools.find((f) => f.id === x.id), ...x })) }]; };
+  // A switch flips: one PUT shortly after, with no button to press.
+  const cb = pane.querySelector('.tools-row .tools-cell-on input[type=checkbox]');
+  cb.checked = !cb.checked;
+  cb.dispatchEvent(new win.Event('change'));
+  assert.equal(puts, 0, 'not on the same tick: a burst of changes is one request');
+  await new Promise((r) => setTimeout(r, 320));
+  assert.equal(puts, 1);
+  // Only the features the caller names get a gear (an add-on's tile has no settings rows).
+  const gears = [...pane.querySelectorAll('.tools-gear')];
+  assert.deepEqual(gears.map((g) => g.dataset.feature), ['harness']);
+  gears[0].click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(opened, ['harness']);
+  const row = pane.querySelector('.tools-settings-row[data-feature="harness"]');
+  assert.ok(row && /ROWS-harness/.test(row.textContent));
+  assert.equal(pane.querySelector('.tools-gear').getAttribute('aria-expanded'), 'true');
+});
+
+test('an app may ask for Settings on a section (Image Studio\'s "Set up"), and nothing else', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec } = wire(mod);
+  await mod.loadTools();
+  mod.openTool('jobboard');
+  appMessage(win, { type: 'dispatch:open-settings', target: 'connections#images' });
+  appMessage(win, { type: 'dispatch:open-settings', target: 'javascript:alert(1)' });
+  appMessage(win, { type: 'dispatch:open-settings', target: 'a'.repeat(200) });
+  appMessage(win, { type: 'dispatch:open-settings', target: 'connections#images' }, { origin: 'http://evil.example' });
+  assert.deepEqual(rec.settings, ['connections#images']);
+  assert.ok(mod.SETTINGS_TARGET_RE.test('people#key:people.lock_timeout_seconds'));
 });

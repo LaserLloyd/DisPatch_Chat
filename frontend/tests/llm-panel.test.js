@@ -1,8 +1,9 @@
-// Settings -> AI models (js/llm.js) in 2.3.0: the panel connects a BOT — the
-// "Bot to connect" picker lists the direct-API bots from /api/bots/all with
-// "New bot…" last, the Lookups switch rides along, and Save posts
-// {backend: "direct", target, tools, ...} to /api/llm/connect. Rendered against
-// the REAL index.html markup under jsdom with fetch() stubbed.
+// Settings -> AI & Connections (js/llm.js) in 3.2: the per-bot "Bot to connect"
+// form is gone (a server is a connection; a character picks one in its Details).
+// What stays: the one-key quick setup, open as the empty state and closed once a
+// connection exists, the image-generation block, and the first-run card that
+// opens this section on the quick setup. Rendered against the REAL index.html
+// markup under jsdom with fetch() stubbed.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,24 +23,9 @@ let jsdom = null;
 try { jsdom = require('jsdom'); } catch { /* not installed - DOM tests skip */ }
 const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
-const PROVIDERS = () => ({
-  providers: [
-    { id: 'lmstudio', label: 'LM Studio', base_url: 'http://127.0.0.1:1234/v1', local: true, key_accepted: false, models: [] },
-    { id: 'minimax', label: 'MiniMax', base_url: 'https://api.minimax.io/v1', local: false, key_accepted: true, key_env: 'MINIMAX_API_KEY', models: ['MiniMax-M3'] },
-  ],
-  connected: [],
-});
-const BOTS = () => ({
-  bots: [
-    { id: 'atlas', name: 'Atlas', backend: 'direct', tools: true, connected: false, provider: '', model: '' },
-    { id: 'sage', name: 'Sage', backend: 'direct', tools: false, connected: true, provider: 'minimax', model: 'MiniMax-M3' },
-    { id: 'nova', name: 'Nova', backend: 'agent', tools: false, connected: false },
-  ],
-});
-
 let calls = [];
 
-async function setup() {
+async function setup({ quickOpen } = {}) {
   const { JSDOM } = jsdom;
   const win = new JSDOM(HTML, { url: 'http://127.0.0.1:8765/', runScripts: 'outside-only' }).window;
   const put = (k, v) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
@@ -47,9 +33,8 @@ async function setup() {
   calls = [];
   const routes = {
     'GET /static/locales/en.json': () => [200, EN],
-    'GET /api/llm/providers': () => [200, PROVIDERS()],
-    'GET /api/bots/all': () => [200, BOTS()],
-    'POST /api/llm/connect': (o) => [200, { id: 'atlas', name: 'Atlas', connected: true, bot: { id: 'atlas', name: 'Atlas', connected: true } }],
+    'GET /api/llm/quicksetup': () => [200, { plans: [{ id: 'minimax', label: 'MiniMax', chat_model: 'MiniMax-M3', images: true, embeddings: false, docs: '' }] }],
+    'GET /api/llm/image': () => [200, { presets: [], config: { provider: '' }, clawforge: false }],
   };
   globalThis.fetch = async (u, opts = {}) => {
     const key = `${(opts.method || 'GET').toUpperCase()} ${u}`;
@@ -61,99 +46,41 @@ async function setup() {
   const i18n = await import('../static/js/i18n.js?v=4');
   await i18n.init('en');
   const mod = await import(`../static/js/llm.js?t=${Math.random()}`);
-  const rec = { toasts: [], connected: [] };
-  mod.initLlmPanel({ toast: (m, e) => rec.toasts.push([m, !!e]), onConnected: async (b) => rec.connected.push(b), isDecoy: () => false, settingsTabActive: () => true });
-  await mod.activateLlmPanel({});
+  const rec = { tabs: [] };
+  mod.initLlmPanel({ toast: () => {}, isDecoy: () => false, settingsTabActive: (t) => t === 'connections',
+    openSettingsTab: (t) => rec.tabs.push(t) });
+  await mod.activateLlmPanel({ quickOpen });
   return { win, mod, rec, doc: win.document };
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0));
-
-test('the picker lists the direct-API bots (never an agent bot) with New bot… last, defaulting to the unconnected one', dom, async () => {
-  const { doc } = await setup();
-  const opts = [...doc.getElementById('llm-target').options].map((o) => [o.value, o.textContent]);
-  assert.deepEqual(opts.map((o) => o[0]), ['atlas', 'sage', '__new__']);
-  assert.match(opts[0][1], /Atlas — not connected yet/);
-  assert.match(opts[1][1], /Sage — connected \(MiniMax, MiniMax-M3\)/);
-  assert.equal(doc.getElementById('llm-target').value, 'atlas');
-  assert.equal(doc.getElementById('llm-tools').checked, true, 'Atlas has lookups on');
+test('the per-bot connect form is gone from the markup; the section has the quick setup and image hosts', () => {
+  for (const id of ['llm-target', 'llm-provider', 'llm-base-url', 'llm-key', 'llm-model', 'llm-save', 'spane-ai']) {
+    assert.doesNotMatch(HTML, new RegExp(`id="${id}"`), id);
+  }
+  const pane = HTML.slice(HTML.indexOf('id="spane-connections"'), HTML.indexOf('id="spane-people"'));
+  assert.match(pane, /id="llm-quick-host"[^>]*data-anchor="quick-setup"/);
+  assert.match(pane, /id="llm-image-host"[^>]*data-anchor="images"/);
 });
 
-test('picking a connected bot pre-fills its provider, model, saved-key placeholder and Lookups state', dom, async () => {
-  const { doc } = await setup();
-  const sel = doc.getElementById('llm-target');
-  sel.value = 'sage'; sel.dispatchEvent(new doc.defaultView.Event('change'));
-  await tick();
-  assert.equal(doc.getElementById('llm-provider').value, 'minimax');
-  assert.equal(doc.getElementById('llm-tools').checked, false);
-  assert.equal(doc.getElementById('llm-key').placeholder, EN.llm.api_key_saved);
-  assert.equal(doc.getElementById('llm-name').value, 'Sage');
+test('quick setup is open as the empty state (no connection yet) and closed once there is one', dom, async () => {
+  const empty = await setup({ quickOpen: true });
+  assert.equal(empty.doc.getElementById('qs-box').open, true);
+  const some = await setup({ quickOpen: false });
+  assert.equal(some.doc.getElementById('qs-box').open, false);
+  assert.ok(some.doc.getElementById('img-section'), 'image generation is drawn too');
 });
 
-test('Save posts backend=direct, the target and the Lookups switch; the panel then opens the bot', dom, async () => {
-  const { doc, rec } = await setup();
-  doc.getElementById('llm-provider').value = 'minimax';
-  doc.getElementById('llm-provider').dispatchEvent(new doc.defaultView.Event('change'));
-  doc.getElementById('llm-model-text').value = 'MiniMax-M3';
-  doc.getElementById('llm-key').value = 'sk-test';
-  doc.getElementById('llm-tools').checked = false;
-  doc.getElementById('llm-save').click();
-  for (let i = 0; i < 5; i++) await tick();
-  const post = calls.find((c) => c.key === 'POST /api/llm/connect');
-  assert.ok(post, 'connect was posted');
-  assert.equal(post.body.backend, 'direct');
-  assert.equal(post.body.target, 'atlas');
-  assert.equal(post.body.tools, false);
-  assert.equal(post.body.provider, 'minimax');
-  assert.equal(post.body.api_key, 'sk-test');
-  assert.deepEqual(rec.connected.map((b) => b.id), ['atlas']);
+test('the old entry point opens AI & Connections on the quick setup; the first-run card has one door', dom, async () => {
+  const { mod, rec } = await setup();
+  await mod.openLlmPanel({});
+  assert.deepEqual(rec.tabs, ['connections#quick-setup']);
+  const card = mod.firstRunCard(() => {});
+  assert.equal(card.querySelectorAll('button').length, 1);
+  assert.equal(mod.llmPanelOpen(), true);
 });
 
-test('New bot… needs a name and derives the id from it', dom, async () => {
-  const { doc, mod } = await setup();
-  const sel = doc.getElementById('llm-target');
-  sel.value = '__new__'; sel.dispatchEvent(new doc.defaultView.Event('change'));
-  await tick();
-  assert.equal(doc.getElementById('llm-advanced').open, true, 'Advanced opens for the name');
-  doc.getElementById('llm-model-text').value = 'x';
-  doc.getElementById('llm-name').value = '';
-  doc.getElementById('llm-save').click();
-  for (let i = 0; i < 5; i++) await tick();
-  assert.equal(calls.some((c) => c.key === 'POST /api/llm/connect'), false);
-  assert.equal(doc.getElementById('llm-result').textContent, EN.llm.need_name);
-  doc.getElementById('llm-name').value = 'Study Buddy!';
-  doc.getElementById('llm-save').click();
-  for (let i = 0; i < 5; i++) await tick();
-  const post = calls.find((c) => c.key === 'POST /api/llm/connect');
-  assert.equal(post.body.target, 'study-buddy');
-  assert.equal(post.body.name, 'Study Buddy!');
-  assert.equal(mod.slugForBot('  Ünïcode name  '), 'n-code-name');
-  assert.equal(mod.slugForBot(''), 'assistant');
-});
-
-test('Test connection names the picked bot (target) and the env name, so a connected bot re-tests on its saved key', dom, async () => {
-  const { doc } = await setup();
-  const sel = doc.getElementById('llm-target');
-  sel.value = 'sage'; sel.dispatchEvent(new doc.defaultView.Event('change'));
-  await tick();
-  // The key field is blank on purpose: a saved key never comes back out of the
-  // API, and the server falls back to the stored key of `target` for the same
-  // provider (main._stored_probe_key) — which it cannot do without `target`.
-  assert.equal(doc.getElementById('llm-key').value, '');
-  doc.getElementById('llm-key-env').value = 'MINIMAX_API_KEY';
-  doc.getElementById('llm-test').click();
-  for (let i = 0; i < 5; i++) await tick();
-  const probe = calls.find((c) => c.key === 'POST /api/llm/test');
-  assert.ok(probe, 'the probe was posted');
-  assert.equal(probe.body.provider, 'minimax');
-  assert.equal(probe.body.target, 'sage');
-  assert.equal(probe.body.api_key, '');
-  assert.equal(probe.body.api_key_env, 'MINIMAX_API_KEY');
-  // New bot…: nothing stored to fall back on, so no target is named.
-  sel.value = '__new__'; sel.dispatchEvent(new doc.defaultView.Event('change'));
-  await tick();
-  doc.getElementById('llm-test').click();
-  for (let i = 0; i < 5; i++) await tick();
-  const again = calls.filter((c) => c.key === 'POST /api/llm/test').at(-1);
-  assert.equal(again.body.target, '');
+test('slugForBot still derives a safe id from a name', dom, async () => {
+  const { mod } = await setup();
+  assert.equal(mod.slugForBot('Ada Lovelace!'), 'ada-lovelace');
+  assert.equal(mod.slugForBot('   '), 'assistant');
 });

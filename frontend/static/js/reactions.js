@@ -6,8 +6,8 @@
 //                   trace row, holds for its duration, then collapses it back
 //                   to the one-line chip. Clicking the chip pops the picture
 //                   back up in place.
-//   2. the MANAGER — upload / generate / edit / delete the pack (unlocked
-//                    only, the ⚡ Reactions tab in Settings). Firing is a bot
+//   2. the MANAGER — upload / generate / edit / delete the pack (Owner and
+//                    Admin; Settings → Characters → Reactions). Firing is a bot
 //                    trait: there is no user-facing picker, and the manager's
 //                    Test button fires AS the enabled reaction bot.
 //
@@ -379,7 +379,7 @@ function wireDismiss() {
 let mgrEl = null;
 let mgrBusy = false;
 
-/** Render the pack manager into `host` (the Settings ⚡ pane). */
+/** Render the pack manager into `host` (Settings → Characters → Reactions). */
 export async function mountManager(host) {
   mgrEl = host;
   host.innerHTML = '';
@@ -437,16 +437,63 @@ function fieldRow(label, control, hint) {
   ]);
 }
 
+// The manager (3.2): Behaviour first (closed), then Add, then the pack as a
+// compact grid of thumbnails — tapping one opens its edit sheet, which saves
+// each field when it changes — then the rotating pool (closed). It used to be
+// forty-odd editable cards, each with its own Save, and the behaviour settings
+// at the bottom of a 5,600px page.
+let editingId = null;          // the reaction whose edit sheet is open
+
 function renderManager() {
   if (!mgrEl) return;
   mgrEl.innerHTML = '';
 
   const content = el('div', { class: 'rx-body' });
 
+  // ---- Behaviour (top, closed): applies when a field changes ----
+  const s = R.settings;
+  const enabled = el('input', { type: 'checkbox', role: 'switch' });
+  enabled.checked = s.enabled !== false;
+  const dur = el('input', { class: 'rx-input rx-num', type: 'number', min: '1', max: '60', step: '1' });
+  dur.value = Math.round((s.default_duration_ms || 10000) / 1000);
+  const cool = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '60', step: '1' });
+  cool.value = Math.round((s.cooldown_ms || 0) / 1000);
+  const queue = el('input', { class: 'rx-input rx-num', type: 'number', min: '1', max: '10', step: '1' });
+  queue.value = s.queue_max || 3;
+  const saveBehaviour = () => withBusy(async () => {
+    const r = await api.reactionSettings({
+      enabled: enabled.checked,
+      default_duration_ms: Math.round(Number(dur.value || 10) * 1000),
+      cooldown_ms: Math.round(Number(cool.value || 0) * 1000),
+      queue_max: Number(queue.value || 3),
+    });
+    R.settings = r.settings;
+    ctx.toast(t('reactions.saved'));
+  });
+  for (const c of [enabled, dur, cool, queue]) c.addEventListener('change', saveBehaviour);
+  const reseedBtn = el('button', { class: 'btn-secondary', text: t('reactions.reseed') });
+  reseedBtn.title = t('reactions.reseed_title');
+  reseedBtn.addEventListener('click', async () => {
+    await withBusy(async () => {
+      await api.reseedReactions();
+      await loadReactions(true);
+      renderManager();
+      ctx.toast(t('reactions.reseeded'));
+      ctx.onChanged();
+    });
+  });
+  content.append(el('details', { class: 'rx-section rx-fold', dataset: { anchor: 'reactions-behaviour' } }, [
+    el('summary', { class: 'rx-h3', text: t('reactions.behaviour_heading') }),
+    fieldRow(t('reactions.enabled'), enabled, t('reactions.enabled_hint')),
+    fieldRow(t('reactions.duration'), dur, t('reactions.duration_hint')),
+    fieldRow(t('reactions.cooldown'), cool, t('reactions.cooldown_hint')),
+    fieldRow(t('reactions.queue'), queue, t('reactions.queue_hint')),
+    el('div', { class: 'rx-actions' }, [reseedBtn]),
+  ]));
+
   // ---- Add: upload + generate ----
   const add = el('section', { class: 'rx-section' });
   add.append(el('h3', { class: 'rx-h3', text: t('reactions.add_heading') }));
-
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   const uploadBtn = el('button', { class: 'btn-secondary', text: t('reactions.upload') });
   uploadBtn.addEventListener('click', () => fileInput.click());
@@ -463,11 +510,10 @@ function renderManager() {
       ctx.onChanged();
     });
   });
-
   const genRow = el('div', { class: 'rx-gen-row' });
   const genPrompt = el('input', {
     class: 'rx-input', type: 'text', placeholder: t('reactions.generate_placeholder'),
-    autocomplete: 'off',
+    autocomplete: 'off', 'aria-label': t('reactions.generate_placeholder'),
   });
   const genBtn = el('button', { class: 'btn-primary' }, iconLabel(RAIL_ICONS.sparkle, t('reactions.generate')));
   genBtn.disabled = !R.canGenerate;
@@ -488,45 +534,128 @@ function renderManager() {
   genBtn.addEventListener('click', runGen);
   genPrompt.addEventListener('keydown', (e) => { if (e.key === 'Enter') runGen(); });
   genRow.append(genPrompt, genBtn);
-
   add.append(el('div', { class: 'rx-add-row' }, [uploadBtn, fileInput]), genRow);
-  if (!R.canGenerate) {
-    add.append(el('p', { class: 'muted rx-note', text: t('reactions.generate_note') }));
-  }
+  if (!R.canGenerate) add.append(el('p', { class: 'muted rx-note', text: t('reactions.generate_note') }));
   content.append(add);
 
-  // ---- The pack ----
+  // ---- The pack: a grid; the open tile's edit sheet sits under the grid ----
   const listSec = el('section', { class: 'rx-section' });
   listSec.append(el('h3', { class: 'rx-h3', text: t('reactions.pack_heading', { count: R.items.length }) }));
-  const list = el('div', { class: 'rx-list' });
-  if (!R.items.length) {
-    list.append(el('div', { class: 'reaction-empty', text: t('reactions.pack_empty') }));
-  }
-  for (const r of R.items) list.append(managerRow(r));
-  listSec.append(list);
+  if (!R.items.length) listSec.append(el('div', { class: 'reaction-empty', text: t('reactions.pack_empty') }));
+  if (editingId && !R.items.some((r) => r.id === editingId)) editingId = null;
+  const grid = el('div', { class: 'rx-grid', role: 'list' });
+  for (const r of R.items) grid.append(managerTile(r));
+  listSec.append(grid);
+  const open = R.items.find((r) => r.id === editingId);
+  if (open) listSec.append(editSheet(open));
   content.append(listSec);
 
-  // ---- The rotating pool ----
+  // ---- The rotating pool (closed) ----
+  content.append(poolSection());
+
+  // No footer: everything here applies on change or has a button of its own.
+  mgrEl.append(content);
+}
+
+/** One tile: the picture (a letter block under No-Image Mode) and the name;
+ *  an R badge when Restricted profiles may see it. */
+function managerTile(r) {
+  const thumb = nimEnabled()
+    ? el('span', { class: 'rx-tile-thumb rx-row-thumb-none', 'aria-hidden': 'true', text: (r.name || '?').charAt(0).toUpperCase() })
+    : el('img', { class: 'rx-tile-thumb', src: r.image_url, alt: '', loading: 'lazy' });
+  const b = el('button', {
+    type: 'button', class: 'rx-tile' + (r.id === editingId ? ' open' : ''), role: 'listitem',
+    'aria-expanded': String(r.id === editingId), 'aria-label': t('reactions.edit_aria', { name: r.name }),
+    dataset: { reaction: r.id },
+  }, [
+    thumb,
+    el('span', { class: 'rx-tile-name', text: r.name }),
+    r.safe ? el('span', { class: 'rx-tile-badge', title: t('reactions.safe_title'), text: t('reactions.safe_short') }) : null,
+  ]);
+  b.addEventListener('click', () => {
+    editingId = editingId === r.id ? null : r.id;
+    renderManager();
+    const sheet = mgrEl && mgrEl.querySelector('.rx-sheet input');
+    if (sheet) sheet.focus();
+  });
+  return b;
+}
+
+/** The edit sheet for one reaction: each field saves when it changes. */
+function editSheet(r) {
+  const name = el('input', { class: 'rx-input', type: 'text', value: r.name, maxlength: '60', id: 'rx-sheet-name' });
+  const aliases = el('input', {
+    class: 'rx-input', type: 'text', id: 'rx-sheet-aliases',
+    value: (r.aliases || []).join(' '), placeholder: t('reactions.aliases_placeholder'),
+  });
+  const safe = el('input', { type: 'checkbox', role: 'switch', id: 'rx-sheet-safe' });
+  safe.checked = !!r.safe;
+  const patch = () => withBusy(async () => {
+    await api.patchReaction(r.id, {
+      name: name.value.trim() || r.name,
+      aliases: aliases.value.split(/[\s,]+/).filter(Boolean),
+      safe: safe.checked,
+    });
+    ctx.toast(t('reactions.saved'));
+    await loadReactions(true);
+    renderManager();
+    ctx.onChanged();
+  });
+  name.addEventListener('change', patch);
+  aliases.addEventListener('change', patch);
+  safe.addEventListener('change', patch);
+  const test = el('button', { class: 'btn-secondary rx-row-test', text: `▶ ${t('reactions.test_button')}`, title: t('reactions.test') });
+  // App-wide test pop, fired as the enabled reaction bot (agents-only API).
+  test.addEventListener('click', () => fireReaction(r.id, { thread_id: null, trace: false }));
+  const del = el('button', { class: 'btn-secondary danger-text rx-row-del' }, iconLabel(RAIL_ICONS.trash, t('common.delete')));
+  del.setAttribute('aria-label', t('reactions.delete_aria', { name: r.name }));
+  del.addEventListener('click', async () => {
+    if (!await ctx.confirm(t('reactions.delete_confirm', { name: r.name }))) return;
+    await withBusy(async () => {
+      await api.deleteReaction(r.id);
+      editingId = null;
+      await loadReactions(true);
+      renderManager();
+      ctx.toast(t('reactions.deleted'));
+      ctx.onChanged();
+    });
+  });
+  const close = el('button', { class: 'btn-secondary', text: t('common.close') });
+  close.addEventListener('click', () => { editingId = null; renderManager(); });
+  const sheet = el('div', { class: 'rx-sheet', role: 'group', 'aria-label': t('reactions.edit_aria', { name: r.name }) }, [
+    nimEnabled() ? null : el('img', { class: 'rx-sheet-img', src: r.image_url, alt: '' }),
+    el('div', { class: 'rx-sheet-fields' }, [
+      el('label', { class: 'rx-field', for: 'rx-sheet-name' }, [el('span', { class: 'rx-field-label', text: t('reactions.name_label') }), name]),
+      el('label', { class: 'rx-field', for: 'rx-sheet-aliases' }, [el('span', { class: 'rx-field-label', text: t('reactions.aliases_label') }), aliases]),
+      el('label', { class: 'rx-field', for: 'rx-sheet-safe' }, [el('span', { class: 'rx-field-label', text: t('reactions.safe_label') }), safe,
+        el('span', { class: 'rx-field-hint', text: t('reactions.safe_title') })]),
+      el('div', { class: 'rx-row-meta' }, [
+        el('code', { class: 'rx-row-id', text: `:react:${r.id}:` }),
+        el('span', { class: 'rx-row-src muted', text: r.source }),
+      ]),
+      el('div', { class: 'rx-actions' }, [test, del, close]),
+    ]),
+  ]);
+  sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); editingId = null; renderManager(); } });
+  return sheet;
+}
+
+/** The rotating pool: status, then its settings (applied on change) and the refills. */
+function poolSection() {
   const pool = R.pool || {};
-  const poolSec = el('section', { class: 'rx-section' });
-  poolSec.append(el('h3', { class: 'rx-h3', text: t('reactions.pool_heading') }));
+  const poolSec = el('details', { class: 'rx-section rx-fold' });
+  poolSec.append(el('summary', { class: 'rx-h3', text: t('reactions.pool_heading') }));
   poolSec.append(el('p', { class: 'muted rx-note', text: t('reactions.pool_note') }));
   if (pool.dir) {
-    // The path is a real filesystem path — an LTR artefact. It stays in its own
-    // <code>, which app.css pins to direction:ltr, so the sentence around it can
-    // mirror without dragging the path apart.
-    poolSec.append(el('p', { class: 'muted rx-note' }, [
-      t('reactions.pool_dir'), el('code', { text: pool.dir }),
-    ]));
+    // A real filesystem path: an LTR artefact in its own <code>.
+    poolSec.append(el('p', { class: 'muted rx-note' }, [t('reactions.pool_dir'), el('code', { text: pool.dir })]));
   }
-
   const lowMoods = pool.low_moods || [];
   const stat = el('div', { class: 'rx-pool-stat' }, [
     el('span', {}, [el('b', { text: String(pool.remaining ?? 0) }), t('reactions.pool_on_hand')]),
     el('span', {}, [el('b', { text: String(pool.per_mood ?? 0) }), t('reactions.pool_target')]),
     el('span', {}, [t('reactions.pool_refilled'), el('b', { text: pool.batch_date || '—' })]),
-    // 2.3.7 (fresh-install audit): "unset" is not an outage — nothing was
-    // ever configured — so it gets a how-to line instead of a warning.
+    // "unset" is not an outage (nothing was ever configured): a how-to, not a warning.
     pool.image_cli === 'unset'
       ? el('span', { class: 'muted', text: t('reactions.pool_needs_cli') })
       : el('span', { class: pool.available ? '' : 'rx-pool-warn',
@@ -537,15 +666,12 @@ function renderManager() {
   }
   if (pool.last_error) stat.append(el('span', { class: 'rx-pool-warn', text: pool.last_error }));
   poolSec.append(stat);
-
   const moods = pool.moods || {};
   const moodNames = Object.keys(moods);
   if (moodNames.length) {
-    poolSec.append(el('div', { class: 'muted rx-note rx-moods',
-      text: moodNames.map((m) => `${m} ${moods[m]}`).join(' · ') }));
+    poolSec.append(el('div', { class: 'muted rx-note rx-moods', text: moodNames.map((m) => `${m} ${moods[m]}`).join(' · ') }));
   }
-
-  const poolOn = el('input', { type: 'checkbox' });
+  const poolOn = el('input', { type: 'checkbox', role: 'switch' });
   poolOn.checked = pool.enabled !== false;
   const perMood = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '100', step: '1' });
   perMood.value = pool.per_mood ?? 20;
@@ -553,15 +679,28 @@ function renderManager() {
   minMood.value = pool.min_per_mood ?? 5;
   const hour = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '23', step: '1' });
   hour.value = pool.refresh_hour ?? 4;
-  // Daily freshness: new images per mood each day, plus (optionally) one for
-  // every image fired since the last daily run. per_mood above is the ceiling.
+  // Daily freshness: new images per mood each day, plus (optionally) one for every
+  // image fired since the last daily run. per_mood above is the ceiling.
   const dailyAdd = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '100', step: '1' });
   dailyAdd.value = pool.daily_add_per_mood ?? 2;
-  const refillSpent = el('input', { type: 'checkbox' });
+  const refillSpent = el('input', { type: 'checkbox', role: 'switch' });
   refillSpent.checked = pool.refill_spent_today !== false;
-  const poolSafe = el('input', { type: 'checkbox' });
+  const poolSafe = el('input', { type: 'checkbox', role: 'switch' });
   poolSafe.checked = !!pool.safe;
-
+  const savePool = () => withBusy(async () => {
+    const r = await api.reactionPool({
+      enabled: poolOn.checked,
+      per_mood: Number(perMood.value || 0),
+      min_per_mood: Number(minMood.value || 0),
+      refresh_hour: Number(hour.value || 4),
+      daily_add_per_mood: Number(dailyAdd.value || 0),
+      refill_spent_today: refillSpent.checked,
+      safe: poolSafe.checked,
+    });
+    R.pool = r.pool;
+    ctx.toast(t('reactions.saved'));
+  });
+  for (const c of [poolOn, perMood, minMood, hour, dailyAdd, refillSpent, poolSafe]) c.addEventListener('change', savePool);
   poolSec.append(
     fieldRow(t('reactions.pool_enabled'), poolOn, t('reactions.pool_enabled_hint')),
     fieldRow(t('reactions.pool_per_mood'), perMood, t('reactions.pool_per_mood_hint')),
@@ -571,24 +710,6 @@ function renderManager() {
     fieldRow(t('reactions.pool_refill_spent'), refillSpent, t('reactions.pool_refill_spent_hint')),
     fieldRow(t('reactions.pool_safe'), poolSafe, t('reactions.pool_safe_hint')),
   );
-
-  const poolSave = el('button', { class: 'btn-primary', text: t('reactions.pool_save') });
-  poolSave.addEventListener('click', async () => {
-    await withBusy(async () => {
-      const r = await api.reactionPool({
-        enabled: poolOn.checked,
-        per_mood: Number(perMood.value || 0),
-        min_per_mood: Number(minMood.value || 0),
-        refresh_hour: Number(hour.value || 4),
-        daily_add_per_mood: Number(dailyAdd.value || 0),
-        refill_spent_today: refillSpent.checked,
-        safe: poolSafe.checked,
-      });
-      R.pool = r.pool;
-      ctx.toast(t('reactions.saved'));
-      renderManager();
-    });
-  });
   const topUp = el('button', { class: 'btn-secondary', text: t('reactions.pool_topup') });
   topUp.disabled = !pool.available;
   topUp.title = t(pool.available ? 'reactions.pool_topup_title' : 'reactions.pool_topup_disabled');
@@ -597,7 +718,6 @@ function renderManager() {
   replaceNow.disabled = !pool.available;
   replaceNow.title = t('reactions.pool_replace_title');
   replaceNow.addEventListener('click', () => runRefill(true));
-
   async function runRefill(replace) {
     if (replace && !await ctx.confirm(t('reactions.pool_replace_confirm'))) return;
     await withBusy(async () => {
@@ -609,131 +729,8 @@ function renderManager() {
       renderManager();
     }, t('reactions.pool_refill_failed'));
   }
-
-  poolSec.append(el('div', { class: 'rx-actions' }, [poolSave, topUp, replaceNow]));
-  content.append(poolSec);
-
-  // ---- Settings ----
-  const s = R.settings;
-  const setSec = el('section', { class: 'rx-section' });
-  setSec.append(el('h3', { class: 'rx-h3', text: t('reactions.behaviour_heading') }));
-
-  const enabled = el('input', { type: 'checkbox' });
-  enabled.checked = s.enabled !== false;
-  const dur = el('input', { class: 'rx-input rx-num', type: 'number', min: '1', max: '60', step: '1' });
-  dur.value = Math.round((s.default_duration_ms || 10000) / 1000);
-  const cool = el('input', { class: 'rx-input rx-num', type: 'number', min: '0', max: '60', step: '1' });
-  cool.value = Math.round((s.cooldown_ms || 0) / 1000);
-  const queue = el('input', { class: 'rx-input rx-num', type: 'number', min: '1', max: '10', step: '1' });
-  queue.value = s.queue_max || 3;
-
-  setSec.append(
-    fieldRow(t('reactions.enabled'), enabled, t('reactions.enabled_hint')),
-    fieldRow(t('reactions.duration'), dur, t('reactions.duration_hint')),
-    fieldRow(t('reactions.cooldown'), cool, t('reactions.cooldown_hint')),
-    fieldRow(t('reactions.queue'), queue, t('reactions.queue_hint')),
-  );
-
-  const saveBtn = el('button', { class: 'btn-primary', text: t('reactions.save_behaviour') });
-  saveBtn.addEventListener('click', async () => {
-    await withBusy(async () => {
-      const r = await api.reactionSettings({
-        enabled: enabled.checked,
-        default_duration_ms: Math.round(Number(dur.value || 10) * 1000),
-        cooldown_ms: Math.round(Number(cool.value || 0) * 1000),
-        queue_max: Number(queue.value || 3),
-      });
-      R.settings = r.settings;
-      ctx.toast(t('reactions.saved'));
-    });
-  });
-  const reseedBtn = el('button', { class: 'btn-secondary', text: t('reactions.reseed') });
-  reseedBtn.title = t('reactions.reseed_title');
-  reseedBtn.addEventListener('click', async () => {
-    await withBusy(async () => {
-      await api.reseedReactions();
-      await loadReactions(true);
-      renderManager();
-      ctx.toast(t('reactions.reseeded'));
-      ctx.onChanged();
-    });
-  });
-  setSec.append(el('div', { class: 'rx-actions' }, [saveBtn, reseedBtn]));
-  content.append(setSec);
-
-  // No footer: every action in here is a section's own button (Save behaviour,
-  // Save pool, Top up, Reseed), so the tab's footer group stays empty and the
-  // modal footer collapses. A "Done" that only closed the dialog would be the
-  // one dead button on the screen.
-  mgrEl.append(content);
-}
-
-function managerRow(r) {
-  const row = el('div', { class: 'rx-row' });
-  // Same oversight as the Bot Manager's avatar picker: the Reaction Manager is
-  // a wall of thumbnails, and under NIM it was the other admin screen still
-  // fetching and showing pictures. The row keeps its name/alias/safe controls
-  // so the pack stays CURATABLE without images — only the preview goes.
-  if (!nimEnabled()) {
-    row.append(el('img', { class: 'rx-row-thumb', src: r.image_url, alt: '', loading: 'lazy' }));
-  } else {
-    row.append(el('div', { class: 'rx-row-thumb rx-row-thumb-none', 'aria-hidden': 'true' }));
-  }
-
-  const name = el('input', { class: 'rx-input rx-row-name', type: 'text', value: r.name });
-  name.maxLength = 60;
-  const aliases = el('input', {
-    class: 'rx-input rx-row-aliases', type: 'text',
-    value: (r.aliases || []).join(' '), placeholder: t('reactions.aliases_placeholder'),
-  });
-
-  const safe = el('input', { type: 'checkbox' });
-  safe.checked = !!r.safe;
-  const safeLabel = el('label', { class: 'rx-safe' }, [
-    safe, el('span', { text: t('reactions.safe_label') }),
-  ]);
-  safeLabel.title = t('reactions.safe_title');
-
-  const meta = el('div', { class: 'rx-row-meta' }, [
-    el('code', { class: 'rx-row-id', text: `:react:${r.id}:` }),
-    el('span', { class: 'rx-row-src muted', text: r.source }),
-  ]);
-
-  const save = el('button', { class: 'btn-secondary rx-row-save', text: t('common.save') });
-  save.addEventListener('click', async () => {
-    await withBusy(async () => {
-      await api.patchReaction(r.id, {
-        name: name.value.trim() || r.name,
-        aliases: aliases.value.split(/[\s,]+/).filter(Boolean),
-        safe: safe.checked,
-      });
-      ctx.toast(t('reactions.saved'));
-      await loadReactions(true);
-      ctx.onChanged();
-    });
-  });
-
-  const test = el('button', { class: 'btn-secondary rx-row-test', text: '▶' });
-  test.title = t('reactions.test');
-  // App-wide test pop, fired as the enabled reaction bot (agents-only API).
-  test.addEventListener('click', () => fireReaction(r.id, { thread_id: null, trace: false }));
-
-  const del = el('button', { class: 'icon-btn ghost danger-text rx-row-del' }, [railIcon(RAIL_ICONS.trash)]);
-  del.setAttribute('aria-label', t('reactions.delete_aria', { name: r.name }));
-  del.addEventListener('click', async () => {
-    if (!await ctx.confirm(t('reactions.delete_confirm', { name: r.name }))) return;
-    await withBusy(async () => {
-      await api.deleteReaction(r.id);
-      await loadReactions(true);
-      renderManager();
-      ctx.toast(t('reactions.deleted'));
-      ctx.onChanged();
-    });
-  });
-
-  row.append(el('div', { class: 'rx-row-fields' }, [name, aliases, meta]),
-             el('div', { class: 'rx-row-actions' }, [safeLabel, test, save, del]));
-  return row;
+  poolSec.append(el('div', { class: 'rx-actions' }, [topUp, replaceNow]));
+  return poolSec;
 }
 
 async function withBusy(fn, errPrefix) {

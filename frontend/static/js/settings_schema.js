@@ -1,28 +1,27 @@
-// Settings -> "All settings": every setting, drawn from the server's schema.
+// Settings drawn from the server's schema, in the section each one belongs to.
 //
 // The page knows nothing about any individual setting. It asks GET /api/settings/schema for the
-// definitions (key, type, default, range, group, section, basic/advanced, restart, env, secret)
-// and GET /api/settings for the values and where each one comes from, then builds one
-// ForgeUI `.ui-setting` row per setting:
+// definitions (key, type, default, range, group, section, basic/advanced, restart, env, secret, and
+// since 3.2 `ui_section` and `presets`) and GET /api/settings for the values and where each one comes
+// from. Each Settings section has one or more `.schema-host[data-schema="section#anchor"]` slots;
+// `mountSchemaRows` fills a slot with one ForgeUI `.ui-setting` row per setting whose `ui_section`
+// names it (a slot without an anchor, under the section's Advanced disclosure, takes the rest):
 //
-//   - groups in the brief's order (Characters, Connections, Voice, Tools & Modules, People &
-//     Profiles, Appearance, System), a search box, a Basic / Advanced switch;
+//   - a value applies when it is changed (one PATCH per row, a toast with Undo);
+//   - durations and sizes are a dropdown of presets plus "Custom…"; booleans are switches;
 //   - a "Set by environment" badge and a locked control for a value an environment variable sets;
-//   - "Reset to default" per row (a staged reset: nothing is sent until Save);
-//   - Save sends only what changed; the server validates every key, so a refusal comes back
-//     per key and is shown on its row; keys that need a restart are listed afterwards.
+//   - a refusal is shown on its row; a row that needs a restart says so, and the section shows
+//     one "Restart DisPatch to apply N changes" line.
 //
-// The same module owns two small things that read the schema's Appearance group: applying the
-// server's default theme / language / avatar style to a device that has not chosen its own
-// (`applyDeviceDefaults`), and the list of settings that still live in their own tabs.
+// The same module applies the server's default theme / language / avatar style to a device that
+// has not chosen its own (`applyDeviceDefaults`).
 //
-// Pure functions first (buildModel, matches, parseInput, buildPatch) so the tests drive them
-// without a DOM; mountSettingsSchema is the DOM half. Nothing runs at import time.
+// Pure functions first (buildModel, matches, parseInput, buildPatch, durations and sizes, which
+// rows go in which slot) so the tests drive them without a DOM. Nothing runs at import time.
 
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
-import { t } from './i18n.js?v=4';
+import { t, lang } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { mountBackups } from './backup.js?v=2';
 
 // ------------------------------------------------------------------ pure
 
@@ -119,23 +118,179 @@ export function deviceDefaultsPlan(defaults, stored) {
   return plan;
 }
 
-/** Settings that still live in their own tab (not in the schema yet): [{ tab, i18n }]. */
-export const OTHER_TABS = [
-  { tab: 'bots', key: 'schema.other_bots' },
-  { tab: 'security', key: 'schema.other_security' },
-  { tab: 'ai', key: 'schema.other_ai' },
-  { tab: 'reactions', key: 'schema.other_reactions' },
-  { tab: 'device', key: 'schema.other_device' },
-  { tab: 'plugins', key: 'schema.other_plugins' },
-];
+// ------------------------------------------------------------------ durations and sizes
+
+/** Seconds per unit, for a schema `unit` and for the Custom… unit picker. */
+const SECONDS = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
+const BYTES = { megabytes: 1024 ** 2, gigabytes: 1024 ** 3 };
+
+/** 'duration' (unit seconds / hours / days), 'size' (unit bytes), or '' for any other row. */
+export function measureOf(def) {
+  if (!def || (def.type !== 'integer' && def.type !== 'number')) return '';
+  if (def.unit === 'bytes') return 'size';
+  if (def.unit === 'seconds' || def.unit === 'hours' || def.unit === 'days') return 'duration';
+  return '';
+}
+
+/** A stored value -> { n, unit } in the biggest whole unit (600 s -> 10 minutes). */
+export function splitMeasure(def, value) {
+  const v = Number(value);
+  if (measureOf(def) === 'size') {
+    for (const u of ['gigabytes', 'megabytes']) if (v >= BYTES[u] && v % BYTES[u] === 0) return { n: v / BYTES[u], unit: u };
+    return { n: Math.round((v / BYTES.megabytes) * 100) / 100, unit: 'megabytes' };
+  }
+  const own = SECONDS[def.unit || 'seconds'];
+  const secs = v * own;
+  for (const u of ['days', 'hours', 'minutes', 'seconds']) {
+    if (SECONDS[u] < own) break;
+    if (secs >= SECONDS[u] && secs % SECONDS[u] === 0) return { n: secs / SECONDS[u], unit: u };
+  }
+  return { n: v, unit: def.unit || 'seconds' };
+}
+
+/** { n, unit } -> the value in the row's own unit (10 minutes -> 600 for a seconds row), or
+ *  undefined when it is not a whole number of the row's unit. */
+export function joinMeasure(def, n, unit) {
+  const x = Number(n);
+  if (String(n).trim() === '' || !Number.isFinite(x) || x < 0) return undefined;
+  if (measureOf(def) === 'size') return BYTES[unit] ? Math.round(x * BYTES[unit]) : undefined;
+  if (!SECONDS[unit]) return undefined;
+  const v = (x * SECONDS[unit]) / SECONDS[def.unit || 'seconds'];
+  return Number.isInteger(v) ? v : undefined;
+}
+
+/** The units the Custom… picker offers for a row (never smaller than the row's own unit). */
+export function customUnits(def) {
+  if (measureOf(def) === 'size') return ['megabytes', 'gigabytes'];
+  const own = SECONDS[def.unit || 'seconds'];
+  const units = ['seconds', 'minutes', 'hours', 'days'].filter((u) => SECONDS[u] >= own);
+  // Seconds only where a row can really want them (a short poll interval).
+  return units.filter((u) => u !== 'seconds' || (def.min != null && def.min < 60));
+}
+
+const UNIT_INTL = { seconds: 'second', minutes: 'minute', hours: 'hour', days: 'day', megabytes: 'megabyte', gigabytes: 'gigabyte' };
+
+/** Does 0 mean "off" for this row? (Its presets offer 0.) */
+const zeroOff = (def) => Array.isArray(def && def.presets) && def.presets.map(Number).includes(0);
+
+/** "10 minutes", "6 hours", "200 MB" in the active language; 0 reads "Off" where 0 turns a thing off. */
+export function formatMeasure(def, value, locale = lang()) {
+  if (Number(value) === 0 && zeroOff(def)) return t('schema.off');
+  const { n, unit } = splitMeasure(def, value);
+  try {
+    return new Intl.NumberFormat(locale || 'en', { style: 'unit', unit: UNIT_INTL[unit],
+      unitDisplay: measureOf(def) === 'size' ? 'short' : 'long', maximumFractionDigits: 2 }).format(n);
+  } catch {
+    return `${n} ${unit}`;
+  }
+}
+
+/** The presets a dropdown lists for a row, in the server's order. */
+export function presetValues(def) {
+  return Array.isArray(def && def.presets)
+    ? def.presets.map(Number).filter((v) => Number.isFinite(v))
+    : [];
+}
+
+// ------------------------------------------------------------------ which rows go where
+
+/** Keys drawn by a section's own controls, never as a schema row (they stay searchable). */
+export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled']);
+
+/** `ui_section` 'people#signin-rules' -> ['people', 'signin-rules']; falls back to the group. */
+export function uiTarget(def) {
+  const raw = String((def && def.ui_section) || '');
+  if (raw) {
+    const i = raw.indexOf('#');
+    return i < 0 ? [raw, ''] : [raw.slice(0, i), raw.slice(i + 1)];
+  }
+  const byGroup = { characters: 'characters', connections: 'connections', voice: 'voice', tools: 'plugins',
+    people: 'people', appearance: 'appearance', system: 'system' };
+  return [byGroup[def && def.group] || 'system', ''];
+}
+
+/** The definitions one slot shows. `claimed` = the anchors of this section that have a slot of
+ *  their own: a row whose anchor has no slot falls back to the section's anchor-less slot, so no
+ *  row is ever lost. */
+export function rowsForSlot(settings, section, anchor, claimed = new Set()) {
+  return (settings || []).filter((def) => {
+    if (BESPOKE_KEYS.has(def.key)) return false;
+    const [s, a] = uiTarget(def);
+    if (s !== section) return false;
+    if (anchor) return a === anchor;
+    return !a || !claimed.has(a);
+  });
+}
 
 // ------------------------------------------------------------------ DOM
 
-const GROUP_GLYPH = {
-  characters: '🤖', connections: '🔗', voice: '🎙️', tools: '🧰', people: '👥', appearance: '🎨', system: '⚙️',
-};
-
 const labelOf = (def) => def.label;
+/** A value inside a quoted attribute selector (keys are [a-z0-9._-]; this is the belt). */
+const attrValue = (v) => String(v).replace(/["\\]/g, '\\$&');
+
+// One fetch of the schema and the values per Settings visit; a write refreshes the values.
+let cache = null;
+/** Drop the cached schema + values (Settings re-opened, a language change, a restore). */
+export function invalidateSchema() { cache = null; }
+async function load(api, force = false) {
+  if (!cache || force) {
+    cache = Promise.all([api.settingsSchema(), api.settings()]).catch((e) => { cache = null; throw e; });
+  }
+  return cache;
+}
+
+/** A row of the model for one definition (see buildModel). */
+function rowOf(def, values) {
+  const v = ((values && values.values) || {})[def.key] || {};
+  return {
+    def,
+    value: v.value === undefined ? def.default : v.value,
+    source: v.source || 'default',
+    env: v.env || null,
+    restartPending: !!v.restart_pending,
+    isDefault: v.is_default !== false && v.source !== 'store' && v.source !== 'env',
+    secretSet: !!v.set,
+    warning: v.warning || '',
+  };
+}
+
+/** A duration or size: a dropdown of presets (plus the current value) and "Custom…",
+ *  which reveals a number box and a unit picker. Calls commit(value) on a complete choice. */
+function measureControl(row, common, commit) {
+  const { def } = row;
+  const wrap = el('span', { class: 'schema-measure' });
+  const sel = el('select', { ...common, class: 'ui-select' });
+  const cur = row.value == null ? def.default : Number(row.value);
+  const values = presetValues(def);
+  const inList = values.includes(cur);
+  for (const v of values) sel.append(el('option', { value: String(v), text: formatMeasure(def, v) }));
+  sel.append(el('option', { value: 'custom', text: inList ? t('schema.custom') : t('schema.custom_value', { value: formatMeasure(def, cur) }) }));
+  const parts = splitMeasure(def, cur);
+  const num = el('input', { type: 'number', class: 'ui-input schema-measure-n', min: '0', step: 'any', inputmode: 'decimal',
+    'aria-label': t('schema.custom_amount', { name: def.label }), value: String(parts.n) });
+  const unit = el('select', { class: 'ui-select schema-measure-u', 'aria-label': t('schema.custom_unit', { name: def.label }) },
+    customUnits(def).map((u) => el('option', { value: u, text: t(`schema.unit_${u}`) })));
+  unit.value = customUnits(def).includes(parts.unit) ? parts.unit : customUnits(def)[0];
+  if (!customUnits(def).includes(parts.unit)) num.value = String(splitMeasure({ ...def }, cur).n);
+  const custom = el('span', { class: 'schema-measure-custom' }, [num, unit]);
+  sel.value = inList ? String(cur) : 'custom';
+  custom.hidden = inList;
+  const fromCustom = () => {
+    const v = joinMeasure(def, num.value, unit.value);
+    if (v !== undefined) commit(v);
+  };
+  sel.addEventListener('change', () => {
+    custom.hidden = sel.value !== 'custom';
+    if (sel.value === 'custom') { num.focus(); return; }
+    commit(Number(sel.value));
+  });
+  num.addEventListener('change', fromCustom);
+  unit.addEventListener('change', fromCustom);
+  if (common.disabled !== undefined) { num.disabled = true; unit.disabled = true; }
+  wrap.append(sel, custom);
+  wrap.focusTarget = sel;
+  return wrap;
+}
 
 function controlFor(row, ctx) {
   const { def } = row;
@@ -145,33 +300,36 @@ function controlFor(row, ctx) {
   if (locked) common.disabled = '';
   let input;
   if (def.type === 'boolean') {
-    input = el('input', { ...common, type: 'checkbox', class: 'ui-checkbox' });
+    input = el('input', { ...common, type: 'checkbox', role: 'switch' });
     input.checked = !!row.value;
-    input.addEventListener('change', () => ctx.edit(row, input.checked));
+    input.addEventListener('change', () => ctx.commit(row, input.checked, input));
   } else if (def.type === 'choice') {
     input = el('select', { ...common, class: 'ui-select' },
-      (def.choices || []).map((c) => el('option', { value: c, text: (def.choice_labels && def.choice_labels[c]) || c })));
+      (def.choices || []).map((c) => el('option', { value: c, text: (def.choice_labels && def.choice_labels[c]) || c || t('schema.none') })));
     input.value = String(row.value ?? def.default ?? '');
-    input.addEventListener('change', () => ctx.edit(row, input.value));
+    input.addEventListener('change', () => ctx.commit(row, input.value, input));
+  } else if (measureOf(def) && Array.isArray(def.presets) && def.presets.length) {
+    input = measureControl(row, common, (v) => ctx.commit(row, v, input));
   } else if (def.type === 'secret') {
     input = el('input', { ...common, type: 'password', class: 'ui-input', autocomplete: 'new-password',
       placeholder: row.secretSet ? t('schema.secret_set') : t('schema.secret_unset') });
-    input.addEventListener('input', () => ctx.edit(row, input.value));
+    input.addEventListener('change', () => { if (input.value) ctx.commit(row, input.value, input); });
   } else if (def.type === 'integer' || def.type === 'number') {
     input = el('input', { ...common, type: 'number', class: 'ui-input', inputmode: 'numeric',
       step: def.type === 'integer' ? '1' : 'any' });
     if (def.min != null) input.min = String(def.min);
     if (def.max != null) input.max = String(def.max);
     input.value = row.value == null ? '' : String(row.value);
-    input.addEventListener('input', () => {
+    input.addEventListener('change', () => {
       const v = parseInput(def, input.value);
-      if (v !== undefined) ctx.edit(row, v);
+      if (v !== undefined) ctx.commit(row, v, input);
     });
   } else {
     input = el('input', { ...common, type: def.type === 'url' ? 'url' : 'text', class: 'ui-input',
       placeholder: def.placeholder || '', autocomplete: 'off', spellcheck: 'false' });
     input.value = row.value == null ? '' : (Array.isArray(row.value) ? row.value.join(', ') : String(row.value));
-    input.addEventListener('input', () => ctx.edit(row, parseInput(def, input.value)));
+    // Text applies on blur or Enter (the change event), never per keystroke.
+    input.addEventListener('change', () => ctx.commit(row, parseInput(def, input.value), input));
   }
   return input;
 }
@@ -195,7 +353,6 @@ function rowNode(row, ctx) {
     el('div', { class: 'ui-setting__text' }, [
       el('div', { class: 'ui-setting__label' }, [
         el('label', { for: id, text: labelOf(def) }),
-        el('span', { class: 'ui-badge ui-setting__level' }),
         el('span', { class: 'ui-badge ui-badge--info ui-setting__env', title: row.env ? t('schema.env_title', { name: row.env }) : '' }),
         def.owner_only && !ctx.owner ? el('span', { class: 'ui-badge schema-owner-only', text: t('schema.owner_only') }) : null,
         ...tags,
@@ -205,221 +362,137 @@ function rowNode(row, ctx) {
     ]),
     el('div', { class: 'ui-setting__control' }, [control, reset, err]),
   ]);
-  ctx.wire(node, row, control, reset, err);
+  ctx.wire(node, row, control.focusTarget || control, reset, err);
   return node;
 }
 
 /**
- * Mount the page into `pane`.
- * deps: { toast, confirm, openTab(tab), role, api? } - api defaults to the real client.
+ * Fill `host` with the rows for `section#anchor` (anchor '' = the rows of the section that have
+ * no slot of their own). opts:
+ *   section, anchor   where the rows belong (see uiTarget / rowsForSlot)
+ *   claimed           Set of the section's anchors that have their own slot
+ *   api, toast(msg, isErr, { undo }), role, onRestart(count)   the app; api defaults to the real client
+ * Returns { rows } (the drawn definitions), or null when nothing was drawn.
  */
-export async function mountSettingsSchema(pane, deps = {}) {
-  const api = deps.api || realApi;
-  const toast = deps.toast || (() => {});
-  pane.textContent = '';
-  const state = {
-    schema: null, values: null, model: [], group: deps.group || 'characters', q: '', advanced: false,
-    edits: new Map(), resets: new Set(), errors: {}, restart: [],
-  };
-  const status = el('p', { class: 'muted modal-hint', role: 'status', text: t('schema.loading') });
-  pane.append(status);
+export async function mountSchemaRows(host, opts = {}) {
+  if (!host) return null;
+  const api = opts.api || realApi;
+  const toast = opts.toast || (() => {});
+  const mine = (host._schemaSeq = (host._schemaSeq || 0) + 1);
+  let schema;
+  let values;
   try {
-    [state.schema, state.values] = await Promise.all([api.settingsSchema(), api.settings()]);
+    [schema, values] = await load(api, !!opts.force);
   } catch (e) {
-    status.textContent = errorText(e);
-    status.classList.add('lock-error');
-    return;
+    if (mine !== host._schemaSeq) return null;
+    host.replaceChildren(el('p', { class: 'muted lock-error', role: 'status', text: errorText(e) }));
+    host.hidden = false;
+    return null;
   }
-  status.remove();
-  state.model = buildModel(state.schema, state.values);
-
-  const search = el('input', { type: 'search', class: 'ui-input schema-search', 'aria-label': t('schema.search_label'),
-    placeholder: t('schema.search_placeholder'), autocomplete: 'off' });
-  const toggle = el('button', { type: 'button', class: 'btn-secondary schema-level', 'aria-pressed': 'false', text: t('schema.show_advanced') });
-  const nav = el('div', { class: 'schema-nav', role: 'tablist', 'aria-label': t('schema.groups_aria') });
-  const body = el('div', { class: 'schema-body' });
-  const bar = el('div', { class: 'schema-savebar', role: 'region', 'aria-label': t('schema.save_bar_aria') });
-  const saveBtn = el('button', { type: 'button', class: 'btn-primary', text: t('schema.save'), disabled: '' });
-  const discardBtn = el('button', { type: 'button', class: 'btn-secondary', text: t('schema.discard'), disabled: '' });
-  const saveMsg = el('span', { class: 'schema-savemsg', role: 'status', 'aria-live': 'polite' });
-  bar.append(discardBtn, saveBtn, saveMsg);
-  pane.append(el('div', { class: 'schema-toolbar' }, [search, toggle]), nav, body, bar);
-
-  const dirtyCount = () => state.edits.size + state.resets.size;
-  const paintBar = () => {
-    const n = dirtyCount();
-    saveBtn.disabled = n === 0;
-    discardBtn.disabled = n === 0;
-    saveBtn.textContent = n ? t('schema.save_n', { count: n }) : t('schema.save');
-  };
+  if (mine !== host._schemaSeq) return null;
+  const defs = rowsForSlot(schema.settings, opts.section, opts.anchor || '', opts.claimed || new Set());
+  host.replaceChildren();
+  host.hidden = !defs.length;
+  if (!defs.length) return null;
 
   const ctx = {
     // Host-control (owner_only) settings need admin_system: the Owner and Admins. A profile merely
     // granted manage_settings is refused by the server; the page just doesn't offer it.
-    owner: deps.role === 'owner' || deps.role === 'admin' || deps.role == null,
-    edit(row, value) {
+    owner: opts.role === 'owner' || opts.role === 'admin' || opts.role == null,
+    async commit(row, value, control) {
       if (value === undefined) return;
-      state.resets.delete(row.def.key);
-      const same = !row.def.secret && sameValue(row.value, value) || (row.def.secret && value === '');
-      if (same) state.edits.delete(row.def.key); else state.edits.set(row.def.key, value);
-      delete state.errors[row.def.key];
-      paintBar();
+      const k = row.def.key;
+      if (!row.def.secret && sameValue(row.value, value)) return;
+      const node = host.querySelector(`[data-key="${attrValue(k)}"]`);
+      const errNode = node && node.querySelector('.schema-error');
+      const before = row.value;
+      const wasDefault = row.source === 'default';
+      try {
+        const res = await api.patchSettings({ [k]: value }, []);
+        await refreshRow(row, node);
+        const restart = (res && res.restart_required || []).includes(k);
+        if (errNode) { errNode.hidden = true; errNode.textContent = ''; }
+        if (control && control.removeAttribute) control.removeAttribute('aria-invalid');
+        const undo = row.def.secret ? null : async () => {
+          try {
+            await api.patchSettings(wasDefault ? {} : { [k]: before }, wasDefault ? [k] : []);
+            await refreshRow(row, null, true);
+            toast(t('schema.undone', { name: row.def.label }));
+          } catch (e) { toast(errorText(e), true); }
+        };
+        toast(restart ? t('schema.saved_one_restart', { name: row.def.label }) : t('schema.saved_one', { name: row.def.label }),
+          false, undo ? { undo } : undefined);
+      } catch (e) {
+        const msg = (e && e.errors && e.errors[k]) || errorText(e);
+        if (errNode) { errNode.textContent = msg; errNode.hidden = false; }
+        if (control && control.setAttribute) control.setAttribute('aria-invalid', 'true');
+      }
     },
     wire(node, row, control, resetBtn, errNode) {
       const k = row.def.key;
-      const e = state.errors[k];
-      if (e) {
-        errNode.textContent = e;
-        errNode.hidden = false;
-        control.setAttribute('aria-invalid', 'true');
-        control.setAttribute('aria-describedby', `${control.id}-desc ${errNode.id}`);
-      }
+      void errNode;
+      const doReset = async () => {
+        try {
+          await api.patchSettings({}, [k]);
+          await refreshRow(row, null, true);
+          toast(t('schema.reset_done', { name: row.def.label }));
+        } catch (e) { toast(errorText(e), true); }
+      };
       const ui = typeof window !== 'undefined' && window.UIComponents;
       if (ui && ui.setting) {
-        ui.setting(node, {
-          default: node.getAttribute('data-default') ?? undefined,
-          onReset: () => { state.edits.delete(k); state.resets.add(k); paintBar(); },
-        });
-      } else if (row.def.default != null && row.def.type !== 'secret') {
+        ui.setting(node, { default: node.getAttribute('data-default') ?? undefined, onReset: doReset });
+      } else if (row.def.default != null && row.def.type !== 'secret' && row.source === 'store') {
         // No component layer (a stripped page, the tests): a small reset link of our own.
         resetBtn.hidden = false;
         resetBtn.textContent = t('schema.reset');
-        resetBtn.addEventListener('click', () => {
-          state.edits.delete(k); state.resets.add(k);
-          if (control.type === 'checkbox') control.checked = !!row.def.default;
-          else control.value = String(row.def.default);
-          paintBar();
-        });
+        resetBtn.addEventListener('click', doReset);
       }
+      void control;
     },
   };
 
-  function paintNav() {
-    nav.textContent = '';
-    for (const g of state.model) {
-      const b = el('button', {
-        type: 'button', role: 'tab', class: 'schema-tab' + (g.id === state.group ? ' active' : ''),
-        'aria-selected': String(g.id === state.group), dataset: { group: g.id },
-      }, [el('span', { 'aria-hidden': 'true', text: GROUP_GLYPH[g.id] || '•' }), ' ', g.label]);
-      b.addEventListener('click', () => { state.group = g.id; state.q = ''; search.value = ''; paint(); });
-      nav.append(b);
-    }
+  /** Re-read the values and redraw one row (or the whole slot) from the server's answer. */
+  async function refreshRow(row, node, whole = false) {
+    cache = Promise.all([Promise.resolve(schema), api.settings()]);
+    try { [schema, values] = await cache; } catch { cache = null; return; }
+    if (whole || !node) { await draw(); return; }
+    const fresh = rowOf(row.def, values);
+    Object.assign(row, fresh);
+    const next = rowNode(row, ctx);
+    node.replaceWith(next);
+    paintRestart();
   }
 
-  function paint() {
-    paintNav();
-    body.textContent = '';
-    const needle = state.q.trim();
-    const groups = needle ? state.model : state.model.filter((g) => g.id === state.group);
-    let shown = 0;
-    for (const g of groups) {
-      const sections = [];
-      for (const s of g.sections) {
-        const rows = s.rows.filter((r) => matches(r, { q: needle, advanced: state.advanced }));
-        if (rows.length) sections.push({ name: s.name, rows });
-      }
-      const extras = needle ? null : groupExtras(g);
-      if (!sections.length && !extras) continue;
-      const sec = el('section', { class: 'dev-group schema-group', id: `schema-${g.id}`, 'aria-labelledby': `schema-${g.id}-h` }, [
-        el('h3', { class: 'dev-group-title', id: `schema-${g.id}-h`, text: g.label }),
-        el('p', { class: 'dev-group-hint', text: g.description }),
-      ]);
-      for (const s of sections) {
-        const list = el('div', { class: 'ui-settings', 'data-level-filter': state.advanced ? 'all' : 'basic' });
-        if (s.name) sec.append(el('h4', { class: 'schema-section', text: s.name }));
-        for (const r of s.rows) { list.append(rowNode(r, ctx)); shown += 1; }
-        sec.append(list);
-      }
-      if (extras) sec.append(extras);
-      body.append(sec);
+  function paintRestart() {
+    if (typeof opts.onRestart !== 'function') return;
+    const vals = (values && values.values) || {};
+    opts.onRestart(Object.values(vals).filter((v) => v && v.restart_pending).length);
+  }
+
+  async function draw() {
+    host.replaceChildren();
+    // Sub-headings by the schema's own `section` field ("Network", "Agents"...),
+    // only when a slot mixes more than one.
+    const bySection = new Map();
+    for (const def of defs) {
+      const s = def.section || '';
+      if (!bySection.has(s)) bySection.set(s, []);
+      bySection.get(s).push(def);
     }
-    if (!shown && needle) body.append(el('p', { class: 'muted', text: t('schema.no_match') }));
-    if (!needle) body.append(otherTabs());
+    const heads = bySection.size > 1;
+    for (const [name, list] of bySection) {
+      if (heads && name) host.append(el('h4', { class: 'schema-section', text: name }));
+      const box = el('div', { class: 'ui-settings', 'data-level-filter': 'all' });
+      for (const def of list) box.append(rowNode(rowOf(def, values), ctx));
+      host.append(box);
+    }
     const ui = typeof window !== 'undefined' && window.UIComponents;
-    if (ui && ui.init) ui.init(body);
+    if (ui && ui.init) ui.init(host);
+    paintRestart();
   }
 
-  /** Content that belongs to a group but is not a schema row. */
-  function groupExtras(g) {
-    if (g.id === 'voice') {
-      const open = el('button', { type: 'button', class: 'btn-secondary', text: t('schema.open_voice') });
-      open.addEventListener('click', () => deps.openTab && deps.openTab('voice'));
-      return el('div', { class: 'schema-extra' }, [el('p', { class: 'muted', text: t('schema.voice_note') }), open]);
-    }
-    if (g.id === 'connections') {
-      const open = el('button', { type: 'button', class: 'btn-secondary', text: t('schema.open_connections') });
-      open.addEventListener('click', () => deps.openTab && deps.openTab('connections'));
-      return el('div', { class: 'schema-extra' }, [open]);
-    }
-    if (g.id === 'system') {
-      const host = el('div', { class: 'schema-backups' });
-      mountBackups(host, { api, toast, confirm: deps.confirm, role: deps.role });
-      return host;
-    }
-    return null;
-  }
-
-  function otherTabs() {
-    const items = OTHER_TABS.map((o) => {
-      const b = el('button', { type: 'button', class: 'schema-link', text: t(o.key) });
-      b.addEventListener('click', () => deps.openTab && deps.openTab(o.tab));
-      return el('li', {}, [b]);
-    });
-    return el('section', { class: 'dev-group schema-other' }, [
-      el('h3', { class: 'dev-group-title', text: t('schema.other_title') }),
-      el('p', { class: 'dev-group-hint', text: t('schema.other_hint') }),
-      el('ul', { class: 'schema-other-list' }, items),
-    ]);
-  }
-
-  search.addEventListener('input', () => { state.q = search.value; paint(); });
-  toggle.addEventListener('click', () => {
-    state.advanced = !state.advanced;
-    toggle.setAttribute('aria-pressed', String(state.advanced));
-    toggle.textContent = state.advanced ? t('schema.hide_advanced') : t('schema.show_advanced');
-    paint();
-  });
-  discardBtn.addEventListener('click', async () => {
-    state.edits.clear(); state.resets.clear(); state.errors = {};
-    saveMsg.textContent = '';
-    state.values = await api.settings();
-    state.model = buildModel(state.schema, state.values);
-    paint(); paintBar();
-  });
-  saveBtn.addEventListener('click', async () => {
-    const { set, reset } = buildPatch(state.edits, state.resets, state.model);
-    if (!Object.keys(set).length && !reset.length) { state.edits.clear(); state.resets.clear(); paintBar(); return; }
-    saveBtn.disabled = true;
-    saveMsg.textContent = '';
-    try {
-      const res = await api.patchSettings(set, reset);
-      state.edits.clear(); state.resets.clear(); state.errors = {};
-      state.values = await api.settings();
-      state.model = buildModel(state.schema, state.values);
-      state.restart = res.restart_required || [];
-      saveMsg.textContent = state.restart.length
-        ? t('schema.saved_restart', { count: state.restart.length })
-        : t('schema.saved');
-      toast(saveMsg.textContent);
-      paint();
-    } catch (e) {
-      if (e.errors) {
-        state.errors = e.errors;
-        saveMsg.textContent = t('schema.not_saved');
-        paint();
-        const first = body.querySelector('[aria-invalid="true"]');
-        if (first && first.focus) first.focus();
-      } else {
-        saveMsg.textContent = errorText(e);
-      }
-    } finally {
-      paintBar();
-    }
-  });
-
-  paint();
-  paintBar();
-  return { state, paint };
+  await draw();
+  return { rows: defs };
 }
 
 // ------------------------------------------------------------------ device defaults

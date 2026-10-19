@@ -77,10 +77,11 @@ test('main.js: Settings opens for a Member without the character list, on a tab 
   const fn = MAIN.slice(MAIN.indexOf('async function openBotManager('), MAIN.indexOf('async function closeBotManager('));
   assert.ok(fn.length > 0);
   assert.match(fn, /if \(canAdmin\(\)\) \{\s+try \{\s+const r = await api\.allBots\(\);/);
-  assert.match(fn, /bmBots = \[\];\s+if \(CHARACTER_TABS\.includes\(tab\)\) tab = homeSettingsTab\(\);/);
-  assert.match(MAIN, /const homeSettingsTab = \(\) => \(state\.decoy \|\| canAdmin\(\) \? 'bots' : 'theme'\);/);
-  // A hidden tab falls back to the profile's home tab, not unconditionally to Bots.
-  assert.match(MAIN, /btn\.classList\.contains\('hidden'\)\) \{ id = homeSettingsTab\(\);/);
+  assert.match(fn, /bmBots = \[\];\s+if \(tab && CHARACTER_TABS\.includes\(resolveSettingsTarget\(tab\)\.id\)\) tab = null;/);
+  // 3.2: everyone's first section is Appearance (a Member has it; the household ones are the admins').
+  assert.match(MAIN, /const homeSettingsTab = \(\) => 'appearance';/);
+  // A hidden section falls back to the home section, not to Characters.
+  assert.match(MAIN, /btn\.classList\.contains\('hidden'\)\) \{ id = homeSettingsTab\(\); anchor = '';/);
 });
 
 // S-5 ---------------------------------------------------------------------------

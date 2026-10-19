@@ -215,13 +215,14 @@ test('a legacy-API bot edits its system prompt with the same panel', { skip: dom
 });
 
 test('wiring: main.js places the slots, bots-edit imports the module, Connect reads the same field, sw caches it', () => {
-  assert.match(MAIN, /ctl && ctl\.persona,/);
-  assert.match(MAIN, /ctl && ctl\.personaPanel,/);
+  // 3.2: Personality is in the row's ⋯ menu; its panel sits under the row.
+  assert.match(MAIN, /if \(ctl\.persona\) items\.push\(\{ label: t\('persona\.button_title'\), run: \(\) => ctl\.persona\.click\(\) \}\);/);
+  assert.match(MAIN, /if \(ctl\.personaPanel\) list\.append\(ctl\.personaPanel\);/);
   assert.match(MAIN, /'persona', 'persona_custom', 'persona_kind'/);
   assert.match(BOTS_EDIT, /from '\.\/personality\.js\?v=\d+'/);
-  assert.match(LLM, /target\.persona/);
+  // The Details panel does not draw a second personality picker beside it.
+  assert.match(MAIN, /skip: \['audience', 'personality'\]/);
   assert.match(SW, /'\/static\/js\/personality\.js'/);
-  assert.match(HTML, /id="llm-system"[^>]*maxlength="8000"/);
   for (const k of ['title', 'preset', 'custom', 'revert', 'reset', 'saved', 'safe_note', 'agent_note', 'hint']) {
     assert.ok(EN.persona[k], k);
   }

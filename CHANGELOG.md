@@ -7,6 +7,65 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Settings, simpler
+
+- **Seven sections instead of thirteen tabs.** Settings is grouped by who it is for. *You*: Appearance (theme,
+  language, avatar style, menu-bar shortcuts), Account (who you are, sign-in, notifications, pictures and privacy,
+  the host-storage notice, recovery, About) and Voice. *Household* (the Owner and Admins): Characters (with their
+  reactions and avatar pools), AI & Connections (connections, the one-key quick setup, image generation, agents),
+  People & Access (profiles, this device, sign-in rules, Restricted limits, machine access, activity), Plugins &
+  Apps and System (health, backups, network). Add-on tabs form a third group. On a desktop the sections are a
+  side nav; on a phone Settings opens on a list with a one-line summary per section, and a section slides in with a
+  back button (the phone's Back returns to the list).
+- **One search box** finds any setting by name or description, including every schema setting, and opens it (the
+  disclosure around it opens, the row flashes).
+- **Every old tab id still works.** `bots`, `theme`, `device`, `security`, `ai`, `agents`, `reactions`, `health`,
+  `settings` and the rest are aliases (`js/settings-nav.js` `TAB_ALIASES`), so pins, links and add-ons
+  (`shell.settings.open('voice')`, `shell.settings.pane('voice')`) land where those controls are now; none of them
+  can be taken by an add-in tab. `section#anchor` opens a subsection.
+- **All settings is gone; its rows live where they belong.** Each schema setting has a `ui_section`
+  (`people#signin-rules`, `system#backups`…; additive schema fields `ui_section` and `presets`, schema version
+  unchanged). Rarely used ones sit under a section's **Advanced** disclosure (remembered per device,
+  `dispatch-settings-adv`). Durations and sizes are dropdowns of sensible values plus *Custom…*; on/off rows are
+  switches; *Default connection* is a list of your connections.
+- **Changes apply when they are made.** No Save buttons in the Characters roster, the tools table, schema rows,
+  reactions or the reaction pool; a toast offers **Undo** for a few seconds where it can. A setting that needs a
+  restart says so, and the section shows one "Restart DisPatch to apply N changes" line. Forms that need several
+  fields (a connection, a person, a PIN) keep their own button.
+- **Characters.** A compact row per character: picture, name with small feature icons, a **Who can see it**
+  dropdown (Everyone / Members and up / Restricted profiles only / Hidden, exactly the two `safe` /
+  `hide_unlocked` flags; widening to Restricted asks first), **Details** (Reactions, Avatar pool, Pictures in
+  chat, Lookups and the voice add-on's control as switches, then connection, model, description and which profiles
+  may see it) and a **⋯** menu (Change photo, Rename, Personality, Remove). **Add ▾** offers a new character or a
+  starter pack. Drag to reorder (▲/▼ in *Reorder* on a phone). The reaction pack is a grid of thumbnails with one
+  edit sheet; avatar-pool warnings are one plain sentence.
+- **Account: one change at a time.** A *Change* dropdown (Change PIN / Set or change password / Remove PIN) opens
+  exactly one form, so there is never a second "Current PIN" box. **A Member can change their own PIN**
+  (`POST /api/auth/pin`, current PIN required, throttled; the Owner's PIN stays the install PIN). The recovery note
+  with server paths is the Owner's only.
+- **AI & Connections.** The per-character "Bot to connect" form is gone: a server is a connection, a character
+  picks one in its Details. The quick setup is open only while there is no connection. Connections no longer
+  repeat their type in a chip, "0 models" is a warning ("check the key or the address"), and *Used by* lists names.
+- **Plugins & Apps** opens on what you change (add-ons, apps & tools, lookups); a built-in tool's own settings
+  open under its ⚙; lookups have readable names; *Works with DisPatch* is under *Discover more*, last.
+- **Smaller fixes.** People & Access: themed selects; the activity table scrolls inside its card on a phone. The
+  Restricted gear is labelled Companions. Tasks and the theme button get line icons. The first-run wizard has a
+  step indicator, padding and choice cards. Image Studio's empty state has a *Set up image generation* button
+  (for a profile that may) that opens AI & Connections. Agents: themed selects, the Claude credentials inside the
+  Claude Agent's card.
+- **Help texts point at the new sections** (server problem fixes and messages too: Settings > Account, AI &
+  Connections, People & Access, Plugins & Apps).
+
+### Fixed
+
+- Image Studio: only the "pictures changed" 409 of *Clear from here down* counts again; the other one (a
+  generation is running) shows the server's message, and a failed re-read says so.
+- The phone's *Tools & more* sheet: a tap on its scrim also closes a menu opened from inside it (the profile
+  chip's), which used to stay on screen and usable.
+- The Restricted banner's link reads "Who can see what?" and its panel says the Owner and Admins can open the
+  chats too; zh no longer calls the Owner an administrator there.
+- The markup fallback of the host-storage notice matches its English string.
+
 ### Image Studio, the rail, uploads and the host-storage notice
 
 - **Image Studio: Sort and Clear from here down.** The results grid has a "Sort:" control (Oldest first, the old

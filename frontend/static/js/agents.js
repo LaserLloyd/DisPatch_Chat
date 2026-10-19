@@ -1,10 +1,10 @@
-// Settings -> Agents (Owner and Admin).
+// Settings -> AI & Connections -> Agents (Owner and Admin).
 //
 // Four groups in the Settings modal's own .dev-group / .dev-row vocabulary, so every palette applies:
 //
 //   Backends      what each backend is, whether it can run here, and what it can and cannot do
 //                 (approvals, steering, subagents, cost figures, "stays on this machine" or
-//                 "prompts go to <service>"). The Claude Agent's credentials live here: an
+//                 "prompts go to <service>"). The Claude Agent's credentials live in its card: an
 //                 Anthropic Console API key, or Amazon Bedrock / Google Cloud / Microsoft Foundry
 //                 credentials set on this machine. There is NO subscription sign-in and this page
 //                 never offers one.
@@ -265,9 +265,14 @@ function capLine(c) {
 }
 
 function backendsBody(data, deps, api, guard, reload, toast) {
+  let credsPlaced = false;
   const rows = data.backends.map((b) => {
     const label = b.label;
     const status = b.available ? t('agents.backend_ready') : t('agents.backend_needs_setup');
+    // The Claude Agent's credentials belong to its own card (3.2: it used to be a
+    // second card with the same title right under it), behind a Connect disclosure.
+    const creds = b.name === 'claude_sdk' ? claudeCredentials(data, api, guard, reload, toast) : null;
+    if (creds) credsPlaced = true;
     return el('div', { class: 'dev-row agents-backend', 'data-backend': b.name }, [
       el('div', { class: 'dev-row-text' }, [
         el('strong', { text: label }),
@@ -275,17 +280,21 @@ function backendsBody(data, deps, api, guard, reload, toast) {
         BACKEND_NOTES[b.name] ? hintLine(t(BACKEND_NOTES[b.name])) : null,
         b.problem ? hintLine(b.problem.message, 'task-error') : null,
         hintLine(capLine(b.capabilities)),
+        creds ? el('details', { class: 'agents-connect', open: b.available ? null : '' }, [
+          el('summary', { text: t('agents.connect') }), creds]) : null,
       ]),
     ]);
   });
-  return el('div', { class: 'dev-group-body' }, [...rows, claudeCredentials(data, api, guard, reload, toast)]);
+  // A server that lists no Claude backend still gets the credentials, on their own.
+  if (!credsPlaced) rows.push(el('div', { class: 'dev-row agents-claude-only' }, [claudeCredentials(data, api, guard, reload, toast)]));
+  return el('div', { class: 'dev-group-body' }, rows);
 }
 
 function claudeCredentials(data, api, guard, reload, toast) {
   const c = data.creds;
   const name = nid('claude');
-  const box = el('div', { class: 'dev-row agents-claude' });
-  const routeSel = el('select', { id: `${name}-route` }, c.routes.map((r) => el('option', { value: r, text: t(ROUTE_LABELS[r]) })));
+  const box = el('div', { class: 'agents-claude' });
+  const routeSel = el('select', { id: `${name}-route`, class: 'ui-select' }, c.routes.map((r) => el('option', { value: r, text: t(ROUTE_LABELS[r]) })));
   routeSel.value = c.route;
   const key = el('input', {
     type: 'password', id: `${name}-key`, autocomplete: 'off', spellcheck: 'false', maxlength: '512',
@@ -318,7 +327,6 @@ function claudeCredentials(data, api, guard, reload, toast) {
   clear.addEventListener('click', () => guard(async () => { await api.clearClaudeKey(); await reload(); }));
   box.append(
     el('div', { class: 'dev-row-text' }, [
-      el('strong', { text: t('agents.claude_title') }),
       hintLine(t('agents.claude_no_subscription')),
       field(t('agents.route_label'), routeSel),
       keyField,
@@ -388,7 +396,7 @@ function editorEl(form, data, deps, api, ctl) {
     return input;
   };
   const backends = (data.backends || []).filter((b) => b.name !== 'fake' || f.backend === 'fake');
-  const backendSel = el('select', {}, backends.map((b) => el('option', { value: b.name, text: b.label + (b.available ? '' : ` (${t('agents.backend_needs_setup')})`) })));
+  const backendSel = el('select', { class: 'ui-select' }, backends.map((b) => el('option', { value: b.name, text: b.label + (b.available ? '' : ` (${t('agents.backend_needs_setup')})`) })));
   backendSel.value = f.backend;
   const seat = bind(el('input', { type: 'text', maxlength: '64', autocomplete: 'off' }), 'seat');
   const seatField = field(t('agents.seat_label'), seat, t('agents.seat_hint'));
@@ -418,10 +426,10 @@ function editorEl(form, data, deps, api, ctl) {
   addMcp.addEventListener('click', () => { f.mcp.push({ name: '', transport: 'http', url: '', command: '', args: '', header: '', secret: '', privileged: false }); paintMcp(); });
   paintMcp();
 
-  const modeSel = el('select', {}, Object.keys(MODE_LABELS).map((m) => el('option', { value: m, text: t(MODE_LABELS[m]) })));
+  const modeSel = el('select', { class: 'ui-select' }, Object.keys(MODE_LABELS).map((m) => el('option', { value: m, text: t(MODE_LABELS[m]) })));
   modeSel.value = f.approval_mode;
   modeSel.addEventListener('change', () => { f.approval_mode = modeSel.value; });
-  const wsSel = el('select', {}, [el('option', { value: 'scratch', text: t('agents.ws_scratch') }), el('option', { value: 'worktree', text: t('agents.ws_worktree') })]);
+  const wsSel = el('select', { class: 'ui-select' }, [el('option', { value: 'scratch', text: t('agents.ws_scratch') }), el('option', { value: 'worktree', text: t('agents.ws_worktree') })]);
   wsSel.value = f.workspace_mode;
   wsSel.addEventListener('change', () => { f.workspace_mode = wsSel.value; });
 
@@ -513,7 +521,7 @@ function mcpRow(m, i, f, owner, repaint) {
   // A local program is code execution on this machine: only the Owner may add one.
   const stdioOpt = el('option', { value: 'stdio', text: t('agents.mcp_stdio') });
   stdioOpt.disabled = !owner;
-  const transport = el('select', {}, [el('option', { value: 'http', text: 'http' }), stdioOpt]);
+  const transport = el('select', { class: 'ui-select' }, [el('option', { value: 'http', text: 'http' }), stdioOpt]);
   transport.value = m.transport;
   transport.addEventListener('change', () => { m.transport = transport.value; repaint(); });
   const remove = el('button', { type: 'button', class: 'btn-secondary danger-text', text: t('agents.remove_mcp'), 'aria-label': t('agents.remove_mcp_aria', { name: m.name || String(i + 1) }) });

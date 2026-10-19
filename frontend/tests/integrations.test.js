@@ -47,8 +47,8 @@ async function setup(routes = {}) {
   return { mod, win };
 }
 
-test('the AI tab has hosts for the one-key box and image generation', () => {
-  const ai = HTML.slice(HTML.indexOf('id="spane-ai"'), HTML.indexOf('</section>', HTML.indexOf('id="spane-ai"')));
+test('AI & Connections has hosts for the one-key box and image generation', () => {
+  const ai = HTML.slice(HTML.indexOf('id="spane-connections"'), HTML.indexOf('id="spane-people"'));
   assert.match(ai, /id="llm-quick-host"/);
   assert.match(ai, /id="llm-image-host"/);
   assert.match(LLM, /mountQuickSetup\(\$\('llm-quick-host'\)/);

@@ -16,7 +16,7 @@
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { describeTest } from './connections.js?v=1';
+import { describeTest } from './connections.js?v=2';
 
 export const STEPS = ['owner', 'connection', 'voice', 'family', 'network', 'done'];
 export const OPTIONAL = new Set(['voice', 'family']);
@@ -135,11 +135,24 @@ export function openWizard(initial, ctx = {}) {
   const go = async (to) => { err.hidden = true; step = to; await refresh(); paint(); };
   const next = (skip = false) => go(nextStep(step, state, { skipDone: skip }));
 
+  // A step indicator (3.2): a numbered dot per step, the current one filled and
+  // bold, finished ones ticked, optional ones quieter and saying so.
   function paintProgress() {
     progress.textContent = '';
+    const by = {};
+    for (const s of (state && state.steps) || []) by[s.id] = s;
+    const at = STEPS.indexOf(step);
     STEPS.forEach((s, i) => {
-      progress.append(el('li', { class: 'wizard-step' + (s === step ? ' current' : ''), 'aria-current': s === step ? 'step' : null },
-        [`${i + 1}. ${stepLabel(s)}`, OPTIONAL.has(s) ? el('span', { class: 'muted', text: ` (${t('wiz.optional')})` }) : null]));
+      const done = i < at || (by[s] && by[s].done && s !== 'done');
+      const cls = ['wizard-step'];
+      if (s === step) cls.push('current');
+      else if (done) cls.push('done');
+      if (OPTIONAL.has(s)) cls.push('optional');
+      progress.append(el('li', { class: cls.join(' '), 'aria-current': s === step ? 'step' : null }, [
+        el('span', { class: 'wizard-dot', 'aria-hidden': 'true', text: done && s !== step ? '✓' : String(i + 1) }),
+        el('span', { class: 'wizard-step-label', text: stepLabel(s) }),
+        OPTIONAL.has(s) ? el('span', { class: 'sr-only', text: ` (${t('wiz.optional')})` }) : null,
+      ]));
     });
   }
 
@@ -272,8 +285,10 @@ export function openWizard(initial, ctx = {}) {
       } catch (e) { showError(e); } finally { save.disabled = false; }
     });
     content.append(el('p', { text: t('wiz.network_intro') }),
-      el('label', { class: 'bkp-check', for: 'wz-local' }, [local, ' ', t('wiz.network_local')]),
-      el('label', { class: 'bkp-check', for: 'wz-lan' }, [lan, ' ', t('wiz.network_lan')]),
+      el('div', { class: 'wizard-choices', role: 'radiogroup', 'aria-label': t('wiz.step_network') }, [
+        el('label', { class: 'wizard-choice', for: 'wz-local' }, [local, el('span', { text: t('wiz.network_local') })]),
+        el('label', { class: 'wizard-choice', for: 'wz-lan' }, [lan, el('span', { text: t('wiz.network_lan') })]),
+      ]),
       field(t('wiz.network_url'), url, t('wiz.network_url_hint')), notes, actions(save));
   }
 

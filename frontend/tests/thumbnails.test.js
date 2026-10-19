@@ -53,6 +53,11 @@ const EXEMPT = [
        + 'setFullRes on it once the bot is known',
   },
   {
+    match: "class: 'acct-avatar', src: spec.src",
+    why: 'Settings -> Account shows the signed-in PROFILE\'s own small avatar (a '
+       + 'profile picture, not a bot image); profiles have no full-resolution route',
+  },
+  {
     match: "class: 'comp-avatar', src: url",
     why: 'Companions is a Safe-Mode-only screen and /api/bots/<id>/avatar/full '
        + 'is PIN-gated, so a full-res affordance there is a guaranteed 403 — '

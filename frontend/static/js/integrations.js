@@ -1,12 +1,14 @@
 // Integrations (2.3.7, docs/design/integrations-2-3.md):
 //
-//   mountQuickSetup(host, deps)   Settings → AI models: "Set up everything with
-//                                 one provider" — one key, a checklist back.
-//   mountImageSection(host, deps) Settings → AI models: "Image generation" —
+//   mountQuickSetup(host, deps)   Settings → AI & Connections: "Set up everything
+//                                 with one provider" — one key, a checklist back.
+//                                 deps.open: false = a closed disclosure.
+//   mountImageSection(host, deps) Settings → AI & Connections: "Image generation" —
 //                                 provider, base URL, model, key, Test, Save.
-//   catalogGroup(deps)            Settings → Plugins: "Works with DisPatch",
-//                                 one card per companion (app/catalog.yaml)
-//                                 with its live status, plus "Show setup guide".
+//   catalogGroup(deps)            Settings → Plugins & Apps: "Works with DisPatch"
+//                                 (under Discover more), one card per companion
+//                                 (app/catalog.yaml) with its live status, plus
+//                                 "Show setup guide".
 //
 // Same contract as llm.js: owns no app state, fetches what it needs itself,
 // and every route it calls is operator-only on the server. A key typed here is
@@ -129,7 +131,9 @@ export async function mountQuickSetup(host, deps = {}) {
     result.textContent = t(lastResult.bad ? 'integrations.qs_done_partial' : 'integrations.qs_done');
     result.className = `llm-result ${lastResult.bad ? 'bad' : 'good'}`;
   }
-  host.replaceChildren(el('details', { class: 'qs-box llm-body', id: 'qs-box', open: '' }, [
+  // Open when there is nothing to talk to yet (the empty state); a closed
+  // disclosure once a connection exists (3.2).
+  host.replaceChildren(el('details', { class: 'qs-box llm-body', id: 'qs-box', open: deps.open === false ? null : '' }, [
     el('summary', { text: t('integrations.qs_title') }),
     note(t('integrations.qs_hint')),
     field(t('llm.provider'), sel, docs),

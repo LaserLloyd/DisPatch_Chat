@@ -1,15 +1,17 @@
-// Settings -> Bots (called Characters in 3.0): what the 3.0 character model adds to each row.
+// Settings -> Characters: what the 3.0 character model adds to each row.
 //
-//   Details panel   per character: its connection and model, personality preset, audience, which
-//                   profiles may see it, a one-line description, and a link to Voice -> Voices for
-//                   this character (the voice add-on owns that section; this only opens it).
-//   Starter packs   Animal Friends (gentle animals for children, Restricted audience) and
-//                   Assistants, one button each; installing is idempotent.
+//   Who can see it  one select per row (3.2) for the two server flags: Everyone,
+//                   Members and up, Restricted profiles only, Hidden. Lossless:
+//                   whoCanSee / flagsForWho are a 4-row truth table over
+//                   (safe, hide_unlocked), the same one config.Bot.audience reads.
+//   Details panel   per character: its connection and model, a one-line description,
+//                   which profiles may see it, and a link to Voice -> Voices for this
+//                   character (the voice add-on owns that section; this only opens it).
 //
-// The rows themselves, their on/off switches and the Save button are main.js's (and bots-edit.js);
-// this module only adds to them, through `decorateCharacterRows`. Everything here acts at once, like
-// the inline editor beside it. The server is the authority: it refuses a connection for an agent
-// character, an unknown profile, and so on, and its sentence is what the person reads.
+// The rows themselves, the feature switches and the save are main.js's (and
+// bots-edit.js); this module builds the panel. The server is the authority: it
+// refuses a connection for an agent character, an unknown profile, and so on, and
+// its sentence is what the person reads.
 
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
@@ -20,6 +22,30 @@ import { el } from './util.js?v=20';
 export const AUDIENCES = ['members', 'restricted', 'all'];
 const AUDIENCE_KEYS = { members: 'chars.audience_members', restricted: 'chars.audience_restricted', all: 'chars.audience_all' };
 export const audienceLabel = (a) => t(AUDIENCE_KEYS[a] || AUDIENCE_KEYS.members);
+
+/** "Who can see it", in the order the select lists them. */
+export const WHO_OPTIONS = ['everyone', 'members', 'restricted', 'hidden'];
+const WHO_FLAGS = {
+  everyone: { safe: true, hide_unlocked: false },      // audience "all"
+  members: { safe: false, hide_unlocked: false },      // audience "members", on the rail
+  restricted: { safe: true, hide_unlocked: true },     // audience "restricted"
+  hidden: { safe: false, hide_unlocked: true },        // "members", off every rail (open by link)
+};
+/** The select's value for a roster row (its `safe` / `hide_unlocked` flags). */
+export function whoCanSee(bot) {
+  const safe = !!(bot && bot.safe);
+  const hide = !!(bot && bot.hide_unlocked);
+  if (safe) return hide ? 'restricted' : 'everyone';
+  return hide ? 'hidden' : 'members';
+}
+/** The flags to send for a select value (a copy; unknown values are refused). */
+export function flagsForWho(value) {
+  const f = WHO_FLAGS[value];
+  if (!f) throw new Error(`unknown visibility ${value}`);
+  return { ...f };
+}
+/** Does going from `from` to `to` let Restricted profiles see a character they could not? */
+export const widensToRestricted = (from, to) => !WHO_FLAGS[from].safe && WHO_FLAGS[to].safe;
 
 /** The PATCH body for what changed between a character as the server returned it and the form. */
 export function diffCharacter(orig, form) {
@@ -60,9 +86,12 @@ function field(label, input, hint) {
   return el('div', { class: 'sec-field people-field' }, kids);
 }
 
-/** Build the details panel for one character. Resolves after its data has loaded. */
+/** Build the details panel for one character. Resolves after its data has loaded.
+ *  `ctx.skip` leaves fields out that the caller draws elsewhere: 'audience' (the
+ *  row's Who can see it select) and 'personality' (the row's Personality editor). */
 export async function characterPanel(bot, ctx) {
   const api = ctx.api || realApi;
+  const skip = new Set(ctx.skip || []);
   const panel = el('div', { class: 'chr-panel dev-group', role: 'group', 'aria-label': t('chars.details_aria', { name: bot.name }) });
   panel.append(el('p', { class: 'muted', text: t('chars.loading') }));
   let orig;
@@ -119,11 +148,11 @@ export async function characterPanel(bot, ctx) {
       ...(presets.presets || []).map((p) => el('option', { value: p.id, text: p.title, title: p.description })),
       el('option', { value: 'custom', text: t('chars.personality_custom') })]);
     pers.value = (orig.personality && orig.personality.preset) || 'default';
-    form.conn = conn; form.model = model; form.pers = pers;
+    form.conn = conn; form.model = model; form.pers = skip.has('personality') ? null : pers;
     panel.append(
       field(t('chars.connection'), conn, t('chars.connection_hint')),
       field(t('chars.model'), model), models,
-      field(t('chars.personality'), pers, t('chars.personality_hint')));
+      skip.has('personality') ? null : field(t('chars.personality'), pers, t('chars.personality_hint')));
     if (!conns.length) {
       const go = el('button', { type: 'button', class: 'btn-secondary', text: t('chars.add_connection') });
       go.addEventListener('click', () => ctx.openTab && ctx.openTab('connections'));
@@ -132,7 +161,8 @@ export async function characterPanel(bot, ctx) {
   } else {
     panel.append(el('p', { class: 'muted', text: t('chars.agent_note') }));
   }
-  panel.append(field(t('chars.description'), desc), field(t('chars.audience'), aud, t('chars.audience_hint')), visBox);
+  panel.append(field(t('chars.description'), desc),
+    skip.has('audience') ? null : field(t('chars.audience'), aud, t('chars.audience_hint')), visBox);
 
   const voice = el('button', { type: 'button', class: 'btn-secondary chr-voice', text: t('chars.voice_link') });
   voice.addEventListener('click', () => {
@@ -144,10 +174,13 @@ export async function characterPanel(bot, ctx) {
   const err = el('p', { class: 'lock-error', role: 'alert', hidden: '' });
   save.addEventListener('click', async () => {
     const values = {
-      description: desc.value, audience: aud.value,
+      description: desc.value, audience: skip.has('audience') ? undefined : aud.value,
       profiles: checks.filter((c) => c.checked).map((c) => c.value),
     };
-    if (form.conn) { values.connection = form.conn.value; values.model = form.model.value.trim(); values.personality = form.pers.value; }
+    if (form.conn) {
+      values.connection = form.conn.value; values.model = form.model.value.trim();
+      if (form.pers) values.personality = form.pers.value;
+    }
     const changes = diffCharacter(orig, values);
     if (!Object.keys(changes).length) { err.hidden = true; ctx.toast && ctx.toast(t('chars.nothing')); return; }
     save.disabled = true;
@@ -159,72 +192,7 @@ export async function characterPanel(bot, ctx) {
     } catch (e) { err.textContent = errorText(e); err.hidden = false; }
     finally { save.disabled = false; }
   });
-  close.addEventListener('click', () => panel.remove());
-  panel.append(err, el('div', { class: 'cxn-actions' }, [save, voice, close]));
+  close.addEventListener('click', () => (ctx.onClose ? ctx.onClose() : panel.remove()));
+  panel.append(err, el('div', { class: 'cxn-actions' }, [save, voice, ctx.noClose ? null : close]));
   return panel;
-}
-
-/** Add a "Details" button to every row of the Bots list. `bots` is the list the rows were drawn from. */
-export function decorateCharacterRows(listEl, bots, ctx) {
-  const rows = [...listEl.querySelectorAll('.bm-row')];
-  rows.forEach((row, idx) => {
-    const bot = bots[idx];
-    if (!bot || row.querySelector('.chr-details-btn')) return;
-    const btn = el('button', { type: 'button', class: 'bm-avatar-btn chr-details-btn', text: t('chars.details'),
-      'aria-expanded': 'false', 'aria-label': t('chars.details_open', { name: bot.name }) });
-    let panel = null;
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (panel) { panel.remove(); panel = null; btn.setAttribute('aria-expanded', 'false'); return; }
-      btn.setAttribute('aria-expanded', 'true');
-      panel = await characterPanel(bot, ctx);
-      row.after(panel);
-    });
-    row.append(btn);
-  });
-}
-
-/** The starter-pack card at the top of the Bots pane. */
-export async function mountStarterPacks(host, ctx = {}) {
-  const api = ctx.api || realApi;
-  const old = host.querySelector('.chr-packs');
-  if (old) old.remove();
-  const box = el('section', { class: 'dev-group chr-packs', 'aria-labelledby': 'chr-packs-h' }, [
-    el('h3', { class: 'dev-group-title', id: 'chr-packs-h', text: t('chars.packs_title') }),
-    el('p', { class: 'dev-group-hint', text: t('chars.packs_hint') })]);
-  host.prepend(box);
-  let packs;
-  let conns = [];
-  try {
-    const [p, c] = await Promise.all([api.starterPacks(), api.connections().catch(() => ({ connections: [] }))]);
-    packs = p.packs; conns = c.connections || [];
-  } catch (e) { box.append(el('p', { class: 'muted', text: errorText(e) })); return box; }
-  const connSel = el('select', { class: 'ui-select', 'aria-label': t('chars.packs_connection') }, [
-    el('option', { value: '', text: t('chars.no_connection') }),
-    ...conns.map((c) => el('option', { value: c.id, text: c.name }))]);
-  if (conns.length) connSel.value = conns[0].id;
-  box.append(el('div', { class: 'bkp-form' }, [el('label', { text: t('chars.packs_connection') }), connSel]));
-  const body = el('div', { class: 'dev-group-body' });
-  box.append(body);
-  for (const p of packs) {
-    const btn = el('button', { type: 'button', class: 'btn-secondary',
-      text: p.installed ? t('chars.pack_installed') : (p.partly_installed ? t('chars.pack_install_rest') : t('chars.pack_install')) });
-    if (p.installed) btn.disabled = true;
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      try {
-        const r = await api.installPack(p.id, connSel.value ? { connection: connSel.value } : {});
-        ctx.toast && ctx.toast(t('chars.pack_done', { count: r.installed.length }));
-        ctx.reload && (await ctx.reload());
-        await mountStarterPacks(host, ctx);
-      } catch (e) { ctx.toast && ctx.toast(errorText(e), true); btn.disabled = false; }
-    });
-    body.append(el('div', { class: 'dev-row chr-pack', dataset: { pack: p.id } }, [
-      el('span', { class: 'dev-row-text' }, [
-        el('strong', {}, [p.name, ' ', el('span', { class: 'ui-badge', text: audienceLabel(p.audience) })]),
-        el('span', { class: 'dev-row-hint', text: p.description }),
-        el('span', { class: 'dev-row-hint', text: p.characters.map((c) => `${c.emoji} ${c.name}`).join('  ') }),
-      ]), btn]));
-  }
-  return box;
 }

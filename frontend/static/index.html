@@ -156,10 +156,10 @@
        and fetches ui-theme/locales/<lang>.json only if asked to. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=109" />
+  <link rel="stylesheet" href="/static/app.css?v=110" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=1" />
-  <link rel="stylesheet" href="/static/w5.css?v=1" />
+  <link rel="stylesheet" href="/static/w5.css?v=2" />
   <!-- Theme tokens for every theme, then the adapter that maps DisPatch's own
        token names onto them. AFTER app.css / dashboard.css so their blocks win
        ties; theme.css holds only what the theme folder does not own. No
@@ -167,7 +167,7 @@
   <link rel="stylesheet" href="/static/ui-theme/ui-theme.css" />
   <link rel="stylesheet" href="/static/ui-theme/adapters/dispatch-extra.css" />
   <script src="/static/ui-theme/ui-components.js" defer></script>
-  <script type="module" src="/static/js/theme.js?v=20"></script>
+  <script type="module" src="/static/js/theme.js?v=21"></script>
 </head>
 <body>
   <!-- Boot veil: covers the half-assembled UI (empty headers, unpopulated
@@ -704,136 +704,172 @@
     <button data-view="chat" class="tab"><span>🗨️</span><span class="tab-label" data-i18n="nav.tab_messages">Messages</span></button>
   </nav>
 
-  <!-- Settings modal — a tab container.
-       The gear rail used to carry ⚡ Reactions, 🩺 Dashboard and 🔌 Connect an AI
-       as three more buttons; on a phone that rail IS the Bots page, so six admin
-       glyphs stacked above the roster. Those three surfaces are panes in here
-       now, which is also why the roster hint/list moved into a pane of its own:
-       one modal, one scroll region per subject, instead of one endless scroll.
-
-       Panes are markup where a module already owns static markup (Bots, AI
-       models, Device, Security) and empty mount points where the module builds
-       its own DOM (Reactions, Health). Every pane keeps the ids its JS already
-       looks up, so moving the markup here rewires nothing below the surface. -->
+  <!-- Settings (3.2): seven sections in two groups instead of thirteen tabs.
+       Desktop (900px and up): a side nav with a search box beside the open
+       section. Phone: the nav is a list of sections with a one-line summary;
+       tapping one slides its page in with a back button (data-view="pane").
+       js/settings-nav.js holds the section table, the old tab ids that still
+       lead here (TAB_ALIASES) and the search. Panes keep the element ids their
+       modules look up, so moving markup here rewires nothing below the surface.
+       Everything applies when it is changed; only multi-field forms (add a
+       connection, add a person, change a PIN) keep a button of their own. -->
   <div class="modal-backdrop hidden" id="botmanager-backdrop">
-    <div class="modal settings-modal" id="botmanager" role="dialog" aria-modal="true" aria-label="Settings" data-i18n-attr="aria-label=settings.title">
-      <header class="modal-header">
-        <h2 data-i18n="settings.title">Settings</h2>
+    <div class="modal settings-modal" id="botmanager" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-view="list">
+      <header class="modal-header settings-header">
+        <button type="button" class="icon-btn ghost settings-back" id="settings-back" hidden title="All sections" aria-label="All sections" data-i18n-attr="title=settings.back;aria-label=settings.back"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <h2 id="settings-title"><span class="settings-title-root" data-i18n="settings.title">Settings</span><span class="settings-title-pane" id="settings-title-pane" hidden></span></h2>
         <button class="icon-btn ghost" id="bm-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
 
-      <!-- Roving-tabindex tablist: only the selected tab is in the Tab order,
-           ←/→/Home/End move between them (main.js: wireSettingsTabs). The three
-           admin tabs are hidden for a Safe-Mode session exactly as the rail
-           buttons they replace were. -->
-      <!-- The strip is wider than a phone AND than the desktop dialog. The two
-           edge buttons (js/tabstrip.js) show only while there are tabs beyond
-           that edge; they are mouse/touch affordances, so they stay out of the
-           Tab order — the keyboard already has ←/→/Home/End on the tablist. -->
-      <div class="settings-tabbar">
-      <button type="button" class="stab-nav stab-prev" id="stab-prev" tabindex="-1" aria-hidden="true" hidden title="Earlier tabs" data-i18n-attr="title=settings.tabs_prev"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      <div class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
-        <button class="settings-tab active" id="stab-bots" role="tab" data-tab="bots" aria-selected="true" aria-controls="spane-bots" tabindex="0"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="settings.tab_bots">Bots</span></button>
-        <button class="settings-tab" id="stab-theme" role="tab" data-tab="theme" aria-selected="false" aria-controls="spane-theme" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎨</span><span class="stab-label" data-i18n="settings.tab_theme">Theme</span></button>
-        <button class="settings-tab" id="stab-device" role="tab" data-tab="device" aria-selected="false" aria-controls="spane-device" tabindex="-1"><span class="stab-glyph" aria-hidden="true">📱</span><span class="stab-label" data-i18n="settings.tab_device">Device</span></button>
-        <!-- Voice: voice chat is an add-on. Always present for an unlocked user
-             (the add-on's own settings when it is installed, otherwise how to
-             add it); hidden in Safe Mode like the other admin tabs. -->
-        <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🎙️</span><span class="stab-label" data-i18n="settings.tab_voice">Voice</span></button>
-        <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🧰</span><span class="stab-label" data-i18n="plugins.tab">Plugins</span></button>
-        <!-- 3.0: Connections (the servers DisPatch talks to) - js/connections.js builds it. -->
-        <button class="settings-tab admin-only hidden" id="stab-connections" role="tab" data-tab="connections" aria-selected="false" aria-controls="spane-connections" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔗</span><span class="stab-label" data-i18n="settings.tab_connections">Connections</span></button>
-        <!-- Agents (3.0): owner and admin only. js/agents.js builds the pane. -->
-        <button class="settings-tab admin-only hidden" id="stab-agents" role="tab" data-tab="agents" aria-selected="false" aria-controls="spane-agents" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🤖</span><span class="stab-label" data-i18n="agents.tab">Agents</span></button>
-        <button class="settings-tab admin-only" id="stab-ai" role="tab" data-tab="ai" aria-selected="false" aria-controls="spane-ai" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔌</span><span class="stab-label" data-i18n="settings.tab_ai">AI models</span></button>
-        <button class="settings-tab admin-only" id="stab-reactions" role="tab" data-tab="reactions" aria-selected="false" aria-controls="spane-reactions" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚡</span><span class="stab-label" data-i18n="settings.tab_reactions">Reactions</span></button>
-        <button class="settings-tab admin-only" id="stab-health" role="tab" data-tab="health" aria-selected="false" aria-controls="spane-health" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🩺</span><span class="stab-label" data-i18n="settings.tab_health">Health</span></button>
-        <!-- People & Profiles (3.0): owner and admin only. js/people.js builds it. -->
-        <button class="settings-tab admin-only hidden" id="stab-people" role="tab" data-tab="people" aria-selected="false" aria-controls="spane-people" tabindex="-1"><span class="stab-glyph" aria-hidden="true">👥</span><span class="stab-label" data-i18n="people.tab">People &amp; Profiles</span></button>
-        <button class="settings-tab" id="stab-security" role="tab" data-tab="security" aria-selected="false" aria-controls="spane-security" tabindex="-1"><span class="stab-glyph" aria-hidden="true">🔐</span><span class="stab-label" data-i18n="settings.tab_security">Security</span></button>
-        <!-- 3.0: every setting, drawn from the server's schema (js/settings_schema.js), with backups. -->
-        <button class="settings-tab admin-only hidden" id="stab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="spane-settings" tabindex="-1"><span class="stab-glyph" aria-hidden="true">⚙️</span><span class="stab-label" data-i18n="settings.tab_all">All settings</span></button>
-      </div>
-      <button type="button" class="stab-nav stab-next" id="stab-next" tabindex="-1" aria-hidden="true" hidden title="More tabs" data-i18n-attr="title=settings.tabs_next"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      </div>
+      <div class="settings-body">
+        <nav class="settings-nav" id="settings-nav" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
+          <div class="settings-search" role="search">
+            <input type="search" class="ui-input settings-search-input" id="settings-search" autocomplete="off" spellcheck="false"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="settings-search-results"
+                   placeholder="Search settings" aria-label="Search settings" data-i18n-attr="placeholder=settings.search_placeholder;aria-label=settings.search_placeholder" />
+            <div class="settings-search-results" id="settings-search-results" role="listbox" aria-label="Matching settings" data-i18n-attr="aria-label=settings.search_results" hidden></div>
+          </div>
+          <!-- Roving-tabindex tablist, vertical: only the selected section is in the
+               Tab order; ↑/↓/Home/End move between the visible ones (main.js
+               wireSettingsTabs). Household sections are the Owner's and Admins'
+               (canAdmin); add-on tabs land before #snav-addons-end. -->
+          <div class="settings-tabs" id="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
+            <h3 class="snav-heading" id="snav-h-you" data-i18n="settings.group_you">You</h3>
+            <button class="settings-tab" id="stab-appearance" role="tab" data-tab="appearance" aria-selected="false" aria-controls="spane-appearance" tabindex="0"><span class="stab-glyph" data-icon="palette" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_appearance">Appearance</span><span class="stab-summary" id="ssum-appearance"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <button class="settings-tab" id="stab-account" role="tab" data-tab="account" aria-selected="false" aria-controls="spane-account" tabindex="-1"><span class="stab-glyph" data-icon="user" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_account">Account</span><span class="stab-summary" id="ssum-account"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <!-- Voice: an add-on. Shown to the Owner and Admins always (the absent page
+                 says how to add it) and to anyone with use_voice once it is mounted. -->
+            <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph stab-glyph-mic" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_voice">Voice</span><span class="stab-summary" id="ssum-voice" data-i18n="settings.sum_voice">Voice chat and voices</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <h3 class="snav-heading admin-only" id="snav-h-household" data-i18n="settings.group_household">Household</h3>
+            <button class="settings-tab admin-only" id="stab-characters" role="tab" data-tab="characters" aria-selected="false" aria-controls="spane-characters" tabindex="-1"><span class="stab-glyph" data-icon="bots" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_characters">Characters</span><span class="stab-summary" id="ssum-characters"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <button class="settings-tab admin-only" id="stab-connections" role="tab" data-tab="connections" aria-selected="false" aria-controls="spane-connections" tabindex="-1"><span class="stab-glyph" data-icon="plug" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_connections">AI &amp; Connections</span><span class="stab-summary" id="ssum-connections" data-i18n="settings.sum_connections">Models, image generation and agents</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <button class="settings-tab admin-only" id="stab-people" role="tab" data-tab="people" aria-selected="false" aria-controls="spane-people" tabindex="-1"><span class="stab-glyph" data-icon="users" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_people">People &amp; Access</span><span class="stab-summary" id="ssum-people" data-i18n="settings.sum_people">Profiles, sign-in rules and limits</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <button class="settings-tab admin-only" id="stab-plugins" role="tab" data-tab="plugins" aria-selected="false" aria-controls="spane-plugins" tabindex="-1"><span class="stab-glyph" data-icon="tools" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_plugins">Plugins &amp; Apps</span><span class="stab-summary" id="ssum-plugins" data-i18n="settings.sum_plugins">Add-ons, tools and lookups</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <button class="settings-tab admin-only" id="stab-system" role="tab" data-tab="system" aria-selected="false" aria-controls="spane-system" tabindex="-1"><span class="stab-glyph" data-icon="pulse" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_system">System</span><span class="stab-summary" id="ssum-system" data-i18n="settings.sum_system">Health, backups and network</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <h3 class="snav-heading" id="snav-h-addons" data-i18n="settings.group_addons" hidden>Add-ons</h3>
+            <span id="snav-addons-end" hidden></span>
+          </div>
+        </nav>
 
-      <!-- ---- Bots ---- -->
-      <section class="settings-pane" id="spane-bots" role="tabpanel" aria-labelledby="stab-bots" tabindex="0">
-        <p class="muted modal-hint" data-i18n-html="settings.hint">Tap a bot's picture (or <strong>Change photo</strong>) to set its avatar. Reorder with the ▲/▼ buttons (or drag rows on desktop); <strong>Show locked</strong> puts a bot on locked (Safe Mode) devices, <strong>Show unlocked</strong> on unlocked ones; with neither it is hidden everywhere.
-          Order and visibility changes apply when you press <strong>Save</strong>.</p>
-        <p class="muted modal-hint bm-instant-hint" data-i18n="bots_edit.instant_hint">Renaming, adding and removing a bot, and the Lookups switch, apply at once.</p>
-        <div class="bm-list" id="bm-list"></div>
-        <!-- Avatar pools: status + prompt banks for pool-enabled bots
-             (main.js renders; hidden while no bot has a pool). -->
-        <div id="avatar-pool-panel" class="ap-panel hidden"></div>
-      </section>
+        <div class="settings-panes" id="settings-panes">
 
-      <!-- ---- Theme: the palette picker (js/theme.js builds the grid) ----
-           A palette is one fixed skin, so there is no dark/light pair left to
-           choose between — picking a card here is the whole control. -->
-      <section class="settings-pane hidden" id="spane-theme" role="tabpanel" aria-labelledby="stab-theme" tabindex="0">
-        <p class="muted modal-hint" data-i18n="settings.theme_hint">Pick this device's look. It applies straight away and is remembered here — there is nothing to save.</p>
-        <div class="theme-grid" id="theme-grid" role="radiogroup" aria-label="Theme" data-i18n-attr="aria-label=settings.tab_theme"></div>
-        <p class="muted theme-revision" id="theme-revision" data-i18n="settings.theme_revision" data-i18n-vars='{"date":""}'></p>
-      </section>
-
-      <!-- ---- Device: per-device preferences (all instant, nothing to Save) ---- -->
-      <!-- Grouped by subject (2026-09-26): each group is a titled card of rows,
-           every row reads "name / one-line explanation" on the left and its
-           control on the right (switch, select or button), with the Pin pill
-           beside the switch where the setting can go on the bar. The rows
-           built in JS (No-Image Mode, Privacy, the theme pin, links, viewer,
-           About) are mounted into these group bodies by mountLanguagePicker();
-           every id a module looks up is unchanged. -->
-      <section class="settings-pane hidden" id="spane-device" role="tabpanel" aria-labelledby="stab-device" tabindex="0">
-        <p class="muted modal-hint" data-i18n="settings.device_hint">These apply to this device only, and take effect straight away — there is nothing to save here.</p>
-
-        <section class="dev-group" id="dev-group-display" aria-labelledby="dev-h-display">
+      <!-- ===== You: Appearance (this device's look; household defaults under Advanced) ===== -->
+      <section class="settings-pane hidden" id="spane-appearance" role="tabpanel" aria-labelledby="stab-appearance" tabindex="0">
+        <p class="muted modal-hint" data-i18n="settings.appearance_hint">How DisPatch looks on this device. Everything here applies straight away.</p>
+        <section class="dev-group" id="app-group-theme" data-anchor="theme" aria-labelledby="app-h-theme">
+          <h3 class="dev-group-title" id="app-h-theme" data-i18n="settings.theme_title">Theme</h3>
+          <div class="theme-grid" id="theme-grid" role="radiogroup" aria-label="Theme" data-i18n-attr="aria-label=settings.theme_title"></div>
+          <p class="muted theme-revision" id="theme-revision" data-i18n="settings.theme_revision" data-i18n-vars='{"date":""}'></p>
+        </section>
+        <section class="dev-group" id="dev-group-display" data-anchor="display" aria-labelledby="dev-h-display">
           <h3 class="dev-group-title" id="dev-h-display" data-i18n="settings.dev_display">Language &amp; display</h3>
           <div class="dev-group-body" id="dev-body-display">
-            <!-- Language: the <select> is built by i18n.js languageSelect() and
-                 added here, so the option list can never drift from the shipped
-                 locales. -->
-            <label class="bm-avatar-style bm-lang dev-row" id="bm-lang-row">
+            <!-- Language: the <select> is built by i18n.js languageSelect() and added
+                 here, so the option list can never drift from the shipped locales. -->
+            <label class="bm-avatar-style bm-lang dev-row" id="bm-lang-row" data-anchor="language">
               <span class="dev-row-text"><strong data-i18n="settings.language">Language</strong><span class="dev-row-hint" data-i18n="settings.language_desc">Menus, buttons and messages from the app.</span></span>
             </label>
-            <!-- Avatar style: a pure CSS attribute swap, applies instantly. -->
-            <label class="bm-avatar-style dev-row" id="bm-avatar-style-row">
-              <input type="checkbox" id="bm-avatar-minimal" />
-              <span class="dev-row-text"><strong data-i18n="settings.minimal_avatars">Minimal avatars</strong><span class="dev-row-hint" data-i18n="settings.minimal_avatars_desc">Names instead of pictures in the sidebar, and no avatars on messages.</span></span>
-            </label>
+            <!-- Avatar style: a pure CSS attribute swap (data-avatar-style), applies at once. -->
+            <div class="bm-avatar-style dev-row" id="bm-avatar-style-row" data-anchor="avatar-style">
+              <label class="dev-row-text" for="bm-avatar-select"><strong data-i18n="settings.avatar_style">Avatar style</strong><span class="dev-row-hint" data-i18n="settings.avatar_style_desc">Pictures, or names instead of pictures in the sidebar and no avatars on messages.</span></label>
+              <select class="ui-select" id="bm-avatar-select">
+                <option value="rich" data-i18n="settings.avatar_rich">Pictures</option>
+                <option value="minimal" data-i18n="settings.avatar_minimal">Names only</option>
+              </select>
+            </div>
           </div>
         </section>
-
-        <section class="dev-group" id="dev-group-pictures" aria-labelledby="dev-h-pictures">
-          <h3 class="dev-group-title" id="dev-h-pictures" data-i18n="settings.dev_pictures">Pictures &amp; privacy</h3>
-          <div class="dev-group-body" id="dev-body-pictures"></div>
-        </section>
-
-        <!-- Notifications (Web Push): unlocked devices only; js/push.js builds
-             the row, mountLanguagePicker() mounts it and hides the card in
-             Safe Mode. -->
-        <section class="dev-group" id="dev-group-notify" aria-labelledby="dev-h-notify" hidden>
-          <h3 class="dev-group-title" id="dev-h-notify" data-i18n="push.group">Notifications</h3>
-          <div class="dev-group-body" id="dev-body-notify"></div>
-        </section>
-
-        <section class="dev-group" id="dev-group-bar" aria-labelledby="dev-h-bar">
+        <section class="dev-group" id="dev-group-bar" data-anchor="menu-bar" aria-labelledby="dev-h-bar">
           <h3 class="dev-group-title" id="dev-h-bar" data-i18n="settings.dev_bar">Menu bar shortcuts</h3>
           <p class="dev-group-hint" data-i18n="settings.dev_bar_hint">A pinned setting gets its own button on the menu bar, one tap away. Use the Pin button on any row.</p>
           <div class="dev-group-body" id="dev-body-bar"></div>
         </section>
+        <!-- Advanced (Owner and Admin): show hidden characters on this device, and the
+             defaults a NEW device starts with. Hidden altogether for anyone else. -->
+        <details class="settings-adv" id="app-adv" data-adv="appearance" data-anchor="advanced" hidden>
+          <summary data-i18n="settings.advanced">Advanced</summary>
+          <div class="dev-group-body" id="app-adv-device"></div>
+          <section class="dev-group schema-defaults" aria-labelledby="app-h-defaults">
+            <h3 class="dev-group-title" id="app-h-defaults" data-i18n="settings.defaults_title">Defaults for new devices</h3>
+            <p class="dev-group-hint" data-i18n="settings.defaults_hint">What a device that has not chosen for itself starts with. Changing a default never changes this device's own choice above.</p>
+            <div class="schema-host" data-schema="appearance"></div>
+          </section>
+        </details>
+      </section>
 
-        <section class="dev-group" id="dev-group-files" aria-labelledby="dev-h-files">
-          <h3 class="dev-group-title" id="dev-h-files" data-i18n="viewer.settings_title">Local viewer</h3>
-          <div class="dev-group-body" id="dev-body-files"></div>
+      <!-- ===== You: Account (who you are, sign-in, this device's privacy) ===== -->
+      <section class="settings-pane hidden" id="spane-account" role="tabpanel" aria-labelledby="stab-account" tabindex="0">
+        <section class="dev-group acct-who-group" data-anchor="profile" aria-label="You" data-i18n-attr="aria-label=acct.who_aria">
+          <div class="acct-who" id="acct-who"></div>
         </section>
-
-        <!-- Recovery stays its own modal: it is a full screen in its own
-             right (an export/restore flow), and nesting it inside a settings
-             pane would bury a footer of actions under a second footer. -->
-        <section class="dev-group" id="dev-group-backup" aria-labelledby="dev-h-backup">
-          <h3 class="dev-group-title" id="dev-h-backup" data-i18n="settings.dev_backup">Backup &amp; recovery</h3>
+        <section class="dev-group" id="acct-signin" data-anchor="signin" aria-labelledby="acct-h-signin">
+          <h3 class="dev-group-title" id="acct-h-signin" data-i18n="acct.signin_title">Sign-in</h3>
+          <p class="muted acct-status" id="sec-status-line"></p>
+          <!-- 3.0: filled by main.js (js/signin.js builds the forms): "Create owner account"
+               while the install is unclaimed, or the dismissible "set a password" prompt. -->
+          <div class="sec-body sec-account" id="sec-account" hidden></div>
+          <!-- One change at a time: the select opens exactly one form below it, so a
+               page never shows two "Current PIN" boxes. -->
+          <div class="dev-row acct-change-row" id="acct-change-row" hidden>
+            <label class="dev-row-text" for="acct-change"><strong data-i18n="acct.change_label">Change</strong><span class="dev-row-hint" data-i18n="acct.change_hint">Pick what to change; only that form opens.</span></label>
+            <select class="ui-select" id="acct-change"></select>
+          </div>
+          <div class="sec-body acct-form" id="sec-pin-form" hidden>
+            <!-- Each password field sits in its own <form> (Chromium warns about a password
+                 input outside one). data-no-submit: main.js cancels the submit. -->
+            <form class="sec-field" id="sec-current-wrap" data-no-submit hidden>
+              <label for="sec-current" id="sec-current-label" data-i18n="security.current_pin">Current PIN</label>
+              <input type="password" inputmode="numeric" id="sec-current" autocomplete="off" />
+            </form>
+            <form class="sec-field" id="sec-new-wrap" data-no-submit>
+              <label for="sec-new" id="sec-new-label" data-i18n="security.new_pin">New PIN</label>
+              <input type="password" inputmode="numeric" id="sec-new" autocomplete="off" />
+            </form>
+            <form class="sec-field" id="sec-confirm-wrap" data-no-submit>
+              <label for="sec-confirm" data-i18n="security.confirm_pin">Confirm PIN</label>
+              <input type="password" inputmode="numeric" id="sec-confirm" autocomplete="off" />
+            </form>
+            <div class="lock-error" id="sec-error" role="alert" aria-live="assertive" hidden></div>
+            <div class="bm-actions acct-form-actions">
+              <button class="btn-secondary danger-text" id="sec-remove" hidden data-i18n="security.remove_pin">Remove PIN</button>
+              <button class="btn-primary" id="sec-save" data-i18n="security.set_pin">Set PIN</button>
+              <button class="btn-secondary" id="sec-cancel" data-i18n="common.cancel">Cancel</button>
+            </div>
+          </div>
+          <div class="sec-body acct-form" id="acct-password-host" hidden></div>
+          <div class="bm-actions sec-lock-row">
+            <button class="btn-secondary danger-text hidden" id="bm-lock"><span class="icn" data-icon="lock" aria-hidden="true"></span><span data-i18n="settings.lock_now">Lock now</span></button>
+          </div>
+          <!-- security.note carries markup we own (a <br> and the two <code id=…> path
+               elements the recovery instructions point at), so renderSecurityNote() renders
+               it as HTML with the server's paths escaped. The Owner's only: a Member can
+               neither use nor should see those paths. -->
+          <p class="muted sec-note" id="sec-note" hidden>
+            Lost your PIN? Use the recovery code in
+            <code class="sec-path" id="sec-recovery-path">RECOVERY-CODE.txt</code>,
+            or edit <code class="sec-path" id="sec-config-path">security.yaml</code> in the data folder.
+          </p>
+        </section>
+        <!-- Notifications (Web Push): js/push.js builds the row. -->
+        <section class="dev-group" id="dev-group-notify" data-anchor="notifications" aria-labelledby="dev-h-notify" hidden>
+          <h3 class="dev-group-title" id="dev-h-notify" data-i18n="push.group">Notifications</h3>
+          <div class="dev-group-body" id="dev-body-notify"></div>
+        </section>
+        <section class="dev-group" id="dev-group-pictures" data-anchor="pictures" aria-labelledby="dev-h-pictures">
+          <h3 class="dev-group-title" id="dev-h-pictures" data-i18n="settings.dev_pictures">Pictures &amp; privacy</h3>
+          <div class="dev-group-body" id="dev-body-pictures"></div>
+        </section>
+        <!-- "Stored on the host computer" (js/host-notice.js): the ONE permanent home of
+             the notice, with this device's privacy controls; a device also sees a short
+             version once, on its first page load. -->
+        <aside class="host-notice" role="note" id="sec-host-notice" data-anchor="notice">
+          <strong class="host-notice-title" data-i18n="host_notice.title">Stored on the host computer</strong>
+          <p class="host-notice-body" data-i18n="host_notice.files_body">Files, pictures and avatars you upload or create here (in chats, the File Server, Image Studio and Settings) are saved on the computer that runs DisPatch, not on your device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.</p>
+          <p class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: anyone who can use that character can open its chats, other profiles (Restricted ones included) and devices that haven&#39;t signed in if this install lets them. Members can use every character that isn&#39;t limited to certain profiles; the Owner and Admins can use every character, so they can read every chat. To keep someone&#39;s chats apart, limit a character to their profile. Anyone with access to that computer, its files or its backups can read them too.</p>
+        </aside>
+        <!-- Recovery stays its own modal: an export/restore flow is a full screen. -->
+        <section class="dev-group" id="dev-group-backup" data-anchor="recovery" aria-labelledby="dev-h-backup">
+          <h3 class="dev-group-title" id="dev-h-backup" data-i18n="acct.device_title">This device</h3>
           <div class="dev-group-body">
             <div class="dev-row dev-row-action">
               <span class="dev-row-text"><strong data-i18n="settings.recovery">Recovery &amp; Export</strong><span class="dev-row-hint" data-i18n="settings.recovery_desc">Export every message to a file, or restore messages that did not save.</span></span>
@@ -841,185 +877,101 @@
             </div>
           </div>
         </section>
-
-        <section class="dev-group" id="dev-group-about" aria-labelledby="dev-h-about">
+        <section class="dev-group" id="dev-group-about" data-anchor="about" aria-labelledby="dev-h-about">
           <h3 class="dev-group-title" id="dev-h-about" data-i18n="about.title">About</h3>
           <div class="dev-group-body" id="dev-body-about"></div>
         </section>
       </section>
 
-      <!-- ---- Voice. The voice chat add-on (DisPatch Voice) renders its own
-           settings into #ext-pane-voice once it is mounted (js/ext-sdk.js
-           settings.pane); until then js/voice-absent.js explains what voice chat
-           is and exactly how to add it (absent / incompatible / failed /
-           disabled). ---- -->
+      <!-- ===== You: Voice. The voice chat add-on renders its own settings into
+           #ext-pane-voice once mounted (js/ext-sdk.js settings.pane); until then
+           js/voice-absent.js explains what it is and how to add it. ===== -->
       <section class="settings-pane hidden" id="spane-voice" role="tabpanel" aria-labelledby="stab-voice" tabindex="0">
         <div class="ext-pane" id="ext-pane-voice"></div>
       </section>
 
-      <!-- ---- Plugins (admin-only; js/plugins.js builds it): add-ons, the Tools
-           table (js/tools.js mounts into #plugins-tools-host) and the built-in
-           lookups switch. ---- -->
-      <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
-
-      <!-- ---- Connections: js/connections.js mounts it here (owner/admin only) ---- -->
-      <section class="settings-pane hidden" id="spane-connections" role="tabpanel" aria-labelledby="stab-connections" tabindex="0"></section>
-
-      <!-- ---- Agents: js/agents.js mounts it here (owner/admin only) ---- -->
-      <section class="settings-pane hidden" id="spane-agents" role="tabpanel" aria-labelledby="stab-agents" tabindex="0"></section>
-
-      <!-- ---- AI models (js/llm.js) ---- -->
-      <section class="settings-pane hidden" id="spane-ai" role="tabpanel" aria-labelledby="stab-ai" tabindex="0">
-        <div id="llm-quick-host" class="llm-quick-host"></div>
-        <p class="muted modal-hint" data-i18n="llm.hint">Connect a bot to a model provider or a local model server. Atlas is ready for a key; any direct-API bot, or a new one, works the same way.</p>
-        <div class="llm-body">
-          <div class="sec-field">
-            <label for="llm-target" data-i18n="llm.target">Bot to connect</label>
-            <select id="llm-target"></select>
-            <p class="sec-note muted" id="llm-target-note" data-i18n="llm.target_hint">The provider, model and key below become this bot's connection.</p>
+      <!-- ===== Household: Characters (main.js renders the roster) ===== -->
+      <section class="settings-pane hidden" id="spane-characters" role="tabpanel" aria-labelledby="stab-characters" tabindex="0">
+        <div class="chars-head" data-anchor="roster">
+          <p class="muted modal-hint" data-i18n="chars.roster_hint">Who you talk to, in the order the menu bar shows them. Drag a row to move it. Every change applies straight away.</p>
+          <div class="chars-toolbar" data-anchor="add">
+            <button type="button" class="btn-primary chars-add-btn" id="chars-add" aria-haspopup="menu" aria-expanded="false" aria-controls="chars-add-menu"><span data-i18n="chars.add">Add</span><span class="chars-caret" aria-hidden="true">▾</span></button>
+            <button type="button" class="btn-secondary chars-reorder-btn" id="chars-reorder" aria-pressed="false" data-i18n="chars.reorder">Reorder</button>
           </div>
-          <div class="sec-field">
-            <label for="llm-provider" data-i18n="llm.provider">Provider</label>
-            <select id="llm-provider"></select>
-            <a class="llm-docs" id="llm-docs" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="llm.docs_link">Where do I get a key?</a>
-          </div>
-          <div class="sec-field">
-            <label for="llm-base-url" data-i18n="llm.base_url">Base URL</label>
-            <input type="url" id="llm-base-url" autocomplete="off" spellcheck="false" inputmode="url" placeholder="http://127.0.0.1:1234/v1" />
-            <p class="sec-note muted" id="llm-base-note" data-i18n="llm.base_url_hint">The API endpoint. Most OpenAI-compatible servers end in /v1.</p>
-          </div>
-          <form class="sec-field" id="llm-key-field" data-no-submit>
-            <label for="llm-key" data-i18n="llm.api_key">API key</label>
-            <input type="password" id="llm-key" autocomplete="off" spellcheck="false" placeholder="Paste your key" data-i18n-attr="placeholder=llm.api_key_placeholder" />
-            <p class="sec-note muted" data-i18n="llm.api_key_hint">Stored in config.yaml in your data directory, which is owner-readable only.</p>
-            <label class="llm-sublabel" for="llm-key-env" data-i18n="llm.key_env_label">…or read it from an environment variable</label>
-            <input type="text" id="llm-key-env" autocomplete="off" spellcheck="false" placeholder="OPENAI_API_KEY" />
-          </form>
-          <div class="llm-test-row">
-            <button class="btn-secondary" id="llm-test" data-i18n="llm.test">Test connection</button>
-            <span class="llm-result" id="llm-result" role="status" aria-live="polite"></span>
-          </div>
-          <div class="sec-field">
-            <label for="llm-model" data-i18n="llm.model">Model</label>
-            <select id="llm-model" hidden></select>
-            <input type="text" id="llm-model-text" autocomplete="off" spellcheck="false" placeholder="Type a model name" data-i18n-attr="placeholder=llm.model_placeholder" />
-            <p class="sec-note muted" id="llm-model-note" data-i18n="llm.model_pick">Run Test connection to list the models this provider offers.</p>
-          </div>
-          <div class="sec-field llm-tools-field" id="llm-tools-field">
-            <label class="llm-check"><input type="checkbox" id="llm-tools" checked /> <span data-i18n="llm.tools">Lookups</span></label>
-            <p class="sec-note muted" data-i18n="llm.tools_hint">Web and news search, a page fetch, weather, Wikipedia, exchange rates, the time and a calculator — the bot calls them itself and says when it did.</p>
-          </div>
-          <details class="llm-advanced" id="llm-advanced">
-            <summary data-i18n="llm.advanced">Advanced</summary>
-            <div class="sec-field">
-              <label for="llm-name" data-i18n="llm.name_label">Display name</label>
-              <input type="text" id="llm-name" autocomplete="off" placeholder="Assistant" data-i18n-attr="placeholder=llm.name_placeholder" />
-            </div>
-            <div class="sec-field">
-              <label for="llm-system" data-i18n="llm.system_prompt">System prompt</label>
-              <textarea id="llm-system" rows="3" maxlength="8000" spellcheck="false" placeholder="You are a friendly assistant in a family chat." data-i18n-attr="placeholder=llm.system_placeholder"></textarea>
-            </div>
-          </details>
+          <div class="menu chars-add-menu" id="chars-add-menu" role="menu" aria-label="Add a character" data-i18n-attr="aria-label=chars.add_menu_aria" hidden></div>
+          <div class="chars-add-host" id="chars-add-host"></div>
         </div>
-        <div id="llm-image-host" class="llm-image-host"></div>
+        <div class="bm-list" id="bm-list"></div>
+        <details class="settings-sub" id="chars-reactions" data-anchor="reactions">
+          <summary><span data-i18n="settings.tab_reactions">Reactions</span><span class="settings-sub-hint" data-i18n="chars.reactions_hint">Pictures a character can show to say how it feels</span></summary>
+          <div class="settings-sub-body" id="chars-reactions-host"></div>
+        </details>
+        <!-- Avatar pools: status + prompt banks for pool-enabled characters (main.js). -->
+        <details class="settings-sub" id="chars-pools" data-anchor="avatar-pools" hidden>
+          <summary><span data-i18n="settings.pool_section">Avatar pools</span><span class="settings-sub-hint" id="chars-pools-status"></span></summary>
+          <div id="avatar-pool-panel" class="ap-panel"></div>
+        </details>
+        <details class="settings-adv" data-adv="characters" data-anchor="advanced">
+          <summary data-i18n="settings.advanced">Advanced</summary>
+          <div class="schema-host" data-schema="characters"></div>
+        </details>
       </section>
 
-      <!-- ---- Reactions: reactions.js mounts the pack manager here ---- -->
-      <section class="settings-pane hidden" id="spane-reactions" role="tabpanel" aria-labelledby="stab-reactions" tabindex="0"></section>
+      <!-- ===== Household: AI & Connections ===== -->
+      <section class="settings-pane hidden" id="spane-connections" role="tabpanel" aria-labelledby="stab-connections" tabindex="0">
+        <div class="cxn-host" id="cxn-host" data-anchor="list"></div>
+        <div class="schema-host dev-group" data-schema="connections#list"></div>
+        <!-- Quick setup (js/integrations.js): the empty state when there are no
+             connections yet, a closed disclosure once there are. -->
+        <div id="llm-quick-host" class="llm-quick-host" data-anchor="quick-setup"></div>
+        <div id="llm-image-host" class="llm-image-host" data-anchor="images"></div>
+        <div class="schema-host dev-group" data-schema="connections#images"></div>
+        <details class="settings-sub" id="cxn-agents" data-anchor="agents">
+          <summary><span data-i18n="agents.tab">Agents</span><span class="settings-sub-hint" data-i18n="cxn.agents_hint">Agent programs, their limits and secrets</span></summary>
+          <div class="settings-sub-body" id="cxn-agents-host"></div>
+        </details>
+        <details class="settings-adv" data-adv="connections" data-anchor="advanced">
+          <summary data-i18n="settings.advanced">Advanced</summary>
+          <div class="schema-host" data-schema="connections"></div>
+        </details>
+      </section>
 
-      <!-- ---- Health: dashboard.js mounts the host dashboard here ---- -->
-      <section class="settings-pane hidden" id="spane-health" role="tabpanel" aria-labelledby="stab-health" tabindex="0"></section>
-
-      <!-- ---- People & Profiles: js/people.js mounts it here (owner/admin only) ---- -->
+      <!-- ===== Household: People & Access (js/people.js + the sign-in rules) ===== -->
       <section class="settings-pane hidden" id="spane-people" role="tabpanel" aria-labelledby="stab-people" tabindex="0"></section>
 
-      <!-- ---- Security & PIN ---- -->
-      <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
-        <!-- "Stored on the host computer" (js/host-notice.js): the one permanent home of the
-             notice; a device also sees a short version once, on its first normal page load. -->
-        <aside class="host-notice" role="note" id="sec-host-notice">
-          <strong class="host-notice-title" data-i18n="host_notice.title">Stored on the host computer</strong>
-          <p class="host-notice-body" data-i18n="host_notice.files_body">Files, pictures and avatars you upload or create here (in chats, the File Server, Image Studio and Settings) are saved on the computer that runs DisPatch, not on your device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.</p>
-          <p class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: anyone who can use that character can open its chats, other profiles (Restricted ones included) and devices that haven&#39;t signed in if this install lets them. Members can use every character that isn&#39;t limited to certain profiles; the Owner and Admins can use every character, so they can read every chat. To keep someone&#39;s chats apart, limit a character to their profile. Anyone with access to that computer, its files or its backups can read them too.</p>
-        </aside>
-        <p class="muted modal-hint" id="sec-status-line"></p>
-        <!-- 3.0: filled by main.js (js/signin.js builds the forms). The first holds
-             "Create owner account" while the install is unclaimed; the second the
-             persistent, dismissible "set a password" prompt after a PIN sign-in. -->
-        <div class="sec-body sec-account" id="sec-account" hidden></div>
-        <div class="sec-body">
-          <!-- Each password field sits in its own <form> (Chromium warns about a
-               password input outside one). data-no-submit: main.js cancels the
-               submit, so Enter never reloads the page; no buttons live inside. -->
-          <form class="sec-field" id="sec-current-wrap" data-no-submit hidden>
-            <label for="sec-current" data-i18n="security.current_pin">Current PIN</label>
-            <input type="password" inputmode="numeric" id="sec-current" autocomplete="off" />
-          </form>
-          <form class="sec-field" data-no-submit>
-            <label for="sec-new" id="sec-new-label" data-i18n="security.new_pin">New PIN</label>
-            <input type="password" inputmode="numeric" id="sec-new" autocomplete="off" />
-          </form>
-          <form class="sec-field" data-no-submit>
-            <label for="sec-confirm" data-i18n="security.confirm_pin">Confirm PIN</label>
-            <input type="password" inputmode="numeric" id="sec-confirm" autocomplete="off" />
-          </form>
-          <div class="lock-error" id="sec-error" role="alert" aria-live="assertive" hidden></div>
-          <!-- The day count and the device count are interpolated, not wrapped in
-               their own <span>: a translation is free to move the number anywhere
-               in its sentence, which a fixed inner element cannot follow.
-               renderSecurityStrings() writes both labels through t(). -->
-          <div class="sec-remember" id="sec-remember-wrap" hidden>
-            <label class="sec-remember-row">
-              <input type="checkbox" id="sec-remember-enable" />
-              <span id="sec-remember-label">Offer “keep this device unlocked” at PIN entry
-                (30-day trust, renewed by use)</span>
-            </label>
-            <button class="btn-secondary sec-forget" id="sec-forget-devices" hidden>
-              Forget remembered devices (0)</button>
+      <!-- ===== Household: Plugins & Apps (js/plugins.js; js/tools.js owns the tools table) ===== -->
+      <section class="settings-pane hidden" id="spane-plugins" role="tabpanel" aria-labelledby="stab-plugins" tabindex="0"></section>
+
+      <!-- ===== Household: System (health, backups, network) ===== -->
+      <section class="settings-pane hidden" id="spane-system" role="tabpanel" aria-labelledby="stab-system" tabindex="0">
+        <section class="dev-group sys-health" id="sys-health" data-anchor="health" aria-labelledby="sys-h-health">
+          <h3 class="dev-group-title" id="sys-h-health" data-i18n="settings.health_title">Health</h3>
+          <div class="sys-health-host" id="sys-health-host"></div>
+          <div class="sys-health-bar" id="sfoot-health">
+            <button type="button" class="btn-secondary sys-dash-toggle" id="sys-dash-toggle" aria-expanded="false" aria-controls="sys-health-host" data-i18n="settings.health_open">Open dashboard</button>
           </div>
-          <div class="bm-actions sec-lock-row">
-            <button class="btn-secondary danger-text hidden" id="bm-lock"><span class="icn" data-icon="lock" aria-hidden="true"></span><span data-i18n="settings.lock_now">Lock now</span></button>
-          </div>
-          <!-- security.note carries markup we own (a <br> and the two <code id=…>
-               path elements the recovery instructions point at), so it is rendered
-               as HTML by renderSecurityNote() with the server-supplied paths
-               escaped first. check-locales.py enforces that translations keep both
-               elements. -->
-          <p class="muted sec-note" id="sec-note">
-            Auto-locks after 10 min of inactivity
-            (remembered devices stay unlocked and skip the timer).
-            When locked, the app shows a plain Safe-Mode view (only the SAFE characters,
-            with chat media hidden) and no sign it unlocks — the gear's “More” button reveals this keypad.
-            <br />Lost your PIN? Use the recovery code in
-            <code class="sec-path" id="sec-recovery-path">RECOVERY-CODE.txt</code>,
-            or edit <code class="sec-path" id="sec-config-path">security.yaml</code> in the data folder.
-          </p>
-        </div>
+        </section>
+        <section class="dev-group" id="sys-backups" data-anchor="backups" aria-labelledby="sys-h-backups">
+          <h3 class="dev-group-title" id="sys-h-backups" data-i18n="bkp.title">Backups</h3>
+          <div class="schema-host" data-schema="system#backups"></div>
+          <div class="sys-backups-host" id="sys-backups-host"></div>
+        </section>
+        <section class="dev-group" id="sys-network" data-anchor="network" aria-labelledby="sys-h-network">
+          <h3 class="dev-group-title" id="sys-h-network" data-i18n="settings.network_title">Network</h3>
+          <div class="schema-host" data-schema="system#network"></div>
+        </section>
+        <details class="settings-adv" data-adv="system" data-anchor="advanced">
+          <summary data-i18n="settings.advanced">Advanced</summary>
+          <div class="schema-host" data-schema="system"></div>
+          <section class="dev-group" id="dev-group-files" data-anchor="viewer" aria-labelledby="dev-h-files">
+            <h3 class="dev-group-title" id="dev-h-files" data-i18n="viewer.settings_title">Local viewer</h3>
+            <div class="dev-group-body" id="dev-body-files"></div>
+          </section>
+        </details>
       </section>
 
-      <!-- ---- All settings: js/settings_schema.js mounts it here (owner/admin only) ---- -->
-      <section class="settings-pane hidden" id="spane-settings" role="tabpanel" aria-labelledby="stab-settings" tabindex="0"></section>
-
-      <!-- Contextual footer: exactly one group is visible, chosen by the active
-           tab. Tabs whose actions all live inline (Reactions, Device) get no
-           group at all and the footer collapses — a permanently-disabled or
-           no-op "Done" is the dead button this replaces. -->
-      <footer class="modal-footer bm-footer" id="bm-footer">
-        <div class="settings-actions" data-tab="bots">
-          <button class="btn-primary" id="bm-done" data-i18n="common.save">Save</button>
         </div>
-        <div class="settings-actions hidden" data-tab="health" id="sfoot-health"></div>
-        <div class="settings-actions hidden" data-tab="ai">
-          <button class="btn-primary" id="llm-save" data-i18n="llm.save">Save &amp; chat</button>
-        </div>
-        <div class="settings-actions hidden" data-tab="plugins">
-          <button class="btn-primary" id="tools-save" data-i18n="tools.save">Save tools</button>
-        </div>
-        <div class="settings-actions hidden" data-tab="security">
-          <button class="btn-secondary danger-text" id="sec-remove" hidden data-i18n="security.remove_pin">Remove PIN</button>
-          <button class="btn-primary" id="sec-save" data-i18n="security.set_pin">Set PIN</button>
-        </div>
-      </footer>
+      </div>
     </div>
   </div>
 
@@ -1354,6 +1306,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=152"></script>
+  <script type="module" src="/static/js/main.js?v=153"></script>
 </body>
 </html>

@@ -624,100 +624,98 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .switch input:checked + .slider::before { transform: translateX(18px); }
 .modal-footer { padding: 14px 18px; border-top: 1px solid var(--border-strong); display: flex; justify-content: flex-end; }
 
-/* ===================== Settings tabs =====================
-   One dialog, six subjects. Three of the panes host a module that used to have
-   a dialog of its own (⚡ pack manager, 🩺 host dashboard, 🔌 provider setup),
-   so the container has to be as wide as the widest of them — the dashboard's
-   two-column card grid — rather than the 640px the bot rows were tuned for.
-   Everything narrower simply centres in it. */
-.settings-modal { width: min(800px, 96vw); max-height: 90vh; }
-/* A FIXED height, not just a cap (2026-09-26). With only max-height the dialog
-   was as tall as its current pane, so every tab click resized it and the tab
-   strip jumped up or down under the pointer — you could not click along the
-   tabs. Now the frame never moves: short panes leave room at the bottom, long
-   ones scroll inside .settings-pane (the one scroll region). min() keeps it
-   inside short viewports; the phone rule below goes full-screen instead. */
+/* ===================== Settings (3.2: sections, not tabs) =====================
+   Seven sections in two groups. Desktop: a side nav (with the search box) beside
+   the open section. Under 900px the nav IS the page, a grouped list with a
+   one-line summary per section; picking one shows only that section and a back
+   button in the header (data-view on the dialog). Logical properties throughout,
+   so an RTL locale mirrors the nav and the chevrons. */
+.settings-modal { width: min(980px, 96vw); max-height: 90vh; }
+/* A FIXED height, not just a cap (2026-09-26): with only max-height the dialog
+   resized on every section switch, moving the nav under the pointer. */
 @media (min-width: 769px) {
-  .settings-modal { height: min(720px, 90vh); }
+  .settings-modal { height: min(760px, 92vh); }
 }
-
-/* Horizontal on desktop, a swipeable strip on a phone: six tabs never fit
-   390px, and truncating labels to fit is worse than scrolling to them. */
-/* The bar owns the rule under the strip and positions the two edge buttons
-   (js/tabstrip.js) OVER the strip's ends, so showing or hiding one never
-   moves a tab under the pointer. */
-.settings-tabbar { position: relative; flex-shrink: 0; border-bottom: 1px solid var(--border-strong); }
-.settings-tabs {
-  display: flex; gap: 2px;
-  padding: 0 10px;
-  overflow-x: auto; overflow-y: hidden;
-  scrollbar-width: none;              /* the tabs are the affordance, not a bar */
-  overscroll-behavior-x: contain;     /* a flick past the end is not "Back" */
-  /* scrollIntoView() of the active tab stops clear of the edge buttons. */
-  scroll-padding-inline: 40px;
+.settings-header { gap: 6px; }
+.settings-header h2 { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-back { flex: none; margin-inline-start: -6px; }
+.settings-back svg { display: block; }
+[dir="rtl"] .settings-back svg { transform: scaleX(-1); }
+.settings-body { flex: 1 1 auto; min-height: 0; display: flex; }
+.settings-nav {
+  flex: 0 0 224px; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 8px 16px;
+  border-inline-end: 1px solid var(--border-strong);
+  background: var(--bg-primary);
 }
-.stab-nav {
-  position: absolute; inset-block: 0; z-index: 1;
-  width: 36px; padding: 0; border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-primary);
-  background: var(--bg-secondary);
+.settings-search { position: relative; padding: 0 2px 6px; }
+.settings-search-input { width: 100%; box-sizing: border-box; }
+.settings-search-results {
+  position: absolute; z-index: 5; inset-inline-start: 2px; top: calc(100% - 2px);
+  width: max(100%, 320px); max-width: calc(100vw - 32px); max-height: min(60vh, 420px); overflow-y: auto;
+  background: var(--bg-secondary); border: 1px solid var(--border-light);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.4));
+  padding: 4px;
 }
-.stab-nav[hidden] { display: none; }
-.stab-prev { inset-inline-start: 0; box-shadow: 8px 0 10px -4px var(--bg-secondary); }
-.stab-next { inset-inline-end: 0; box-shadow: -8px 0 10px -4px var(--bg-secondary); }
-[dir="rtl"] .stab-prev { box-shadow: -8px 0 10px -4px var(--bg-secondary); }
-[dir="rtl"] .stab-next { box-shadow: 8px 0 10px -4px var(--bg-secondary); }
-/* The chevrons point the way the strip moves, so they flip with the text. */
-[dir="rtl"] .stab-nav svg { transform: scaleX(-1); }
-.stab-nav:hover { color: var(--accent-text); background: var(--bg-tertiary); }
-.stab-nav:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.settings-tabs::-webkit-scrollbar { display: none; }
-/* Edge fades: main.js measures the overflow and adds these, so a fade only ever
-   appears when there really are more tabs that way. `--fade-fwd` is the reading
-   direction, so "start" stays the right-hand edge under RTL. */
-.settings-tabs { --fade-fwd: right; }
-[dir="rtl"] .settings-tabs { --fade-fwd: left; }
-.settings-tabs.fade-start {
-  -webkit-mask-image: linear-gradient(to var(--fade-fwd), transparent, #000 22px);
-  mask-image: linear-gradient(to var(--fade-fwd), transparent, #000 22px);
+.ssearch-hit { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; }
+.ssearch-hit[aria-selected="true"], .ssearch-hit:hover { background: var(--bg-hover); }
+.ssearch-label { color: var(--text-primary); font-size: 13.5px; font-weight: 600; }
+.ssearch-where { color: var(--text-secondary); font-size: 12px; }
+.ssearch-empty { padding: 10px; color: var(--text-secondary); font-size: 13px; }
+.settings-tabs { display: flex; flex-direction: column; gap: 2px; }
+.snav-heading {
+  margin: 14px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-secondary);
 }
-.settings-tabs.fade-end {
-  -webkit-mask-image: linear-gradient(to var(--fade-fwd), #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to var(--fade-fwd), #000 calc(100% - 22px), transparent);
-}
-.settings-tabs.fade-start.fade-end {
-  -webkit-mask-image: linear-gradient(to var(--fade-fwd), transparent, #000 22px, #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to var(--fade-fwd), transparent, #000 22px, #000 calc(100% - 22px), transparent);
-}
+.snav-heading:first-child { margin-top: 4px; }
 .settings-tab {
-  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  min-height: 44px; padding: 10px 12px;
-  background: none; border: none; border-bottom: 2px solid transparent;
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 8px 10px;
+  background: none; border: 1px solid transparent; border-radius: var(--radius-md);
   color: var(--text-secondary); font-size: 13.5px; font-weight: 600;
-  white-space: nowrap; cursor: pointer;
+  text-align: start; cursor: pointer;
 }
-.settings-tab:hover { color: var(--text-primary); }
-/* --accent-text, not --accent: this is small text on the panel background, and
-   the raw accent does not clear AA at 13.5px on the light skin. */
-/* The three admin-only tabs (Reactions, Health, AI models) are operator
-   surfaces that a Safe-Mode device never sees. They used to look exactly like
-   the four general ones, so the strip read as seven peers and gave no hint
-   that more than half of it appears and disappears with the session. A leading
-   hairline and slightly quieter label mark them as a group without turning
-   them into a second row. */
-.settings-tab.admin-only { position: relative; }
-.settings-tab.admin-only .stab-label { color: var(--text-secondary); }
-.settings-tab.admin-only.active .stab-label { color: inherit; }
-.settings-tab.admin-only::before {
-  content: ""; position: absolute; inset-block: 22%; inset-inline-start: 0;
-  width: 1px; background: var(--border-light);
-}
-.settings-tab.admin-only + .settings-tab.admin-only::before { display: none; }
+.settings-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+/* --accent-text, not --accent: small text on the panel, and the raw accent does
+   not clear AA at 13.5px on the light skins. */
+.settings-tab.active { color: var(--accent-text); background: var(--bg-tertiary); border-color: var(--border-strong); }
+.settings-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.stab-glyph { flex: none; width: 18px; height: 18px; display: grid; place-items: center; font-size: 15px; line-height: 1; }
+.stab-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.stab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stab-summary { display: none; font-size: 12.5px; font-weight: 400; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stab-chevron { display: none; }
+.settings-panes { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* A flash on the row a search result (or a deep link) opened. */
+@keyframes settings-flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 3px transparent; } }
+.settings-flash { animation: settings-flash 1.6s ease-out; border-radius: var(--radius-md); }
+@media (prefers-reduced-motion: reduce) { .settings-flash { animation: none; outline: 2px solid var(--accent); } }
 
-.settings-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
-.settings-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 6px 6px 0 0; }
-.stab-glyph { font-size: 15px; line-height: 1; }
+/* Phone and narrow windows: the list, then one section at a time. */
+@media (max-width: 899px) {
+  .settings-body { display: block; position: relative; }
+  .settings-modal[data-view="list"] .settings-panes { display: none; }
+  .settings-modal[data-view="pane"] .settings-nav { display: none; }
+  .settings-nav {
+    height: 100%; box-sizing: border-box; border-inline-end: 0;
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); gap: 6px;
+    background: var(--bg-secondary);
+  }
+  .settings-panes { height: 100%; }
+  .settings-tab {
+    min-height: 58px; padding: 10px 12px; gap: 12px;
+    background: var(--bg-tertiary); border-color: var(--border-strong); color: var(--text-primary);
+  }
+  .settings-tab.active { color: var(--text-primary); }
+  .stab-glyph { width: 22px; height: 22px; }
+  .settings-nav .stab-glyph .rail-icon { width: 20px; height: 20px; }
+  .stab-summary { display: block; }
+  .stab-chevron { display: block; flex: none; width: 8px; height: 8px; border: solid var(--text-secondary);
+    border-width: 0 2px 2px 0; transform: rotate(-45deg); margin-inline-end: 4px; }
+  [dir="rtl"] .stab-chevron { transform: rotate(135deg); }
+  .snav-heading { margin-inline: 4px; }
+}
 
 /* The pane is the ONE scroll region between header and footer. Modules that
    used to be the modal's direct scroll child (.sec-body, .llm-body, .rx-body,
@@ -1334,7 +1332,7 @@ body.drive-open .toast { z-index: 1100; }
   /* Bot Manager rows are too wide for a phone with every affordance shown:
      drop the (touch-dead) drag handle and the redundant "Change photo" button
      — the avatar itself is the tap-to-change target, per the hint. */
-  .bm-handle, .bm-avatar-btn { display: none; }
+  .bm-handle { display: none; }
 
   /* --- Settings goes full-screen on a phone --- */
   /* Six panes of admin surface inside a 92vw card left every one of them in a
@@ -1346,9 +1344,6 @@ body.drive-open .toast { z-index: 1100; }
     height: 100dvh; max-height: 100dvh;
     border-radius: 0; border: none;
   }
-  .settings-modal .modal-footer { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
-  .settings-tabs { padding: 0 4px; }
-  .settings-tab { padding: 10px 11px; font-size: 12.5px; gap: 5px; }
 
   /* Above the composer AND the tab bar (56px + inset). */
   .toast { bottom: calc(168px + env(safe-area-inset-bottom)); }
@@ -3371,7 +3366,7 @@ hr.rule { border: none; border-top: 1px solid var(--border-strong); margin: 8px 
    it replaces), 15px in the settings tab strip, 18px for header and composer
    buttons, and the two decorative glyphs at the size their font-size set. */
 .mobile-tabs .tab .rail-icon { width: 19px; height: 19px; display: block; }
-.stab-glyph .rail-icon { width: 15px; height: 15px; display: block; }
+.stab-glyph .rail-icon { width: 17px; height: 17px; display: block; }
 .icon-btn .rail-icon,
 .back-btn .rail-icon,
 .attach-btn .rail-icon,
@@ -3559,7 +3554,7 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    name + one-line explanation on the start side, the control on the end side,
    the Pin pill just before the control. The markup is index.html #dev-group-*;
    rows built in other modules are normalised by main.js tidyRowText(). */
-:is(#spane-device, #spane-voice, #spane-plugins) > .modal-hint { padding-inline: 20px; }
+#botmanager .settings-pane > .modal-hint { padding-inline: 20px; }
 .dev-group { margin: 16px 18px 0; }
 .dev-group:last-child { margin-bottom: 18px; }
 .dev-group[hidden] { display: none; }
@@ -3613,10 +3608,11 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
    background gradient rather than ::before because form controls do not get
    pseudo-elements in every engine. OFF uses text-secondary for knob and ring
    so the control keeps 3:1 against the card in every palette; ON is the
-   accent/on-accent pair. #spane-device in the selector: the night contrast
+   accent/on-accent pair. #botmanager in the selector: the night contrast
    profile redraws every checkbox as a 14px box (bottom of this file), and
-   the switch has to outrank that. */
-:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] {
+   the switch has to outrank that. 3.2: every Settings section, and the
+   boolean rows drawn from the settings schema, use it (one switch look). */
+#botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"] {
   -webkit-appearance: none; appearance: none;
   width: 44px; height: 26px; margin: 0; flex: none; cursor: pointer;
   border-radius: 999px; box-shadow: none;
@@ -3627,26 +3623,26 @@ h2:has(> .icn), button:has(> .icn) { display: inline-flex; align-items: center; 
   background-position: 1px center;
   transition: background-color .18s ease, border-color .18s ease, background-position .2s ease;
 }
-:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:checked {
+#botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"]:checked {
   border-color: var(--accent-text);   /* same reason as .pin-toggle.pinned */
   background-color: var(--accent);
   background-image: radial-gradient(circle closest-side, var(--on-accent) 0 82%, transparent 90%);
   background-position: calc(100% - 1px) center;
   box-shadow: none;
 }
-[dir="rtl"] :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
-[dir="rtl"] :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:checked { background-position: 1px center; }
-:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[dir="rtl"] #botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"] { background-position: calc(100% - 1px) center; }
+[dir="rtl"] #botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"]:checked { background-position: 1px center; }
+#botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Disabled (the NIM ratchet on a locked device, or Minimal avatars while NIM
    drives it): still reads ON/OFF, just visibly not operable. */
-:is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
-:is(#spane-device, #spane-voice, #spane-plugins) .dev-row:has(> input:disabled) { cursor: default; }
+#botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"]:disabled { opacity: .55; cursor: not-allowed; }
+#botmanager .dev-row:has(> input:disabled) { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
-  :is(#spane-device, #spane-voice, #spane-plugins) .dev-row > input[type="checkbox"] { transition: none; }
+  #botmanager :is(.dev-row, .ui-setting__control) > input[type="checkbox"] { transition: none; }
 }
 @media (max-width: 768px) {
   .dev-group { margin-inline: 12px; }
-  :is(#spane-device, #spane-voice, #spane-plugins) > .modal-hint { padding-inline: 14px; }
+  #botmanager .settings-pane > .modal-hint { padding-inline: 14px; }
   .dev-group-body > .dev-row { padding: 12px; gap: 10px; }
   /* Language: the select would squeeze the name to a sliver at 390px. */
   .dev-group-body > .bm-lang { flex-wrap: wrap; }
@@ -4706,12 +4702,7 @@ body.tools-sheet-open::after {
      switches and the Personality button wrap neatly underneath. The name's
      basis leaves no room for a fourth item on line one (avatar 36 + move 2x32
      + gaps), so line one is always exactly those three. */
-  .bm-row { gap: 6px 8px; padding: 8px 10px; }
-  .bm-row > .bm-avatar-pick, .bm-row > img { order: -3; }
-  .bm-row > .bm-name { order: -2; flex: 1 1 calc(100% - 36px - 72px - 16px); min-width: 0; }
-  .bm-row > .bm-move { order: -1; flex-direction: row; gap: 4px; }
   .bm-move-btn { min-width: 32px; width: 32px; min-height: 32px; height: 32px; font-size: 11px; }
-  .bm-row > :is(.bm-safe-btn, .bm-avatar-btn, .switch) { margin-block: 0; }
 
   /* Reactions: the describe box takes its own full line, Generate under it. */
   .rx-gen-row { flex-wrap: wrap; }
@@ -5001,3 +4992,230 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .chat-drop-sub { font-size: 12.5px; color: var(--text-secondary); }
 .chat-drop-hint { margin: 0; font-size: 12px; color: var(--text-muted); }
 @media (prefers-reduced-motion: reduce) { .chat-drop-target { transition: none; } }
+
+/* ===================== Settings 3.2: sections, disclosures, rows ===================== */
+/* Advanced ▸ and subsection disclosures: a quiet summary row at the bottom of a
+   section (Advanced) or a titled card with a one-line hint (Reactions, Agents…). */
+.settings-adv, .settings-sub { margin: 16px 18px 0; }
+.settings-adv:last-child, .settings-sub:last-child { margin-bottom: 18px; }
+.settings-adv > summary, .settings-sub > summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  list-style: none; cursor: pointer; padding: 10px 12px; min-height: 44px; box-sizing: border-box;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--bg-tertiary); color: var(--text-primary); font-size: 14px; font-weight: 600;
+}
+.settings-adv > summary::-webkit-details-marker, .settings-sub > summary::-webkit-details-marker { display: none; }
+.settings-adv > summary::before, .settings-sub > summary::before {
+  content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
+  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease;
+}
+[dir="rtl"] .settings-adv > summary::before, [dir="rtl"] .settings-sub > summary::before { transform: rotate(135deg); }
+.settings-adv[open] > summary::before, .settings-sub[open] > summary::before { transform: rotate(45deg); }
+.settings-adv > summary:focus-visible, .settings-sub > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.settings-adv > summary { background: none; border-style: dashed; color: var(--text-secondary); font-size: 13px; }
+.settings-sub-hint { flex: 1 1 100%; margin-inline-start: 17px; font-size: 12.5px; font-weight: 400; color: var(--text-secondary); }
+.settings-sub-hint:empty { display: none; }
+.settings-sub-warn { color: var(--warning-text, var(--text-primary)); font-weight: 600; }
+.settings-adv[open] > summary, .settings-sub[open] > summary { margin-bottom: 4px; }
+.settings-adv > .dev-group, .settings-adv > .schema-host, .settings-adv > .dev-group-body { margin-inline: 0; }
+.settings-adv > .dev-group-body { margin-top: 8px; }
+.settings-sub-body > .dev-group:first-child, .settings-sub-body > .rx-body { margin-top: 8px; }
+.settings-sub-body .dev-group { margin-inline: 0; }
+.schema-host[hidden] { display: none; }
+.settings-pane > .schema-host.dev-group { margin-top: 10px; }
+.schema-host .schema-section { margin: 14px 2px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+.schema-restart-banner {
+  margin: 12px 18px 0; padding: 9px 12px; border-radius: var(--radius-md);
+  border: 1px solid var(--warning, var(--border-light)); background: var(--bg-tertiary);
+  color: var(--warning-text, var(--text-primary)); font-size: 13px; font-weight: 600;
+}
+/* Duration / size: the dropdown, and Custom…'s number + unit beside it. */
+.schema-measure { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; max-width: 100%; }
+.schema-measure-custom { display: inline-flex; gap: 6px; }
+.schema-measure-custom[hidden] { display: none; }
+.schema-measure-n { width: 7em; }
+
+/* The toast's Undo. */
+.toast.has-action { display: flex; align-items: center; gap: 12px; }
+.toast-undo {
+  background: none; border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  color: var(--accent-text); font-weight: 700; font-size: 13px; padding: 4px 10px; cursor: pointer;
+}
+.toast-undo:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---- Characters ---- */
+.chars-head { display: flex; flex-direction: column; gap: 10px; }
+.chars-head .modal-hint { margin: 0; }
+.chars-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 18px; position: relative; }
+.chars-add-btn { display: inline-flex; align-items: center; gap: 6px; }
+.chars-caret { font-size: 11px; }
+.chars-reorder-btn { display: none; }
+.chars-add-host:empty { display: none; }
+.chars-add-host { margin: 0 18px; }
+.chars-add-host .bm-add-form { padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.chars-add-host .dev-group { margin-inline: 0; }
+.bm-row { flex-wrap: nowrap; position: relative; }
+.bm-name-block { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.bm-name-block .bm-name { flex: none; min-width: 0; }
+.bm-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; font-size: 11.5px; color: var(--text-secondary); }
+.bm-meta:empty { display: none; }
+.bm-feat { display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--text-secondary); }
+.bm-feat .rail-icon { width: 14px; height: 14px; }
+.bm-narrow { white-space: nowrap; }
+.bm-who { flex: 0 1 190px; min-width: 0; max-width: 210px; }
+.bm-details-btn { flex: none; min-height: 34px; }
+.bm-more-btn { flex: none; }
+/* ▲/▼: on a desktop the drag handle does it (the buttons stay for the keyboard,
+   shown while the row has focus or the pointer); on a phone only in Reorder mode. */
+.bm-move { display: none; }
+.bm-list.reordering .bm-move, .bm-row:focus-within .bm-move { display: flex; }
+@media (hover: hover) { .bm-row:hover .bm-move { display: flex; } }
+.bm-row-menu {
+  position: absolute; z-index: 6; top: calc(100% - 4px); inset-inline-end: 8px; min-width: 180px;
+  display: flex; flex-direction: column; padding: 4px;
+  background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,.4));
+}
+.chars-toolbar .bm-row-menu { inset-inline-end: auto; inset-inline-start: 18px; top: 100%; }
+.bm-row-menu .menu-item {
+  display: block; width: 100%; text-align: start; padding: 9px 12px; min-height: 40px;
+  background: none; border: 0; border-radius: var(--radius-sm); color: var(--text-primary); font-size: 13.5px; cursor: pointer;
+}
+.bm-row-menu .menu-item:hover, .bm-row-menu .menu-item:focus-visible { background: var(--bg-hover); outline: none; }
+.bm-row-menu .menu-item.danger-text { color: var(--error-text, var(--error)); }
+.chr-drawer { margin: -2px 0 6px; padding: 12px; border: 1px solid var(--border-strong); border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--bg-secondary); }
+.chr-drawer[hidden] { display: none; }
+.chr-drawer-title { margin: 0 2px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+.chr-drawer .chr-panel { margin: 12px 0 0; }
+.chr-features .chr-ext { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.ap-off { gap: 10px; }
+.bm-empty { padding: 8px 4px; }
+
+/* ---- Account ---- */
+.acct-who-group { margin-top: 14px; }
+.acct-who { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.acct-avatar { width: 44px; height: 44px; border-radius: 12px; object-fit: cover; flex: none; }
+.acct-avatar-text { display: grid; place-items: center; background: var(--bg-hover); font-size: 20px; font-weight: 700; color: var(--text-primary); }
+.acct-who-text { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.acct-name { font-size: 15px; color: var(--text-primary); }
+.acct-status { margin: 0 2px 8px; font-size: 13px; }
+.acct-change-row { margin-bottom: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-tertiary); padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+.acct-change-row[hidden] { display: none; }
+.acct-change-row .ui-select { max-width: 50%; min-width: 170px; }
+.acct-form { padding: 4px 2px 8px; }
+.acct-form-actions { padding-inline: 0; justify-content: flex-start; }
+#acct-signin .sec-prompt { margin-bottom: 10px; }
+#acct-signin .sec-prompt .bm-actions { padding-inline: 0; }
+#acct-signin .sec-lock-row { padding-inline: 0; }
+#acct-signin .sec-note { padding: 0 2px; }
+@media (max-width: 480px) {
+  .acct-change-row { flex-wrap: wrap; }
+  .acct-change-row .ui-select { max-width: none; flex: 1 1 100%; }
+}
+
+/* ---- People & Access ---- */
+.people-forget-row { padding-inline: 0; justify-content: flex-start; }
+.people-forget-row:has(> [hidden]:only-child) { display: none; }
+.people-activity-sub > .people-activity-host .dev-group { margin-inline: 0; }
+/* 3.9: the activity table scrolls inside its card on a phone instead of
+   widening the page. */
+.dev-group-body, .dev-row-block, .people-activity-holder { min-width: 0; }
+.people-activity-holder { max-width: 100%; overflow-x: auto; }
+
+/* ---- System ---- */
+.sys-health .dash-body { padding: 0; }
+.sys-health:not(.open) :is(.dash-cards, .dash-h3, .dash-findings, .dash-log-head, .dash-log) { display: none; }
+.sys-health-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.sys-health-bar .dash-updated { font-size: 12px; }
+.sys-backups-host .bkp-section:first-child .schema-section { margin-top: 10px; }
+
+/* ---- AI & Connections / Agents ---- */
+.agents-backend .task-pill { align-self: flex-start; }
+.agents-connect { margin-top: 8px; }
+.agents-connect > summary { cursor: pointer; color: var(--accent-text); font-weight: 600; font-size: 13px; }
+.agents-claude { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.cxn-host .cxn-top { padding: 14px 18px 0; }
+
+/* ---- Plugins & Apps ---- */
+.plugins-names { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.plugins-names .plugins-chip { font-family: inherit; }
+.tools-gear { margin-inline-start: 6px; width: 32px; height: 32px; }
+.tools-gear[aria-expanded="true"] { color: var(--accent-text); }
+.tools-settings-row > td { padding: 0 8px 10px; }
+.tools-settings-rows .ui-settings { margin: 0; }
+
+@media (max-width: 899px) {
+  .chars-reorder-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .bm-row { flex-wrap: wrap; gap: 8px 10px; }
+  /* Line one: picture, name, ⋯. Line two: Who can see it, Details. */
+  .bm-name-block { flex: 1 1 calc(100% - 36px - 44px - 20px); }
+  .bm-more-btn { order: 4; }
+  .bm-who { order: 5; flex: 1 1 0; min-width: 0; max-width: none; }
+  .bm-details-btn { order: 6; flex: none; }
+  .bm-list.reordering .bm-name-block { flex-basis: calc(100% - 36px - 44px - 92px - 30px); }
+  .bm-list.reordering .bm-move { order: -1; flex-direction: row; gap: 4px; }
+  .settings-adv, .settings-sub { margin-inline: 12px; }
+  .chars-toolbar { padding: 0 12px; }
+  .chars-add-host { margin: 0 12px; }
+  .schema-restart-banner { margin-inline: 12px; }
+}
+.dev-group > .theme-grid { padding: 4px 0 8px; }
+.dev-group > .theme-revision { padding: 0 2px 4px; }
+#acct-signin .bm-actions .btn-secondary, #acct-signin .bm-actions .btn-primary { flex: 0 1 auto; width: auto; }
+.people-forget-row .btn-secondary, .chr-pack-sheet .bm-actions > button { flex: 0 1 auto; }
+.ui-setting__control > input[type="number"] { max-width: 9em; }
+.ui-setting__control > :is(input[type="text"], input[type="url"], input[type="password"], select) { max-width: 100%; }
+.tools-cell-kind { white-space: nowrap; }
+.tools-cell-on { white-space: nowrap; }
+.tools-cell-on > * { vertical-align: middle; }
+.cxn-bar .bkp-check { font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+#qs-box { margin: 16px 18px 0; }
+#qs-box > summary { list-style: none; cursor: pointer; padding: 10px 12px; min-height: 44px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--bg-tertiary); font-size: 14px; font-weight: 600; color: var(--text-primary); }
+#qs-box > summary::-webkit-details-marker { display: none; }
+#qs-box > summary::before { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
+  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
+#qs-box[open] > summary::before { transform: rotate(45deg); }
+[dir="rtl"] #qs-box:not([open]) > summary::before { transform: rotate(135deg); }
+@media (max-width: 899px) { #qs-box { margin-inline: 12px; } }
+/* ---- Reactions manager (3.2): a grid of the pack, one edit sheet ---- */
+.rx-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 0; min-height: 32px; }
+.rx-fold > summary::-webkit-details-marker { display: none; }
+.rx-fold > summary::before { content: ""; width: 7px; height: 7px; border: solid var(--text-secondary); border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
+[dir="rtl"] .rx-fold:not([open]) > summary::before { transform: rotate(135deg); }
+.rx-fold[open] > summary { margin-bottom: 10px; }
+.rx-fold[open] > summary::before { transform: rotate(45deg); }
+.rx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.rx-tile {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px;
+  background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  color: var(--text-primary); cursor: pointer; min-width: 0;
+}
+.rx-tile:hover, .rx-tile.open { border-color: var(--accent); }
+.rx-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.rx-tile-thumb { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); object-fit: cover; background: var(--bg-primary); display: grid; place-items: center; font-weight: 700; color: var(--text-secondary); }
+.rx-tile-name { width: 100%; font-size: 12px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rx-tile-badge { position: absolute; top: 9px; inset-inline-end: 9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.rx-sheet { display: flex; gap: 14px; margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--bg-secondary); }
+.rx-sheet-img { width: 120px; height: 120px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
+.rx-sheet-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rx-sheet .rx-field .rx-input { width: min(100%, 320px); }
+.rx-field input[role="switch"] { -webkit-appearance: none; appearance: none; width: 44px; height: 26px; margin: 0; cursor: pointer; border-radius: 999px;
+  border: 1.5px solid var(--text-secondary); background-color: var(--bg-input, var(--bg-secondary));
+  background-image: radial-gradient(circle closest-side, var(--text-secondary) 0 82%, transparent 90%); background-size: 22px 22px;
+  background-repeat: no-repeat; background-position: 1px center; transition: background-position .2s ease; }
+.rx-field input[role="switch"]:checked { border-color: var(--accent-text); background-color: var(--accent);
+  background-image: radial-gradient(circle closest-side, var(--on-accent) 0 82%, transparent 90%); background-position: calc(100% - 1px) center; }
+[dir="rtl"] .rx-field input[role="switch"] { background-position: calc(100% - 1px) center; }
+[dir="rtl"] .rx-field input[role="switch"]:checked { background-position: 1px center; }
+.rx-field input[role="switch"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .rx-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+  .rx-sheet { flex-direction: column; }
+  .rx-sheet-img { width: 96px; height: 96px; }
+}
+#spane-account > .host-notice { margin-top: 12px; }
+@media (max-width: 899px) { #spane-account > .host-notice { margin-inline: 12px; } }

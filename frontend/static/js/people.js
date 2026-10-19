@@ -1,7 +1,9 @@
-// Settings -> People & Profiles (owner and admin only).
+// Settings -> People & Access (owner and admin only).
 //
 // Four groups in the Settings modal's own .dev-group / .dev-row vocabulary, so
-// every palette applies and this file carries no colour:
+// every palette applies and this file carries no colour (main.js adds the
+// sign-in rules and Restricted limits between This device and Machine access,
+// through deps.extraGroups, and Activity becomes a closed disclosure):
 //
 //   People        every profile with its role badge, PIN / password
 //                 indicators and disabled state; create, edit (name, role,
@@ -10,7 +12,7 @@
 //   This device   "Open this device as..." (binds THIS browser to a Member or
 //                 Restricted profile) and the devices the server knows.
 //   Activity      per-profile counts for the last 7 days (never message
-//                 content) and the admin audit log.
+//                 content) and the admin audit log (last, collapsed).
 //   Machine access (Owner and Admins) the API key, rotated on demand and shown once,
 //                 and the on-box trust switch.
 //
@@ -18,8 +20,8 @@
 // Admin). This module only decides what to OFFER, via profiles.js.
 //
 // Pure-ish: nothing runs at import time. App-shaped things arrive through
-// `deps` ({ toast, confirm, role, onSelfChanged, api? }), which is also how the
-// tests drive it without main.js.
+// `deps` ({ toast, confirm, role, onSelfChanged, api?, extraGroups?,
+// collapseActivity? }), which is also how the tests drive it without main.js.
 
 import { api as realApi } from './api.js?v=35';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
@@ -131,7 +133,7 @@ function editorPanel(ctx, person) {
   const roleChoices = (person && !options.includes(person.role) ? [person.role, ...options] : options);
 
   const name = el('input', { type: 'text', maxlength: '40', value: person ? person.name : '', autocomplete: 'off' });
-  const role = el('select', {}, roleChoices.map((r) => {
+  const role = el('select', { class: 'ui-select' }, roleChoices.map((r) => {
     const o = el('option', { value: r, text: roleLabel(r) });
     if ((person ? person.role : 'member') === r) o.selected = true;
     return o;
@@ -328,7 +330,7 @@ function deviceGroup(ctx) {
   const bound = mine ? mine.default_profile_id : null;
   const choices = bindableProfiles(ctx.data.people);
 
-  const select = el('select', { id: 'people-device-select' }, [
+  const select = el('select', { id: 'people-device-select', class: 'ui-select' }, [
     el('option', { value: '', text: t('people.device_nobody') }),
     ...choices.map((p) => el('option', { value: p.id, text: `${p.name} (${roleLabel(p.role)})` })),
   ]);
@@ -451,7 +453,7 @@ function auditKind(kind) {
 }
 
 function activityGroup(ctx) {
-  const select = el('select', { id: 'people-activity-who' }, [
+  const select = el('select', { id: 'people-activity-who', class: 'ui-select' }, [
     el('option', { value: '', text: t('people.activity_everyone') }),
     ...ctx.data.people.map((p) => el('option', { value: p.id, text: p.name })),
   ]);
@@ -656,13 +658,30 @@ export async function mountPeopleSettings(pane, deps) {
   renderList();
   renderDevices();
   renderActivity();
-  const parts = [intro, listHost, editorHost, deviceHost, activityHost];
+  // 3.2 (People & Access): the caller's groups after This device (the sign-in
+  // rules, the Restricted limits), and Activity & audit as a closed disclosure.
+  const extra = (deps.extraGroups && deps.extraGroups()) || {};
+  listHost.dataset.anchor = 'people';
+  deviceHost.dataset.anchor = 'device';
+  machineHost.dataset.anchor = 'machine';
+  let activityPart = activityHost;
+  if (deps.collapseActivity) {
+    activityPart = el('details', { class: 'settings-sub people-activity-sub', dataset: { anchor: 'activity' } }, [
+      el('summary', {}, [el('span', { text: t('people.activity_audit') }),
+        el('span', { class: 'settings-sub-hint', text: t('people.activity_audit_hint') })]),
+      activityHost,
+    ]);
+  } else {
+    activityHost.dataset.anchor = 'activity';
+  }
+  const parts = [intro, listHost, editorHost, deviceHost, ...(extra.afterDevices || [])];
   if (isAdminRole(role)) {
     const g = await machineGroup(ctx);
     if (mine !== seq) return;
     if (g) machineHost.replaceChildren(g);
     parts.push(machineHost);
   }
+  parts.push(activityPart, ...(extra.end || []));
   pane.replaceChildren(...parts);
 }
 

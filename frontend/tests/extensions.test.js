@@ -516,9 +516,13 @@ test('main.js routes an unknown shell.settings.pane id to the add-in tabs and ke
   // A claim before wireSettingsTabs built the add-in tab host is a real error
   // for the loader to record, never a TypeError on null.
   assert.match(src, /if \(!addinTabs\) throw new Error\(`settings\.pane: "\$\{id\}" claimed before the Settings tabs exist`\);/);
-  assert.match(src, /SETTINGS_TABS\.splice\(at < 0 \? SETTINGS_TABS\.length : at, 0, id\)/);
+  // 3.2: add-in tabs form the "Add-ons" group after the household sections.
+  assert.match(src, /SETTINGS_TABS\.push\(id\);/);
   assert.match(src, /if \(!isPublic\) ADMIN_TABS\.push\(id\);/);
+  assert.match(src, /beforeTab: document\.getElementById\('snav-addons-end'\)/);
   assert.match(src, /reserved: CORE_SETTINGS_TABS/);
+  // Every old tab id stays reserved, so no add-in can take 'theme' or 'bots'.
+  assert.match(src, /const CORE_SETTINGS_TABS = RESERVED_TAB_IDS;/);
   // The strip is walked live by the keyboard handler, so add-in tabs get arrows for free.
   assert.match(src, /list\.querySelectorAll\('\.settings-tab'\)/);
 });

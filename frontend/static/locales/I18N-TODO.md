@@ -16,18 +16,13 @@ because a stale term next to the new UI is worse than an untranslated sentence. 
 (was Safe Mode / locked device / limited), **Owner** and **Admin** (was Unlocked / operator / full session),
 **Member**, **sign in** (was unlock).
 
-## de: German (217 new, 41 reworded)
+## de: German (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -45,9 +40,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -111,16 +103,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -142,10 +131,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -173,7 +160,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -207,7 +193,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -278,18 +263,13 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## es: Spanish (217 new, 41 reworded)
+## es: Spanish (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -307,9 +287,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -373,16 +350,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -404,10 +378,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -435,7 +407,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -469,7 +440,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -540,18 +510,13 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## fr: French (217 new, 41 reworded)
+## fr: French (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -569,9 +534,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -635,16 +597,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -666,10 +625,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -697,7 +654,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -731,7 +687,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -802,18 +757,13 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## pt: Portuguese (217 new, 41 reworded)
+## pt: Portuguese (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -831,9 +781,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -897,16 +844,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -928,10 +872,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -959,7 +901,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -993,7 +934,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -1064,18 +1004,13 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## zh: Chinese (217 new, 41 reworded)
+## zh: Chinese (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -1093,9 +1028,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -1159,16 +1091,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -1190,10 +1119,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -1221,7 +1148,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -1255,7 +1181,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -1326,18 +1251,13 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## ar: Arabic (217 new, 41 reworded)
+## ar: Arabic (208 new, 33 reworded)
 
 Reworded:
 - `nav.unlock_title`
 - `nav.unlock_aria`
 - `nav.label_unlock`
 - `settings.hint`
-- `settings.show_locked_badge`
-- `settings.show_locked_title`
-- `settings.show_unlocked_badge`
-- `settings.show_unlocked_title`
-- `settings.hidden_title`
 - `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
@@ -1355,9 +1275,6 @@ Reworded:
 - `lock.unlocked_remembered`
 - `lock.locked_toast`
 - `lock.auto_locked_toast`
-- `security.status_remembered`
-- `security.remember_label`
-- `security.remember_on`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -1421,16 +1338,13 @@ New:
 - `password.current`
 - `password.current_pin`
 - `password.saved`
-- `password.toast`
 - `password.prompt_title`
 - `password.prompt_body`
-- `password.change_title`
 - `chip.title`
 - `chip.label`
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.banner`
 - `restricted.region`
 - `restricted.today`
 - `restricted.today_empty`
@@ -1452,10 +1366,8 @@ New:
 - `settings.audience_all`
 - `settings.audience_members`
 - `settings.audience_restricted`
-- `people.tab`
 - `people.hint`
 - `people.title`
-- `people.intro`
 - `people.empty`
 - `people.add`
 - `people.edit`
@@ -1483,7 +1395,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_needs_password`
 - `people.admin_owner_only`
 - `people.budgets`
 - `people.budgets_hint`
@@ -1517,7 +1428,6 @@ New:
 - `people.err_both_times`
 - `people.err_same_times`
 - `people.err_range_1_43200`
-- `people.err_password_required`
 - `people.err_denied`
 - `people.load_failed`
 - `people.device_title`
@@ -1589,9 +1499,10 @@ New:
 - `people.machine_trust_off`
 
 
-## W5 (settings from one schema, Connections, characters, wizard, backups): 244 new keys in all 8 locales
+## W5 (settings from one schema, Connections, characters, wizard, backups): new keys in all 8 locales
 
-`settings.tab_connections`, `settings.tab_all` and every key under `schema.`, `cxn.`, `chars.`, `wiz.` and `bkp.`.
+The W5 keys under `schema.`, `cxn.`, `chars.`, `wiz.` and `bkp.` (the 3.2 Settings keys in those namespaces are
+translated).
 English (`en`) is the source. The seven other locales, **including `ja`**, carry the English text prefixed with the
 locale code (`[de] Connections`) so the gap is visible and greppable:
 

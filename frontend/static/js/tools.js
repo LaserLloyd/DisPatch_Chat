@@ -207,6 +207,9 @@ let draft = null;        // working copy while Settings → Tools is open
 let draftDirty = false;
 let addOpen = false;
 let settingsHost = null;
+let settingsOpts = null;     // { toolSettings(feature, host) }: a built-in tool's own settings
+const openGears = new Set(); // built-in features whose ⚙ settings row is open
+let saveTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -1212,6 +1215,9 @@ export function forwardAppFrame(frame) {
   return postToApp({ type: 'dispatch:frame', frame });
 }
 
+/** 'section' or 'section#anchor' (lower case, a few safe characters, short). */
+export const SETTINGS_TARGET_RE = /^[a-z][a-z-]{1,30}(#[a-z0-9:._-]{1,80})?$/;
+
 function onAppMessage(ev) {
   if (!deps) return;
   const frame = $('tool-frame');
@@ -1240,6 +1246,14 @@ function onAppMessage(ev) {
       // A picture set (Image Studio results) for the shell's own viewer. The
       // shell validates it (same-origin paths only, capped) before it opens.
       if (typeof deps.lightbox === 'function') deps.lightbox({ items: msg.items, index: msg.index });
+      return;
+    }
+    case 'dispatch:open-settings': {
+      // An app's "set this up" button (Image Studio's empty state): open Settings on
+      // a section, never anything else. The shell decides what this session may see.
+      const target = String(msg.target == null ? '' : msg.target);
+      if (!SETTINGS_TARGET_RE.test(target)) return;
+      if (typeof deps.openSettings === 'function') deps.openSettings(target);
       return;
     }
     case 'dispatch:close':
@@ -1468,6 +1482,7 @@ function toolRow(tool, idx) {
       const next = toolTile(draft[idx]);
       preview.replaceWith(next); preview = next;
     });
+    inp.addEventListener('change', () => saveSoon());
     iconCell.append(el('div', { class: 'tools-icon-edit' }, [preview, inp]));
   }
   row.append(iconCell);
@@ -1484,6 +1499,7 @@ function toolRow(tool, idx) {
       'aria-label': t('tools.field_title'), value: tool.title || '',
     });
     inp.addEventListener('input', () => { draft[idx].title = inp.value; draftDirty = true; });
+    inp.addEventListener('change', () => saveSoon());
     titleCell.append(inp, el('div', { class: 'muted tools-id', text: tool.id }));
   }
   row.append(titleCell);
@@ -1511,7 +1527,7 @@ function toolRow(tool, idx) {
     const wl = el('label', { class: 'tools-open-window', title: t('tools.open_window_aria', { name }) });
     const wcb = el('input', { type: 'checkbox', 'aria-label': t('tools.open_window_aria', { name }) });
     wcb.checked = tool.open === 'window';
-    wcb.addEventListener('change', () => { draft[idx].open = wcb.checked ? 'window' : 'frame'; draftDirty = true; });
+    wcb.addEventListener('change', () => { draft[idx].open = wcb.checked ? 'window' : 'frame'; draftDirty = true; saveSoon(); });
     wl.append(wcb, document.createTextNode(' ' + t('tools.col_open')));
     loc.append(el('div', {}, [wl]));
   }
@@ -1522,10 +1538,27 @@ function toolRow(tool, idx) {
   const lbl = el('label', { class: 'switch', title: t('tools.enabled_aria', { name }) });
   const cb = el('input', { type: 'checkbox', 'aria-label': t('tools.enabled_aria', { name }) });
   cb.checked = tool.enabled !== false;
-  cb.addEventListener('change', () => { draft[idx].enabled = cb.checked; draftDirty = true; });
+  cb.addEventListener('change', () => { draft[idx].enabled = cb.checked; draftDirty = true; saveSoon(); });
   lbl.append(cb, el('span', { class: 'slider' }));
   onCell.append(lbl);
   row.append(onCell);
+
+  // A built-in tool's own settings (address, folder, port: schema rows the
+  // caller draws), under a ⚙ button that opens a row below this one (3.2).
+  const bi = tool.kind === 'builtin' ? builtinOf(tool) : null;
+  if (bi && settingsOpts && typeof settingsOpts.toolSettings === 'function'
+      && (settingsOpts.features || []).includes(bi.feature)) {
+    const gear = el('button', {
+      type: 'button', class: 'icon-btn ghost tools-gear', 'aria-expanded': String(openGears.has(bi.feature)),
+      'aria-label': t('tools.settings_aria', { name }), title: t('tools.settings_aria', { name }),
+      dataset: { feature: bi.feature },
+    }, [railIcon(RAIL_ICONS.gear)]);
+    gear.addEventListener('click', () => {
+      if (openGears.has(bi.feature)) openGears.delete(bi.feature); else openGears.add(bi.feature);
+      renderSettings();
+    });
+    onCell.append(gear);
+  }
 
   // Remove
   const rmCell = el('td', { class: 'tools-cell-rm' });
@@ -1533,7 +1566,7 @@ function toolRow(tool, idx) {
     rmCell.append(el('button', {
       type: 'button', class: 'icon-btn ghost tools-remove',
       'aria-label': t('tools.remove', { name }), title: t('tools.remove', { name }), text: '🗑',
-      onclick: () => { draft.splice(idx, 1); draftDirty = true; renderSettings(); },
+      onclick: () => { draft.splice(idx, 1); draftDirty = true; renderSettings(); saveSoon(); },
     }));
   }
   row.append(rmCell);
@@ -1595,6 +1628,7 @@ function addForm() {
     addOpen = false;
     settingsError('');
     renderSettings();
+    saveSoon();
   });
   return form;
 }
@@ -1628,7 +1662,18 @@ function renderSettings() {
       el('th', { scope: 'col' }, [el('span', { class: 'sr-only', text: t('common.delete') })]),
     ])]));
     const body = el('tbody');
-    for (const [tool, idx] of rows) body.append(toolRow(tool, idx));
+    for (const [tool, idx] of rows) {
+      body.append(toolRow(tool, idx));
+      const bi = tool.kind === 'builtin' ? builtinOf(tool) : null;
+      if (bi && openGears.has(bi.feature) && settingsOpts && settingsOpts.toolSettings) {
+        const holder = el('div', { class: 'tools-settings-rows' }, [el('p', { class: 'muted', text: t('common.loading') })]);
+        body.append(el('tr', { class: 'tools-settings-row', dataset: { feature: bi.feature } }, [
+          el('td', { colspan: '6' }, [holder])]));
+        Promise.resolve(settingsOpts.toolSettings(bi.feature, holder)).then((r) => {
+          if (!r) holder.replaceChildren(el('p', { class: 'muted', text: t('tools.settings_none') }));
+        });
+      }
+    }
     table.append(body);
     host.append(el('div', { class: 'tools-table-wrap' }, [table]));
     host.append(el('p', { class: 'muted tools-loc-hint', text: t('tools.location_hint') }));
@@ -1643,8 +1688,9 @@ function renderSettings() {
 }
 
 /** Settings → Tools was activated. Loads a fresh list into a draft. */
-export async function mountToolsSettings(pane) {
+export async function mountToolsSettings(pane, opts = {}) {
   settingsHost = pane;
+  settingsOpts = opts || {};
   draft = null;
   draftDirty = false;
   addOpen = false;
@@ -1680,11 +1726,16 @@ function errorIndex(body) {
   return look(d) ?? look(d && d.errors);
 }
 
+/** A row changed: save the table shortly (3.2: no Save button; a burst of
+ *  changes is one request). */
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveTimer = null; saveToolsSettings(); }, 250);
+}
+
 /** PUT the draft. Inline error on a 422; rail re-rendered on success. */
 export async function saveToolsSettings() {
   if (!draft) return false;
-  const btn = $('tools-save');
-  if (btn) btn.disabled = true;
   settingsError('');
   // Send in the displayed order (builtins first) so a 422's index points at
   // the row the user sees.
@@ -1718,8 +1769,6 @@ export async function saveToolsSettings() {
       ? t('tools.error_at', { n: String(idx + 1), error: msg })
       : t('tools.save_failed', { error: msg }), draftIdx);
     return false;
-  } finally {
-    if (btn) btn.disabled = false;
   }
 }
 
@@ -1738,6 +1787,7 @@ export async function saveToolsSettings() {
  *    paintPlaceholder(title, glyph)  the thread-list stand-in while a tool is up
  *                     (glyph is a node: toolGlyph()'s line icon or typed emoji)
  *    renderSidebar, isMobile, navigate, toast, isBotId, onSaved
+ *    openSettings(target)  an app asked for Settings on 'section#anchor'
  */
 export function wireTools(d) {
   deps = d;
@@ -1747,8 +1797,6 @@ export function wireTools(d) {
   if (back) back.addEventListener('click', () => { closeTool(); if (deps.isMobile()) deps.navigate('bots'); });
   const refresh = $('tool-refresh');
   if (refresh) refresh.addEventListener('click', () => doRefresh());
-  const save = $('tools-save');
-  if (save) save.addEventListener('click', () => saveToolsSettings());
   window.addEventListener('hashchange', () => { if (hashToolId()) openFromHash(); });
   // Apps: messages from the framed page, and the shell's theme/language
   // handed to it once it has loaded and whenever either changes.
@@ -1808,4 +1856,5 @@ export function _resetForTest() {
   deps = null; tools = null; toolsPath = ''; openId = null; prev = null;
   parked = []; menuOpen = false; menuMode = 'tools'; lastCompact = null;
   refreshing = false; draft = null; draftDirty = false; addOpen = false; settingsHost = null;
+  settingsOpts = null; openGears.clear(); clearTimeout(saveTimer); saveTimer = null;
 }

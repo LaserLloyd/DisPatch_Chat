@@ -701,22 +701,23 @@ test('api.js carries the agent, task and approval calls with the routes the serv
 
 test('main.js routes task frames, intercepts @mentions before sending, and mounts the pane', () => {
   assert.match(MAIN, /import \{ createTasksUi \} from '\.\/tasks\.js\?v=1'/);
-  assert.match(MAIN, /import \{ mountAgentsSettings \} from '\.\/agents\.js\?v=1'/);
+  assert.match(MAIN, /import \{ mountAgentsSettings \} from '\.\/agents\.js\?v=\d+'/);
   assert.match(MAIN, /data\.type\.startsWith\('task\.'\)\) \{ tasksUi\.onFrame\(data\); return; \}/);
   const send = MAIN.slice(MAIN.indexOf('function sendMessage()'));
   assert.ok(send.indexOf('tasksUi.interceptSend') > -1 && send.indexOf('tasksUi.interceptSend') < send.indexOf('const draftThread'),
     'the mention check comes before anything is sent or cleared');
-  assert.match(MAIN, /case 'agents':\s+await mountAgentsSettings/);
+  // 3.2: Agents is a subsection of AI & Connections, mounted when it is opened.
+  assert.match(MAIN, /await mountAgentsSettings\(host\.querySelector\('\.agents-mount'\)/);
   assert.match(MAIN, /tasksUi\.cardForMessage\(msg\)/);
   assert.match(MAIN, /tasksUi\.closeAll\(\);/);
   assert.match(MAIN, /act === 'assign'/);
 });
 
-test('index.html: the rail button, the thread-menu item, the Agents tab and pane, the stylesheet', () => {
+test('index.html: the rail button, the thread-menu item, the Agents subsection, the stylesheet', () => {
   assert.match(HTML, /id="tasks-btn"[^>]*type="button"/);
   assert.match(HTML, /id="thread-menu-assign" hidden/);
-  assert.match(HTML, /id="stab-agents"[^>]*aria-controls="spane-agents"/);
-  assert.match(HTML, /id="spane-agents"[^>]*aria-labelledby="stab-agents"/);
+  assert.match(HTML, /<details class="settings-sub" id="cxn-agents" data-anchor="agents">/);
+  assert.match(HTML, /id="cxn-agents-host"/);
   assert.match(HTML, /\/static\/tasks\.css\?v=1/);
 });
 
@@ -730,7 +731,7 @@ test('no UI string uses a forbidden product label; the verbs are Assign task / S
   for (const ns of ['tasks', 'approval', 'agents']) assert.doesNotMatch(JSON.stringify(EN[ns]), bad);
   assert.equal(EN.tasks.assign, 'Assign task');
   assert.equal(EN.tasks.send_followup, 'Send to agent');
-  assert.equal(EN.agents.claude_title, 'Claude Agent');
+  assert.equal(EN.agents.connect, 'Connect');
   assert.equal(EN.agents.route_google, 'Google Cloud');
   assert.doesNotMatch(JSON.stringify(EN.agents), /subscription login/i);
 });

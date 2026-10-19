@@ -675,6 +675,7 @@ async function mountPeople(role = 'owner', over = {}) {
     role,
     toast: (m, err) => rec.toasts.push([m, !!err]),
     confirm: async (m) => { rec.confirms.push(m); return true; },
+    ...(over.deps || {}),
   };
   const pane = win.document.getElementById('spane-people');
   await mod.mountPeopleSettings(pane, deps);
@@ -827,6 +828,34 @@ test('People tab: Machine access shows the rotated key once, with a Copy button'
   assert.equal(keyBox.querySelector('input'), null, 'the key is gone from the page');
 });
 
+test('People & Access: the caller\'s groups go after This device; Activity & audit is closed, last but the extras', { skip: dom.skip }, async () => {
+  const groups = (doc) => {
+    const mk = (id) => { const n = doc.createElement('section'); n.id = id; return n; };
+    return { afterDevices: [mk('x-rules'), mk('x-limits')], end: [mk('x-adv')] };
+  };
+  let win = null;
+  const { pane } = await mountPeople('owner', { deps: { extraGroups: () => groups(globalThis.document), collapseActivity: true } });
+  win = pane.ownerDocument;
+  const order = [...pane.children].map((n) => n.id || n.dataset.anchor || n.className);
+  const at = (x) => order.findIndex((o) => String(o).includes(x));
+  assert.ok(at('device') < at('x-rules') && at('x-rules') < at('x-limits'), order.join(' | '));
+  assert.ok(at('x-limits') < at('machine') && at('machine') < at('activity'), order.join(' | '));
+  assert.equal(order.at(-1), 'x-adv');
+  const act = pane.querySelector('details.people-activity-sub');
+  assert.ok(act && !act.open, 'Activity & audit starts closed');
+  assert.equal(act.dataset.anchor, 'activity');
+  assert.ok(act.querySelector('#people-activity'), 'the activity group lives inside it');
+  // The anchors the settings search jumps to.
+  for (const a of ['people', 'device', 'machine']) assert.ok(pane.querySelector(`[data-anchor="${a}"]`), a);
+  void win;
+});
+
+test('People & Access: "Open this device as" and the activity filter are themed selects', { skip: dom.skip }, async () => {
+  const { pane } = await mountPeople('owner');
+  assert.ok(pane.querySelector('#people-device-select').classList.contains('ui-select'));
+  assert.ok(pane.querySelector('#people-activity-who').classList.contains('ui-select'));
+});
+
 test('People tab: every control has a label (no placeholder-only inputs)', { skip: dom.skip }, async () => {
   const { pane } = await mountPeople('owner');
   pane.querySelector('#people-add').click();
@@ -840,11 +869,11 @@ test('People tab: every control has a label (no placeholder-only inputs)', { ski
 
 // ------------------------------------------------------------------- wiring
 
-test('index.html: the People tab is admin-only, before Security, with its pane', () => {
-  assert.match(HTML, /class="settings-tab admin-only hidden" id="stab-people"[^>]*aria-controls="spane-people"/);
+test('index.html: People & Access is a household (admin-only) section after Account, with its pane', () => {
+  assert.match(HTML, /class="settings-tab admin-only" id="stab-people"[^>]*aria-controls="spane-people"/);
   assert.match(HTML, /id="spane-people"[^>]*aria-labelledby="stab-people"/);
-  assert.ok(HTML.indexOf('id="stab-people"') < HTML.indexOf('id="stab-security"'));
-  assert.match(HTML, /data-i18n="people\.tab"/);
+  assert.ok(HTML.indexOf('id="stab-account"') < HTML.indexOf('id="stab-people"'));
+  assert.match(HTML, /data-i18n="settings\.sec_people"/);
 });
 
 test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
@@ -852,7 +881,7 @@ test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () =>
   // !canAdmin() hides every admin tab. OWNER_TABS is empty since Admins hold admin_system
   // (2026-10-19), and Voice left the list: a Member who holds use_voice gets it too.
   assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isHostRole\(\)\)\)/);
-  assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'people', 'connections', 'agents', 'settings'\];/);
+  assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)\.map\(\(s\) => s\.id\);/);
   assert.match(MAIN, /case 'people':\s+await mountPeopleSettings/);
 });
 
@@ -872,7 +901,7 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v177'/);
+  assert.match(SW, /const CACHE = 'local-chat-v178'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {

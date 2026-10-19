@@ -1,4 +1,4 @@
-// Appearance: the Settings → Theme gallery and the rail button's icon.
+// Appearance: the Settings → Appearance theme gallery and the rail button's icon.
 //
 // The THEME itself is not this module's any more. ui-theme.js — a generated,
 // vendored runtime loaded as the first, blocking <script> in index.html —
@@ -17,7 +17,7 @@
 //
 // Theme names are proper nouns and are deliberately NOT translated.
 import { applyDom, hasDictionary } from './i18n.js?v=4';
-import { el, railIcon } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
 
 // The badge labels are the only translated strings on a card. Literal keys,
 // never `t('theme.mode_' + mode)`: the i18n guard test reads keys out of the
@@ -29,18 +29,8 @@ const MODE_FALLBACK = { dark: 'Dark', light: 'Light' };
 // [data-theme="light"] surfaces exactly as the page would.
 const DATA_THEME = { oled: 'amoled', dark: 'dark', light: 'light' };
 
-// Swatch glyph for the rail button. Kept local rather than added to
-// RAIL_ICONS: util.js is imported under a versioned URL by half the app, and
-// adding an icon there would mean either bumping that URL (two live copies of
-// the module) or shipping a new theme.js against a cached old util.js, where
-// RAIL_ICONS.palette is undefined and railIcon() throws on first paint.
-const PALETTE_ICON = [
-  'M4 5h6v6H4z',
-  'M14 5h6v6h-6z',
-  'M4 15h6v6H4z',
-  'M14 15h6v6h-6z',
-];
-
+// The rail button's glyph: a painter's palette (RAIL_ICONS.palette). Until 3.2
+// it was a local four-square swatch, which read as an "apps" grid.
 let grid = null;
 
 /** The runtime, or null when it failed to load. Everything below degrades to
@@ -164,7 +154,7 @@ function fillRevision(ui) {
 
 function init() {
   const b = document.getElementById('theme-toggle');
-  if (b) b.replaceChildren(railIcon(PALETTE_ICON));
+  if (b) b.replaceChildren(railIcon(RAIL_ICONS.palette));
   const ui = runtime();
   if (!ui) return;
   buildGallery(ui);

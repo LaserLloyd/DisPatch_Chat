@@ -149,16 +149,18 @@ test('wireTools() is called from init with the four builtin openers and the app 
   }
 });
 
-test('Settings → Plugins is an admin-only tab; the Tools table, its host and Save live in it', () => {
+test('Settings → Plugins & Apps is an admin-only section; the tools table lives in it and saves per row', () => {
   assert.match(MARKUP, /class="settings-tab admin-only" id="stab-plugins"[^>]*data-tab="plugins"/);
   assert.match(MARKUP, /id="spane-plugins"/);
-  // The old standalone Tools tab and pane are gone.
-  assert.doesNotMatch(MARKUP, /id="stab-tools"|id="spane-tools"/);
-  assert.match(MARKUP, /data-tab="plugins">\s*<button class="btn-primary" id="tools-save"/);
-  assert.match(MAIN, /const ADMIN_TABS = \[[^\]]*'plugins'[^\]]*\];/);
-  assert.match(MAIN, /const SETTINGS_TABS = \[[^\]]*'plugins'[^\]]*\];/);
-  // main.js hands the Plugins pane the Tools mounter.
-  assert.match(MAIN, /mountPluginsSettings\(pane, \{\s*mountTools: \(host\) => mountToolsSettings\(host\)/);
+  // The old standalone Tools tab and pane are gone, and so is the Save tools button.
+  assert.doesNotMatch(MARKUP, /id="stab-tools"|id="spane-tools"|id="tools-save"/);
+  assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)/);
+  // main.js hands the Plugins pane the tools mounter and the built-in tools' settings rows.
+  assert.match(MAIN, /mountPluginsSettings\(pane, \{\s*mountTools: \(host, o\) => mountToolsSettings\(host, o\)/);
+  assert.match(MAIN, /toolSettings: \(feature, host\) => mountSchemaRows\(host, \{\s*section: 'plugins', anchor: `tool:\$\{feature\}`/);
+  // A row's change is saved shortly after it happens (no Save button).
+  assert.match(TOOLS, /function saveSoon\(\)/);
+  assert.match(TOOLS, /cb\.addEventListener\('change', \(\) => \{ draft\[idx\]\.enabled = cb\.checked; draftDirty = true; saveSoon\(\); \}\);/);
 });
 
 test('the deep link opens only unlocked, after the feature probes', () => {
@@ -211,9 +213,11 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v177 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
+test('the sw.js CACHE is local-chat-v178 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v178: 3.2 Settings — seven sections with a side nav / phone list, search, settings-nav.js joins
+  // SHELL, tabstrip.js leaves it; everything applies when changed.
   // v176: review fixes on the v175 round (phone sheet + profile menu, drag MIME, card timing, wording).
   // v175: Image Studio sort/clear, the Settings host-storage notice + first-load card,
   // Tools & more (railmenu.js), upload in the quick-actions menu, drop files on a chat.
@@ -283,7 +287,7 @@ test('the sw.js CACHE is local-chat-v177 (3.0.0, W5 + W11b, the api.js importer 
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v177');
+  assert.equal(m[1], 'local-chat-v178');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

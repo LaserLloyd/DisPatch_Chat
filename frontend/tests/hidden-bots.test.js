@@ -104,22 +104,35 @@ test('a roster frame keeps a hidden bot\'s open chat (selection checked against 
 // 2.4.2: "Show locked" (`safe`) + "Show unlocked" (`!hide_unlocked`); neither
 // = shown nowhere, the row dimmed and tagged Hidden. The old `visible` switch
 // is gone (the server folds a stray `visible: false` into "neither").
-test('the Bot Manager has Show locked + Show unlocked and saves both with the roster', () => {
+test('the Characters row has one Who can see it select over safe + hide_unlocked, saved at once with the roster', () => {
   const rows = fnBody(MAIN, 'renderBotManager');
-  assert.match(rows, /bmBots\[idx\]\.safe = !bmBots\[idx\]\.safe/);
-  assert.match(rows, /bmBots\[idx\]\.hide_unlocked = !bmBots\[idx\]\.hide_unlocked/);
-  assert.match(rows, /t\('settings\.show_locked_badge'\)/);
-  assert.match(rows, /t\('settings\.show_unlocked_badge'\)/);
-  // "Show unlocked" is ON when the bot is NOT hidden on unlocked devices.
-  assert.match(rows, /\(!bot\.hide_unlocked \? ' on' : ''\)/);
-  assert.match(rows, /t\('settings\.hidden_badge'\)/);
-  assert.match(rows, /row\.classList\.toggle\('bm-row--hidden', none\)/);
+  assert.match(rows, /WHO_OPTIONS\.map\(\(o\) => el\('option', \{ value: o, text: t\(`chars\.who_\$\{o\}`\) \}\)\)/);
+  assert.match(rows, /who\.value = whoCanSee\(bot\);/);
+  assert.match(rows, /Object\.assign\(bmBots\[idx\], flagsForWho\(to\)\);/);
+  // Widening to Restricted asks first.
+  assert.match(rows, /widensToRestricted\(from, to\)\s+&& !await uiConfirm\(t\('chars\.who_confirm'/);
+  assert.match(rows, /row\.classList\.toggle\('bm-row--hidden', whoCanSee\(bmBots\[idx\]\) === 'hidden'\)/);
   assert.doesNotMatch(rows, /bmBots\[idx\]\.visible/);
-  assert.doesNotMatch(rows, /settings\.show_in_sidebar/);
-  const save = fnBody(MAIN, 'saveBotManager');
+  const save = fnBody(MAIN, 'doSaveRoster');
   assert.match(save, /safe: !!b\.safe/);
   assert.match(save, /hide_unlocked: !!b\.hide_unlocked/);
   assert.doesNotMatch(save, /visible:/);
+});
+
+test('Who can see it is a lossless 4-row truth table over (safe, hide_unlocked), both ways', async () => {
+  const C = await import(`../static/js/characters.js?t=${Math.random()}`);
+  const table = [[true, false, 'everyone'], [false, false, 'members'], [true, true, 'restricted'], [false, true, 'hidden']];
+  for (const [safe, hide, who] of table) {
+    assert.equal(C.whoCanSee({ safe, hide_unlocked: hide }), who, `${safe}/${hide}`);
+    assert.deepEqual(C.flagsForWho(who), { safe, hide_unlocked: hide }, who);
+  }
+  assert.deepEqual(C.WHO_OPTIONS, ['everyone', 'members', 'restricted', 'hidden']);
+  assert.throws(() => C.flagsForWho('nobody'));
+  // Only a change that lets Restricted profiles in asks for confirmation.
+  assert.equal(C.widensToRestricted('members', 'everyone'), true);
+  assert.equal(C.widensToRestricted('hidden', 'restricted'), true);
+  assert.equal(C.widensToRestricted('everyone', 'restricted'), false);
+  assert.equal(C.widensToRestricted('restricted', 'members'), false);
 });
 
 test('shownNowhere is exactly "neither switch on"', () => {
@@ -133,20 +146,24 @@ test('no roster path drops a bot client-side for `visible` (Hidden bots stay rea
   assert.doesNotMatch(MAIN, /visible: b\.visible/);
 });
 
-test('every locale has the new labels and none of the retired ones', () => {
+test('every locale has the Who can see it labels and none of the retired pills', () => {
   for (const lang of ['en', 'de', 'es', 'fr', 'pt', 'ja', 'zh', 'ar']) {
-    const s = JSON.parse(read(`locales/${lang}.json`)).settings;
-    for (const k of ['show_locked_badge', 'show_locked_title', 'show_unlocked_badge',
-      'show_unlocked_title', 'hidden_badge', 'hidden_title']) assert.ok(s[k], `${lang} ${k}`);
-    for (const k of ['safe_badge', 'hide_unlocked_badge', 'hide_unlocked_title', 'show_in_sidebar']) {
-      assert.equal(s[k], undefined, `${lang} still has ${k}`);
+    const L = JSON.parse(read(`locales/${lang}.json`));
+    for (const k of ['who_everyone', 'who_members', 'who_restricted', 'who_hidden', 'who_confirm', 'who_aria']) {
+      assert.ok(L.chars[k], `${lang} chars.${k}`);
+    }
+    // 3.2 retired the two visibility pills (2.4.2) and the older names before them.
+    for (const k of ['show_locked_badge', 'show_locked_title', 'show_unlocked_badge', 'show_unlocked_title',
+      'hidden_badge', 'hidden_title', 'safe_badge', 'hide_unlocked_badge', 'hide_unlocked_title', 'show_in_sidebar']) {
+      assert.equal(L.settings[k], undefined, `${lang} still has settings.${k}`);
     }
   }
 });
 
-test('the device switch is unlocked-only and only offered when a bot is hidden', () => {
+test('the device switch is the Owner\'s and Admins\' (Appearance -> Advanced), only offered when a bot is hidden', () => {
   const body = fnBody(MAIN, 'mountLanguagePicker');
-  assert.match(body, /!state\.decoy && displayBody && state\.bots\.some\(\(b\) => b\.hide_unlocked\)/);
+  // A Member never sees it: it lists the characters kept off the rail.
+  assert.match(body, /!state\.decoy && canAdmin\(\) && advBody && state\.bots\.some\(\(b\) => b\.hide_unlocked\)/);
   assert.match(body, /setShowHiddenBots\(cb\.checked\)/);
 });
 

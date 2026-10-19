@@ -79,14 +79,14 @@ test('backend kinds: the four badges, and an old server row (no backend) reads a
   assert.equal(mod.backendBadge({ backend: 'direct' }).dataset.backend, 'direct');
 });
 
-test('"Not connected: open AI models" only for a direct-API bot with connected === false', { skip: dom.skip }, async () => {
+test('"Not connected: choose a connection" only for a direct-API bot with connected === false', { skip: dom.skip }, async () => {
   const { mod, ctx, rec, win } = await setup();
   assert.equal(mod.notConnectedLink({ ...DIRECT, connected: true }, ctx), null);
   assert.equal(mod.notConnectedLink({ ...DIRECT }, ctx), null);
   assert.equal(mod.notConnectedLink({ backend: 'agent', connected: false }, ctx), null);
   assert.equal(mod.notConnectedLink({ backend: 'legacy-api', connected: false }, ctx), null);
   const link = mod.notConnectedLink({ ...DIRECT, connected: false }, ctx);
-  assert.equal(link.textContent, 'Not connected: open AI models');
+  assert.equal(link.textContent, 'Not connected: choose a connection');
   fire(win, link);
   assert.equal(rec.ai, 1);
 });
@@ -284,16 +284,25 @@ test('api.js carries the three bot calls', async () => {
   assert.match(src, /deleteBot: \(id\) => j\(`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/);
 });
 
-test('main.js builds every row with the new controls and keeps the old flags, avatar and reorder', () => {
-  assert.match(MAIN, /import \{ rowControls, addBotRow \} from '\.\/bots-edit\.js\?v=\d+';/);
-  assert.match(MAIN, /const ctl = state\.decoy \? null : rowControls\(bot, botEditCtx\(\)\);/);
-  assert.match(MAIN, /if \(!state\.decoy\) list\.append\(addBotRow\(botEditCtx\(\)\)\);/);
-  // The existing behaviour is still there.
-  for (const part of ['lockedBtn,', 'unlockedBtn,', 'rxBtn,', 'apBtn,', 'moveBtn(-1), moveBtn(1)', 'pickAvatarFile(bot.id)', 'wireDrag(row);', 'avatar_pool: !!b.avatar_pool']) {
+test('main.js builds every Characters row: who-can-see select, Details, the ⋯ menu, drag and ▲/▼, instant save', () => {
+  assert.match(MAIN, /import \{ rowControls, addBotRow, backendKind \} from '\.\/bots-edit\.js\?v=\d+';/);
+  assert.match(MAIN, /const ctl = rowControls\(bot, botEditCtx\(\)\);/);
+  // Rename / Personality / Remove are the ⋯ menu's, using the same controls bots-edit.js builds.
+  assert.match(MAIN, /run: \(\) => ctl\.edit\.click\(\)/);
+  assert.match(MAIN, /run: \(\) => ctl\.persona\.click\(\)/);
+  assert.match(MAIN, /run: \(\) => ctl\.remove\.click\(\), danger: true/);
+  // Add is a menu: a blank character, or a starter pack.
+  assert.match(MAIN, /showAddCharacter\(\)/);
+  assert.match(MAIN, /const row = addBotRow\(\{/);
+  for (const part of ['moveBtn(-1), moveBtn(1)', 'pickAvatarFile(bot.id)', 'wireDrag(row);', 'avatar_pool: !!b.avatar_pool',
+    "sw('chars.feat_reactions', 'reactions'", "sw('chars.feat_pool', 'avatar_pool'", "sw('chars.feat_pictures', 'image_jobs'"]) {
     assert.ok(MAIN.includes(part), part);
   }
+  // Every change saves at once (no Save button, no unsaved-changes guard).
+  assert.doesNotMatch(MAIN, /bmDirty|saveBotManager|'bm-done'/);
+  assert.match(MAIN, /async function doSaveRoster\(/);
   // A removed bot drops out of both the roster and the sidebar list.
   assert.match(MAIN, /bmBots = bmBots\.filter\(\(x\) => x\.id !== id\);/);
   assert.match(MAIN, /state\.bots = state\.bots\.filter\(\(x\) => x\.id !== id\);/);
-  assert.match(MAIN, /openAi: \(\) => setSettingsTab\('ai'\)/);
+  assert.match(MAIN, /openAi: \(\) => setSettingsTab\('connections'\)/);
 });

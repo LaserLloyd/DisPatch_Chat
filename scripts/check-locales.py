@@ -193,6 +193,10 @@ IDENTICAL_OK = {
     "security.title", "recovery.title", "transcript.title",
     "reactions.manager_title", "settings.move_up",
     "settings.move_down", "chat.sync", "chat.transcript",
+    # 3.2 Settings: a name:value pair, proper or loan words several languages share.
+    "chars.who_saved", "plugins.lookup_wikipedia", "reactions.name_label",
+    "settings.group_addons", "settings.sec_plugins", "settings.sec_system", "settings.theme_title",
+    "schema.unit_minutes",
     # Byte/size units are conventionally untranslated (SI/IEC symbols).
     "unit.bytes", "unit.kb", "unit.mb", "unit.gb", "unit.tb", "unit.pb",
 }

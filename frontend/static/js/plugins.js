@@ -1,19 +1,21 @@
-// Settings -> Plugins (admin-only): one place that answers "what is installed
-// and what is on". Contract: docs/design/platform-2-3.md section 3.
+// Settings -> Plugins & Apps (admin-only): one place that answers "what is
+// installed and what is on". Contract: docs/design/platform-2-3.md section 3.
 //
 // Four groups, in the Settings modal's own group/row style (.dev-group /
-// .dev-row, so every palette applies and this file carries no colour):
+// .dev-row, so every palette applies and this file carries no colour), in
+// the order an Owner uses them (3.2):
 //
-//   Works with DisPatch  the companion catalog (js/integrations.js, 2.3.7).
 //   Add-ons          one row per extension the host knows (GET /api/plugins):
 //                    name, version, state and an install-wide switch bound to
 //                    PUT /api/plugins/extensions/{id} (takes effect after a
 //                    restart). When the voice add-on is not installed, a row
 //                    says so and shows the install command (voice-absent.js).
-//   Apps & tools     the Tools table. js/tools.js owns it (table, draft, Save
-//                    in the footer); this module only gives it a host element.
+//   Apps & tools     the tools table. js/tools.js owns it (a row saves when it
+//                    changes; a tool's own settings open under its ⚙ button);
+//                    this module only gives it a host element.
 //   Built-in lookups the install-wide switch for app/livetools
-//                    (PUT /api/plugins/livetools) and the tool names.
+//                    (PUT /api/plugins/livetools) and the lookups by name.
+//   Discover more    the companion catalog (js/integrations.js), closed, last.
 //
 // Pure-ish: nothing runs at import time. Everything app-shaped arrives through
 // `deps` ({ mountTools(host), toast(msg, isErr), openTab(id), api? }), which
@@ -23,9 +25,13 @@ import { api as realApi } from './api.js?v=35';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import { COMMANDS, commandBlock } from './voice-absent.js?v=16';
-import { catalogGroup } from './integrations.js?v=1';
+import { catalogGroup } from './integrations.js?v=2';
+import { has } from './i18n.js?v=4';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
+
+/** The settings anchors of the built-in tools (tools.js draws them under each ⚙). */
+export const BUILTIN_TOOL_ANCHORS = ['tool:harness', 'tool:studioforge', 'tool:mail', 'tool:practice'];
 
 const stateLabel = () => ({
   ok: t('plugins.state_ok'),
@@ -127,10 +133,18 @@ function addonsBody(data, deps, a) {
   return el('div', { class: 'dev-group-body', id: 'plugins-addons-body' }, rows);
 }
 
+/** A lookup's name for people: its translated label, else its id made readable. */
+export function lookupLabel(id) {
+  const key = `plugins.lookup_${id}`;
+  if (has(key)) return t(key);
+  const s = String(id || '').replace(/[_-]+/g, ' ').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+}
+
 function lookupsBody(data, deps, a) {
   const live = data.livetools || { enabled: true, names: [] };
-  const names = el('div', { class: 'plugins-names', 'aria-label': t('plugins.lookups_names') },
-    (live.names || []).map((n) => el('code', { class: 'plugins-chip', dir: 'ltr', text: n })));
+  const names = el('ul', { class: 'plugins-names', 'aria-label': t('plugins.lookups_names') },
+    (live.names || []).map((n) => el('li', { class: 'plugins-chip', title: n, text: lookupLabel(n) })));
   const row = switchRow({
     name: t('plugins.lookups_name'),
     hints: [hintLine(t('plugins.lookups_hint')), hintLine(t('plugins.lookups_note'))],
@@ -177,10 +191,6 @@ export async function mountPluginsSettings(pane, deps) {
   }
   if (mine !== seq) return;                         // a newer mount took over
   const parts = [hint];
-  // 2.3.7: "Works with DisPatch" — every companion and its status, first,
-  // because it is the map of everything below. Loads its own data.
-  parts.push(catalogGroup({ toast: deps.toast, onGuide: deps.onGuide,
-    loadCatalog: a.pluginsCatalog }));
   if (data) {
     parts.push(group('plugins-addons', t('plugins.addons_title'), t('plugins.addons_hint'),
       addonsBody(data, deps, a)));
@@ -197,7 +207,28 @@ export async function mountPluginsSettings(pane, deps) {
   if (data) {
     parts.push(group('plugins-lookups', t('plugins.lookups_title'), null, lookupsBody(data, deps, a)));
   }
+  // "Works with DisPatch": every companion and its status. A map, not a control,
+  // so it is last and closed (it used to fill the first screen). Loads its own data.
+  const discover = el('details', { class: 'settings-sub plugins-discover', dataset: { anchor: 'discover' } }, [
+    el('summary', {}, [el('span', { text: t('plugins.discover_title') }),
+      el('span', { class: 'settings-sub-hint', text: t('plugins.discover_hint') })]),
+  ]);
+  let catalog = null;
+  discover.addEventListener('toggle', () => {
+    if (!discover.open || catalog) return;
+    catalog = catalogGroup({ toast: deps.toast, onGuide: deps.onGuide, loadCatalog: a.pluginsCatalog });
+    discover.append(catalog);
+  });
+  parts.push(discover, el('details', { class: 'settings-adv', dataset: { adv: 'plugins', anchor: 'advanced' } }, [
+    el('summary', { text: t('settings.advanced') }),
+    // The built-in tools' rows are drawn under their own ⚙ in the tools table.
+    el('div', { class: 'schema-host', dataset: { schema: 'plugins', schemaClaims: BUILTIN_TOOL_ANCHORS.join(' ') } }),
+  ]));
+  for (const [node, anchor] of [[parts.find((p) => p && p.id === 'plugins-addons'), 'addons'],
+    [parts.find((p) => p && p.id === 'plugins-tools'), 'tools'], [parts.find((p) => p && p.id === 'plugins-lookups'), 'lookups']]) {
+    if (node) node.dataset.anchor = anchor;
+  }
   pane.replaceChildren(...parts);
-  // The Tools table renders into its own host and loads its own list.
-  await deps.mountTools(toolsHost);
+  // The tools table renders into its own host and loads its own list.
+  await deps.mountTools(toolsHost, { toolSettings: deps.toolSettings, features: deps.toolSettingsFeatures || [] });
 }

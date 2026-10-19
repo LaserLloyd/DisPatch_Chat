@@ -14,21 +14,21 @@ import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loa
 import {
   t, tHtml, init as i18nInit, onChange as onI18nChange, languageSelect, localeLoadFailed, hasDictionary,
   relTime, clockTime, dayLabel, dayKey, fileSize,
-  n as fmtNumber, percent as fmtPercent, mergeBundle, removeBundle, lang as i18nLang,
+  n as fmtNumber, percent as fmtPercent, mergeBundle, removeBundle, lang as i18nLang, LANGUAGES,
 } from './i18n.js?v=4';
 import {
   initReactions, loadReactions, resetReactions, handleReactionFrame, handlePoolFrame,
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=27';
+} from './reactions.js?v=28';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=10';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=12';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=12';
+} from './llm.js?v=13';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=13';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=4';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=16';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=17';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -50,16 +50,23 @@ import { maybeShowPrivacyCard } from './host-notice.js?v=1';
 import { createChatDrop } from './chatdrop.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
-import { mountPluginsSettings } from './plugins.js?v=16';
-import { rowControls, addBotRow } from './bots-edit.js?v=4';
+import { mountPluginsSettings } from './plugins.js?v=17';
+import { rowControls, addBotRow, backendKind } from './bots-edit.js?v=4';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
 // modules to extend without a cascade).
-import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?v=1';
-import { mountConnections } from './connections.js?v=1';
-import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=2';
-import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
-import { maybeStartWizard } from './wizard.js?v=2';
+import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=1';
+// 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
+import {
+  SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch,
+} from './settings-nav.js?v=1';
+import { mountConnections } from './connections.js?v=2';
+import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
+import { mountBackups } from './backup.js?v=2';
+import {
+  characterPanel, audienceLabel, WHO_OPTIONS, whoCanSee, flagsForWho, widensToRestricted,
+} from './characters.js?v=2';
+import { maybeStartWizard } from './wizard.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -70,11 +77,11 @@ import {
 import { activeMenuBotIds, isMenuBot, toggleMenuBot, pruneMenuBots, hiddenHere, showHiddenBots, setShowHiddenBots } from './menubots.js?v=3';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
-  openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
+  openFromHash, mountToolsSettings, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen,
-} from './tools.js?v=17';
+} from './tools.js?v=18';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=3';
@@ -87,18 +94,17 @@ import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './vi
 import { aboutRow } from './about.js?v=22';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
-import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, audienceOf } from './profiles.js?v=2';
+import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, avatarSpec } from './profiles.js?v=2';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
   paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
-} from './signin.js?v=2';
-import { mountPeopleSettings } from './people.js?v=2';
+} from './signin.js?v=3';
+import { mountPeopleSettings } from './people.js?v=3';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=1';
-import { mountAgentsSettings } from './agents.js?v=1';
+import { mountAgentsSettings } from './agents.js?v=2';
 import { pushRow } from './push.js?v=2';
-import { wireTabStrip } from './tabstrip.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
 import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
 import {
@@ -267,15 +273,15 @@ const dom = {};
  'app-thread-host',
  'retry-chip', 'retry-chip-btn', 'quick-btn',
  'reply-chip', 'reply-chip-label', 'reply-chip-excerpt', 'reply-chip-cancel',
- 'botmanager-backdrop', 'bm-list', 'bm-close', 'bm-done', 'toast', 'reconnect',
+ 'botmanager-backdrop', 'botmanager', 'bm-list', 'bm-close', 'toast', 'reconnect',
  'collapse-threads', 'expand-threads', 'crop-backdrop', 'crop-img', 'crop-box',
  'crop-stage', 'crop-size', 'crop-save', 'crop-close', 'crop-title',
  'fs-chip', 'fileserver-backdrop', 'fs-list', 'fs-upload-btn', 'fs-close',
  'fs-file-input',
- // Settings tab container. The panes for Reactions and Health are empty mount
- // points; their modules build what goes inside.
- 'settings-tabs', 'bm-footer', 'spane-bots', 'spane-reactions', 'spane-health',
- 'spane-ai', 'spane-plugins', 'spane-theme', 'spane-device', 'spane-voice', 'spane-security', 'sfoot-health', 'avatar-pool-panel',
+ // Settings (3.2): the section nav, its search and back button, the seven panes.
+ 'settings-tabs', 'settings-back', 'settings-title-pane', 'settings-search', 'settings-search-results',
+ 'spane-appearance', 'spane-account', 'spane-voice', 'spane-characters', 'spane-connections',
+ 'spane-people', 'spane-plugins', 'spane-system', 'sfoot-health', 'avatar-pool-panel',
  // Extensions: the chat-header action slot, the Settings → Voice tab and its body.
  'chat-actions-ext', 'stab-voice', 'ext-pane-voice',
  // Locked-side one-way drop
@@ -291,13 +297,13 @@ const dom = {};
  // The recovery note is rendered as ONE interpolated HTML string, so the two
  // <code> path elements inside it are created by the translation, not held here.
  'sec-note',
- 'lock-remember-row', 'lock-remember', 'sec-remember-wrap', 'sec-remember-enable',
+ 'lock-remember-row', 'lock-remember',
  'lock-nim-row', 'lock-nim',
  // 3.0 profiles: tiles host, rail chip + menu, Restricted strip, setup/notice overlays, first-run card, account block
  'lock-tiles', 'profile-chip', 'profile-menu', 'restricted-banner', 'setup-screen', 'setup-card',
  'access-notice', 'firstrun-card', 'firstrun-open', 'firstrun-dismiss', 'sec-account',
- 'sec-remember-label', 'sec-forget-devices',
- 'bm-avatar-minimal', 'bm-avatar-style-row', 'bm-lang-row',
+ 'acct-change', 'acct-change-row', 'acct-password-host', 'acct-who', 'sec-pin-form', 'sec-cancel',
+ 'bm-avatar-select', 'bm-avatar-style-row', 'bm-lang-row',
  // Safe-Mode companions panel (the gear when locked)
  'companions-backdrop', 'comp-list', 'comp-close', 'comp-more',
  // Redesign 2026: status, search, recovery, transcript bridge, a11y
@@ -698,14 +704,21 @@ function maybeFlashMoodFace(msg, rowEl) {
 
 // ===================== Toast / overlay =====================
 let toastTimer;
-function toast(msg, isError = false) {
+function toast(msg, isError = false, { undo = null } = {}) {
   // Behind the sign-in gate every failing call is just "sign in first"; the
   // screen already says so, and a red toast under it helps nobody.
   if (isError && (gateBusy || gateOverlayOpen())) return;
   dom.toast.textContent = msg;
   dom.toast.className = 'toast' + (isError ? ' error' : '');
+  // 3.2: a setting that applied at once can be taken back for a few seconds.
+  if (typeof undo === 'function') {
+    const b = el('button', { type: 'button', class: 'toast-undo', text: t('common.undo') });
+    b.addEventListener('click', () => { dom.toast.classList.add('hidden'); undo(); });
+    dom.toast.append(' ', b);
+    dom.toast.classList.add('has-action');
+  }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => dom.toast.classList.add('hidden'), 4000);
+  toastTimer = setTimeout(() => dom.toast.classList.add('hidden'), typeof undo === 'function' ? 6000 : 4000);
   // Toasts carry nearly every failure in the app (upload, delete, rename,
   // "not connected"). Route them to the live regions too, errors assertively,
   // or they are invisible to assistive tech.
@@ -3999,128 +4012,145 @@ function wireModelChip() {
 // Safe Mode hiding the unlocked-only rows — never the one it was first built in.
 //
 // (The function keeps its old name: three call sites and a locale hook know it.)
-function mountLanguagePicker() {
+// The rows Settings builds in JS for this device, by section (3.2): `section`
+// 'appearance' | 'account' | 'system', or null for all of them (a language switch).
+function mountLanguagePicker(section = null) {
   const row = dom['bm-lang-row'];
   if (!row) return;
+  const want = (s) => !section || section === s;
   const body = (id) => document.getElementById(id);
   const picturesBody = body('dev-body-pictures');
   const barBody = body('dev-body-bar');
   const filesBody = body('dev-body-files');
   const aboutBody = body('dev-body-about');
 
-  // Language: the <select> is built by i18n.js rather than declared in markup,
-  // so the option list can never drift from the locales that actually ship. It
-  // is rebuilt on every open because it reflects the active language at
-  // construction time. It goes AFTER the text: every row reads name-then-control.
-  row.querySelector('.lang-select')?.remove();
-  row.append(languageSelect({ id: 'bm-lang' }));
-
-  // Pictures & privacy. No-Image Mode first — it is the one a parent reaches
-  // for — then Privacy mode. nimRow is rebuilt on each open so the ratchet's
-  // disabled state reflects the CURRENT session: a device that has since
-  // locked must not still offer an operable switch.
-  document.getElementById('privacy-row')?.remove();
-  document.getElementById('nim-row')?.remove();
-  const nr = nimRow(t, { decoy: state.decoy, pinSet: !!state.auth.pinSet, onChange: applyNimChange });
-  nr.id = 'nim-row';
-  const pr = privacyRow(t);
-  pr.id = 'privacy-row';
-  for (const r of [nr, pr]) { r.classList.add('dev-row'); tidyRowText(r); }
-  if (picturesBody) picturesBody.append(nr, pr);
-  else row.after(nr, pr);
-  // The Pin pill on each pinnable row puts that switch on the menu bar. It
-  // lives on the row rather than in a list of its own so the thing you pin and
-  // the pin control are the same object — nothing to keep in step.
-  for (const [r, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
-    const pin = pinToggle(pinId, { t, onChange: renderPins });
-    if (pin) r.append(pin);
-  }
-  // Minimal avatars is pinnable too. Its row is static markup (unlike the two
-  // built above), so the pill from the previous mount must go first.
-  const avRow = dom['bm-avatar-style-row'];
-  if (avRow) {
-    avRow.querySelector('.pin-toggle')?.remove();
-    const avPin = pinToggle('avatars', { t, onChange: renderPins });
-    if (avPin) avRow.append(avPin);
+  if (want('appearance')) {
+    // Language: the <select> is built by i18n.js rather than declared in markup,
+    // so the option list can never drift from the locales that actually ship. It
+    // is rebuilt on every open because it reflects the active language at
+    // construction time. It goes AFTER the text: every row reads name-then-control.
+    row.querySelector('.lang-select')?.remove();
+    row.append(languageSelect({ id: 'bm-lang' }));
   }
 
-  // "Show hidden bots on this device" (2.4.0): unlocked only, and only once
-  // some bot is flagged hide-on-unlocked — a switch for nothing is noise.
-  // Device-local and instant, like the rest of this pane (menubots.js).
-  document.getElementById('show-hidden-row')?.remove();
-  const displayBody = body('dev-body-display');
-  if (!state.decoy && displayBody && state.bots.some((b) => b.hide_unlocked)) {
-    const cb = el('input', { type: 'checkbox', id: 'show-hidden-bots' });
-    cb.checked = showHiddenBots();
-    cb.addEventListener('change', () => {
-      cb.checked = setShowHiddenBots(cb.checked);
-      renderSidebar();
-      // The open chat may belong to a bot that just left the rail: keep it
-      // open (it is still reachable), only the rail changes.
-    });
-    const names = state.bots.filter((b) => b.hide_unlocked).map((b) => b.name).join(', ');
-    displayBody.append(el('label', { class: 'bm-avatar-style dev-row', id: 'show-hidden-row' }, [
-      cb,
-      el('span', { class: 'dev-row-text' }, [
-        el('strong', { text: t('settings.show_hidden') }),
-        el('span', { class: 'dev-row-hint', text: t('settings.show_hidden_desc', { names }) }),
-      ]),
-    ]));
+  if (want('account')) {
+    // Pictures & privacy. No-Image Mode first — it is the one a parent reaches
+    // for — then Privacy mode. nimRow is rebuilt on each open so the ratchet's
+    // disabled state reflects the CURRENT session: a device that has since
+    // locked must not still offer an operable switch.
+    document.getElementById('privacy-row')?.remove();
+    document.getElementById('nim-row')?.remove();
+    const nr = nimRow(t, { decoy: state.decoy, pinSet: !!state.auth.pinSet, onChange: applyNimChange });
+    nr.id = 'nim-row';
+    const pr = privacyRow(t);
+    pr.id = 'privacy-row';
+    for (const r of [nr, pr]) { r.classList.add('dev-row'); tidyRowText(r); }
+    if (picturesBody) picturesBody.append(nr, pr);
+    else row.after(nr, pr);
+    // The Pin pill on each pinnable row puts that switch on the menu bar. It
+    // lives on the row rather than in a list of its own so the thing you pin and
+    // the pin control are the same object — nothing to keep in step.
+    for (const [r, pinId] of [[pr, 'privacy'], [nr, 'nim']]) {
+      const pin = pinToggle(pinId, { t, onChange: renderPins });
+      if (pin) r.append(pin);
+    }
   }
 
-  // Menu bar shortcuts: the 🎨 rail button (a row whose ONLY control is its
-  // pin — it ships pinned, pins.js `pinnedByDefault`, so the pin IS the
-  // setting) and the custom link buttons. Both unlocked only, matching the
-  // rail itself: Safe Mode hides the palette picker, and a locked device
-  // neither sees the link buttons nor the URLs behind them.
-  document.getElementById('theme-pin-row')?.remove();
-  document.getElementById('links-row')?.remove();
-  if (!state.decoy) {
-    const tRow = el('div', { class: 'bm-avatar-style dev-row', id: 'theme-pin-row' }, [
-      el('span', { class: 'dev-row-text' }, [
-        el('strong', { text: t('settings.theme_button') }),
-        el('span', { class: 'dev-row-hint', text: t('settings.theme_button_desc') }),
-      ]),
-    ]);
-    const tPin = pinToggle('theme', { t, onChange: renderPins });
-    if (tPin) tRow.append(tPin);
-    const lr = linksSection(t, { onChange: renderPins });
-    lr.classList.add('dev-row', 'dev-row-block');
-    tidyRowText(lr);
-    if (barBody) barBody.append(tRow, lr);
+  if (want('appearance')) {
+    // Minimal avatars is pinnable too. Its row is static markup (unlike the two
+    // built above), so the pill from the previous mount must go first.
+    const avRow = dom['bm-avatar-style-row'];
+    if (avRow) {
+      avRow.querySelector('.pin-toggle')?.remove();
+      const avPin = pinToggle('avatars', { t, onChange: renderPins });
+      if (avPin) avRow.append(avPin);
+    }
+
+    // "Show hidden characters on this device" (2.4.0): Appearance -> Advanced, for
+    // the Owner and Admins only. A Member never sees it: the list names characters
+    // kept off the rail, which is a disclosure, and the switch could do nothing for
+    // them anyway. Device-local and instant (menubots.js).
+    document.getElementById('show-hidden-row')?.remove();
+    const advBody = body('app-adv-device');
+    if (!state.decoy && canAdmin() && advBody && state.bots.some((b) => b.hide_unlocked)) {
+      const cb = el('input', { type: 'checkbox', role: 'switch', id: 'show-hidden-bots' });
+      cb.checked = showHiddenBots();
+      cb.addEventListener('change', () => {
+        cb.checked = setShowHiddenBots(cb.checked);
+        renderSidebar();
+        // The open chat may belong to a character that just left the rail: keep it
+        // open (it is still reachable), only the rail changes.
+      });
+      const names = state.bots.filter((b) => b.hide_unlocked).map((b) => b.name).join(', ');
+      advBody.append(el('div', { class: 'bm-avatar-style dev-row', id: 'show-hidden-row', 'data-anchor': 'hidden-bots' }, [
+        el('label', { class: 'dev-row-text', for: 'show-hidden-bots' }, [
+          el('strong', { text: t('settings.show_hidden') }),
+          el('span', { class: 'dev-row-hint', text: t('settings.show_hidden_desc', { names }) }),
+        ]),
+        cb,
+      ]));
+    }
+
+    // Menu bar shortcuts: the 🎨 rail button (a row whose ONLY control is its
+    // pin — it ships pinned, pins.js `pinnedByDefault`, so the pin IS the
+    // setting) and the custom link buttons. Both unlocked only, matching the
+    // rail itself: Safe Mode hides the palette picker, and a locked device
+    // neither sees the link buttons nor the URLs behind them.
+    document.getElementById('theme-pin-row')?.remove();
+    document.getElementById('links-row')?.remove();
+    if (!state.decoy) {
+      const tRow = el('div', { class: 'bm-avatar-style dev-row', id: 'theme-pin-row' }, [
+        el('span', { class: 'dev-row-text' }, [
+          el('strong', { text: t('settings.theme_button') }),
+          el('span', { class: 'dev-row-hint', text: t('settings.theme_button_desc') }),
+        ]),
+      ]);
+      const tPin = pinToggle('theme', { t, onChange: renderPins });
+      if (tPin) tRow.append(tPin);
+      const lr = linksSection(t, { onChange: renderPins });
+      lr.classList.add('dev-row', 'dev-row-block');
+      tidyRowText(lr);
+      if (barBody) barBody.append(tRow, lr);
+    }
+    // In Safe Mode the bar group has nothing of its own to show (the pins that
+    // survive Safe Mode sit on their rows above), so the whole card goes.
+    const barGroup = document.getElementById('dev-group-bar');
+    if (barGroup) barGroup.hidden = !!state.decoy;
   }
-  // In Safe Mode the bar group has nothing of its own to show (the pins that
-  // survive Safe Mode sit on their rows above), so the whole card goes.
-  const barGroup = document.getElementById('dev-group-bar');
-  if (barGroup) barGroup.hidden = !!state.decoy;
 
-  // Notifications (Web Push): unlocked only, like the bar group above — in
-  // Safe Mode the row is not built and the card goes.
-  document.getElementById('push-row')?.remove();
-  const notifyGroup = document.getElementById('dev-group-notify');
-  if (notifyGroup) notifyGroup.hidden = !!state.decoy;
-  const pushEl = pushRow(t, { decoy: !!state.decoy, onToast: toast });
-  if (pushEl) document.getElementById('dev-body-notify')?.append(pushEl);
+  if (want('account')) {
+    // Notifications (Web Push): unlocked only, like the bar group above — in
+    // Safe Mode the row is not built and the card goes.
+    document.getElementById('push-row')?.remove();
+    const notifyGroup = document.getElementById('dev-group-notify');
+    if (notifyGroup) notifyGroup.hidden = !!state.decoy;
+    const pushEl = pushRow(t, { decoy: !!state.decoy, onToast: toast });
+    if (pushEl) document.getElementById('dev-body-notify')?.append(pushEl);
+  }
 
-  // Local viewer roots: same rules, rebuilt on every open so its contents
-  // reflect the current session and server config. Unlocked only.
-  document.getElementById('viewer-row')?.remove();
-  const filesGroup = document.getElementById('dev-group-files');
-  if (filesGroup) filesGroup.hidden = !isHostRole();
-  // The local viewer is host control (admin_system): the Owner's and the Admins', not a Member's.
-  if (isHostRole() && filesBody) filesBody.append(viewerSection());
+  if (want('system')) {
+    // Local viewer roots: same rules, rebuilt on every open so its contents
+    // reflect the current session and server config. Unlocked only.
+    document.getElementById('viewer-row')?.remove();
+    const filesGroup = document.getElementById('dev-group-files');
+    if (filesGroup) filesGroup.hidden = !isHostRole();
+    // The local viewer is host control (admin_system): the Owner's and the Admins', not a Member's.
+    if (isHostRole() && filesBody) filesBody.append(viewerSection());
+  }
 
-  // About: version + the source link. In the Device pane on purpose — it is the
-  // one settings tab a Safe-Mode session can open, so every user of the running
-  // program can see what it is, not just the operator. LAST: it is reference
-  // information, not a control. Its own title duplicates the group's, so the
-  // group heading is the one that shows.
-  document.getElementById('about-row')?.remove();
-  const ab = aboutRow(t);
-  ab.id = 'about-row';
-  ab.classList.add('dev-row', 'dev-row-block');
-  ab.querySelector('.about-title')?.remove();
-  (aboutBody || dom['spane-device'] || nr.parentNode).append(ab);
+  if (want('account')) {
+    // About: version + the source link. In the Device pane on purpose — it is the
+    // one settings tab a Safe-Mode session can open, so every user of the running
+    // program can see what it is, not just the operator. LAST: it is reference
+    // information, not a control. Its own title duplicates the group's, so the
+    // group heading is the one that shows.
+    document.getElementById('about-row')?.remove();
+    const ab = aboutRow(t);
+    ab.id = 'about-row';
+    ab.classList.add('dev-row', 'dev-row-block');
+    ab.querySelector('.about-title')?.remove();
+    (aboutBody || dom['spane-account']).append(ab);
+  }
 }
 
 /** Normalise a row built elsewhere (nim.js, privacy.js, links.js) from the
@@ -4260,18 +4290,18 @@ function viewerSection() {
   return wrap;
 }
 
-// Keep the Minimal-avatars control honest about who is driving it.
+// Keep the avatar-style control honest about who is driving it.
 //
-// NIM implies minimal avatars, so the box is ticked AND locked while NIM is on,
-// with the reason spelled out — a control that silently ignores you is worse
-// than one that explains why it cannot move.
+// NIM implies minimal avatars, so the select shows "Names only" AND is locked
+// while NIM is on, with the reason spelled out — a control that silently
+// ignores you is worse than one that explains why it cannot move.
 function syncMinimalAvatarRow() {
-  const box = dom['bm-avatar-minimal'];
-  if (!box) return;
+  const sel = dom['bm-avatar-select'];
+  if (!sel) return;
   const nim = nimEnabled();
-  box.checked = nim
-    || document.documentElement.getAttribute('data-avatar-style') === 'minimal';
-  box.disabled = nim;
+  const minimal = nim || document.documentElement.getAttribute('data-avatar-style') === 'minimal';
+  sel.value = minimal ? 'minimal' : 'rich';
+  sel.disabled = nim;
   const row = dom['bm-avatar-style-row'];
   if (row) {
     row.classList.toggle('is-forced', nim);
@@ -4344,42 +4374,39 @@ function syncLockNimRow() {
   }
 }
 
-// ===================== Settings tabs =====================
-// Six subjects that used to be spread across the gear rail (⚡ 🩺 🔌) and one
-// endless Settings scroll. Each is a pane; three of them are admin surfaces
-// that a Safe-Mode session must not even see — the same rule the rail buttons
-// they replace carried, enforced in applyAuthChrome().
+// ===================== Settings sections =====================
+// 3.2: seven sections in two groups (js/settings-nav.js SECTIONS) instead of a
+// thirteen-tab strip. Desktop shows a side nav beside the open section; a
+// phone opens on the nav as a list and drills into one section at a time.
+// Every id the old strip had is an alias (TAB_ALIASES), so a pinned Theme
+// button, the voice add-on's settings.open('voice') and an old deep link all
+// land in the section that holds those controls now; 'section#anchor' opens a
+// subsection.
 //
-// A tab OWNS its pane's lifecycle: activating mounts, leaving unmounts. That
-// matters for exactly one of them — the dashboard polls every 5s — and the
-// leave path has to fire on every way out of the modal, which is why
-// deactivation hangs off a MutationObserver on the backdrop rather than being
-// sprinkled through the seven places that hide it.
-// Order = the tab strip (2.3): day-to-day first, setup after, rare last. Add-in
-// tabs (shell.settings.pane with a new id) are spliced in before 'plugins'.
-const SETTINGS_TABS = ['bots', 'theme', 'device', 'voice', 'plugins', 'connections', 'agents', 'ai', 'reactions', 'health', 'people', 'security', 'settings'];
-const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
-// The tabs that live behind the PIN (Tools joined 2026-09-25, Voice in 2.2.0:
-// voice chat is unlocked-only, and so is the page explaining how to add it).
-// `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
-// 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
-// a Member is signed in but must not be offered tabs that can only 403.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'people', 'connections', 'agents', 'settings'];
-// Since 2026-10-19 voice is a Member's too ("Members should have voice"): the Voice tab shows for an
-// Owner/Admin always (the absent page explains how to add the add-on) and for anyone else who holds
-// use_voice once the add-on has mounted its pane (an absent add-on is nothing a Member can act on).
-// Never for a Restricted caller: a locked device gets voice on the call screen only.
-// Tabs that need host control (admin_system) on top of being an admin. Since 2026-10-19 an Admin
-// holds every permission the Owner has, so this is empty: Health (the dashboard) is theirs too.
+// A section OWNS its pane's lifecycle: activating mounts, leaving unmounts.
+// That matters for the health dashboard (it polls every 5s) and the reaction
+// manager, and the leave path has to fire on every way out of the modal,
+// which is why deactivation hangs off a MutationObserver on the backdrop.
+const SETTINGS_TABS = [...SECTION_IDS];          // add-in tabs are pushed in after these
+const CORE_SETTINGS_TABS = RESERVED_TAB_IDS;     // sections + every old id: no add-in may take one
+// The household sections: the Owner and Admins (canAdmin). A Member is signed in but
+// must not be offered sections that can only 403. Add-in tabs join unless public.
+const ADMIN_TABS = SECTIONS.filter((s) => s.perm === 'admin').map((s) => s.id);
+// Since 2026-10-19 voice is a Member's too: the Voice section shows for an Owner/Admin
+// always (the absent page explains how to add the add-on) and for anyone else who
+// holds use_voice once the add-on has mounted its pane. Never for a Restricted caller.
+// Sections that need host control (admin_system) on top of being an admin. Since
+// 2026-10-19 an Admin holds every permission the Owner has, so this is empty.
 const OWNER_TABS = [];
-// 3.0: the Bots tab is the character editor (GET /api/bots/all needs manage_characters). A Member
-// opens Settings for Theme / Device / Security and lands on the first of those instead.
-const CHARACTER_TABS = ['bots'];
-let settingsTab = 'bots';
+// The character editor (GET /api/bots/all needs manage_characters).
+const CHARACTER_TABS = ['characters'];
+let settingsTab = 'appearance';
+// Phone: true while the section LIST is on screen (no pane open).
+let settingsListView = false;
 /** Host control (admin_system): the Owner and Admins. */
 const isHostRole = () => canAdmin();
-/** Where Settings opens when no tab (or a tab this profile cannot have) is asked for. */
-const homeSettingsTab = () => (state.decoy || canAdmin() ? 'bots' : 'theme');   // Restricted never opens Settings
+/** Where Settings opens when no section (or one this profile cannot have) is asked for. */
+const homeSettingsTab = () => 'appearance';     // the first section, everyone's
 /** Does this session hold `perm`? From /api/auth/status `permissions` (["*"] on an open install);
  *  an older server without the field answers by role. */
 const sessionCan = (perm) => {
@@ -4398,34 +4425,106 @@ function syncVoiceTab() {
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
 const settingsPane = (id) => dom[`spane-${id}`] || document.getElementById(`spane-${id}`);
+/** Is the side nav a list of its own (phone width) rather than a column beside the pane? */
+const settingsCompact = () => {
+  try { return window.matchMedia('(max-width: 899px)').matches; } catch { return isMobile(); }
+};
 
-/** Is the Settings modal open, on tab `id` (or on any tab, if `id` is null)? */
+/** Is the Settings modal open, on section `id` (or on any, if `id` is null)? Old ids count. */
 function settingsOpen(id = null) {
   if (dom['botmanager-backdrop'].classList.contains('hidden')) return false;
-  return id === null || settingsTab === id;
+  if (id === null) return true;
+  return !settingsListView && settingsTab === resolveSettingsTarget(id).id;
 }
 
-/** Tear down whatever the ACTIVE tab has running. Idempotent by design: it is
- *  called on every tab switch and again when the modal closes. */
+/** Tear down whatever the ACTIVE section has running. Idempotent by design: it is
+ *  called on every switch, on Back to the list, and again when the modal closes. */
 function deactivateSettingsTab() {
-  if (settingsTab === 'health') unmountDashboard();
-  if (settingsTab === 'reactions') unmountReactionManager();
+  if (settingsTab === 'system') unmountDashboard();
+  if (settingsTab === 'characters') unmountReactionManager();
   if (settingsTab === 'voice' && voicePaneHost) voicePaneHost.hide();
   const addin = addinTabs && addinTabs.host(settingsTab);
   if (addin) addin.hide();
 }
 
-/** Bring `id` on screen: swap the tablist state, swap the panes, swap the
- *  footer group, then let the tab's module take over its pane. */
-async function setSettingsTab(id, { focusTab = false } = {}) {
-  if (!SETTINGS_TABS.includes(id)) id = 'bots';
-  // A hidden (Safe Mode) tab is not a destination — fall back to the roster.
-  // Resolve the button AFTER that swap, or focus and scroll-into-view would
-  // both aim at the tab we just refused to open.
+// ---- per-device memory: the last section, and which Advanced disclosures are open ----
+const SETTINGS_LAST_KEY = 'dispatch-settings-last';
+const SETTINGS_ADV_KEY = 'dispatch-settings-adv';
+function rememberSection(id) {
+  try { localStorage.setItem(SETTINGS_LAST_KEY, id); } catch { /* private mode */ }
+}
+function lastSection() {
+  try { return localStorage.getItem(SETTINGS_LAST_KEY) || ''; } catch { return ''; }
+}
+function advOpenSet() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_ADV_KEY) || '[]');
+    return new Set(Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+  } catch { return new Set(); }
+}
+function setAdvOpen(id, open) {
+  const s = advOpenSet();
+  if (open) s.add(id); else s.delete(id);
+  try { localStorage.setItem(SETTINGS_ADV_KEY, JSON.stringify([...s])); } catch { /* private mode */ }
+}
+
+/** Phone: show the list (pane = false) or the open section (pane = true). Desktop
+ *  always shows both, so this only moves the data-view attribute and the header. */
+let settingsPaneHistoryPop = null;
+function showSettingsView(pane) {
+  const modal = dom['botmanager'];
+  if (!modal) return;
+  const compact = settingsCompact();
+  settingsListView = compact && !pane;
+  modal.dataset.view = settingsListView ? 'list' : 'pane';
+  const back = dom['settings-back'];
+  if (back) back.hidden = !(compact && pane);
+  const title = dom['settings-title-pane'];
+  if (title) {
+    const btn = settingsTabBtn(settingsTab);
+    const label = btn && btn.querySelector('.stab-label');
+    title.textContent = label ? label.textContent : '';
+    title.hidden = !(compact && pane);
+    modal.querySelector('.settings-title-root')?.toggleAttribute('hidden', compact && pane);
+  }
+  // Hardware Back on a phone returns to the list instead of closing Settings.
+  if (compact && pane && !settingsPaneHistoryPop) {
+    settingsPaneHistoryPop = historyPush(null, 'settings-pane', () => {
+      settingsPaneHistoryPop = null;
+      backToSettingsList({ fromHistory: true });
+    });
+  } else if (!(compact && pane) && settingsPaneHistoryPop) {
+    const pop = settingsPaneHistoryPop;
+    settingsPaneHistoryPop = null;
+    pop();
+  }
+}
+
+/** Phone: leave the open section for the list (the header ‹, or Back). */
+function backToSettingsList({ fromHistory = false } = {}) {
+  if (fromHistory) settingsPaneHistoryPop = null;
+  deactivateSettingsTab();
+  for (const tab of SETTINGS_TABS) settingsPane(tab)?.classList.add('hidden');
+  showSettingsView(false);
+  paintSettingsSummaries();
+  const btn = settingsTabBtn(settingsTab);
+  if (btn) { try { btn.focus({ preventScroll: true }); } catch { /* ignore */ } }
+}
+
+/** Bring `target` on screen: 'appearance', an old id ('theme', 'bots') or
+ *  'section#anchor'. Swaps the tablist state and the panes, then lets the
+ *  section's modules take over, then opens and scrolls to the anchor. */
+async function setSettingsTab(target, { focusTab = false } = {}) {
+  let { id, anchor } = resolveSettingsTarget(target);
+  if (!id || !SETTINGS_TABS.includes(id)) { id = homeSettingsTab(); anchor = ''; }
+  // A hidden section (a Member's household one) is not a destination. Resolve the
+  // button AFTER that swap, or focus and scroll would aim at the refused one.
   let btn = settingsTabBtn(id);
-  if (!btn || btn.classList.contains('hidden')) { id = homeSettingsTab(); btn = settingsTabBtn(id); }
+  if (!btn || btn.classList.contains('hidden')) { id = homeSettingsTab(); anchor = ''; btn = settingsTabBtn(id); }
+  const fresh = id !== settingsTab || settingsListView;
   if (id !== settingsTab) deactivateSettingsTab();
   settingsTab = id;
+  rememberSection(id);
 
   for (const tab of SETTINGS_TABS) {
     const b = settingsTabBtn(tab);
@@ -4439,94 +4538,60 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
     }
     if (p) p.classList.toggle('hidden', !on);
   }
-  // Contextual footer. An empty group means no actions for this tab, and the
-  // footer collapses rather than showing an empty bar.
-  let anyAction = false;
-  dom['bm-footer'].querySelectorAll('.settings-actions').forEach((g) => {
-    const on = g.dataset.tab === id;
-    g.classList.toggle('hidden', !on);
-    if (on) anyAction = true;
-  });
-  dom['bm-footer'].classList.toggle('hidden', !anyAction);
-
+  showSettingsView(true);
   if (focusTab && btn) { try { btn.focus(); } catch { /* ignore */ } }
-  // On a phone the strip is wider than the screen, so the tab you just chose
-  // (with an arrow key, or by opening Settings straight onto it) can be off it.
-  if (btn && btn.scrollIntoView) {
-    try { btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* ignore */ }
-  }
-  updateTabStripEdges();
 
-  // Reset the pane's scroll: arriving halfway down the previous tab's scroll
-  // offset reads as a broken page.
+  // Arriving halfway down the previous section's scroll offset reads as a broken page.
   const pane = settingsPane(id);
-  if (pane) pane.scrollTop = 0;
+  if (pane && fresh) pane.scrollTop = 0;
 
   switch (id) {
-    case 'bots':
-      if (!state.decoy) mountStarterPacks(pane, characterCtx());
-      break;
-    case 'connections':
-      await mountConnections(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), openTab: (tab) => setSettingsTab(tab),
-        onChanged: () => {},
-      });
-      break;
-    case 'settings':
-      await mountSettingsSchema(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), openTab: (tab) => setSettingsTab(tab), role: state.role,
-      });
-      break;
-    case 'reactions':
-      await mountReactionManager(pane);
-      break;
-    case 'health':
-      await mountDashboard(pane, dom['sfoot-health'], dashCtx());
-      break;
-    case 'ai':
-      await activateLlmPanel(llmCtx());
-      break;
-    case 'plugins':
-      // plugins.js builds the three groups; the Tools table inside it is still
-      // tools.js's (the draft and the Save, PUT /api/tools).
-      await mountPluginsSettings(pane, {
-        mountTools: (host) => mountToolsSettings(host),
-        toast, openTab: (tab) => setSettingsTab(tab),
-        onGuide: () => resync(),
-      });
-      break;
-    case 'device':
-      mountLanguagePicker();
-      // Reflect the LIVE attribute, not just localStorage — the theme module
-      // can have changed it since this modal was last opened.
-      //
-      // EXCEPT under No-Image Mode, which BORROWS this attribute to reuse the
-      // minimal-avatar rules (see nim.js applyNim). Reflecting the borrowed
-      // value made this checkbox claim a stored preference the user never set,
-      // and worse, unticking it wrote that lie to disk AND stripped the
-      // attribute out from under NIM — leaving a desktop bot rail sized for
-      // pictures with every picture hidden, i.e. a blank column. So while NIM
-      // is on the control shows what is true (avatars are minimal) and refuses
-      // to be the thing that changes it.
+    case 'appearance':
+      mountLanguagePicker('appearance');
+      // Reflect the LIVE attribute, not just localStorage (see syncMinimalAvatarRow:
+      // No-Image Mode BORROWS that attribute, and this control must not claim it).
       syncMinimalAvatarRow();
+      paintAppearanceAdvanced();
+      break;
+    case 'account':
+      mountLanguagePicker('account');
+      activateSecurityPane({ focusField: false });
+      paintAccountWho();
       break;
     case 'voice':
-      // The voice add-on's own pane when it is mounted; otherwise the page
-      // that says how to add it, from a fresh read of /api/extensions.
+      // The add-on's own pane when it is mounted; otherwise how to add it.
       showVoiceTab();
       break;
-    case 'agents':
-      await mountAgentsSettings(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), isOwner: isHostRole(),
-      });
+    case 'characters':
+      mountCharactersSection(pane);
+      break;
+    case 'connections':
+      await mountConnectionsSection(pane);
       break;
     case 'people':
       await mountPeopleSettings(pane, {
         toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role,
+        extraGroups: () => peopleRuleGroups(),
+        collapseActivity: true,
       });
+      mountSchemaHosts(pane);
       break;
-    case 'security':
-      activateSecurityPane({ focusField: !focusTab });
+    case 'plugins':
+      // plugins.js builds the groups; the tools table inside it is tools.js's.
+      await mountPluginsSettings(pane, {
+        mountTools: (host, o) => mountToolsSettings(host, o),
+        toolSettingsFeatures: ['harness', 'studioforge', 'mail', 'practice'],
+        toolSettings: (feature, host) => mountSchemaRows(host, {
+          section: 'plugins', anchor: `tool:${feature}`, role: state.role, toast,
+        }),
+        toast, openTab: (tab) => setSettingsTab(tab),
+        onGuide: () => resync(),
+      });
+      mountSchemaHosts(pane);
+      break;
+    case 'system':
+      mountLanguagePicker('system');   // the local viewer row lives under System -> Advanced
+      await mountSystemSection(pane);
       break;
     default: {
       // An add-in's own tab: its pane host fires the add-in's onShow.
@@ -4534,33 +4599,76 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
       if (addin) addin.show();
     }
   }
+  wireAdvancedDisclosures(pane);
+  if (anchor) revealSettingsAnchor(pane, anchor);
 }
 
-/** Edge fades + the ‹ / › buttons of the tab strip (js/tabstrip.js).
- *
- *  Ten tabs are ~800px of strip, more than a phone and more than the desktop
- *  dialog, and the strip has no scrollbar. Before 2.3.5 a 22px fade was the
- *  only sign of the rest, and a mouse could not reach Security at all. The
- *  strip now measures itself and shows an arrow at whichever end has more.
- */
-let tabStrip = null;
-function updateTabStripEdges() {
-  if (tabStrip) tabStrip.update();
+/** Open `anchor` inside `pane` (a data-anchor name, or key:<schema key>): any
+ *  closed <details> around it opens, it scrolls into view and flashes once. */
+function revealSettingsAnchor(pane, anchor, tries = 0) {
+  if (!pane || !anchor) return;
+  const sel = anchor.startsWith('key:')
+    ? `[data-key="${CSS.escape(anchor.slice(4))}"]`
+    : `[data-anchor="${CSS.escape(anchor)}"]`;
+  const node = pane.querySelector(sel);
+  if (!node) {
+    // Schema rows and module-built groups arrive after a fetch: look again shortly.
+    if (tries < 20) setTimeout(() => revealSettingsAnchor(pane, anchor, tries + 1), 100);
+    return;
+  }
+  for (let n = node; n && n !== pane; n = n.parentElement) {
+    if (n.tagName === 'DETAILS' && !n.open) { n.open = true; n.dispatchEvent(new Event('toggle')); }
+  }
+  if (node.tagName === 'DETAILS' && !node.open) { node.open = true; node.dispatchEvent(new Event('toggle')); }
+  try { node.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch { /* ignore */ }
+  node.classList.remove('settings-flash');
+  void node.offsetWidth;
+  node.classList.add('settings-flash');
+  setTimeout(() => node.classList.remove('settings-flash'), 1600);
 }
 
+/** Advanced ▸ disclosures remember, per device, whether they were left open. */
+function wireAdvancedDisclosures(root) {
+  if (!root) return;
+  const open = advOpenSet();
+  for (const d of root.querySelectorAll('details.settings-adv[data-adv]')) {
+    if (!d._advWired) {
+      d._advWired = true;
+      d.open = open.has(d.dataset.adv);
+      d.addEventListener('toggle', () => setAdvOpen(d.dataset.adv, d.open));
+    }
+  }
+}
+
+/** The one-line summaries the phone list shows under each section name. */
+function paintSettingsSummaries() {
+  const put = (id, text) => { const n = document.getElementById(`ssum-${id}`); if (n && text) n.textContent = text; };
+  try {
+    const slug = document.documentElement.getAttribute('data-palette') || '';
+    const ui = window.UITheme;
+    const theme = ui && typeof ui.list === 'function' ? ui.list().find((x) => x && x.slug === slug) : null;
+    const language = LANGUAGES.find((l) => l.code === i18nLang());
+    put('appearance', [(theme && theme.name) || slug, language && language.native].filter(Boolean).join(' · '));
+  } catch { /* summaries are decoration */ }
+  const prof = state.auth && state.auth.profile;
+  const roleName = t(`role.${state.role || 'owner'}`);
+  put('account', prof && prof.name && prof.name !== roleName ? `${prof.name} · ${roleName}` : roleName);
+  if (canAdmin()) put('characters', t('settings.sum_characters', { count: (bmBots || []).length }));
+}
+
+let settingsSearch = null;
 function wireSettingsTabs() {
   const list = dom['settings-tabs'];
   wireAddinTabs();
   list.querySelectorAll('.settings-tab').forEach((b) => {
     b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
   });
-  tabStrip = wireTabStrip({
-    list,
-    prev: document.getElementById('stab-prev'),
-    next: document.getElementById('stab-next'),
-  });
-  // Arrow-key navigation over the VISIBLE tabs only: in Safe Mode the three
-  // admin tabs aren't rendered, and stepping onto one would be a dead stop.
+  // The mic glyph is the voice add-on's own icon, not a RAIL_ICONS entry.
+  const mic = list.querySelector('.stab-glyph-mic');
+  if (mic && !mic.querySelector('svg')) mic.replaceChildren(railIcon(MIC_ICON));
+  iconifyDataIcons(dom['botmanager']);
+  // Arrow keys over the VISIBLE sections only: a Member's household ones are not
+  // rendered, and stepping onto one would be a dead stop.
   list.addEventListener('keydown', (e) => {
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'];
     if (!keys.includes(e.key)) return;
@@ -4568,7 +4676,6 @@ function wireSettingsTabs() {
       .filter((b) => !b.classList.contains('hidden'));
     if (!tabs.length) return;
     const cur = Math.max(0, tabs.findIndex((b) => b.dataset.tab === settingsTab));
-    // ← and → follow the writing direction, so an RTL locale's "next" is left.
     const rtl = document.documentElement.getAttribute('dir') === 'rtl';
     const fwd = (e.key === 'ArrowDown') || (e.key === (rtl ? 'ArrowLeft' : 'ArrowRight'));
     const back = (e.key === 'ArrowUp') || (e.key === (rtl ? 'ArrowRight' : 'ArrowLeft'));
@@ -4580,74 +4687,119 @@ function wireSettingsTabs() {
     e.preventDefault();
     setSettingsTab(tabs[next].dataset.tab, { focusTab: true });
   });
+  if (dom['settings-back']) dom['settings-back'].addEventListener('click', () => backToSettingsList());
+  // Crossing the phone breakpoint with Settings open: re-derive list vs pane.
+  try {
+    window.matchMedia('(max-width: 899px)').addEventListener('change', () => {
+      if (!settingsOpen()) return;
+      if (settingsCompact()) showSettingsView(true);
+      else setSettingsTab(settingsTab);
+    });
+  } catch { /* old engine */ }
+
+  settingsSearch = mountSettingsSearch({
+    input: dom['settings-search'],
+    results: dom['settings-search-results'],
+    t,
+    index: async () => {
+      let schema = null;
+      if (sessionCan('manage_settings') && canAdmin()) {
+        try { schema = await schemaApi.settingsSchema(); } catch { schema = null; }
+      }
+      return buildSearchIndex({
+        t, schema,
+        allowed: (section, perm) => {
+          const b = settingsTabBtn(section);
+          if (!b || b.classList.contains('hidden')) return false;
+          return perm !== 'admin' || canAdmin();
+        },
+        sectionLabel: (sid) => t((SECTIONS.find((s) => s.id === sid) || {}).label || sid),
+      });
+    },
+    go: (e) => setSettingsTab(e.anchor ? `${e.section}#${e.anchor}` : e.section),
+  });
 
   // The one place deactivation is wired, so no exit path can leak the
   // dashboard's 5s poll: closeAllOverlays(), a failed-save hide, the File
   // Server takeover and reboot() all hide this backdrop directly.
   new MutationObserver(() => {
-    if (dom['botmanager-backdrop'].classList.contains('hidden')) deactivateSettingsTab();
+    if (dom['botmanager-backdrop'].classList.contains('hidden')) {
+      deactivateSettingsTab();
+      if (settingsPaneHistoryPop) { const pop = settingsPaneHistoryPop; settingsPaneHistoryPop = null; pop(); }
+      if (settingsSearch) settingsSearch.close();
+    }
   }).observe(dom['botmanager-backdrop'], { attributes: true, attributeFilter: ['class'] });
 }
 
 let bmBots = [];
-// Order / visibility / Safe edits live only in bmBots until "Save" — track a
-// dirty flag so ✕ / backdrop / Esc can warn instead of silently discarding.
-let bmDirty = false;
-async function openBotManager(tab = 'bots') {
+async function openBotManager(tab = null) {
   if (canAdmin()) {
     try {
       const r = await api.allBots();
       bmBots = r.bots.slice();
     } catch (e) { toast(e.message, true); return; }
   } else {
-    // A Member: no character editor (that call is manage_characters and would 403, which
-    // used to stop Settings from opening at all), but Theme, Device and Security are theirs.
+    // A Member: no character editor (that call is manage_characters and would 403),
+    // but Appearance, Account and (with the add-on) Voice are theirs.
     bmBots = [];
-    if (CHARACTER_TABS.includes(tab)) tab = homeSettingsTab();
+    if (tab && CHARACTER_TABS.includes(resolveSettingsTarget(tab).id)) tab = null;
   }
-  bmDirty = false;
   renderBotManager();
-  refreshAvatarPoolPanel();     // async; fills in the Avatar pools section
+  refreshAvatarPoolPanel();     // async; fills in the Avatar pools subsection
+  if (settingsSearch) settingsSearch.reset();
+  invalidateSchema();
   dom['botmanager-backdrop'].classList.remove('hidden');
-  // After the reveal: setSettingsTab mounts panes, and a pane that measures
-  // itself (the dashboard's cards) needs a laid-out box to measure.
-  await setSettingsTab(tab);
-}
-// Dismiss without saving; confirms first when there are unsaved edits.
-async function closeBotManager() {
-  if ((bmDirty || toolsSettingsDirty()) && !dom['botmanager-backdrop'].classList.contains('hidden')) {
-    if (!await uiConfirm(t('settings.discard_confirm'), { okText: t('common.discard'), danger: true })) return;
+  paintSettingsSummaries();
+  // After the reveal: a pane that measures itself (the dashboard's cards) needs a
+  // laid-out box. No section asked for: a phone shows the list, a desktop the
+  // section this device used last.
+  if (!tab && settingsCompact()) {
+    settingsListView = true;
+    for (const t2 of SETTINGS_TABS) settingsPane(t2)?.classList.add('hidden');
+    for (const t2 of SETTINGS_TABS) {
+      const b = settingsTabBtn(t2);
+      if (b) { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); b.tabIndex = -1; }
+    }
+    const first = Array.from(dom['settings-tabs'].querySelectorAll('.settings-tab')).find((b) => !b.classList.contains('hidden'));
+    if (first) first.tabIndex = 0;
+    showSettingsView(false);
+    return;
   }
-  bmDirty = false;
+  await setSettingsTab(tab || lastSection() || homeSettingsTab());
+}
+// Every change applies when it is made, so closing never discards anything.
+async function closeBotManager() {
   dom['botmanager-backdrop'].classList.add('hidden');   // observer deactivates
 }
-/** Open Settings straight onto a tab. This is what the modules' legacy entry
- *  points (openManager / openDashboard / openLlmPanel) and the first-run card
- *  now route through, so every old caller lands in the right place. */
+/** Open Settings straight onto a section (or an old tab id). This is what the
+ *  modules' legacy entry points (openManager / openDashboard / openLlmPanel),
+ *  the pins and the first-run card route through. */
 function openSettingsTab(tab) {
-  // Silent in Safe Mode, not a "unlock to do that" toast. A locked device
-  // cannot reach any of these callers anyway (the gear routes to Companions),
-  // and the whole point of the locked view is that it gives no sign there is
-  // an admin surface behind it.
+  // Silent for a Restricted session, not an "unlock to do that" toast: a locked
+  // device cannot reach any of these callers (the gear routes to Companions).
   if (state.decoy) return;
-  if (settingsOpen()) { setSettingsTab(tab); return; }
+  if (settingsOpen() || (!dom['botmanager-backdrop'].classList.contains('hidden'))) { setSettingsTab(tab); return; }
   openBotManager(tab);
 }
+// ---- Settings -> Characters: the roster ----
+// One compact row per character: drag handle (▲/▼ in Reorder mode on a phone),
+// picture, name with small read-only feature icons, a "Who can see it" select,
+// Details (features, model, description, profiles) and a ⋯ menu (Change photo,
+// Rename, Personality, Remove). Everything applies when it is changed: order,
+// visibility and features through POST /api/bots/order, the rest through the
+// modules' own PATCH routes.
+let charsReorder = false;             // phone: show ▲/▼ instead of relying on drag
+const bmOpenDetails = new Set();      // bot ids whose Details drawer is open (survives a rebuild)
+
 function renderBotManager() {
   const list = dom['bm-list'];
+  if (!list) return;
   list.innerHTML = '';
+  list.classList.toggle('reordering', charsReorder);
   bmBots.forEach((bot, idx) => {
-    // The avatar itself is the primary "change photo" affordance — clicking it
-    // opens the file picker + crop flow (discoverable without hunting for a
-    // tiny icon). A letter-block fallback covers a missing/broken image.
-    //
-    // In No-Image Mode this is a letter block with NO picker attached. Settings
-    // was the one screen that still showed every bot's photograph while the
-    // rest of the app showed none — the picture was the button, so hiding the
-    // picture and keeping the click would have left an invisible control.
-    // Offering "change photo" on a device that cannot display photos is
-    // incoherent anyway, so the affordance goes with it. Nothing is lost: turn
-    // NIM off and the picker is back.
+    // The picture is the "change photo" affordance; in No-Image Mode it is a
+    // letter block with no picker attached (a device that shows no photos is not
+    // offered one to set).
     let avatarImg;
     if (nimEnabled()) {
       avatarImg = tintLetterAvatar(
@@ -4661,58 +4813,38 @@ function renderBotManager() {
         avatarImg.replaceWith(fb);
       });
     }
-    // Visibility (2.4.2): two independent switches, decided only here (the
-    // Bot Manager opens only when unlocked). "Show locked" is the `safe` flag
-    // — the server-enforced Safe-Mode gate (a locked device lists and reaches
-    // only these bots; their turns there run locked). "Show unlocked" is the
-    // inverse of `hide_unlocked` — a display choice for unlocked devices.
-    // Neither on = shown nowhere: the row stays here, dimmed and labelled
-    // Hidden, and its chats still open by URL on an unlocked device.
-    const hiddenTag = el('span', { class: 'bm-hidden-tag', text: t('settings.hidden_badge'),
-      title: t('settings.hidden_title') });
-    // 3.0: read-only caption of who sees this character, derived from the two
-    // switches below (restricted only = both on the Restricted side, everyone = both audiences,
-    // members = not shown to Restricted at all).
-    const audienceTag = el('span', { class: 'bm-audience', 'data-audience': '' });
-    const paintHidden = () => {
-      const none = shownNowhere(bmBots[idx]);
-      row.classList.toggle('bm-row--hidden', none);
-      hiddenTag.hidden = !none;
-      const aud = audienceOf(bmBots[idx]);
-      audienceTag.dataset.audience = aud;
-      audienceTag.textContent = t(`settings.audience_${aud}`);
-    };
-    const lockedBtn = el('button', {
-      class: 'bm-safe-btn bm-vis-locked' + (bot.safe ? ' on' : ''),
-      title: t('settings.show_locked_title'),
-      'aria-pressed': String(!!bot.safe),
-      onclick: (e) => {
-        e.stopPropagation();
-        bmBots[idx].safe = !bmBots[idx].safe;
-        lockedBtn.classList.toggle('on', bmBots[idx].safe);
-        lockedBtn.setAttribute('aria-pressed', String(bmBots[idx].safe));
-        paintHidden();
-        bmDirty = true;
-      },
-    }, iconLabel(RAIL_ICONS.lock, t('settings.show_locked_badge')));
-    const unlockedBtn = el('button', {
-      class: 'bm-safe-btn bm-vis-unlocked' + (!bot.hide_unlocked ? ' on' : ''),
-      title: t('settings.show_unlocked_title'),
-      'aria-pressed': String(!bot.hide_unlocked),
-      onclick: (e) => {
-        e.stopPropagation();
-        bmBots[idx].hide_unlocked = !bmBots[idx].hide_unlocked;
-        unlockedBtn.classList.toggle('on', !bmBots[idx].hide_unlocked);
-        unlockedBtn.setAttribute('aria-pressed', String(!bmBots[idx].hide_unlocked));
-        paintHidden();
-        bmDirty = true;
-      },
-    }, iconLabel(RAIL_ICONS.unlock, t('settings.show_unlocked_badge')));
-    // ▲/▼ move buttons: HTML5 DnD never fires on touch, so these are the
-    // reorder affordance that works everywhere (drag still works on desktop).
+    // Who can see it: one select for the two server flags (lossless, see
+    // characters.js whoCanSee/flagsForWho). Widening to Restricted asks first.
+    const who = el('select', {
+      class: 'ui-select bm-who', 'aria-label': t('chars.who_aria', { name: bot.name }),
+      title: t('chars.who_title'),
+    }, WHO_OPTIONS.map((o) => el('option', { value: o, text: t(`chars.who_${o}`) })));
+    who.value = whoCanSee(bot);
+    who.addEventListener('change', async () => {
+      const from = whoCanSee(bmBots[idx]);
+      const to = who.value;
+      if (widensToRestricted(from, to)
+          && !await uiConfirm(t('chars.who_confirm', { name: bot.name }), { okText: t('chars.who_confirm_ok') })) {
+        who.value = from;
+        return;
+      }
+      Object.assign(bmBots[idx], flagsForWho(to));
+      paintRow();
+      saveRoster({
+        toastKey: 'chars.who_saved', vars: { name: bot.name, who: t(`chars.who_${to}`) },
+        undo: () => { Object.assign(bmBots[idx], flagsForWho(from)); renderBotManager(); saveRoster({ quiet: true }); },
+      });
+    });
+    const narrowed = (bot.profiles || []).length
+      ? el('span', { class: 'bm-narrow', title: t('chars.who_profiles_title'), text: t('chars.who_profiles', { count: bot.profiles.length }) })
+      : null;
+    const paintRow = () => { row.classList.toggle('bm-row--hidden', whoCanSee(bmBots[idx]) === 'hidden'); };
+
+    // ▲/▼: HTML5 drag never fires on touch, so these are the reorder affordance that
+    // works everywhere; shown on a phone in Reorder mode, always on a desktop row's hover.
     const moveBtn = (dir) => {
       const b = el('button', {
-        class: 'bm-move-btn', text: dir < 0 ? '▲' : '▼',
+        type: 'button', class: 'bm-move-btn', text: dir < 0 ? '▲' : '▼',
         title: t(dir < 0 ? 'settings.move_up' : 'settings.move_down'),
         'aria-label': t(dir < 0 ? 'settings.move_up_aria' : 'settings.move_down_aria', { name: bot.name }),
       });
@@ -4723,132 +4855,284 @@ function renderBotManager() {
         if (to < 0 || to >= bmBots.length) return;
         const [moved] = bmBots.splice(idx, 1);
         bmBots.splice(to, 0, moved);
-        bmDirty = true;
         renderBotManager();
+        const again = dom['bm-list'].querySelectorAll('.bm-row')[to];
+        const same = again && again.querySelector(`.bm-move-btn:nth-child(${dir < 0 ? 1 : 2})`);
+        if (same && !same.disabled) same.focus();
+        saveRoster({ quiet: true, debounce: true });
       });
       return b;
     };
-    // Per-bot reaction images. Off for every bot by default — a
-    // reaction interrupts every screen in the house, so it's opt-in per bot.
-    const rxBtn = el('button', {
-      class: 'bm-safe-btn' + (bot.reactions ? ' on' : ''),
-      title: t('settings.react_title'),
-      onclick: (e) => {
-        e.stopPropagation();
-        bmBots[idx].reactions = !bmBots[idx].reactions;
-        rxBtn.classList.toggle('on', bmBots[idx].reactions);
-        bmDirty = true;
-      },
-    }, iconLabel(RAIL_ICONS.bolt, t('settings.react_badge')));
-    // Per-bot avatar pool: new chats draw a one-shot face of their own. Also
-    // opt-in — a pool only makes sense for a companion with a curated look.
-    const apBtn = el('button', {
-      class: 'bm-safe-btn' + (bot.avatar_pool ? ' on' : ''),
-      title: t('settings.pool_title'),
-      onclick: (e) => {
-        e.stopPropagation();
-        bmBots[idx].avatar_pool = !bmBots[idx].avatar_pool;
-        apBtn.classList.toggle('on', bmBots[idx].avatar_pool);
-        bmDirty = true;
-      },
-    }, iconLabel(RAIL_ICONS.images, t('settings.pool_badge')));
-    // Per-bot pictures ([[pic:…]], 2.3.7). Needs an image generator
-    // (Settings → AI models → Image generation); without one the bot is never
-    // told about the marker, and a stray one leaves a "needs" note instead.
-    const picBtn = el('button', {
-      class: 'bm-safe-btn' + (bot.image_jobs ? ' on' : ''),
-      title: t('settings.pics_title'),
-      onclick: (e) => {
-        e.stopPropagation();
-        bmBots[idx].image_jobs = !bmBots[idx].image_jobs;
-        picBtn.classList.toggle('on', bmBots[idx].image_jobs);
-        bmDirty = true;
-      },
-    }, iconLabel(RAIL_ICONS.images, t('settings.pics_badge')));
-    // Placement badge. DEVICE-local, unlike its neighbours: it writes straight
-    // to localStorage and repaints, rather than joining bmDirty and waiting for
-    // Save, because there is nothing server-side to save. Off in Safe Mode —
-    // parked bots are ignored there, so offering to move a bot into the popup would
-    // promise something the tier cannot deliver.
-    const mbBtn = state.decoy ? null : el('button', {
-      class: 'bm-safe-btn' + (isMenuBot(bot.id) ? ' on' : ''),
-      text: t('settings.menu_badge'),
-      title: t('settings.menu_title'),
-      onclick: (e) => {
-        e.stopPropagation();
-        mbBtn.classList.toggle('on', toggleMenuBot(bot.id));
-        renderSidebar();
-      },
+
+    // Feature icons: read-only, so the row says what a character does without
+    // carrying a switch for each (they live in Details).
+    const icons = [];
+    const icon = (on, ic, key) => { if (on) icons.push(el('span', { class: 'bm-feat', title: t(key), 'aria-label': t(key) }, [railIcon(ic)])); };
+    icon(bot.reactions, RAIL_ICONS.bolt, 'chars.feat_reactions');
+    icon(bot.avatar_pool, RAIL_ICONS.avatars, 'chars.feat_pool');
+    icon(bot.image_jobs, RAIL_ICONS.images, 'chars.feat_pictures');
+    icon(backendKind(bot) === 'direct' && bot.tools !== false, RAIL_ICONS.search, 'chars.feat_lookups');
+    icon(typeof bot.voice === 'string' && bot.voice !== '', MIC_ICON, 'chars.feat_voice');
+
+    const ctl = rowControls(bot, botEditCtx());
+    const detailsBtn = el('button', {
+      type: 'button', class: 'btn-secondary bm-details-btn', text: t('chars.details'),
+      'aria-expanded': String(bmOpenDetails.has(bot.id)), 'aria-label': t('chars.details_open', { name: bot.name }),
     });
-    // Extensions' per-bot controls (the voice add-on's Voice pill): unlocked
-    // only, never for a Safe-Mode bot. A change waits for Save like its
-    // neighbours, and only the extension-owned fields can be set this way.
-    const extras = state.decoy ? [] : botRowExtrasFor(bmBots[idx], (patch) => {
-      for (const [k, v] of Object.entries(patch || {})) {
-        if (!EXT_BOT_FIELDS.includes(k) || typeof v !== 'string') continue;
-        bmBots[idx][k] = v;
-        (bmBots[idx]._extDirty ||= new Set()).add(k);
-        bmDirty = true;
-      }
+    const moreBtn = el('button', {
+      type: 'button', class: 'icon-btn ghost bm-more-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+      title: t('chars.more_title'), 'aria-label': t('chars.more_aria', { name: bot.name }),
+    }, [railIcon(RAIL_ICONS.menu)]);
+    moreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const items = [];
+      if (!nimEnabled()) items.push({ label: t('settings.change_photo_short'), run: () => pickAvatarFile(bot.id) });
+      items.push({ label: t('bots_edit.edit_title'), run: () => ctl.edit.click() });
+      if (ctl.persona) items.push({ label: t('persona.button_title'), run: () => ctl.persona.click() });
+      items.push({ label: t('bots_edit.remove'), run: () => ctl.remove.click(), danger: true });
+      openRowMenu(moreBtn, items);
     });
-    // 2.3 inline editing (js/bots-edit.js): backend badge, "not connected"
-    // link, Lookups pill, rename/model editor, Remove. These act at once —
-    // they are server facts, not part of the Save-button draft.
-    const ctl = state.decoy ? null : rowControls(bot, botEditCtx());
-    const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx } }, [
-      el('span', { class: 'bm-handle', text: '⠿' }),
+
+    const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx, bot: bot.id } }, [
+      el('span', { class: 'bm-handle', 'aria-hidden': 'true', text: '⠿' }),
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
       avatarImg,
-      el('span', { class: 'bm-name', text: bot.name }),
-      hiddenTag,
-      audienceTag,
-      ctl && ctl.badge,
-      ctl && ctl.notConnected,
-      lockedBtn,
-      unlockedBtn,
-      rxBtn,
-      apBtn,
-      picBtn,
-      ctl && ctl.lookups,
-      ...extras,
-      mbBtn,
-      // "Change photo" is omitted entirely in No-Image Mode — not disabled,
-      // omitted. Offering to set a picture on a device that will not display
-      // one is incoherent, and it is the last route into the crop dialog, so
-      // dropping it keeps the whole photo flow unreachable rather than
-      // half-reachable. el() ignores a null child, so this composes cleanly.
-      // Icon-only: tapping the picture does the same thing, so a worded
-      // button on every row was the loudest control for the rarest action.
-      nimEnabled() ? null : el('button', {
-        class: 'bm-avatar-btn bm-avatar-btn--icon', title: t('settings.change_photo_title'),
-        'aria-label': t('settings.change_photo_short'),
-        onclick: (e) => { e.stopPropagation(); pickAvatarFile(bot.id); },
-      }, [railIcon(RAIL_ICONS.camera)]),
-      ctl && ctl.persona,
-      ctl && ctl.edit,
-      ctl && ctl.remove,
-      ctl && ctl.panel,
-      ctl && ctl.personaPanel,
+      el('div', { class: 'bm-name-block' }, [
+        el('span', { class: 'bm-name', text: bot.name }),
+        el('span', { class: 'bm-meta' }, [ctl.badge, ...icons, narrowed, ctl.notConnected]),
+      ]),
+      who,
+      detailsBtn,
+      moreBtn,
     ]);
-    // Firefox cannot select text inside an input whose ancestor is draggable:
-    // the row stops being draggable while a field in it has focus.
-    if (ctl) {
-      for (const p of [ctl.panel, ctl.personaPanel]) {
-        if (!p) continue;
-        p.addEventListener('focusin', () => { row.draggable = false; });
-        p.addEventListener('focusout', () => { row.draggable = true; });
-      }
+    const drawer = el('div', { class: 'chr-drawer', hidden: '', dataset: { bot: bot.id } });
+    detailsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = drawer.hidden;
+      if (open) bmOpenDetails.add(bot.id); else bmOpenDetails.delete(bot.id);
+      detailsBtn.setAttribute('aria-expanded', String(open));
+      if (open) fillDrawer(drawer, bot, idx, ctl); else drawer.replaceChildren();
+      drawer.hidden = !open;
+    });
+    if (bmOpenDetails.has(bot.id)) { drawer.hidden = false; fillDrawer(drawer, bot, idx, ctl); }
+    // Firefox cannot select text inside an input whose ancestor is draggable.
+    for (const p of [ctl.panel, ctl.personaPanel, drawer]) {
+      if (!p) continue;
+      p.addEventListener('focusin', () => { row.draggable = false; });
+      p.addEventListener('focusout', () => { row.draggable = true; });
     }
-    paintHidden();
+    paintRow();
     wireDrag(row);
     list.append(row);
+    if (ctl.panel) list.append(ctl.panel);
+    if (ctl.personaPanel) list.append(ctl.personaPanel);
+    list.append(drawer);
   });
-  if (!state.decoy) list.append(addBotRow(botEditCtx()));
-  // 3.0: a Details button per row (connection, model, personality, audience, who may see it).
-  if (!state.decoy) decorateCharacterRows(list, bmBots, characterCtx());
+  if (!bmBots.length && canAdmin()) list.append(el('p', { class: 'muted bm-empty', text: t('chars.none_yet') }));
+  paintSettingsSummaries();
 }
 
-/** What js/characters.js needs from the app: a toast, the tab opener, and a way to redraw the roster. */
+/** Details: the features as switches, then the character's model, description
+ *  and profile list (js/characters.js). */
+function fillDrawer(drawer, bot, idx, ctl) {
+  const feats = el('div', { class: 'dev-group-body chr-features', role: 'group', 'aria-label': t('chars.features') });
+  const sw = (key, field, hint, extra = {}) => {
+    const id = `chr-f-${field}-${bot.id}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+    const cb = el('input', { type: 'checkbox', role: 'switch', id, ...extra });
+    cb.checked = field === 'tools' ? bot.tools !== false : !!bmBots[idx][field];
+    cb.addEventListener('change', async () => {
+      if (field === 'tools') {
+        cb.disabled = true;
+        try {
+          const r = await api.patchBot(bot.id, { tools: cb.checked });
+          botEditCtx().onPatched(bot.id, r || { tools: cb.checked });
+        } catch (err) {
+          cb.checked = !cb.checked;
+          toast(t('bots_edit.save_failed', { error: String((err && err.message) || err).replace(/^\d{3}:\s*/, '') }), true);
+        } finally { cb.disabled = false; }
+        return;
+      }
+      bmBots[idx][field] = cb.checked;
+      saveRoster({ toastKey: 'chars.saved_name', vars: { name: bot.name } });
+    });
+    return el('div', { class: 'dev-row chr-feature', dataset: { feature: field } }, [
+      el('label', { class: 'dev-row-text', for: id }, [
+        el('strong', { text: t(key) }), el('span', { class: 'dev-row-hint', text: t(hint) })]),
+      cb,
+    ]);
+  };
+  feats.append(
+    sw('chars.feat_reactions', 'reactions', 'settings.react_title'),
+    sw('chars.feat_pool', 'avatar_pool', 'settings.pool_title'),
+    sw('chars.feat_pictures', 'image_jobs', 'chars.feat_pictures_hint'),
+  );
+  if (backendKind(bot) === 'direct') feats.append(sw('chars.feat_lookups', 'tools', 'bots_edit.lookups_title'));
+  // Extensions' per-character controls (the voice add-on's Voice pill). A change
+  // saves at once like the switches beside it; only the add-on's fields may be set.
+  const extras = botRowExtrasFor(bmBots[idx], (patch) => {
+    let any = false;
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (!EXT_BOT_FIELDS.includes(k) || typeof v !== 'string') continue;
+      bmBots[idx][k] = v;
+      (bmBots[idx]._extDirty ||= new Set()).add(k);
+      any = true;
+    }
+    if (any) saveRoster({ toastKey: 'chars.saved_name', vars: { name: bot.name } });
+  });
+  if (extras.length) {
+    feats.append(el('div', { class: 'dev-row chr-feature chr-feature-ext' }, [
+      el('span', { class: 'dev-row-text' }, [el('strong', { text: t('chars.feat_voice') }),
+        el('span', { class: 'dev-row-hint', text: t('chars.feat_voice_hint') })]),
+      el('span', { class: 'chr-ext' }, extras),
+    ]));
+  }
+  const panelHost = el('div', { class: 'chr-panel-host' });
+  drawer.replaceChildren(
+    el('h4', { class: 'chr-drawer-title', text: t('chars.features') }), feats, panelHost);
+  characterPanel(bot, { ...characterCtx(), skip: ['audience', 'personality'], noClose: true }).then((p) => {
+    if (drawer.isConnected || !drawer.hidden) panelHost.replaceChildren(p);
+  });
+}
+
+/** A small ⋯ menu anchored to `btn`: [{label, run, danger}]. Escape, a tap
+ *  outside or picking an item closes it; arrows move between the items. */
+let rowMenu = null;
+function closeRowMenu({ focus = false } = {}) {
+  if (!rowMenu) return;
+  const { menu, btn, off } = rowMenu;
+  rowMenu = null;
+  off();
+  menu.remove();
+  btn.setAttribute('aria-expanded', 'false');
+  if (focus) { try { btn.focus(); } catch { /* ignore */ } }
+}
+function openRowMenu(btn, items) {
+  const again = rowMenu && rowMenu.btn === btn;
+  closeRowMenu();
+  if (again) return;
+  const menu = el('div', { class: 'menu bm-row-menu', role: 'menu' });
+  for (const it of items) {
+    const b = el('button', { type: 'button', role: 'menuitem', class: 'menu-item' + (it.danger ? ' danger-text' : ''), text: it.label });
+    b.addEventListener('click', (e) => { e.stopPropagation(); closeRowMenu(); it.run(); });
+    menu.append(b);
+  }
+  btn.after(menu);
+  btn.setAttribute('aria-expanded', 'true');
+  const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closeRowMenu(); };
+  const onKey = (e) => {
+    const els = [...menu.querySelectorAll('button')];
+    const i = els.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeRowMenu({ focus: true }); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); (els[(i + 1) % els.length] || els[0]).focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); (els[(i - 1 + els.length) % els.length] || els[0]).focus(); }
+    else if (e.key === 'Tab') closeRowMenu();
+  };
+  document.addEventListener('click', onDoc, true);
+  menu.addEventListener('keydown', onKey);
+  rowMenu = { menu, btn, off: () => document.removeEventListener('click', onDoc, true) };
+  const first = menu.querySelector('button');
+  if (first) first.focus();
+}
+
+/** Characters became the open section: the roster (already drawn when Settings
+ *  opened), the Add menu, the reactions and avatar-pool subsections. */
+function mountCharactersSection(pane) {
+  if (!pane || state.decoy) return;
+  wireCharactersToolbar();
+  renderBotManager();
+  const rx = document.getElementById('chars-reactions');
+  if (rx && !rx._wired) {
+    rx._wired = true;
+    rx.addEventListener('toggle', () => {
+      if (rx.open && settingsOpen('characters')) mountReactionManager(document.getElementById('chars-reactions-host'));
+      else unmountReactionManager();
+    });
+  }
+  if (rx && rx.open) mountReactionManager(document.getElementById('chars-reactions-host'));
+  mountSchemaHosts(pane);
+}
+
+let charsToolbarWired = false;
+function wireCharactersToolbar() {
+  if (charsToolbarWired) return;
+  const add = document.getElementById('chars-add');
+  const reorder = document.getElementById('chars-reorder');
+  if (!add) return;
+  charsToolbarWired = true;
+  add.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    // Starter packs are part of the Add menu: one item per pack, then a confirm
+    // sheet that asks which connection the new characters use.
+    let packs = [];
+    let conns = [];
+    try {
+      const [p, c] = await Promise.all([schemaApi.starterPacks(), schemaApi.connections().catch(() => ({ connections: [] }))]);
+      packs = p.packs || []; conns = c.connections || [];
+    } catch { packs = []; }
+    const items = [{ label: t('chars.add_blank'), run: () => showAddCharacter() }];
+    for (const pk of packs) {
+      items.push({
+        label: pk.installed ? t('chars.add_pack_installed', { name: pk.name }) : t('chars.add_pack', { name: pk.name }),
+        run: () => showPackSheet(pk, conns),
+      });
+    }
+    openRowMenu(add, items);
+  });
+  if (reorder) {
+    reorder.addEventListener('click', () => {
+      charsReorder = !charsReorder;
+      reorder.setAttribute('aria-pressed', String(charsReorder));
+      reorder.textContent = t(charsReorder ? 'chars.reorder_done' : 'chars.reorder');
+      renderBotManager();
+    });
+  }
+}
+
+function showAddCharacter() {
+  const host = document.getElementById('chars-add-host');
+  if (!host) return;
+  const row = addBotRow({
+    ...botEditCtx(),
+    onAdded: (r) => { botEditCtx().onAdded(r); host.replaceChildren(); },
+  });
+  host.replaceChildren(row);
+  const open = row.querySelector('[data-bm="add-open"]');
+  if (open) open.click();
+  row.querySelector('.bm-add-form .btn-secondary')?.addEventListener('click', () => host.replaceChildren());
+}
+
+function showPackSheet(pk, conns) {
+  const host = document.getElementById('chars-add-host');
+  if (!host) return;
+  const sel = el('select', { class: 'ui-select', id: 'chars-pack-conn' }, [
+    el('option', { value: '', text: t('chars.no_connection') }),
+    ...conns.map((c) => el('option', { value: c.id, text: c.name }))]);
+  if (conns.length) sel.value = conns[0].id;
+  const go = el('button', { type: 'button', class: 'btn-primary',
+    text: pk.installed ? t('chars.pack_installed') : (pk.partly_installed ? t('chars.pack_install_rest') : t('chars.pack_install')) });
+  if (pk.installed) go.disabled = true;
+  const cancel = el('button', { type: 'button', class: 'btn-secondary', text: t('common.cancel') });
+  cancel.addEventListener('click', () => host.replaceChildren());
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    try {
+      const r = await schemaApi.installPack(pk.id, sel.value ? { connection: sel.value } : {});
+      toast(t('chars.pack_done', { count: r.installed.length }));
+      host.replaceChildren();
+      await characterCtx().reload();
+    } catch (e) { toast(w5ErrorText(e), true); go.disabled = false; }
+  });
+  host.replaceChildren(el('section', { class: 'dev-group chr-pack-sheet', 'aria-labelledby': 'chr-pack-h' }, [
+    el('h3', { class: 'dev-group-title', id: 'chr-pack-h' }, [pk.name, ' ', el('span', { class: 'ui-badge', text: audienceLabel(pk.audience) })]),
+    el('p', { class: 'dev-group-hint', text: pk.description }),
+    el('p', { class: 'dev-group-hint', text: (pk.characters || []).map((c) => `${c.emoji} ${c.name}`).join('  ') }),
+    el('div', { class: 'sec-field' }, [el('label', { for: 'chars-pack-conn', text: t('chars.packs_connection') }), sel]),
+    el('div', { class: 'bm-actions' }, [go, cancel]),
+  ]));
+  sel.focus();
+}
+
+/** What js/characters.js needs from the app: a toast, the section opener, and a way to redraw the roster. */
 function characterCtx() {
   return {
     toast,
@@ -4860,15 +5144,14 @@ function characterCtx() {
 }
 
 /** What js/bots-edit.js reports back through: the roster (bmBots) and the
- *  sidebar (state.bots) follow the server at once, leaving any unsaved
- *  order / visibility / Safe edits alone. */
+ *  sidebar (state.bots) follow the server at once. */
 const BOT_ROW_FIELDS = ['name', 'emoji', 'model_hint', 'tools', 'backend', 'connected',
   'persona', 'persona_custom', 'persona_kind'];
 function botEditCtx() {
   return {
     toast,
     confirm: (msg, opts) => uiConfirm(msg, opts),
-    openAi: () => setSettingsTab('ai'),
+    openAi: () => setSettingsTab('connections'),
     onPatched: (id, row) => {
       for (const list of [bmBots, state.bots]) {
         const b = list.find((x) => x.id === id);
@@ -4882,6 +5165,7 @@ function botEditCtx() {
     onRemoved: async (id) => {
       bmBots = bmBots.filter((x) => x.id !== id);
       state.bots = state.bots.filter((x) => x.id !== id);
+      bmOpenDetails.delete(id);
       renderBotManager();
       renderSidebar();
       const gone = state.selectedBotId === id || (state.activeThread && state.activeThread.bot_id === id);
@@ -4916,13 +5200,12 @@ function wireDrag(row) {
     if (dropBelow) to += 1;             // drop on lower half -> place after target
     to = Math.max(0, Math.min(to, bmBots.length));
     bmBots.splice(to, 0, moved);
-    bmDirty = true;
     renderBotManager();
+    saveRoster({ quiet: true });
   });
 }
-// ---- Avatar pools: per-bot one-shot thread faces (status + prompt banks) ----
-// Server truth only: the panel lists pools whose avatar_pool flag is SAVED, so
-// a just-toggled row appears after Save — same moment the pool goes live.
+// ---- Avatar pools: per-character one-shot thread faces (status + prompt banks) ----
+// Server truth only: the panel lists pools whose avatar_pool flag is SAVED.
 let apPools = null;          // {bot_id: status} from the last fetch / WS frame
 let apOpenPrompts = null;    // bot_id whose prompt editor is expanded
 async function refreshAvatarPoolPanel() {
@@ -4939,9 +5222,28 @@ function renderAvatarPoolPanel() {
   box.innerHTML = '';
   const pools = apPools || {};
   const ids = Object.keys(pools);
-  box.classList.toggle('hidden', !ids.length);
+  const sub = document.getElementById('chars-pools');
+  if (sub) sub.hidden = !ids.length;
   if (!ids.length) return;
-  box.append(el('h3', { class: 'ap-title', text: t('settings.pool_section') }));
+  // 3.7: one plain sentence when the pools cannot make faces, not one red line
+  // with an environment variable name per pool.
+  const off = ids.filter((bid) => pools[bid].available === false);
+  const status = document.getElementById('chars-pools-status');
+  if (status) {
+    status.textContent = off.length
+      ? t('chars.pools_off')
+      : t('chars.pools_status', { count: ids.length });
+    status.classList.toggle('settings-sub-warn', !!off.length);
+  }
+  if (off.length) {
+    const go = el('button', { type: 'button', class: 'btn-secondary', text: t('chars.pools_off_open') });
+    go.addEventListener('click', () => setSettingsTab('connections#key:connections.image_cli'));
+    box.append(el('div', { class: 'dev-row ap-off' }, [
+      el('span', { class: 'dev-row-text' }, [el('strong', { text: t('chars.pools_off') }),
+        el('span', { class: 'dev-row-hint', text: t('chars.pools_off_hint') })]),
+      go,
+    ]));
+  }
   ids.forEach((bid) => {
     const p = pools[bid];
     const bot = bmBots.find((b) => b.id === bid);
@@ -4951,8 +5253,6 @@ function renderAvatarPoolPanel() {
       el('span', { class: 'ap-name', text: (bot && bot.name) || bid }),
       el('span', { class: 'ap-stats muted', text: stats }),
       p.has_prompts ? null : el('span', { class: 'ap-warn', text: t('settings.pool_no_prompts') }),
-      // 2.3.7 audit: no image tool = say so, and no Refill that can only 503.
-      p.available === false ? el('span', { class: 'ap-warn', text: t('settings.pool_needs_cli') }) : null,
       el('button', {
         class: 'bm-avatar-btn', text: t('settings.pool_refill'),
         disabled: p.available === false ? '' : null,
@@ -4998,27 +5298,42 @@ function buildAvatarPromptEditor(bid) {
   return wrap;
 }
 
-async function saveBotManager() {
+// ---- Saving the roster: order, visibility, features (POST /api/bots/order) ----
+// Every change saves at once; changes made while a save is in flight are sent
+// right after it (one request at a time, never out of order).
+let rosterSaving = false;
+let rosterAgain = null;
+let rosterTimer = null;
+function saveRoster(opts = {}) {
+  if (opts.debounce) {
+    clearTimeout(rosterTimer);
+    rosterTimer = setTimeout(() => saveRoster({ ...opts, debounce: false }), 350);
+    return;
+  }
+  if (rosterSaving) { rosterAgain = opts; return; }
+  rosterSaving = true;
+  doSaveRoster(opts).finally(() => {
+    rosterSaving = false;
+    if (rosterAgain) { const next = rosterAgain; rosterAgain = null; saveRoster(next); }
+  });
+}
+async function doSaveRoster({ quiet = false, toastKey = 'chars.saved_order', vars = {}, undo = null } = {}) {
   const payload = bmBots.map((b, i) => {
     const item = {
       id: b.id, order: i, safe: !!b.safe,
       hide_unlocked: !!b.hide_unlocked, reactions: !!b.reactions,
       avatar_pool: !!b.avatar_pool, image_jobs: !!b.image_jobs,
     };
-    // Only an extension field the user actually changed: an absent key leaves
-    // it alone (and without the add-on the server accepts only "" or the
-    // stored value, so nothing here can break a save).
+    // Only an extension field the user actually changed: an absent key leaves it alone.
     for (const f of (b._extDirty || [])) item[f] = b[f] || '';
     return item;
   });
   try {
     const r = await api.saveOrder(payload);
     for (const b of bmBots) delete b._extDirty;
-    // The whole roster: a bot with Show unlocked off (or shown nowhere) stays
-    // in state.bots so its chats open by URL; visibleBots() keeps it off the rail.
+    // The whole roster: a character kept off the rail stays in state.bots so its
+    // chats open by URL; visibleBots() keeps it off the rail.
     state.bots = r.bots.filter((b) => !state.decoy || b.safe);
-    // "Hidden" here = no longer on this device's rail, which now includes a
-    // bot just flagged hide-on-unlocked (unless the device opted back in).
     const selectedHidden = !visibleBots().some((b) => b.id === state.selectedBotId);
     const activeBotHidden = state.activeThread && !botById(state.activeThread.bot_id);
     if (selectedHidden && visibleBots().length) state.selectedBotId = visibleBots()[0].id;
@@ -5028,12 +5343,164 @@ async function saveBotManager() {
       if (visibleBots().length) await selectBot(state.selectedBotId);
       else { state.threads = []; renderThreads(); clearChatView(); }
     }
-    // Hide only on SUCCESS — a failed save must keep the modal (and the
-    // user's edits) on screen instead of silently dropping them.
-    bmDirty = false;
     loadReactions(true);          // reaction_bots may have changed
-    dom['botmanager-backdrop'].classList.add('hidden');
-  } catch (e) { toast(e.message, true); }
+    refreshAvatarPoolPanel();     // a pool switched on or off
+    if (!quiet) toast(t(toastKey, vars), false, undo ? { undo } : undefined);
+  } catch (e) {
+    toast(e.message, true);
+    // The server is the truth: redraw from it rather than leave a row that lies.
+    try { const r = await api.allBots(); bmBots = r.bots.slice(); renderBotManager(); } catch { /* keep */ }
+  }
+}
+
+// ---- Settings: schema rows inside the sections (js/settings_schema.js) ----
+/** Fill every `.schema-host[data-schema]` slot in `pane`. A slot names
+ *  'section#anchor'; one without an anchor (under Advanced) takes the section's
+ *  remaining rows. Only for a session that may change settings. */
+function mountSchemaHosts(pane, { force = false } = {}) {
+  if (!pane || !canAdmin() || !sessionCan('manage_settings')) {
+    if (pane) for (const h of pane.querySelectorAll('.schema-host')) h.hidden = true;
+    return;
+  }
+  const hosts = [...pane.querySelectorAll('.schema-host[data-schema]')];
+  const claimed = new Map();
+  const claim = (sec, anchor) => { if (!claimed.has(sec)) claimed.set(sec, new Set()); claimed.get(sec).add(anchor); };
+  for (const h of hosts) {
+    const [sec, anchor] = h.dataset.schema.split('#');
+    if (anchor) claim(sec, anchor);
+    // Anchors drawn somewhere this pane does not hold a slot for (a tool's ⚙ row).
+    for (const a of (h.dataset.schemaClaims || '').split(/\s+/).filter(Boolean)) claim(sec, a);
+  }
+  let banner = pane.querySelector(':scope > .schema-restart-banner');
+  if (!banner) {
+    banner = el('p', { class: 'schema-restart-banner', role: 'status', hidden: '' });
+    pane.prepend(banner);
+  }
+  const onRestart = (n) => {
+    banner.hidden = !n;
+    banner.textContent = n ? t('schema.restart_banner', { count: n }) : '';
+  };
+  hosts.forEach((h, i) => {
+    const [sec, anchor = ''] = h.dataset.schema.split('#');
+    mountSchemaRows(h, {
+      section: sec, anchor, claimed: claimed.get(sec) || new Set(), role: state.role, toast, onRestart,
+      force: force && i === 0,
+    }).then(() => {
+      // An Advanced disclosure with nothing left inside it goes away.
+      const adv = h.closest('details.settings-adv');
+      if (adv && adv.dataset.adv !== 'appearance') {
+        const anyRows = adv.querySelector('.schema-host:not([hidden]) .ui-setting, .dev-group-body:not(:empty), .dev-group:not([hidden]) .dev-row');
+        adv.hidden = !anyRows;
+      }
+    });
+  });
+}
+
+/** Appearance -> Advanced: the Owner's and Admins' (show hidden characters on
+ *  this device, and the defaults a new device starts with). */
+function paintAppearanceAdvanced() {
+  const adv = document.getElementById('app-adv');
+  if (!adv) return;
+  adv.hidden = !canAdmin();
+  if (canAdmin()) mountSchemaHosts(settingsPane('appearance'));
+}
+
+/** AI & Connections: the servers, quick setup (the empty state when there are
+ *  none), image generation, agents (on open) and the advanced rows. */
+async function mountConnectionsSection(pane) {
+  const host = document.getElementById('cxn-host');
+  let count = 0;
+  if (host) {
+    const ctl = await mountConnections(host, {
+      toast, confirm: (msg, o) => uiConfirm(msg, o), openTab: (tab) => setSettingsTab(tab),
+      botName: (id) => (bmBots.find((b) => b.id === id) || botById(id) || {}).name || id,
+      onChanged: () => {},
+    });
+    count = (ctl && typeof ctl.count === 'function') ? ctl.count() : 0;
+  }
+  await activateLlmPanel({ ...llmCtx(), quickOpen: count === 0 });
+  const agents = document.getElementById('cxn-agents');
+  if (agents && !agents._wired) {
+    agents._wired = true;
+    agents.addEventListener('toggle', () => {
+      if (agents.open && settingsOpen('connections')) mountAgentsHere();
+    });
+  }
+  if (agents && agents.open) mountAgentsHere();
+  mountSchemaHosts(pane);
+}
+async function mountAgentsHere() {
+  const host = document.getElementById('cxn-agents-host');
+  if (!host) return;
+  if (!host.querySelector('.agents-mount')) {
+    host.replaceChildren(el('div', { class: 'agents-mount' }),
+      el('div', { class: 'schema-host', dataset: { schema: 'connections#agents' } }));
+  }
+  await mountAgentsSettings(host.querySelector('.agents-mount'), {
+    toast, confirm: (msg, o) => uiConfirm(msg, o), isOwner: isHostRole(),
+  });
+  mountSchemaHosts(settingsPane('connections'));
+}
+
+/** People & Access: the groups main.js adds to people.js's page — the sign-in
+ *  rules and the Restricted limits (schema rows), with "Forget remembered
+ *  devices" beside the remember-device row. */
+function peopleRuleGroups() {
+  const forget = el('button', { type: 'button', class: 'btn-secondary sec-forget', id: 'sec-forget-devices',
+    hidden: (state.auth.trustedDevices || 0) > 0 ? null : '',
+    text: t('security.forget_devices', { count: state.auth.trustedDevices || 0 }) });
+  forget.addEventListener('click', async () => {
+    if (!await uiConfirm(t('security.forget_confirm'), { danger: true })) return;
+    try {
+      await api.forgetDevices();
+      state.auth.remembered = false;
+      state.auth.trustedDevices = 0;
+      forget.hidden = true;
+      armIdleTimer();   // this session is now a normal idle-expiring one
+      toast(t('security.forgotten'));
+    } catch (e) { toast(cleanErr(e), true); }
+  });
+  const rules = el('section', { class: 'dev-group', id: 'people-rules', 'data-anchor': 'signin-rules', 'aria-labelledby': 'people-rules-h' }, [
+    el('h3', { class: 'dev-group-title', id: 'people-rules-h', text: t('people.rules_title') }),
+    el('p', { class: 'dev-group-hint', text: t('people.rules_hint') }),
+    el('div', { class: 'schema-host', dataset: { schema: 'people#signin-rules' } }),
+    el('div', { class: 'bm-actions people-forget-row' }, [forget]),
+  ]);
+  const limits = el('section', { class: 'dev-group', id: 'people-limits', 'data-anchor': 'restricted-limits', 'aria-labelledby': 'people-limits-h' }, [
+    el('h3', { class: 'dev-group-title', id: 'people-limits-h', text: t('people.limits_title') }),
+    el('p', { class: 'dev-group-hint', text: t('people.limits_hint') }),
+    el('div', { class: 'schema-host', dataset: { schema: 'people#restricted-limits' } }),
+  ]);
+  const adv = el('details', { class: 'settings-adv', dataset: { adv: 'people', anchor: 'advanced' } }, [
+    el('summary', { text: t('settings.advanced') }),
+    el('div', { class: 'schema-host', dataset: { schema: 'people' } }),
+  ]);
+  return { afterDevices: [rules, limits], end: [adv] };
+}
+
+/** System: the health summary (the dashboard opens in place), backups, network
+ *  and the advanced rows. The dashboard polls only while System is open. */
+async function mountSystemSection(pane) {
+  const host = document.getElementById('sys-health-host');
+  const box = document.getElementById('sys-health');
+  const toggle = document.getElementById('sys-dash-toggle');
+  if (toggle && !toggle._wired) {
+    toggle._wired = true;
+    toggle.addEventListener('click', () => {
+      const open = !box.classList.contains('open');
+      box.classList.toggle('open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+      setI18nText(toggle, open ? 'settings.health_close' : 'settings.health_open');
+      setAdvOpen('system-dashboard', open);
+    });
+  }
+  const open = advOpenSet().has('system-dashboard');
+  if (box) box.classList.toggle('open', open);
+  if (toggle) { toggle.setAttribute('aria-expanded', String(open)); setI18nText(toggle, open ? 'settings.health_close' : 'settings.health_open'); }
+  if (host) await mountDashboard(host, dom['sfoot-health'], dashCtx());
+  const bk = document.getElementById('sys-backups-host');
+  if (bk) mountBackups(bk, { toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role });
+  mountSchemaHosts(pane);
 }
 
 // ===================== Thread list collapse (desktop) =====================
@@ -7351,6 +7818,10 @@ function focusIntoModal(backdrop) {
   // strip back to its start, hiding the tab that had just been opened.
   const activeTab = foci.find((f) => f.getAttribute('role') === 'tab' && f.getAttribute('aria-selected') === 'true');
   if (activeTab) { try { activeTab.focus(); } catch { /* ignore */ } return; }
+  // Settings opened on its section list (a phone): the first section, never the
+  // search box, which would throw the keyboard over the list on a touch screen.
+  const firstTab = foci.find((f) => f.getAttribute('role') === 'tab' && f.tabIndex === 0);
+  if (firstTab) { try { firstTab.focus(); } catch { /* ignore */ } return; }
   // Skip a leading Close/Dismiss ✕ so the user doesn't land on "close".
   // aria-label is translated now, so it cannot be string-matched. The element id
   // and the translation KEY are the two identifiers that survive a locale switch.
@@ -7453,7 +7924,7 @@ function wireEvents() {
   // that switch is gone (a theme is now a single fixed palette, not a pair).
   // Wired here rather than in theme.js because opening Settings is main.js's
   // job — theme.js stays a self-contained appearance module.
-  dom['theme-toggle'].addEventListener('click', () => openSettingsTab('theme'));
+  dom['theme-toggle'].addEventListener('click', () => openSettingsTab('appearance#theme'));
   dom['comp-close'].addEventListener('click', hideCompanions);
   dom['companions-backdrop'].addEventListener('click', (e) => {
     if (e.target === dom['companions-backdrop']) hideCompanions();
@@ -7487,6 +7958,9 @@ function wireEvents() {
     openThread: openThreadFromApp,
     // An app pane asked to show a picture set in the shell's own lightbox.
     lightbox: openAppGallery,
+    // An app's "set this up" button: Settings on that section (the section
+    // controller refuses one this session cannot see and opens the first one).
+    openSettings: (target) => openSettingsTab(target),
     closeToolPanes,
     builtinOn,
     builtinDot,
@@ -7536,17 +8010,15 @@ function wireEvents() {
     }
   });
   dom['bm-close'].addEventListener('click', () => closeBotManager());
-  dom['bm-done'].addEventListener('click', saveBotManager);
-  // Minimal-avatar toggle: pure CSS attribute swap, applies instantly and is
-  // deliberately outside the Save/dirty flow (it's a device preference, not
-  // roster state). Same keys the no-FOUC <head> script reads at boot.
-  dom['bm-avatar-minimal'].addEventListener('change', () => {
-    // Belt to syncMinimalAvatarRow's braces: `disabled` is a DOM property
-    // anyone can clear, and this handler writes a stored preference.
-    // setMinimalAvatars refuses under NIM for the same reason.
+  // Avatar style: a pure CSS attribute swap, applies instantly; a device
+  // preference, not roster state. Same keys the no-FOUC <head> script reads.
+  dom['bm-avatar-select'].addEventListener('change', () => {
+    // Belt to syncMinimalAvatarRow's braces: `disabled` is a DOM property anyone
+    // can clear, and this handler writes a stored preference. setMinimalAvatars
+    // refuses under NIM for the same reason.
     if (nimEnabled()) { syncMinimalAvatarRow(); return; }
-    setMinimalAvatars(dom['bm-avatar-minimal'].checked);
-    renderPins();   // a pinned 👤 shows the same state this checkbox writes
+    setMinimalAvatars(dom['bm-avatar-select'].value === 'minimal');
+    renderPins();   // a pinned avatars button shows the same state this select writes
   });
   dom['botmanager-backdrop'].addEventListener('click', (e) => {
     if (e.target === dom['botmanager-backdrop']) closeBotManager();
@@ -7684,9 +8156,9 @@ function dashCtx() {
 }
 
 // The first-run "Connect an AI" card in an empty chat, and anything else that
-// wants provider setup: one door, and it is the 🔌 Settings tab.
+// wants provider setup: one door, Settings -> AI & Connections (quick setup).
 function openLlm() {
-  openSettingsTab('ai');
+  openSettingsTab('connections#quick-setup');
 }
 
 // A connected provider is a real bot, so finish the job the way a person would
@@ -7789,23 +8261,23 @@ function applyAuthChrome() {
     const b = document.getElementById(`stab-${tab}`);
     if (b) b.classList.toggle('hidden', !canAdmin() || (OWNER_TABS.includes(tab) && !isHostRole()));
   }
-  for (const tab of CHARACTER_TABS) {
-    const b = document.getElementById(`stab-${tab}`);
-    if (b) b.classList.toggle('hidden', !state.decoy && !canAdmin());
-  }
+  // The Household heading goes with its sections.
+  document.getElementById('snav-h-household')?.toggleAttribute('hidden', !canAdmin());
   syncVoiceTab();
   if (!isHostRole()) unmountDashboard();
   if (!canAdmin()) {
     unmountReactionManager();
-    if (ADMIN_TABS.includes(settingsTab) || (!state.decoy && CHARACTER_TABS.includes(settingsTab))
-        || (settingsTab === 'voice' && !voiceTabAllowed())) setSettingsTab(homeSettingsTab());
-  } else if (OWNER_TABS.includes(settingsTab) && !isHostRole()) {
+    if (settingsOpen() && (ADMIN_TABS.includes(settingsTab) || (settingsTab === 'voice' && !voiceTabAllowed()))) {
+      setSettingsTab(homeSettingsTab());
+    }
+  } else if (settingsOpen() && OWNER_TABS.includes(settingsTab) && !isHostRole()) {
     setSettingsTab(homeSettingsTab());
   }
   // Dedicated unlock padlock: visible ONLY in locked/Safe Mode so family
   // devices have an obvious way into admin mode (opens the existing PIN
   // overlay). Hidden once unlocked — the 🔒 lock-now button takes over.
   if (dom['unlock-btn']) dom['unlock-btn'].classList.toggle('hidden', !state.decoy);
+  syncGearButton();
   // Pinned settings live on the same rail and follow the same rule: rebuilt on
   // every tier change, so a pin that Safe Mode may not have disappears the
   // moment the device locks rather than lingering as a dead button.
@@ -7848,28 +8320,36 @@ function paneHost(id) {
 // is there (wireSettingsTabs). Null before that: no extension mounts earlier.
 let addinTabs = null;
 function wireAddinTabs() {
+  // Add-in tabs form a third nav group, "Add-ons", after the household sections.
+  const paintAddonsHeading = () => {
+    const h = document.getElementById('snav-h-addons');
+    if (h) h.hidden = !(addinTabs && addinTabs.ids().length);
+  };
   addinTabs = createAddinTabs({
     doc: document,
     tablist: dom['settings-tabs'],
-    beforeTab: document.getElementById('stab-plugins'),
-    beforePane: document.getElementById('spane-plugins'),
+    beforeTab: document.getElementById('snav-addons-end'),
+    beforePane: null,
     reserved: CORE_SETTINGS_TABS,
     t,
     isLocked: () => !!state.decoy,
     onTab: (id) => setSettingsTab(id),
     onAdd: (id, { public: isPublic }) => {
-      const at = SETTINGS_TABS.indexOf('plugins');
-      SETTINGS_TABS.splice(at < 0 ? SETTINGS_TABS.length : at, 0, id);
+      SETTINGS_TABS.push(id);
       if (!isPublic) ADMIN_TABS.push(id);
-      updateTabStripEdges();
+      // createAddinTabs appends the pane beside the tablist; it belongs with the others.
+      const pane = document.getElementById(`spane-${id}`);
+      const panes = document.getElementById('settings-panes');
+      if (pane && panes && pane.parentNode !== panes) panes.append(pane);
+      queueMicrotask(paintAddonsHeading);
     },
     onRemove: (id) => {
       const i = SETTINGS_TABS.indexOf(id);
       if (i >= 0) SETTINGS_TABS.splice(i, 1);
       const j = ADMIN_TABS.indexOf(id);
       if (j >= 0) ADMIN_TABS.splice(j, 1);
-      if (settingsTab === id) setSettingsTab('bots');
-      updateTabStripEdges();
+      if (settingsTab === id && settingsOpen()) setSettingsTab(homeSettingsTab());
+      queueMicrotask(paintAddonsHeading);
     },
   });
 }
@@ -8486,14 +8966,18 @@ function paintFirstRun() {
   card.hidden = !show;
 }
 
-// ---- Settings -> Security: the account block ----
+// ---- Settings -> Account: the account block ----
+// Above the sign-in "Change" select: "Create owner account" while nobody has
+// claimed the install, or a dismissible nudge to set a password after a PIN
+// sign-in. The nudge is only a button now (it opens the Set a password form
+// below): a second password form here was the page's second "Current PIN" box.
 let passwordPromptDismissed = false;
 function paintAccountBlock() {
   const host = dom['sec-account'];
   if (!host) return;
   const a = state.auth;
   // Rebuild only when what it shows changes: applyAuthChrome runs on every
-  // hello frame, and a rebuild would wipe a half-typed password.
+  // hello frame, and a rebuild would wipe a half-typed form.
   const sig = [a.claimed, a.setupRequired, canAdmin(), a.needsPassword, passwordPromptDismissed, a.pinSet, i18nLang()].join();
   if (host._sig === sig) return;
   host._sig = sig;
@@ -8504,34 +8988,16 @@ function paintAccountBlock() {
       el('p', { class: 'muted', text: t('setup.settings_hint') }),
       renderSetup({ setupRequired: false, onSubmit: createOwner, idPrefix: 'sec-setup' }).form,
     );
-  } else if (a.claimed && canAdmin() && a.needsPassword) {
-    if (!passwordPromptDismissed) {
-      const form = renderPasswordForm({
-        mode: 'first', needsPin: state.role === 'owner' && a.pinSet, idPrefix: 'sec-pwfirst',
-        onSubmit: async (v) => {
-          await api.changePassword(v);
-          a.needsPassword = false;
-          toast(t('password.saved'));
-          paintAccountBlock();
-        },
-        onDismiss: () => { passwordPromptDismissed = true; paintAccountBlock(); },
-      }).form;
-      host.append(el('div', { class: 'sec-prompt', role: 'region', 'aria-label': t('password.prompt_title') }, [
-        el('h3', { text: t('password.prompt_title') }),
-        el('p', { class: 'muted', text: t('password.prompt_body') }),
-        form,
-      ]));
-    }
-  } else if (a.claimed && canAdmin() && !a.needsPassword) {
-    const form = renderPasswordForm({
-      mode: 'change', idPrefix: 'sec-pwchange',
-      onSubmit: async (v) => {
-        await api.changePassword(v);
-        toast(t('password.saved'));
-      },
-    }).form;
-    host.append(el('details', { class: 'sec-pw-details' }, [
-      el('summary', { text: t('password.change_title') }), form]));
+  } else if (a.claimed && canAdmin() && a.needsPassword && !passwordPromptDismissed) {
+    const go = el('button', { type: 'button', class: 'btn-primary', text: t('acct.opt_pw_set') });
+    go.addEventListener('click', () => openAccountForm('pw_set'));
+    const later = el('button', { type: 'button', class: 'btn-secondary', text: t('setup.not_now') });
+    later.addEventListener('click', () => { passwordPromptDismissed = true; paintAccountBlock(); });
+    host.append(el('div', { class: 'sec-prompt', role: 'region', 'aria-label': t('password.prompt_title') }, [
+      el('h3', { text: t('password.prompt_title') }),
+      el('p', { class: 'muted', text: t('password.prompt_body') }),
+      el('div', { class: 'bm-actions' }, [go, later]),
+    ]));
   }
   host.hidden = !host.childNodes.length;
 }
@@ -8806,7 +9272,9 @@ function closeAllOverlays() {
   document.querySelectorAll('dialog[open]').forEach((d) => { try { d.close(); } catch { /* ignore */ } });
   toggleThreadMenu(false);
   bmBots = [];
-  bmDirty = false;
+  bmOpenDetails.clear();
+  charsReorder = false;
+  closeRowMenu();
 
   // Hiding a backdrop is not emptying it. Every panel above keeps its content
   // in the DOM and its data in a module-level cache, so a lock left full-access
@@ -8815,7 +9283,7 @@ function closeAllOverlays() {
   // harness job output, avatar-pool status. bmBots was already cleared for
   // exactly this reason; the rest were missed. Same posture as the lightbox
   // teardown above: assume a frame slips through and leave nothing behind it.
-  for (const k of ['tx-list', 'search-results', 'fs-list', 'harness-jobs', 'avatar-pool-panel']) {
+  for (const k of ['tx-list', 'search-results', 'fs-list', 'harness-jobs', 'avatar-pool-panel', 'bm-list']) {
     if (dom[k]) dom[k].innerHTML = '';
   }
   txState = { items: [], filter: null, threadId: null, sessionKey: null, botId: null, missing: 0 };
@@ -8825,12 +9293,14 @@ function closeAllOverlays() {
   const searchBox = dom['search-input'];
   if (searchBox) searchBox.value = '';
 
-  // An API key typed into the AI-models pane is a secret sitting in an input
-  // value, exactly like the PIN and the recovery code — both of which are
-  // wiped after use for this reason. This one survived a lock, still populated
-  // behind the lock screen (and in the next screenshot or bug report).
-  const llmKey = document.getElementById('llm-key');
-  if (llmKey) llmKey.value = '';
+  // A key typed into Settings (the quick setup, an image-provider key) is a secret
+  // sitting in an input value, exactly like the PIN and the recovery code — both
+  // wiped after use for this reason. It must not survive a lock behind the lock
+  // screen (or into the next screenshot or bug report).
+  for (const id of ['qs-key', 'img-key']) {
+    const k = document.getElementById(id);
+    if (k) k.value = '';
+  }
 }
 
 // Rebuild the app for the current mode: drop the socket + sensitive caches and
@@ -9004,67 +9474,141 @@ async function submitRecover() {
   dom['recover-new-pin'].value = '';
 }
 
-// ---- Security modal (set / change / remove PIN) ----
+// ---- Settings -> Account: sign-in (set / change / remove PIN, password) ----
 function setSecError(m) { dom['sec-error'].textContent = m || ''; dom['sec-error'].hidden = !m; }
 
-// Every string in the Security modal that depends on server state: the two
-// mode-dependent labels, the two counted sentences, and the recovery note.
-// Split out of activateSecurityPane() so a language switch can repaint the tab
-// in place without re-running the focus/value side effects.
+/** Is this the install's Owner view (or an install nobody has claimed yet)? */
+const ownerAccountView = () => !state.auth.claimed || state.role === 'owner';
+
+// Every string in the sign-in card that depends on server state, split out of
+// activateSecurityPane() so a language switch repaints it without re-running the
+// focus/value side effects.
 function renderSecurityStrings() {
-  const pinSet = state.auth.pinSet;
-  setI18nText(dom['sec-new-label'], pinSet ? 'security.new_pin' : 'security.create_pin');
-  setI18nText(dom['sec-save'], pinSet ? 'security.change_pin' : 'security.set_pin');
-  setI18nText(dom['sec-status-line'], pinSet
-    ? (state.auth.remembered ? 'security.status_remembered' : 'security.status_set')
-    : 'security.status_none');
-  setI18nText(dom['sec-remember-label'], 'security.remember_label',
-    { days: state.auth.rememberDays || 30 });
-  setI18nText(dom['sec-forget-devices'], 'security.forget_devices',
-    { count: state.auth.trustedDevices || 0 });
-  // security.note is one of the two strings that carry markup we own — a <br>
-  // and the two <code id="sec-…-path"> elements the recovery instructions point
-  // at. It therefore goes in as HTML; the SERVER-supplied paths below are passed
-  // RAW because setI18nHtml escapes every non-number var for us now.
-  setI18nHtml(dom['sec-note'], 'security.note', {
-    minutes: Math.round((state.auth.lockTimeout || 600) / 60),
-    recoveryPath: state.auth.recoveryPath || 'RECOVERY-CODE.txt',
-    configPath: state.auth.configPath || 'security.yaml',
-  });
+  const a = state.auth;
+  const pinSet = a.pinSet;
+  const owner = ownerAccountView();
+  let key;
+  if (owner) {
+    if (!pinSet) key = 'security.status_none';
+    else if (a.claimed && a.needsPassword) key = 'acct.status_pin_only';
+    else key = a.claimed ? 'acct.status_pin_password' : 'security.status_set';
+  } else if (state.role === 'admin') key = a.needsPassword ? 'acct.status_admin_nopw' : 'acct.status_admin';
+  else key = 'acct.status_member';
+  setI18nText(dom['sec-status-line'], key);
+  if (a.remembered) dom['sec-status-line'].append(' ', t('acct.status_remembered'));
+  // The recovery note names two files on the host. Only the Owner can use them, and
+  // nobody else should be shown where they are (3.8).
+  const note = dom['sec-note'];
+  if (note) {
+    note.hidden = !(owner && pinSet);
+    if (!note.hidden) {
+      setI18nHtml(note, 'security.recovery_note', {
+        recoveryPath: a.recoveryPath || 'RECOVERY-CODE.txt',
+        configPath: a.configPath || 'security.yaml',
+      });
+    }
+  }
+  paintAccountChoices();
 }
 
-// The Security & PIN surface is the 🔐 tab in Settings, not a modal of its
-// own: it was already a plain field stack with two footer buttons, which is
-// exactly what a pane is. This is what the tab controller calls when it
-// becomes visible — populate, clear, focus the first field somebody types in.
-function activateSecurityPane({ focusField = true } = {}) {
-  const pinSet = state.auth.pinSet;
-  // 3.0: the install PIN is the Owner's. Admins and Members get the rest of the
-  // pane (their password, Lock now) but not a form that would only 403.
-  const ownerView = !state.auth.claimed || state.role === 'owner';
-  for (const inp of [dom['sec-new'], dom['sec-confirm']]) {
-    const f = inp.closest('form');
-    if (f) f.hidden = !ownerView;
+/** The "Change" select: one entry per thing this profile may change about how it
+ *  signs in. Picking one opens exactly that form. */
+function accountChoices() {
+  const a = state.auth;
+  const out = [];
+  if (ownerAccountView()) {
+    out.push(a.pinSet ? 'pin_change' : 'pin_set');
+    if (a.claimed) out.push(a.needsPassword ? 'pw_set' : 'pw_change');
+    if (a.pinSet) out.push('pin_remove');
+  } else if (state.role === 'admin') {
+    out.push(a.needsPassword ? 'pw_set' : 'pw_change');
+  } else if (state.role === 'member') {
+    out.push('my_pin');
   }
-  dom['sec-save'].hidden = !ownerView;
-  dom['sec-current-wrap'].hidden = !pinSet || !ownerView;
-  dom['sec-remove'].hidden = !pinSet || !ownerView;
-  // Remember-device controls: only meaningful once a PIN exists.
-  dom['sec-remember-wrap'].hidden = !pinSet || !ownerView;
-  dom['sec-remember-enable'].checked = (state.auth.rememberDays || 0) > 0;
-  dom['sec-forget-devices'].hidden = !(pinSet && ownerView && (state.auth.trustedDevices || 0) > 0);
-  renderSecurityStrings();
-  dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
+  return out;
+}
+let accountChoice = '';
+function paintAccountChoices() {
+  const sel = dom['acct-change'];
+  const row = dom['acct-change-row'];
+  if (!sel || !row) return;
+  const choices = accountChoices();
+  row.hidden = !choices.length;
+  if (!choices.includes(accountChoice)) accountChoice = '';
+  sel.replaceChildren(
+    el('option', { value: '', text: t('acct.change_choose') }),
+    ...choices.map((c) => el('option', { value: c, text: t(`acct.opt_${c}`) })));
+  sel.value = accountChoice;
+}
+
+/** Show the form for `choice` ('' = none) and nothing else. */
+function openAccountForm(choice, { focus = true } = {}) {
+  accountChoice = choice || '';
+  if (dom['acct-change']) dom['acct-change'].value = accountChoice;
+  const pinForm = dom['sec-pin-form'];
+  const pwHost = dom['acct-password-host'];
+  const pinModes = ['pin_change', 'pin_set', 'pin_remove', 'my_pin'];
+  pinForm.hidden = !pinModes.includes(accountChoice);
+  pwHost.hidden = !accountChoice.startsWith('pw_');
+  pwHost.replaceChildren();
   setSecError('');
-  // Not when the tab was reached with the arrow keys (focusTab): stealing focus
-  // into the PIN field there made Security a dead end for ←/→ — the next arrow
-  // press moved the caret instead of the tab. Not on a touch screen either,
-  // where a focused field throws the keyboard over the pane you just opened.
-  if (!focusField) return;
-  let coarse = false;
-  try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch { /* old engine */ }
-  if (coarse) return;
-  setTimeout(() => (pinSet ? dom['sec-current'] : dom['sec-new']).focus(), 40);
+  dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
+  if (pinModes.includes(accountChoice)) {
+    const needCurrent = accountChoice !== 'pin_set';
+    const needNew = accountChoice !== 'pin_remove';
+    dom['sec-current-wrap'].hidden = !needCurrent;
+    dom['sec-new'].closest('form').hidden = !needNew;
+    dom['sec-confirm'].closest('form').hidden = !needNew;
+    dom['sec-remove'].hidden = accountChoice !== 'pin_remove';
+    dom['sec-save'].hidden = accountChoice === 'pin_remove';
+    setI18nText(dom['sec-new-label'], accountChoice === 'pin_set' ? 'security.create_pin' : 'security.new_pin');
+    setI18nText(dom['sec-save'], accountChoice === 'pin_set' ? 'security.set_pin' : 'security.change_pin');
+    if (focus) setTimeout(() => (needCurrent ? dom['sec-current'] : dom['sec-new']).focus(), 40);
+  } else if (accountChoice.startsWith('pw_')) {
+    const a = state.auth;
+    const form = renderPasswordForm({
+      mode: accountChoice === 'pw_set' ? 'first' : 'change',
+      needsPin: accountChoice === 'pw_set' && state.role === 'owner' && a.pinSet,
+      idPrefix: accountChoice === 'pw_set' ? 'sec-pwfirst' : 'sec-pwchange',
+      onSubmit: async (v) => {
+        await api.changePassword(v);
+        a.needsPassword = false;
+        passwordPromptDismissed = true;
+        toast(t('password.saved'));
+        openAccountForm('', { focus: false });
+        paintAccountBlock();
+        renderSecurityStrings();
+      },
+      onDismiss: () => openAccountForm('', { focus: false }),
+    }).form;
+    pwHost.replaceChildren(form);
+    if (focus) setTimeout(() => form.querySelector('input')?.focus(), 40);
+  }
+}
+
+// The Account section came on screen: populate, clear, no focus stealing (a
+// touch screen would throw the keyboard over the pane you just opened).
+function activateSecurityPane() {
+  renderSecurityStrings();
+  openAccountForm(accountChoice, { focus: false });
+  paintAccountBlock();
+}
+
+/** Who you are: picture, name, role. */
+function paintAccountWho() {
+  const host = dom['acct-who'];
+  if (!host) return;
+  const prof = state.auth && state.auth.profile;
+  const spec = avatarSpec(prof || { name: t(`role.${state.role || 'owner'}`) });
+  host.replaceChildren(
+    spec.kind === 'img'
+      ? el('img', { class: 'acct-avatar', src: spec.src, alt: '', draggable: 'false' })
+      : el('span', { class: 'acct-avatar acct-avatar-text', 'aria-hidden': 'true', text: spec.text }),
+    el('span', { class: 'acct-who-text' }, [
+      el('strong', { class: 'acct-name', text: (prof && prof.name) || t(`role.${state.role || 'owner'}`) }),
+      el('span', { class: `people-role people-role-${state.role || 'owner'}`, text: t(`role.${state.role || 'owner'}`) }),
+    ]),
+  );
 }
 
 async function saveSecurity() {
@@ -9072,10 +9616,18 @@ async function saveSecurity() {
   const np = dom['sec-new'].value;
   const cf = dom['sec-confirm'].value;
   const minPin = state.auth.minPin || 4;
+  if (accountChoice !== 'pin_set' && !cur) { setSecError(t('security.need_current_any')); dom['sec-current'].focus(); return; }
   if (np.length < minPin) { setSecError(t('security.too_short', { count: minPin })); return; }
   if (np !== cf) { setSecError(t('security.mismatch')); return; }
   dom['sec-save'].disabled = true;
   try {
+    if (accountChoice === 'my_pin') {
+      // 3.8: a Member changes their own PIN; the current one confirms it.
+      await appApi('/api/auth/pin', { method: 'POST', body: { current: cur, new: np } });
+      openAccountForm('', { focus: false });
+      toast(t('acct.my_pin_saved'));
+      return;
+    }
     await api.setupPin(np, cur);
     // A new full session cookie was just issued; reconnect so the live socket
     // uses it (the old session was revoked) and the idle timer (re)starts.
@@ -9083,6 +9635,7 @@ async function saveSecurity() {
     state.auth.authenticated = true;
     state.auth.decoy = false;
     state.decoy = false;
+    accountChoice = '';
     dom['botmanager-backdrop'].classList.add('hidden');
     await refreshAuthQuiet();      // 3.0: claimed / role / needs_password changed with the PIN
     await reboot();
@@ -9091,8 +9644,7 @@ async function saveSecurity() {
   } catch (e) {
     setSecError(cleanErr(e));
   } finally {
-    // Same reason as the recovery code: PINs do not linger in input values,
-    // success or failure. A retry retypes them.
+    // PINs do not linger in input values, success or failure.
     dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
     dom['sec-save'].disabled = false;
   }
@@ -9108,6 +9660,7 @@ async function removePin() {
     state.auth.pinSet = false;
     state.auth.authenticated = true;
     state.auth.decoy = false;
+    accountChoice = '';
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     dom['botmanager-backdrop'].classList.add('hidden');
     await refreshAuthQuiet();
@@ -9156,7 +9709,7 @@ function wireAuthEvents() {
 
   // 3.0 first-run card: open Settings -> Security (the Create owner account
   // form), or put it away on this browser.
-  dom['firstrun-open'].addEventListener('click', () => { dom['firstrun-card'].hidden = true; openSettingsTab('security'); });
+  dom['firstrun-open'].addEventListener('click', () => { dom['firstrun-card'].hidden = true; openSettingsTab('account#signin'); });
   dom['firstrun-dismiss'].addEventListener('click', () => {
     firstRunDismissed = true;
     dom['firstrun-card'].hidden = true;
@@ -9169,46 +9722,17 @@ function wireAuthEvents() {
   // Dedicated unlock padlock (locked mode) → the existing PIN overlay.
   if (dom['unlock-btn']) dom['unlock-btn'].addEventListener('click', () => showSignInScreen());
 
-  // Remember-device toggle + forget-all (Security modal)
-  dom['sec-remember-enable'].addEventListener('change', async () => {
-    const on = dom['sec-remember-enable'].checked;
-    try {
-      const r = await api.rememberConfig(on ? 30 : 0);
-      state.auth.rememberDays = (r && r.remember_days) || 0;
-      if (!on) {
-        // Server forgot every device; this session is demoted to idle-expiry.
-        state.auth.remembered = false;
-        state.auth.trustedDevices = 0;
-        dom['sec-forget-devices'].hidden = true;
-        armIdleTimer();
-      }
-      renderSecurityStrings();
-      toast(t(on ? 'security.remember_on' : 'security.remember_off'));
-    } catch (e) {
-      dom['sec-remember-enable'].checked = !on;   // revert on failure
-      setSecError(cleanErr(e));
-    }
-  });
-  dom['sec-forget-devices'].addEventListener('click', async () => {
-    if (!await uiConfirm(t('security.forget_confirm'), { danger: true })) return;
-    try {
-      await api.forgetDevices();
-      state.auth.remembered = false;
-      state.auth.trustedDevices = 0;
-      dom['sec-forget-devices'].hidden = true;
-      armIdleTimer();   // this session is now a normal idle-expiring one
-      renderSecurityStrings();
-      toast(t('security.forgotten'));
-    } catch (e) { setSecError(cleanErr(e)); }
-  });
-
-  // Security & PIN — the 🔐 Settings tab. No open/close wiring of its own any
-  // more: the tab controller activates it, and the Settings dialog's ✕ /
-  // Escape / backdrop close it like every other pane.
+  // Settings -> Account -> Sign-in: the Change select opens one form; its own
+  // buttons save. The section controller activates it like every other pane.
+  dom['acct-change'].addEventListener('change', () => openAccountForm(dom['acct-change'].value));
+  dom['sec-cancel'].addEventListener('click', () => openAccountForm('', { focus: false }));
   dom['sec-save'].addEventListener('click', saveSecurity);
   dom['sec-remove'].addEventListener('click', removePin);
   [dom['sec-current'], dom['sec-new'], dom['sec-confirm']].forEach((inp) =>
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveSecurity(); }));
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      if (accountChoice === 'pin_remove') removePin(); else saveSecurity();
+    }));
 
   // Idle auto-lock activity
   ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach((ev) =>
@@ -9258,6 +9782,8 @@ function iconifyRail() {
     ['drop-btn', RAIL_ICONS.upload],
     ['fs-chip', RAIL_ICONS.folder],
     ['manage-bots', RAIL_ICONS.gear],
+    // 3.2: Tasks was the one colour emoji (📋) left among the line icons.
+    ['tasks-btn', RAIL_ICONS.jobs],
   ]) {
     const b = document.getElementById(id);
     if (b) b.replaceChildren(railIcon(icon));
@@ -9287,17 +9813,8 @@ function iconifyChrome() {
     ['.mobile-tabs .tab[data-view="bots"]', RAIL_ICONS.bots, 'span:not(.tab-label)'],
     ['.mobile-tabs .tab[data-view="threads"]', RAIL_ICONS.chats, 'span:not(.tab-label)'],
     ['.mobile-tabs .tab[data-view="chat"]', RAIL_ICONS.messages, 'span:not(.tab-label)'],
-    // Settings tab strip.
-    ['#stab-bots', RAIL_ICONS.bots, '.stab-glyph'],
-    ['#stab-reactions', RAIL_ICONS.bolt, '.stab-glyph'],
-    ['#stab-health', RAIL_ICONS.pulse, '.stab-glyph'],
-    ['#stab-ai', RAIL_ICONS.chip, '.stab-glyph'],
-    ['#stab-plugins', RAIL_ICONS.tools, '.stab-glyph'],
-    ['#stab-theme', RAIL_ICONS.palette, '.stab-glyph'],
-    ['#stab-device', RAIL_ICONS.device, '.stab-glyph'],
-    ['#stab-voice', MIC_ICON, '.stab-glyph'],
-    ['#stab-security', RAIL_ICONS.shield, '.stab-glyph'],
-    ['#stab-people', RAIL_ICONS.bots, '.stab-glyph'],
+    // (The Settings nav's line icons are data-icon spans, iconifyDataIcons; Voice's
+    // mic glyph is filled in wireSettingsTabs.)
     // Chat header + thread list.
     ['#back-btn', RAIL_ICONS.back, null],
     ['#expand-threads', RAIL_ICONS.forward, null],
@@ -9883,6 +10400,25 @@ function applyRailLabels() {
     const btn = dom[id] || document.getElementById(id);
     if (btn) btn.setAttribute('data-label', t(key));
   }
+  syncGearButton();
+}
+
+/** The gear says what it opens (3.2): Settings, or for a Restricted session the
+ *  Companions picker (it was labelled Settings while opening a list of characters). */
+function syncGearButton() {
+  const b = dom['manage-bots'];
+  if (!b) return;
+  const comp = !!state.decoy;
+  const key = comp ? 'companions.title' : 'nav.settings';
+  if (b.dataset.face === key && b.querySelector('svg')) return;
+  b.dataset.face = key;
+  b.setAttribute('data-i18n-attr', `title=${key};aria-label=${key}`);
+  if (hasDictionary()) {
+    b.title = t(key);
+    b.setAttribute('aria-label', t(key));
+    b.setAttribute('data-label', t(key));
+  }
+  b.replaceChildren(railIcon(comp ? RAIL_ICONS.users : RAIL_ICONS.gear));
 }
 
 function wireRecoveryUi() {
@@ -9959,7 +10495,7 @@ async function openLocalPath(path) {
 function cmdkActions() {
   const a = [
     { icon: RAIL_ICONS.plus, label: t('cmdk.action_new_chat'), run: () => newChat() },
-    { icon: RAIL_ICONS.palette, label: t('cmdk.action_theme'), run: () => openSettingsTab('theme') },
+    { icon: RAIL_ICONS.palette, label: t('cmdk.action_theme'), run: () => openSettingsTab('appearance#theme') },
   ];
   if (!state.decoy) {
     a.push({ icon: RAIL_ICONS.search, label: t('cmdk.action_search'), run: () => openSearch() });
@@ -9969,8 +10505,8 @@ function cmdkActions() {
     // The Settings tabs and the File Server are unlocked-only surfaces, so
     // the palette offers them only where the rail would — a locked device
     // must get no hint that they exist.
-    a.push({ icon: RAIL_ICONS.gear, label: t('cmdk.action_settings'), run: () => openSettingsTab('device') });
-    a.push({ icon: RAIL_ICONS.pulse, label: t('cmdk.action_health'), run: () => openSettingsTab('health') });
+    a.push({ icon: RAIL_ICONS.gear, label: t('cmdk.action_settings'), run: () => openSettingsTab(null) });
+    a.push({ icon: RAIL_ICONS.pulse, label: t('cmdk.action_health'), run: () => openSettingsTab('system#health') });
     a.push({ icon: RAIL_ICONS.folder, label: t('cmdk.action_files'), run: () => openFileServer() });
     // Open a path on the DisPatch host in the viewer. Unlocked only, with the
     // rest of the admin surface: Safe Mode gets no hint the feature exists.
@@ -10061,8 +10597,10 @@ function wireCmdk() {
 function reRenderForLocale() {
   applySearchShortcutTitle();
   paintProfileChrome();
-  if (settingsOpen('people')) setSettingsTab('people');
-  if (settingsOpen('agents')) setSettingsTab('agents');
+  // Sections built by modules from server data rebuild in the new language.
+  for (const id of ['people', 'connections', 'plugins', 'system']) {
+    if (settingsOpen(id)) { setSettingsTab(id); break; }
+  }
   applyRailLabels();
   setConnected(state.connected);
   renderSidebar();
@@ -10084,12 +10622,18 @@ function reRenderForLocale() {
   // put back, and running the others would fetch for a screen nobody is on.
   if (open('botmanager-backdrop')) {
     renderBotManager();
-    if (settingsTab === 'device') mountLanguagePicker();
+    paintSettingsSummaries();
+    if (settingsSearch) settingsSearch.reset();
+    if (['appearance', 'account', 'system'].includes(settingsTab)) mountLanguagePicker(settingsTab);
+    if (settingsTab === 'appearance') syncMinimalAvatarRow();
     if (settingsTab === 'voice') renderVoicePane();
-    if (settingsTab === 'security') renderSecurityStrings();
-    // The Health pane is built inside dashboard.js (same story as the Reaction
+    if (settingsTab === 'account') { renderSecurityStrings(); paintAccountWho(); }
+    if (settingsTab === 'characters') mountSchemaHosts(settingsPane('characters'), { force: true });
+    if (settingsTab === 'appearance') mountSchemaHosts(settingsPane('appearance'), { force: true });
+    // The Health dashboard is built inside dashboard.js (same story as the Reaction
     // Manager): nothing in `dom` describes its labels, so it repaints itself.
-    if (settingsTab === 'health') repaintDashboard();
+    if (settingsTab === 'system') repaintDashboard();
+    showSettingsView(!settingsListView);
   }
   // Extensions: re-merge their strings for the new language, then let each
   // repaint what it built; the Voice tab's absent page is ours to repaint.

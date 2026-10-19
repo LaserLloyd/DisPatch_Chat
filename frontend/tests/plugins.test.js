@@ -22,44 +22,41 @@ let jsdom = null;
 try { jsdom = require('jsdom'); } catch { /* not installed - DOM tests skip */ }
 const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
-// ---------------------------------------------------------------- tab order
+// ---------------------------------------------------------------- section order (3.2)
 
-const TAB_ORDER = ['bots', 'theme', 'device', 'voice', 'plugins', 'connections', 'agents', 'ai', 'reactions', 'health', 'people', 'security', 'settings'];
+const SECTION_ORDER = ['appearance', 'account', 'voice', 'characters', 'connections', 'people', 'plugins', 'system'];
 
-test('the tab strip reads Bots, Theme, Device, Voice, Plugins, Connections, Agents, AI models, Reactions, Health, People, Security, All settings', () => {
+test('the nav reads Appearance, Account, Voice, then Characters, AI & Connections, People & Access, Plugins & Apps, System', () => {
   const tabs = [...HTML.matchAll(/<button class="settings-tab[^"]*" id="stab-([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(tabs, TAB_ORDER);
+  assert.deepEqual(tabs, SECTION_ORDER);
 });
 
-test('the panes follow the same order as the tabs', () => {
+test('the panes follow the same order as the nav', () => {
   const panes = [...HTML.matchAll(/<section class="settings-pane[^"]*" id="spane-([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(panes, TAB_ORDER);
+  assert.deepEqual(panes, SECTION_ORDER);
 });
 
-test('every tab button points at its pane and the pane back at the tab', () => {
-  for (const id of TAB_ORDER) {
+test('every section button points at its pane and the pane back at the button', () => {
+  for (const id of SECTION_ORDER) {
     assert.match(HTML, new RegExp(`id="stab-${id}"[^>]*aria-controls="spane-${id}"`), id);
     assert.match(HTML, new RegExp(`id="spane-${id}"[^>]*aria-labelledby="stab-${id}"`), id);
   }
 });
 
-test('main.js lists the tabs in the same order and the admin rule is unchanged', () => {
-  const m = /const SETTINGS_TABS = \[([^\]]*)\];/.exec(MAIN);
-  assert.deepEqual([...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]), TAB_ORDER);
-  const a = /const ADMIN_TABS = \[([^\]]*)\];/.exec(MAIN);
-  assert.deepEqual([...a[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort(),
-    ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings']);
-  // The same tabs are admin-only in the markup (Bots, Theme, Device and
-  // Security stay visible to a Restricted session, exactly as before; People &
-  // Profiles joined in 3.0 and shows for owner/admin only -- canAdmin()).
+test('settings-nav.js lists the sections in the same order and the household ones are the admin ones', async () => {
+  const N = await import('../static/js/settings-nav.js');
+  assert.deepEqual(N.SECTION_IDS, SECTION_ORDER);
+  assert.deepEqual(N.SECTIONS.filter((x) => x.perm === 'admin').map((x) => x.id),
+    ['characters', 'connections', 'people', 'plugins', 'system']);
+  assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)/);
+  // The same sections are admin-only in the markup; Voice has its own rule (voiceTabAllowed).
   const adminInMarkup = [...HTML.matchAll(/class="settings-tab admin-only[^"]*" id="stab-([a-z]+)"/g)].map((x) => x[1]).sort();
-  assert.deepEqual(adminInMarkup, ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings']);
-  // Voice is not an admin tab since 2026-10-19 (Members have voice): its own rule, voiceTabAllowed().
+  assert.deepEqual(adminInMarkup, ['characters', 'connections', 'people', 'plugins', 'system']);
   assert.match(HTML, /class="settings-tab hidden" id="stab-voice"/);
 });
 
-test('the first-run card still opens the AI models tab', () => {
-  assert.match(MAIN, /openSettingsTab\('ai'\);/);
+test('the first-run card opens AI & Connections on the quick setup', () => {
+  assert.match(MAIN, /openSettingsTab\('connections#quick-setup'\);/);
 });
 
 test('the old Tools tab and its locale key are gone', () => {
@@ -132,11 +129,23 @@ async function setup(over = {}) {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test('Plugins pane: four groups - Works with DisPatch, Add-ons, Apps & tools, Built-in lookups', { skip: dom.skip }, async () => {
+test('Plugins & Apps: Add-ons, Apps & tools, Built-in lookups, then Discover more (closed, last)', { skip: dom.skip }, async () => {
   const { mod, pane, deps, rec } = await setup();
   await mod.mountPluginsSettings(pane, deps);
   const titles = [...pane.querySelectorAll('.dev-group-title')].map((h) => h.textContent);
-  assert.deepEqual(titles, ['Works with DisPatch', 'Add-ons', 'Apps & tools', 'Built-in lookups']);
+  assert.deepEqual(titles, ['Add-ons', 'Apps & tools', 'Built-in lookups']);
+  // The catalog is a closed disclosure after the controls, loaded only when opened.
+  const discover = pane.querySelector('details.plugins-discover');
+  assert.ok(discover && !discover.open);
+  assert.equal(discover.querySelector('#plugins-catalog'), null, 'nothing fetched while closed');
+  const order = [...pane.children].map((n) => n.id || n.className);
+  assert.ok(order.indexOf('plugins-lookups') < order.findIndex((c) => /plugins-discover/.test(c)));
+  discover.open = true;
+  discover.dispatchEvent(new globalThis.window.Event('toggle'));
+  assert.ok(discover.querySelector('#plugins-catalog'), 'opening it loads the catalog');
+  // Each group carries the anchor the Settings search jumps to.
+  assert.deepEqual(['plugins-addons', 'plugins-tools', 'plugins-lookups'].map((id) => pane.querySelector(`#${id}`).dataset.anchor),
+    ['addons', 'tools', 'lookups']);
   // The Tools table got its own host inside the second group.
   assert.equal(rec.tools.length, 1);
   assert.equal(rec.tools[0].id, 'plugins-tools-host');
@@ -225,8 +234,11 @@ test('Built-in lookups: the switch PUTs /api/plugins/livetools and the tool name
   const { mod, pane, deps, rec } = await setup();
   await mod.mountPluginsSettings(pane, deps);
   const body = pane.querySelector('#plugins-lookups-body');
+  // Readable names, not tool ids (the id stays in the title).
   assert.deepEqual([...body.querySelectorAll('.plugins-chip')].map((c) => c.textContent),
-    ['web_search', 'weather', 'calculator']);
+    ['Web search', 'Weather', 'Calculator']);
+  assert.deepEqual([...body.querySelectorAll('.plugins-chip')].map((c) => c.title), ['web_search', 'weather', 'calculator']);
+  assert.equal(mod.lookupLabel('some_new_tool'), 'Some new tool', 'an unknown id is made readable');
   assert.match(body.textContent, /Offered to bots whose settings turn them on\./);
   const cb = body.querySelector('input[type=checkbox]');
   assert.equal(cb.checked, true);

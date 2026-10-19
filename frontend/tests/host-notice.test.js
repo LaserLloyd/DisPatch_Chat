@@ -100,11 +100,15 @@ test('a newer wording version shows it again on a device that dismissed an older
   assert.equal(mod.privacyAcked(), false);
 });
 
-test('Settings -> Security holds the full notice (files and chats), with its keys', () => {
-  const i = HTML.indexOf('id="spane-security"');
-  const pane = HTML.slice(i, i + 3000);
-  assert.match(pane, /<aside class="host-notice" role="note" id="sec-host-notice">/);
+test('Settings -> Account holds the full notice (files and chats), with its keys, first', () => {
+  const i = HTML.indexOf('id="spane-account"');
+  const pane = HTML.slice(i, HTML.indexOf('id="spane-voice"'));
+
   for (const k of ['title', 'files_body', 'chats_body']) assert.match(pane, new RegExp(`data-i18n="host_notice\\.${k}"`));
+  // With this device's privacy controls, and the anchor the settings search jumps to.
+  assert.match(pane, /<aside class="host-notice" role="note" id="sec-host-notice" data-anchor="notice">/);
+  assert.ok(pane.indexOf('id="dev-group-pictures"') < pane.indexOf('id="sec-host-notice"'));
+  assert.equal(EN.host_notice.card_more, 'The details are in Settings → Account.');
 });
 
 test('the markup fallback of the Settings notice says what en.json says', () => {

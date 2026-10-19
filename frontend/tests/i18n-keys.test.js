@@ -66,6 +66,14 @@ function flatten(obj, prefix = '') {
 // EXPLICIT, not a wildcard sweep: each entry names the exact expression that
 // builds it, because an allowlist nobody can audit is how the dead keys got in.
 const DYNAMIC = [
+  // js/settings_schema.js  customUnits() / the Custom… unit picker:  t(`schema.unit_${u}`)
+  { re: /^schema\.unit_(seconds|minutes|hours|days|megabytes|gigabytes)$/, built: 'settings_schema.js  t(`schema.unit_${u}`)' },
+  // js/main.js  renderBotManager():  t(`chars.who_${o}`) over characters.js WHO_OPTIONS
+  { re: /^chars\.who_(everyone|members|restricted|hidden)$/, built: 'main.js  t(`chars.who_${o}`)' },
+  // js/main.js  paintAccountChoices():  t(`acct.opt_${c}`) over accountChoices()
+  { re: /^acct\.opt_(pin_change|pin_set|pin_remove|pw_set|pw_change|my_pin)$/, built: 'main.js  t(`acct.opt_${c}`)' },
+  // js/plugins.js  lookupLabel():  `plugins.lookup_${id}` over the server's livetools names
+  { re: /^plugins\.lookup_[a-z_]+$/, built: 'plugins.js  lookupLabel()' },
   // js/main.js  renderHarness():  t('harness.state_' + svc)
   { re: /^harness\.state_(running|stopped|starting|failed|not_installed|unknown)$/,
     built: "main.js  t('harness.state_' + svc)" },
