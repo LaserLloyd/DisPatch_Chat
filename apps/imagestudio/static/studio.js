@@ -99,6 +99,16 @@ function refreshForm() {
   R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', { value: m })));
 }
 
+/** Ask the shell to open Settings on `target` ('section#anchor'). The shell checks
+ *  the target and the session; a page outside the shell does nothing. */
+function openShellSettings(target) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'dispatch:open-settings', target }, location.origin);
+    }
+  } catch { /* not framed */ }
+}
+
 function renderProviders() {
   const { providers, default: def } = S.info;
   R.provider.replaceChildren(...providers.map((p) => el('option', {
@@ -108,6 +118,8 @@ function renderProviders() {
   })));
   if (def) R.provider.value = def;
   R.none.hidden = !!def;
+  R.setup.hidden = !S.info.can_configure;
+  R.ask.hidden = !!S.info.can_configure;
   R.form.hidden = !def;
 }
 
@@ -489,7 +501,15 @@ function build(root) {
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.status = el('p', { class: 'st-status', role: 'status', 'aria-live': 'polite' });
   R.today = el('span', { class: 'st-today' });
-  R.none = el('p', { class: 'st-none', hidden: '', text: t('provider.none') });
+  // No provider yet: say so, and (for a profile that may change it) open the
+  // shell's Settings -> AI & Connections -> Image generation from here (3.2).
+  R.setup = el('button', { type: 'button', class: 'st-btn st-primary', hidden: '', text: t('provider.setup') });
+  R.setup.addEventListener('click', () => openShellSettings('connections#images'));
+  R.ask = el('p', { class: 'st-muted', hidden: '', text: t('provider.ask_owner') });
+  R.none = el('div', { class: 'st-none', hidden: '' }, [
+    el('p', { text: t('provider.none') }),
+    R.setup, R.ask,
+  ]);
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider), field(t('model.label'), R.model, R.models)]),

@@ -165,3 +165,14 @@ def test_restricted_and_signed_out_callers_never_reach_it(world):
     assert kid.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
     assert world.client().post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code in (401, 403)
     assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)
+
+
+def test_state_says_who_may_set_up_a_provider(world):
+    """The empty state's "Set up image generation" opens Settings; only a profile
+    that may change connections is offered it (3.2)."""
+    owner = world.create_owner()
+    world.person(owner, "Max", "member", pin="5555")
+    max_ = world.client()
+    assert world.login(max_, name="Max", pin="5555").status_code == 200
+    assert owner.get(BASE + "/state").json()["can_configure"] is True
+    assert max_.get(BASE + "/state").json()["can_configure"] is False

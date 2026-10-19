@@ -331,6 +331,9 @@ def build(ctx):
             "busy": _lock.locked(),
             # "Clear from here down" is offered only to a profile that may delete.
             "can_clear": policy.of(request).can("manage_history"),
+            # The empty state's "Set up image generation" opens Settings -> AI & Connections;
+            # offered only to a profile that may change it.
+            "can_configure": policy.of(request).can("manage_connections"),
         }
 
     @router.get("/images", dependencies=op)

@@ -364,3 +364,19 @@ test('a recount whose picture list fails says so instead of throwing', { skip: d
   await flush(30);
   assert.match(doc.querySelector('.st-status').textContent, /disk gone/);
 });
+
+test('no provider yet: a profile that may set one up gets a button that opens Settings there; others are told who can', { skip: dom.skip }, async () => {
+  const none = { ...STATE, default: '', providers: PROVIDERS.map((p) => ({ ...p, configured: false })) };
+  const env = await page({ state: { ...none, can_configure: true } });
+  const btn = env.doc.querySelector('.st-none button');
+  assert.ok(btn && !btn.hidden, 'the Set up button is shown');
+  assert.equal(btn.textContent, 'Set up image generation');
+  assert.equal(env.doc.querySelector('.st-none .st-muted').hidden, true);
+  btn.click();
+  assert.deepEqual(env.posted.at(-1)[0], { type: 'dispatch:open-settings', target: 'connections#images' });
+  assert.equal(env.posted.at(-1)[1], 'http://127.0.0.1:8765');
+  const env2 = await page({ state: { ...none, can_configure: false } });
+  assert.equal(env2.doc.querySelector('.st-none button').hidden, true, 'no button that could only lead nowhere');
+  assert.equal(env2.doc.querySelector('.st-none .st-muted').hidden, false);
+  assert.match(env2.doc.querySelector('.st-none').textContent, /Ask the Owner or an Admin/);
+});
