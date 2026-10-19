@@ -86,8 +86,6 @@
   "clear.go": "删除",
   "clear.done": "已删除图片：{n} 张。",
   "clear.failed": "无法删除：{error}",
-  "privacy.title": "图片保存在主机电脑上",
-  "privacy.body": "你在这里生成的图片保存在运行 DisPatch 的电脑上，而不是这台设备上。所有能打开 Image Studio 的人都能看到它们，能访问那台电脑的人也可以。",
   "common.cancel": "取消",
   "common.close": "关闭"
 }

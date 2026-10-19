@@ -16,7 +16,6 @@
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { hostNotice } from './host-notice.js?v=1';
 import { describeTest } from './connections.js?v=1';
 
 export const STEPS = ['owner', 'connection', 'voice', 'family', 'network', 'done'];
@@ -282,7 +281,7 @@ export function openWizard(initial, ctx = {}) {
         el('span', { 'aria-hidden': 'true', text: s.done ? '✓ ' : (s.skipped ? '– ' : '○ ') }),
         el('strong', { text: s.title }), s.hint && !s.done ? el('span', { class: 'muted', text: ` ${s.hint}` }) : null]));
     }
-    content.append(el('p', { text: t('wiz.done_intro') }), list, hostNotice('chats'), actions(btn(t('wiz.finish'), 'btn-primary', async () => {
+    content.append(el('p', { text: t('wiz.done_intro') }), list, actions(btn(t('wiz.finish'), 'btn-primary', async () => {
       try { await api.wizardFinish(); } catch (e) { showError(e); return; }
       close();
       ctx.onFinished && ctx.onFinished();

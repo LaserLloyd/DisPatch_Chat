@@ -86,8 +86,6 @@
   "clear.go": "削除",
   "clear.done": "削除した画像：{n} 枚。",
   "clear.failed": "削除できませんでした：{error}",
-  "privacy.title": "画像はホストコンピューターに保存されます",
-  "privacy.body": "ここで作った画像は、この端末ではなく DisPatch を動かしているコンピューターに保存されます。Image Studio を開ける人は全員それを見られます。そのコンピューターにアクセスできる人も同じです。",
   "common.cancel": "キャンセル",
   "common.close": "閉じる"
 }

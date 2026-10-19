@@ -88,8 +88,6 @@
   "clear.go": "Supprimer",
   "clear.done": "Images supprimées : {n}.",
   "clear.failed": "Suppression impossible : {error}",
-  "privacy.title": "Images enregistrées sur l’ordinateur hôte",
-  "privacy.body": "Les images que vous créez ici sont enregistrées sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Toute personne qui peut ouvrir Image Studio les voit, de même que toute personne ayant accès à cet ordinateur.",
   "common.cancel": "Annuler",
   "common.close": "Fermer"
 }

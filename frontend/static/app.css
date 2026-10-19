@@ -4905,23 +4905,33 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .bm-row--hidden .bm-audience { opacity: .45; }
 
 /* ---------------------------------------------------------------------------
-   Host-storage notices (js/host-notice.js; static ones in index.html). The
-   LaserLloyd footer disclaimer's shape -- a red outlined bubble, a bold title,
-   a plain sentence -- in the ACTIVE theme's danger tokens, so it follows the
-   palette (and its contrast checks) instead of a fixed red.
+   "Stored on the host computer" (js/host-notice.js): the Settings -> Security
+   notice and the one-time first-load card. Quiet on purpose -- a neutral
+   surface; the ACTIVE theme's danger colour is only the accent edge and the
+   title, so it follows the palette (and its contrast checks).
    --------------------------------------------------------------------------- */
 .host-notice {
-  display: block; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
-  font-size: 12.5px; line-height: 1.5; text-align: start;
-  color: var(--danger-text, var(--error-text)); border: 1px solid var(--danger-border, var(--danger));
-  background: var(--danger-subtle, transparent); overflow-wrap: anywhere;
+  display: block; margin: 4px 18px 12px; padding: 10px 14px; border-radius: 10px;
+  font-size: 12.5px; line-height: 1.5; text-align: start; color: var(--text-secondary);
+  background: var(--bg-tertiary); border: 1px solid var(--border-light, var(--border-strong));
+  border-inline-start: 4px solid var(--danger, var(--error)); overflow-wrap: anywhere;
 }
-.host-notice-title { display: block; font-weight: 700; }
-.host-notice-body { display: block; margin-top: 2px; }
-.host-notice-compact { flex: 1 0 100%; margin: 2px 0 0; padding: 6px 10px; font-size: 12px; }
-.host-notice-compact .host-notice-title, .host-notice-compact .host-notice-body { display: inline; margin: 0; }
-.modal .host-notice { margin: 10px 18px 6px; }
-.settings-pane > .host-notice:first-child { margin-top: 4px; }
+.host-notice-title { display: block; font-weight: 700; color: var(--danger-text, var(--error-text)); }
+.host-notice-body { margin: 4px 0 0; }
+.privacy-card {
+  position: fixed; z-index: 400; inset-inline-end: 16px; bottom: 16px;
+  width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto;
+  padding: 14px 16px 12px; border-radius: 14px; background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-inline-start: 4px solid var(--danger, var(--error));
+  box-shadow: 0 10px 30px rgb(0 0 0 / .28); font-size: 13.5px; line-height: 1.5;
+}
+.privacy-card-title { margin: 0 0 6px; font-size: 15px; color: var(--danger-text, var(--error-text)); }
+.privacy-card-points { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
+.privacy-card-more { margin: 8px 0 0; font-size: 12px; }
+.privacy-card-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
+@media (max-width: 768px) {
+  .privacy-card { inset-inline: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
 
 /* ---------------------------------------------------------------------------
    Rail buttons moved into the Tools & more popup (js/railmenu.js). They are the
@@ -4970,3 +4980,24 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .quick-menu .qm-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }
 .quick-menu .qm-icon .rail-icon { width: 15px; height: 15px; display: block; }
 .qa-chip.qa-upload { border-style: dashed; }
+
+/* Drop files on a chat (js/chatdrop.js): two targets over the chat view. */
+.chat-drop {
+  position: absolute; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; padding: 24px;
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent); backdrop-filter: blur(2px);
+}
+.chat-drop-targets { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: min(720px, 100%); }
+.chat-drop-target {
+  flex: 1 1 240px; max-width: 340px; min-height: 150px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px; padding: 18px; text-align: center;
+  border: 2px dashed var(--border-strong); border-radius: 16px; background: var(--bg-secondary);
+  color: var(--text-primary); transition: border-color .12s ease, background-color .12s ease;
+}
+.chat-drop-target * { pointer-events: none; }
+.chat-drop-target.is-hot { border-color: var(--accent); border-style: solid; background: var(--bg-hover); }
+.chat-drop-icon .rail-icon { width: 30px; height: 30px; display: block; color: var(--accent-text, var(--accent)); }
+.chat-drop-title { font-size: 16px; }
+.chat-drop-sub { font-size: 12.5px; color: var(--text-secondary); }
+.chat-drop-hint { margin: 0; font-size: 12px; color: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) { .chat-drop-target { transition: none; } }

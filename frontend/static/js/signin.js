@@ -18,7 +18,6 @@
 
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { hostNotice } from './host-notice.js?v=1';
 import {
   ACTIVITY_COLUMNS, activityRows, avatarSpec, blockNoticeKey, createCountdown, credentialModes,
   credentialOptions, formatCountdown, sortTiles, usageLines,
@@ -333,7 +332,6 @@ export async function openRestrictedPanel({ fetchActivity }) {
   body.append(
     el('h3', { class: 'ui-dialog-title', id: 'restricted-title', text: t('restricted.panel_title') }),
     el('p', { class: 'ui-dialog-msg', text: t('restricted.banner') }),
-    hostNotice('chats_restricted'),
   );
   const holder = el('div', { class: 'restricted-holder', 'aria-live': 'polite' }, [
     el('p', { class: 'muted', text: t('common.loading') })]);

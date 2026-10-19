@@ -2107,16 +2107,14 @@
     "erased": "[es] Profile erased."
   },
   "host_notice": {
-    "upload_title": "Los archivos se guardan en el ordenador anfitrión",
-    "upload_body": "Los archivos que envías se guardan en el ordenador donde funciona DisPatch, no en este dispositivo. Otras personas que usan DisPatch aquí, y cualquiera con acceso a ese ordenador, podrían abrirlos.",
-    "fileserver_title": "Archivos guardados en el ordenador anfitrión",
-    "fileserver_body": "Los archivos de aquí están en el ordenador donde funciona DisPatch. Todas las personas que pueden abrir el File Server los ven, igual que cualquiera con acceso a ese ordenador.",
-    "images_title": "Imágenes guardadas en el ordenador anfitrión",
-    "images_body": "Las imágenes que añades aquí se guardan en el ordenador donde funciona DisPatch, no en este dispositivo. Cualquiera con acceso a ese ordenador puede abrirlas, y todas las personas que ven este personaje ven sus imágenes.",
-    "chats_title": "Los chats se guardan en el ordenador anfitrión",
+    "title": "Guardado en el ordenador anfitrión",
+    "files_body": "Los archivos, imágenes y avatares que subes o creas aquí (en los chats, el File Server, Image Studio y los Ajustes) se guardan en el ordenador donde funciona DisPatch, no en tu dispositivo. Otras personas que usan DisPatch aquí, y cualquiera con acceso a ese ordenador, podrían abrirlos.",
     "chats_body": "Cada chat se guarda en el ordenador donde funciona DisPatch, no en este dispositivo. Los chats no son privados ni tienen cifrado de extremo a extremo. Un chat pertenece a su personaje, no a una persona: todas las personas que pueden usar un personaje pueden abrir sus chats, y el Owner y los Admins pueden usar todos los personajes, así que pueden leer todos los chats, también los de los perfiles restringidos. Cualquiera con acceso a ese ordenador, a sus archivos o a sus copias de seguridad también puede leerlos.",
-    "chats_restricted_title": "Tus chats se guardan en el ordenador anfitrión",
-    "chats_restricted_body": "Tus chats se guardan en el ordenador donde funciona DisPatch. No son secretos: los adultos que usan DisPatch aquí pueden leerlos."
+    "card_title": "Antes de empezar",
+    "card_files": "Lo que subes o creas aquí se guarda en el ordenador donde funciona DisPatch, no en este dispositivo.",
+    "card_chats": "Los chats también se guardan allí. No son privados: quienes administran DisPatch, y cualquiera con acceso a ese ordenador, pueden leerlos.",
+    "card_more": "Los detalles están en Ajustes → Seguridad.",
+    "card_ok": "Entendido"
   },
   "rail": {
     "arrange": "Ordenar la barra…",
@@ -2128,5 +2126,15 @@
     "to_bar": "Mover a la barra",
     "reset": "Restablecer",
     "empty": "Aquí no hay nada."
+  },
+  "chatdrop": {
+    "region": "Soltar archivos",
+    "insert_title": "Insertar en el chat",
+    "insert_sub": "Adjuntar al próximo mensaje, como con el clip.",
+    "server_title": "Subir al File Server",
+    "server_sub": "Guardar en el anfitrión para tus asistentes. No se inicia ninguna respuesta.",
+    "send_title": "Enviar a tus asistentes",
+    "send_sub": "Una subida de un solo sentido, con una nota en este chat.",
+    "cancel_hint": "Suelta en otro lugar o pulsa Esc para cancelar."
   }
 }

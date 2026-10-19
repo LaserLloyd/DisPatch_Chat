@@ -2082,16 +2082,14 @@
     "erased": "[de] Profile erased."
   },
   "host_notice": {
-    "upload_title": "Dateien werden auf dem Host-Computer gespeichert",
-    "upload_body": "Dateien, die du sendest, werden auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Andere Personen, die DisPatch hier nutzen, und jeder mit Zugriff auf diesen Computer können sie unter Umständen öffnen.",
-    "fileserver_title": "Dateien auf dem Host-Computer gespeichert",
-    "fileserver_body": "Die Dateien hier liegen auf dem Computer, auf dem DisPatch läuft. Alle, die den File Server öffnen können, sehen sie, ebenso jeder mit Zugriff auf diesen Computer.",
-    "images_title": "Bilder auf dem Host-Computer gespeichert",
-    "images_body": "Bilder, die du hier hinzufügst, werden auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Jeder mit Zugriff auf diesen Computer kann sie öffnen, und alle, die diese Figur sehen, sehen ihre Bilder.",
-    "chats_title": "Chats werden auf dem Host-Computer gespeichert",
+    "title": "Auf dem Host-Computer gespeichert",
+    "files_body": "Dateien, Bilder und Avatare, die du hier hochlädst oder erstellst (in Chats, im File Server, im Image Studio und in den Einstellungen), werden auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf deinem Gerät. Andere Personen, die DisPatch hier nutzen, und jeder mit Zugriff auf diesen Computer können sie unter Umständen öffnen.",
     "chats_body": "Jeder Chat wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Chats sind nicht privat und nicht Ende-zu-Ende-verschlüsselt. Ein Chat gehört zu seiner Figur, nicht zu einer Person: Alle, die eine Figur nutzen können, können ihre Chats öffnen, und Owner und Admins können jede Figur nutzen, also jeden Chat lesen, auch die Chats eingeschränkter Profile. Jeder mit Zugriff auf diesen Computer, seine Dateien oder seine Backups kann sie ebenfalls lesen.",
-    "chats_restricted_title": "Deine Chats liegen auf dem Host-Computer",
-    "chats_restricted_body": "Deine Chats werden auf dem Computer gespeichert, auf dem DisPatch läuft. Sie sind nicht geheim: Die Erwachsenen, die DisPatch hier nutzen, können sie lesen."
+    "card_title": "Bevor du anfängst",
+    "card_files": "Was du hier hochlädst oder erstellst, wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät.",
+    "card_chats": "Auch die Chats liegen dort. Sie sind nicht privat: Die Personen, die DisPatch betreiben, und jeder mit Zugriff auf diesen Computer können sie lesen.",
+    "card_more": "Details stehen unter Einstellungen → Sicherheit.",
+    "card_ok": "Verstanden"
   },
   "rail": {
     "arrange": "Leiste anordnen…",
@@ -2103,5 +2101,15 @@
     "to_bar": "Auf die Leiste",
     "reset": "Zurücksetzen",
     "empty": "Nichts hier."
+  },
+  "chatdrop": {
+    "region": "Dateien ablegen",
+    "insert_title": "In den Chat einfügen",
+    "insert_sub": "An die nächste Nachricht anhängen, wie mit der Büroklammer.",
+    "server_title": "In den File Server hochladen",
+    "server_sub": "Auf dem Host für deine Assistenten ablegen. Es wird keine Antwort gestartet.",
+    "send_title": "An deine Assistenten senden",
+    "send_sub": "Ein Upload in eine Richtung, mit einer Notiz in diesem Chat.",
+    "cancel_hint": "Woanders ablegen oder Esc drücken, um abzubrechen."
   }
 }

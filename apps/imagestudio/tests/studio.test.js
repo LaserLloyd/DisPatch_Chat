@@ -296,16 +296,7 @@ test('a profile that may not delete gets no clear action', { skip: dom.skip }, a
   assert.equal(doc.querySelectorAll('.st-icon-danger').length, 0);
 });
 
-test('the host-storage notice is on the page, titled, in the theme danger style', { skip: dom.skip }, async () => {
+test('no host-storage callout on the page (it lives in Settings and the first-load card)', { skip: dom.skip }, async () => {
   const { doc } = await page();
-  const note = doc.querySelector('.st-privacy');
-  assert.ok(note, 'the notice is shown');
-  assert.equal(note.getAttribute('role'), 'note');
-  assert.equal(note.querySelector('strong').textContent, 'Images stored on the host computer');
-  assert.match(note.textContent, /saved on the computer that runs DisPatch/);
-  const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8');
-  const rule = /\.st-privacy\s*\{([^}]*)\}/.exec(css)[1];
-  assert.match(rule, /var\(--danger-text/);
-  assert.match(rule, /var\(--danger-border/);
-  assert.doesNotMatch(rule, /#f00|#ff0000|\bred\b/i, 'a theme token, not a hard-coded red');
+  assert.equal(doc.querySelector('.st-privacy, .host-notice'), null);
 });

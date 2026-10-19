@@ -523,7 +523,7 @@ test('main.js: hooks the new modules, registers the locked handler and starts th
   }
   assert.ok(SW.includes("'/static/w5.css'"));
   assert.match(MAIN, /w5SetOnLocked\(\(\) => handleLocked\(\)\);/);
-  assert.match(MAIN, /await refreshAuthAndBoot\(\);\s+[\s\S]{0,400}applyDeviceDefaults\(\);\s+maybeStartWizard\(/);
+  assert.match(MAIN, /await refreshAuthAndBoot\(\);\s+[\s\S]{0,400}applyDeviceDefaults\(\);\s+(?:const wizard = await )?maybeStartWizard\(/);
   assert.match(MAIN, /decorateCharacterRows\(list, bmBots, characterCtx\(\)\)/);
   assert.match(MAIN, /case 'connections':[\s\S]{0,200}mountConnections\(pane/);
   assert.match(MAIN, /case 'settings':[\s\S]{0,200}mountSettingsSchema\(pane/);

@@ -87,8 +87,6 @@
   "clear.go": "Löschen",
   "clear.done": "Gelöschte Bilder: {n}.",
   "clear.failed": "Löschen fehlgeschlagen: {error}",
-  "privacy.title": "Bilder werden auf dem Host-Computer gespeichert",
-  "privacy.body": "Bilder, die du hier erstellst, werden auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Alle, die das Image Studio öffnen können, sehen sie, ebenso jeder mit Zugriff auf diesen Computer.",
   "common.cancel": "Abbrechen",
   "common.close": "Schließen"
 }

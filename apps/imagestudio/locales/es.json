@@ -88,8 +88,6 @@
   "clear.go": "Borrar",
   "clear.done": "Imágenes borradas: {n}.",
   "clear.failed": "No se pudo borrar: {error}",
-  "privacy.title": "Imágenes guardadas en el ordenador anfitrión",
-  "privacy.body": "Las imágenes que creas aquí se guardan en el ordenador donde funciona DisPatch, no en este dispositivo. Todas las personas que pueden abrir Image Studio las ven, igual que cualquiera con acceso a ese ordenador.",
   "common.cancel": "Cancelar",
   "common.close": "Cerrar"
 }

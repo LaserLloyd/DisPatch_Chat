@@ -2107,16 +2107,14 @@
     "erased": "[pt] Profile erased."
   },
   "host_notice": {
-    "upload_title": "Os arquivos ficam guardados no computador anfitrião",
-    "upload_body": "Os arquivos que você envia são guardados no computador que executa o DisPatch, não neste dispositivo. Outras pessoas que usam o DisPatch aqui, e qualquer pessoa com acesso a esse computador, podem conseguir abri-los.",
-    "fileserver_title": "Arquivos guardados no computador anfitrião",
-    "fileserver_body": "Os arquivos aqui ficam no computador que executa o DisPatch. Todos que podem abrir o File Server os veem, assim como qualquer pessoa com acesso a esse computador.",
-    "images_title": "Imagens guardadas no computador anfitrião",
-    "images_body": "As imagens que você adiciona aqui são guardadas no computador que executa o DisPatch, não neste dispositivo. Qualquer pessoa com acesso a esse computador pode abri-las, e todos que veem esta personagem veem as suas imagens.",
-    "chats_title": "As conversas ficam guardadas no computador anfitrião",
+    "title": "Guardado no computador anfitrião",
+    "files_body": "Os arquivos, imagens e avatares que você carrega ou cria aqui (nas conversas, no File Server, no Image Studio e nas Definições) são guardados no computador que executa o DisPatch, não no seu dispositivo. Outras pessoas que usam o DisPatch aqui, e qualquer pessoa com acesso a esse computador, podem conseguir abri-los.",
     "chats_body": "Cada conversa é guardada no computador que executa o DisPatch, não neste dispositivo. As conversas não são privadas nem têm criptografia de ponta a ponta. Uma conversa pertence à sua personagem, não a uma pessoa: todos que podem usar uma personagem podem abrir as conversas dela, e o Owner e os Admins podem usar todas as personagens, então podem ler todas as conversas, incluindo as dos perfis restritos. Qualquer pessoa com acesso a esse computador, aos seus arquivos ou às suas cópias de segurança também pode lê-las.",
-    "chats_restricted_title": "As suas conversas ficam no computador anfitrião",
-    "chats_restricted_body": "As suas conversas são guardadas no computador que executa o DisPatch. Não são segredo: os adultos que usam o DisPatch aqui podem lê-las."
+    "card_title": "Antes de começar",
+    "card_files": "O que você carrega ou cria aqui é guardado no computador que executa o DisPatch, não neste dispositivo.",
+    "card_chats": "As conversas também ficam lá. Não são privadas: quem administra o DisPatch, e qualquer pessoa com acesso a esse computador, pode lê-las.",
+    "card_more": "Os detalhes estão em Definições → Segurança.",
+    "card_ok": "Entendi"
   },
   "rail": {
     "arrange": "Organizar a barra…",
@@ -2128,5 +2126,15 @@
     "to_bar": "Mover para a barra",
     "reset": "Repor",
     "empty": "Nada aqui."
+  },
+  "chatdrop": {
+    "region": "Largar arquivos",
+    "insert_title": "Inserir na conversa",
+    "insert_sub": "Anexar à próxima mensagem, como o clipe.",
+    "server_title": "Carregar para o File Server",
+    "server_sub": "Guardar no anfitrião para os seus assistentes. Nenhuma resposta é iniciada.",
+    "send_title": "Enviar aos seus assistentes",
+    "send_sub": "Um envio só de ida, com uma nota nesta conversa.",
+    "cancel_hint": "Largue noutro lugar ou prima Esc para cancelar."
   }
 }

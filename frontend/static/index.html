@@ -935,8 +935,13 @@
 
       <!-- ---- Security & PIN ---- -->
       <section class="settings-pane hidden" id="spane-security" role="tabpanel" aria-labelledby="stab-security" tabindex="0">
-        <!-- Host-storage notice (js/host-notice.js explains the family): chats live on the host. -->
-        <aside class="host-notice" role="note" data-kind="chats"><strong class="host-notice-title" data-i18n="host_notice.chats_title">Chats are stored on the host computer</strong> <span class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: everyone who can use a character can open its chats, and the Owner and Admins can use every character, so they can read every chat, Restricted profiles&#39; chats included. Anyone with access to that computer, its files or its backups can read them too.</span></aside>
+        <!-- "Stored on the host computer" (js/host-notice.js): the one permanent home of the
+             notice; a device also sees a short version once, on its first normal page load. -->
+        <aside class="host-notice" role="note" id="sec-host-notice">
+          <strong class="host-notice-title" data-i18n="host_notice.title">Stored on the host computer</strong>
+          <p class="host-notice-body" data-i18n="host_notice.files_body">Files, pictures and avatars you upload or create here are saved on the computer that runs DisPatch, not on your device.</p>
+          <p class="host-notice-body" data-i18n="host_notice.chats_body">Every chat is saved on the computer that runs DisPatch. Chats are not private and not end-to-end encrypted.</p>
+        </aside>
         <p class="muted modal-hint" id="sec-status-line"></p>
         <!-- 3.0: filled by main.js (js/signin.js builds the forms). The first holds
              "Create owner account" while the install is unclaimed; the second the
@@ -1029,7 +1034,6 @@
         </div>
       </header>
       <p class="muted modal-hint" data-i18n="files.hint">Drop files here to share them with your assistants. Drag &amp; drop works too.</p>
-      <aside class="host-notice" role="note" data-kind="fileserver"><strong class="host-notice-title" data-i18n="host_notice.fileserver_title">Files stored on the host computer</strong> <span class="host-notice-body" data-i18n="host_notice.fileserver_body">Files here are saved on the computer that runs DisPatch. Everyone who can open the File Server sees them, and so can anyone with access to that computer.</span></aside>
       <div class="fs-list" id="fs-list"></div>
       <input type="file" id="fs-file-input" multiple hidden />
     </div>
@@ -1046,7 +1050,6 @@
       <p class="muted modal-hint" data-i18n="drop.hint">Files go straight to your assistants, and a note
         appears in the chat. Sending is one-way — a file can't be opened again from
         this device.</p>
-      <aside class="host-notice" role="note" data-kind="upload"><strong class="host-notice-title" data-i18n="host_notice.upload_title">Files are stored on the host computer</strong> <span class="host-notice-body" data-i18n="host_notice.upload_body">Files you send are saved on the computer that runs DisPatch, not on this device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.</span></aside>
       <div class="drop-list" id="drop-list" aria-live="polite"></div>
       <footer class="modal-footer drop-footer">
         <button class="btn-secondary" id="drop-more" data-i18n="drop.choose">Choose files</button>
@@ -1064,7 +1067,6 @@
         <button class="icon-btn ghost" id="crop-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
       </header>
       <p class="muted modal-hint" data-i18n="crop.hint">Drag the square over the face. The full-resolution original is saved too.</p>
-      <aside class="host-notice" role="note" data-kind="images"><strong class="host-notice-title" data-i18n="host_notice.images_title">Images stored on the host computer</strong> <span class="host-notice-body" data-i18n="host_notice.images_body">Pictures you add here are saved on the computer that runs DisPatch, not on this device. Anyone with access to that computer can open them, and everyone who sees this character sees its pictures.</span></aside>
       <div class="crop-stage" id="crop-stage">
         <img id="crop-img" alt="" draggable="false" />
         <div class="crop-box" id="crop-box"></div>

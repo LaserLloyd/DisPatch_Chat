@@ -87,8 +87,6 @@
   "clear.go": "Delete",
   "clear.done": "Pictures deleted: {n}.",
   "clear.failed": "Could not delete: {error}",
-  "privacy.title": "Images stored on the host computer",
-  "privacy.body": "Pictures you make here are saved on the computer that runs DisPatch, not on this device. Everyone who can open Image Studio sees them, and so can anyone with access to that computer.",
   "common.cancel": "Cancel",
   "common.close": "Close"
 }

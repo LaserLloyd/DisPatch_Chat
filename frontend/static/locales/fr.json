@@ -2107,16 +2107,14 @@
     "erased": "[fr] Profile erased."
   },
   "host_notice": {
-    "upload_title": "Les fichiers sont enregistrés sur l’ordinateur hôte",
-    "upload_body": "Les fichiers que vous envoyez sont enregistrés sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Les autres personnes qui utilisent DisPatch ici, et toute personne ayant accès à cet ordinateur, peuvent éventuellement les ouvrir.",
-    "fileserver_title": "Fichiers enregistrés sur l’ordinateur hôte",
-    "fileserver_body": "Les fichiers ici sont enregistrés sur l’ordinateur qui fait tourner DisPatch. Toute personne qui peut ouvrir le File Server les voit, de même que toute personne ayant accès à cet ordinateur.",
-    "images_title": "Images enregistrées sur l’ordinateur hôte",
-    "images_body": "Les images que vous ajoutez ici sont enregistrées sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Toute personne ayant accès à cet ordinateur peut les ouvrir, et tous ceux qui voient ce personnage voient ses images.",
-    "chats_title": "Les discussions sont enregistrées sur l’ordinateur hôte",
+    "title": "Enregistré sur l’ordinateur hôte",
+    "files_body": "Les fichiers, images et avatars que vous envoyez ou créez ici (dans les discussions, le File Server, Image Studio et les Réglages) sont enregistrés sur l’ordinateur qui fait tourner DisPatch, pas sur votre appareil. Les autres personnes qui utilisent DisPatch ici, et toute personne ayant accès à cet ordinateur, peuvent éventuellement les ouvrir.",
     "chats_body": "Chaque discussion est enregistrée sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Les discussions ne sont ni privées ni chiffrées de bout en bout. Une discussion appartient à son personnage, pas à une personne : toute personne qui peut utiliser un personnage peut ouvrir ses discussions, et l’Owner et les Admins peuvent utiliser tous les personnages, donc lire toutes les discussions, y compris celles des profils restreints. Toute personne ayant accès à cet ordinateur, à ses fichiers ou à ses sauvegardes peut aussi les lire.",
-    "chats_restricted_title": "Tes discussions sont gardées sur l’ordinateur hôte",
-    "chats_restricted_body": "Tes discussions sont enregistrées sur l’ordinateur qui fait tourner DisPatch. Elles ne sont pas secrètes : les adultes qui utilisent DisPatch ici peuvent les lire."
+    "card_title": "Avant de commencer",
+    "card_files": "Ce que vous envoyez ou créez ici est enregistré sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil.",
+    "card_chats": "Les discussions y sont aussi gardées. Elles ne sont pas privées : les personnes qui gèrent DisPatch, et toute personne ayant accès à cet ordinateur, peuvent les lire.",
+    "card_more": "Les détails sont dans Réglages → Sécurité.",
+    "card_ok": "Compris"
   },
   "rail": {
     "arrange": "Organiser la barre…",
@@ -2128,5 +2126,15 @@
     "to_bar": "Mettre sur la barre",
     "reset": "Réinitialiser",
     "empty": "Rien ici."
+  },
+  "chatdrop": {
+    "region": "Déposer des fichiers",
+    "insert_title": "Insérer dans la discussion",
+    "insert_sub": "Joindre à votre prochain message, comme avec le trombone.",
+    "server_title": "Envoyer au File Server",
+    "server_sub": "Stocker sur l’hôte pour vos assistants. Aucune réponse n’est lancée.",
+    "send_title": "Envoyer à vos assistants",
+    "send_sub": "Un envoi à sens unique, avec une note dans cette discussion.",
+    "cancel_hint": "Déposez ailleurs ou appuyez sur Échap pour annuler."
   }
 }

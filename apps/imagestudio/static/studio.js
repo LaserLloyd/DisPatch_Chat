@@ -482,17 +482,13 @@ function build(root) {
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
   R.sortWrap = el('label', { class: 'st-sortwrap', for: 'st-sort' }, [`${t('sort.label')}: `, R.sort]);
-  R.privacy = el('aside', { class: 'st-privacy', role: 'note' }, [
-    el('strong', { class: 'st-privacy-title', text: t('privacy.title') }),
-    el('p', { text: t('privacy.body') }),
-  ]);
   R.grid = el('ul', { class: 'st-grid' });
   R.empty = el('p', { class: 'st-muted st-emptynote', text: t('results.empty') });
   R.dlg = el('div', { class: 'st-dlgwrap', hidden: '' });
   root.append(
     el('header', { class: 'st-head' }, [R.today]),
     el('div', { class: 'st-layout' }, [
-      el('section', { class: 'st-controls' }, [R.privacy, R.none, R.form, R.status]),
+      el('section', { class: 'st-controls' }, [R.none, R.form, R.status]),
       el('section', { class: 'st-results' }, [
         el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), R.sortWrap]),
         R.empty, R.grid]),

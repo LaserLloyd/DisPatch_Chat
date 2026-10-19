@@ -2082,16 +2082,14 @@
     "erased": "Profile erased."
   },
   "host_notice": {
-    "upload_title": "Files are stored on the host computer",
-    "upload_body": "Files you send are saved on the computer that runs DisPatch, not on this device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.",
-    "fileserver_title": "Files stored on the host computer",
-    "fileserver_body": "Files here are saved on the computer that runs DisPatch. Everyone who can open the File Server sees them, and so can anyone with access to that computer.",
-    "images_title": "Images stored on the host computer",
-    "images_body": "Pictures you add here are saved on the computer that runs DisPatch, not on this device. Anyone with access to that computer can open them, and everyone who sees this character sees its pictures.",
-    "chats_title": "Chats are stored on the host computer",
+    "title": "Stored on the host computer",
+    "files_body": "Files, pictures and avatars you upload or create here (in chats, the File Server, Image Studio and Settings) are saved on the computer that runs DisPatch, not on your device. Other people who use DisPatch here, and anyone with access to that computer, may be able to open them.",
     "chats_body": "Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: everyone who can use a character can open its chats, and the Owner and Admins can use every character, so they can read every chat, Restricted profiles' chats included. Anyone with access to that computer, its files or its backups can read them too.",
-    "chats_restricted_title": "Your chats are kept on the host computer",
-    "chats_restricted_body": "Your chats are saved on the computer that runs DisPatch. They are not secret: the grown-ups who use DisPatch here can read them."
+    "card_title": "Before you start",
+    "card_files": "What you upload or create here is saved on the computer that runs DisPatch, not on this device.",
+    "card_chats": "Chats are kept there too. They are not private: the people who run DisPatch, and anyone with access to that computer, can read them.",
+    "card_more": "The details are in Settings → Security.",
+    "card_ok": "Got it"
   },
   "rail": {
     "arrange": "Arrange the bar…",
@@ -2103,5 +2101,15 @@
     "to_bar": "Move to the bar",
     "reset": "Reset",
     "empty": "Nothing here."
+  },
+  "chatdrop": {
+    "region": "Drop files",
+    "insert_title": "Insert into chat",
+    "insert_sub": "Attach to your next message, like the paperclip.",
+    "server_title": "Upload to File Server",
+    "server_sub": "Store on the host for your assistants. No reply is started.",
+    "send_title": "Send to your assistants",
+    "send_sub": "A one-way upload, with a note in this chat.",
+    "cancel_hint": "Drop anywhere else, or press Esc, to cancel."
   }
 }

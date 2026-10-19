@@ -21,7 +21,7 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=28';
+} from './reactions.js?v=27';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=10';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
 import {
@@ -46,7 +46,8 @@ import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
 } from './ext-sdk.js?v=18';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { hostNotice } from './host-notice.js?v=1';
+import { maybeShowPrivacyCard } from './host-notice.js?v=1';
+import { createChatDrop } from './chatdrop.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
 import { mountPluginsSettings } from './plugins.js?v=16';
@@ -58,7 +59,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?
 import { mountConnections } from './connections.js?v=1';
 import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=2';
 import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
-import { maybeStartWizard } from './wizard.js?v=2';
+import { maybeStartWizard } from './wizard.js?v=1';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -90,8 +91,8 @@ import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, au
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
   paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
-} from './signin.js?v=3';
-import { mountPeopleSettings } from './people.js?v=3';
+} from './signin.js?v=2';
+import { mountPeopleSettings } from './people.js?v=2';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=1';
@@ -3206,8 +3207,6 @@ function renderAttachments() {
     const chip = el('div', { class: 'chip' + (asFile ? ' doc-chip' : '') }, children);
     p.append(chip);
   });
-  // Only while something is queued: the composer stays clean otherwise.
-  if (state.attachments.length) p.append(hostNotice('upload', { compact: true }));
 }
 function clearAttachments() {
   state.attachments.forEach((a) => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
@@ -5334,12 +5333,17 @@ function updateDropBusy() {
   dom['drop-done'].textContent = t(busy ? 'drop.sending_short' : 'common.done');
 }
 
-function openDrop() {
+function openDropSheet() {
+  if (!dom['drop-backdrop'].classList.contains('hidden')) return;
   dom['drop-list'].replaceChildren(
     el('div', { class: 'drop-empty', text: t('drop.empty') }));
   dropBusy = 0;
   updateDropBusy();
   dom['drop-backdrop'].classList.remove('hidden');
+}
+
+function openDrop() {
+  openDropSheet();
   dom['drop-input'].click();
 }
 
@@ -7608,13 +7612,21 @@ function wireEvents() {
   // now — see wireSettingsTabs() and openSettingsTab().
   dom['file-input'].addEventListener('change', (e) => { handleFiles([...e.target.files]); e.target.value = ''; });
 
-  // Drag & drop images onto the chat view.
-  const cv = $('chatview');
-  cv.addEventListener('dragover', (e) => e.preventDefault());
-  cv.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const files = [...(e.dataTransfer?.files || [])];
-    if (files.length) handleFiles(files);
+  // Drop files on the chat view: an overlay offers "Insert into chat" (the
+  // paperclip's flow) and "Upload to File Server" (or, on a Restricted device,
+  // its one-way "Send a file"); js/chatdrop.js. Before 2026-10-19 a drop went
+  // straight into the composer.
+  createChatDrop({
+    host: $('chatview'),
+    canInsert: () => !!state.activeThreadId && !dom['attach-btn'].disabled,
+    canServer: () => (!dom['fs-chip'].classList.contains('hidden') ? 'fileserver'
+      : (!dom['drop-btn'].classList.contains('hidden') ? 'send' : '')),
+    onInsert: (files) => handleFiles(files),
+    onServer: (files) => {
+      if (!dom['fs-chip'].classList.contains('hidden')) { uploadToFileServer(files); return; }
+      openDropSheet();
+      sendDrops(files);
+    },
   });
 
   dom['mobile-tabs'].querySelectorAll('.tab').forEach((t) =>
@@ -8283,6 +8295,17 @@ const hasLock = () => !!(state.auth.claimed || state.auth.pinSet);
 const canAdmin = () => !state.decoy && isAdminRole(state.role);
 /** anonymous_access: none and nobody signed in -> only the sign-in screen. */
 const gateActive = () => !!(state.auth.claimed && state.auth.anonymousAccess === 'none' && !state.auth.signedIn);
+
+/** The one-time "stored on the host computer" card, when the app is on a normal
+ *  page: booted, not gated, no lock / setup screen and no wizard up. */
+function showPrivacyCardWhenReady() {
+  maybeShowPrivacyCard({
+    ready: () => state.started && !gateActive()
+      && dom['lock-screen'].classList.contains('hidden')
+      && !(dom['setup-screen'] && !dom['setup-screen'].classList.contains('hidden') && !dom['setup-screen'].hidden)
+      && !document.querySelector('.wizard-backdrop'),
+  });
+}
 
 /** Fold a GET /api/auth/status body into state. One place, so boot, the retry
  *  after a failed boot, and every sign-in/out read it the same way. */
@@ -10142,6 +10165,8 @@ async function init() {
   let lastTick = '';
   setInterval(() => {
     if (!state.started) return;
+    // A device that booted to the sign-in screen sees the card once it is past it.
+    showPrivacyCardWhenReady();
     // Only repaint when something a repaint would CHANGE has changed. The
     // timer exists for two drifting things — relative timestamps and the 24h
     // unread colour — so hash exactly those. An idle tab used to pay a full
@@ -10159,10 +10184,13 @@ async function init() {
   // 3.0 (W5): the server's default theme / language / avatar style for a device that has none of its
   // own, and - on an install that is not set up - the first-run wizard (it can be put off for the session).
   applyDeviceDefaults();
-  maybeStartWizard({
+  const wizard = await maybeStartWizard({
     toast, openTab: (tab) => openSettingsTab(tab),
-    onFinished: () => { refreshAuthAndBoot(); },
+    onFinished: () => { refreshAuthAndBoot().finally(showPrivacyCardWhenReady); },
   });
+  // "Stored on the host computer", once per device (js/host-notice.js): on the
+  // first normal page load, never over the wizard, the lock screen or setup.
+  if (!wizard) showPrivacyCardWhenReady();
 
   // Say it out loud when NO dictionary loaded at all. i18n keeps the shipped
   // English markup in that case (applyDom declines to run), which is the right

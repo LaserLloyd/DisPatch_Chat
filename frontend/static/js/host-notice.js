@@ -1,39 +1,76 @@
-// Host-storage notices: "this is kept on the computer that runs DisPatch".
+// "Stored on the host computer": what DisPatch keeps, and who can read it.
 //
-// Everything a person makes or sends here -- an uploaded file, a picture, an
-// avatar, a chat -- is stored by the server on the host computer, not on the
-// device in their hand. These notices say so, plainly, wherever something is
-// created or uploaded, and in Settings for the chats themselves. The shape is
-// the LaserLloyd footer disclaimer's (a red outlined bubble with a bold title
-// and a plain sentence or two), drawn with the active theme's danger tokens
-// (app.css .host-notice) so it follows the palette instead of a fixed red.
+// Everything a person sends, uploads or makes here -- a chat, a file, a picture,
+// an avatar -- is kept by the server on the computer that runs DisPatch, not on
+// the device in their hand, and chats are not private. That is said in TWO
+// places, and only two (2026-10-19: per-surface callouts were too loud):
 //
-// The static ones (Security tab, File Server, the send-a-file sheet, the avatar
-// crop dialog) are plain markup in index.html with data-i18n; this module draws
-// the ones built in JS. The wording per kind is in the shell locales under
-// host_notice.* -- keep every claim TRUE for the code (see docs/security.md
-// "What you are trusting" and docs/privacy.md).
+//   * Settings -> Security: the full notice, permanent (static markup in
+//     index.html, data-i18n host_notice.*);
+//   * a one-time card on a device's first normal page load (after sign-in, or
+//     the first time a Restricted / anonymous device opens DisPatch, and never
+//     over the lock screen, setup or the first-run wizard). "Got it", a click
+//     outside it or Escape dismisses it, and the dismissal is remembered on the
+//     device under PRIVACY_ACK_KEY with PRIVACY_ACK_VERSION: bump the version
+//     when the wording changes materially and every device sees it once more.
+//
+// The card is a non-modal region (no focus trap, no backdrop that blocks the
+// app); the theme's danger colour is only its accent edge. Keep every claim
+// TRUE for the code -- docs/security.md "What you are trusting".
 
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 
-/** kind -> [title key, body key]. Literal keys so the i18n key checks see them. */
-export const HOST_NOTICE_KEYS = {
-  upload: ['host_notice.upload_title', 'host_notice.upload_body'],
-  fileserver: ['host_notice.fileserver_title', 'host_notice.fileserver_body'],
-  images: ['host_notice.images_title', 'host_notice.images_body'],
-  chats: ['host_notice.chats_title', 'host_notice.chats_body'],
-  chats_restricted: ['host_notice.chats_restricted_title', 'host_notice.chats_restricted_body'],
-};
+export const PRIVACY_ACK_KEY = 'dispatch-privacy-ack';
+export const PRIVACY_ACK_VERSION = 1;
 
-/** The notice for `kind` as an <aside role="note">. `compact` = one smaller block
- *  for tight spots such as the composer's attachment row. */
-export function hostNotice(kind, { compact = false } = {}) {
-  const keys = HOST_NOTICE_KEYS[kind] || HOST_NOTICE_KEYS.upload;
-  return el('aside', {
-    class: `host-notice${compact ? ' host-notice-compact' : ''}`, role: 'note', 'data-kind': kind,
-  }, [
-    el('strong', { class: 'host-notice-title', text: t(keys[0]) }),
-    el('span', { class: 'host-notice-body', text: ` ${t(keys[1])}` }),
-  ]);
+/** Has this device dismissed the current card? Storage off = treat as seen on
+ *  this page only (the card shows at most once per load either way). */
+export function privacyAcked() {
+  try { return Number(localStorage.getItem(PRIVACY_ACK_KEY)) >= PRIVACY_ACK_VERSION; } catch { return false; }
 }
+
+export function ackPrivacy() {
+  try { localStorage.setItem(PRIVACY_ACK_KEY, String(PRIVACY_ACK_VERSION)); } catch { /* storage off */ }
+}
+
+let shownThisLoad = false;
+
+/** Show the one-time card unless it was dismissed on this device (or already
+ *  shown on this page). `ready()` says whether the app is on a normal page now
+ *  (not the lock screen, setup or the wizard). Returns the card or null. */
+export function maybeShowPrivacyCard({ ready = () => true, host = document.body } = {}) {
+  if (shownThisLoad || privacyAcked() || !ready()) return null;
+  shownThisLoad = true;
+  const ok = el('button', { type: 'button', class: 'btn-primary privacy-card-ok', text: t('host_notice.card_ok') });
+  const card = el('section', {
+    class: 'privacy-card', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'privacy-card-title',
+  }, [
+    el('h2', { class: 'privacy-card-title', id: 'privacy-card-title', text: t('host_notice.card_title') }),
+    el('ul', { class: 'privacy-card-points' }, [
+      el('li', { text: t('host_notice.card_files') }),
+      el('li', { text: t('host_notice.card_chats') }),
+    ]),
+    el('p', { class: 'privacy-card-more muted', text: t('host_notice.card_more') }),
+    el('div', { class: 'privacy-card-foot' }, [ok]),
+  ]);
+  const done = () => {
+    ackPrivacy();
+    card.remove();
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('pointerdown', onOutside, true);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(); } };
+  const onOutside = (e) => { if (!card.contains(e.target)) done(); };
+  ok.addEventListener('click', done);
+  document.addEventListener('keydown', onKey, true);
+  // Pointer, not click: a click outside dismisses the card AND still does what
+  // it was aimed at (it is a note, not a gate).
+  document.addEventListener('pointerdown', onOutside, true);
+  host.append(card);
+  try { ok.focus({ preventScroll: true }); } catch { /* old engines */ }
+  return card;
+}
+
+/** Test hook. */
+export function _resetForTest() { shownThisLoad = false; }

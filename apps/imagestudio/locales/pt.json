@@ -88,8 +88,6 @@
   "clear.go": "Apagar",
   "clear.done": "Imagens apagadas: {n}.",
   "clear.failed": "Não foi possível apagar: {error}",
-  "privacy.title": "Imagens guardadas no computador anfitrião",
-  "privacy.body": "As imagens que você cria aqui são guardadas no computador que executa o DisPatch, não neste dispositivo. Todos que podem abrir o Image Studio as veem, assim como qualquer pessoa com acesso a esse computador.",
   "common.cancel": "Cancelar",
   "common.close": "Fechar"
 }
