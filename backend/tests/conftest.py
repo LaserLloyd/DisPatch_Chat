@@ -601,3 +601,22 @@ def world(tmp_path, monkeypatch):
     yield w
     w.close()
     asyncio.run(temp_db.close())
+
+
+def pytest_unconfigure(config):
+    """DIAGNOSTIC (2026-10-19): CI jobs print the pytest summary and then never exit. Name whatever
+    still holds the interpreter open, with its stack, so the culprit can be fixed."""
+    import sys
+    import threading
+    import traceback
+
+    frames = sys._current_frames()
+    for t in threading.enumerate():
+        if t is threading.main_thread() or t.daemon:
+            continue
+        print(f"\n[exit-hang] non-daemon thread still alive: {t.name!r} ({type(t).__module__}.{type(t).__name__})",
+              file=sys.stderr)
+        f = frames.get(t.ident)
+        if f is not None:
+            print("".join(traceback.format_stack(f)[-6:]), file=sys.stderr)
+    sys.stderr.flush()
