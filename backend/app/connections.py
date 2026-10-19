@@ -679,6 +679,34 @@ def credential_for_block(block: dict) -> str | None:
     return credential(c)
 
 
+def credential_for_url(base_url: str) -> str | None:
+    """The key of the connection that points at the same server as ``base_url``, or None.
+
+    For a block that 3.0 did not turn into a connection - an advisor's ``embeddings:``
+    entry is the one on this box - but that talks to a server a connection already
+    holds the key for (the GPU rig's embedder sits on the same StudioForge as the
+    fallback chat model). An exact address match wins over a same-origin one; the key
+    only ever goes back to the server it was saved for."""
+    want = str(base_url or "").strip().rstrip("/")
+    if not want:
+        return None
+    origin = _origin(want)
+    exact = same = None
+    for c in list_all():
+        have = c.base_url.rstrip("/")
+        if have == want:
+            exact = c
+            break
+        if same is None and _origin(have) == origin:
+            same = c
+    for c in (exact, same):
+        if c is not None:
+            key = credential(c)
+            if key:
+                return key
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Test
 # --------------------------------------------------------------------------- #

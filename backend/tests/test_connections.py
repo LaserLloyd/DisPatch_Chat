@@ -462,3 +462,28 @@ def test_adopt_endpoint_links_a_legacy_character_without_breaking_it(world, owne
     assert llm_api.resolve_key(entry) == "sk-legacy-123456789"
     assert "sk-legacy" not in config.CONFIG_PATH.read_text(encoding="utf-8")
     assert owner.post("/api/connections/adopt").json()["linked"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Embeddings borrow the key of the connection for the same server (ops 2026-10-19)
+# --------------------------------------------------------------------------- #
+
+
+def test_advisor_embeddings_use_the_key_of_the_connection_for_the_same_server(tmp_path, monkeypatch):
+    """The rig's StudioForge began requiring a key; the chat fallback's connection had it,
+    the un-migrated `embeddings:` block did not, and every embedding came back 401."""
+    from app import advisor
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    connections.create(type="openai_compatible", base_url="http://192.0.2.5:1234/v1",
+                       api_key="sf-rig-key-1234567")  # scrub-ok: test fixture, not a real credential
+    connections.create(type="openai_compatible", base_url="http://192.0.2.9:1234/v1",
+                       api_key="sf-other-key-1234567")  # scrub-ok: test fixture, not a real credential
+    cfg = advisor._embed_config({"base_url": "http://192.0.2.5:1234/v1", "model": "embed-8b"})
+    assert cfg is not None and cfg.api_key == "sf-rig-key-1234567"
+    # same origin, other path: still that server's key
+    cfg = advisor._embed_config({"base_url": "http://192.0.2.5:1234/v1/", "model": "embed-8b"})
+    assert cfg.api_key == "sf-rig-key-1234567"
+    # an inline key wins; an unknown server gets none
+    assert advisor._embed_config({"base_url": "http://192.0.2.5:1234/v1", "model": "e",
+                                  "api_key": "inline-123456"}).api_key == "inline-123456"
+    assert advisor._embed_config({"base_url": "http://192.0.2.7:1234/v1", "model": "e"}).api_key == ""
