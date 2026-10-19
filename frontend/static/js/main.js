@@ -4919,7 +4919,7 @@ function wireDrag(row) {
 let apPools = null;          // {bot_id: status} from the last fetch / WS frame
 let apOpenPrompts = null;    // bot_id whose prompt editor is expanded
 async function refreshAvatarPoolPanel() {
-  if (state.decoy) return;
+  if (state.decoy || !sessionCan('manage_characters')) return;   // a Member: not theirs, would 403
   try {
     const r = await api.avatarPools();
     apPools = r.pools || {};
@@ -8152,7 +8152,11 @@ installShell({
   activeThread: () => state.activeThread || null,
   bots: () => state.bots.slice(),
   botById: (id) => botById(id) || null,
-  allBots: () => api.allBots().then((r) => (r && r.bots) || []),
+  // The full roster is the character editor's (manage_characters). Anyone else - a Member using
+  // voice - gets the roster this session may see instead of a 403.
+  allBots: () => (sessionCan('manage_characters')
+    ? api.allBots().then((r) => (r && r.bots) || [])
+    : Promise.resolve(state.bots.slice())),
   isLocked: () => !!state.decoy,
   can: (perm) => !state.decoy && sessionCan(String(perm || '')),
   features: () => ({ ...(state.auth.features || {}) }),
