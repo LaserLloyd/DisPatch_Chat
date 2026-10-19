@@ -8161,9 +8161,16 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
         try:
             owner = None
             if password:
-                owner = accounts.create_profile(
-                    str(payload.get("name") or "Owner")[:40] or "Owner", "owner",
-                    password_hash=credentials.hash_secret(password))
+                stale = accounts.get_owner()
+                if stale is not None:
+                    # An owner row with no credential left (security.yaml deleted, the documented
+                    # way to drop the lock, on an install with other profiles): claim THAT row;
+                    # creating a second owner would only answer "owner_exists".
+                    owner = accounts.update_profile(stale.id, password_hash=credentials.hash_secret(password))
+                else:
+                    owner = accounts.create_profile(
+                        str(payload.get("name") or "Owner")[:40] or "Owner", "owner",
+                        password_hash=credentials.hash_secret(password))
             if new_pin:
                 auth.set_pin(new_pin)               # mirrors onto the owner row
             owner = accounts.get_owner() or owner
@@ -8214,8 +8221,11 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
 async def auth_recover(request: Request, payload: dict = Body(...)):
     """Reset the lock using the recovery code from RECOVERY-CODE.txt.
 
-    On success the PIN is removed (lock disabled) and a fresh Owner session is
-    issued, so the user is straight in and can set a new PIN from Security.
+    With ``new_pin`` the forgotten PIN is replaced by it (the install stays claimed and
+    the recovery code rotates). Without one the PIN is removed (lock disabled) - unless
+    other people have profiles and the Owner has no password, where removing it would
+    leave the household with no owner (409 ``recovery_needs_new_pin``). Either way a fresh
+    Owner session is issued, so the user is straight in.
     """
     cfg = auth.load()
     if not cfg.pin_set:
@@ -8231,6 +8241,28 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
         return JSONResponse({"detail": "Incorrect recovery code",
                              "error": errors.envelope("incorrect_recovery_code")}, status_code=401)
     people_api._succeeded(request, "recovery")
+    new_pin = str(payload.get("new_pin") or "")
+    if new_pin:
+        bad = credentials.check_pin(new_pin)
+        if bad:
+            return JSONResponse({"detail": bad, "error": errors.envelope("pin_too_short", message=bad)},
+                                status_code=400)
+        # Replace the forgotten PIN in one step: the install stays claimed, the household
+        # keeps working, and set_pin rotates the recovery code that was just used.
+        auth.set_pin(new_pin)
+        accounts.log_activity("recovered", subject=policy.request_quota_ip(request), category="audit")
+        return _issue_cookie_response({"ok": True, "pin_set": True, "recovered": True},
+                                      request=request, profile=accounts.get_owner())
+    owner = accounts.get_owner()
+    if (not (owner and owner.has_password)
+            and any(p.role != "owner" for p in accounts.list_profiles())):
+        # Removing the only Owner credential while other people have profiles would leave
+        # an install with a household but no owner: closed to every other device ("setup
+        # required"), the Members and Restricted profiles locked out with it. 2.x could
+        # simply drop the lock; with profiles the PIN must be replaced instead.
+        return JSONResponse(
+            {"detail": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
+             "error": errors.envelope("recovery_needs_new_pin")}, status_code=409)
     auth.clear_pin()
     accounts.log_activity("recovered", subject=policy.request_quota_ip(request), category="audit")
     # On a PIN-only install clear_pin removed the Owner row too (the lock is gone);

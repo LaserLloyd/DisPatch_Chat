@@ -873,6 +873,15 @@
    "seeded": false
   },
   {
+   "code": "recovery_needs_new_pin",
+   "status": 409,
+   "message": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
+   "fix": "Enter the recovery code together with a new PIN (4 or more characters).",
+   "docs": "recovery_needs_new_pin",
+   "patterns": [],
+   "seeded": false
+  },
+  {
    "code": "remember_device_required",
    "status": 403,
    "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",

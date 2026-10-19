@@ -5543,7 +5543,7 @@
     },
     "/api/auth/recover": {
       "post": {
-        "description": "Reset the lock using the recovery code from RECOVERY-CODE.txt.\n\nOn success the PIN is removed (lock disabled) and a fresh Owner session is\nissued, so the user is straight in and can set a new PIN from Security.",
+        "description": "Reset the lock using the recovery code from RECOVERY-CODE.txt.\n\nWith ``new_pin`` the forgotten PIN is replaced by it (the install stays claimed and\nthe recovery code rotates). Without one the PIN is removed (lock disabled) - unless\nother people have profiles and the Owner has no password, where removing it would\nleave the household with no owner (409 ``recovery_needs_new_pin``). Either way a fresh\nOwner session is issued, so the user is straight in.",
         "operationId": "auth_recover_api_auth_recover_post",
         "requestBody": {
           "content": {
