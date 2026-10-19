@@ -3217,7 +3217,7 @@ def _image_jobs_configured() -> bool:
 advisor.pictures_available = lambda: _image_jobs_configured()
 
 #: The drop reason a marker gets on an install with no image generator.
-NO_IMAGE_GENERATOR = ("needs an image generator — Settings → AI models → "
+NO_IMAGE_GENERATOR = ("needs an image generator — Settings → AI & Connections → "
                       "Image generation")
 
 

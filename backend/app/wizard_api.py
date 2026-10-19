@@ -144,7 +144,7 @@ def _checklist() -> list[dict]:
     items = [
         {"id": "owner", "title": "Owner account", "done": _claimed(), "optional": False,
          "hint": "Create the owner on this computer, or with the setup token from the server log."
-         if not _claimed() else ("Give the owner a password in Settings > Security."
+         if not _claimed() else ("Give the owner a password in Settings > Account."
                                  if owner is not None and not owner.has_password else "")},
         {"id": "connection", "title": "A model connection", "done": (bool(conns) and tested) or bool(connected),
          "optional": False, "hint": "Add a connection and press Test." if not conns else
@@ -154,7 +154,7 @@ def _checklist() -> list[dict]:
          "hint": "Install the voice add-on from Settings > Voice." if voice is None else
          ("The voice add-on is installed." if voice.state == "ok" else f"The voice add-on is {voice.state}.")},
         {"id": "family", "title": "Family and Restricted profiles", "optional": True, "done": bool(others),
-         "skipped": "family" in skipped, "hint": "Add people in Settings > People & Profiles."},
+         "skipped": "family" in skipped, "hint": "Add people in Settings > People & Access."},
         {"id": "network", "title": "Who can reach DisPatch", "optional": False,
          "done": bool(st.get("network_chosen")),
          "hint": "Choose this computer only, or the home network."},

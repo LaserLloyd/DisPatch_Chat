@@ -29,7 +29,7 @@ remember that you are responsible for what an agent does with the tools you gave
 - The **transcript**: the prompt, the event timeline (text, tool calls and results, approvals
   with a short redacted summary of their arguments) and the result text. It is plain text in
   the database. For the Claude Agent, the agent's own session transcript and memory are plain
-  JSONL under `<data>/agents/<task>/.claude/`. **Retention** (Settings -> Agents, default 30
+  JSONL under `<data>/agents/<task>/.claude/`. **Retention** (Settings -> AI & Connections -> Agents, default 30
   days, 0 = keep) deletes the database transcript, the prompt, the result text and that
   folder for finished tasks, and keeps the task row. OpenClaw keeps its own transcripts in the
   agent's home; DisPatch does not manage those.

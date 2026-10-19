@@ -6,7 +6,7 @@ written into every character's own settings, so the same key was pasted once per
 server does this character use?" had no answer you could point at. In 3.0 each server is one record and
 a character *refers* to it.
 
-Open **Settings -> Connections** (owner and admins), or use the API below.
+Open **Settings -> AI & Connections** (owner and admins), or use the API below.
 
 ## What a connection holds
 
@@ -53,7 +53,7 @@ panel, Users & Keys) and press Test.
 **Find servers** (`POST /api/connections/discover`) looks for StudioForge, LM Studio, Ollama and OpenAI-style
 servers, on ports 1234, 8080 and 11434, in these places:
 
-1. the hosts in the setting **`connections.discovery_targets`** (Settings -> Connections -> Safety; environment
+1. the hosts in the setting **`connections.discovery_targets`** (Settings -> AI & Connections -> Advanced; environment
    `DISPATCH_DISCOVERY_TARGETS`, comma separated). The default is `127.0.0.1`, `studioforge`, `lmstudio` and
    `ollama`: this computer, and the names the compose files give the model servers. A name that does not
    resolve is **skipped** (nothing is sent to it). Write `host:port` (`[::1]:1234` for IPv6) to probe one port
@@ -95,11 +95,11 @@ again each time a character uses it:
   the point.
 
 An admin who really runs a model server on a link-local address can allow it with the setting
-`connections.allow_private_targets` (Settings -> All settings -> Connections -> Safety).
+`connections.allow_private_targets` (Settings -> AI & Connections -> Advanced).
 
 ## Characters use connections
 
-In **Settings -> Bots -> Details** (or `PATCH /api/characters/{id}` with `connection` and `model`) a character is
+In **Settings -> Characters -> Details** (or `PATCH /api/characters/{id}` with `connection` and `model`) a character is
 pointed at a connection. The turn code resolves the provider, address and key through the connection each time,
 so changing a key or address in one place changes it for every character that uses it. A connection that
 characters still use cannot be deleted (`connection_in_use`).
@@ -115,7 +115,7 @@ character's inline provider block - `api:` or each entry of `advisor.providers` 
 - `provider`, `base_url`, `model` and everything else stay in `config.yaml`, readable, beside a new
   `connection: <id>`; a 2.x reader, or a person with a text editor, still sees what the character uses;
 - the old **Connect an AI** panel and `/api/llm/*` routes keep working and keep writing inline settings; the next
-  start (or **Settings -> Connections -> Move keys here**, `POST /api/connections/adopt`) turns those into
+  start (or **Settings -> AI & Connections -> Move keys here**, `POST /api/connections/adopt`) turns those into
   connections too.
 
 `uv run python -m app.migrate --dry-run` (from `backend/`; `docker compose run --rm app python -m app.migrate --dry-run`

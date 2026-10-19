@@ -3,7 +3,7 @@
 To report a vulnerability, see [SECURITY.md](../SECURITY.md). This page is about
 running a DisPatch Chat install safely.
 
-Most of what follows is checked automatically. Open **Settings → Dashboard**;
+Most of what follows is checked automatically. Open **Settings → System**;
 anything wrong appears as a finding with the fix attached. Check it after any
 change to how the app is exposed.
 
@@ -33,7 +33,7 @@ the others, give them a character limited to their profile (the character's
 `profiles` list); a profile left off that list must not be able to read those
 chats, and if they can, it is a bug and we want the report. DisPatch is built for
 a household or small team, and it is not designed to resist a determined insider
-who also controls the host. The app says this in Settings -> Security ("Stored on
+who also controls the host. The app says this in Settings -> Account ("Stored on
 the host computer": files and pictures, then chats), and once per device in a
 short card on its first normal page load.
 
@@ -71,7 +71,7 @@ permission each route and WebSocket action requires is in
   on the host (OpenClaw) runs with your user's rights. A Member cannot talk to
   one until you grant `dispatch_agents`; a Restricted profile's turn on such a
   character always runs *locked*.
-- **Shared devices.** In **Settings → People & Profiles → This device** you can
+- **Shared devices.** In **Settings → People & Access → This device** you can
   bind a browser to a Member or Restricted profile: the kitchen tablet then opens
   as "Mia" with nobody signing in. Admins and the Owner cannot be a device
   default — stepping up always needs their credential.
@@ -416,7 +416,7 @@ travels — privacy mode makes the client hold nothing locally:
 - Drafts are never saved.
 
 The cost is honest: the app will not work offline and will be slower to start,
-because nothing is cached. Enable it per device in **Settings → Privacy**.
+because nothing is cached. Enable it per device in **Settings → Account → Pictures & privacy**.
 
 Note what this does *not* do. It stops the device retaining data. It does not
 hide anything from the server, which still stores the full history — that is

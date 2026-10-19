@@ -450,7 +450,7 @@
    "code": "pin_not_set",
    "status": 400,
    "message": "No PIN is set",
-   "fix": "There is no PIN to check. Create the owner account in Settings > Security.",
+   "fix": "There is no PIN to check. Create the owner account in Settings > Account.",
    "docs": "pin_not_set",
    "patterns": [
     "No PIN is set"
@@ -719,7 +719,7 @@
    "code": "invalid_api_key",
    "status": 401,
    "message": "Invalid or missing API key",
-   "fix": "Send the install's API key as X-API-Key or a Bearer token (Settings > Security > API key).",
+   "fix": "Send the install's API key as X-API-Key or a Bearer token (Settings > People & Access > Machine access).",
    "docs": "invalid_api_key",
    "patterns": [
     "Invalid or missing API key",
@@ -907,7 +907,7 @@
    "code": "safe_mode",
    "status": 403,
    "message": "Unlock for full access",
-   "fix": "Sign in as a profile that is allowed to do this (Settings > People & Profiles), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
+   "fix": "Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
    "docs": "safe_mode",
    "patterns": [
     "Unlock for full access"
@@ -1244,7 +1244,7 @@
    "code": "panel_disabled",
    "status": 404,
    "message": "Clients panel disabled",
-   "fix": "Enable the feature in Settings > Plugins, or ignore this panel.",
+   "fix": "Enable the feature in Settings > Plugins & Apps, or ignore this panel.",
    "docs": "panel_disabled",
    "patterns": [
     "Clients panel disabled",
@@ -1435,22 +1435,22 @@
   {
    "code": "imagestudio_no_image_provider_has_an_api",
    "status": 409,
-   "message": "No image provider has an API key yet (Settings → AI models → Image generation)",
+   "message": "No image provider has an API key yet (Settings → AI & Connections → Image generation)",
    "fix": "The state conflicts with the request; reload and retry.",
    "docs": "imagestudio_no_image_provider_has_an_api",
    "patterns": [
-    "No image provider has an API key yet (Settings → AI models → Image generation)"
+    "No image provider has an API key yet (Settings → AI & Connections → Image generation)"
    ],
    "seeded": true
   },
   {
    "code": "imagestudio_that_provider_has_no_api_key",
    "status": 409,
-   "message": "That provider has no API key yet (Settings → AI models → Image generation)",
+   "message": "That provider has no API key yet (Settings → AI & Connections → Image generation)",
    "fix": "The state conflicts with the request; reload and retry.",
    "docs": "imagestudio_that_provider_has_no_api_key",
    "patterns": [
-    "That provider has no API key yet (Settings → AI models → Image generation)"
+    "That provider has no API key yet (Settings → AI & Connections → Image generation)"
    ],
    "seeded": true
   },
@@ -1482,7 +1482,7 @@
    "code": "owner_required",
    "status": 409,
    "message": "Create the owner account first.",
-   "fix": "Create the owner account first (Settings > Security).",
+   "fix": "Create the owner account first (Settings > Account).",
    "docs": "owner_required",
    "patterns": [
     "Create the owner account first."
@@ -1493,7 +1493,7 @@
    "code": "password_required",
    "status": 409,
    "message": "Set a password for the owner first.",
-   "fix": "Set the owner's password first (Settings > People & Profiles > Your account).",
+   "fix": "Set the owner's password first (Settings > Account).",
    "docs": "password_required",
    "patterns": [
     "Set a password for the owner first."
@@ -2110,7 +2110,7 @@
    "code": "image_unavailable",
    "status": 503,
    "message": "Image generation isn't configured",
-   "fix": "Configure an image provider in Settings > AI models > Image generation.",
+   "fix": "Configure an image provider in Settings > AI & Connections > Image generation.",
    "docs": "image_unavailable",
    "patterns": [
     "Image generation isn't configured",

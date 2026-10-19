@@ -122,13 +122,13 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`imagestudio_a_generation_is_already_running`](#imagestudio_a_generation_is_already_running) | 409 | A generation is already running |
 | [`imagestudio_cannot_delete_pictures`](#imagestudio_cannot_delete_pictures) | 403 | Your profile cannot delete pictures |
 | [`imagestudio_generation_running_clear`](#imagestudio_generation_running_clear) | 409 | A generation is running; try again when it is done |
-| [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI models → Image generation) |
+| [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI & Connections → Image generation) |
 | [`imagestudio_not_a_picture_id`](#imagestudio_not_a_picture_id) | 422 | That is not a picture id |
 | [`imagestudio_picture_already_gone`](#imagestudio_picture_already_gone) | 404 | That picture is already gone |
 | [`imagestudio_pictures_changed`](#imagestudio_pictures_changed) | 409 | The pictures changed since you confirmed; count again |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
-| [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI models → Image generation) |
+| [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI & Connections → Image generation) |
 | [`imagestudio_that_result_is_gone`](#imagestudio_that_result_is_gone) | 404 | That result is gone |
 | [`imagestudio_the_aspect_ratio_must_look_like`](#imagestudio_the_aspect_ratio_must_look_like) | 422 | The aspect ratio must look like 16:9 |
 | [`imagestudio_the_prompt_is_characters_the_limit`](#imagestudio_the_prompt_is_characters_the_limit) | 422 | The prompt is {} characters; the limit is {} |
@@ -1053,7 +1053,7 @@ HTTP **403** - Image requests aren't enabled for {}
 
 HTTP **503** - Image generation isn't configured
 
-**Fix:** Configure an image provider in Settings > AI models > Image generation.
+**Fix:** Configure an image provider in Settings > AI & Connections > Image generation.
 
 ## image_undecodable
 
@@ -1091,7 +1091,7 @@ HTTP **409** - A generation is running; try again when it is done
 
 <a id="imagestudio_no_image_provider_has_an_api"></a>
 
-HTTP **409** - No image provider has an API key yet (Settings → AI models → Image generation)
+HTTP **409** - No image provider has an API key yet (Settings → AI & Connections → Image generation)
 
 **Fix:** The state conflicts with the request; reload and retry.
 
@@ -1139,7 +1139,7 @@ HTTP **422** - That model name is not valid
 
 <a id="imagestudio_that_provider_has_no_api_key"></a>
 
-HTTP **409** - That provider has no API key yet (Settings → AI models → Image generation)
+HTTP **409** - That provider has no API key yet (Settings → AI & Connections → Image generation)
 
 **Fix:** The state conflicts with the request; reload and retry.
 
@@ -1293,7 +1293,7 @@ HTTP **503** - The GPU does not have enough free memory.
 
 HTTP **401** - Invalid or missing API key
 
-**Fix:** Send the install's API key as X-API-Key or a Bearer token (Settings > Security > API key).
+**Fix:** Send the install's API key as X-API-Key or a Bearer token (Settings > People & Access > Machine access).
 
 ## invalid_callback_token
 
@@ -1461,7 +1461,7 @@ HTTP **409** - The owner's role cannot be changed.
 
 HTTP **409** - Create the owner account first.
 
-**Fix:** Create the owner account first (Settings > Security).
+**Fix:** Create the owner account first (Settings > Account).
 
 ## panel_disabled
 
@@ -1469,7 +1469,7 @@ HTTP **409** - Create the owner account first.
 
 HTTP **404** - Clients panel disabled
 
-**Fix:** Enable the feature in Settings > Plugins, or ignore this panel.
+**Fix:** Enable the feature in Settings > Plugins & Apps, or ignore this panel.
 
 ## password_invalid
 
@@ -1485,7 +1485,7 @@ HTTP **400** - Password invalid.
 
 HTTP **409** - Set a password for the owner first.
 
-**Fix:** Set the owner's password first (Settings > People & Profiles > Your account).
+**Fix:** Set the owner's password first (Settings > Account).
 
 ## password_role
 
@@ -1541,7 +1541,7 @@ HTTP **400** - Pin invalid.
 
 HTTP **400** - No PIN is set
 
-**Fix:** There is no PIN to check. Create the owner account in Settings > Security.
+**Fix:** There is no PIN to check. Create the owner account in Settings > Account.
 
 ## pin_too_short
 
@@ -1781,7 +1781,7 @@ HTTP **403** - This endpoint has no access policy.
 
 HTTP **403** - Unlock for full access
 
-**Fix:** Sign in as a profile that is allowed to do this (Settings > People & Profiles), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.
+**Fix:** Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.
 
 ## session_key_required
 

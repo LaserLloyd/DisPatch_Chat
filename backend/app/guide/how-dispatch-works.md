@@ -4,7 +4,7 @@ DisPatch is a private chat app for your own AI. You run it on one machine, prote
 
 ![Welcome screen](/static/guide/welcome.png)
 
-Turn it on: you already have. Set a PIN under Settings → Security if you have not yet.
+Turn it on: you already have. Set a PIN under Settings → Account if you have not yet.
 
 ## Bots and backends
 
@@ -14,32 +14,32 @@ A **direct API** bot talks to a model API itself: any OpenAI-compatible service,
 
 ![The Bots tab](/static/guide/bots-tab.png)
 
-Turn it on: Settings → Bots lists every bot. Add one, rename it, or remove it there; removing a bot keeps its threads.
+Turn it on: Settings → Characters lists every bot. Add one, rename it, or remove it there (the ⋯ menu); removing a bot keeps its threads.
 
 ## Connect an AI
 
 Atlas works the moment he has a model behind him.
 
-1. Open Settings → AI models.
+1. Open Settings → AI & Connections and press Add a connection.
 2. Choose a provider. For a local server, enter its address instead of a key.
-3. Paste the API key if the provider wants one, then press Test.
-4. Pick a model from the list that comes back and press Connect.
+3. Paste the API key if the provider wants one, press Test, pick a model from the list that comes back and Save.
+4. In Settings → Characters, open Atlas's Details and choose that connection.
 
 The key is written to `config.yaml` in your data directory, which is set to owner-only (0600). It is not encrypted, and it is never shown again or sent back to the browser. If you would rather keep it out of the file, name an environment variable and DisPatch reads the key from there. Details per provider are in [llm-providers.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/llm-providers.md).
 
 ![Settings, AI models](/static/guide/ai-models.png)
 
-Turn it on: Settings → AI models, choose Atlas (or another direct API bot) as the target, Test, Connect.
+Turn it on: Settings → AI & Connections, add a connection and Test it; then pick it in Atlas's Details (or another direct API bot's).
 
-Quickest of all: Settings → AI models → **Set up everything with one provider**. Pick MiniMax, OpenAI or xAI, paste one key, and chat, pictures and (where the provider has it) knowledge search are set up and tested in one go.
+Quickest of all: Settings → AI & Connections → **Set up everything with one provider**. Pick MiniMax, OpenAI or xAI, paste one key, and chat, pictures and (where the provider has it) knowledge search are set up and tested in one go.
 
 ## Lookups
 
 A direct API bot on an OpenAI-compatible provider can look things up while it answers. There are eight: web search, news search, a page fetch, weather, Wikipedia, exchange rates, the current time and a calculator. They only read; none of them can run a program or touch your machine, and the page fetch refuses private and local addresses. Each lookup that runs leaves a small notice row before the answer.
 
-Lookups are on or off per bot. Safe Mode devices get a subset, by default all eight, and you can narrow it with `tools_locked`. An install-wide switch lives in Settings → Plugins.
+Lookups are on or off per bot. Safe Mode devices get a subset, by default all eight, and you can narrow it with `tools_locked`. An install-wide switch lives in Settings → Plugins & Apps.
 
-Turn it on: Settings → Bots, open the bot and switch Lookups on.
+Turn it on: Settings → Characters, open the bot's Details and switch Lookups on.
 
 ## Quick actions
 
@@ -59,7 +59,7 @@ You can mark a device as remembered so it stays unlocked for a while. Forgetting
 
 ![Safe Mode](/static/guide/safe-mode.png)
 
-Turn it on: Settings → Security to set the PIN; Settings → Bots to mark a bot safe.
+Turn it on: Settings → Account to set the PIN; Settings → Characters to choose who can see a bot.
 
 ## Reactions and pictures
 
@@ -67,7 +67,7 @@ Reactions are small pictures a bot can attach to a message to show a mood, drawn
 
 Refilling a reaction or avatar pool automatically needs an image tool of your own (`DISPATCH_IMAGE_CLI`); pools never use a paid API.
 
-Turn it on: Settings → AI models → Image generation, press Test, Save; then switch Pictures on for a bot in Settings → Bots. The "Set up add-ons" chat and [integrations.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/integrations.md) cover every option.
+Turn it on: Settings → AI & Connections → Image generation, press Test, Save; then switch Pictures in chat on in a bot's Details (Settings → Characters). The "Set up add-ons" chat and [integrations.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/integrations.md) cover every option.
 
 ## Voice chat
 
@@ -85,17 +85,17 @@ Turn it on: install the add-on, restart, then open Settings → Voice, switch it
 
 ## Apps and tools
 
-The Tools popup holds pages and small apps you add yourself: a static folder, a web address, or an app package with its own backend, page and bot. They are listed in `tools.yaml` and in the `apps/<id>/` folder of your install. Settings → Plugins shows all of it in one place: installed add-ons with an on/off switch, your apps and tools, and the built-in lookups. An add-on can also add a tab of its own to Settings.
+The Tools popup holds pages and small apps you add yourself: a static folder, a web address, or an app package with its own backend, page and bot. They are listed in `tools.yaml` and in the `apps/<id>/` folder of your install. Settings → Plugins & Apps shows all of it in one place: installed add-ons with an on/off switch, your apps and tools, and the built-in lookups. An add-on can also add a tab of its own to Settings.
 
 ![Plugins tab](/static/guide/plugins-tab.png)
 
-Turn it on: Settings → Plugins; see [apps.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/apps.md) and [extensions.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/extensions.md) to write your own.
+Turn it on: Settings → Plugins & Apps; see [apps.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/apps.md) and [extensions.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/extensions.md) to write your own.
 
 ## Agents
 
 An agent bot connects DisPatch to a runtime that can act: read and write files, run commands, work for an hour on a task. DisPatch speaks to an OpenClaw gateway over its WebSocket, or runs an agent command-line tool. Because agents act on real machines, they are never reachable from Safe Mode unless you say so. The Job Board is the example app: a board of tasks with a bot that works them through an agent.
 
-Turn it on: add an agent bot in Settings → Bots, choose Agent, and name the agent; see [agents.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/agents.md).
+Turn it on: add an agent bot in Settings → Characters (Add → New character), choose Agent, and name the agent; see [agents.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/agents.md).
 
 ## Remote access
 
@@ -107,4 +107,4 @@ Turn it on: pick a route in [remote-access.md](https://github.com/LaserLloyd/Dis
 
 Everything is in one data directory, `~/.local/share/local-chat` by default or `/data` in the container images. It holds `chats.db` (every message), `config.yaml` (your bots and connection settings), `tools.yaml`, `extensions.yaml` and `quick-actions.yaml` when you use them, media folders, and `backups/`, where rotating snapshots are kept. Copy the folder to back it up; move it to change machines.
 
-Turn it on: nothing to do. Check the Health tab to see backups and storage.
+Turn it on: nothing to do. Settings → System shows backups and storage.

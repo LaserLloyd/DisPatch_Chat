@@ -991,7 +991,7 @@
     {
       "code": "image_unavailable",
       "docs": "image_unavailable",
-      "fix": "Configure an image provider in Settings > AI models > Image generation.",
+      "fix": "Configure an image provider in Settings > AI & Connections > Image generation.",
       "message": "Image generation isn't configured",
       "patterns": [
         "Image generation isn't configured",
@@ -1044,9 +1044,9 @@
       "code": "imagestudio_no_image_provider_has_an_api",
       "docs": "imagestudio_no_image_provider_has_an_api",
       "fix": "The state conflicts with the request; reload and retry.",
-      "message": "No image provider has an API key yet (Settings → AI models → Image generation)",
+      "message": "No image provider has an API key yet (Settings → AI & Connections → Image generation)",
       "patterns": [
-        "No image provider has an API key yet (Settings → AI models → Image generation)"
+        "No image provider has an API key yet (Settings → AI & Connections → Image generation)"
       ],
       "status": 409
     },
@@ -1104,9 +1104,9 @@
       "code": "imagestudio_that_provider_has_no_api_key",
       "docs": "imagestudio_that_provider_has_no_api_key",
       "fix": "The state conflicts with the request; reload and retry.",
-      "message": "That provider has no API key yet (Settings → AI models → Image generation)",
+      "message": "That provider has no API key yet (Settings → AI & Connections → Image generation)",
       "patterns": [
-        "That provider has no API key yet (Settings → AI models → Image generation)"
+        "That provider has no API key yet (Settings → AI & Connections → Image generation)"
       ],
       "status": 409
     },
@@ -1293,7 +1293,7 @@
     {
       "code": "invalid_api_key",
       "docs": "invalid_api_key",
-      "fix": "Send the install's API key as X-API-Key or a Bearer token (Settings > Security > API key).",
+      "fix": "Send the install's API key as X-API-Key or a Bearer token (Settings > People & Access > Machine access).",
       "message": "Invalid or missing API key",
       "patterns": [
         "Invalid or missing API key",
@@ -1507,7 +1507,7 @@
     {
       "code": "owner_required",
       "docs": "owner_required",
-      "fix": "Create the owner account first (Settings > Security).",
+      "fix": "Create the owner account first (Settings > Account).",
       "message": "Create the owner account first.",
       "patterns": [
         "Create the owner account first."
@@ -1517,7 +1517,7 @@
     {
       "code": "panel_disabled",
       "docs": "panel_disabled",
-      "fix": "Enable the feature in Settings > Plugins, or ignore this panel.",
+      "fix": "Enable the feature in Settings > Plugins & Apps, or ignore this panel.",
       "message": "Clients panel disabled",
       "patterns": [
         "Clients panel disabled",
@@ -1538,7 +1538,7 @@
     {
       "code": "password_required",
       "docs": "password_required",
-      "fix": "Set the owner's password first (Settings > People & Profiles > Your account).",
+      "fix": "Set the owner's password first (Settings > Account).",
       "message": "Set a password for the owner first.",
       "patterns": [
         "Set a password for the owner first."
@@ -1610,7 +1610,7 @@
     {
       "code": "pin_not_set",
       "docs": "pin_not_set",
-      "fix": "There is no PIN to check. Create the owner account in Settings > Security.",
+      "fix": "There is no PIN to check. Create the owner account in Settings > Account.",
       "message": "No PIN is set",
       "patterns": [
         "No PIN is set"
@@ -1906,7 +1906,7 @@
     {
       "code": "safe_mode",
       "docs": "safe_mode",
-      "fix": "Sign in as a profile that is allowed to do this (Settings > People & Profiles), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
+      "fix": "Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
       "message": "Unlock for full access",
       "patterns": [
         "Unlock for full access"

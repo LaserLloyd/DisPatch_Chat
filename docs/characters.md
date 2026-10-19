@@ -38,7 +38,7 @@ name, avatar or threads, in the roster or in a broadcast. Owner and Admin socket
 
 ## Changing a character
 
-**Settings -> Bots -> Details** on a row, or `PATCH /api/characters/{id}`:
+**Settings -> Characters -> Details** on a row, or `PATCH /api/characters/{id}`:
 
 ```json
 {"connection": "studioforge", "model": "qwen3-8b", "personality": "tutor",

@@ -1,7 +1,7 @@
 # Backups, restore, the support bundle, and your data
 
-Three kinds of backup sit side by side in `<data>/backups/` and are listed together in **Settings -> All settings ->
-System -> Backups and recovery** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Owner's and the Admins'**.
+Three kinds of backup sit side by side in `<data>/backups/` and are listed together in **Settings -> System ->
+Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Owner's and the Admins'**.
 
 | Kind | What | Made by |
 |---|---|---|

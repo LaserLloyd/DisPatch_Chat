@@ -36,7 +36,7 @@ pane with a new id (lowercase letters, digits and hyphens) and a title, and the
 tab and its pane are created for you, placed after Voice. Ids the shell already
 knows keep their place. A package can also add lookups for the bots to use, by
 registering tool specs on the extension context (`register_live_tools`). Settings →
-Plugins lists every installed add-on and lets you switch one off (the choice is
+Plugins & Apps lists every installed add-on and lets you switch one off (the choice is
 kept in `extensions.yaml`, see [configuration.md](configuration.md)). The
 sections below, [Writing an extension](#writing-an-extension-the-backend), cover
 the API.
@@ -65,7 +65,7 @@ migration step `007_plugin_approvals` lists them). One that appears later must b
 is recorded with who gave it; switching a plugin off never needs one. (Loading an installed add-on is still the
 extension host's decision; approval gates the Plugins switch, and the audit log shows who approved what.)
 
-**Settings.** An app's `env:` names, and any `settings` a manifest declares, appear in Settings -> All settings under
+**Settings.** An app's `env:` names, and any `settings` a manifest declares, appear in Settings -> Plugins & Apps under
 `tools.<id>.` (secrets are write-only) and reach the app through `ctx.env`, whether the value came from the
 environment or from Settings. An add-on registers its own rows with `settings_schema.register(...)` and writes values
 with `settings_store.writer("<namespace>")` - see [settings.md](settings.md#settings_storewriternamespace---for-add-ons).
@@ -279,7 +279,7 @@ is imported and called. Every outcome is a **state**, never a failed boot:
 | `ok` | mounted |
 | `incompatible` | the API range excludes this DisPatch — `detail` says which side to update |
 | `failed` | importing or running `setup` raised — everything it had registered is rolled back; `detail` is `Type: message`, the traceback is in the journal |
-| `disabled` | installed, but `DISPATCH_EXTENSIONS` leaves it out, or the operator switched it off in Settings → Plugins (`<DATA_DIR>/extensions.yaml`) |
+| `disabled` | installed, but `DISPATCH_EXTENSIONS` leaves it out, or the operator switched it off in Settings → Plugins & Apps (`<DATA_DIR>/extensions.yaml`) |
 
 A second extension claiming an id that is taken is `failed`.
 
@@ -557,7 +557,7 @@ packages with an entry point in the `dispatch_voice.providers` group. With the
 add-on running, its own route answers (each provider's health, capabilities and
 settings, and the installed plugins with whether each is switched on). Without it
 the host answers with the installed plugins only, `installed: false` and the
-add-on's state, so Settings → Plugins can still show them; nothing is imported and
+add-on's state, so Settings → Plugins & Apps can still show them; nothing is imported and
 no `module:attr` target is shown. Both need `manage_plugins`
 (`app/route_policy.py`); using a provider is `use_voice` (`/ext/*`, `/ws/voice`).
 
@@ -752,7 +752,7 @@ never render anything an admin pane would. A malformed or built-in id, a missing
 `render`, or an id another extension already holds throws. The tab strip scrolls
 and the arrow keys walk it, so any number of add-in tabs fits.
 
-The Plugins tab (Settings → Plugins) lists every discovered extension with an
+The Plugins tab (Settings → Plugins & Apps) lists every discovered extension with an
 install-wide on/off switch. Switching one off writes `<DATA_DIR>/extensions.yaml`
 (`disabled: [id, …]`); at the next start that id is listed as `disabled` and its
 code is never imported. `GET /api/plugins` (operator) returns the same list plus

@@ -139,7 +139,7 @@ def test_a_turn_on_an_unconnected_bot_says_so_in_the_thread(env, monkeypatch):
     asyncio.run(advisor.run_turn("t1", "atlas", "hello"))
     (text, meta), = delivered
     assert text == ("Atlas isn't connected to an AI yet. "
-                    "Open Settings → AI models to add a key.")
+                    "Open Settings → AI & Connections to add a key.")
     assert meta["notice"]["level"] == "warn" and meta["not_connected"] is True
     assert not [f for f in frames if f["type"] == "error"]
     # The thread is back to idle, not left "thinking" with Send disabled.

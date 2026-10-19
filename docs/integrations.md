@@ -4,7 +4,7 @@ DisPatch on its own is a chat app with lookups, quick actions, Safe Mode and pus
 pings. Everything else is a service you connect: an AI provider for answers, an
 image provider for pictures, an agent runtime for agent bots, an add-on for voice.
 This page lists each one, what it needs, what you can use instead, and the exact
-setting. **Settings → Plugins → Works with DisPatch** shows the live status of
+setting. **Settings → Plugins & Apps → Discover more** shows the live status of
 every entry, and the "Set up add-ons" chat with Atlas walks through them in order
 (on an existing install, press **Show setup guide** there).
 
@@ -19,7 +19,7 @@ Contents: [quickest start](#quickest-start-one-key) ·
 
 ## Quickest start: one key
 
-**Settings → AI models → Set up everything with one provider.** Pick a provider,
+**Settings → AI & Connections → Set up everything with one provider.** Pick a provider,
 paste one key, press **Set up**. DisPatch configures every capability that
 provider offers and tests each one once:
 
@@ -51,7 +51,7 @@ is a possible add-on feature, not part of DisPatch today.
 What you get: answers. Atlas, and any bot you add as "Direct API", streams replies
 from a model API and can use the built-in lookups.
 
-**Settings → AI models → Connect an AI.** Presets: MiniMax, OpenAI, xAI (Grok),
+**Settings → AI & Connections → Add a connection.** Presets: MiniMax, OpenAI, xAI (Grok),
 OpenRouter, DeepSeek, Groq, Mistral, Together, Anthropic, LM Studio, Ollama,
 **Local server (llama.cpp / StudioForge)**, and **Custom** for any other
 OpenAI-compatible host. Details, key storage and troubleshooting:
@@ -73,11 +73,11 @@ preset answers without lookups.
 ## Image generation (API)
 
 What you get: pictures in chat. A bot with **Pictures** switched on
-(Settings → Bots) writes `[[pic:<description>|<caption>]]`; a placeholder appears
+(Settings → Characters) writes `[[pic:<description>|<caption>]]`; a placeholder appears
 at once and the picture replaces it when it is ready. Direct-API bots are told
 about the marker automatically once an image generator is configured.
 
-**Settings → AI models → Image generation.** Pick a provider, check the base URL
+**Settings → AI & Connections → Image generation.** Pick a provider, check the base URL
 and model, paste a key or leave it empty to share the chat key for the same host,
 press **Test** (one picture, shown inline, not stored), then **Save**. The setting
 lives in `<data>/image.yaml` (mode 0600):
@@ -143,7 +143,7 @@ its control panel as a tab for unlocked devices.
 markers a direct-API bot can use (`advisor.agents`) and the Job Board app.
 
 Put the `openclaw` command on DisPatch's PATH (or set `OPENCLAW_BIN`), or run its
-gateway and set `DISPATCH_GATEWAY_WS=1`. Then **Settings → Bots → Add bot →
+gateway and set `DISPATCH_GATEWAY_WS=1`. Then **Settings → Characters → Add → New character →
 Agent**. See [agents.md](agents.md). There is no API substitute: an agent bot
 needs an agent runtime.
 
@@ -161,7 +161,7 @@ uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.co
 
 Restart, then **Settings → Voice**: switch it on and press **Download** (the models
 come down from that page; no terminal). Its install-wide switch is in Settings →
-Plugins → Add-ons. See [extensions.md](extensions.md#voice).
+Plugins & Apps → Add-ons. See [extensions.md](extensions.md#voice).
 
 <a id="speechforge"></a>
 
@@ -242,7 +242,7 @@ API substitute: mail needs MailForge.
 
 Web and news search, page fetch, weather, Wikipedia, exchange rates, current time
 and a calculator, keyless, for direct-API bots on any OpenAI-compatible provider.
-Per bot in Settings → Bots; install-wide in Settings → Plugins.
+Per bot in Settings → Characters; install-wide in Settings → Plugins & Apps.
 
 <a id="crucibleforge"></a>
 
@@ -265,11 +265,11 @@ What each feature needs, and what a fresh install shows without it.
 
 | Feature | Requires | Alternative | How to enable | Without it |
 |---|---|---|---|---|
-| Chat with Atlas / direct-API bots | an AI provider key or a local model server | any OpenAI-compatible host | Settings → AI models | A "not connected yet" notice in the thread |
+| Chat with Atlas / direct-API bots | an AI provider key or a local model server | any OpenAI-compatible host | Settings → AI & Connections | A "not connected yet" notice in the thread |
 | Lookups | internet access | — | built in, per bot | — |
 | Knowledge search | `advisor.knowledge_dir`; embeddings optional | any OpenAI-compatible `/embeddings` (`advisor.embeddings: {base_url, model, api_key_env}`) | `config.yaml`, or one-key setup with OpenAI | Keyword search (FTS5) |
-| `[[pic:…]]` pictures | an image API or MCP image server | MiniMax, OpenAI, xAI, any OpenAI images host | Settings → AI models → Image generation; Pictures per bot | One "needs an image generator" line |
-| Reaction images (pack) | nothing | — | Settings → Reactions | — |
+| `[[pic:…]]` pictures | an image API or MCP image server | MiniMax, OpenAI, xAI, any OpenAI images host | Settings → AI & Connections → Image generation; Pictures per bot | One "needs an image generator" line |
+| Reaction images (pack) | nothing | — | Settings → Characters → Reactions | — |
 | Reaction pool refills | `DISPATCH_IMAGE_CLI` | — (pools never use a paid API) | env var, restart | "Needs an image tool" line; the pack still works |
 | Avatar pools | `DISPATCH_IMAGE_CLI` | — | env var, Pool per bot | "Needs an image tool"; Refill disabled |
 | Agent bots | OpenClaw | — | `openclaw` on PATH or `DISPATCH_GATEWAY_WS=1` | Health shows "No agent backend"; an agent turn says OpenClaw is not available |
@@ -281,7 +281,7 @@ What each feature needs, and what a fresh install shows without it.
 | Emails tab | MailForge | — | run MailForge | tab hidden |
 | StudioForge panel | `DISPATCH_STUDIOFORGE=1` + URL | — | env vars | tab hidden |
 | DeepSeek Harness panel | the `dsh` command | — | on PATH | tab hidden |
-| Web Push | the https address | — | Settings → Device | explains it needs https |
+| Web Push | the https address | — | Settings → Appearance | explains it needs https |
 | File Server, Local Viewer, quick actions, Safe Mode | nothing | — | built in | — |
 
 Known gaps (tracked for a later release): the Plugins tab's "not available" rows

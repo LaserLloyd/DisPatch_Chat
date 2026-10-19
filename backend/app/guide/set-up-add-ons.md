@@ -1,10 +1,10 @@
 ## What already works
 
-Out of the box, with nothing else installed, you get chat with any AI API (with my lookups: web and news search, weather, Wikipedia, exchange rates, the time and a calculator), quick actions, Safe Mode for family devices, reactions from the built-in pack, the file drop and push notifications on an https address. Everything below is optional. Take the steps in this order and stop wherever you have what you need. Settings → Plugins → **Works with DisPatch** shows the status of each one.
+Out of the box, with nothing else installed, you get chat with any AI API (with my lookups: web and news search, weather, Wikipedia, exchange rates, the time and a calculator), quick actions, Safe Mode for family devices, reactions from the built-in pack, the file drop and push notifications on an https address. Everything below is optional. Take the steps in this order and stop wherever you have what you need. Settings → Plugins & Apps → **Discover more** shows the status of each one.
 
 ## The quickest start: one key for everything
 
-Open **Settings → AI models → Set up everything with one provider**, choose MiniMax, OpenAI or xAI, paste one key and press Set up. DisPatch connects me for chat, switches on picture generation with the same key, and adds knowledge search where the provider has it. Each capability gets one small live test and a line in the result: ✓ configured, — not offered by that provider, or ✗ with the reason.
+Open **Settings → AI & Connections → Set up everything with one provider**, choose MiniMax, OpenAI or xAI, paste one key and press Set up. DisPatch connects me for chat, switches on picture generation with the same key, and adds knowledge search where the provider has it. Each capability gets one small live test and a line in the result: ✓ configured, — not offered by that provider, or ✗ with the reason.
 
 MiniMax covers the most with one key (chat and pictures). OpenAI adds embeddings for knowledge search. Pictures are billed per image on every provider, so the test makes exactly one.
 
@@ -14,7 +14,7 @@ What you get: answers. Without one I can only tell you I'm not connected.
 
 What it needs: an API key from any OpenAI-compatible service (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Groq, Mistral, Together), an Anthropic key, or a model server on your own network.
 
-How: **Settings → AI models → Connect an AI**. Pick a provider, paste the key, press Test, then Connect.
+How: **Settings → AI & Connections → Add a connection**. Pick a provider, paste the key, press Test, then Save; choose the connection in my Details under **Settings → Characters**.
 
 ## 2. Image generation
 
@@ -22,7 +22,7 @@ What you get: pictures in chat. A bot with pictures switched on writes `[[pic:�
 
 What it needs: either an image API key (MiniMax image-01, OpenAI, xAI Grok, or any host with the OpenAI images endpoint), or your own image server that speaks MCP, such as a ComfyUI-style server.
 
-How: **Settings → AI models → Image generation**. Pick the provider, press Test (one picture), then Save. Then switch Pictures on for a bot in **Settings → Bots**. API pictures cost money per image; DisPatch makes one per request and never refills anything in the background with a paid API. Reaction and avatar pools use an image command-line tool of your own (`DISPATCH_IMAGE_CLI`).
+How: **Settings → AI & Connections → Image generation**. Pick the provider, press Test (one picture), then Save. Then switch Pictures in chat on in a bot's Details under **Settings → Characters**. API pictures cost money per image; DisPatch makes one per request and never refills anything in the background with a paid API. Reaction and avatar pools use an image command-line tool of your own (`DISPATCH_IMAGE_CLI`).
 
 ## 3. StudioForge, for local models
 
@@ -30,7 +30,7 @@ What you get: your own GPUs as an AI server. StudioForge loads a model just in t
 
 What it needs: a machine with an NVIDIA GPU and the StudioForge server: [github.com/LaserLloyd/StudioForge](https://github.com/LaserLloyd/StudioForge).
 
-How: **Settings → AI models → Connect an AI**, choose **Local server (llama.cpp / StudioForge)** and enter its `/v1` address. To watch its control panel from inside DisPatch, set `DISPATCH_STUDIOFORGE=1` and `DISPATCH_STUDIOFORGE_URL` and restart.
+How: **Settings → AI & Connections → Add a connection** (or **Find servers**), choose StudioForge and enter its `/v1` address. To watch its control panel from inside DisPatch, set `DISPATCH_STUDIOFORGE=1` and `DISPATCH_STUDIOFORGE_URL` and restart.
 
 ## 4. OpenClaw, for agent bots
 
@@ -38,7 +38,7 @@ What you get: agent bots that can use tools, read and write files and work on lo
 
 What it needs: the OpenClaw agent runtime on the same machine: [github.com/openclaw/openclaw](https://github.com/openclaw/openclaw).
 
-How: put the `openclaw` command on DisPatch's PATH, or run its gateway and set `DISPATCH_GATEWAY_WS=1`, then add an agent bot in **Settings → Bots → Add bot → Agent**. Agents are never reachable from Safe Mode unless you mark them safe.
+How: put the `openclaw` command on DisPatch's PATH, or run its gateway and set `DISPATCH_GATEWAY_WS=1`, then add an agent bot in **Settings → Characters → Add → New character → Agent**. Agents are never reachable from Safe Mode unless you mark them safe.
 
 ## 5. DisPatch Voice
 

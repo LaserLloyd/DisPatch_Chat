@@ -3,7 +3,7 @@
 This page documents the direct-API backend, configured by a bot's `advisor:`
 block. The Settings UI calls it "Direct API"; the YAML key keeps its original
 name. Atlas, the default bot of a fresh install, is a direct-API bot, and
-Settings → AI models fills in its first provider.
+Settings → AI & Connections fills in its first provider.
 
 A **direct-API bot** (the `advisor:` block) answers straight from a model API, streams its
 reply token by token, knows you from a folder of Markdown notes, and can hand
@@ -89,7 +89,7 @@ agent runtime to be useful. The rest of this page describes what you can add.
 | Key | Default | Meaning |
 |---|---|---|
 | `owner` | `the user` | How the persona refers to the person it talks to ("Sam"). |
-| `persona` | built-in | System prompt that replaces the default. `{name}` (the bot's display name) and `{user}` (the person, from `owner`) are filled in; `{owner}` still works as an older spelling of `{user}`. The delegation rules and the profile are appended after it either way; retrieved notes go in the user turn.  Edited in Settings → Bots → Personality (preset picker + editor, `PATCH /api/bots/<id>` `{persona}`; presets in `backend/app/personas/*.md`, served by `GET /api/bots/personas`) or the AI models Connect field — the same key. The shipped default text is stored as no key. |
+| `persona` | built-in | System prompt that replaces the default. `{name}` (the bot's display name) and `{user}` (the person, from `owner`) are filled in; `{owner}` still works as an older spelling of `{user}`. The delegation rules and the profile are appended after it either way; retrieved notes go in the user turn.  Edited in Settings → Characters → ⋯ → Personality (preset picker + editor, `PATCH /api/bots/<id>` `{persona}`; presets in `backend/app/personas/*.md`, served by `GET /api/bots/personas`) or the AI models Connect field — the same key. The shipped default text is stored as no key. |
 | `providers` | none (required) | Ordered list. Each entry takes the same keys as a bot's `api:` block (`provider`, `base_url`, `model`, `api_key_env` or `api_key`; see [llm-providers.md](llm-providers.md)) plus the extras below. |
 | `knowledge_dir` | none | Corpus directory. Without it the advisor has no notes, no saved reports and no digest. |
 | `profile_fallback` | `[]` | Files read and used as the profile when `_profile.md` does not exist. |

@@ -282,7 +282,7 @@ def resolve(cfg: dict | None = None) -> Resolved:
             key, source = shared, "shared"
     if preset.key_required and not key:
         raise image_jobs.ImageJobError(
-            f"{preset.label} images need an API key (Settings → AI models → "
+            f"{preset.label} images need an API key (Settings → AI & Connections → "
             "Image generation)")
     return Resolved(preset=preset, base_url=base, model=model, api_key=key,
                     key_source=source)

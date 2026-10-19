@@ -3,7 +3,7 @@
 One page that answers a single question: **is this install healthy, and if not,
 what do I do about it?**
 
-Open it from **Settings → 🩺 Health** (the ⚙ button in the gear rail).
+Open it from **Settings → System** (the ⚙ button in the gear rail).
 Everything on it is read-only — the dashboard
 never changes anything, it only looks. It is admin-only: a limited (Safe-Mode)
 device cannot see it, and neither can anyone without the PIN.
@@ -140,7 +140,7 @@ No PIN is configured.
 - 🟢 **Green** when bound to `127.0.0.1`, because nothing off this box can
   connect.
 
-**Fix:** Settings → 🔒 Security & PIN → set a PIN. Or, to keep it
+**Fix:** Settings → Account → set a PIN. Or, to keep it
 machine-local, set `DISPATCH_HOST=127.0.0.1` and restart.
 
 #### `auth.lock`
@@ -306,7 +306,7 @@ watch for the next snapshot to verify.
 
 #### `agent.api_bots`
 🟢 One or more bots are wired straight to an LLM provider through **Connect an
-AI** (Settings → 🔌 AI models). These answer over the provider's HTTP
+AI** (Settings → AI & Connections). These answer over the provider's HTTP
 API and never touch the agent CLI, so the findings below do not apply to them
 — which is why this one is listed first. Only shown when at least one such bot
 exists.

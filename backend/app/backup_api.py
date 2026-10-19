@@ -217,7 +217,7 @@ def export_user(prof: accounts.Profile) -> dict:
         "characters_limited_to_this_profile": chars,
         "conversations": ("Chats are shared by the household in this version and are not attributed to a "
                           "single profile, so they are not part of a per-profile export. Use the full "
-                          "History export (Settings > System) to take the conversations."),
+                          "History export (Settings > Account > Recovery & Export) to take the conversations."),
     }
 
 

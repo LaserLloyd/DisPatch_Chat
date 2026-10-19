@@ -244,7 +244,7 @@ class NotConnected(llm_api.ApiError):
         self.bot_name = name
         super().__init__(
             f"{name} isn't connected to an AI yet",
-            "Open Settings → AI models to add a key.")
+            "Open Settings → AI & Connections to add a key.")
 
     @property
     def thread_text(self) -> str:

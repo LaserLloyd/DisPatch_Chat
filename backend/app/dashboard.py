@@ -1146,7 +1146,7 @@ def _security_findings(bind: dict | None = None) -> list[dict]:
             f"The app answers on {where} ({why}), so anyone who can reach this "
             "machine gets full access — including the harness, file store and "
             "every conversation.",
-            "Open Settings → 🔒 Security & PIN and set a PIN. To keep it "
+            "Open Settings → Account and set a PIN. To keep it "
             "machine-local instead, start it with --host 127.0.0.1 (and set "
             "DISPATCH_HOST=127.0.0.1 to match), then restart."))
     elif verified:
@@ -1165,7 +1165,7 @@ def _security_findings(bind: dict | None = None) -> list[dict]:
             "its own --host to uvicorn, so that is the configuration, not the "
             "live socket. If the real bind is wider, anyone who can reach this "
             "machine has full access.",
-            "Set a PIN (Settings → 🔒 Security & PIN) — that verdict does not "
+            "Set a PIN (Settings → Account) — that verdict does not "
             "depend on the bind at all. To confirm the bind instead, check the "
             f"listening socket: `ss -ltnp | grep {bind.get('port')}`."))
 

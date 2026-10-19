@@ -41,7 +41,7 @@ no account, no cloud, no telemetry.
   how DisPatch works, one walks through setting up the add-ons.
 - **Quick actions** on desktop: summarise, translate, fix grammar and other
   ready-made prompts, for any bot.
-- **A personality for every bot.** Settings → Bots → Personality has ten presets
+- **A personality for every bot.** Settings → Characters → ⋯ → Personality has ten presets
   (Sleek assistant, Cat-girl, Warm friend, Patient tutor and more) and an editor;
   `{name}` and `{user}` in the text are filled in for each reply.
 - **Profiles and roles.** An Owner, Admins, Members and Restricted profiles for
@@ -56,7 +56,7 @@ no account, no cloud, no telemetry.
   a thread.
 - **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
   chat, pictures and (where offered) knowledge search are set up and tested.
-- **Apps** you drop in as folders, and a Settings → Plugins tab that shows what
+- **Apps** you drop in as folders, and a Settings → Plugins & Apps section that shows what
   is installed and what each one asks to be allowed to do.
 - **Connections and characters.** One record per model server (a key is stored
   once, in your keyring or a 0600 file, never in a chat's settings), characters that
@@ -84,14 +84,14 @@ no account, no cloud, no telemetry.
 ## Works with
 
 DisPatch connects to these, all optional. Each one's status shows in
-**Settings → Plugins → Works with DisPatch**, and
+**Settings → Plugins & Apps → Discover more**, and
 [docs/integrations.md](docs/integrations.md) has the setup for every one, the
 alternatives, and a feature-by-feature matrix of what needs what.
 
 | | What it adds | How it connects |
 |---|---|---|
-| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → Connections |
-| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Settings → Connections (found automatically; sends your key as a bearer token) |
+| Any AI API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek, Anthropic…) | chat; pictures and embeddings where offered | Settings → AI & Connections |
+| [StudioForge](https://github.com/LaserLloyd/StudioForge) | your own GPUs as an OpenAI-compatible server that loads models just in time and unloads them when idle | Settings → AI & Connections (found automatically; sends your key as a bearer token) |
 | [OpenClaw](https://github.com/openclaw/openclaw) | agent bots with tools, files and long jobs | `openclaw` on PATH or its gateway |
 | [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
 | [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
@@ -347,9 +347,8 @@ lose the data by accident.
 The wizard has six short steps: the owner account, a model server (it looks for StudioForge, LM Studio
 and Ollama, or takes an API key), voice, the family (children get a Restricted profile and the *Animal
 Friends* characters), network exposure, and a checklist. Every step is also available from the command line
-([docs/first-run.md](docs/first-run.md)). After that, everything is in the gear menu: **Connections**
-(the servers you talk to), **Bots** (characters), **All settings** (every setting, searchable, with a Basic
-and Advanced switch) and **System, Backups** ([docs/settings.md](docs/settings.md),
+([docs/first-run.md](docs/first-run.md)). After that, everything is in the gear menu, in seven sections with one search box: **AI & Connections**
+(the servers you talk to), **Characters**, **People & Access**, **System** (health and backups) and the rest ([docs/settings.md](docs/settings.md),
 [docs/connections.md](docs/connections.md), [docs/characters.md](docs/characters.md),
 [docs/backups.md](docs/backups.md)).
 
@@ -497,7 +496,7 @@ Full reference: [docs/accounts.md](docs/accounts.md).
   </tr>
   <tr>
     <td align="center"><em>First run: two chats that explain the app</em></td>
-    <td align="center"><em>Settings → AI models: connect Atlas in a minute</em></td>
+    <td align="center"><em>Settings → AI & Connections: connect Atlas in a minute</em></td>
   </tr>
   <tr>
     <td width="50%">
@@ -511,7 +510,7 @@ Full reference: [docs/accounts.md](docs/accounts.md).
   </tr>
   <tr>
     <td align="center"><em>Quick actions on desktop</em></td>
-    <td align="center"><em>Settings → Plugins</em></td>
+    <td align="center"><em>Settings → Plugins & Apps</em></td>
   </tr>
   <tr>
     <td width="50%">
@@ -558,7 +557,7 @@ on a phone, in a few of the ten themes.
   </tr>
   <tr>
     <td align="center"><em>Checklist tables — ticks sync to every device</em></td>
-    <td align="center"><em>Settings → Theme — ten skins, live previews</em></td>
+    <td align="center"><em>Settings → Appearance — ten skins, live previews</em></td>
   </tr>
 </table>
 
@@ -603,7 +602,7 @@ on a phone, in a few of the ten themes.
   permission it needs.
 - **One settings store.** Every user-facing setting is described once (64 documented keys, see
   [docs/settings.md](docs/settings.md)), kept in `chats.db`, overridable by environment variable
-  and editable in **Settings, All settings** or over `GET`/`PATCH /api/settings`.
+  and editable in its **Settings** section (or found with the search box) or over `GET`/`PATCH /api/settings`.
 - **Connections.** One record per model server, keys in the secret store, an actionable **Test**
   and **Find servers**. StudioForge is recognised automatically and sent its bearer key
   ([docs/connections.md](docs/connections.md)).
@@ -633,16 +632,16 @@ on a phone, in a few of the ten themes.
   by voice. Every voice turn runs with the same locked rules, and the same daily
   budget, as a typed Safe-Mode message. Needs DisPatch Voice 1.3.3 or later.
 - **2.3.6, Personality:** a preset picker and prompt editor per bot, in
-  Settings → Bots (ten presets in `backend/app/personas/`).
+  Settings → Characters (ten presets in `backend/app/personas/`).
 - **2.3.7, integrations:** pictures from MiniMax, OpenAI or xAI Grok; one key
   sets up chat and pictures together; a *Works with DisPatch* catalog in
-  Settings → Plugins; a "Set up add-ons" guide chat; see
+  Settings → Plugins & Apps; a "Set up add-ons" guide chat; see
   [docs/integrations.md](docs/integrations.md).
 - **2.3.8:** Settings is laid out for a 360px phone.
 - **2.3.9, pictures:** Image Studio, and a lightbox gallery with arrow keys, side
   buttons and swipe.
 - **2.4.0, hide on unlocked devices:** a bot can stay on the locked family tablet
-  and off your own screen; Settings → Device can bring hidden bots back per device.
+  and off your own screen; Settings → Appearance → Advanced can bring hidden bots back per device.
 - Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
   arrived on the way; the [changelog](CHANGELOG.md) has all of it.
 
@@ -745,7 +744,7 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   Português, 中文 — including full right-to-left layout
 - Ten built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
   Daylight, Classic Purple, Electric Yellow, Night Red and two LaserLloyd
-  skins — picked per device from Settings → Theme, each
+  skins — picked per device from Settings → Appearance, each
   with a live preview. A theme is one fixed skin; there is no separate
   light/dark switch
 - Keyboard-navigable, screen-reader labelled, WCAG AA contrast in every theme
@@ -872,7 +871,7 @@ loosening it. The generated reference is [docs/contracts/](docs/contracts/).
 DisPatch ships with no model and talks to no cloud until you tell it to. Making
 it answer takes about a minute and needs no agent stack:
 
-1. Open **⚙ Settings → 🔌 AI models**.
+1. Open **⚙ Settings → AI & Connections**.
 2. Choose the bot to connect (Atlas by default, any other direct-API bot, or a
    new one), pick a provider, paste a key if it needs one, press **Test**, pick a
    model from the list, press **Connect**.

@@ -97,7 +97,7 @@ timed, and the full 1.4 GB download was not run.
 
 1. **The `VOICE=1` choice is made when the image is built.** The published image has
    no voice add-on and a read-only image cannot install one at run time. Installing
-   the add-on from Settings → Plugins (and shipping a voice image variant) is the
+   the add-on from Settings → Plugins & Apps (and shipping a voice image variant) is the
    plugin work, not this one.
 2. **Cloned-voice management still waits for one restart** if the models were
    downloaded *after* DisPatch started: the `/api/voice/profiles` router is sealed

@@ -15,7 +15,7 @@ nothing below is switched on.
 
 | Concept | What it is |
 |---|---|
-| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Owner or Admin defines it (Settings → Agents) and *publishes* it to the profiles that may use it. |
+| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Owner or Admin defines it (Settings → AI & Connections → Agents) and *publishes* it to the profiles that may use it. |
 | **Task** | one dispatched job: a live timeline (what the agent said and did, subagents nested), approvals, artifacts, an **estimated** cost, and one state — `queued`, `running`, `awaiting_approval`, `succeeded`, `failed`, `cancelled`. |
 | **Backend** | what actually runs it. Two ship: **OpenClaw** (the gateway or CLI on this machine) and **Claude Agent** (the Anthropic agent SDK, one supervised process per task). Both speak one interface (`AgentBackend`, [agents/backends.md](agents/backends.md)). |
 | **Approval** | the agent stops and asks before a tool that changes things. You allow it once, allow it for the rest of the task (never for a destructive tool), or deny it. |
@@ -56,7 +56,7 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
 
 ## Setting it up (Owner / Admin)
 
-**Settings → Agents.**
+**Settings → AI & Connections → Agents.**
 
 1. **Backends** shows what can run here and what each can and cannot do. *OpenClaw* needs
    OpenClaw installed on this machine. *Claude Agent* needs the optional extra
@@ -99,7 +99,7 @@ stops a Member from continuing them (they can still read the history; Stop alway
   and per agent and per person per day. Costs are client-side estimates and are labelled so;
   never bill from them.
 - **Audit.** Every finished task records who, which agent, approvals allowed and denied, the
-  estimated cost, the duration and the outcome (Settings → People → audit); every approval and
+  estimated cost, the duration and the outcome (Settings → People & Access → Activity & audit); every approval and
   every change to an agent is logged too.
 - **Retention.** The purge deletes the transcript (prompt, events, result text, the agent's
   working folder) of finished tasks after the configured days and keeps the audit row.
@@ -148,7 +148,7 @@ DisPatch, and only its API calls leave the machine.
 turn runs through the existing transport/watcher/mirror stack, and an advisor's
 `[[handoff:…]]` card is only a card and a row in the advisor's ledger.
 
-With it **on** (Settings → Agents → Limits, or `DISPATCH_AGENTS_UNIFIED_DISPATCH=1`, which
+With it **on** (Settings → AI & Connections → Agents → Limits, or `DISPATCH_AGENTS_UNIFIED_DISPATCH=1`, which
 overrides the setting either way):
 
 - an OpenClaw character's chat turn runs as a hidden *chat task* whose id is the thread id (so
@@ -255,7 +255,7 @@ one is a place where a naive caller silently does the wrong thing:
 
 Add `"notify": true` (titled "<bot> posted") or `"notify": "Morning brief
 posted"` (your own title, 80 characters at most) and every device that turned
-on **Settings → Device → Push notifications** gets a lock-screen ping. The ping
+on **Settings → Account → Notifications** gets a lock-screen ping. The ping
 is the title and the thread id only — never the message text — and tapping it
 opens the thread. Bot replies and finished pictures ping on their own; nothing
 else does. Push needs the app's **https** address (a browser only allows push

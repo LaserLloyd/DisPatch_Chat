@@ -10,7 +10,7 @@ assistant.
 
 ## The two-step version
 
-1. Unlock DisPatch, open **⚙ Settings → 🔌 AI models**. Choose which bot to
+1. Unlock DisPatch, open **⚙ Settings → AI & Connections**. Choose which bot to
    connect: Atlas (the default), any other direct-API bot, or a new one.
 2. Pick a provider, paste a key if it needs one (or enter a local server's
    address), press **Test**, pick a model from the list it returns, press
@@ -160,7 +160,7 @@ hand. Setting up a provider spends money and writes a credential; it belongs on
 the same side of the door as the dashboard and the harness pane.
 
 A newly connected bot is created with `safe: false`, so it does **not** appear
-on Safe-Mode devices until you flip that yourself in **Settings → Bot Manager**.
+on Safe-Mode devices until you flip that yourself in **Settings → Characters**.
 Decide deliberately: a safe bot is reachable by anyone holding a family tablet,
 and every message it sends costs you tokens.
 

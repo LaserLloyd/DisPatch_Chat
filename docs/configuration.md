@@ -12,7 +12,8 @@ Credentials live in neither. They are set through the app and stored hashed.
 
 **3.0: every setting is described once.** [settings.md](settings.md) lists every setting - key,
 type, default, range, whether it needs a restart, and the environment variable that overrides it - and
-Settings -> **All settings** draws the same list, searchable, with a Basic / Advanced switch. Values live in the
+Settings draws each one in the section it belongs to (the *Shown in* column), rarely used ones under that section's
+**Advanced**, and its search box finds any of them by name. Values live in the
 `settings` table of `chats.db`; an environment variable still wins and the page shows *Set by environment*.
 Provider keys are kept by [connections](connections.md), not in `config.yaml`. The rest of this page is still the
 reference for what each variable does.
@@ -96,7 +97,7 @@ The message budget is the one to think about: each message to a bot spawns an
 agent turn, which may cost real money. Since 3.0 the counters live in `chats.db`
 (they survive a restart) and are charged to the **profile** when a Restricted
 profile is signed in or its device is bound, and to the client address only for an
-anonymous device. A profile's own numbers (Settings → People & Profiles → budgets:
+anonymous device. A profile's own numbers (Settings → People & Access → a person's Edit sheet → budgets:
 messages, conversations, ratings, upload MB, minutes per day, quiet hours)
 override these defaults. Counts reset at local midnight.
 
@@ -130,7 +131,7 @@ three slow turns. See [agents.md](agents.md).
 ## Direct LLM providers
 
 There are no environment variables for these. A bot connected through **Connect
-an AI** (Settings → 🔌 AI models) is configured in `config.yaml` in the data directory,
+an AI** (Settings → AI & Connections) is configured in `config.yaml` in the data directory,
 under its own `api` block — provider, base URL, model, and either a stored key
 or the *name* of an environment variable holding one:
 
@@ -189,13 +190,13 @@ and written for one release and always agree with it when this app writes the fi
 hand edit makes them disagree, the more restrictive reading wins. `python -m
 app.migrate` adds `audience` to an existing roster.
 
-Where a bot shows is two independent switches (Settings → Bots, 2.4.2): **Show to
+Where a bot shows is two independent switches (Settings → Characters, 2.4.2): **Show to
 Restricted profiles** (`safe`, was "Show locked") and **Show on the Owner's rail**
 (`hide_unlocked: false`, was "Show unlocked"). With
 neither on, the bot is shown on no device — it stays on the roster, the Bots tab
 lists it dimmed as *Hidden*, and its chats still open by link on an unlocked
 device. An unlocked device can bring back every bot with Show unlocked off via
-Settings → Device → *Show hidden bots on this device*.
+Settings → Appearance → Advanced → *Show hidden bots on this device*.
 
 `safe` is the access flag, and it is server-enforced: a bot without it is
 invisible *and* unreachable to a Safe-Mode session, not merely hidden. Turning
@@ -289,7 +290,7 @@ inside the app, for a fully-unlocked session only. It is **off until you give it
 a root**: with no roots configured every route answers
 `404 {"detail": "Local viewer is off — add a root in Settings"}`.
 
-Configure it from **Settings → Device → Local viewer**, which writes
+Configure it from **Settings → System → Advanced → Local viewer**, which writes
 `<data>/local-viewer.yaml` (0600, atomic):
 
 ```yaml
@@ -345,7 +346,7 @@ appears in the thread, and DisPatch rewrites that message into the picture (or
 into a visible failure line) when the render lands. There is deliberately **no
 default endpoint** — the address of a GPU box is site configuration — and
 `auto` therefore means "on iff `DISPATCH_CLAWFORGE_URL` is set" — or, since
-2.3.7, iff an image API provider is chosen in Settings → AI models → Image
+2.3.7, iff an image API provider is chosen in Settings → AI & Connections → Image
 generation (`<data>/image.yaml`; see [integrations.md](integrations.md#image-api)).
 `0` switches both off.
 
@@ -551,14 +552,14 @@ tools:
   weather, Wikipedia, exchange rates, the time, a calculator) and any an add-on
   registered — off for every bot at once.
   Absent or `enabled: true` leaves each bot's own `advisor.tools` setting in
-  charge. Settings → Plugins → Built-in lookups writes it, and saving the
+  charge. Settings → Plugins & Apps → Built-in lookups writes it, and saving the
   Tools table never drops it.
 - **builtin** entries for the four original panes can only switch a pane
   *off*; no entry (or `enabled: true`) leaves the env flags in charge.
 - **Extension tools** (the voice add-on's `voice-cloning`, `voice-builtin`,
   `voice-lab` — see [extensions.md](extensions.md#voice)) are builtins an
   installed extension registers, and usually **opt-in**: a tool is on only
-  with a row saying `enabled: true`. Settings → Plugins (Apps & tools) can switch them on and
+  with a row saying `enabled: true`. Settings → Plugins & Apps (Apps & tools) can switch them on and
   off, and a save never leaves `enabled: false` rows for them behind. Like
   every builtin they are unlocked-tier only and never listed or served in
   Safe Mode. When the extension is NOT installed, its rows are **dormant**:
@@ -766,7 +767,7 @@ is optional; a missing file means the defaults.
 
 ### `extensions.yaml`
 
-Turns installed add-ons off without uninstalling them. Settings → Plugins writes
+Turns installed add-ons off without uninstalling them. Settings → Plugins & Apps writes
 it for you.
 
 ```yaml
