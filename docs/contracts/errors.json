@@ -1071,6 +1071,16 @@
       "status": 404
     },
     {
+      "code": "imagestudio_pictures_changed",
+      "docs": "imagestudio_pictures_changed",
+      "fix": "Something was added or removed since the count; press Clear from here down again to see the new count.",
+      "message": "The pictures changed since you confirmed; count again",
+      "patterns": [
+        "The pictures changed since you confirmed; count again"
+      ],
+      "status": 409
+    },
+    {
       "code": "imagestudio_that_chat_image_is_not_in",
       "docs": "imagestudio_that_chat_image_is_not_in",
       "fix": "The thing you asked for does not exist; reload and pick it again.",

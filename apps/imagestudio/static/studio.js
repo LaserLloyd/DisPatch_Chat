@@ -391,14 +391,26 @@ async function openClear(r) {
   go.addEventListener('click', async () => {
     go.disabled = true;
     try {
-      const res = await api(`${API}/clear`, { method: 'POST', body: { id: r.id, order: S.sort } });
+      const res = await api(`${API}/clear`, { method: 'POST', body: { id: r.id, order: S.sort, expect: plan.count } });
       closeDialog();
       S.images = (await api(`${API}/images`)).images;
       await reloadState(false);
       renderGrid();
       setStatus(t('clear.done', { n: res.deleted }));
       toast(t('clear.done', { n: res.deleted }));
-    } catch (e) { go.disabled = false; setStatus(t('clear.failed', { error: e.message }), true); }
+    } catch (e) {
+      // 409: a picture came or went since the count (another tab) -- nothing was
+      // deleted; count again and ask again rather than delete what was not seen.
+      if (e && e.status === 409) {
+        closeDialog();
+        setStatus(t('clear.changed'));
+        S.images = (await api(`${API}/images`)).images;
+        renderGrid();
+        openClear(r);
+        return;
+      }
+      go.disabled = false; setStatus(t('clear.failed', { error: e.message }), true);
+    }
   });
   const body = [el('p', { class: 'st-clear-msg', text: t(S.sort === 'newest' ? 'clear.confirm_newest' : 'clear.confirm_oldest', { n: plan.count }) })];
   if (plan.in_chat) body.push(el('p', { class: 'st-muted', text: t('clear.in_chat', { n: plan.in_chat }) }));

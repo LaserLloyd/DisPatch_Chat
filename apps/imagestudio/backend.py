@@ -29,10 +29,14 @@ supplies the first list.
 CLEARING
 --------
 ``POST /clear`` is the studio's "Clear from here down": the picture named and
-every picture after it in the order the page shows (``newest`` first, the
-default, or ``oldest`` first) leave the ledger, and their files leave the media
-store -- except a file a chat message still shows (sent to chat), which stays so
-the chat keeps its picture. ``dry_run`` answers the count for the confirmation.
+every picture after it in the order the page shows (``order`` is required:
+``oldest`` first -- the page's default -- or ``newest`` first) leave the ledger,
+and their files leave the media store -- except a file a chat message still
+shows (sent to chat), which stays so the chat keeps its picture. ``dry_run``
+answers the count for the confirmation, and the real request carries that count
+back as ``expect``: if the set changed in between (a picture made in another
+tab), nothing is deleted and the answer is 409 ``changed`` so the page counts
+again and asks again.
 It needs ``manage_history`` on top of the app's ``use_images`` (the permission
 that lets a profile delete its conversations); Restricted never holds either.
 
@@ -276,8 +280,9 @@ class GenerateIn(BaseModel):
 
 class ClearIn(BaseModel):
     id: str = Field(min_length=32, max_length=32)
-    order: str = Field(default="newest", pattern=r"^(newest|oldest)$")
+    order: str = Field(pattern=r"^(newest|oldest)$")   # required: the page's order, never a guess
     dry_run: bool = False
+    expect: int | None = Field(default=None, ge=0)   # the dry run's count the person confirmed
 
 
 def _clear_rows(rows: list[dict], iid: str, order: str) -> tuple[list[dict], list[dict]] | None:
@@ -403,6 +408,8 @@ def build(ctx):
             still_used = in_chat | {str(r.get("url") or "") for r in kept}
             if body.dry_run:
                 return {"count": len(removed), "in_chat": len(in_chat), "dry_run": True}
+            if body.expect is not None and body.expect != len(removed):
+                raise HTTPException(409, "The pictures changed since you confirmed; count again")
             await asyncio.to_thread(_rewrite_ledger, kept)
             files = 0
             for url in dict.fromkeys(urls):

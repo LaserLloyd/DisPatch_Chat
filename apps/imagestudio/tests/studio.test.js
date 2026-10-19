@@ -274,7 +274,7 @@ test('"Clear from here down" counts first, asks in a danger dialog, then clears 
   assert.equal(clears(env).length, 1, 'nothing is deleted before the confirmation');
   dlg.querySelector('.st-danger').click();
   await flush();
-  assert.deepEqual(clears(env)[1].body, { id: ID('b'), order: 'newest' });
+  assert.deepEqual(clears(env)[1].body, { id: ID('b'), order: 'newest', expect: 2 }, 'the confirmed count rides along');
   assert.equal(doc.querySelectorAll('.st-tile').length, 0, 'the grid reloads from the server');
   assert.match(doc.querySelector('.st-status').textContent, /Pictures deleted: 2/);
 });
@@ -299,4 +299,28 @@ test('a profile that may not delete gets no clear action', { skip: dom.skip }, a
 test('no host-storage callout on the page (it lives in Settings and the first-load card)', { skip: dom.skip }, async () => {
   const { doc } = await page();
   assert.equal(doc.querySelector('.st-privacy, .host-notice'), null);
+});
+
+test('a 409 (pictures changed since the count) deletes nothing, re-counts and asks again', { skip: dom.skip }, async () => {
+  let dry = 0;
+  const env = await page({
+    state: { ...STATE, can_clear: true },
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) { dry += 1; return [200, { count: dry === 1 ? 1 : 2, in_chat: 0, dry_run: true }]; }
+      return b.expect === 2 ? [200, { deleted: 2, files: 2, in_chat: 0 }] : [409, { detail: 'The pictures changed since you confirmed; count again' }];
+    },
+  });
+  const { doc } = env;
+  doc.querySelectorAll('.st-tile')[1].querySelector('.st-icon-danger').click();
+  await flush();
+  assert.match(doc.querySelector('.st-dlg').textContent, /Pictures to delete: 1/);
+  doc.querySelector('.st-dlg .st-danger').click();
+  await flush(30);
+  assert.equal(dry, 2, 'counted again');
+  assert.match(doc.querySelector('.st-dlg').textContent, /Pictures to delete: 2/, 'and asked again with the new number');
+  assert.match(doc.querySelector('.st-status').textContent, /changed/);
+  doc.querySelector('.st-dlg .st-danger').click();
+  await flush(30);
+  assert.deepEqual(clears(env).filter((c) => !c.body.dry_run).map((c) => c.body.expect), [1, 2]);
 });

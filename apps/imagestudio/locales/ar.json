@@ -91,6 +91,7 @@
   "clear.go": "حذف",
   "clear.done": "الصور المحذوفة: {n}.",
   "clear.failed": "تعذّر الحذف: {error}",
+  "clear.changed": "تغيّرت الصور منذ أن نظرت إليها؛ هذا هو العدد الجديد.",
   "common.cancel": "إلغاء",
   "common.close": "إغلاق"
 }

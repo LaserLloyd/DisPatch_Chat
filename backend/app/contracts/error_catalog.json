@@ -1152,6 +1152,17 @@
    "seeded": true
   },
   {
+   "code": "imagestudio_pictures_changed",
+   "status": 409,
+   "message": "The pictures changed since you confirmed; count again",
+   "fix": "Something was added or removed since the count; press Clear from here down again to see the new count.",
+   "docs": "imagestudio_pictures_changed",
+   "patterns": [
+    "The pictures changed since you confirmed; count again"
+   ],
+   "seeded": true
+  },
+  {
    "code": "jobboard_job_not_found",
    "status": 404,
    "message": "Job not found",

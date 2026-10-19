@@ -63,11 +63,45 @@ def test_oldest_first_clears_the_picture_and_every_newer_one(world):
     assert [_file(x) for x in rows] == [True, False, False, False, False]
 
 
-def test_newest_is_the_default_order(world):
+def test_the_order_is_required_never_guessed(world):
     owner = world.create_owner()
     rows = _seed(3)
-    assert owner.post(BASE + "/clear", json={"id": rows[0]["id"]}).json()["deleted"] == 1
-    assert _ids(owner) == [rows[1]["id"], rows[2]["id"]]
+    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"})
+    assert r.status_code == 422, r.text
+    assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
+
+
+def test_the_confirmed_count_must_still_hold(world):
+    owner = world.create_owner()
+    rows = _seed(3)
+    plan = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest", "dry_run": True}).json()
+    assert plan["count"] == 3
+    _seed(1)                                  # another tab made a picture after the count
+    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest", "expect": plan["count"]})
+    assert r.status_code == 409, r.text
+    assert len(_ids(owner)) == 4 and all(_file(x) for x in rows), "nothing was deleted"
+    plan = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest", "dry_run": True}).json()
+    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest", "expect": plan["count"]})
+    assert r.status_code == 200 and r.json()["deleted"] == 4
+
+
+def test_a_cross_origin_request_is_refused(world):
+    owner = world.create_owner()
+    rows = _seed(2)
+    r = owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest"},
+                   headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403, r.text
+    assert r.json()["error"]["code"] == "csrf_origin"
+    assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)
+
+
+def test_a_machine_caller_is_refused(world):
+    owner = world.create_owner()
+    rows = _seed(2)
+    for c in (world.client(origin=False), world.client(world.LAN, origin=False)):
+        r = c.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "oldest"})
+        assert r.status_code in (401, 403), (r.status_code, r.text)
+    assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)
 
 
 def test_a_dry_run_counts_and_deletes_nothing(world):
@@ -98,8 +132,8 @@ def test_a_picture_sent_to_a_chat_keeps_its_file(world):
 def test_unknown_ids_and_bad_orders_are_refused(world):
     owner = world.create_owner()
     rows = _seed(1)
-    assert owner.post(BASE + "/clear", json={"id": "0" * 32}).status_code == 404
-    assert owner.post(BASE + "/clear", json={"id": "x" * 32}).status_code == 422
+    assert owner.post(BASE + "/clear", json={"id": "0" * 32, "order": "oldest"}).status_code == 404
+    assert owner.post(BASE + "/clear", json={"id": "x" * 32, "order": "oldest"}).status_code == 422
     assert owner.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "random"}).status_code == 422
     assert _file(rows[0])
 
@@ -113,12 +147,12 @@ def test_a_member_may_clear_but_not_without_manage_history(world):
     assert world.login(nia, name="Nia", pin="6666").status_code == 200
     assert nia.get(BASE + "/state").json()["can_clear"] is False, "the page hides the action too"
     assert owner.get(BASE + "/state").json()["can_clear"] is True
-    r = nia.post(BASE + "/clear", json={"id": rows[2]["id"]})
+    r = nia.post(BASE + "/clear", json={"id": rows[2]["id"], "order": "newest"})
     assert r.status_code == 403
     assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
     max_ = world.client()
     assert world.login(max_, name="Max", pin="5555").status_code == 200
-    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"]}).status_code == 200
+    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"}).status_code == 200
     assert len(_ids(owner)) == 2
 
 
@@ -128,6 +162,6 @@ def test_restricted_and_signed_out_callers_never_reach_it(world):
     rows = _seed(2)
     kid = world.client()
     assert world.login(kid, name="Mia").status_code == 200
-    assert kid.post(BASE + "/clear", json={"id": rows[1]["id"]}).status_code == 403
-    assert world.client().post(BASE + "/clear", json={"id": rows[1]["id"]}).status_code in (401, 403)
+    assert kid.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
+    assert world.client().post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code in (401, 403)
     assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)

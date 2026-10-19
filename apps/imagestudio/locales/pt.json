@@ -88,6 +88,7 @@
   "clear.go": "Apagar",
   "clear.done": "Imagens apagadas: {n}.",
   "clear.failed": "Não foi possível apagar: {error}",
+  "clear.changed": "As imagens mudaram desde que você olhou; aqui está a nova contagem.",
   "common.cancel": "Cancelar",
   "common.close": "Fechar"
 }

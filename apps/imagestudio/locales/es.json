@@ -88,6 +88,7 @@
   "clear.go": "Borrar",
   "clear.done": "Imágenes borradas: {n}.",
   "clear.failed": "No se pudo borrar: {error}",
+  "clear.changed": "Las imágenes cambiaron desde que miraste; aquí está el nuevo recuento.",
   "common.cancel": "Cancelar",
   "common.close": "Cerrar"
 }

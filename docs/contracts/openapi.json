@@ -1438,6 +1438,18 @@
             "title": "Dry Run",
             "type": "boolean"
           },
+          "expect": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expect"
+          },
           "id": {
             "maxLength": 32,
             "minLength": 32,
@@ -1445,14 +1457,14 @@
             "type": "string"
           },
           "order": {
-            "default": "newest",
             "pattern": "^(newest|oldest)$",
             "title": "Order",
             "type": "string"
           }
         },
         "required": [
-          "id"
+          "id",
+          "order"
         ],
         "title": "ClearIn",
         "type": "object"

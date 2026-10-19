@@ -86,6 +86,7 @@
   "clear.go": "削除",
   "clear.done": "削除した画像：{n} 枚。",
   "clear.failed": "削除できませんでした：{error}",
+  "clear.changed": "確認した後に画像が変わりました。新しい枚数を表示します。",
   "common.cancel": "キャンセル",
   "common.close": "閉じる"
 }

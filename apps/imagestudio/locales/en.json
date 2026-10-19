@@ -87,6 +87,7 @@
   "clear.go": "Delete",
   "clear.done": "Pictures deleted: {n}.",
   "clear.failed": "Could not delete: {error}",
+  "clear.changed": "The pictures changed since you looked; here is the new count.",
   "common.cancel": "Cancel",
   "common.close": "Close"
 }

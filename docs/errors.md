@@ -125,6 +125,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI models → Image generation) |
 | [`imagestudio_not_a_picture_id`](#imagestudio_not_a_picture_id) | 422 | That is not a picture id |
 | [`imagestudio_picture_already_gone`](#imagestudio_picture_already_gone) | 404 | That picture is already gone |
+| [`imagestudio_pictures_changed`](#imagestudio_pictures_changed) | 409 | The pictures changed since you confirmed; count again |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
 | [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI models → Image generation) |
@@ -1109,6 +1110,14 @@ HTTP **422** - That is not a picture id
 HTTP **404** - That picture is already gone
 
 **Fix:** Reload Image Studio; the picture was deleted already.
+
+## imagestudio_pictures_changed
+
+<a id="imagestudio_pictures_changed"></a>
+
+HTTP **409** - The pictures changed since you confirmed; count again
+
+**Fix:** Something was added or removed since the count; press Clear from here down again to see the new count.
 
 ## imagestudio_that_chat_image_is_not_in
 

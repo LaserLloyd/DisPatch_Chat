@@ -1518,14 +1518,25 @@ class Database:
         """Which of ``urls`` (``/media/<name>``) a chat message still shows, as
         its attachment or inside its text. Image Studio asks before it deletes a
         picture's file, so "send to chat" never leaves a broken image behind."""
+        wanted = list(dict.fromkeys(u for u in urls if u))
         found: set[str] = set()
-        for url in dict.fromkeys(u for u in urls if u):
-            pattern = "%" + url.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        # One scan per chunk of URLs, not one per URL: the WHERE keeps only rows that
+        # mention any of them and Python decides which. Chunked under SQLite's
+        # host-parameter limit (two parameters per URL).
+        for i in range(0, len(wanted), 200):
+            chunk = wanted[i:i + 200]
+            marks = ",".join("?" * len(chunk))
+            hits = " OR ".join("instr(content, ?) > 0" for _ in chunk)
             cur = await self.db.execute(
-                "SELECT 1 FROM messages WHERE media_url = ? OR content LIKE ? ESCAPE '\\' LIMIT 1",
-                (url, pattern))
-            if await cur.fetchone():
-                found.add(url)
+                f"SELECT media_url, content FROM messages WHERE media_url IN ({marks}) OR {hits}",
+                (*chunk, *chunk))
+            for row in await cur.fetchall():
+                media, content = row[0] or "", row[1] or ""
+                for url in chunk:
+                    if url not in found and (media == url or url in content):
+                        found.add(url)
+            if len(found) == len(wanted):
+                break
         return found
 
     async def update_message_content(self, msg_id: str, content: str) -> None:

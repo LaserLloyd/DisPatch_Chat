@@ -87,6 +87,7 @@
   "clear.go": "Löschen",
   "clear.done": "Gelöschte Bilder: {n}.",
   "clear.failed": "Löschen fehlgeschlagen: {error}",
+  "clear.changed": "Die Bilder haben sich inzwischen geändert; hier ist die neue Anzahl.",
   "common.cancel": "Abbrechen",
   "common.close": "Schließen"
 }

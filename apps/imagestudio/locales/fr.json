@@ -88,6 +88,7 @@
   "clear.go": "Supprimer",
   "clear.done": "Images supprimées : {n}.",
   "clear.failed": "Suppression impossible : {error}",
+  "clear.changed": "Les images ont changé entre-temps ; voici le nouveau compte.",
   "common.cancel": "Annuler",
   "common.close": "Fermer"
 }
