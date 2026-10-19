@@ -351,8 +351,11 @@ async function refresh() {
     D.fetchedAt = Date.now();
   } catch (e) {
     D.error = cleanErr(e);
-    // Locked out mid-session: hand off to main.js and get out of the way.
-    if (e.locked || e.status === 403) {
+    // Locked out mid-session: hand off to main.js and get out of the way. Only a real
+    // downgrade (401, or a 403 that says decoy/locked) is that: since 3.0 an Admin is
+    // signed in but the dashboard is the Owner's (admin_system), and treating that 403
+    // as "locked" flipped the Admin's whole UI to the Restricted view.
+    if (e.locked) {
       stopPolling();
       closeDashboard();
       ctx.onLocked();

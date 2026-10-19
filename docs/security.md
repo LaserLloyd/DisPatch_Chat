@@ -209,6 +209,12 @@ directory when the Owner's PIN is set. Losing both it and the PIN means editing
 ownership for self-hosted software, but it means you need shell access. An owner
 with a password can always sign in with it.
 
+Using the code on the lock screen removes the PIN on a one-person install. Once
+other people have profiles it **replaces** the PIN instead: type the code and a
+new PIN together (`POST /api/auth/recover` with `new_pin`). Removing the only
+Owner credential there would leave the household with no owner, so a request
+without a new PIN is refused with `recovery_needs_new_pin` and nothing changes.
+
 **Decide who is Restricted.** Anyone who reaches the port without signing in is
 Restricted — useful for a tablet on the kitchen counter, and the reason the
 audience of each character is a decision, not a default. Give children their own

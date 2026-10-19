@@ -1527,12 +1527,12 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .lock-forgot:hover { color: var(--text-primary); }
 .lock-recover { display: flex; flex-direction: column; gap: 10px; width: 260px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-strong); }
 .lock-recover-hint { font-size: 12px; text-align: center; line-height: 1.5; }
-#recover-code {
+#recover-code, #recover-new-pin {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px;
   padding: 11px 12px; color: var(--text-primary); font-family: var(--font-mono);
   text-align: center; letter-spacing: 2px; text-transform: uppercase; font-size: 15px;
 }
-#recover-code:focus { outline: none; border-color: var(--accent); }
+#recover-code:focus, #recover-new-pin:focus { outline: none; border-color: var(--accent); }
 .lock-recover-row { display: flex; gap: 10px; justify-content: center; }
 
 /* Security modal */
@@ -1707,6 +1707,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
    cue; give them a proper focus-visible ring instead of nothing. */
 #input:focus-visible,
 #recover-code:focus-visible,
+#recover-new-pin:focus-visible,
 .sec-field input:focus-visible {
   outline: none;
   border-color: var(--accent);
@@ -3133,6 +3134,7 @@ a.markdown-file-link > code,
    field keeps its own existing alignment (#recover-code is text-align:center,
    so text-align:left is deliberately NOT added here). */
 #recover-code,
+#recover-new-pin,
 .sec-field input,
 /* Connect an AI: a base URL, an API key, an env-var name and a model id are
    all identifiers, not prose — they read left-to-right in every locale. */

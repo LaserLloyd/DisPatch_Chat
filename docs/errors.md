@@ -197,6 +197,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`quiet_hours`](#quiet_hours) | 403 | This profile is not available right now. |
 | [`rate_limited`](#rate_limited) | 429 | Rate limited. |
 | [`reaction_not_found`](#reaction_not_found) | 404 | reaction not found |
+| [`recovery_needs_new_pin`](#recovery_needs_new_pin) | 409 | Choose a new PIN: other people have profiles here, so the lock cannot simply be removed. |
 | [`refresh_running`](#refresh_running) | 409 | A refresh is already running for this tool |
 | [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: lock, then unlock with "Remember this device" ticked. |
 | [`reply_in_progress_delete`](#reply_in_progress_delete) | 409 | Cannot delete messages while a reply is in progress |
@@ -1680,6 +1681,14 @@ HTTP **429** - Rate limited.
 HTTP **404** - reaction not found
 
 **Fix:** Reload the reaction pack.
+
+## recovery_needs_new_pin
+
+<a id="recovery_needs_new_pin"></a>
+
+HTTP **409** - Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.
+
+**Fix:** Enter the recovery code together with a new PIN (4 or more characters).
 
 ## refresh_running
 

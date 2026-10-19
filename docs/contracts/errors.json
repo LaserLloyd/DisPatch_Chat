@@ -1796,6 +1796,14 @@
       "status": 404
     },
     {
+      "code": "recovery_needs_new_pin",
+      "docs": "recovery_needs_new_pin",
+      "fix": "Enter the recovery code together with a new PIN (4 or more characters).",
+      "message": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
+      "patterns": [],
+      "status": 409
+    },
+    {
       "code": "refresh_running",
       "docs": "refresh_running",
       "fix": "The state conflicts with the request; reload and retry.",
