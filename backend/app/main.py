@@ -13364,6 +13364,18 @@ async def websocket_endpoint(ws: WebSocket):
                 with contextlib.suppress(Exception):
                     await ws.send_json({"type": "locked"})
                 break
+            elif device_id is not None and principal.kind in ("profile", "anonymous"):
+                # A device bound to a default profile (the kitchen tablet) has no session to
+                # re-read, so the profile was a snapshot from the handshake: quiet hours or a
+                # budget the Owner set afterwards, disabling the profile or re-binding the
+                # device never reached a socket that stays open for days. Resolve it again.
+                fresh = policy.for_device(device_id) or policy.anonymous(device_id)
+                current = fresh
+                if (fresh.kind != principal.kind or fresh.profile_id != principal.profile_id
+                        or fresh.role != principal.role or fresh.permissions != principal.permissions):
+                    principal = fresh
+                    manager.set_principal(ws, principal)
+                    decoy = principal.is_restricted
             if mtype == "ping":
                 await manager.send(ws, {"type": "pong"})
                 continue
