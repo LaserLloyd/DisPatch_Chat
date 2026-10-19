@@ -289,6 +289,22 @@ it up, keep it `0600`, and never commit it.
 
 ---
 
+## Accounts and lockout recovery
+
+From the clone, as the user the service runs as:
+
+```bash
+cd ~/dispatch/backend
+uv run python -m app users list
+uv run python -m app users passwd Olive
+uv run python -m app owner reset --yes
+```
+
+Without a command line: `: > ~/.local/share/local-chat/RESET_LOGIN` (or `printf 'Olive:%s\n' "$NEWPW" > ...` to set a password),
+then `systemctl --user restart dispatch` (system unit: `sudo systemctl restart dispatch`, and the file belongs to the unit's
+user). The command reads the same data directory as the service only if it sees the same `DISPATCH_DATA_DIR`: its first line
+says which one it used. Full reference: [accounts.md](accounts.md).
+
 ## Backups
 
 The app writes rotated snapshots to `<data>/backups/` every 6 hours. They are on the

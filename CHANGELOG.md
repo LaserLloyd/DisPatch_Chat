@@ -7,6 +7,40 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-10-19
+
+### Accounts and lock-out recovery (new commands: minor bump)
+
+Owner requirement: a way to reset the login, add sign-ins and delete old ones, for someone who only has access to the
+machine. Reference and copy-paste commands for every install: [docs/accounts.md](docs/accounts.md) and the README section
+"Accounts and lockout recovery".
+
+- **`python -m app users list | add | passwd | delete`, `owner reset`, `token show | rotate`** (`app/cli.py`;
+  Docker: `docker compose exec app python -m app ...`). A PIN or password is never an argument: a hidden prompt,
+  `--password-stdin` or `--password-env VAR`. Every run prints which data directory it used first, and a folder
+  without a `chats.db` is refused rather than created. `users add` makes a Restricted profile unless `--profile` says
+  otherwise (a Member needs a PIN, an Admin a password and an owner with a password, and a second Owner is refused);
+  `users delete` never deletes the owner; `users passwd` signs the profile out everywhere. `owner reset` clears the
+  owner's password, PIN, recovery code and sessions, keeps the owner row and everyone else, and prints a new one-time
+  setup token (also kept in `SETUP-TOKEN.txt`, deleted once the owner exists). `token` is the `api_token` for agents and crons.
+- **A `RESET_LOGIN` file in the data directory** (`app/recovery.py`), for someone with nothing but the files: empty or
+  `name` = `owner reset`; `name:new-password` = set the owner's password (creating the owner when there is none). It is read
+  once, while the server starts, **deleted before it is acted on** (a file that cannot be deleted is not acted on), refuses
+  symlinks, directories, files over 1 KB and (POSIX) world-writable or foreign-owned files, understands UTF-8 BOMs and
+  PowerShell's UTF-16, and logs one line without the password. **`DISPATCH_RESET_OWNER=<value>`** does the empty-file reset
+  once per value (remembered in `.reset-owner-applied`, so leaving it in `.env` does not wipe the owner on every restart). Neither is
+  reachable over the network: only the lifespan start-up calls the hook, the variable is read from the process environment
+  and not from the settings store.
+- **A running server follows command-line changes within about a second.** A one-row `account_rev` table is bumped by every write
+  to `profiles` and the profile cache reloads when another process changed it (it used to be cleared only by writes in
+  the same process, so a password changed from a second process kept working until a restart);
+  `trusted-devices.yaml` is re-read when its mtime changes (the file already said "delete me to forget every device, picked up immediately");
+  `SETUP-TOKEN.txt` is accepted by `POST /api/auth/setup` and printed in the start-up banner.
+- Docs: new [docs/accounts.md](docs/accounts.md); the Docker guide, the stack guide, the Windows, Raspberry Pi and bare-metal
+  guides, security.md, first-run.md and `.env.example` carry the container and platform forms. Tests: `tests/test_cli_accounts.py`,
+  `tests/test_login_recovery.py`.
+- Frontend: `APP_VERSION` 3.1.0, service worker cache v174.
+
 ### Permissions (owner's order, 2026-10-19)
 
 - **Admins have full permissions.** An Admin now holds every permission the Owner has, host control

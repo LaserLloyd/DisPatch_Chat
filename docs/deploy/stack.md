@@ -111,6 +111,69 @@ docker run --rm -v dispatch-stack_dispatch-data:/data -v "$PWD":/backup:ro alpin
 in place of `docker` and add `:z` to bind mounts on SELinux hosts. Never copy `chats.db` alone out of
 a running instance: the `-wal` file holds the recent writes.
 
+## Accounts and lockout recovery
+
+The same commands as [accounts.md](../accounts.md), with the stack's flags and the service name `dispatch` (data on the
+`dispatch-stack_dispatch-data` volume, `/data` in the container):
+
+```bash
+P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
+$P exec dispatch python -m app users list
+$P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
+printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile member --password-stdin
+$P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
+$P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
+```
+
+(The root filesystem is read-only; the commands only write the volume.) If you have nothing but the volume, create
+`/data/RESET_LOGIN` and restart DisPatch: `$P exec dispatch sh -c ': > /data/RESET_LOGIN' && $P restart dispatch`, then
+`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the owner's sign-in and opens setup (the
+wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the owner's
+password instead. `DISPATCH_RESET_OWNER=1` in `stack.env` (then `$P up -d`) does the empty-file reset once per value.
+StudioForge has its own accounts: `$P exec studioforge studioforge users passwd <name>` (see its docs).
+
+## Accounts and lockout recovery
+
+The same commands as [accounts.md](../accounts.md), with the stack's flags and the service name `dispatch` (data on the
+`dispatch-stack_dispatch-data` volume, `/data` in the container):
+
+```bash
+P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
+$P exec dispatch python -m app users list
+$P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
+printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile member --password-stdin
+$P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
+$P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
+```
+
+(The root filesystem is read-only; the commands only write the volume.) If you have nothing but the volume, create
+`/data/RESET_LOGIN` and restart DisPatch: `$P exec dispatch sh -c ': > /data/RESET_LOGIN' && $P restart dispatch`, then
+`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the owner's sign-in and opens setup (the
+wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the owner's
+password instead. `DISPATCH_RESET_OWNER=1` in `stack.env` (then `$P up -d`) does the empty-file reset once per value.
+StudioForge has its own accounts: `$P exec studioforge studioforge users passwd <name>` (see its docs).
+
+## Accounts and lockout recovery
+
+The same commands as [accounts.md](../accounts.md), with the stack's flags and the service name `dispatch` (data on the
+`dispatch-stack_dispatch-data` volume, `/data` in the container):
+
+```bash
+P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
+$P exec dispatch python -m app users list
+$P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
+printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile member --password-stdin
+$P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
+$P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
+```
+
+(The root filesystem is read-only; the commands only write the volume.) If you have nothing but the volume, create
+`/data/RESET_LOGIN` and restart DisPatch: `$P exec dispatch sh -c ': > /data/RESET_LOGIN' && $P restart dispatch`, then
+`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the owner's sign-in and opens setup (the
+wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the owner's
+password instead. `DISPATCH_RESET_OWNER=1` in `stack.env` (then `$P up -d`) does the empty-file reset once per value.
+StudioForge has its own accounts: `$P exec studioforge studioforge users passwd <name>` (see its docs).
+
 ## Podman
 
 `podman-compose -f deploy/compose/stack.yml up -d` works; known differences:

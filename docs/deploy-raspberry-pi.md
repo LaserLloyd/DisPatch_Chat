@@ -320,6 +320,18 @@ there.
 
 ---
 
+## Accounts and lockout recovery
+
+```bash
+cd ~/DisPatch_Chat      # wherever the clone with docker-compose.yml is
+docker compose exec app python -m app users list
+docker compose exec app python -m app users passwd Olive
+docker compose exec app python -m app owner reset --yes
+```
+
+With the data on an SSD bind mount (`DATA_PATH`) the file form works from the host too: `sudo touch "$DATA_PATH/RESET_LOGIN"` (the
+owner must be root or uid 1000), then `docker compose restart app`. Full reference: [accounts.md](accounts.md).
+
 ## Reducing writes
 
 Worth doing for latency and card longevity, in rough order of value.

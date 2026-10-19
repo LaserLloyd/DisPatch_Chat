@@ -54,6 +54,11 @@ standard input) or from `--password-env VAR`. `--password foo` is a usage error.
 
 PINs are at least 4 characters and passwords at least 8 (the same rules as the Settings screens).
 
+**Who may do this.** Whoever can run the command or write the data folder: it is host access, not a role. An Admin signed in to
+the app holds every permission the Owner has except the structural one, changing the Owner's profile or credentials; this command
+line (or the recovery file) is how the Owner's own sign-in gets reset. `users add --profile` defaults to the lowest role
+(Restricted), so a new sign-in gets nothing it was not asked for.
+
 ### users
 
 - `users list` prints name, role, what each profile signs in with, and whether it is disabled. `--json` prints the

@@ -55,7 +55,7 @@
 import { el, railIcon, RAIL_ICONS, loadStyle, acquireInert, releaseInert } from './util.js?v=20';
 import { t, tHtml, has, applyDom, list, n, lang } from './i18n.js?v=4';
 import { api, DecoyError } from './app-sdk.js?v=3';
-import { APP_VERSION } from './about.js?v=21';
+import { APP_VERSION } from './about.js?v=22';
 
 /** The extension API this shell speaks. Bump ONLY on a breaking change. */
 export const EXT_API = 1;
