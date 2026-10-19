@@ -790,7 +790,8 @@ def _migrate_ext_settings(ext: Extension) -> None:
     except Exception:           # an add-on's migration never stops the shell
         log.exception("ext %s: settings migration failed", ext.id)
         return
-    if isinstance(rep, dict) and rep.get("status") not in ("nothing_to_migrate", "already_migrated"):
+    # "deferred": DisPatch Voice 1.6 still reads voice.yaml only and says so itself, once.
+    if isinstance(rep, dict) and rep.get("status") not in ("nothing_to_migrate", "already_migrated", "deferred"):
         log.info("ext %s: settings migration: %s (%s key(s) written)", ext.id, rep.get("status"),
                  rep.get("written"))
 
