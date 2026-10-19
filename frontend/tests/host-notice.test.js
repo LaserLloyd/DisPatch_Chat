@@ -107,6 +107,15 @@ test('Settings -> Security holds the full notice (files and chats), with its key
   for (const k of ['title', 'files_body', 'chats_body']) assert.match(pane, new RegExp(`data-i18n="host_notice\\.${k}"`));
 });
 
+test('the markup fallback of the Settings notice says what en.json says', () => {
+  const unesc = (x) => x.replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  for (const k of ['title', 'files_body', 'chats_body']) {
+    const m = HTML.match(new RegExp(`data-i18n="host_notice\\.${k}">([^<]*)<`));
+    assert.ok(m, k);
+    assert.equal(unesc(m[1]), EN.host_notice[k], `index.html host_notice.${k} matches en.json`);
+  }
+});
+
 test('no callout on the create/upload surfaces any more', () => {
   assert.equal((HTML.match(/class="host-notice"/g) || []).length, 1, 'only the Security one');
   for (const f of ['js/main.js', 'js/reactions.js', 'js/people.js', 'js/wizard.js', 'js/signin.js', 'js/chatdrop.js']) {
