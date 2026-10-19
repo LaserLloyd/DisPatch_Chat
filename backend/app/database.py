@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import json as _json
 import logging
+import re
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -270,6 +271,83 @@ CREATE TABLE IF NOT EXISTS job_profile (
 """
 
 
+
+_READ_SQL = re.compile(r"\s*(SELECT|PRAGMA|VALUES)\b", re.IGNORECASE)
+
+
+class _Rows:
+    """A fully read result, shaped like the cursor the callers already use."""
+
+    rowcount = -1
+    lastrowid = None
+
+    def __init__(self, rows: list) -> None:
+        self._rows = list(rows)
+        self._i = 0
+
+    async def fetchone(self):
+        if self._i >= len(self._rows):
+            return None
+        row = self._rows[self._i]
+        self._i += 1
+        return row
+
+    async def fetchall(self) -> list:
+        rest, self._i = self._rows[self._i:], len(self._rows)
+        return rest
+
+    async def fetchmany(self, size: int = 1) -> list:
+        part = self._rows[self._i:self._i + size]
+        self._i += len(part)
+        return part
+
+    async def close(self) -> None:
+        return None
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        row = await self.fetchone()
+        if row is None:
+            raise StopAsyncIteration
+        return row
+
+
+class _SharedConnection:
+    """The one aiosqlite connection, with every READ run to completion in one step.
+
+    THE BUG THIS EXISTS FOR. ``await conn.execute("SELECT ...")`` steps the statement
+    to its first row and returns; until the caller fetches the rest (or the cursor
+    is collected) that statement keeps a READ transaction open on the shared
+    connection, and other coroutines' writes queue up behind it on the same
+    connection. Since 3.0, accounts / settings / connections / agents commit to
+    chats.db through their own sqlite3 connections, so such a write has to upgrade
+    a snapshot that is already stale - and SQLite refuses that at once with
+    "database is locked" (SQLITE_BUSY_SNAPSHOT; busy_timeout does not apply). Ops
+    check 2026-10-19: four Restricted sockets sending while a background writer
+    ran -> `ws handler 'send' failed`, the user's message lost.
+
+    A read here is ``execute_fetchall``: execute and fetch in ONE call on the
+    worker thread, so no statement is ever left active between two calls and
+    every write starts a fresh transaction (where busy_timeout does apply).
+    Writes go through unchanged, so ``rowcount`` keeps working.
+    """
+
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        object.__setattr__(self, "_conn", conn)
+
+    async def execute(self, sql: str, parameters: Any = None):
+        if _READ_SQL.match(sql):
+            return _Rows(await self._conn.execute_fetchall(sql, parameters))
+        return await self._conn.execute(sql, parameters)
+
+    def __getattr__(self, name: str):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name: str, value) -> None:
+        setattr(self._conn, name, value)
+
 def now_iso() -> str:
     """Current UTC time as an unambiguous ISO-8601 string."""
     return datetime.now(UTC).isoformat()
@@ -401,7 +479,8 @@ class Database:
         # Critical because a single connection is shared across many coroutines;
         # without this, one coroutine's commit() could publish another's
         # half-finished (uncommitted) multi-statement write.
-        self._db = await aiosqlite.connect(str(self.path), isolation_level=None)
+        self._db = _SharedConnection(
+            await aiosqlite.connect(str(self.path), isolation_level=None))
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.execute("PRAGMA foreign_keys=ON;")
