@@ -211,9 +211,10 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v175 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
+test('the sw.js CACHE is local-chat-v176 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v176: review fixes on the v175 round (phone sheet + profile menu, drag MIME, card timing, wording).
   // v175: Image Studio sort/clear, the Settings host-storage notice + first-load card,
   // Tools & more (railmenu.js), upload in the quick-actions menu, drop files on a chat.
   // v154: 2.3.1 review — llm.js 9→10 (Test sends target + api_key_env),
@@ -282,7 +283,7 @@ test('the sw.js CACHE is local-chat-v175 (3.0.0, W5 + W11b, the api.js importer 
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v175');
+  assert.equal(m[1], 'local-chat-v176');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {

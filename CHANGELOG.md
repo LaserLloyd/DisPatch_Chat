@@ -12,15 +12,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Image Studio: Sort and Clear from here down.** The results grid has a "Sort:" control (Oldest first, the old
   layout and default, or Newest first), remembered per device (`dispatch-imagestudio-sort`). Each picture has
   "Clear from here down", the studio's version of the File Server's "Delete this & older": `POST
-  /api/apps/imagestudio/clear {id, order, dry_run}` removes the picture and every picture after it in the shown order
+  /api/apps/imagestudio/clear {id, order, dry_run, expect}` (order required) removes the picture and every picture after it in the shown order
   from the ledger and deletes their media files, except a file a chat message still shows (sent to chat). A dry run
-  counts them for the danger confirmation. It needs `manage_history` on top of the app's `use_images` (Restricted
+  counts them for the danger confirmation, and the delete is refused (409) if the count changed in between. It needs `manage_history` on top of the app's `use_images` (Restricted
   holds neither); `/state` reports `can_clear` so the page hides the action otherwise.
 - **"Stored on the host computer".** Settings -> Security says what DisPatch keeps on the computer that runs it
-  (files, pictures, avatars; and chats, which belong to a character, so everyone who can use that character can open
-  them and the Owner and Admins can read every chat; not end-to-end encrypted; in the backups). A device also sees a
-  short version once, on its first normal page load (Got it / Escape / click outside; `dispatch-privacy-ack` with a
-  version number). The Restricted banner no longer says the owner never sees what was said, and
+  (files, pictures, avatars; and chats, which belong to a character, so anyone who can use that character can open
+  them: other profiles, Restricted ones included, and, while `anonymous_access` is `restricted`, devices nobody signed
+  in on; the Owner and Admins can read every chat; not end-to-end encrypted; in the backups). A device also sees a
+  short version once, on a page load, a sign-in or right after the setup wizard closes (Got it / Escape / click
+  outside; `dispatch-privacy-ack` with a version number, kept through privacy mode's wipe). The Restricted banner no longer says the owner never sees what was said, and
   [docs/security.md](docs/security.md) describes the per-character model.
 - **Tools & more on the rail.** The fixed rail buttons can sit on the bar or in the Tools popup (now "Tools & more"):
   by default the profile chip, Tasks, the File Server and the theme button move into it; Lock / Unlock, send-a-file
