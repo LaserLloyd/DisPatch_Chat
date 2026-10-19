@@ -49,6 +49,8 @@ log = logging.getLogger("local-chat.auth")
 SECURITY_PATH = DATA_DIR / "security.yaml"
 RECOVERY_PATH = DATA_DIR / "RECOVERY-CODE.txt"
 TRUSTED_PATH = DATA_DIR / "trusted-devices.yaml"
+#: A setup token written by ``python -m app owner reset`` (see :func:`setup_token`).
+SETUP_TOKEN_PATH = DATA_DIR / "SETUP-TOKEN.txt"
 
 # Cost factor for the PIN KDF. 200,000 is the shipped floor and the only value
 # a real deployment ever uses.
@@ -111,6 +113,16 @@ _cache: tuple[float, SecurityConfig] | None = None
 # sha256(token) hex -> {"created": epoch, "last_seen": epoch, "ua": str}.
 # Lazy-loaded from TRUSTED_PATH; None = not loaded yet.
 _trusted: dict[str, dict] | None = None
+#: ``trusted-devices.yaml``'s mtime (ns) when ``_trusted`` was loaded or last saved; ``None`` =
+#: the file did not exist. A different value means ANOTHER process (``python -m app``) edited it.
+_trusted_sig: int | None = None
+
+
+def _trusted_file_sig() -> int | None:
+    try:
+        return TRUSTED_PATH.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 _TEMPLATE = """\
@@ -630,10 +642,12 @@ def _token_hash(token: str) -> str:
 def _trusted_store() -> dict[str, dict]:
     """Lazy-load the trusted-device store. A corrupt/unreadable file FAILS
     CLOSED the convenient way: no device is trusted, PIN entry still works."""
-    global _trusted
+    global _trusted, _trusted_sig
     with _lock:
-        if _trusted is not None:
+        if _trusted is not None and _trusted_sig == _trusted_file_sig():
             return _trusted
+        # First use, or the file changed under us (a command-line reset deleted or rewrote it).
+        _trusted_sig = _trusted_file_sig()
         _trusted = {}
         if TRUSTED_PATH.exists():
             try:
@@ -658,6 +672,7 @@ def _trusted_store() -> dict[str, dict]:
 
 def _save_trusted() -> None:
     """Atomic 0600 write, mirroring security.yaml's discipline."""
+    global _trusted_sig
     store = _trusted_store()
     text = (
         "# DisPatch Chat — remembered (\"keep this device unlocked\") devices.\n"
@@ -673,6 +688,7 @@ def _save_trusted() -> None:
             f.write(text)
         os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, TRUSTED_PATH)
+        _trusted_sig = _trusted_file_sig()
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
@@ -680,11 +696,12 @@ def _save_trusted() -> None:
 
 
 def _wipe_trusted() -> None:
-    global _trusted
+    global _trusted, _trusted_sig
     with _lock:
         _trusted = {}
         with contextlib.suppress(OSError):
             TRUSTED_PATH.unlink(missing_ok=True)
+        _trusted_sig = _trusted_file_sig()
 
 
 def _trusted_entry(token: str, days: int) -> dict | None:
@@ -1106,14 +1123,56 @@ def set_profile_password(profile_id: str, password: str) -> None:
 # --------------------------------------------------------------------------- #
 
 _setup_token: str | None = None
+_SETUP_TOKEN_MIN = 16
+
+
+def _file_setup_token() -> str | None:
+    """The token ``python -m app owner reset`` left in ``SETUP-TOKEN.txt``, or None.
+
+    The file is the offline equivalent of the log line: whoever can write the data directory
+    can already do anything, and nothing on the network can create it. A symlink or an odd
+    file is ignored, not followed."""
+    try:
+        if SETUP_TOKEN_PATH.is_symlink() or not SETUP_TOKEN_PATH.is_file():
+            return None
+        tok = SETUP_TOKEN_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return tok if len(tok) >= _SETUP_TOKEN_MIN and tok.isascii() and tok.isprintable() else None
+
+
+def write_setup_token_file() -> str:
+    """Mint a fresh one-time setup token and keep it in ``SETUP-TOKEN.txt`` (0600) so the
+    running server accepts it and the next start prints the same one. Returns the token."""
+    global _setup_token
+    token = secrets.token_urlsafe(16)
+    ensure_dirs()
+    SETUP_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(SETUP_TOKEN_PATH.parent), prefix=".setup-token.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(token + chr(10))
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, SETUP_TOKEN_PATH)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+    with _lock:
+        _setup_token = None            # the file is the token now
+    return token
 
 
 def setup_token() -> str:
     """The token that authorises ``POST /api/auth/setup`` from a non-loopback client
     while the install has no owner. Generated on first use, printed to the log at
-    startup, held in memory only and invalidated once the owner exists."""
+    startup, held in memory only and invalidated once the owner exists. After
+    ``owner reset`` the same token also lives in ``SETUP-TOKEN.txt`` and that one is used."""
     global _setup_token
     with _lock:
+        from_file = _file_setup_token()
+        if from_file is not None:
+            return from_file
         if _setup_token is None:
             _setup_token = secrets.token_urlsafe(16)
         return _setup_token
@@ -1123,19 +1182,23 @@ def verify_setup_token(candidate: str | None) -> bool:
     if not candidate:
         return False
     with _lock:
-        tok = _setup_token
-    if tok is None:
-        return False
-    try:
-        return hmac.compare_digest(str(candidate), tok)
-    except TypeError:
-        return False
+        known = [t for t in (_setup_token, _file_setup_token()) if t]
+    cand = str(candidate)
+    ok = False
+    for tok in known:
+        try:
+            ok = hmac.compare_digest(cand, tok) or ok
+        except TypeError:
+            continue
+    return ok
 
 
 def burn_setup_token() -> None:
     global _setup_token
     with _lock:
         _setup_token = None
+        with contextlib.suppress(OSError):
+            SETUP_TOKEN_PATH.unlink(missing_ok=True)
 
 
 def machine_loopback_trust() -> bool:

@@ -251,13 +251,15 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
     base = tmp_path / "data"
     base.mkdir(parents=True, exist_ok=True)
     for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
-                        ("TRUSTED_PATH", "trusted-devices.yaml")):
+                        ("TRUSTED_PATH", "trusted-devices.yaml"),
+                        ("SETUP_TOKEN_PATH", "SETUP-TOKEN.txt")):
         if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
             monkeypatch.setattr(auth, name, base / fname)
     accounts.reset_for_tests()
     limits.reset()
     auth._cache = None
     auth._trusted = None
+    auth._trusted_sig = None
     auth._sessions.clear()
     auth._buckets.clear()
     auth._fail_count = 0
@@ -586,6 +588,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
     monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
     monkeypatch.setattr(auth, "TRUSTED_PATH", tmp_path / "trusted-devices.yaml")
+    monkeypatch.setattr(auth, "SETUP_TOKEN_PATH", tmp_path / "SETUP-TOKEN.txt")
     config._invalidate_bots_cache()
     from app import accounts
     accounts.reset_for_tests()
