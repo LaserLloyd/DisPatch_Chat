@@ -166,9 +166,12 @@ VOICE=1 docker compose build && docker compose up -d
 ```
 
 `--build-arg VOICE_REF=` picks the add-on's ref: a full ref (`refs/tags/v1.6.0`,
-`refs/heads/<branch>`) or a bare tag name (`v1.6.0`). The default is the 3.0
-refactor branch of the add-on, which carries the 1.6.0 line (the `v1` tag still
-names 1.5.0); it moves to a release tag when 1.6.0 ships. To build from a local
+`refs/heads/<branch>`) or a bare tag name (`v1.6.0`). The default is `refs/heads/main`
+of the add-on, which carries the 1.6.0 line (the `v1` tag still names 1.5.0, which
+the host no longer supports); it moves to a release tag when 1.6.0 ships. The
+add-on is two packages from one repository (`dispatch-voice` and its engines,
+`forge-voice-core`); the Dockerfile installs both from the same ref or directory
+and the build fails unless `import dispatch_voice, forge_voice_core` works. To build from a local
 copy (CI, an air-gapped host, a branch nobody pushed yet) hand the Dockerfile the
 directory as a named build context; export it clean first (`git archive`), the
 whole directory is sent:

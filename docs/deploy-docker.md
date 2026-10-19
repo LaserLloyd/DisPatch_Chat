@@ -570,7 +570,7 @@ Notes on the Dockerfile, since a few things in it look changeable but are not:
 - **`CMD` is exec form, and that is load-bearing.** See the next section.
 
 - **`VOICE=1` adds the voice add-on, `ffmpeg` and `libopus0`.** The add-on comes from
-  `--build-arg VOICE_REF=` (default: the add-on's 3.0 refactor branch; use
+  `--build-arg VOICE_REF=` (default: `refs/heads/main` of the add-on, the 1.6.0 line; use
   `refs/tags/v1.6.0` once it is tagged) or, with `VOICE_SRC=local` and
   `--build-context voice-src=<dir>`, from a local directory. The speech models are
   downloaded into `/data/models` from Settings → Voice, never baked in; the rig

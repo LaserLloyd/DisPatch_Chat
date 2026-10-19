@@ -24,7 +24,7 @@ What `VOICE=1` puts in the image:
 
 | | |
 |---|---|
-| the add-on | installed from `VOICE_REF` (default: the 3.0 refactor branch of the add-on, the 1.6.0 line; the moving `v1` tag still names 1.5.0), or from a local directory (`VOICE_SRC=local` with `--build-context voice-src=<dir>`, see [extensions.md](extensions.md#1-install-it)) |
+| the add-on | installed from `VOICE_REF` (default: `refs/heads/main` of the add-on, the 1.6.0 line; the moving `v1` tag still names 1.5.0), or from a local directory (`VOICE_SRC=local` with `--build-context voice-src=<dir>`, see [extensions.md](extensions.md#1-install-it)) |
 | `ffmpeg` | decodes the clip you upload to clone a voice |
 | `libopus0` | the codec of the low-bandwidth voice link (without it the link stays on raw PCM) |
 | the models | **not** baked in; the page downloads them into the data volume |
@@ -97,7 +97,7 @@ timed, and the full 1.4 GB download was not run.
    the page says so after the download.
 3. **The image size** above. And the first download needs the network from inside the
    container (GitHub and Hugging Face).
-4. **The add-on pin.** `VOICE_REF` points at a branch until 1.6.0 is tagged; the `v1`
+4. **The add-on pin.** `VOICE_REF` points at `main` until 1.6.0 is tagged; the `v1`
    install command on the "add voice" page installs 1.5.0 until the tag moves. Both
    are one-line changes at release (the TODO in the Dockerfile and `VOICE_TAG` in
    `js/voice-absent.js`).

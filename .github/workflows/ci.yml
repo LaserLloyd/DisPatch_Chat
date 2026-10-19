@@ -217,3 +217,20 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build with the voice add-on (VOICE=1, amd64, loaded for the import check)
+        # The add-on is two packages (dispatch-voice + forge-voice-core) installed from one ref; a
+        # build that cannot resolve them, or an image that cannot import them, fails here.
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          build-args: |
+            VOICE=1
+            VOICE_REF=refs/heads/main
+          load: true
+          push: false
+          tags: dispatch-chat:ci-voice
+          cache-from: type=gha,scope=voice
+          cache-to: type=gha,mode=max,scope=voice
+      - name: The voice image imports both add-on packages
+        run: docker run --rm --entrypoint python dispatch-chat:ci-voice -I -c "import dispatch_voice, forge_voice_core; print('ok')"
