@@ -753,3 +753,54 @@ def test_avatar_refill_names_a_lease_as_a_lease(avatar_env, monkeypatch):
     assert st.last_error.startswith("rig-leased")
     assert "vram" not in st.last_error.lower()
     assert pool_guard.refill_failure_stats()["by_kind"] == {"leased": 1}
+
+
+def test_lease_read_sends_the_rig_connection_key(monkeypatch):
+    """2026-10-19: StudioForge 2.x refuses a key-less lease read (401), which the
+    fail-open path read as "unleased". The read must carry the key of the
+    connection to the same server."""
+    import io
+    import json as _json
+    from app import connections, pool_guard
+
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=0):
+        seen["auth"] = req.get_header("Authorization")
+        return _Resp(_json.dumps({"leases": []}).encode())
+
+    monkeypatch.setattr(connections, "credential_for_url",
+                        lambda url: "sf-i-test" if url.startswith("http://rig:1234/") else None)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert pool_guard._fetch_leases("http://rig:1234/api/leases") == {"leases": []}
+    assert seen["auth"] == "Bearer sf-i-test"
+
+
+def test_lease_read_without_a_key_sends_no_header(monkeypatch):
+    import io
+    from app import connections, pool_guard
+
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=0):
+        seen["auth"] = req.get_header("Authorization")
+        return _Resp(b"{}")
+
+    monkeypatch.setattr(connections, "credential_for_url", lambda url: None)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    assert pool_guard._fetch_leases("http://rig:1234/api/leases") == {}
+    assert seen["auth"] is None

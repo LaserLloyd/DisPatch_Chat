@@ -327,6 +327,18 @@ def _lease_is_live(lease: dict) -> bool:
     return str(state).strip().lower() not in _LEASE_DEAD_STATES
 
 
+def _lease_key(url: str) -> str:
+    """The API key for the rig's lease book: the key of the connection that points
+    at the same server (an exact address never matches /api/leases, so this is the
+    same-origin rule). "" when there is none; never raises."""
+    try:
+        from . import connections
+        return connections.credential_for_url(url) or ""
+    except Exception as e:      # the store is optional here; fail OPEN like the read
+        log.debug("pool_guard: no lease key (%s)", e)
+        return ""
+
+
 def _fetch_leases(url: str) -> dict | None:
     """The lease book, or None when it could not be read (fail OPEN)."""
     try:
@@ -335,7 +347,14 @@ def _fetch_leases(url: str) -> dict | None:
         # and the scheme is fixed there -- so the audit rule about opening a
         # caller-supplied URL does not apply. (That rule's family is not
         # enabled, so the reason lives in prose rather than a suppression.)
-        with urllib.request.urlopen(url, timeout=5.0) as r:
+        req = urllib.request.Request(url, method="GET")
+        # StudioForge 2.x answers 401 to a key-less lease read, which used to
+        # read as "unleased" -- so the pools never stood down for a benchmark.
+        # The key is the one the connection to the same rig server holds.
+        key = _lease_key(url)
+        if key:
+            req.add_header("Authorization", f"Bearer {key}")
+        with urllib.request.urlopen(req, timeout=5.0) as r:
             return json.loads(r.read().decode("utf-8", "replace") or "{}")
     except Exception as e:
         # Blind `except Exception` on purpose (see rig_lease_holder's docstring):
