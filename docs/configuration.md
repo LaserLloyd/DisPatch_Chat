@@ -104,6 +104,7 @@ Access settings (environment; `security.yaml` keys are in [security.md](security
 
 ```
 DISPATCH_ALLOW_OPEN_INSTALL=0   # 1 = keep the 2.x "open to the LAN until a PIN is set" behaviour
+DISPATCH_RESET_OWNER=           # set to any value (not 0/false/off) for ONE start: clear the owner's sign-in and open setup (accounts.md)
 DISPATCH_ARGON2_MEMORY_KIB=19456  # tests only: lower the PIN/password hash cost
 DISPATCH_ARGON2_PASSES=2          # tests only
 ```

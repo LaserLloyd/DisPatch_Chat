@@ -103,7 +103,7 @@ def test_effective_permissions_of_an_admin_include_host_control(world):
 import json  # noqa: E402
 
 import pytest  # noqa: E402
-from _extfake import KNOBS, ext_env, install, thread_for  # noqa: E402,F401
+from _extfake import KNOBS, ext_env, install, thread_for  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
 ORIGIN = {"origin": "http://testserver"}

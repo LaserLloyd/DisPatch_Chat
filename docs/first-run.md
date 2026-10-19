@@ -16,6 +16,9 @@ away for good when you press **Finish**. Every step is an API call, so a script 
 `GET /api/wizard` answers `{needed, claimed}` to anyone and the full checklist to someone who may manage settings.
 `POST /api/wizard/step/{voice|family}` with `{"status": "skipped"}` records a skipped optional step.
 
+Locked out later (lost password and PIN)? `python -m app owner reset` or a `RESET_LOGIN` file puts the install back at this
+step with a new setup token, keeping chats and profiles: [accounts.md](accounts.md).
+
 ## Network exposure, plainly
 
 The wizard records your decision (`system.network_exposure`) and tells you what to do about it; **the address DisPatch

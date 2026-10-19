@@ -23,6 +23,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -95,6 +96,14 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_profile_ts ON activity(profile_id, ts);
 
+-- One row, bumped by every write to ``profiles``. A second process (the ``python -m app users``
+-- command line) edits the same file; the running server notices the bump and reloads its profile
+-- cache instead of serving a stale password hash until the next restart.
+CREATE TABLE IF NOT EXISTS account_rev (
+    id  INTEGER PRIMARY KEY CHECK (id = 1),
+    rev INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     id         TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -103,7 +112,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 #: Tables this module owns, in drop-safe (children first) order.
-TABLES = ("sessions", "devices", "usage_daily", "activity", "profiles", "schema_migrations")
+TABLES = ("sessions", "devices", "usage_daily", "activity", "profiles", "account_rev", "schema_migrations")
 
 _lock = threading.RLock()
 _ready: set[str] = set()
@@ -211,6 +220,20 @@ def _row_profile(r: sqlite3.Row) -> Profile:
 
 #: path -> {id: Profile}. Invalidated by every write in this process.
 _profiles: dict[str, dict[str, Profile]] = {}
+#: path -> (``account_rev`` when the cache was filled, monotonic time it was last checked).
+_rev_seen: dict[str, tuple[int, float]] = {}
+#: How often a cached read looks at ``account_rev`` to see whether ANOTHER process wrote.
+REV_RECHECK_SECONDS = 1.0
+
+
+def _read_rev(con: sqlite3.Connection) -> int:
+    row = con.execute("SELECT rev FROM account_rev WHERE id = 1").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _bump_rev(con: sqlite3.Connection) -> None:
+    con.execute("INSERT INTO account_rev (id, rev) VALUES (1, 1) "
+                "ON CONFLICT(id) DO UPDATE SET rev = rev + 1")
 
 
 def _all(path: Path | None = None) -> dict[str, Profile]:
@@ -218,23 +241,36 @@ def _all(path: Path | None = None) -> dict[str, Profile]:
     key = str(path)
     with _lock:
         hit = _profiles.get(key)
+        seen = _rev_seen.get(key)
+        now = time.monotonic()
+        if hit is not None and seen is not None and now - seen[1] >= REV_RECHECK_SECONDS:
+            with connect(path) as con:
+                rev = _read_rev(con)
+            if rev != seen[0]:
+                hit = None                      # another process changed an account
+            else:
+                _rev_seen[key] = (rev, now)
         if hit is None:
             with connect(path) as con:
+                rev = _read_rev(con)
                 rows = con.execute("SELECT * FROM profiles ORDER BY created, name").fetchall()
             hit = {r["id"]: _row_profile(r) for r in rows}
             _profiles[key] = hit
+            _rev_seen[key] = (rev, now)
         return hit
 
 
 def invalidate() -> None:
     with _lock:
         _profiles.clear()
+        _rev_seen.clear()
 
 
 def reset_for_tests() -> None:
     """Forget every cache (the schema-ready set and the profile cache)."""
     with _lock:
         _profiles.clear()
+        _rev_seen.clear()
         _ready.clear()
 
 
@@ -301,6 +337,7 @@ def create_profile(name: str, role: str, *, pin_hash: str | None = None,
         except sqlite3.IntegrityError as e:
             raise AccountError("profile_conflict", "That profile could not be created "
                                "(duplicate name or second owner).", 409) from e
+        _bump_rev(con)
         invalidate()
     p = get_profile(pid)
     assert p is not None
@@ -358,6 +395,7 @@ def update_profile(profile_id: str, **fields) -> Profile:
             con.execute(f"UPDATE profiles SET {', '.join(sets)} WHERE id = ?", args)
         except sqlite3.IntegrityError as e:
             raise AccountError("profile_conflict", "That change conflicts with another profile.", 409) from e
+        _bump_rev(con)
         invalidate()
     out = get_profile(profile_id)
     assert out is not None
@@ -372,6 +410,7 @@ def delete_profile(profile_id: str) -> None:
         raise AccountError("owner_immutable", "The owner cannot be deleted.", 409)
     with _lock, connect() as con:
         con.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        _bump_rev(con)
         invalidate()
 
 
@@ -647,6 +686,7 @@ def delete_owner_row() -> None:
     """Remove the owner row - only for "remove the lock" on a PIN-only 2.x install."""
     with _lock, connect() as con:
         con.execute("DELETE FROM profiles WHERE role = 'owner'")
+        _bump_rev(con)
         invalidate()
 
 
@@ -657,6 +697,7 @@ def update_profile_hash_silently(profile_id: str, column: str, value: str) -> No
         raise AccountError("profile_field_invalid", f"Cannot set {column!r}.")
     with _lock, connect() as con:
         con.execute(f"UPDATE profiles SET {column} = ? WHERE id = ?", (value, profile_id))
+        _bump_rev(con)
         invalidate()
 
 

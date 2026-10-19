@@ -4,7 +4,7 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 3.0.0** (October 2026) · [what changed](CHANGELOG.md#300--2026-10-18)
+**Current release: 3.1.0** (October 2026) · [what changed](CHANGELOG.md#310--2026-10-19)
 
 [Install](#install) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
@@ -372,6 +372,116 @@ Bind address in Docker: the plain `docker-compose.yml` publishes 8765 on `0.0.0.
 (reachable from your LAN; set `BIND_ADDR=127.0.0.1` to keep it to this host), while the
 [stack](docs/deploy/stack.md) (`deploy/compose/stack.yml`) publishes every port on `127.0.0.1` by default.
 
+## Accounts and lockout recovery
+
+Everything below runs on the machine DisPatch lives on, against the data directory, so it needs no
+sign-in and cannot be reached from the network. It works while the server runs (a running server
+picks the change up within about a second and signs the affected profile out) or stopped.
+
+**Where the data directory is**
+
+| Install | Data directory |
+| --- | --- |
+| Docker (Compose, stack) | `/data` inside the container, the `dispatch-data` volume (or your `DATA_PATH` folder) |
+| Linux, macOS (uv, systemd) | `~/.local/share/local-chat` (`$XDG_DATA_HOME/local-chat` if set) |
+| Windows (uv) | `%USERPROFILE%\.local\share\local-chat` |
+| Any | `DISPATCH_DATA_DIR` (or `--data-dir`) when you set one |
+
+Every command prints `DisPatch data directory: ...` first, so you can see it acted on the install you
+meant. A folder without a `chats.db` is refused, never created.
+
+**The commands** (one noun, the same verbs everywhere; a PIN or password is never an argument)
+
+```text
+users list                                  # names, roles, what each signs in with (never a secret)
+users add <name> [--profile restricted|member|admin|owner]
+users passwd <name> [--kind pin|password]   # signs that profile out everywhere
+users delete <name> [--yes]                 # never the owner
+owner reset [--yes]                         # lost the owner's password AND PIN: opens setup again
+token show | token rotate                   # the machine API key (X-API-Key) for agents and crons
+```
+
+`users add` makes the lowest profile, Restricted, unless you pass `--profile`; a Member needs a PIN, an
+Admin needs a password (and the owner needs one first), and there is only ever one Owner. The secret comes
+from a hidden prompt, from `--password-stdin` (first line of stdin) or from `--password-env VAR`. "Password"
+means the profile's own credential: a PIN for Members and Restricted profiles, a password for Admins and the
+Owner (`--kind pin` sets the Owner's PIN instead).
+
+**Native, from the clone** (Linux, macOS, systemd service):
+
+```bash
+cd DisPatch_Chat/backend
+uv run python -m app users list
+uv run python -m app users passwd Olive                     # prompts, twice, nothing is echoed
+printf '%s\n' "$NEWPW" | uv run python -m app users add Noor --profile member --password-stdin
+uv run python -m app users delete Noor --yes
+uv run python -m app owner reset --yes                      # prints a SETUP TOKEN and opens setup
+systemctl --user restart dispatch                           # only needed after a RESET_LOGIN file (below)
+```
+
+**Native, Windows (PowerShell):**
+
+```powershell
+cd DisPatch_Chat\backend
+uv run python -m app users list
+uv run python -m app users passwd Olive
+uv run python -m app users add Noor --profile member          # prompts for the PIN
+uv run python -m app owner reset --yes
+```
+
+**Docker Compose** (service `app`; for the stack use the same line with
+`-f deploy/compose/stack.yml --env-file deploy/compose/stack.env` and the service `dispatch`):
+
+```bash
+docker compose exec app python -m app users list
+docker compose exec app python -m app users passwd Olive                   # prompts on your terminal
+printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users passwd Olive --password-stdin
+docker compose exec app python -m app owner reset --yes                    # prints a SETUP TOKEN
+```
+
+In PowerShell pipe the same way: `$env:NEWPW | docker compose exec -T app python -m app users passwd Olive --password-stdin`.
+
+**No command line, only the data directory: the `RESET_LOGIN` file.** Put a file called `RESET_LOGIN` (or
+`RESET_LOGIN.txt`) in the data directory and restart DisPatch. It is read once, while the server starts, and
+deleted before anything is done, so it cannot repeat. Its first line is one of:
+
+| Contents | What happens |
+| --- | --- |
+| empty | The owner's password, PIN and recovery code are cleared and setup opens again: the log prints a new one-time `SETUP TOKEN` (also written to `SETUP-TOKEN.txt`) and the wizard asks for a new password. Opened in a browser on the same machine (not through a container's published port) the wizard needs no token. |
+| `Olive` | The same, after checking that Olive is the owner. |
+| `Olive:new-password` | Olive's password is set now (everything after the first colon is the password). If the install has no owner, it creates one. |
+
+```bash
+# Linux, macOS, bare metal: reset to setup mode, or set a password directly
+: > ~/.local/share/local-chat/RESET_LOGIN
+printf 'Olive:%s\n' "$NEWPW" > ~/.local/share/local-chat/RESET_LOGIN
+systemctl --user restart dispatch                  # or stop and start uvicorn
+
+# Docker (works while the container is up; a stopped one: see docs/accounts.md)
+docker compose exec app sh -c ': > /data/RESET_LOGIN'
+docker compose restart app
+docker compose logs app | grep -E "login recovery|SETUP TOKEN"
+```
+
+```powershell
+# Windows (uv): reset to setup mode, then stop and start uvicorn
+New-Item "$env:USERPROFILE\.local\share\local-chat\RESET_LOGIN" -ItemType File
+```
+
+The same thing as an environment variable, for a container you cannot reach a shell in:
+`DISPATCH_RESET_OWNER=1` (any value except `0`, `false`, `off`) in `.env` or the unit, then restart. It only
+opens setup (the environment is no place for a password), and the value is remembered in
+`<data>/.reset-owner-applied`, so leaving it set does not wipe the owner on every restart; use a different
+value to run it again. Remove it afterwards.
+
+**What is reset and what is kept.** Reset: the owner's password, PIN, recovery code, sessions and remembered
+devices (`owner reset`, an empty file, the variable); one profile's PIN or password and sessions (`users
+passwd`). Kept, always: every chat, every other profile and its PIN, the character roster, settings,
+connections, backups, and the owner's profile row itself (its id, name, picture and history). While the owner
+is unset the install is closed to the network and other profiles cannot sign in until the owner is back.
+The PIN-only recovery code (`RECOVERY-CODE.txt`) and the `pin:` line in `security.yaml` still work as before.
+Full reference: [docs/accounts.md](docs/accounts.md).
+
 ## Screenshots
 
 <table>
@@ -473,6 +583,14 @@ on a phone, in a few of the ten themes.
     <td align="center"><em>Settings — the bot roster</em></td>
   </tr>
 </table>
+
+## What's new in 3.1
+
+- **Accounts from the command line, and a way back in.** `python -m app users list | add | passwd | delete`,
+  `owner reset` and `token show | rotate` work on the data directory, locally or with
+  `docker compose exec app ...`; a `RESET_LOGIN` file or `DISPATCH_RESET_OWNER` is read once at start for
+  someone who only has the files. A running server follows a command-line change within a second. See
+  [Accounts and lockout recovery](#accounts-and-lockout-recovery).
 
 ## What's new in 3.0
 

@@ -37,7 +37,6 @@ from .contracts.permissions import (
     Permission,
     Role,
     is_valid_permission,
-    role_rank,
 )
 
 log = logging.getLogger("local-chat.people")

@@ -251,13 +251,15 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
     base = tmp_path / "data"
     base.mkdir(parents=True, exist_ok=True)
     for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
-                        ("TRUSTED_PATH", "trusted-devices.yaml")):
+                        ("TRUSTED_PATH", "trusted-devices.yaml"),
+                        ("SETUP_TOKEN_PATH", "SETUP-TOKEN.txt")):
         if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
             monkeypatch.setattr(auth, name, base / fname)
     accounts.reset_for_tests()
     limits.reset()
     auth._cache = None
     auth._trusted = None
+    auth._trusted_sig = None
     auth._sessions.clear()
     auth._buckets.clear()
     auth._fail_count = 0
@@ -586,6 +588,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "SECURITY_PATH", tmp_path / "security.yaml")
     monkeypatch.setattr(auth, "RECOVERY_PATH", tmp_path / "RECOVERY-CODE.txt")
     monkeypatch.setattr(auth, "TRUSTED_PATH", tmp_path / "trusted-devices.yaml")
+    monkeypatch.setattr(auth, "SETUP_TOKEN_PATH", tmp_path / "SETUP-TOKEN.txt")
     config._invalidate_bots_cache()
     from app import accounts
     accounts.reset_for_tests()
@@ -598,3 +601,55 @@ def world(tmp_path, monkeypatch):
     yield w
     w.close()
     asyncio.run(temp_db.close())
+
+
+def _stop_leaked_aiosqlite_workers() -> int:
+    """Stop the worker threads of aiosqlite connections some test opened and never closed.
+
+    aiosqlite 0.22 runs each connection on a NON-daemon thread, so one leaked connection keeps the
+    interpreter alive after pytest prints its summary: CI jobs finished their 3700 tests in nine
+    minutes and then sat until the job timeout (2026-10-19, also main's own run). Closing them at
+    the end is harmless (the process is over) and makes the exit prompt; a test that wants its
+    connection closed earlier should still close it."""
+    import gc
+
+    try:
+        import aiosqlite
+        from aiosqlite import core
+    except ImportError:                                    # pragma: no cover
+        return 0
+    stopped = 0
+    for obj in gc.get_objects():
+        if not isinstance(obj, aiosqlite.Connection) or not obj._running:
+            continue
+
+        def close_and_stop(c=obj):
+            if c._connection is not None:
+                c._connection.close()
+                c._connection = None
+            return core._STOP_RUNNING_SENTINEL
+        obj._running = False
+        obj._tx.put_nowait((None, close_and_stop))
+        stopped += 1
+    return stopped
+
+
+def pytest_unconfigure(config):
+    """Make sure nothing keeps the interpreter open after the summary, and say so if it did."""
+    import sys
+    import threading
+    import traceback
+
+    n = _stop_leaked_aiosqlite_workers()
+    if n:
+        print(f"\n[exit-hang] closed {n} aiosqlite connection(s) that tests left open", file=sys.stderr)
+    for t in threading.enumerate():
+        if t is threading.main_thread() or t.daemon:
+            continue
+        t.join(timeout=5)
+        if t.is_alive():
+            print(f"\n[exit-hang] non-daemon thread still alive: {t.name!r}", file=sys.stderr)
+            f = sys._current_frames().get(t.ident)
+            if f is not None:
+                print("".join(traceback.format_stack(f)[-6:]), file=sys.stderr)
+    sys.stderr.flush()

@@ -308,6 +308,22 @@ you build a derived image with a Linux agent CLI inside it.
 
 ---
 
+## Accounts and lockout recovery
+
+Docker Desktop (path A): run the commands inside the container, from PowerShell:
+
+```powershell
+docker compose exec app python -m app users list
+docker compose exec app python -m app users passwd Olive            # prompts; nothing is echoed
+docker compose exec app python -m app owner reset --yes             # prints a SETUP TOKEN
+docker compose exec app sh -c ': > /data/RESET_LOGIN'               # no command line? this + restart does the same
+docker compose restart app
+```
+
+Do not reach for the volume through `\\wsl$` or a Windows path; `exec` / `run --rm` are the supported way. With the native
+uv install the data folder is `%USERPROFILE%\.local\share\local-chat`, and the commands run from `DisPatch_Chat\backend` as
+`uv run python -m app ...`. Everything else, including the file and `DISPATCH_RESET_OWNER` forms: [accounts.md](accounts.md).
+
 ## Making it survive reboots (as far as Windows allows)
 
 Ranked, most to least honest:

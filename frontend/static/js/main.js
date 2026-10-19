@@ -44,10 +44,10 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=15';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=17';
+} from './ext-sdk.js?v=18';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=15';
-import { mountPluginsSettings } from './plugins.js?v=15';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
+import { mountPluginsSettings } from './plugins.js?v=16';
 import { rowControls, addBotRow } from './bots-edit.js?v=4';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
@@ -80,7 +80,7 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
-import { aboutRow } from './about.js?v=21';
+import { aboutRow } from './about.js?v=22';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
 import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, audienceOf } from './profiles.js?v=2';

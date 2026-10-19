@@ -101,12 +101,22 @@ DisPatch has no owner account yet.
 Until the owner exists, the network sees only the app shell and the sign-in
 state — never data. (Docker: `docker compose logs app | grep "SETUP TOKEN"`.)
 Wrong-token guesses are throttled. The token lives in memory, changes every
-start and is spent when the owner is created. This replaces 2.x, where the first
+start and is spent when the owner is created (after `owner reset` it is also kept in
+`SETUP-TOKEN.txt`, owner-only, and deleted with it). This replaces 2.x, where the first
 network client to set a PIN became the owner.
 
 `DISPATCH_ALLOW_OPEN_INSTALL=1` restores the 2.x behaviour (an install with no
 account is open to the LAN) — only for a network you fully control, and
 the log says so loudly.
+
+### Lost your sign-in
+
+Anyone with the machine can get back in; nobody without it can. `python -m app users passwd <name>` sets a new password or
+PIN, `users add` / `users delete` manage profiles, `owner reset` clears the owner's password and PIN and opens setup again
+with a new setup token, and a `RESET_LOGIN` file in the data directory (or `DISPATCH_RESET_OWNER` in the environment) does
+the same at the next start, deleting itself first. None of it is reachable over the network, and none of it touches chats
+or other profiles. A running server follows within a second. Commands for every install, and what is kept:
+[accounts.md](accounts.md).
 
 ### Restricted profiles
 

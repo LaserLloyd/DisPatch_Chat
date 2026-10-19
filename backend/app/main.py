@@ -104,6 +104,7 @@ from . import (
     quick_actions,
     quicksetup,
     reactions,
+    recovery,
     route_policy,
     tools,
 )
@@ -441,6 +442,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
         log.info("migrated the data directory to %s: %s%s", migrate.TARGET_VERSION,
                  ", ".join(report.applied),
                  f" (backup: {report.backup})" if report.backup else "")
+    # Locked-out recovery: a RESET_LOGIN file or DISPATCH_RESET_OWNER in the environment, read
+    # once, here and nowhere else (app/recovery.py). Before the banner so it can say "setup is open".
+    await asyncio.to_thread(recovery.apply_startup_reset)
     _warn_if_wide_open()
     config.load_bots()  # materialises config.yaml on first run
     # Apps that bring a roster bot (the Job Board's `jobboard`) get it appended
@@ -8174,7 +8178,8 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
                 if stale is not None:
                     # An owner row with no credential left (security.yaml deleted, the documented
                     # way to drop the lock, on an install with other profiles): claim THAT row;
-                    # creating a second owner would only answer "owner_exists".
+                    # creating a second owner would only answer "owner_exists" (`owner reset` leaves this
+                    # state too).
                     owner = accounts.update_profile(stale.id, password_hash=credentials.hash_secret(password))
                 else:
                     owner = accounts.create_profile(

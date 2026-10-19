@@ -422,6 +422,8 @@ def _repoint(data_dir: Path) -> None:
     auth.SECURITY_PATH = data_dir / "security.yaml"
     auth.RECOVERY_PATH = data_dir / "RECOVERY-CODE.txt"
     auth.TRUSTED_PATH = data_dir / "trusted-devices.yaml"
+    auth.SETUP_TOKEN_PATH = data_dir / "SETUP-TOKEN.txt"
+    auth._trusted = None
     config._invalidate_bots_cache()
     accounts.reset_for_tests()
     auth._cache = None

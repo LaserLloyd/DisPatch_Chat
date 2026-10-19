@@ -498,6 +498,39 @@ The stop is not optional if you want the tarball to be restorable in one step.
 
 ---
 
+## Accounts and lockout recovery
+
+The command line works against the data volume from inside the container (service `app`, data in `/data`):
+
+```bash
+docker compose exec app python -m app users list
+docker compose exec app python -m app users passwd Olive                 # prompts on your terminal
+printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile member --password-stdin
+docker compose exec app python -m app users delete Noor --yes
+docker compose exec app python -m app owner reset --yes                  # lost both the password and the PIN
+docker compose exec app python -m app token rotate                       # the machine API key
+```
+
+PowerShell pipes the same way: `$env:NEWPW | docker compose exec -T app python -m app users passwd Olive --password-stdin`.
+The first line printed is `DisPatch data directory: /data`, so you can see it acted on the volume you meant. A running
+server follows the change within about a second; no restart. If the container is stopped or crash-looping, use
+`docker compose run --rm app python -m app ...` (a one-off container on the same volume; it publishes no port).
+
+With no shell at all, only the volume: put a `RESET_LOGIN` file in the data directory and restart. It is read once at start
+and deleted first.
+
+```bash
+docker compose exec app sh -c ': > /data/RESET_LOGIN'                     # empty: owner sign-in cleared, setup opens
+printf 'Olive:%s\n' "$NEWPW" | docker compose exec -T app sh -c 'cat > /data/RESET_LOGIN'   # or: set Olive's password
+docker compose restart app
+docker compose logs app | grep -E "login recovery|SETUP TOKEN"
+```
+
+or `DISPATCH_RESET_OWNER=1` in `.env`, then `docker compose up -d` (one-shot per value, remove it afterwards). Through
+a published port a browser is not "this computer", so after an empty-file or variable reset the wizard asks for the
+`SETUP TOKEN` in the log (also `docker compose exec app cat /data/SETUP-TOKEN.txt`). Data survives all of this: only the
+owner's sign-in changes. Full reference: [accounts.md](accounts.md).
+
 ## Upgrading
 
 Built from source (the default, image `dispatch-chat:local`): `docker compose pull` has nothing to
