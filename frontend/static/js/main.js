@@ -47,6 +47,7 @@ import {
 } from './ext-sdk.js?v=18';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { hostNotice } from './host-notice.js?v=1';
+import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
 import { mountPluginsSettings } from './plugins.js?v=16';
 import { rowControls, addBotRow } from './bots-edit.js?v=4';
@@ -71,7 +72,8 @@ import {
   openFromHash, mountToolsSettings, toolsSettingsDirty, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
-} from './tools.js?v=16';
+  openToolsMenu, toolsMenuOpen,
+} from './tools.js?v=17';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=3';
@@ -7463,8 +7465,11 @@ function wireEvents() {
   wireSettingsTabs();
   wireFileServer();
   wireDrop();
+  wireRailLayout();
   wireTools({
     state,
+    // "Arrange the bar…" in the Tools & more popup (js/railmenu.js).
+    arrangeRail: openRailArrange,
     openers: {
       harness: openHarnessView,
       studioforge: openStudioForgeView,
@@ -8208,6 +8213,52 @@ function renderPins() {
   // but not the registry: they are unlocked-only (the URLs are exactly what
   // Safe Mode must not advertise) and links.js enforces that on every render.
   renderLinkRail(document.getElementById('gear-row'), { decoy: state.decoy, openViewer });
+  applyRailLayout();
+}
+
+// ---- The bar vs "Tools & more" (js/railmenu.js) ----
+// Which static rail buttons sit on the bar and which in the Tools popup, per
+// device. Restricted always gets the shipped bar (activeLayout ignores the
+// stored layout there), so its reduced set never changes.
+function applyRailLayout() {
+  applyLayout(activeLayout(state.decoy), {
+    rail: document.getElementById('gear-row'),
+    menu: document.getElementById('tools-more'),
+    decoy: state.decoy,
+  });
+  renderToolRail();
+}
+
+function moveRailButton(id, zone, beforeId) {
+  if (state.decoy) return;
+  saveLayout(moveItem(activeLayout(false), id, zone, beforeId));
+  applyRailLayout();
+  if (zone === 'menu' && !toolsMenuOpen()) openToolsMenu('tools');
+}
+
+function railButtonLabel(id) {
+  const b = document.getElementById(id);
+  return (b && (b.dataset.label || b.getAttribute('aria-label') || b.title)) || id;
+}
+
+function openRailArrange() {
+  if (state.decoy) return;
+  openArrangeDialog({
+    t, el, labelOf: railButtonLabel,
+    visible: (id) => { const b = document.getElementById(id); return !!b && !b.classList.contains('hidden'); },
+    onChange: () => applyRailLayout(),
+  });
+}
+
+function wireRailLayout() {
+  wireRailDrag({
+    rail: document.getElementById('gear-row'),
+    menu: document.getElementById('tools-more'),
+    toolList: document.getElementById('tool-list'),
+    isDecoy: () => !!state.decoy,
+    openMenu: () => { if (!toolsMenuOpen()) openToolsMenu('tools'); },
+    onMove: moveRailButton,
+  });
 }
 
 // ===================== 3.0 profiles, roles and policy =====================
@@ -9784,6 +9835,8 @@ const RAIL_LABELS = {
   'unlock-btn': 'nav.label_unlock',
   'fs-chip': 'nav.label_files',
   'drop-btn': 'nav.label_send_file',
+  // The popup rows (js/railmenu.js) print data-label, so Tasks needs one too.
+  'tasks-btn': 'tasks.nav_title',
   // nav.label_reactions / label_dashboard / label_connect are no longer
   // referenced — ⚡ 🩺 🔌 left the rail for Settings tabs. The KEYS stay in all
   // eight locale files: deleting them churns every translation for nothing.

@@ -55,7 +55,9 @@
     "label_files": "Dateien",
     "label_send_file": "Datei senden",
     "label_reactions": "Reaktionen",
-    "tools": "Werkzeuge"
+    "tools": "Werkzeuge",
+    "tools_more": "Tools & mehr",
+    "tools_more_aria": "Tools und mehr – Menü öffnen"
   },
   "theme": {
     "mode_dark": "Dunkel",
@@ -2087,5 +2089,16 @@
     "chats_body": "Jeder Chat wird auf dem Computer gespeichert, auf dem DisPatch läuft, nicht auf diesem Gerät. Chats sind nicht privat und nicht Ende-zu-Ende-verschlüsselt. Ein Chat gehört zu seiner Figur, nicht zu einer Person: Alle, die eine Figur nutzen können, können ihre Chats öffnen, und Owner und Admins können jede Figur nutzen, also jeden Chat lesen, auch die Chats eingeschränkter Profile. Jeder mit Zugriff auf diesen Computer, seine Dateien oder seine Backups kann sie ebenfalls lesen.",
     "chats_restricted_title": "Deine Chats liegen auf dem Host-Computer",
     "chats_restricted_body": "Deine Chats werden auf dem Computer gespeichert, auf dem DisPatch läuft. Sie sind nicht geheim: Die Erwachsenen, die DisPatch hier nutzen, können sie lesen."
+  },
+  "rail": {
+    "arrange": "Leiste anordnen…",
+    "arrange_title": "Leiste anordnen",
+    "arrange_hint": "Wähle, welche Knöpfe auf der Leiste bleiben und welche unter „Tools & mehr“ liegen. Am Computer kannst du sie auch ziehen.",
+    "on_bar": "Auf der Leiste",
+    "in_menu": "Unter „Tools & mehr“",
+    "to_menu": "Zu Tools",
+    "to_bar": "Auf die Leiste",
+    "reset": "Zurücksetzen",
+    "empty": "Nichts hier."
   }
 }

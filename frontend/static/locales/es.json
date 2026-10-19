@@ -56,7 +56,9 @@
     "label_files": "Archivos",
     "label_send_file": "Enviar archivo",
     "label_reactions": "Reacciones",
-    "tools": "Herramientas"
+    "tools": "Herramientas",
+    "tools_more": "Herramientas y más",
+    "tools_more_aria": "Herramientas y más: abrir el menú"
   },
   "theme": {
     "mode_dark": "Oscuro",
@@ -2112,5 +2114,16 @@
     "chats_body": "Cada chat se guarda en el ordenador donde funciona DisPatch, no en este dispositivo. Los chats no son privados ni tienen cifrado de extremo a extremo. Un chat pertenece a su personaje, no a una persona: todas las personas que pueden usar un personaje pueden abrir sus chats, y el Owner y los Admins pueden usar todos los personajes, así que pueden leer todos los chats, también los de los perfiles restringidos. Cualquiera con acceso a ese ordenador, a sus archivos o a sus copias de seguridad también puede leerlos.",
     "chats_restricted_title": "Tus chats se guardan en el ordenador anfitrión",
     "chats_restricted_body": "Tus chats se guardan en el ordenador donde funciona DisPatch. No son secretos: los adultos que usan DisPatch aquí pueden leerlos."
+  },
+  "rail": {
+    "arrange": "Ordenar la barra…",
+    "arrange_title": "Ordenar la barra",
+    "arrange_hint": "Elige qué botones quedan en la barra y cuáles van a Herramientas y más. En un ordenador también puedes arrastrarlos.",
+    "on_bar": "En la barra",
+    "in_menu": "En Herramientas y más",
+    "to_menu": "Mover a Herramientas",
+    "to_bar": "Mover a la barra",
+    "reset": "Restablecer",
+    "empty": "Aquí no hay nada."
   }
 }

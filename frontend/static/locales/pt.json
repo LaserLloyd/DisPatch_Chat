@@ -56,7 +56,9 @@
     "label_files": "Ficheiros",
     "label_send_file": "Enviar ficheiro",
     "label_reactions": "Reações",
-    "tools": "Ferramentas"
+    "tools": "Ferramentas",
+    "tools_more": "Ferramentas e mais",
+    "tools_more_aria": "Ferramentas e mais — abrir o menu"
   },
   "theme": {
     "mode_dark": "Escuro",
@@ -2112,5 +2114,16 @@
     "chats_body": "Cada conversa é guardada no computador que executa o DisPatch, não neste dispositivo. As conversas não são privadas nem têm criptografia de ponta a ponta. Uma conversa pertence à sua personagem, não a uma pessoa: todos que podem usar uma personagem podem abrir as conversas dela, e o Owner e os Admins podem usar todas as personagens, então podem ler todas as conversas, incluindo as dos perfis restritos. Qualquer pessoa com acesso a esse computador, aos seus arquivos ou às suas cópias de segurança também pode lê-las.",
     "chats_restricted_title": "As suas conversas ficam no computador anfitrião",
     "chats_restricted_body": "As suas conversas são guardadas no computador que executa o DisPatch. Não são segredo: os adultos que usam o DisPatch aqui podem lê-las."
+  },
+  "rail": {
+    "arrange": "Organizar a barra…",
+    "arrange_title": "Organizar a barra",
+    "arrange_hint": "Escolha quais botões ficam na barra e quais vão para Ferramentas e mais. Num computador também pode arrastá-los.",
+    "on_bar": "Na barra",
+    "in_menu": "Em Ferramentas e mais",
+    "to_menu": "Mover para Ferramentas",
+    "to_bar": "Mover para a barra",
+    "reset": "Repor",
+    "empty": "Nada aqui."
   }
 }

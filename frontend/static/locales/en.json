@@ -55,7 +55,9 @@
     "label_files": "Files",
     "label_send_file": "Send file",
     "label_reactions": "Reactions",
-    "tools": "Tools"
+    "tools": "Tools",
+    "tools_more": "Tools & more",
+    "tools_more_aria": "Tools and more — open the menu"
   },
   "theme": {
     "mode_dark": "Dark",
@@ -2087,5 +2089,16 @@
     "chats_body": "Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: everyone who can use a character can open its chats, and the Owner and Admins can use every character, so they can read every chat, Restricted profiles' chats included. Anyone with access to that computer, its files or its backups can read them too.",
     "chats_restricted_title": "Your chats are kept on the host computer",
     "chats_restricted_body": "Your chats are saved on the computer that runs DisPatch. They are not secret: the grown-ups who use DisPatch here can read them."
+  },
+  "rail": {
+    "arrange": "Arrange the bar…",
+    "arrange_title": "Arrange the bar",
+    "arrange_hint": "Choose which buttons sit on the bar and which go in Tools & more. You can also drag them on a computer.",
+    "on_bar": "On the bar",
+    "in_menu": "In Tools & more",
+    "to_menu": "Move to Tools",
+    "to_bar": "Move to the bar",
+    "reset": "Reset",
+    "empty": "Nothing here."
   }
 }

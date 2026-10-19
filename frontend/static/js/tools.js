@@ -438,6 +438,21 @@ function visibleParked() {
   return deps && deps.state && deps.state.decoy ? [] : parked;
 }
 
+// The static rail buttons the person moved into this popup (js/railmenu.js puts
+// the real elements into #tools-more). Only the visible ones count: a button
+// hidden for this profile stays hidden wherever it sits. Never in Restricted.
+function moreItems() {
+  const host = $('tools-more');
+  if (!host || (deps && deps.state && deps.state.decoy)) return [];
+  return [...host.children].filter((b) => !b.classList.contains('hidden') && !b.hidden);
+}
+function moreCount() { return moreItems().length; }
+/** The button's and the menu's name: "Tools & more" once rail buttons live here. */
+function groupLabel(mode) {
+  if (mode !== 'tools') return t('tools.more_bots');
+  return moreCount() ? t('nav.tools_more') : t('nav.tools');
+}
+
 /** The dot class for the one rail button: the builtins' worst-of state when
  *  there is one, else the parked bots' (thinking beats unread). */
 function groupDotClass(mode, bots) {
@@ -456,13 +471,13 @@ function menuButton(entries, bots, mode) {
   const st = deps.state;
   const active = (mode === 'tools' && (entries.some((x) => x.id === st.selectedBotId) || !!openId))
     || bots.some((b) => b.active);
-  const label = mode === 'tools' ? t('nav.tools') : t('tools.more_bots');
+  const label = groupLabel(mode);
   const btn = el('button', {
     class: 'bot-btn tool-btn tools-menu-btn' + (active ? ' active' : ''),
     id: 'tools-menu-btn',
     type: 'button',
     dataset: { menu: mode },
-    'aria-label': mode === 'tools' ? t('tools.menu_aria') : t('tools.more_bots_aria'),
+    'aria-label': mode === 'tools' ? (moreCount() ? t('nav.tools_more_aria') : t('tools.menu_aria')) : t('tools.more_bots_aria'),
     'aria-haspopup': 'menu',
     'aria-controls': 'tools-menu',
     'aria-expanded': menuOpen ? 'true' : 'false',
@@ -504,8 +519,9 @@ export function renderToolRail() {
   host.textContent = '';
   host.classList.toggle('tool-list-compact', compact);
   host.classList.toggle('tool-list-row', !compact);
-  const mode = entries.length ? 'tools' : 'bots';
-  const empty = !entries.length && !bots.length;
+  const extra = moreCount();
+  const mode = entries.length || extra ? 'tools' : 'bots';
+  const empty = !entries.length && !bots.length && !extra;
   host.hidden = empty;
   if (empty) { closeToolsMenu(); return; }
   host.append(menuButton(entries, bots, mode));
@@ -591,7 +607,8 @@ function botRow(bot) {
 
 function menuItems() {
   const menu = $('tools-menu');
-  return menu ? [...menu.querySelectorAll('[role="menuitem"]')] : [];
+  return menu ? [...menu.querySelectorAll('[role="menuitem"]')]
+    .filter((r) => !r.classList.contains('hidden') && !r.hidden) : [];
 }
 
 /** Fill the popup for the current mode, keeping keyboard focus on the same row. */
@@ -608,7 +625,18 @@ function paintMenu() {
   for (const bot of visibleParked()) botsHost.append(botRow(bot));
   const sep = $('tools-bots-sep');
   if (sep) sep.hidden = !(toolsHost.childElementCount && botsHost.childElementCount);
-  const label = menuMode === 'tools' ? t('nav.tools') : t('tools.more_bots');
+  const extra = moreCount();
+  const moreSep = $('tools-more-sep');
+  if (moreSep) moreSep.hidden = !(extra && (toolsHost.childElementCount || botsHost.childElementCount));
+  const arrange = $('tools-arrange');
+  if (arrange) {
+    const can = !!(deps && typeof deps.arrangeRail === 'function' && !(deps.state && deps.state.decoy));
+    arrange.hidden = !can;
+    // A menu item only while it is offered (a hidden row must not count as one).
+    if (can) arrange.setAttribute('role', 'menuitem'); else arrange.removeAttribute('role');
+    arrange.textContent = t('rail.arrange');
+  }
+  const label = groupLabel(menuMode);
   menu.setAttribute('aria-label', label);
   const title = $('tools-menu-title');
   if (title) title.textContent = label;
@@ -616,7 +644,7 @@ function paintMenu() {
     const again = menuItems().find((r) => (keep.tool && r.dataset.tool === keep.tool) || (keep.bot && r.dataset.bot === keep.bot));
     if (again) again.focus({ preventScroll: true });
   }
-  return toolsHost.childElementCount + botsHost.childElementCount;
+  return toolsHost.childElementCount + botsHost.childElementCount + extra;
 }
 
 /** Anchor the fixed popup beside the button, on the rail's inline-end side,
@@ -1702,6 +1730,24 @@ export function wireTools(d) {
   // so an open popup closes rather than floating somewhere stale.
   const menu = $('tools-menu');
   if (menu) menu.addEventListener('keydown', onMenuKey);
+  // A rail button parked here does what it does on the bar, then the popup
+  // closes -- except one that opens a menu of its own (the profile chip), which
+  // would otherwise lose its anchor.
+  const more = $('tools-more');
+  if (more) {
+    more.addEventListener('click', (e) => {
+      const b = e.target.closest('button, a');
+      if (!b || !more.contains(b) || b.getAttribute('aria-haspopup')) return;
+      closeToolsMenu();
+    });
+  }
+  const arrange = $('tools-arrange');
+  if (arrange) {
+    arrange.addEventListener('click', () => {
+      closeToolsMenu();
+      if (deps && typeof deps.arrangeRail === 'function') deps.arrangeRail();
+    });
+  }
   window.addEventListener('resize', () => {
     if (menuOpen) closeToolsMenu();
     if (deps && compactRail() !== lastCompact) renderToolRail();

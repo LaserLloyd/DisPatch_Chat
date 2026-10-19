@@ -56,7 +56,9 @@
     "label_files": "Fichiers",
     "label_send_file": "Envoyer un fichier",
     "label_reactions": "Réactions",
-    "tools": "Outils"
+    "tools": "Outils",
+    "tools_more": "Outils et plus",
+    "tools_more_aria": "Outils et plus — ouvrir le menu"
   },
   "theme": {
     "mode_dark": "Sombre",
@@ -2112,5 +2114,16 @@
     "chats_body": "Chaque discussion est enregistrée sur l’ordinateur qui fait tourner DisPatch, pas sur cet appareil. Les discussions ne sont ni privées ni chiffrées de bout en bout. Une discussion appartient à son personnage, pas à une personne : toute personne qui peut utiliser un personnage peut ouvrir ses discussions, et l’Owner et les Admins peuvent utiliser tous les personnages, donc lire toutes les discussions, y compris celles des profils restreints. Toute personne ayant accès à cet ordinateur, à ses fichiers ou à ses sauvegardes peut aussi les lire.",
     "chats_restricted_title": "Tes discussions sont gardées sur l’ordinateur hôte",
     "chats_restricted_body": "Tes discussions sont enregistrées sur l’ordinateur qui fait tourner DisPatch. Elles ne sont pas secrètes : les adultes qui utilisent DisPatch ici peuvent les lire."
+  },
+  "rail": {
+    "arrange": "Organiser la barre…",
+    "arrange_title": "Organiser la barre",
+    "arrange_hint": "Choisissez les boutons qui restent sur la barre et ceux qui vont dans Outils et plus. Sur un ordinateur, vous pouvez aussi les faire glisser.",
+    "on_bar": "Sur la barre",
+    "in_menu": "Dans Outils et plus",
+    "to_menu": "Mettre dans Outils",
+    "to_bar": "Mettre sur la barre",
+    "reset": "Réinitialiser",
+    "empty": "Rien ici."
   }
 }

@@ -388,6 +388,8 @@ const SHELL = [
   // Host-storage notices ("saved on the computer that runs DisPatch"), imported by main.js,
   // people.js, wizard.js, signin.js and reactions.js.
   '/static/js/host-notice.js',
+  // The bar vs the Tools & more popup (which static rail buttons sit where), main.js.
+  '/static/js/railmenu.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

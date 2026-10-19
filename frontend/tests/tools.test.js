@@ -1008,3 +1008,41 @@ test('tool state: over 16 KB (or not JSON) is refused and the stored state kept'
   appMessage(win, { type: 'dispatch:tool-state', op: 'set' }, { origin: 'null' });
   assert.ok(win.localStorage.getItem('dispatch-tool-state:benchmark'));
 });
+
+test('rail buttons moved into the popup: the button shows as "Tools & more" (even with no tools), rows are menu items, a click closes it, Restricted ignores them', { skip: dom.skip }, async () => {
+  let win = setup();
+  routes['GET /api/tools'] = () => [200, { tools: [] }];
+  let mod = await freshTools();
+  wire(mod, { mobile: false });
+  const doc = win.document;
+  const more = doc.getElementById('tools-more');
+  const fs = doc.getElementById('fs-chip');
+  fs.classList.remove('hidden');
+  fs.setAttribute('role', 'menuitem');
+  fs.setAttribute('data-label', 'Files');
+  let clicked = 0;
+  fs.addEventListener('click', () => { clicked++; });
+  more.append(fs);
+  await mod.loadTools();
+  const btn = doc.getElementById('tools-menu-btn');
+  assert.ok(btn, 'a moved button keeps the popup reachable with no tools at all');
+  assert.equal(btn.dataset.menu, 'tools');
+  assert.equal(btn.querySelector('.bot-name-label').textContent, 'Tools & more');
+  pointerClick(win, btn);
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  assert.equal(doc.getElementById('tools-menu').getAttribute('aria-label'), 'Tools & more');
+  assert.ok([...doc.querySelectorAll('#tools-menu [role="menuitem"]')].includes(fs));
+  fs.click();
+  assert.equal(clicked, 1, 'it does what it does on the bar');
+  assert.equal(doc.getElementById('tools-menu').hidden, true, 'and the popup closes');
+
+  win = setup();
+  routes['GET /api/tools'] = () => [200, { tools: [] }];
+  mod = await freshTools();
+  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
+  const fs2 = win.document.getElementById('fs-chip');
+  fs2.classList.remove('hidden');
+  win.document.getElementById('tools-more').append(fs2);
+  await mod.loadTools();
+  assert.equal(win.document.getElementById('tools-menu-btn'), null, 'Restricted: no popup for rail buttons');
+});

@@ -58,6 +58,7 @@ export const APP_KEYS = [
   'dispatch-menu-bots',       // menubots.js (which bots were parked in the ⌥ menu)
   'dispatch-show-hidden-bots', // menubots.js (show bots hidden on unlocked devices here)
   'dispatch-imagestudio-sort', // apps/imagestudio studio.js (the results grid's order)
+  'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (unlock keypad "keep this device unlocked")

@@ -4922,3 +4922,45 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .host-notice-compact .host-notice-title, .host-notice-compact .host-notice-body { display: inline; margin: 0; }
 .modal .host-notice { margin: 10px 18px 6px; }
 .settings-pane > .host-notice:first-child { margin-top: 4px; }
+
+/* ---------------------------------------------------------------------------
+   Rail buttons moved into the Tools & more popup (js/railmenu.js). They are the
+   real .gear-btn elements, drawn here as popup rows: icon + the data-label
+   caption, like .tools-item. High-specificity on purpose so the phone bar's
+   own .gear-btn rules (column layout, caption under the glyph) do not apply.
+   --------------------------------------------------------------------------- */
+.app .tools-menu .gear-btn.rail-menu-item {
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px;
+  width: 100%; height: auto; min-height: 40px; min-width: 0; max-width: none; margin: 0;
+  padding: 7px 10px; border: none; border-radius: var(--radius-sm);
+  background: none; color: inherit; font-size: 14px; text-align: start; cursor: pointer;
+}
+.app .tools-menu .gear-btn.rail-menu-item.hidden { display: none; }
+.app .tools-menu .gear-btn.rail-menu-item:hover,
+.app .tools-menu .gear-btn.rail-menu-item:focus-visible { background: var(--bg-hover); }
+.app .tools-menu .gear-btn.rail-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app .tools-menu .gear-btn.rail-menu-item .rail-icon { margin: 0 4px; flex: none; }
+.app .tools-menu .gear-btn.rail-menu-item .profile-chip-img,
+.app .tools-menu .gear-btn.rail-menu-item .profile-chip-text { width: 26px; height: 26px; flex: none; }
+.app .tools-menu .gear-btn.rail-menu-item[data-label]::after {
+  content: attr(data-label); flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; letter-spacing: normal;
+}
+.tools-menu.tools-sheet .gear-btn.rail-menu-item { min-height: 52px; font-size: 15px; }
+.tools-arrange { color: var(--text-secondary); font-size: 13px; }
+/* Drag marks: the bot rail's drop-above/below line, for the bar and the popup. */
+.gear-row > .gear-btn, .tools-more > .gear-btn { position: relative; }
+.gear-row > .gear-btn.drop-above::before,
+.tools-more > .gear-btn.drop-above::before {
+  content: ""; position: absolute; left: 4px; right: 4px; top: -7px; height: 3px;
+  background: var(--accent); border-radius: 2px; z-index: 5;
+}
+.gear-row > .gear-btn.drop-below, .tools-more > .gear-btn.drop-below { box-shadow: 0 3px 0 0 var(--accent); }
+.gear-row > .gear-btn.dragging, .tools-more > .gear-btn.dragging { opacity: .45; }
+#tools-menu-btn.drop-into { outline: 2px dashed var(--accent); outline-offset: 2px; }
+/* "Arrange the bar" dialog. */
+.rail-arrange .rail-arrange-h { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.rail-arrange-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rail-arrange-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rail-arrange-name { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
+.rail-arrange-btn { padding: 4px 10px; min-height: 32px; }

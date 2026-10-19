@@ -54,7 +54,9 @@
     "label_files": "文件",
     "label_send_file": "发送文件",
     "label_reactions": "反应图片",
-    "tools": "工具"
+    "tools": "工具",
+    "tools_more": "工具和更多",
+    "tools_more_aria": "工具和更多——打开菜单"
   },
   "theme": {
     "mode_dark": "深色",
@@ -2062,5 +2064,16 @@
     "chats_body": "每段聊天都保存在运行 DisPatch 的电脑上，而不是这台设备上。聊天不是私密的，也没有端到端加密。聊天属于角色，而不属于某一个人：能使用某个角色的人都能打开它的聊天；Owner 和 Admin 能使用所有角色，所以能读到所有聊天，包括受限资料的聊天。能访问那台电脑、它的文件或备份的人也能读到。",
     "chats_restricted_title": "你的聊天保存在主机电脑上",
     "chats_restricted_body": "你的聊天保存在运行 DisPatch 的电脑上。它们不是秘密：在这里使用 DisPatch 的大人可以读到。"
+  },
+  "rail": {
+    "arrange": "整理栏…",
+    "arrange_title": "整理栏",
+    "arrange_hint": "选择哪些按钮留在栏上，哪些放进“工具和更多”。在电脑上也可以直接拖动。",
+    "on_bar": "在栏上",
+    "in_menu": "在“工具和更多”中",
+    "to_menu": "移到工具",
+    "to_bar": "移到栏上",
+    "reset": "重置",
+    "empty": "这里没有内容。"
   }
 }
