@@ -48,12 +48,14 @@ test('main.js lists the tabs in the same order and the admin rule is unchanged',
   assert.deepEqual([...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]), TAB_ORDER);
   const a = /const ADMIN_TABS = \[([^\]]*)\];/.exec(MAIN);
   assert.deepEqual([...a[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort(),
-    ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings', 'voice']);
+    ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings']);
   // The same tabs are admin-only in the markup (Bots, Theme, Device and
   // Security stay visible to a Restricted session, exactly as before; People &
   // Profiles joined in 3.0 and shows for owner/admin only -- canAdmin()).
   const adminInMarkup = [...HTML.matchAll(/class="settings-tab admin-only[^"]*" id="stab-([a-z]+)"/g)].map((x) => x[1]).sort();
-  assert.deepEqual(adminInMarkup, ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings', 'voice']);
+  assert.deepEqual(adminInMarkup, ['agents', 'ai', 'connections', 'health', 'people', 'plugins', 'reactions', 'settings']);
+  // Voice is not an admin tab since 2026-10-19 (Members have voice): its own rule, voiceTabAllowed().
+  assert.match(HTML, /class="settings-tab hidden" id="stab-voice"/);
 });
 
 test('the first-run card still opens the AI models tab', () => {

@@ -7990,6 +7990,9 @@ async def auth_status(request: Request):
         "signed_in": bool(sess),
         "role": pr.role if claimed else "owner",
         "profile": people_api.public_profile(prof),
+        # What this caller may do (the role matrix plus its grants): the client decides
+        # what to OFFER from it, the server still decides every request. ["*"] = open.
+        "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
         "needs_password": bool(prof and prof.role in ("owner", "admin") and not prof.has_password),
         "profiles": people_api.lock_screen_profiles() if claimed else [],
         "disclosure": people_api.DISCLOSURE if (claimed and pr.is_restricted) else None,

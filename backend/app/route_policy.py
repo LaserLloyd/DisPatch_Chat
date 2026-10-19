@@ -349,6 +349,38 @@ for _ms, _p, _req in ROUTES:
 #: routers registered at runtime). They carry the plugin permission.
 _EXTENSION_REQ = _R(P.MANAGE_PLUGINS, note="an installed add-on's operator API (its own Origin check applies)")
 
+#: The add-on routes a USER of voice chat reads (2026-10-19, the owner: "Members should have
+#: voice"): what the call screen and Settings -> Voice draw from - the status (on/off, ready, the
+#: voice list), a voice's sample, the cloned-voice list. ``use_voice`` = Member, Admin, Owner. A
+#: Restricted caller holds use_voice for its locked voice socket but not these (``not_restricted``): a
+#: locked device reads the add-on's ``locked_status`` in /api/extensions instead. Everything else under an add-on's prefix - the switch
+#: and server settings (PATCH /settings), cloning, the lab, the rig, model downloads - is voice
+#: ADMINISTRATION and stays ``manage_plugins``.
+_EXTENSION_USE_REQ = _R(P.USE_VOICE, not_restricted=True, note=(
+    "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads "
+    "locked_status in /api/extensions). The add-on's other routes are manage_plugins"))
+EXTENSION_USE_ROUTES: frozenset[tuple[str, str]] = frozenset({
+    ("GET", "/api/voice/status"),
+    ("GET", "/api/voice/preview"),
+    ("GET", "/api/voice/profiles"),
+})
+
+
+def extension_requirement(method: str, path: str) -> Requirement:
+    """What one request on an add-on's own routes needs: ``use_voice`` for the reads listed in
+    EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
+    m = method.upper()
+    if (("GET" if m == "HEAD" else m), path.rstrip("/") or "/") in EXTENSION_USE_ROUTES:
+        return _EXTENSION_USE_REQ
+    return _EXTENSION_REQ
+
+
+def extension_document() -> dict:
+    """routes.json's view of the add-on prefixes (registered at runtime, so not in ``routes``)."""
+    return {"default": _EXTENSION_REQ.describe(),
+            "use": [{"method": m, "path": p, "requirement": _EXTENSION_USE_REQ.describe()}
+                    for m, p in sorted(EXTENSION_USE_ROUTES)]}
+
 
 def declared() -> dict[tuple[str, str], Requirement]:
     """The static (method, template) -> Requirement table, HEAD included."""
@@ -369,7 +401,7 @@ def requirement_for(method: str, template: str | None, path: str) -> Requirement
     if template.startswith(("/ws",)):
         return WS_ROUTES.get(template)
     if extensions.owns_path(path):
-        return _EXTENSION_REQ
+        return extension_requirement(method, path)
     return apps_loader.requirement_for(method, path)
 
 

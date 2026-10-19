@@ -12,6 +12,7 @@
 //   onLocale(fn) / onLocked(fn) / onThread(fn)          → unsubscribe
 //   api(path, { method, body, query, signal })          same-origin JSON; DecoyError on 403
 //   activeThread(), bots(), botById(id), allBots(), isLocked(), language(), features()
+//   can(permission)                     does this session hold it (e.g. 'manage_plugins')?
 //   threadFace(thread, bot) → { src, letter }           honours No-Image Mode
 //   toast, confirm, prompt, navigate
 //   chatHeader.addAction(node, { before })              → remove()
@@ -42,6 +43,9 @@
 // auto-lock does not lock the device mid-conversation. It only re-arms the
 // timer the shell already runs: it never unlocks, never extends a lapsed server
 // session, and does nothing on a locked or remembered device.
+// 3.0 ops (2026-10-19): `can(permission)` — Members use voice now, so an add-on
+// that used to assume "unlocked = may configure the server" asks instead (voice
+// administration is `manage_plugins`; the server decides either way).
 //
 // main.js installs the implementations once (installShell). Each extension gets
 // its OWN frozen shell (createShell(id)) so everything it registered can be
@@ -145,6 +149,7 @@ export function createShell(owner = null) {
     botById: (id) => call('botById', id),
     allBots: () => call('allBots'),
     isLocked: () => call('isLocked'),
+    can: (permission) => !!call('can', permission),
     language: () => lang(),
     features: () => call('features'),
     // media

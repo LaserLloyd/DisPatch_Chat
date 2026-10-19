@@ -94,3 +94,90 @@ def test_effective_permissions_of_an_admin_include_host_control(world):
     from app import accounts
     prof = accounts.get_profile(ada["id"])
     assert Permission.ADMIN_SYSTEM.value in policy.effective_permissions(prof)
+
+
+# P-2 ------------------------------------------------------------------------ #
+# "Members should have voice": the add-on's user reads are use_voice, its administration
+# stays manage_plugins; a Restricted caller keeps its own (locked) view.
+
+import json  # noqa: E402
+
+import pytest  # noqa: E402
+from _extfake import KNOBS, ext_env, install, thread_for  # noqa: E402,F401
+from starlette.websockets import WebSocketDisconnect  # noqa: E402
+
+ORIGIN = {"origin": "http://testserver"}
+
+
+def _household(c):
+    """An owner (password + PIN) on the ext_env app, and a client factory."""
+    from fastapi.testclient import TestClient
+
+    from app import main
+    r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"})
+    assert r.status_code == 200, r.text
+    made = []
+
+    def client(addr):
+        k = TestClient(main.app, client=addr)
+        k.__enter__()
+        k.headers.update({"Origin": "http://testserver"})
+        made.append(k)
+        return k
+    return client, made
+
+
+def _person(owner, name, role, **body):
+    r = owner.post("/api/people", json={"name": name, "role": role, **body})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _signed_in(client, addr, **cred):
+    k = client(addr)
+    r = k.post("/api/auth/login", json=cred)
+    assert r.status_code == 200, r.text
+    return k
+
+
+def test_a_member_reads_what_voice_chat_needs_but_does_not_administer_it(ext_env):
+    c, _ = ext_env
+    install()
+    client, made = _household(c)
+    try:
+        _person(c, "Max", "member", pin="5555")
+        _person(c, "Ada", "admin", password="admin-pass1")
+        _person(c, "Mia", "restricted")
+        member = _signed_in(client, ("203.0.113.91", 44001), name="Max", pin="5555")
+        admin = _signed_in(client, ("203.0.113.92", 44002), name="Ada", password="admin-pass1")
+        kid = _signed_in(client, ("203.0.113.93", 44003), name="Mia")
+        guest = client(("203.0.113.94", 44004))
+        assert member.get("/api/voice/status").status_code == 200
+        assert member.post("/api/voice/upload", content=b"x").status_code == 403    # administration
+        assert member.get("/api/voice/providers").status_code == 403
+        assert admin.get("/api/voice/status").status_code == 200
+        assert admin.post("/api/voice/upload", content=b"x").status_code == 200
+        for k in (kid, guest):                       # a locked device has its own view
+            assert k.get("/api/voice/status").status_code == 403
+        status = member.get("/api/auth/status").json()
+        assert "use_voice" in status["permissions"] and "manage_plugins" not in status["permissions"]
+    finally:
+        for k in made:
+            k.__exit__(None, None, None)
+
+
+def test_a_member_opens_a_voice_call(ext_env):
+    c, _ = ext_env
+    install()
+    client, made = _household(c)
+    try:
+        _person(c, "Max", "member", pin="5555")
+        member = _signed_in(client, ("203.0.113.95", 44005), name="Max", pin="5555")
+        tid = thread_for(member, "main")
+        with member.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
+            ready = json.loads(ws.receive_text())
+            assert ready["type"] == "ready" and ready["token"] is True and ready["locked"] is False
+    finally:
+        for k in made:
+            k.__exit__(None, None, None)
+

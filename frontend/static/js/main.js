@@ -44,7 +44,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=15';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=16';
+} from './ext-sdk.js?v=17';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=15';
 import { mountPluginsSettings } from './plugins.js?v=15';
@@ -4357,7 +4357,11 @@ const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // `admin-only` in the markup is the class; this is the list applyAuthChrome() walks.
 // 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
 // a Member is signed in but must not be offered tabs that can only 403.
-const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'];
+const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'people', 'connections', 'agents', 'settings'];
+// Since 2026-10-19 voice is a Member's too ("Members should have voice"): the Voice tab shows for an
+// Owner/Admin always (the absent page explains how to add the add-on) and for anyone else who holds
+// use_voice once the add-on has mounted its pane (an absent add-on is nothing a Member can act on).
+// Never for a Restricted caller: a locked device gets voice on the call screen only.
 // Tabs that need host control (admin_system) on top of being an admin. Since 2026-10-19 an Admin
 // holds every permission the Owner has, so this is empty: Health (the dashboard) is theirs too.
 const OWNER_TABS = [];
@@ -4369,6 +4373,21 @@ let settingsTab = 'bots';
 const isHostRole = () => canAdmin();
 /** Where Settings opens when no tab (or a tab this profile cannot have) is asked for. */
 const homeSettingsTab = () => (state.decoy || canAdmin() ? 'bots' : 'theme');   // Restricted never opens Settings
+/** Does this session hold `perm`? From /api/auth/status `permissions` (["*"] on an open install);
+ *  an older server without the field answers by role. */
+const sessionCan = (perm) => {
+  const ps = state.auth && state.auth.permissions;
+  if (Array.isArray(ps)) return ps.includes('*') || ps.includes(perm);
+  return canAdmin() || (perm === 'use_voice' && !state.decoy && state.role === 'member');
+};
+/** May this session see Settings -> Voice? */
+const voiceTabAllowed = () => !state.decoy
+  && (canAdmin() || (sessionCan('use_voice') && !!(paneHost('voice') && paneHost('voice').owned())));
+function syncVoiceTab() {
+  const b = document.getElementById('stab-voice');
+  if (b) b.classList.toggle('hidden', !voiceTabAllowed());
+  if (settingsTab === 'voice' && !voiceTabAllowed() && settingsOpen()) setSettingsTab(homeSettingsTab());
+}
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
 const settingsPane = (id) => dom[`spane-${id}`] || document.getElementById(`spane-${id}`);
@@ -7747,10 +7766,12 @@ function applyAuthChrome() {
     const b = document.getElementById(`stab-${tab}`);
     if (b) b.classList.toggle('hidden', !state.decoy && !canAdmin());
   }
+  syncVoiceTab();
   if (!isHostRole()) unmountDashboard();
   if (!canAdmin()) {
     unmountReactionManager();
-    if (ADMIN_TABS.includes(settingsTab) || (!state.decoy && CHARACTER_TABS.includes(settingsTab))) setSettingsTab(homeSettingsTab());
+    if (ADMIN_TABS.includes(settingsTab) || (!state.decoy && CHARACTER_TABS.includes(settingsTab))
+        || (settingsTab === 'voice' && !voiceTabAllowed())) setSettingsTab(homeSettingsTab());
   } else if (OWNER_TABS.includes(settingsTab) && !isHostRole()) {
     setSettingsTab(homeSettingsTab());
   }
@@ -7845,7 +7866,7 @@ const extLoader = createLoader({
   shellFor: (id) => createShell(id),
   disposeExtension,
   emitLocale,
-  onChange: () => renderVoicePane(),
+  onChange: () => { renderVoicePane(); syncVoiceTab(); },
 });
 
 /** Is the extension tool with this feature switched on (tools.yaml) and
@@ -7968,7 +7989,9 @@ function extSettingsPane(owner, id, spec = {}) {
     return addinTabs.claim(owner, id, spec);
   }
   if (host.owned() && host.ownerId() !== owner) throw new Error(`settings.pane: "${id}" is taken`);
-  return host.claim(owner, spec);
+  const dispose = host.claim(owner, spec);
+  syncVoiceTab();                     // a Member's Voice tab appears once the add-on owns the pane
+  return () => { if (typeof dispose === 'function') dispose(); syncVoiceTab(); };
 }
 
 function botRowExtra(owner, fn) {
@@ -8131,6 +8154,7 @@ installShell({
   botById: (id) => botById(id) || null,
   allBots: () => api.allBots().then((r) => (r && r.bots) || []),
   isLocked: () => !!state.decoy,
+  can: (perm) => !state.decoy && sessionCan(String(perm || '')),
   features: () => ({ ...(state.auth.features || {}) }),
   threadFace: (thread, bot) => ({
     src: (bot && !nimEnabled()) ? (threadFaceUrl(thread) || bot.avatar_url || '') : '',
@@ -8211,6 +8235,8 @@ function applyAuthStatus(s, { keepFeatures = false } = {}) {
     lockTimeout: s.lock_timeout_seconds || 600,
     minPin: s.min_pin_length || 4,
     recoveryPath: s.recovery_path || '',
+    // 2026-10-19: what this session may do (the server's matrix; ["*"] = an open install).
+    permissions: Array.isArray(s.permissions) ? s.permissions : null,
     configPath: s.config_path || '',
     rememberDays: s.remember_days || 0,
     remembered: !!s.remembered,

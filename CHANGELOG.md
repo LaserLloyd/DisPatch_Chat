@@ -16,6 +16,14 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   password, sign out, delete). One structural exception stays: an Admin cannot delete, disable,
   demote, sign out or change the credentials of THE Owner profile, nor change the install PIN,
   so nobody can lock the household's owner out. `admin_system` still cannot be granted to a Member.
+- **Members have voice.** The voice add-on's routes no longer all need `manage_plugins`: the reads a
+  voice user needs - `GET /api/voice/status`, `/api/voice/preview`, `/api/voice/profiles` - need
+  `use_voice` (Member, Admin, Owner; never a Restricted caller, whose locked device keeps its own
+  `locked_status` view), declared in `route_policy.EXTENSION_USE_ROUTES` and published in
+  `docs/contracts/routes.json` (`extension_routes`). Voice administration (the switch and server
+  settings, cloning, the lab, the rig, models) stays `manage_plugins`. A Member sees Settings -> Voice
+  once the add-on is mounted. New: `Requirement.not_restricted`, `permissions` in
+  `GET /api/auth/status`, and `shell.can(permission)` for extension frontends.
 
 ### Voice (the host side of DisPatch Voice 1.6)
 

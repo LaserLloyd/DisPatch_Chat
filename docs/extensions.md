@@ -203,8 +203,8 @@ start DisPatch moves it across once (never overwriting; see
 
 The journal shows `ext voice: DisPatch Voice 1.x.y ok (api 1)`,
 and `curl -s 127.0.0.1:8765/api/extensions` lists `voice` as `ok` (loopback is
-the machine tier for that one route). `/api/voice/*` is operator-only: with a
-PIN set, `curl` it with an unlocked session's cookie, e.g.
+the machine tier for that one route). `/api/voice/*` needs a signed-in session (the reads below are any voice user's,
+the rest `manage_plugins`): with a PIN set, `curl` it with a session cookie, e.g.
 `curl -s -c jar -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json'
 -d '{"pin":"…"}' 127.0.0.1:8765/api/auth/unlock` and then `curl -s -b jar
 127.0.0.1:8765/api/voice/status`.
@@ -329,9 +329,14 @@ and `state_dir` = `<data>/ext/<id>/`, owner-only — never the data directory it
 `counters` (host-side counters such as `speculation_stale`).
 
 **HTTP** — `include_router(router, prefix, body_limits=)`: the prefix must be
-`/api/<id>` or below it. Every route gets the operator dependency (a live
-unlocked session, or anyone when no PIN exists — never Safe Mode, never the
-machine-inbound tier), the prefix joins the Safe-Mode block list and is kept
+`/api/<id>` or below it. Every route gets the host's extension dependency
+(`extensions.require_extension_route`): the requirement the route table declares
+for that path (`route_policy.extension_requirement`, listed in
+`docs/contracts/routes.json` under `extension_routes`) — `manage_plugins` by
+default, `use_voice` (Member, Admin, Owner; never a Restricted caller) for the
+reads a voice user needs: `GET /api/voice/status`, `GET /api/voice/preview` and
+`GET /api/voice/profiles` (2026-10-19, "Members should have voice"). Never the
+machine-inbound tier. The prefix joins the Safe-Mode block list and is kept
 off the machine-inbound surface, and `body_limits` (exact path → bytes) are
 enforced from `Content-Length` before the body is read. A request that can
 change something (anything but GET, HEAD and OPTIONS) must also come from
@@ -694,7 +699,9 @@ export async function mount(shell, { assetsVersion }) {
 spelled `onThreadChange`), `api(path, {method, body, query,
 signal})` (same-origin JSON; `DecoyError` on a Safe-Mode 403),
 `activeThread()`, `bots()`, `botById(id)`, `allBots()`, `isLocked()`,
-`language()`, `features()`, `threadFace(thread, bot)` (honours No-Image Mode),
+`language()`, `features()`, `can(permission)` (2026-10-19: does this session hold
+`manage_plugins`, `use_voice`, …? — a Member uses voice but does not administer it;
+the server decides either way), `threadFace(thread, bot)` (honours No-Image Mode),
 `toast`, `confirm`, `prompt`, `navigate`, `activity()` (2.2.0: the person is
 using the app — re-arms the idle auto-lock the way a touch does; call it while
 your feature is in use without touches, e.g. a voice chat; it never unlocks

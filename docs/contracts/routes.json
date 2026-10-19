@@ -1,4 +1,39 @@
 {
+  "extension_routes": {
+    "default": {
+      "note": "an installed add-on's operator API (its own Origin check applies)",
+      "permission": "manage_plugins"
+    },
+    "use": [
+      {
+        "method": "GET",
+        "path": "/api/voice/preview",
+        "requirement": {
+          "not_restricted": true,
+          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "permission": "use_voice"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/voice/profiles",
+        "requirement": {
+          "not_restricted": true,
+          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "permission": "use_voice"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/voice/status",
+        "requirement": {
+          "not_restricted": true,
+          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "permission": "use_voice"
+        }
+      }
+    ]
+  },
   "mounts": {
     "/media": {
       "note": "chat media",

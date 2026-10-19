@@ -913,7 +913,7 @@ class ExtensionContext:
                 raise ValueError(f"body limit for {p!r} must be a positive int")
             limits[p] = n
         before = list(self._app.router.routes)
-        self._app.include_router(router, prefix=prefix, dependencies=[Depends(require_operator)])
+        self._app.include_router(router, prefix=prefix, dependencies=[Depends(require_extension_route)])
         self._ext.routes += [r for r in self._app.router.routes if not any(r is b for b in before)]
         if prefix not in self._ext.prefixes:
             self._ext.prefixes.append(prefix)
@@ -1103,6 +1103,26 @@ def require_operator(request: Request) -> None:
             raise HTTPException(403, "cross-origin request refused")
     from . import policy
     policy.of(request).require(Permission.MANAGE_PLUGINS)
+
+
+def require_extension_route(request: Request) -> None:
+    """The dependency on every route an extension mounts (``ctx.include_router``).
+
+    The same Origin rule as :func:`require_operator`, then the requirement the route
+    table declares for this add-on path (``route_policy.extension_requirement``): the
+    reads a voice user needs (``use_voice``, 2026-10-19: Members have voice) or, for
+    everything else, ``manage_plugins``. A Restricted caller is refused even the reads: a
+    locked device has its own view (``locked_status`` in /api/extensions)."""
+    if request.method not in SAFE_METHODS:
+        if not origin_ok(request.headers) or \
+                request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site"):
+            raise HTTPException(403, "cross-origin request refused")
+    from . import policy, route_policy
+    req = route_policy.extension_requirement(request.method, request.url.path)
+    pol = policy.of(request)
+    d = policy.authorize(pol.principal, req)       # the gate's own decision, stated again here
+    if not d.allowed:
+        raise policy.denied(pol.principal, req.permission or Permission.MANAGE_PLUGINS)
 
 
 # --------------------------------------------------------------------------- #

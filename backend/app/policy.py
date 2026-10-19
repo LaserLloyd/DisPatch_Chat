@@ -77,6 +77,9 @@ class Requirement:
     note: str = ""
     #: What a signed-in person is told when the route is machine-only.
     denied_detail: str = ""
+    #: A Restricted caller is refused even though its role holds ``permission`` (the voice
+    #: add-on's user reads: a locked device has its own, reduced view).
+    not_restricted: bool = False
 
     @property
     def machine_only(self) -> bool:
@@ -95,6 +98,8 @@ class Requirement:
             d["machine"] = list(self.machine)
         if self.scoped:
             d["scoped"] = True
+        if self.not_restricted:
+            d["not_restricted"] = True
         if self.note:
             d["note"] = self.note
         return d
@@ -104,11 +109,11 @@ PUBLIC = Requirement(public=True)
 
 
 def R(permission: Permission | str | None = None, *, machine: Iterable[MachineScope | str] = (),
-      scoped: bool = False, note: str = "") -> Requirement:
+      scoped: bool = False, note: str = "", not_restricted: bool = False) -> Requirement:
     perm = permission.value if isinstance(permission, Permission) else permission
     return Requirement(permission=perm,
                        machine=tuple(m.value if isinstance(m, MachineScope) else m for m in machine),
-                       scoped=scoped, note=note)
+                       scoped=scoped, note=note, not_restricted=not_restricted)
 
 
 def public(note: str) -> Requirement:
@@ -293,6 +298,8 @@ def authorize(principal: Principal, req: Requirement) -> Decision:
         return Decision(False, 403, "agents_only" if req.machine else "route_undeclared",
                         (req.denied_detail or "Only agents may call this.") if req.machine
                         else UNLOCK_DETAIL, required=need)
+    if req.not_restricted and principal.is_restricted:
+        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=req.permission)
     if principal.can(req.permission):
         return ALLOW
     if req.scoped:

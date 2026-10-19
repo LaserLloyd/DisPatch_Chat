@@ -63,6 +63,14 @@ uv pip install --python .venv/bin/python "dispatch-voice @ git+https://github.co
 You also need `ffmpeg` (voice cloning) and, optionally, libopus on the host; Settings
 → Voice names what is missing, with the install command for your system.
 
+## Who can use it
+
+| Who | What |
+|---|---|
+| Owner, Admin | Everything: the switch, server settings, voices and cloning, the lab, the GPU rig, models. |
+| Member | Voice calls with the characters they can chat with, Settings → Voice (once the add-on is installed), the voice list and samples (`use_voice`). Changing the server's voice setup is refused (`manage_plugins`). |
+| Restricted (a signed-in child, a device bound to one, or a guest) | Voice calls on the characters their audience allows, from the call screen only; every turn runs locked and counts against that profile's (or, for a guest, the default) budgets and quiet hours. |
+
 ## Touch points for CPU voice
 
 One thing a person has to *do*, counted from a fresh install in the order they happen.

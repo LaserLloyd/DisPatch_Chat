@@ -834,9 +834,9 @@ test('index.html: the People tab is admin-only, before Security, with its pane',
 test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
   assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
   // !canAdmin() hides every admin tab. OWNER_TABS is empty since Admins hold admin_system
-  // (2026-10-19).
+  // (2026-10-19), and Voice left the list: a Member who holds use_voice gets it too.
   assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isHostRole\(\)\)\)/);
-  assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'\];/);
+  assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'people', 'connections', 'agents', 'settings'\];/);
   assert.match(MAIN, /case 'people':\s+await mountPeopleSettings/);
 });
 

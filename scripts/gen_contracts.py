@@ -132,6 +132,7 @@ def build() -> dict[Path, str]:
         "schema": 1, "routes": routes, "websocket_actions": ws,
         "websocket_routes": {p: r.describe() for p, r in sorted(route_policy.WS_ROUTES.items())},
         "mounts": {p: r.describe() for p, r in route_policy.MOUNTS},
+        "extension_routes": route_policy.extension_document(),
     })
     catalog = errors.catalog_document()
     out[CONTRACTS / "errors.json"] = _dump(catalog)

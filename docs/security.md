@@ -41,7 +41,7 @@ what it may do.
 |---|---|---|
 | **Owner** | You. Exactly one. | Everything, including host control (the coding harness, wiping files, full export, logs, Health, backups) and the machine API key. |
 | **Admin** | A trusted adult. | Everything the Owner can do: host control, the machine API key, every setting, characters, connections, plugins, agents (shell approvals included), backups, Health, and every profile, other Admins included. The one exception is THE Owner profile: an Admin cannot delete, disable, demote, sign out or change the credentials of it (nor change the install PIN, which is the Owner's), so nobody can lock the owner out. Needs a password. |
-| **Member** | An adult or teen household member. | Chat, voice, images, the tools you enabled, notifications, rename/delete their conversations. **Not** agents (see below) and not configuration. Needs a PIN. |
+| **Member** | An adult or teen household member. | Chat, voice (the call screen, Settings → Voice, the voice list and samples; not voice administration such as cloning, the GPU rig or the server switch), images, the tools you enabled, notifications, rename/delete their conversations. **Not** agents (see below) and not configuration. Needs a PIN. |
 | **Restricted** | A child or a guest. | Chat and voice with the characters whose *audience* is "Restricted only" or "Everyone". No tools (unless you flag one `safe`), no agents, no settings, no file access, no history management. Daily budgets and time limits apply. |
 
 A **permission** is a named capability (`use_chat`, `use_voice`, `use_images`,
