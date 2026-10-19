@@ -107,7 +107,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Which source (VOICE_SRC):
 #   github (default)  the archive of VOICE_REF on GitHub; the builder needs no git.
 #   local             the directory passed as `--build-context voice-src=<dir>`.
-# VOICE_REF is a full ref (`refs/heads/<branch>`, `refs/tags/<tag>`) or a bare tag
+# VOICE_REF is a full ref (`refs/heads/<branch>`, `refs/tags/<tag>`), a commit sha or a bare tag
 # name. It defaults to `refs/heads/main` of the add-on, which carries the
 # 1.6.0 line (one models folder, the host credential store, settings schema). The
 # moving tag `v1` still names 1.5.0.
@@ -134,7 +134,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         echo "forge-voice-core[speechforge] @ file:///voice-src/packages/forge-voice-core" > /tmp/voice-override.txt; \
         uv pip install --python /app/.venv/bin/python --no-sources --override /tmp/voice-override.txt /voice-src; \
       else \
-        case "$VOICE_REF" in refs/*) ref="$VOICE_REF" ;; *) ref="refs/tags/$VOICE_REF" ;; esac; \
+        case "$VOICE_REF" in ""|*[!A-Za-z0-9._/-]*) echo "VOICE_REF must be a ref, a tag name or a commit sha (letters, digits, . _ / -): $VOICE_REF"; exit 1 ;; esac; \
+        case "$VOICE_REF" in refs/*) ref="$VOICE_REF" ;; [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ref="$VOICE_REF" ;; *) ref="refs/tags/$VOICE_REF" ;; esac; \
         url="https://github.com/LaserLloyd/DisPatch_Voice/archive/${ref}.tar.gz"; \
         echo "forge-voice-core[speechforge] @ ${url}#subdirectory=packages/forge-voice-core" > /tmp/voice-override.txt; \
         uv pip install --python /app/.venv/bin/python --no-sources --override /tmp/voice-override.txt "dispatch-voice @ ${url}"; \

@@ -230,7 +230,6 @@ jobs:
           load: true
           push: false
           tags: dispatch-chat:ci-voice
-          cache-from: type=gha,scope=voice
-          cache-to: type=gha,mode=max,scope=voice
+          no-cache: true   # VOICE_REF=main moves; a cached layer would pass without fetching today's main
       - name: The voice image imports both add-on packages
         run: docker run --rm --entrypoint python dispatch-chat:ci-voice -I -c "import dispatch_voice, forge_voice_core; print('ok')"
