@@ -30,11 +30,9 @@ the others, give them a character limited to their profile (the character's
 `profiles` list); a profile left off that list must not be able to read those
 chats, and if they can, it is a bug and we want the report. DisPatch is built for
 a household or small team, and it is not designed to resist a determined insider
-who also controls the host. The app says this where people will read it: a
-host-storage notice in Settings -> Security, People & Profiles and the first-run
-wizard's last step, and beside every upload or picture you create (Image Studio,
-the File Server, the send-a-file sheet, composer attachments, avatars, reaction
-images).
+who also controls the host. The app says this in Settings -> Security ("Stored on
+the host computer": files and pictures, then chats), and once per device in a
+short card on its first normal page load.
 
 **Agent backends run as your user.** A bot is a local process with your
 permissions. Who you let talk to a bot is a real privilege decision, not a
@@ -158,8 +156,7 @@ or other profiles. A running server follows within a second. Commands for every 
   content. The summary is not the only view, though: the chats themselves belong
   to the characters, so the Owner, Admins and any Member who can use the same
   character can open them. The Restricted UI shows a banner saying both, and a
-  "my activity" panel with the same numbers and a plain "your chats are not
-  secret" notice.
+  "my activity" panel with the same numbers.
 
 ### Sign-in protection
 

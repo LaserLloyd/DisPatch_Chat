@@ -7,6 +7,32 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Image Studio, the rail, uploads and the host-storage notice
+
+- **Image Studio: Sort and Clear from here down.** The results grid has a "Sort:" control (Oldest first, the old
+  layout and default, or Newest first), remembered per device (`dispatch-imagestudio-sort`). Each picture has
+  "Clear from here down", the studio's version of the File Server's "Delete this & older": `POST
+  /api/apps/imagestudio/clear {id, order, dry_run}` removes the picture and every picture after it in the shown order
+  from the ledger and deletes their media files, except a file a chat message still shows (sent to chat). A dry run
+  counts them for the danger confirmation. It needs `manage_history` on top of the app's `use_images` (Restricted
+  holds neither); `/state` reports `can_clear` so the page hides the action otherwise.
+- **"Stored on the host computer".** Settings -> Security says what DisPatch keeps on the computer that runs it
+  (files, pictures, avatars; and chats, which belong to a character, so everyone who can use that character can open
+  them and the Owner and Admins can read every chat; not end-to-end encrypted; in the backups). A device also sees a
+  short version once, on its first normal page load (Got it / Escape / click outside; `dispatch-privacy-ack` with a
+  version number). The Restricted banner no longer says the owner never sees what was said, and
+  [docs/security.md](docs/security.md) describes the per-character model.
+- **Tools & more on the rail.** The fixed rail buttons can sit on the bar or in the Tools popup (now "Tools & more"):
+  by default the profile chip, Tasks, the File Server and the theme button move into it; Lock / Unlock, send-a-file
+  and Settings stay. Drag them along the bar, onto the popup's button or rows and back, or use "Arrange the bar…".
+  Per device (`dispatch-rail-layout`); Restricted devices always keep the shipped bar.
+- **Upload in the quick-actions menu.** "Upload a file" heads the ⚡ menu and "Upload to chat" leads the empty
+  chat's chips (the paperclip's flow). While ⚡ is shown the standalone paperclip folds into it; a bot with
+  `quick_actions: false` keeps the paperclip.
+- **Drop files on a chat.** Dragging files over an open chat offers "Insert into chat" (attach, then send) or
+  "Upload to File Server" (a Restricted device: its one-way "Send a file"). Targets a profile cannot use are not
+  shown; Escape or a drop elsewhere cancels.
+
 ## [3.1.0] — 2026-10-19
 
 ### Accounts and lock-out recovery (new commands: minor bump)
