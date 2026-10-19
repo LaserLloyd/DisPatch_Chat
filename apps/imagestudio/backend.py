@@ -353,7 +353,7 @@ def build(ctx):
         pid = (body.provider or default).strip().lower()
         if not pid:
             raise HTTPException(
-                409, "No image provider has an API key yet (Settings → AI models → Image generation)")
+                409, "No image provider has an API key yet (Settings → AI & Connections → Image generation)")
         if pid not in image_providers.PRESET_BY_ID:
             raise HTTPException(422, "Unknown image provider")
         model = body.model.strip()
@@ -366,7 +366,7 @@ def build(ctx):
         res = _resolved(pid, model)
         if res is None:
             raise HTTPException(
-                409, "That provider has no API key yet (Settings → AI models → Image generation)")
+                409, "That provider has no API key yet (Settings → AI & Connections → Image generation)")
         caps = image_providers.supports(res)
         n = min(body.n, caps["max_n"])
         wants_ref = bool(body.reference)
