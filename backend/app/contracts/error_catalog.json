@@ -1108,6 +1108,50 @@
    "seeded": true
   },
   {
+   "code": "imagestudio_cannot_delete_pictures",
+   "status": 403,
+   "message": "Your profile cannot delete pictures",
+   "fix": "Ask the Owner or an Admin; deleting needs the manage_history permission.",
+   "docs": "imagestudio_cannot_delete_pictures",
+   "patterns": [
+    "Your profile cannot delete pictures"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_not_a_picture_id",
+   "status": 422,
+   "message": "That is not a picture id",
+   "fix": "Reload Image Studio and pick the picture again.",
+   "docs": "imagestudio_not_a_picture_id",
+   "patterns": [
+    "That is not a picture id"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_generation_running_clear",
+   "status": 409,
+   "message": "A generation is running; try again when it is done",
+   "fix": "Wait for the current generation to finish, then clear again.",
+   "docs": "imagestudio_generation_running_clear",
+   "patterns": [
+    "A generation is running; try again when it is done"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_picture_already_gone",
+   "status": 404,
+   "message": "That picture is already gone",
+   "fix": "Reload Image Studio; the picture was deleted already.",
+   "docs": "imagestudio_picture_already_gone",
+   "patterns": [
+    "That picture is already gone"
+   ],
+   "seeded": true
+  },
+  {
    "code": "jobboard_job_not_found",
    "status": 404,
    "message": "Job not found",

@@ -120,7 +120,11 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`image_unavailable`](#image_unavailable) | 503 | Image generation isn't configured |
 | [`image_undecodable`](#image_undecodable) | 400 | Could not decode image |
 | [`imagestudio_a_generation_is_already_running`](#imagestudio_a_generation_is_already_running) | 409 | A generation is already running |
+| [`imagestudio_cannot_delete_pictures`](#imagestudio_cannot_delete_pictures) | 403 | Your profile cannot delete pictures |
+| [`imagestudio_generation_running_clear`](#imagestudio_generation_running_clear) | 409 | A generation is running; try again when it is done |
 | [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI models → Image generation) |
+| [`imagestudio_not_a_picture_id`](#imagestudio_not_a_picture_id) | 422 | That is not a picture id |
+| [`imagestudio_picture_already_gone`](#imagestudio_picture_already_gone) | 404 | That picture is already gone |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
 | [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI models → Image generation) |
@@ -1066,6 +1070,22 @@ HTTP **409** - A generation is already running
 
 **Fix:** The state conflicts with the request; reload and retry.
 
+## imagestudio_cannot_delete_pictures
+
+<a id="imagestudio_cannot_delete_pictures"></a>
+
+HTTP **403** - Your profile cannot delete pictures
+
+**Fix:** Ask the Owner or an Admin; deleting needs the manage_history permission.
+
+## imagestudio_generation_running_clear
+
+<a id="imagestudio_generation_running_clear"></a>
+
+HTTP **409** - A generation is running; try again when it is done
+
+**Fix:** Wait for the current generation to finish, then clear again.
+
 ## imagestudio_no_image_provider_has_an_api
 
 <a id="imagestudio_no_image_provider_has_an_api"></a>
@@ -1073,6 +1093,22 @@ HTTP **409** - A generation is already running
 HTTP **409** - No image provider has an API key yet (Settings → AI models → Image generation)
 
 **Fix:** The state conflicts with the request; reload and retry.
+
+## imagestudio_not_a_picture_id
+
+<a id="imagestudio_not_a_picture_id"></a>
+
+HTTP **422** - That is not a picture id
+
+**Fix:** Reload Image Studio and pick the picture again.
+
+## imagestudio_picture_already_gone
+
+<a id="imagestudio_picture_already_gone"></a>
+
+HTTP **404** - That picture is already gone
+
+**Fix:** Reload Image Studio; the picture was deleted already.
 
 ## imagestudio_that_chat_image_is_not_in
 

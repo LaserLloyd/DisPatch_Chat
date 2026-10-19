@@ -1021,6 +1021,26 @@
       "status": 409
     },
     {
+      "code": "imagestudio_cannot_delete_pictures",
+      "docs": "imagestudio_cannot_delete_pictures",
+      "fix": "Ask the Owner or an Admin; deleting needs the manage_history permission.",
+      "message": "Your profile cannot delete pictures",
+      "patterns": [
+        "Your profile cannot delete pictures"
+      ],
+      "status": 403
+    },
+    {
+      "code": "imagestudio_generation_running_clear",
+      "docs": "imagestudio_generation_running_clear",
+      "fix": "Wait for the current generation to finish, then clear again.",
+      "message": "A generation is running; try again when it is done",
+      "patterns": [
+        "A generation is running; try again when it is done"
+      ],
+      "status": 409
+    },
+    {
       "code": "imagestudio_no_image_provider_has_an_api",
       "docs": "imagestudio_no_image_provider_has_an_api",
       "fix": "The state conflicts with the request; reload and retry.",
@@ -1029,6 +1049,26 @@
         "No image provider has an API key yet (Settings → AI models → Image generation)"
       ],
       "status": 409
+    },
+    {
+      "code": "imagestudio_not_a_picture_id",
+      "docs": "imagestudio_not_a_picture_id",
+      "fix": "Reload Image Studio and pick the picture again.",
+      "message": "That is not a picture id",
+      "patterns": [
+        "That is not a picture id"
+      ],
+      "status": 422
+    },
+    {
+      "code": "imagestudio_picture_already_gone",
+      "docs": "imagestudio_picture_already_gone",
+      "fix": "Reload Image Studio; the picture was deleted already.",
+      "message": "That picture is already gone",
+      "patterns": [
+        "That picture is already gone"
+      ],
+      "status": 404
     },
     {
       "code": "imagestudio_that_chat_image_is_not_in",
