@@ -156,7 +156,7 @@
        and fetches ui-theme/locales/<lang>.json only if asked to. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=7" />
-  <link rel="stylesheet" href="/static/app.css?v=107" />
+  <link rel="stylesheet" href="/static/app.css?v=108" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=1" />
   <link rel="stylesheet" href="/static/w5.css?v=1" />
@@ -1150,6 +1150,9 @@
         <!-- LC-XXXX-XXXX is a format mask, not prose — it stays literal in every
              locale, so the placeholder key exists only to keep it in one place. -->
         <input type="text" id="recover-code" placeholder="LC-XXXX-XXXX" data-i18n-attr="placeholder=lock.recover_placeholder" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <!-- 3.0: with other profiles on the install the PIN is replaced, not removed
+             (409 recovery_needs_new_pin); left empty on a single-person install it is removed. -->
+        <input type="password" id="recover-new-pin" placeholder="New PIN" data-i18n-attr="placeholder=security.new_pin;aria-label=security.new_pin" aria-label="New PIN" inputmode="numeric" autocomplete="new-password" />
         <div class="lock-recover-row">
           <button class="btn-secondary" id="recover-cancel" data-i18n="lock.recover_back">Back</button>
           <button class="btn-primary" id="recover-submit" data-i18n="lock.recover_submit">Reset PIN</button>
@@ -1339,6 +1342,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=147"></script>
+  <script type="module" src="/static/js/main.js?v=148"></script>
 </body>
 </html>

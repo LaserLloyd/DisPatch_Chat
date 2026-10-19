@@ -832,7 +832,9 @@ test('index.html: the People tab is admin-only, before Security, with its pane',
 
 test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
   assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
-  assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\)\)/);
+  // 2026-10-19: !canAdmin() still hides every admin tab; Health (OWNER_TABS) is also hidden
+  // from an Admin, because the dashboard is host control (admin_system).
+  assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isOwnerRole\(\)\)\)/);
   assert.match(MAIN, /const ADMIN_TABS = \['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'\];/);
   assert.match(MAIN, /case 'people':\s+await mountPeopleSettings/);
 });

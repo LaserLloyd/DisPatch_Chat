@@ -22,7 +22,7 @@ import {
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
 } from './reactions.js?v=27';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=9';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=10';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
@@ -52,7 +52,7 @@ import { rowControls, addBotRow } from './bots-edit.js?v=4';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
 // modules to extend without a cascade).
-import { setOnLocked as w5SetOnLocked } from './w5-api.js?v=1';
+import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?v=1';
 import { mountConnections } from './connections.js?v=1';
 import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=1';
 import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
@@ -279,7 +279,7 @@ const dom = {};
  'drop-more', 'drop-done',
  // Lock / security / decoy
  'lock-screen', 'lock-title', 'lock-sub', 'lock-dots', 'lock-error', 'keypad',
- 'lock-submit', 'lock-forgot', 'lock-cancel', 'lock-recover', 'lock-recover-hint', 'recover-code',
+ 'lock-submit', 'lock-forgot', 'lock-cancel', 'lock-recover', 'lock-recover-hint', 'recover-code', 'recover-new-pin',
  'recover-cancel', 'recover-submit', 'lock-now', 'bm-lock',
  'sec-current-wrap', 'sec-current', 'sec-new',
  'sec-new-label', 'sec-confirm', 'sec-error', 'sec-save', 'sec-remove',
@@ -4099,8 +4099,9 @@ function mountLanguagePicker() {
   // reflect the current session and server config. Unlocked only.
   document.getElementById('viewer-row')?.remove();
   const filesGroup = document.getElementById('dev-group-files');
-  if (filesGroup) filesGroup.hidden = !!state.decoy;
-  if (!state.decoy && filesBody) filesBody.append(viewerSection());
+  if (filesGroup) filesGroup.hidden = !isOwnerRole();
+  // The local viewer is host control (admin_system): the Owner's, not an Admin's or a Member's.
+  if (isOwnerRole() && filesBody) filesBody.append(viewerSection());
 
   // About: version + the source link. In the Device pane on purpose — it is the
   // one settings tab a Safe-Mode session can open, so every user of the running
@@ -4357,7 +4358,16 @@ const CORE_SETTINGS_TABS = new Set(SETTINGS_TABS);
 // 3.0: shown to owner and admin only (canAdmin), not merely "not Restricted" --
 // a Member is signed in but must not be offered tabs that can only 403.
 const ADMIN_TABS = ['reactions', 'health', 'ai', 'plugins', 'voice', 'people', 'connections', 'agents', 'settings'];
+// 3.0: tabs that are host control (admin_system) - the Owner's even among admins. Health is the
+// dashboard (logs, paths, process detail); an Admin would only collect 403s there.
+const OWNER_TABS = ['health'];
+// 3.0: the Bots tab is the character editor (GET /api/bots/all needs manage_characters). A Member
+// opens Settings for Theme / Device / Security and lands on the first of those instead.
+const CHARACTER_TABS = ['bots'];
 let settingsTab = 'bots';
+const isOwnerRole = () => !state.decoy && state.role === 'owner';
+/** Where Settings opens when no tab (or a tab this profile cannot have) is asked for. */
+const homeSettingsTab = () => (state.decoy || canAdmin() ? 'bots' : 'theme');   // Restricted never opens Settings
 
 const settingsTabBtn = (id) => document.getElementById(`stab-${id}`);
 const settingsPane = (id) => dom[`spane-${id}`] || document.getElementById(`spane-${id}`);
@@ -4386,7 +4396,7 @@ async function setSettingsTab(id, { focusTab = false } = {}) {
   // Resolve the button AFTER that swap, or focus and scroll-into-view would
   // both aim at the tab we just refused to open.
   let btn = settingsTabBtn(id);
-  if (!btn || btn.classList.contains('hidden')) { id = 'bots'; btn = settingsTabBtn(id); }
+  if (!btn || btn.classList.contains('hidden')) { id = homeSettingsTab(); btn = settingsTabBtn(id); }
   if (id !== settingsTab) deactivateSettingsTab();
   settingsTab = id;
 
@@ -4557,10 +4567,17 @@ let bmBots = [];
 // dirty flag so ✕ / backdrop / Esc can warn instead of silently discarding.
 let bmDirty = false;
 async function openBotManager(tab = 'bots') {
-  try {
-    const r = await api.allBots();
-    bmBots = r.bots.slice();
-  } catch (e) { toast(e.message, true); return; }
+  if (canAdmin()) {
+    try {
+      const r = await api.allBots();
+      bmBots = r.bots.slice();
+    } catch (e) { toast(e.message, true); return; }
+  } else {
+    // A Member: no character editor (that call is manage_characters and would 403, which
+    // used to stop Settings from opening at all), but Theme, Device and Security are theirs.
+    bmBots = [];
+    if (CHARACTER_TABS.includes(tab)) tab = homeSettingsTab();
+  }
   bmDirty = false;
   renderBotManager();
   refreshAvatarPoolPanel();     // async; fills in the Avatar pools section
@@ -7723,12 +7740,18 @@ function applyAuthChrome() {
   // ordinary tabs but not these.
   for (const tab of ADMIN_TABS) {
     const b = document.getElementById(`stab-${tab}`);
-    if (b) b.classList.toggle('hidden', !canAdmin());
+    if (b) b.classList.toggle('hidden', !canAdmin() || (OWNER_TABS.includes(tab) && !isOwnerRole()));
   }
+  for (const tab of CHARACTER_TABS) {
+    const b = document.getElementById(`stab-${tab}`);
+    if (b) b.classList.toggle('hidden', !state.decoy && !canAdmin());
+  }
+  if (!isOwnerRole()) unmountDashboard();
   if (!canAdmin()) {
-    unmountDashboard();
     unmountReactionManager();
-    if (ADMIN_TABS.includes(settingsTab)) setSettingsTab('bots');
+    if (ADMIN_TABS.includes(settingsTab) || (!state.decoy && CHARACTER_TABS.includes(settingsTab))) setSettingsTab(homeSettingsTab());
+  } else if (OWNER_TABS.includes(settingsTab) && !isOwnerRole()) {
+    setSettingsTab(homeSettingsTab());
   }
   // Dedicated unlock padlock: visible ONLY in locked/Safe Mode so family
   // devices have an obvious way into admin mode (opens the existing PIN
@@ -8814,17 +8837,30 @@ function showRecover() {
   dom['lock-recover-hint'].textContent =
     t('lock.recover_hint', { path: state.auth.recoveryPath || 'RECOVERY-CODE.txt' });
   dom['recover-code'].value = '';
+  dom['recover-new-pin'].value = '';
   setTimeout(() => dom['recover-code'].focus(), 30);
 }
 function hideRecover() { dom['lock-recover'].classList.add('hidden'); }
 
+// POST /api/auth/recover with the optional new PIN (3.0). Kept here rather than in api.js so
+// the dozen api.js importers keep their ?v=; errors carry the 3.0 envelope via w5's failure().
+async function postRecover(code, newPin) {
+  const r = await fetch('/api/auth/recover', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newPin ? { code, new_pin: newPin } : { code }),
+  });
+  if (!r.ok) throw await w5Failure(r, '/api/auth/recover');
+  return r.json();
+}
+
 async function submitRecover() {
   const code = dom['recover-code'].value.trim();
+  const newPin = dom['recover-new-pin'].value.trim();
   if (!code) return;
   dom['recover-submit'].disabled = true;
   try {
-    await api.recover(code);
-    state.auth.pinSet = false;
+    const res = await postRecover(code, newPin);
+    state.auth.pinSet = !!(res && res.pin_set);
     state.auth.authenticated = true;
     state.auth.decoy = false;
     state.decoy = false;
@@ -8834,13 +8870,20 @@ async function submitRecover() {
     toast(t('lock.pin_reset'));
   } catch (e) {
     setLockError(cleanErr(e) || t('lock.wrong_code'));
+    if (e && e.code === 'recovery_needs_new_pin') {
+      // The code was right; only the new PIN is missing. Keep the code, ask for the PIN.
+      dom['recover-submit'].disabled = false;
+      setTimeout(() => dom['recover-new-pin'].focus(), 30);
+      return;
+    }
   } finally {
-    // Never leave the secret sitting in the DOM: a recovery code is single-use
-    // and one-shot, and the field is otherwise still populated behind the lock
-    // screen (and in the next screenshot / bug report).
-    dom['recover-code'].value = '';
     dom['recover-submit'].disabled = false;
   }
+  // Never leave the secret sitting in the DOM: a recovery code is single-use
+  // and one-shot, and the field is otherwise still populated behind the lock
+  // screen (and in the next screenshot / bug report).
+  dom['recover-code'].value = '';
+  dom['recover-new-pin'].value = '';
 }
 
 // ---- Security modal (set / change / remove PIN) ----
