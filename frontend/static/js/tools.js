@@ -723,17 +723,32 @@ export function toggleToolsMenu(mode = menuMode, opts = {}) {
 
 export function toolsMenuOpen() { return menuOpen; }
 
-/** Is `node` inside a popup that belongs to a button in #tools-more (named by
- *  its aria-controls, or the profile chip's #profile-menu)? */
-function ownedPopupContains(node) {
+/** The open popups that belong to a button in #tools-more (named by its
+ *  aria-controls, or the profile chip's #profile-menu), as [button, popup]. */
+function ownedPopups() {
   const more = $('tools-more');
-  if (!more || !node) return false;
+  if (!more) return [];
+  const out = [];
   for (const b of more.querySelectorAll('[aria-haspopup]')) {
     const id = b.getAttribute('aria-controls') || (b.id === 'profile-chip' ? 'profile-menu' : '');
     const pop = id ? $(id) : null;
-    if (pop && !pop.hidden && pop.contains(node)) return true;
+    if (pop && !pop.hidden) out.push([b, pop]);
   }
-  return false;
+  return out;
+}
+
+/** Is `node` inside one of those popups? */
+function ownedPopupContains(node) {
+  return !!node && ownedPopups().some(([, pop]) => pop.contains(node));
+}
+
+/** Put those popups away too: the scrim tap that dismisses the sheet must not
+ *  leave a menu opened from inside it floating over the page, still usable. */
+function closeOwnedPopups() {
+  for (const [b, pop] of ownedPopups()) {
+    pop.hidden = true;
+    b.setAttribute('aria-expanded', 'false');
+  }
 }
 
 function onOutside(e) {
@@ -752,7 +767,11 @@ function onOutside(e) {
   }
   // The phone sheet sits over a scrim: a tap on the scrim only dismisses it.
   // Without this the same tap would land on whatever bot tile is under it.
-  if (menu && menu.classList.contains('tools-sheet')) { e.preventDefault(); e.stopPropagation(); }
+  if (menu && menu.classList.contains('tools-sheet')) {
+    e.preventDefault(); e.stopPropagation();
+    // The swallowed tap never reaches the popup's own outside-click handler.
+    closeOwnedPopups();
+  }
   closeToolsMenu();
 }
 

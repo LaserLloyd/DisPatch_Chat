@@ -1083,3 +1083,30 @@ test('phone sheet: a tap in the profile chip\'s menu (opened from the sheet) rea
   assert.equal(scrim.defaultPrevented, true);
   assert.equal(sheet.hidden, true);
 });
+
+test('phone sheet: a scrim tap with the profile chip\'s menu open closes that menu too', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: true });
+  await mod.loadTools();
+  const doc = win.document;
+  const chip = doc.getElementById('profile-chip');
+  chip.classList.remove('hidden');
+  chip.setAttribute('aria-haspopup', 'menu');
+  chip.setAttribute('role', 'menuitem');
+  doc.getElementById('tools-more').append(chip);
+  mod.renderToolRail();
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  const sheet = doc.getElementById('tools-menu');
+  assert.ok(!sheet.hidden, 'the sheet is up');
+  const pm = doc.getElementById('profile-menu');
+  pm.replaceChildren(doc.createElement('button'));
+  pm.hidden = false;
+  chip.setAttribute('aria-expanded', 'true');
+  const scrim = new win.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+  doc.body.dispatchEvent(scrim);
+  assert.equal(scrim.defaultPrevented, true, 'the tap still lands on nothing under the scrim');
+  assert.equal(sheet.hidden, true, 'the sheet closes');
+  assert.equal(pm.hidden, true, 'and the menu opened from it does not stay floating');
+  assert.equal(chip.getAttribute('aria-expanded'), 'false');
+});
