@@ -18,6 +18,11 @@ draw the control and what the server needs to accept a value:
                    to the legacy ``LOCAL_CHAT_X`` (see :func:`env_names`)
 ``secret``         write-only: the value goes to the secret store and is never returned
 ``min`` / ``max`` / ``choices`` / ``unit``  the range the value must fall in
+``ui_section``     where the Settings dialog draws it: ``section`` or ``section#anchor``
+                   (3.2; filled from :data:`UI_SECTIONS`, not by hand on each row). A
+                   value without an anchor goes under that section's *Advanced*
+``presets``        the values a duration or size dropdown offers (3.2; :data:`PRESETS`),
+                   in the row's own ``unit``; the page adds "Custom…" for anything else
 
 The schema is versioned (:data:`SCHEMA_VERSION`, the ``schema: N`` in the generated
 documents). A key is never renamed or repurposed inside a major version; one that goes
@@ -87,7 +92,8 @@ class SettingDef(BaseModel):
     secret: bool = False
     choices: list[str] = Field(default_factory=list)
     choice_labels: dict[str, str] = Field(default_factory=dict)
-    choices_from: Literal["themes", "locales", ""] = ""    # filled at run time from the shipped bundle
+    # Filled at run time: from the shipped bundle (themes, locales) or the connections table.
+    choices_from: Literal["themes", "locales", "connections", ""] = ""
     min: float | None = None
     max: float | None = None
     unit: str = ""
@@ -99,6 +105,10 @@ class SettingDef(BaseModel):
     owner_only: bool = False
     since: int = 1
     placeholder: str = ""
+    #: 3.2, additive: where Settings draws the row (``section`` or ``section#anchor``) and the
+    #: dropdown presets of a duration / size. Set from UI_SECTIONS / PRESETS, not per row.
+    ui_section: str = ""
+    presets: list[int] = Field(default_factory=list)
 
     # ------------------------------------------------------------------ #
     def env_names(self) -> tuple[str, ...]:
@@ -115,6 +125,10 @@ class SettingDef(BaseModel):
         d["env_names"] = list(self.env_names())
         if self.choices_from:
             d["choices"] = dynamic_choices(self.choices_from) or d["choices"]
+            if self.choices_from == "connections":
+                d["choice_labels"] = {**dynamic_choice_labels("connections"), **d["choice_labels"]}
+        if not d["ui_section"]:
+            d["ui_section"] = ui_section_for(self.key, self.group)
         d.pop("binding", None)
         return d
 
@@ -154,7 +168,7 @@ _CORE: tuple[SettingDef, ...] = (
        "system", section="Network", level="advanced", env="DISPATCH_PORT", restart_required=True,
        min=1, max=65535),
     _d("system.backup_interval", "integer", 21600, "Database snapshot interval",
-       "Seconds between automatic database snapshots (6 hours by default). 0 turns them off.",
+       "How often the database is copied aside automatically (every 6 hours by default). Off turns it off.",
        "system", section="Backups", env="DISPATCH_BACKUP_INTERVAL", restart_required=True,
        min=0, max=30 * 86400, unit="seconds"),
     _d("system.backup_keep", "integer", 12, "Snapshots to keep",
@@ -166,7 +180,7 @@ _CORE: tuple[SettingDef, ...] = (
        "The first one generates a recovery key and shows it once - keep it somewhere safe.",
        "system", section="Backups"),
     _d("system.encrypted_backup_interval_hours", "integer", 24, "Encrypted backup interval",
-       "Hours between scheduled encrypted backups.", "system", section="Backups", level="advanced",
+       "How often a scheduled encrypted backup is written.", "system", section="Backups", level="advanced",
        min=1, max=24 * 30, unit="hours"),
     _d("system.encrypted_backup_keep", "integer", 7, "Encrypted backups to keep",
        "Older encrypted backups are deleted beyond this many.", "system", section="Backups",
@@ -182,7 +196,7 @@ _CORE: tuple[SettingDef, ...] = (
        "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
        "system", section="Diagnostics", level="advanced", env="DISPATCH_LOG_FILE"),
     _d("system.files_total_max", "integer", 20 * 1024 ** 3, "File Server size limit",
-       "Total bytes the File Server may hold before uploads are refused (20 GiB by default).",
+       "How much the File Server may hold before uploads are refused (20 GB by default).",
        "system", section="Limits", level="advanced", env="DISPATCH_FILES_TOTAL_MAX",
        restart_required=True, min=1024 ** 2, unit="bytes"),
     _d("system.push_subject", "string", "", "Push notification contact",
@@ -192,18 +206,18 @@ _CORE: tuple[SettingDef, ...] = (
 
     # ============================ PEOPLE ================================= #
     _d("people.lock_timeout_seconds", "integer", 600, "Owner and Admin auto-lock",
-       "Seconds of inactivity before an Owner or Admin session locks.", "people",
+       "How long an Owner or Admin session may sit idle before it locks.", "people",
        section="Sessions", min=30, max=7 * 86400, unit="seconds", binding="file:security"),
     _d("people.session_timeout_member", "integer", 3600, "Member session length",
-       "Seconds of inactivity before a Member session ends.", "people", section="Sessions",
+       "How long a Member session may sit idle before it ends.", "people", section="Sessions",
        level="advanced", min=30, max=30 * 86400, unit="seconds", binding="file:security"),
     _d("people.session_timeout_restricted", "integer", 1800, "Restricted session length",
-       "Seconds of inactivity before a Restricted profile's session ends.", "people",
+       "How long a Restricted profile's session may sit idle before it ends.", "people",
        section="Sessions", level="advanced", min=30, max=30 * 86400, unit="seconds",
        binding="file:security"),
-    _d("people.remember_device_days", "integer", 0, "Remember this device (days)",
-       "0 turns it off. A number of days offers a 'keep this device unlocked' box on sign-in; turning "
-       "it off forgets every remembered device.", "people", section="Sessions", min=0, max=365,
+    _d("people.remember_device_days", "integer", 0, "Remember signed-in devices",
+       "Off, or how many days a device that ticks 'keep this device signed in' at sign-in stays signed "
+       "in (renewed by use). Turning it off forgets every remembered device.", "people", section="Sessions", min=0, max=365,
        unit="days", binding="file:security"),
     _d("people.machine_loopback_trust", "boolean", True, "Trust programs on this computer",
        "Let programs running on the same computer (agents, cron jobs) call the API without a key. "
@@ -226,8 +240,8 @@ _CORE: tuple[SettingDef, ...] = (
        "How many reply ratings one Restricted device or profile may give per day.", "people",
        section="Restricted limits", level="advanced", env="DISPATCH_DECOY_FEEDBACK_QUOTA",
        restart_required=True, min=0, max=100000),
-    _d("people.restricted_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Restricted: upload bytes per day",
-       "How many bytes of pictures and files one Restricted device or profile may upload per day.",
+    _d("people.restricted_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Restricted: uploads per day",
+       "How much in pictures and files one Restricted device or profile may upload per day.",
        "people", section="Restricted limits", level="advanced", env="DISPATCH_DECOY_UPLOAD_QUOTA",
        restart_required=True, min=0, unit="bytes"),
 
@@ -259,8 +273,9 @@ _CORE: tuple[SettingDef, ...] = (
        "the computer the container runs on. Turn off to stop that. It never happens outside a container, "
        "whatever this says.", "connections", section="Safety", level="advanced",
        env="DISPATCH_DISCOVERY_PROBE_DOCKER_HOST"),
-    _d("connections.default", "string", "", "Default connection",
-       "The connection a new character uses when you do not pick one.", "connections"),
+    _d("connections.default", "choice", "", "Default connection",
+       "The connection a new character uses when you do not pick one.", "connections",
+       choices_from="connections", choices=[""], choice_labels={"": "None"}),
     _d("connections.clawforge_url", "url", "", "Image server (MCP) address",
        "An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp.",
        "connections", section="Image server", level="advanced", env="DISPATCH_CLAWFORGE_URL",
@@ -283,7 +298,7 @@ _CORE: tuple[SettingDef, ...] = (
        "automatic top-up off.", "connections", section="Image server", level="advanced",
        env="DISPATCH_IMAGE_CLI"),
     _d("connections.image_cli_timeout", "integer", 300, "Image command timeout",
-       "Seconds to wait for one picture from the image command.", "connections",
+       "How long to wait for one picture from the image command.", "connections",
        section="Image server", level="advanced", env="DISPATCH_IMAGE_CLI_TIMEOUT", min=10, max=7200,
        unit="seconds"),
     _d("connections.gpu_cli", "string", "", "GPU status command",
@@ -313,7 +328,7 @@ _CORE: tuple[SettingDef, ...] = (
        "tools", section="Agents", level="advanced", env="OPENCLAW_BIN", legacy_prefix_alias=False,
        restart_required=True),
     _d("tools.agent_timeout", "integer", 900, "Agent turn timeout",
-       "Seconds an agent may take to answer before the turn is abandoned.", "tools", section="Agents",
+       "How long an agent may take to answer before the turn is abandoned.", "tools", section="Agents",
        level="advanced", env="DISPATCH_AGENT_TIMEOUT", restart_required=True, min=10, max=86400,
        unit="seconds"),
     _d("tools.agent_max_concurrency", "integer", 3, "Agents running at once",
@@ -334,7 +349,7 @@ _CORE: tuple[SettingDef, ...] = (
     _d("tools.mirror_enabled", "boolean", True, "Mirror gateway chats",
        "Copy the agent runtime's own conversations into DisPatch threads.", "tools",
        section="Agents", level="advanced", env="DISPATCH_MIRROR", restart_required=True),
-    _d("tools.mirror_poll", "integer", 4, "Mirror check interval", "Seconds between checks while busy.",
+    _d("tools.mirror_poll", "integer", 4, "Mirror check interval", "How often the mirror checks while busy.",
        "tools", section="Agents", level="advanced", env="DISPATCH_MIRROR_POLL", restart_required=True,
        min=1, max=3600, unit="seconds"),
     _d("tools.mirror_idle_max", "integer", 60, "Mirror idle interval",
@@ -412,6 +427,85 @@ OWNER_ONLY_PREFIXES: tuple[str, ...] = (
 CORE_SETTINGS: tuple[SettingDef, ...] = tuple(
     d.model_copy(update={"owner_only": True}) if d.key.startswith(OWNER_ONLY_PREFIXES) else d
     for d in _CORE)
+
+#: Where the Settings dialog (3.2) draws each setting: ``section`` or ``section#anchor``. Matched
+#: by key prefix, longest first; a key without an entry goes to its group's section, under
+#: Advanced. The sections and anchors are the frontend's (js/settings-nav.js SECTIONS and the
+#: ``data-schema`` slots in index.html); docs/settings.md lists the result.
+UI_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("system.public_url", "system#network"),
+    ("system.behind_tls", "system#network"),
+    ("system.network_exposure", "system#network"),
+    ("system.backup_", "system#backups"),
+    ("system.encrypted_backup_", "system#backups"),
+    ("system.", "system"),
+    ("people.lock_timeout_seconds", "people#signin-rules"),
+    ("people.session_timeout_", "people#signin-rules"),
+    ("people.remember_device_days", "people#signin-rules"),
+    ("people.anonymous_access", "people#signin-rules"),
+    ("people.machine_loopback_trust", "people#machine"),
+    ("people.restricted_daily_", "people#restricted-limits"),
+    ("characters.", "characters"),
+    ("connections.default", "connections#list"),
+    ("connections.image_jobs", "connections#images"),
+    ("connections.studioforge_", "plugins#tool:studioforge"),
+    ("connections.", "connections"),
+    ("tools.livetools_enabled", "plugins#lookups"),
+    ("tools.openclaw_bin", "connections#agents"),
+    ("tools.agent_", "connections#agents"),
+    ("tools.gateway_ws", "connections#agents"),
+    ("tools.turn_transport", "connections#agents"),
+    ("tools.mirror_", "connections#agents"),
+    ("tools.harness", "plugins#tool:harness"),
+    ("tools.mail", "plugins#tool:mail"),
+    ("tools.practice", "plugins#tool:practice"),
+    ("appearance.", "appearance"),
+    ("voice.", "voice"),
+)
+
+_GROUP_SECTION = {"characters": "characters", "connections": "connections", "voice": "voice",
+                  "tools": "plugins", "people": "people", "appearance": "appearance", "system": "system"}
+
+#: The dropdown presets of the duration and size settings, in each row's own unit.
+PRESETS: dict[str, tuple[int, ...]] = {
+    "system.backup_interval": (0, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 7 * 86400),
+    "system.encrypted_backup_interval_hours": (6, 12, 24, 48, 168),
+    "system.files_total_max": tuple(n * 1024 ** 3 for n in (1, 5, 10, 20, 50, 100)),
+    "people.lock_timeout_seconds": (60, 300, 600, 900, 1800, 3600, 2 * 3600, 4 * 3600, 86400),
+    "people.session_timeout_member": (900, 1800, 3600, 2 * 3600, 4 * 3600, 8 * 3600, 86400, 7 * 86400),
+    "people.session_timeout_restricted": (600, 900, 1800, 3600, 2 * 3600, 4 * 3600),
+    "people.remember_device_days": (0, 7, 30, 90, 180, 365),
+    "people.restricted_daily_upload_bytes": (0, *(n * 1024 ** 2 for n in (50, 100, 200, 500, 1024))),
+    "connections.image_cli_timeout": (60, 120, 300, 600, 1200),
+    "tools.agent_timeout": (120, 300, 600, 900, 1800, 3600, 2 * 3600),
+    "tools.mirror_poll": (2, 4, 10, 30, 60),
+    "tools.mirror_idle_max": (30, 60, 300, 900, 3600),
+    "tools.mirror_horizon_h": (24, 72, 168, 720),
+}
+
+
+def ui_section_for(key: str, group: str) -> str:
+    """Where Settings draws ``key``: the longest UI_SECTIONS prefix that matches; a plugin's
+    ``tools.<id>.x`` goes under that tool's ⚙ (``plugins#tool:<id>``); else its group."""
+    best = ""
+    target = ""
+    for prefix, where in UI_SECTIONS:
+        if key.startswith(prefix) and len(prefix) > len(best):
+            best, target = prefix, where
+    if target:
+        return target
+    parts = key.split(".")
+    if parts[0] == "tools" and len(parts) >= 3:
+        return f"plugins#tool:{parts[1]}"
+    return _GROUP_SECTION.get(group, "system")
+
+
+def _placed(d: SettingDef) -> SettingDef:
+    return d.model_copy(update={"ui_section": d.ui_section or ui_section_for(d.key, d.group),
+                                "presets": list(PRESETS.get(d.key, d.presets))})
+
+
+CORE_SETTINGS = tuple(_placed(d) for d in CORE_SETTINGS)
 
 #: key -> reason it was removed, so an old database row is reported rather than dropped.
 RETIRED: dict[str, str] = {}
@@ -519,9 +613,27 @@ def dynamic_choices(kind: str) -> list[str]:
             return ids
         if kind == "locales":
             return sorted(p.stem for p in (_frontend_dir() / "locales").glob("*.json"))
-    except (OSError, ValueError):
+        if kind == "connections":
+            # "" = no default. Imported here, at call time: this module must not import the
+            # app while config.py is still being imported.
+            from . import connections
+            return ["", *[c.id for c in connections.list_all_ro()]]
+    except (OSError, ValueError, ImportError):
         return []
+    except Exception:          # a database that cannot be read must not break the schema
+        return [""] if kind == "connections" else []
     return []
+
+
+def dynamic_choice_labels(kind: str) -> dict[str, str]:
+    """Display names for the choices ``dynamic_choices`` returns (connections: their names)."""
+    if kind != "connections":
+        return {}
+    try:
+        from . import connections
+        return {"": "None", **{c.id: c.name for c in connections.list_all_ro()}}
+    except Exception:
+        return {"": "None"}
 
 
 # --------------------------------------------------------------------------- #
@@ -650,6 +762,27 @@ def schema_document(defs: list[SettingDef] | None = None) -> dict:
     }
 
 
+#: Section and anchor names as the Settings dialog shows them (English), for docs/settings.md.
+_SECTION_NAMES = {"appearance": "Appearance", "account": "Account", "voice": "Voice",
+                  "characters": "Characters", "connections": "AI & Connections",
+                  "people": "People & Access", "plugins": "Plugins & Apps", "system": "System"}
+_ANCHOR_NAMES = {"network": "Network", "backups": "Backups", "signin-rules": "Sign-in rules",
+                 "machine": "Machine access", "restricted-limits": "Restricted limits",
+                 "list": "Connections", "images": "Image generation", "agents": "Agents",
+                 "lookups": "Built-in lookups"}
+
+
+def shown_in(ui_section: str) -> str:
+    """``people#signin-rules`` -> ``People & Access → Sign-in rules`` (docs)."""
+    sec, _, anchor = (ui_section or "").partition("#")
+    name = _SECTION_NAMES.get(sec, sec)
+    if not anchor:
+        return f"{name} → Advanced"
+    if anchor.startswith("tool:"):
+        return f"{name} → Apps & tools → ⚙ {anchor[5:]}"
+    return f"{name} → {_ANCHOR_NAMES.get(anchor, anchor)}"
+
+
 def markdown_reference() -> str:
     """``docs/settings.md``: one table per group, generated from :data:`CORE_SETTINGS`."""
     out = [
@@ -660,7 +793,8 @@ def markdown_reference() -> str:
         "",
         f"Schema version {SCHEMA_VERSION}. Every setting below can be read with `GET /api/settings` and "
         "changed with `PATCH /api/settings` (the `manage_settings` permission), or in "
-        "**Settings** in the app. How the store works, and how an environment variable "
+        "**Settings** in the app (the *Shown in* column says where; a search box at the top of "
+        "Settings finds any of them by name). How the store works, and how an environment variable "
         "interacts with it, is in [Settings store](#how-the-store-works) at the end.",
         "",
         "**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy "
@@ -677,8 +811,8 @@ def markdown_reference() -> str:
             out += ["*Provided by the voice add-on once it is installed; see its documentation.*"
                     if gid == "voice" else "*None yet.*", ""]
             continue
-        out += ["| Key | Type | Default | Level | Restart | Env | What it does |",
-                "|---|---|---|---|---|---|---|"]
+        out += ["| Key | Type | Default | Level | Restart | Env | Shown in | What it does |",
+                "|---|---|---|---|---|---|---|---|"]
         for d in rows:
             default = "" if d.default in (None, "") else f"`{d.default}`"
             if d.type == "boolean":
@@ -697,7 +831,8 @@ def markdown_reference() -> str:
             desc_txt = d.description.replace("|", "\\|") + rng
             sec = (" *(secret, write-only)*" if d.secret else "") + (" *(host control)*" if d.owner_only else "")
             out.append(f"| `{d.key}` | {d.type} | {default} | {d.level} | "
-                       f"{'yes' if d.restart_required else ''} | {env} | {desc_txt}{sec} |")
+                       f"{'yes' if d.restart_required else ''} | {env} | {shown_in(d.ui_section)} | "
+                       f"{desc_txt}{sec} |")
         out.append("")
     out += [
         "## How the store works",

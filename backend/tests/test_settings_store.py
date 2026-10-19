@@ -413,3 +413,65 @@ def test_a_manage_settings_grant_is_not_host_control(world, owner):
         r = member.patch("/api/settings", json=body)
         assert r.status_code == 403, (body, r.text)
     assert member.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# 3.2: where Settings draws each row, and the dropdown presets
+# --------------------------------------------------------------------------- #
+
+
+def test_every_setting_names_a_settings_section():
+    from app import settings_schema as S
+    sections = {"appearance", "account", "voice", "characters", "connections", "people", "plugins", "system"}
+    for d in S.CORE_SETTINGS:
+        sec = d.ui_section.split("#", 1)[0]
+        assert sec in sections, f"{d.key}: {d.ui_section!r}"
+        assert d.public()["ui_section"] == d.ui_section
+
+
+def test_ui_sections_follow_the_settings_plan():
+    from app import settings_schema as S
+    where = {d.key: d.ui_section for d in S.CORE_SETTINGS}
+    assert where["people.lock_timeout_seconds"] == "people#signin-rules"
+    assert where["people.remember_device_days"] == "people#signin-rules"
+    assert where["people.restricted_daily_turns"] == "people#restricted-limits"
+    assert where["people.machine_loopback_trust"] == "people#machine"
+    assert where["system.backup_interval"] == "system#backups"
+    assert where["system.public_url"] == "system#network"
+    assert where["system.log_file"] == "system"                 # under System -> Advanced
+    assert where["tools.livetools_enabled"] == "plugins#lookups"
+    assert where["tools.harness_port"] == "plugins#tool:harness"
+    assert where["connections.studioforge_panel_url"] == "plugins#tool:studioforge"
+    assert where["tools.agent_timeout"] == "connections#agents"
+    assert where["connections.image_jobs"] == "connections#images"
+    assert where["appearance.default_theme"] == "appearance"
+    # A plugin's own keys go under its tool's gear unless the table says otherwise.
+    assert S.ui_section_for("tools.weather.units", "tools") == "plugins#tool:weather"
+
+
+def test_duration_and_size_presets_are_valid_values():
+    from app import settings_schema as S
+    with_presets = [d for d in S.CORE_SETTINGS if d.presets]
+    assert {d.key for d in with_presets} >= {"people.lock_timeout_seconds", "system.files_total_max",
+                                             "people.remember_device_days", "system.backup_interval"}
+    for d in with_presets:
+        assert d.unit in ("seconds", "hours", "days", "bytes"), d.key
+        for v in d.presets:
+            assert S.coerce(d, v) == v, f"{d.key}: preset {v} is refused"
+    # The default sits among the presets, so a fresh install shows a named choice.
+    for key in ("people.lock_timeout_seconds", "people.session_timeout_member", "system.backup_interval",
+                "system.files_total_max", "people.restricted_daily_upload_bytes"):
+        d = S.get_def(key)
+        assert d.default in d.presets, key
+
+
+def test_the_default_connection_is_a_choice_of_connections(world):
+    from app import connections, settings_schema as S
+    c = connections.create(type="openai_compatible", name="Box", base_url="http://127.0.0.1:9/v1")
+    d = S.get_def("connections.default").public()
+    assert d["type"] == "choice" and d["choices_from"] == "connections"
+    assert "" in d["choices"] and c.id in d["choices"]
+    assert d["choice_labels"][c.id] == "Box"
+    assert S.coerce(S.get_def("connections.default"), c.id) == c.id
+    with pytest.raises(S.SettingError):
+        S.coerce(S.get_def("connections.default"), "nope")

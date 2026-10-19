@@ -60,11 +60,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "https://chat.example.net",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Network",
       "since": 1,
       "type": "url",
+      "ui_section": "system#network",
       "unit": ""
     },
     {
@@ -88,11 +90,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Network",
       "since": 1,
       "type": "boolean",
+      "ui_section": "system#network",
       "unit": ""
     },
     {
@@ -119,11 +123,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Network",
       "since": 1,
       "type": "choice",
+      "ui_section": "system#network",
       "unit": ""
     },
     {
@@ -147,11 +153,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Network",
       "since": 1,
       "type": "string",
+      "ui_section": "system",
       "unit": ""
     },
     {
@@ -175,11 +183,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Network",
       "since": 1,
       "type": "integer",
+      "ui_section": "system",
       "unit": ""
     },
     {
@@ -187,7 +197,7 @@
       "choices": [],
       "choices_from": "",
       "default": 21600,
-      "description": "Seconds between automatic database snapshots (6 hours by default). 0 turns them off.",
+      "description": "How often the database is copied aside automatically (every 6 hours by default). Off turns it off.",
       "env": "DISPATCH_BACKUP_INTERVAL",
       "env_names": [
         "DISPATCH_BACKUP_INTERVAL",
@@ -203,11 +213,21 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        0,
+        3600,
+        10800,
+        21600,
+        43200,
+        86400,
+        604800
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "integer",
+      "ui_section": "system#backups",
       "unit": "seconds"
     },
     {
@@ -231,11 +251,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "integer",
+      "ui_section": "system#backups",
       "unit": ""
     },
     {
@@ -256,11 +278,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "boolean",
+      "ui_section": "system#backups",
       "unit": ""
     },
     {
@@ -268,7 +292,7 @@
       "choices": [],
       "choices_from": "",
       "default": 24,
-      "description": "Hours between scheduled encrypted backups.",
+      "description": "How often a scheduled encrypted backup is written.",
       "env": null,
       "env_names": [],
       "group": "system",
@@ -281,11 +305,19 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        6,
+        12,
+        24,
+        48,
+        168
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "integer",
+      "ui_section": "system#backups",
       "unit": "hours"
     },
     {
@@ -306,11 +338,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "integer",
+      "ui_section": "system#backups",
       "unit": ""
     },
     {
@@ -331,11 +365,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Backups",
       "since": 1,
       "type": "boolean",
+      "ui_section": "system#backups",
       "unit": ""
     },
     {
@@ -356,11 +392,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": true,
       "section": "Backups",
       "since": 1,
       "type": "secret",
+      "ui_section": "system#backups",
       "unit": ""
     },
     {
@@ -384,11 +422,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Diagnostics",
       "since": 1,
       "type": "path",
+      "ui_section": "system",
       "unit": ""
     },
     {
@@ -396,7 +436,7 @@
       "choices": [],
       "choices_from": "",
       "default": 21474836480,
-      "description": "Total bytes the File Server may hold before uploads are refused (20 GiB by default).",
+      "description": "How much the File Server may hold before uploads are refused (20 GB by default).",
       "env": "DISPATCH_FILES_TOTAL_MAX",
       "env_names": [
         "DISPATCH_FILES_TOTAL_MAX",
@@ -412,11 +452,20 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        1073741824,
+        5368709120,
+        10737418240,
+        21474836480,
+        53687091200,
+        107374182400
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Limits",
       "since": 1,
       "type": "integer",
+      "ui_section": "system",
       "unit": "bytes"
     },
     {
@@ -440,11 +489,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "mailto:you@example.com",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Notifications",
       "since": 1,
       "type": "string",
+      "ui_section": "system",
       "unit": ""
     },
     {
@@ -452,7 +503,7 @@
       "choices": [],
       "choices_from": "",
       "default": 600,
-      "description": "Seconds of inactivity before an Owner or Admin session locks.",
+      "description": "How long an Owner or Admin session may sit idle before it locks.",
       "env": null,
       "env_names": [],
       "group": "people",
@@ -465,11 +516,23 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [
+        60,
+        300,
+        600,
+        900,
+        1800,
+        3600,
+        7200,
+        14400,
+        86400
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Sessions",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#signin-rules",
       "unit": "seconds"
     },
     {
@@ -477,7 +540,7 @@
       "choices": [],
       "choices_from": "",
       "default": 3600,
-      "description": "Seconds of inactivity before a Member session ends.",
+      "description": "How long a Member session may sit idle before it ends.",
       "env": null,
       "env_names": [],
       "group": "people",
@@ -490,11 +553,22 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [
+        900,
+        1800,
+        3600,
+        7200,
+        14400,
+        28800,
+        86400,
+        604800
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Sessions",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#signin-rules",
       "unit": "seconds"
     },
     {
@@ -502,7 +576,7 @@
       "choices": [],
       "choices_from": "",
       "default": 1800,
-      "description": "Seconds of inactivity before a Restricted profile's session ends.",
+      "description": "How long a Restricted profile's session may sit idle before it ends.",
       "env": null,
       "env_names": [],
       "group": "people",
@@ -515,11 +589,20 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [
+        600,
+        900,
+        1800,
+        3600,
+        7200,
+        14400
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Sessions",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#signin-rules",
       "unit": "seconds"
     },
     {
@@ -527,12 +610,12 @@
       "choices": [],
       "choices_from": "",
       "default": 0,
-      "description": "0 turns it off. A number of days offers a 'keep this device unlocked' box on sign-in; turning it off forgets every remembered device.",
+      "description": "Off, or how many days a device that ticks 'keep this device signed in' at sign-in stays signed in (renewed by use). Turning it off forgets every remembered device.",
       "env": null,
       "env_names": [],
       "group": "people",
       "key": "people.remember_device_days",
-      "label": "Remember this device (days)",
+      "label": "Remember signed-in devices",
       "legacy_prefix_alias": true,
       "level": "basic",
       "max": 365.0,
@@ -540,11 +623,20 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [
+        0,
+        7,
+        30,
+        90,
+        180,
+        365
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Sessions",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#signin-rules",
       "unit": "days"
     },
     {
@@ -565,11 +657,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Machines",
       "since": 1,
       "type": "boolean",
+      "ui_section": "people#machine",
       "unit": ""
     },
     {
@@ -596,11 +690,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Sessions",
       "since": 1,
       "type": "choice",
+      "ui_section": "people#signin-rules",
       "unit": ""
     },
     {
@@ -624,11 +720,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Restricted limits",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#restricted-limits",
       "unit": ""
     },
     {
@@ -652,11 +750,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Restricted limits",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#restricted-limits",
       "unit": ""
     },
     {
@@ -680,11 +780,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Restricted limits",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#restricted-limits",
       "unit": ""
     },
     {
@@ -692,7 +794,7 @@
       "choices": [],
       "choices_from": "",
       "default": 209715200,
-      "description": "How many bytes of pictures and files one Restricted device or profile may upload per day.",
+      "description": "How much in pictures and files one Restricted device or profile may upload per day.",
       "env": "DISPATCH_DECOY_UPLOAD_QUOTA",
       "env_names": [
         "DISPATCH_DECOY_UPLOAD_QUOTA",
@@ -700,7 +802,7 @@
       ],
       "group": "people",
       "key": "people.restricted_daily_upload_bytes",
-      "label": "Restricted: upload bytes per day",
+      "label": "Restricted: uploads per day",
       "legacy_prefix_alias": true,
       "level": "advanced",
       "max": null,
@@ -708,11 +810,20 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [
+        0,
+        52428800,
+        104857600,
+        209715200,
+        524288000,
+        1073741824
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Restricted limits",
       "since": 1,
       "type": "integer",
+      "ui_section": "people#restricted-limits",
       "unit": "bytes"
     },
     {
@@ -741,11 +852,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
       "type": "choice",
+      "ui_section": "characters",
       "unit": ""
     },
     {
@@ -769,11 +882,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
       "type": "boolean",
+      "ui_section": "characters",
       "unit": ""
     },
     {
@@ -794,11 +909,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Safety",
       "since": 1,
       "type": "boolean",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -827,11 +944,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Safety",
       "since": 1,
       "type": "list",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -855,17 +974,23 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Safety",
       "since": 1,
       "type": "boolean",
+      "ui_section": "connections",
       "unit": ""
     },
     {
-      "choice_labels": {},
-      "choices": [],
-      "choices_from": "",
+      "choice_labels": {
+        "": "None"
+      },
+      "choices": [
+        ""
+      ],
+      "choices_from": "connections",
       "default": "",
       "description": "The connection a new character uses when you do not pick one.",
       "env": null,
@@ -880,11 +1005,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
-      "type": "string",
+      "type": "choice",
+      "ui_section": "connections#list",
       "unit": ""
     },
     {
@@ -908,11 +1035,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "url",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -936,11 +1065,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "url",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -964,11 +1095,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "url",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -1000,11 +1133,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "choice",
+      "ui_section": "connections#images",
       "unit": ""
     },
     {
@@ -1028,11 +1163,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "string",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -1040,7 +1177,7 @@
       "choices": [],
       "choices_from": "",
       "default": 300,
-      "description": "Seconds to wait for one picture from the image command.",
+      "description": "How long to wait for one picture from the image command.",
       "env": "DISPATCH_IMAGE_CLI_TIMEOUT",
       "env_names": [
         "DISPATCH_IMAGE_CLI_TIMEOUT",
@@ -1056,11 +1193,19 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        60,
+        120,
+        300,
+        600,
+        1200
+      ],
       "restart_required": false,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections",
       "unit": "seconds"
     },
     {
@@ -1084,11 +1229,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "string",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -1112,11 +1259,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Image server",
       "since": 1,
       "type": "url",
+      "ui_section": "connections",
       "unit": ""
     },
     {
@@ -1140,11 +1289,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "StudioForge",
       "since": 1,
       "type": "boolean",
+      "ui_section": "plugins#tool:studioforge",
       "unit": ""
     },
     {
@@ -1168,11 +1319,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "StudioForge",
       "since": 1,
       "type": "url",
+      "ui_section": "plugins#tool:studioforge",
       "unit": ""
     },
     {
@@ -1196,11 +1349,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "StudioForge",
       "since": 1,
       "type": "url",
+      "ui_section": "plugins#tool:studioforge",
       "unit": ""
     },
     {
@@ -1221,11 +1376,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "Lookups",
       "since": 1,
       "type": "boolean",
+      "ui_section": "plugins#lookups",
       "unit": ""
     },
     {
@@ -1248,11 +1405,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "string",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1260,7 +1419,7 @@
       "choices": [],
       "choices_from": "",
       "default": 900,
-      "description": "Seconds an agent may take to answer before the turn is abandoned.",
+      "description": "How long an agent may take to answer before the turn is abandoned.",
       "env": "DISPATCH_AGENT_TIMEOUT",
       "env_names": [
         "DISPATCH_AGENT_TIMEOUT",
@@ -1276,11 +1435,21 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        120,
+        300,
+        600,
+        900,
+        1800,
+        3600,
+        7200
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections#agents",
       "unit": "seconds"
     },
     {
@@ -1304,11 +1473,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1340,11 +1511,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "choice",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1376,11 +1549,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "choice",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1404,11 +1579,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "boolean",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1416,7 +1593,7 @@
       "choices": [],
       "choices_from": "",
       "default": 4,
-      "description": "Seconds between checks while busy.",
+      "description": "How often the mirror checks while busy.",
       "env": "DISPATCH_MIRROR_POLL",
       "env_names": [
         "DISPATCH_MIRROR_POLL",
@@ -1432,11 +1609,19 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        2,
+        4,
+        10,
+        30,
+        60
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections#agents",
       "unit": "seconds"
     },
     {
@@ -1460,11 +1645,19 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        30,
+        60,
+        300,
+        900,
+        3600
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections#agents",
       "unit": "seconds"
     },
     {
@@ -1488,11 +1681,18 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [
+        24,
+        72,
+        168,
+        720
+      ],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "integer",
+      "ui_section": "connections#agents",
       "unit": "hours"
     },
     {
@@ -1516,11 +1716,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Agents",
       "since": 1,
       "type": "string",
+      "ui_section": "connections#agents",
       "unit": ""
     },
     {
@@ -1552,11 +1754,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Harness",
       "since": 1,
       "type": "choice",
+      "ui_section": "plugins#tool:harness",
       "unit": ""
     },
     {
@@ -1580,11 +1784,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Harness",
       "since": 1,
       "type": "string",
+      "ui_section": "plugins#tool:harness",
       "unit": ""
     },
     {
@@ -1608,11 +1814,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Harness",
       "since": 1,
       "type": "integer",
+      "ui_section": "plugins#tool:harness",
       "unit": ""
     },
     {
@@ -1636,11 +1844,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Harness",
       "since": 1,
       "type": "url",
+      "ui_section": "plugins#tool:harness",
       "unit": ""
     },
     {
@@ -1672,11 +1882,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "MailForge",
       "since": 1,
       "type": "choice",
+      "ui_section": "plugins#tool:mail",
       "unit": ""
     },
     {
@@ -1700,11 +1912,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "MailForge",
       "since": 1,
       "type": "path",
+      "ui_section": "plugins#tool:mail",
       "unit": ""
     },
     {
@@ -1728,11 +1942,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "MailForge",
       "since": 1,
       "type": "url",
+      "ui_section": "plugins#tool:mail",
       "unit": ""
     },
     {
@@ -1764,11 +1980,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Clients pane",
       "since": 1,
       "type": "choice",
+      "ui_section": "plugins#tool:practice",
       "unit": ""
     },
     {
@@ -1792,11 +2010,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Clients pane",
       "since": 1,
       "type": "url",
+      "ui_section": "plugins#tool:practice",
       "unit": ""
     },
     {
@@ -1820,11 +2040,13 @@
       "owner": "core",
       "owner_only": true,
       "placeholder": "",
+      "presets": [],
       "restart_required": true,
       "secret": false,
       "section": "Clients pane",
       "since": 1,
       "type": "path",
+      "ui_section": "plugins#tool:practice",
       "unit": ""
     },
     {
@@ -1859,11 +2081,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
       "type": "choice",
+      "ui_section": "appearance",
       "unit": ""
     },
     {
@@ -1893,11 +2117,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
       "type": "choice",
+      "ui_section": "appearance",
       "unit": ""
     },
     {
@@ -1924,11 +2150,13 @@
       "owner": "core",
       "owner_only": false,
       "placeholder": "",
+      "presets": [],
       "restart_required": false,
       "secret": false,
       "section": "",
       "since": 1,
       "type": "choice",
+      "ui_section": "appearance",
       "unit": ""
     }
   ]
