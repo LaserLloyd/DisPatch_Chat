@@ -196,7 +196,7 @@ def test_only_manage_characters_may_change_characters(world, owner):
 # --------------------------------------------------------------------------- #
 
 #: Names and places from the maintainer's own roster and notes that must never ship in a pack.
-_PERSONAL = re.compile(r"(?i)\b(lisbon|portugal|wikka|nova|scout|atlas|lloyd|laserlloyd|sam\b|jlloy|@)")
+_PERSONAL = re.compile(r"(?i)\b(lisbon|portugal|wikka|nova|scout|atlas|lloyd|laserlloyd|sam\b|jlloy|@)")  # scrub-ok: the deny-list of names a pack must never contain
 
 
 def test_the_packs_load_and_every_character_fits_the_character_manifest():
