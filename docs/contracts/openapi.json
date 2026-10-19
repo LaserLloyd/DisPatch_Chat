@@ -1431,6 +1431,32 @@
         "title": "CharacterPatchIn",
         "type": "object"
       },
+      "ClearIn": {
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Id",
+            "type": "string"
+          },
+          "order": {
+            "default": "newest",
+            "pattern": "^(newest|oldest)$",
+            "title": "Order",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ClearIn",
+        "type": "object"
+      },
       "CommentIn": {
         "properties": {
           "comment": {
@@ -4482,6 +4508,42 @@
           }
         },
         "summary": "Chat Images"
+      }
+    },
+    "/api/apps/imagestudio/clear": {
+      "post": {
+        "operationId": "clear_api_apps_imagestudio_clear_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear"
       }
     },
     "/api/apps/imagestudio/generate": {

@@ -1368,6 +1368,7 @@
     "GET /tools/{tool_id}/{rel:path}",
     "PATCH /api/messages/{message_id}/checklist",
     "POST /api/advisor/digest",
+    "POST /api/apps/imagestudio/clear",
     "POST /api/apps/imagestudio/generate",
     "POST /api/apps/jobboard",
     "POST /api/apps/jobboard/find",

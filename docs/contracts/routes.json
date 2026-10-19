@@ -257,6 +257,17 @@
     },
     {
       "method": "POST",
+      "path": "/api/apps/imagestudio/clear",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/api/apps/imagestudio/generate",
       "requirement": {
         "machine": [

@@ -56,7 +56,8 @@ _DEVICE_MAX_AGE = 2 * 365 * 86400
 
 #: The one sentence the Restricted UI shows so a child (and a parent) know the
 #: activity summary exists. The UI renders its own localised copy of it.
-DISCLOSURE = "The owner can see a summary of what happens in this profile (how many chats and uploads, not what was said)."
+DISCLOSURE = ("The owner sees a summary of what happens in this profile. Chats are kept on the host computer, "
+              "and the grown-ups who use DisPatch here can open them.")
 
 
 # --------------------------------------------------------------------------- #
