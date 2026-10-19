@@ -181,3 +181,166 @@ def test_a_member_opens_a_voice_call(ext_env):
         for k in made:
             k.__exit__(None, None, None)
 
+
+# P-3 ------------------------------------------------------------------------ #
+# "Anonymous is the same as a locked session": a Restricted child who locks the screen (or
+# whose session times out) stays under their own profile's quiet hours and budgets; a guest
+# on a device nobody bound gets the default Restricted budgets, over HTTP and WebSocket.
+
+from datetime import datetime, timedelta  # noqa: E402
+
+from app import accounts, auth  # noqa: E402
+
+TABLET = ("203.0.113.97", 44007)
+
+
+def _inside_now() -> str:
+    now = datetime.now()
+    return f"{(now - timedelta(minutes=5)).strftime('%H:%M')}-{(now + timedelta(minutes=5)).strftime('%H:%M')}"
+
+
+def _kid_on_tablet(world, **budgets):
+    owner = world.create_owner(world.client())
+    mia = world.person(owner, "Mia", "restricted", **({"budgets": budgets} if budgets else {}))
+    tablet = world.client(TABLET)
+    assert world.login(tablet, profile_id=mia["id"]).status_code == 200
+    return owner, mia, tablet
+
+
+def test_a_restricted_sign_in_keeps_the_device_as_that_profiles(world):
+    owner, mia, tablet = _kid_on_tablet(world)
+    assert tablet.post("/api/auth/lock").status_code == 200
+    me = tablet.get("/api/auth/me").json()
+    assert (me["kind"], me["profile"]["id"]) == ("profile", mia["id"]), me
+    devs = owner.get("/api/people/devices").json()["devices"]
+    assert [d for d in devs if d.get("default_profile_id") == mia["id"]], devs
+
+
+def test_locking_does_not_escape_quiet_hours(world):
+    owner, mia, tablet = _kid_on_tablet(world)
+    assert owner.patch(f"/api/people/{mia['id']}", json={"budgets": {"quiet_hours": _inside_now()}}).status_code == 200
+    r = tablet.get("/api/threads")
+    assert r.status_code == 403 and r.json()["error"]["code"] == "quiet_hours", r.text
+    assert tablet.post("/api/auth/lock").status_code == 200
+    r = tablet.get("/api/threads")
+    assert r.status_code == 403 and r.json()["error"]["code"] == "quiet_hours", r.text
+    with tablet.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
+        assert ws.receive_json().get("code") == "quiet_hours"
+
+
+def test_a_daily_budget_is_counted_across_lock_and_unlock(world):
+    owner, mia, tablet = _kid_on_tablet(world, threads=1)
+    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200
+    assert tablet.post("/api/auth/lock").status_code == 200
+    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 429
+    assert world.login(tablet, profile_id=mia["id"]).status_code == 200
+    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 429
+
+
+def test_an_expired_session_does_not_escape_either(world):
+    owner, mia, tablet = _kid_on_tablet(world, threads=1)
+    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200
+    for s in list(auth._sessions.values()):
+        if s.profile_id == mia["id"]:
+            s.last_seen -= 4000                       # past the restricted 1800 s
+    assert tablet.get("/api/auth/status").json()["signed_in"] is False
+    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 429
+
+
+def test_lock_rebinds_a_device_unbound_while_the_child_was_signed_in(world):
+    owner, mia, tablet = _kid_on_tablet(world)
+    dev = next(d for d in owner.get("/api/people/devices").json()["devices"]
+               if d.get("default_profile_id") == mia["id"])
+    accounts.bind_device(dev["id"], None)
+    assert tablet.post("/api/auth/lock").status_code == 200
+    assert accounts.default_profile_for_device(dev["id"]).id == mia["id"]
+
+
+def test_a_device_bound_to_someone_else_is_left_alone(world):
+    owner = world.create_owner(world.client())
+    mia = world.person(owner, "Mia", "restricted")
+    leo = world.person(owner, "Leo", "restricted")
+    tablet = world.client(TABLET)
+    assert world.login(tablet, profile_id=leo["id"]).status_code == 200      # Leo's tablet
+    assert world.login(tablet, profile_id=mia["id"]).status_code == 200      # Mia borrows it
+    assert tablet.post("/api/auth/lock").status_code == 200
+    me = tablet.get("/api/auth/me").json()
+    assert me["profile"]["id"] == leo["id"], me
+
+
+def test_an_unbound_guest_gets_the_default_restricted_budgets(world, monkeypatch):
+    world.create_owner(world.client())
+    monkeypatch.setattr(world.main, "DECOY_THREAD_QUOTA", 1)
+    monkeypatch.setattr(world.main, "DECOY_TURN_QUOTA", 1)
+    guest = world.client(("203.0.113.98", 44008))
+    me = guest.get("/api/auth/me").json()
+    assert me["kind"] == "anonymous" and me["restricted"] is True
+    assert guest.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200
+    assert guest.post("/api/threads", json={"bot_id": "alpha"}).status_code == 429
+    me = guest.get("/api/auth/me").json()
+    assert set(me["limits"]) >= {"turns", "threads", "feedback", "upload_mb"}, me
+    assert me["today"].get("action:thread") == 1, me      # spent; the refused one is not counted
+    with guest.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "create_thread", "bot_id": "alpha"})
+        f = ws.receive_json()
+        while f.get("type") not in ("error", "thread_created"):
+            f = ws.receive_json()
+        assert f["type"] == "error", f
+
+
+# The voice socket: before 2026-10-19 it skipped the device step, so a device-bound
+# Restricted profile's call ran as an anonymous guest (per-address budget, no quiet hours).
+
+def _ext_kid(c, client, **budgets):
+    mia = _person(c, "Mia", "restricted", **({"budgets": budgets} if budgets else {}))
+    tablet = client(TABLET)
+    assert tablet.post("/api/auth/login", json={"profile_id": mia["id"]}).status_code == 200
+    tid = thread_for(tablet, "alpha")
+    return mia, tablet, tid
+
+
+def test_a_locked_voice_call_keeps_the_profiles_quiet_hours(ext_env):
+    c, _ = ext_env
+    KNOBS.handler_mode = "hold"
+    install()
+    client, made = _household(c)
+    try:
+        mia, tablet, tid = _ext_kid(c, client)
+        assert tablet.post("/api/auth/lock").status_code == 200
+        with tablet.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
+            assert json.loads(ws.receive_text())["locked"] is True
+            ws.send_text("live?")
+            assert json.loads(ws.receive_text())["live"] is True
+            accounts.update_profile(mia["id"], budgets={"quiet_hours": _inside_now()})
+            ws.send_text("live?")
+            assert json.loads(ws.receive_text())["live"] is False   # the add-on ends the call
+        with pytest.raises(WebSocketDisconnect) as e:
+            with tablet.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
+                ws.receive_text()
+        assert e.value.code == 1008
+    finally:
+        for k in made:
+            k.__exit__(None, None, None)
+
+
+def test_a_locked_voice_call_spends_the_profiles_own_budget(ext_env):
+    c, _ = ext_env
+    KNOBS.handler_mode = "submit"
+    install()
+    client, made = _household(c)
+    try:
+        mia, tablet, tid = _ext_kid(c, client, turns=1)
+        assert tablet.post("/api/auth/lock").status_code == 200
+        with tablet.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
+            assert json.loads(ws.receive_text())["locked"] is True
+            ws.send_text("one")
+            assert json.loads(ws.receive_text())["id"]
+            with pytest.raises(PermissionError, match="Daily message limit"):
+                c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "two"))
+        assert accounts.usage_get(mia["id"], "action:turn") == 1
+    finally:
+        for k in made:
+            k.__exit__(None, None, None)

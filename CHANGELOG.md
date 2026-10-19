@@ -24,6 +24,16 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   settings, cloning, the lab, the rig, models) stays `manage_plugins`. A Member sees Settings -> Voice
   once the add-on is mounted. New: `Requirement.not_restricted`, `permissions` in
   `GET /api/auth/status`, and `shell.can(permission)` for extension frontends.
+- **Anonymous is the same as a locked session.** A Restricted child could lock the screen (or let
+  the session time out) and come back as an anonymous guest - with a fresh per-address budget and
+  no quiet hours. Now the first Restricted sign-in on an unbound device binds the device to that
+  profile (and locking re-binds one that was unbound meanwhile), so the locked device stays under
+  the profile's quiet hours, minutes and daily budgets, counted across lock and unlock. The voice
+  socket resolves its caller like the HTTP gate and `/ws` (it used to skip the device step): a
+  device-bound Restricted profile's call checks quiet hours at the handshake and while it runs
+  (`session_live`), counts its minutes, and spends the profile's own turn budget. A guest on an
+  unbound device keeps the default Restricted budgets (`DISPATCH_DECOY_*`), and `GET /api/auth/me`
+  now shows a guest those limits and today's use.
 
 ### Voice (the host side of DisPatch Voice 1.6)
 

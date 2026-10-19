@@ -121,6 +121,28 @@ def public_profile(p: accounts.Profile | None) -> dict | None:
     return {"id": p.id, "name": p.name, "role": p.role, "avatar": p.avatar}
 
 
+def keep_device_for_restricted(device_id: str | None, profile: accounts.Profile | None) -> bool:
+    """A device a Restricted profile signs in on stays that profile's device.
+
+    "Anonymous is the same as a locked session" (the owner, 2026-10-19): locking the
+    screen, an idle timeout or a dropped session cookie must not turn a child's device
+    into a guest with its own (per-address) budgets and no quiet hours. So the first
+    Restricted sign-in on a device nobody bound binds it to that profile - from then on
+    the locked device opens as that profile, under its quiet hours, minutes and daily
+    budgets (People & Profiles > This device shows it; an Owner or Admin can unbind or
+    re-bind it). A device already bound to someone else is left alone. True if bound."""
+    if not device_id or profile is None or profile.role != Role.RESTRICTED.value or profile.disabled:
+        return False
+    if accounts.default_profile_for_device(device_id) is not None:
+        return False
+    with contextlib.suppress(accounts.AccountError):
+        accounts.bind_device(device_id, profile.id)
+        accounts.log_activity("device_bound", profile_id=profile.id, subject=device_id[:12],
+                              detail="restricted sign-in keeps the device", category="audit")
+        return True
+    return False
+
+
 def session_response(request: Request, body: dict, profile: accounts.Profile | None, *,
                      persistent: bool = False) -> JSONResponse:
     """Issue a session for ``profile`` and attach it (and the device cookie) to a reply."""
@@ -128,10 +150,13 @@ def session_response(request: Request, body: dict, profile: accounts.Profile | N
     # remembered (or already has one). A plain sign-in leaves the response with the
     # session cookie alone.
     have = _device_token(request)
-    if have or persistent:
+    restricted = profile is not None and profile.role == Role.RESTRICTED.value
+    if have or persistent or restricted:
         dev, new_dev_tok = device_for(request)
     else:
         dev, new_dev_tok = None, None
+    if restricted:
+        keep_device_for_restricted(dev, profile)
     token = auth.issue_session(persistent=persistent, user_agent=_ua(request),
                                profile_id=profile.id if profile else None, device_id=dev)
     sess = auth.get_session(token)
@@ -306,6 +331,10 @@ def principal_document(request: Request) -> dict:
     if prof is not None and prof.role == "restricted":
         doc["today"] = accounts.usage_today(prof.id)
         doc["limits"] = {**default_limits(), **prof.budgets}
+    elif pr.kind == "anonymous":
+        # A guest is a Restricted caller with the default budgets, charged to its address.
+        doc["today"] = accounts.usage_today(policy.request_quota_ip(request))
+        doc["limits"] = default_limits()
     return doc
 
 

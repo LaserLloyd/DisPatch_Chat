@@ -774,12 +774,17 @@ Every gate stays in DisPatch; an extension only ever receives what passed it.
 - Locked devices (2.3.4): Safe Mode reads `/api/extensions` (the mount rows
   and each one's `locked_status`, nothing else) and `/ext/*` (GET/HEAD), gets
   `features.extensions` only, and mounts the frontend told it is locked.
-  Every extension ROUTE stays operator-only (403). Its websockets are open to
-  it on a `safe` bot's thread only, and every turn from there runs locked.
+  Every extension ROUTE refuses it (403), the voice user's reads included. Its
+  websockets are open to it on a `safe` bot's thread only, and every turn from
+  there runs locked. A locked socket is resolved like the HTTP gate: a device
+  bound to a Restricted profile is that profile (its quiet hours and minutes end
+  the call through `session_live`, its turns spend its own daily budget); only a
+  device nobody bound is an anonymous guest on the per-address defaults.
 - Websockets: Origin==Host, the tier and an existing thread (a `safe` bot's
   for a locked device) are checked inline before `accept` (HTTP middleware
   never sees a websocket).
-- HTTP: the operator dependency on every route, the Safe-Mode block list, never
+- HTTP: the declared requirement on every route (`manage_plugins`, or `use_voice`
+  for the voice user's reads), the Safe-Mode block list, never
   the machine-inbound surface, body ceilings before the body is read.
 - Static: an asset-type allowlist, no documents, `nosniff`, a deny-all CSP.
 - Data: the context exposes `BotView`s and named paths — never provider blocks,

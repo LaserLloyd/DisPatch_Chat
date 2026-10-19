@@ -8076,6 +8076,12 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
 
 @app.post("/api/auth/lock")
 async def auth_lock(request: Request):
+    # A Restricted profile locking its screen leaves the device as that profile's, not a
+    # fresh guest's (people_api.keep_device_for_restricted): the lock is no way out of its
+    # quiet hours or budgets.
+    pr = policy.of(request).principal
+    if pr.kind == "profile" and pr.is_restricted and pr.profile is not None:
+        people_api.keep_device_for_restricted(_device_id_of(request), pr.profile)
     auth.revoke(request.cookies.get(COOKIE_NAME))
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(COOKIE_NAME, path="/")
@@ -13587,6 +13593,15 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
                 await _discard_run(adopted)
             raise PermissionError("Unlock for full access")
         ip = extensions.locked_client_ip(thread_id)
+        kid = accounts.get_profile(ip) if ip is not None else None
+        if kid is not None and kid.role == "restricted":
+            # The socket belongs to a Restricted PROFILE (extensions.thread_websocket_endpoint):
+            # its quiet hours and minutes hold for a spoken turn exactly as for a typed one.
+            limited = limits.check(policy.profile_principal(kid))
+            if limited is not None:
+                if adopted is not None:
+                    await _discard_run(adopted)
+                raise PermissionError(limited.detail)
         if ip is not None and not _decoy_action_allowed(ip, "turn", DECOY_TURN_QUOTA):
             if adopted is not None:
                 await _discard_run(adopted)

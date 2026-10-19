@@ -263,14 +263,17 @@ def test_session_timeouts_follow_the_role_and_the_profile(world, owner):
         return next(s for s in auth._sessions.values() if s.profile_id == mia["id"])
 
     mia_session().last_seen -= 1700                         # the restricted default is 1800 s
-    assert c.get("/api/auth/me").json()["profile"] is not None      # (this request slides the window)
+    assert c.get("/api/auth/status").json()["signed_in"] is True    # (this request slides the window)
     mia_session().last_seen -= 1900
-    assert c.get("/api/auth/me").json()["profile"] is None
+    assert c.get("/api/auth/status").json()["signed_in"] is False
+    # The session is gone, the device is still Mia's (2026-10-19: no way out of her limits).
+    me = c.get("/api/auth/me").json()
+    assert (me["kind"], me["profile"]["id"]) == ("profile", mia["id"]), me
     # A per-profile override wins over the role default.
     assert owner.patch(f"/api/people/{mia['id']}", json={"session_timeout": 60}).status_code == 200
     world.login(c, profile_id=mia["id"])
     mia_session().last_seen -= 120
-    assert c.get("/api/auth/me").json()["profile"] is None
+    assert c.get("/api/auth/status").json()["signed_in"] is False
 
 
 # --------------------------------------------------------------------------- #

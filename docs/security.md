@@ -117,9 +117,20 @@ the log says so loudly.
   conversations, ratings and upload megabytes per day, **minutes per day** of
   active time and **quiet hours** (for example 20:30–07:00). They are stored in
   `chats.db`, survive a restart, and follow the *person*, not the network
-  address — two children behind one router each get their own. An anonymous
-  device without a profile is still budgeted per address (`DISPATCH_DECOY_*`
-  defaults).
+  address — two children behind one router each get their own.
+- **Locking is not a way out.** Nobody signed in is the same as a locked
+  session: a guest is a Restricted caller (Restricted characters only, no
+  mutations) and there is no state less restricted than a Restricted profile.
+  The first time a Restricted profile signs in on a device nobody bound, the
+  device is bound to it (People & Profiles → This device shows it; an Owner or
+  Admin can unbind or re-bind it), so when the child locks the screen, the
+  session times out or the session cookie is dropped, the device opens as that
+  profile again — under its quiet hours, minutes per day and daily budgets, over
+  HTTP, the chat socket and the voice socket alike, counted across lock and
+  unlock. A device already bound to someone else is left alone. Only a device
+  nobody bound (or one whose site data was wiped) is an anonymous guest, on the
+  default Restricted budgets (`DISPATCH_DECOY_*`) charged per address; set
+  `anonymous_access: none` to show such a device nothing but the sign-in page.
 - **Guardrails.** Restricted turns run locked: no tools, no lookups beyond the
   character's allow-list, no agent hand-offs, and the guardrail system prompt and
   the output filter hook stay in place.

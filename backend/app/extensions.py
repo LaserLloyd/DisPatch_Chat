@@ -1834,23 +1834,57 @@ async def _accept_then_close(ws, code: int, reason: str) -> None:
 
 
 def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
-                     locked: bool = False) -> Callable[[], bool]:
+                     locked: bool = False, *, device_id: str | None = None,
+                     who: tuple[str, str | None] | None = None) -> Callable[[], bool]:
+    """``ThreadSocket.session_live``: may this socket go on? The add-on asks it all through a
+    call (before each turn and while listening), so it also carries the Restricted rules that
+    change with the clock: a Restricted profile's quiet hours or used-up minutes end the call
+    (2026-10-19: no state - a voice call included - is less restricted than a Restricted
+    profile). ``who`` is (kind, profile id) of the caller at the handshake; a device-bound
+    caller (no session) is resolved again from its device, as the main /ws does."""
     def session_live() -> bool:
         if thread_id in _deleted_threads:
             return False
         bot = config.get_bot(bot_id)
         if bot is None:
             return False
-        if locked:
+        if locked and not locked_may_see(bot):
             # A locked device may stay as long as it could still see the
             # thread: the bot is still `safe` and listed (what its chat list
             # shows — main._safe_bot_ids).
-            return locked_may_see(bot)
+            return False
         from . import policy
-        if token is None:
-            return not policy.claimed()     # opened on an unclaimed install; claimed since = locked
-        return auth.get_session(token) is not None
+        if who is None:
+            # Opened on an unclaimed install; claimed since = refuse (the client reconnects).
+            return not policy.claimed()
+        if token is not None:
+            pr = policy.for_session(auth.get_session(token), device_id)
+            if pr is None:
+                return False
+        else:
+            pr = policy.for_device(device_id) or policy.anonymous(device_id)
+            if (pr.kind, pr.profile_id) != who:
+                return False                # re-bound, unbound or disabled since: reconnect
+        return _restricted_limits_ok(pr)
     return session_live
+
+
+def _restricted_limits_ok(principal) -> bool:
+    """False while a Restricted PROFILE is in its quiet hours or out of minutes (app/limits.py)."""
+    if principal is None or principal.kind != "profile" or not principal.is_restricted:
+        return True
+    from . import limits
+    return limits.check(principal) is None
+
+
+def _ws_device_id(ws) -> str | None:
+    """The hashed ``lc_device`` cookie of a socket, as the HTTP gate and /ws read it."""
+    from . import policy
+    try:
+        tok = ws.cookies.get(policy.DEVICE_COOKIE)
+    except Exception:
+        tok = None
+    return auth.device_hash(tok) if tok and 16 <= len(tok) <= 128 else None
 
 
 def locked_may_see(bot) -> bool:
@@ -1922,6 +1956,7 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     token = None
     locked = False
     principal = None
+    device_id = None
     if not policy.claimed(cfg):
         # Nobody owns this install yet: like /ws and the HTTP gate, only this computer (or an
         # install that opted into DISPATCH_ALLOW_OPEN_INSTALL) gets in - not the whole network.
@@ -1932,22 +1967,30 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             await ws.close(code=POLICY)
             return
     else:
+        # The same principal the HTTP gate and /ws resolve: a session -> that profile; else
+        # the device's default profile (the kitchen tablet, or the device a Restricted child
+        # signed in on); else an anonymous guest = Restricted. Before 2026-10-19 this socket
+        # skipped the device step, so a device-bound Restricted profile's voice call ran as an
+        # anonymous guest - per-address budget, no quiet hours.
+        device_id = _ws_device_id(ws)
         session = auth.get_session(ws.cookies.get(_hooks.cookie_name))
-        principal = policy.for_session(session)
+        principal = policy.for_session(session, device_id)
         if principal is None:
-            if cfg.anonymous_access == "none":
+            session = None
+            principal = policy.for_device(device_id) or policy.anonymous(device_id)
+            if principal.kind == "anonymous" and cfg.anonymous_access == "none":
                 await ws.close(code=POLICY)    # "nothing but the sign-in page" covers voice too
                 return
-            locked = True
-            principal = policy.anonymous()
-        elif not principal.can(Permission.USE_VOICE):
-            await ws.close(code=POLICY)        # a signed-in profile without voice
+        if not principal.can(Permission.USE_VOICE):
+            await ws.close(code=POLICY)        # a profile without voice
             return
-        else:
-            token = session.token
-            # A Restricted PROFILE is the old locked device: same redaction, same
-            # safe-character rule, but its budget and activity are its own.
-            locked = principal.is_restricted
+        if not _restricted_limits_ok(principal):
+            await ws.close(code=POLICY)        # quiet hours / today's minutes are up
+            return
+        token = session.token if session is not None else None
+        # A Restricted caller (a profile or an anonymous guest) is the old locked device:
+        # same redaction, same safe-character rule; a profile's budget is its own.
+        locked = principal.is_restricted
     # 3. The thread exists, and a locked device can see it: only a `safe`
     # bot's threads, the same rule its chat list follows (pre-accept, the same
     # 1008 as an unknown thread). Since 2.3.4 a locked device may use voice on
@@ -1994,21 +2037,35 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     slots.append(me)
     _open_total[name] = _open_total.get(name, 0) + 1
 
+    restricted_profile = principal is not None and principal.kind == "profile" and principal.is_restricted
+
     def touch() -> None:
         if token is not None:
             auth.touch_session(token)
+        if restricted_profile:
+            # A voice call is active time like any request: count it toward minutes per day.
+            from . import limits
+            with contextlib.suppress(Exception):
+                limits.note_active(principal)
 
     sock = ThreadSocket(
         thread=thread, bot=bot_view(bot), token=token,
-        session_live=_session_live_fn(token, thread_id, bot.id, locked),
+        session_live=_session_live_fn(
+            token, thread_id, bot.id, locked, device_id=device_id if principal is not None else None,
+            who=(principal.kind, principal.profile_id) if principal is not None else None),
         touch=touch,
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
         on_replaced=me.replaced.append, locked=locked)
     if locked:
-        try:
-            client_ip = str(_hooks.client_ip(ws) or "?")
-        except Exception:
-            client_ip = "?"
+        # Whose daily budget this socket's turns spend: a Restricted profile's own (it follows
+        # the person), else the anonymous device's address (main._budget_subject).
+        if restricted_profile:
+            client_ip = str(principal.profile_id)
+        else:
+            try:
+                client_ip = str(_hooks.client_ip(ws) or "?")
+            except Exception:
+                client_ip = "?"
         _locked_open(thread_id, client_ip)
     try:
         # Inside the try: a handshake cancelled mid-eviction (shutdown) still
