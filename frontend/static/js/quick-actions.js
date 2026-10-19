@@ -178,7 +178,9 @@ export function chooseAction(action) {
 
 /** The empty-thread block: a short line, then a grid of chips. [] when there are none. */
 export function welcomeChips() {
-  if (!allowed || !actions.length) return [];
+  // The upload chip comes with uploads, not with the served actions: a server with
+  // no actions still gets "Upload to chat", like the ⚡ menu still offers upload.
+  if (!allowed || (!actions.length && !uploadFn)) return [];
   const grid = el('div', { class: 'qa-grid', role: 'group', 'aria-label': t('quick.title') });
   if (uploadFn) {
     const up = el('button', { class: 'qa-chip qa-upload', type: 'button', title: t('quick.upload_title'), dataset: { upload: '1' } }, [
@@ -194,7 +196,7 @@ export function welcomeChips() {
     b.addEventListener('click', () => chooseAction(a));
     grid.append(b);
   }
-  return [el('p', { class: 'qa-intro', text: t('quick.intro') }), grid];
+  return actions.length ? [el('p', { class: 'qa-intro', text: t('quick.intro') }), grid] : [grid];
 }
 
 /** The small tag over a sent message's bubble, or null when it carries no action. */

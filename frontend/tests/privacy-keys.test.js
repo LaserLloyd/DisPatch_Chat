@@ -45,6 +45,9 @@ const EXEMPT = new Map([
   // handed-over tablet, which is the exact scenario NIM exists for. See the
   // matching note in privacy.js — do not "fix" this by wiping it.
   ['dispatch-nim', 'nim.js FLAG_KEY — a PIN-gated ratchet, deliberately kept'],
+  // "This device dismissed the one-time stored-on-the-host card." Not personal
+  // data; wiping it would re-show the card on every visit of a privacy-mode device.
+  ['dispatch-privacy-ack', 'host-notice.js PRIVACY_ACK_KEY — a seen-the-notice flag, deliberately kept'],
 ]);
 
 const sources = () => {
@@ -160,7 +163,7 @@ test('the two documented exemptions are still the only ones', () => {
   // A cheap tripwire on the exemption list itself: growing it is exactly how a
   // wipe promise gets hollowed out one "just this key" at a time, so adding an
   // entry should require deliberately editing this expectation too.
-  assert.deepEqual([...EXEMPT.keys()].sort(), ['dispatch-nim', 'dispatch-privacy']);
+  assert.deepEqual([...EXEMPT.keys()].sort(), ['dispatch-nim', 'dispatch-privacy', 'dispatch-privacy-ack']);
 });
 
 // ===========================================================================

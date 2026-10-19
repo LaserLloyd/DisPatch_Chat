@@ -108,9 +108,10 @@ test('applyLayout moves the real buttons; hidden ones stay hidden; pins stay bef
   assert.equal(doc.getElementById('lock-now').getAttribute('draggable'), 'false');
 });
 
+const dragData = [];
 function drag(win, target, type, { x = 0, y = 0 } = {}) {
   const ev = new win.Event(type, { bubbles: true, cancelable: true });
-  Object.assign(ev, { clientX: x, clientY: y, dataTransfer: { setData() {}, effectAllowed: '' } });
+  Object.assign(ev, { clientX: x, clientY: y, dataTransfer: { setData(t, v) { dragData.push([t, v]); }, effectAllowed: '' } });
   target.dispatchEvent(ev);
   return ev;
 }
@@ -197,4 +198,18 @@ test('wiring: main.js applies the layout with the pins, the popup has the sectio
   assert.match(read('js/privacy.js'), /'dispatch-rail-layout'/);
   assert.match(read('sw.js'), /'\/static\/js\/railmenu\.js'/);
   assert.equal(EN.nav.tools_more, 'Tools & more');
+});
+
+test('a rail drag carries only its own MIME type, never text (so a drop on the composer types nothing)', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const M = await R();
+  const doc = win.document;
+  const rail = doc.getElementById('gear-row');
+  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, isDecoy: () => false, openMenu() {}, onMove() {} });
+  dragData.length = 0;
+  drag(win, doc.getElementById('lock-now'), 'dragstart');
+  assert.deepEqual(dragData, [['application/x-dispatch-rail', 'lock-now']]);
+  assert.equal(M.RAIL_DRAG_TYPE, 'application/x-dispatch-rail');
+  const { dragHasFiles } = await import('../static/js/chatdrop.js');
+  assert.equal(dragHasFiles({ dataTransfer: { types: [M.RAIL_DRAG_TYPE] } }), false, 'the chat drop overlay ignores it');
 });

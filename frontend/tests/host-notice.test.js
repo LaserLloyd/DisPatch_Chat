@@ -122,7 +122,10 @@ test('main.js shows the card after boot, never over the wizard, lock or setup sc
   assert.match(main, /if \(!wizard\) showPrivacyCardWhenReady\(\);/);
   assert.match(main, /!document\.querySelector\('\.wizard-backdrop'\)/);
   assert.match(main, /dom\['lock-screen'\]\.classList\.contains\('hidden'\)/);
-  assert.match(read('js/privacy.js'), /'dispatch-privacy-ack'/);
+  assert.doesNotMatch(read('js/privacy.js').replace(/\/\/.*$/gm, ''), /'dispatch-privacy-ack'/, 'not wiped by privacy mode (exempt on purpose)');
+  assert.doesNotMatch(main.slice(main.indexOf('setInterval(() => {'), main.indexOf('setInterval(() => {') + 400), /showPrivacyCardWhenReady/, 'never from the minute tick');
+  assert.match(main, /onClosed: \(\) => showPrivacyCardWhenReady\(\)/);
+  assert.match(main, /await startApp\(\);\n  \/\/ A sign-in[\s\S]{0,200}showPrivacyCardWhenReady\(\);/);
   assert.match(read('sw.js'), /'\/static\/js\/host-notice\.js'/);
 });
 
@@ -156,5 +159,24 @@ test('the chats wording matches the code: per character, Owner/Admin read all, n
   assert.match(body, /belongs to its character/);
   assert.match(body, /Owner and Admins can use every character/);
   assert.match(body, /backups/);
+  // characters.may_use: other profiles (Restricted included) and, with
+  // anonymous_access: restricted, devices that are not signed in.
+  assert.match(body, /other profiles \(Restricted ones included\)/);
+  assert.match(body, /devices that haven't signed in/);
+  assert.match(EN.host_notice.card_chats, /other profiles and devices that haven't signed in/);
+  assert.match(EN.restricted.banner, /other profiles too, and devices that haven't signed in/);
   assert.doesNotMatch(EN.restricted.banner, /not what was said/, 'the banner no longer says chats stay unread');
+});
+
+test('the wizard reports its closing ("Set up later" too), so the card follows it at once', { skip: dom.skip }, async () => {
+  const { win } = await boot();
+  win.sessionStorage.clear();
+  const W = await import(`../static/js/wizard.js?t=${Math.random()}`);
+  let closed = 0;
+  W.openWizard({ needed: true, claimed: true, steps: [] }, { api: {}, onClosed: () => { closed++; } });
+  const later = [...win.document.querySelectorAll('.wizard button')].find((b) => b.textContent === EN.wiz.later);
+  assert.ok(later, 'the Set up later button');
+  later.click();
+  assert.equal(closed, 1);
+  assert.equal(win.document.querySelector('.wizard-backdrop'), null);
 });

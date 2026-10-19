@@ -120,7 +120,10 @@ export function openWizard(initial, ctx = {}) {
   overlay.append(dialog);
   document.body.append(overlay);
 
-  const close = () => { overlay.remove(); };
+  const close = () => {
+    overlay.remove();
+    if (typeof ctx.onClosed === 'function') ctx.onClosed();
+  };
   later.addEventListener('click', () => {
     try { sessionStorage.setItem(LATER_KEY, '1'); } catch { /* ignore */ }
     close();

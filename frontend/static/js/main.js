@@ -33,7 +33,7 @@ import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
-  setAllowed as setQuickAllowed, setUpload as setQuickUpload,
+  setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=3';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
 import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=16';
@@ -59,7 +59,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure } from './w5-api.js?
 import { mountConnections } from './connections.js?v=1';
 import { mountSettingsSchema, applyDeviceDefaults } from './settings_schema.js?v=2';
 import { decorateCharacterRows, mountStarterPacks } from './characters.js?v=1';
-import { maybeStartWizard } from './wizard.js?v=1';
+import { maybeStartWizard } from './wizard.js?v=2';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -2236,7 +2236,10 @@ function renderMessages(stick = true) {
     const quick = (!state.decoy && !isMobile()) ? quickWelcomeChips() : [];
     if (quick.length) {
       welcome.append(el('div', { class: 'welcome-quick' }, quick));
-    } else if (!state.decoy && quickOk) {
+    }
+    // With no served actions the quick block is the upload chip alone; the three
+    // suggestions still belong under it.
+    if ((!quick.length || !quickActionList().length) && !state.decoy && quickOk) {
       // welcome.chip_search keeps a TRAILING SPACE on purpose: the chip prefills
       // the composer and leaves the caret after it, ready for the query.
       const chips = [t('welcome.chip_help'), t('welcome.chip_summary'), t('welcome.chip_search')];
@@ -8858,6 +8861,9 @@ async function reboot() {
   clearChatView();
   if (gateActive()) { enterGate(); return; }   // anonymous_access none: nothing to start
   await startApp();
+  // A sign-in (or a switch to another profile) rebuilds the app like a page load:
+  // a device that first opened on the sign-in screen sees the one-time card here.
+  showPrivacyCardWhenReady();
 }
 
 // Drop to Safe Mode (manual lock, idle auto-lock, or server-signalled expiry).
@@ -10165,8 +10171,6 @@ async function init() {
   let lastTick = '';
   setInterval(() => {
     if (!state.started) return;
-    // A device that booted to the sign-in screen sees the card once it is past it.
-    showPrivacyCardWhenReady();
     // Only repaint when something a repaint would CHANGE has changed. The
     // timer exists for two drifting things — relative timestamps and the 24h
     // unread colour — so hash exactly those. An idle tab used to pay a full
@@ -10186,7 +10190,10 @@ async function init() {
   applyDeviceDefaults();
   const wizard = await maybeStartWizard({
     toast, openTab: (tab) => openSettingsTab(tab),
-    onFinished: () => { refreshAuthAndBoot().finally(showPrivacyCardWhenReady); },
+    onFinished: () => { refreshAuthAndBoot(); },
+    // Finished or "Set up later": the card follows the wizard right away, never
+    // from a timer in the middle of a session.
+    onClosed: () => showPrivacyCardWhenReady(),
   });
   // "Stored on the host computer", once per device (js/host-notice.js): on the
   // first normal page load, never over the wizard, the lock screen or setup.

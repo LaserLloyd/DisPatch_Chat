@@ -25,6 +25,9 @@
 
 export const KEY = 'dispatch-rail-layout';
 
+/** The drag payload's type (a private MIME, so nothing else reads it as text). */
+export const RAIL_DRAG_TYPE = 'application/x-dispatch-rail';
+
 /** Every managed button, in the shipped (index.html) order. */
 export const RAIL_ITEMS = ['theme-toggle', 'profile-chip', 'lock-now', 'unlock-btn',
   'drop-btn', 'tasks-btn', 'fs-chip', 'manage-bots'];
@@ -188,7 +191,10 @@ export function wireRailDrag({ rail, menu, toolList, isDecoy, openMenu, onMove }
       if (!b || isDecoy()) return;
       dragId = b.id;
       b.classList.add('dragging');
-      try { e.dataTransfer.setData('text/plain', b.id); e.dataTransfer.effectAllowed = 'move'; } catch { /* old engines */ }
+      // Our own type, never text/plain: a text payload would be typed into the
+      // composer ("profile-chip") if the button were dropped there. Some engines
+      // will not start a drag without any data, so the custom type is set.
+      try { e.dataTransfer.setData(RAIL_DRAG_TYPE, b.id); e.dataTransfer.effectAllowed = 'move'; } catch { /* old engines */ }
     });
     host.addEventListener('dragend', () => { dragId = null; clear(); });
     host.addEventListener('dragover', (e) => {

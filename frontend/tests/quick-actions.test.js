@@ -379,3 +379,16 @@ test('main.js hands the paperclip flow to ⚡; the strings exist in all eight lo
     for (const k of ['upload', 'upload_title', 'upload_chip']) assert.ok(q[k] && q[k].trim(), `${f}: quick.${k}`);
   }
 });
+
+test('with no served actions the empty chat still gets the "Upload to chat" chip (no intro line)', dom, async () => {
+  setupUp();
+  const m = await load();
+  m.setActions([]);
+  m.setUpload(() => {});
+  const out = m.welcomeChips();
+  assert.equal(out.length, 1);
+  assert.deepEqual([...out[0].querySelectorAll('.qa-chip')].map((b) => b.dataset.upload), ['1']);
+  m.setUpload(null);
+  assert.deepEqual(m.welcomeChips(), []);
+  assert.match(MAIN, /if \(\(!quick\.length \|\| !quickActionList\(\)\.length\) && !state\.decoy && quickOk\)/);
+});
