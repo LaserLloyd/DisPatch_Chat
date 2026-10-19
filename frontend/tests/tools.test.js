@@ -1046,3 +1046,40 @@ test('rail buttons moved into the popup: the button shows as "Tools & more" (eve
   await mod.loadTools();
   assert.equal(win.document.getElementById('tools-menu-btn'), null, 'Restricted: no popup for rail buttons');
 });
+
+test('phone sheet: a tap in the profile chip\'s menu (opened from the sheet) reaches it, then the sheet closes', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  wire(mod, { mobile: true });
+  await mod.loadTools();
+  const doc = win.document;
+  const chip = doc.getElementById('profile-chip');
+  chip.classList.remove('hidden');
+  chip.setAttribute('aria-haspopup', 'menu');
+  chip.setAttribute('role', 'menuitem');
+  doc.getElementById('tools-more').append(chip);
+  mod.renderToolRail();
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  const sheet = doc.getElementById('tools-menu');
+  assert.ok(sheet.classList.contains('tools-sheet') && !sheet.hidden, 'the sheet is up');
+  // The chip opens its own menu (signin.js attachChipMenu does this).
+  const pm = doc.getElementById('profile-menu');
+  const lock = doc.createElement('button');
+  let locked = 0;
+  lock.addEventListener('click', () => { locked++; });
+  pm.replaceChildren(lock);
+  pm.hidden = false;
+  const ev = new win.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+  lock.dispatchEvent(ev);
+  assert.equal(locked, 1, 'one tap on Lock locks');
+  assert.equal(ev.defaultPrevented, false);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(sheet.hidden, true, 'and the sheet goes away after');
+  // A tap on the scrim itself still only closes the sheet.
+  pm.hidden = true;
+  pointerClick(win, doc.getElementById('tools-menu-btn'));
+  const scrim = new win.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+  doc.body.dispatchEvent(scrim);
+  assert.equal(scrim.defaultPrevented, true);
+  assert.equal(sheet.hidden, true);
+});

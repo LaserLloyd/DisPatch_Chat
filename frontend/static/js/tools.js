@@ -723,12 +723,33 @@ export function toggleToolsMenu(mode = menuMode, opts = {}) {
 
 export function toolsMenuOpen() { return menuOpen; }
 
+/** Is `node` inside a popup that belongs to a button in #tools-more (named by
+ *  its aria-controls, or the profile chip's #profile-menu)? */
+function ownedPopupContains(node) {
+  const more = $('tools-more');
+  if (!more || !node) return false;
+  for (const b of more.querySelectorAll('[aria-haspopup]')) {
+    const id = b.getAttribute('aria-controls') || (b.id === 'profile-chip' ? 'profile-menu' : '');
+    const pop = id ? $(id) : null;
+    if (pop && !pop.hidden && pop.contains(node)) return true;
+  }
+  return false;
+}
+
 function onOutside(e) {
   const btn = $('tools-menu-btn');
   const menu = $('tools-menu');
   // position:fixed puts the menu outside the button's box — check both. Their
   // own listeners handle clicks on them.
   if ((btn && btn.contains(e.target)) || (menu && menu.contains(e.target))) return;
+  // A popup opened FROM a rail button parked in this menu (the profile chip's
+  // Switch profile / Lock menu): its own handlers must get this tap. Swallowing it
+  // here (the phone sheet's scrim rule below) made "Lock" only close the sheet.
+  // Let the tap through, then put the sheet away once it has been handled.
+  if (ownedPopupContains(e.target)) {
+    setTimeout(() => closeToolsMenu(), 0);
+    return;
+  }
   // The phone sheet sits over a scrim: a tap on the scrim only dismisses it.
   // Without this the same tap would land on whatever bot tile is under it.
   if (menu && menu.classList.contains('tools-sheet')) { e.preventDefault(); e.stopPropagation(); }
