@@ -174,6 +174,13 @@ def session_response(request: Request, body: dict, profile: accounts.Profile | N
     return resp
 
 
+def _was_remembered(request: Request) -> bool:
+    """Was this request's session a remembered-device one? Read before a credential
+    change revokes it, so the re-issued session keeps the same persistence."""
+    sess = auth.get_session(request.cookies.get(SESSION_COOKIE))
+    return bool(sess and sess.persistent)
+
+
 def _client_keys(request: Request) -> tuple[str, str]:
     """(device key, address). A browser with no device cookie is keyed by its address,
     so one noisy deviceless client can never lock the others out."""
@@ -379,14 +386,16 @@ async def auth_password(request: Request, payload: PasswordIn):
     if not ok:
         return _failed(request, pkey, prof.name)
     _succeeded(request, pkey)
+    remembered = _was_remembered(request)
     try:
         auth.set_profile_password(prof.id, payload.new)
     except accounts.AccountError as e:
         return _account_error(e)
     accounts.log_activity("password_changed", profile_id=prof.id, category="audit")
-    # set_profile_password signs the profile out everywhere; keep THIS device in.
+    # set_profile_password signs the profile out everywhere; keep THIS device in,
+    # remembered if it was.
     fresh = accounts.get_profile(prof.id)
-    return session_response(request, {"ok": True}, fresh, persistent=False)
+    return session_response(request, {"ok": True}, fresh, persistent=remembered)
 
 
 class OwnPinIn(BaseModel):
@@ -424,14 +433,16 @@ async def auth_own_pin(request: Request, payload: OwnPinIn):
     if not ok:
         return _failed(request, pkey, prof.name)
     _succeeded(request, pkey)
+    remembered = _was_remembered(request)
     try:
         auth.set_profile_pin(prof.id, payload.new)
     except accounts.AccountError as e:
         return _account_error(e)
     accounts.log_activity("pin_changed", profile_id=prof.id, category="audit")
-    # set_profile_pin signs the profile out everywhere; keep THIS device in.
+    # set_profile_pin signs the profile out everywhere; keep THIS device in,
+    # remembered if it was.
     fresh = accounts.get_profile(prof.id)
-    return session_response(request, {"ok": True}, fresh, persistent=False)
+    return session_response(request, {"ok": True}, fresh, persistent=remembered)
 
 
 class MachineIn(BaseModel):

@@ -703,3 +703,45 @@ def test_own_pin_attempts_are_throttled(world, owner):
     assert world.login(c, name="Max", pin="5555").status_code == 200
     codes = [c.post("/api/auth/pin", json={"current": "0000", "new": "7777"}).status_code for _ in range(12)]
     assert 429 in codes
+
+
+# A PIN or password change re-issues this device's session (the change signs the
+# profile out everywhere else); a remembered device must stay remembered, and a
+# plain sign-in must not be promoted to one.
+
+
+def _remembered_login(world, c, **who):
+    return c.post("/api/auth/login", json={**who, "remember": True})
+
+
+def test_own_pin_change_keeps_a_remembered_device_remembered(world, owner):
+    auth.set_remember_days(30)
+    world.person(owner, "Max", "member", pin="5555")
+    c = world.client()
+    r = _remembered_login(world, c, name="Max", pin="5555")
+    assert r.status_code == 200 and r.json()["remembered"] is True
+    r = c.post("/api/auth/pin", json={"current": "5555", "new": "7777"})
+    assert r.status_code == 200, r.text
+    assert r.json()["remembered"] is True
+    assert c.get("/api/auth/status").json()["remembered"] is True
+    # A device that signed in without "remember me" is not promoted by the change.
+    plain = world.client()
+    assert world.login(plain, name="Max", pin="7777").status_code == 200
+    r = plain.post("/api/auth/pin", json={"current": "7777", "new": "8888"})
+    assert r.status_code == 200 and r.json()["remembered"] is False
+
+
+def test_password_change_keeps_a_remembered_device_remembered(world, owner):
+    auth.set_remember_days(30)
+    world.person(owner, "Ada", "admin", password="admin-pass1")
+    c = world.client()
+    r = _remembered_login(world, c, name="Ada", password="admin-pass1")
+    assert r.status_code == 200 and r.json()["remembered"] is True
+    r = c.post("/api/auth/password", json={"current": "admin-pass1", "new": "admin-pass2"})
+    assert r.status_code == 200, r.text
+    assert r.json()["remembered"] is True
+    assert c.get("/api/auth/status").json()["remembered"] is True
+    plain = world.client()
+    assert world.login(plain, name="Ada", password="admin-pass2").status_code == 200
+    r = plain.post("/api/auth/password", json={"current": "admin-pass2", "new": "admin-pass3"})
+    assert r.status_code == 200 and r.json()["remembered"] is False
