@@ -175,3 +175,40 @@ def test_posting_junk_never_crashes(world, path):
     c = world.create_owner()
     r = c.post(path, content=b"not json", headers={"content-type": "application/json"})
     assert r.status_code in (200, 409, 422)
+
+
+# connections.default may hold the id of a connection that has since been deleted (it
+# reads back as itself since 3.2, so Settings can show it as missing). Every reader
+# treats such a dangling id as "no default".
+
+
+def _dangling_default():
+    gone = connections.create(type="openai_compatible", name="Gone", base_url="http://127.0.0.1:9/v1")
+    assert settings_store.set_many({"connections.default": gone.id}).ok
+    connections.delete(gone.id)
+    assert settings_store.get("connections.default") == gone.id
+    return gone.id
+
+
+def test_a_wizard_connection_becomes_the_default_when_the_stored_one_is_gone(world, monkeypatch):
+    _lm_studio_on_loopback(monkeypatch)
+    c = world.create_owner()
+    gone = _dangling_default()
+    found = c.post("/api/wizard/detect", json={}).json()["found"]
+    r = c.post("/api/wizard/connection", json={"type": "lmstudio", "base_url": found[0]["base_url"], "model": "qwen2.5-7b"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["test"]["ok"] is True
+    assert settings_store.get("connections.default") == body["connection"]["id"] != gone
+    assert c.get("/api/connections").json()["default"] == body["connection"]["id"]
+
+
+def test_a_starter_pack_ignores_a_dangling_default_connection(world):
+    c = world.create_owner()
+    _dangling_default()
+    assert c.get("/api/connections").json()["default"] == ""
+    fam = c.post("/api/wizard/family", json={"people": [], "install_animal_friends": True})
+    assert fam.status_code == 200, fam.text
+    assert fam.json()["packs"]["animal_friends"]["installed"]
+    otto = config.get_bot("otto")
+    assert not any((p or {}).get("connection") for p in (otto.advisor or {}).get("providers", []))

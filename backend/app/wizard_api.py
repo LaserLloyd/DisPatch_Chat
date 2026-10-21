@@ -202,7 +202,7 @@ async def wizard_connection(request: Request, payload: WizardConnectionIn):
     out: dict[str, Any] = {"connection": c.public(connections.used_by(c.id)), "test": result,
                            "assigned": None}
     if result.get("ok"):
-        if not settings_store.get("connections.default", ""):
+        if not connections.default_id():
             settings_store.set_many({"connections.default": c.id})
         target = payload.character
         bots = await asyncio.to_thread(config.load_bots)
@@ -244,7 +244,7 @@ async def wizard_family(request: Request, payload: FamilyIn):
             if prof.role == "restricted":
                 restricted_ids.append(prof.id)
         packs: dict[str, Any] = {}
-        default_conn = settings_store.get("connections.default", "") or None
+        default_conn = connections.default_id() or None
         for want, pack_id in ((payload.install_animal_friends, "animal_friends"),
                               (payload.install_assistants, "assistants")):
             if want:

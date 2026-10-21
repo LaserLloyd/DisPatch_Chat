@@ -315,6 +315,14 @@ def list_all_ro() -> list[Connection]:
         return []
 
 
+def default_id() -> str:
+    """The default connection's id, or "" when none is set OR the stored id names a
+    connection that has since been deleted (``connections.default`` reads a dangling
+    id back as itself so Settings can show it as missing; nothing else may use it)."""
+    cid = str(settings_store.get("connections.default", "") or "")
+    return cid if cid and get(cid) is not None else ""
+
+
 def get(conn_id: str | None) -> Connection | None:
     if not conn_id:
         return None
