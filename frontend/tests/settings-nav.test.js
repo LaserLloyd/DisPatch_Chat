@@ -229,3 +229,69 @@ test('every literal settings target in the frontend and the bundled apps resolve
   }
   assert.ok(seen.length >= 10, `found the callers (${seen.length})`);
 });
+
+// Deep links (settings-nav.js revealAnchor): the target opens, scrolls to the top
+// and STAYS there while the section's late content lands above it, until the
+// reader scrolls. Fake timers; jsdom has no layout, so positions are stubbed.
+test('revealAnchor waits for a late target, opens its <details>, and keeps it at the top until the reader scrolls', async () => {
+  const { createRequire } = await import('node:module');
+  let jsdom = null;
+  try { jsdom = createRequire(import.meta.url)('jsdom'); } catch { /* skip below */ }
+  if (!jsdom) { if (process.env.CI_REQUIRE_DOM) assert.fail('jsdom is required'); return; }
+  const win = new jsdom.JSDOM('<div id="pane"><div id="above"></div><details id="adv"><summary>Advanced</summary><div id="slot"></div></details></div>').window;
+  globalThis.Event = win.Event;
+  const { revealAnchor } = await import(`../static/js/settings-nav.js?t=${Math.random()}`);
+  const doc = win.document;
+  const pane = doc.getElementById('pane');
+  // A fake clock: advance(ms) runs every timer due by then, in time order.
+  let now = 0;
+  let seq = 0;
+  const due = new Map();
+  const timers = { setTimeout: (fn, ms) => { seq += 1; due.set(seq, { fn, at: now + ms }); return seq; }, clearTimeout: (h) => { due.delete(h); } };
+  const advance = (ms) => {
+    const end = now + ms;
+    for (;;) {
+      const next = [...due.entries()].filter(([, v]) => v.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next) break;
+      due.delete(next[0]);
+      now = next[1].at;
+      next[1].fn();
+    }
+    now = end;
+  };
+  pane.getBoundingClientRect = () => ({ top: 100 });
+  let top = 100;     // the target's top; 100 = at the pane's top
+  let scrolls = 0;
+  revealAnchor(pane, 'viewer', { timers, settleMs: 600, step: 150 });
+  advance(300);      // not there yet: it keeps looking
+  assert.equal(scrolls, 0);
+  const target = doc.createElement('section');
+  target.dataset.anchor = 'viewer';
+  target.getBoundingClientRect = () => ({ top });
+  target.scrollIntoView = () => { scrolls += 1; top = 100; };
+  doc.getElementById('slot').append(target);
+  advance(100);
+  assert.equal(doc.getElementById('adv').open, true, 'the Advanced around it opened');
+  assert.equal(scrolls, 1, 'scrolled once when found');
+  // The backups card loads above it and pushes it down: it is put back.
+  top = 900;
+  advance(150);
+  assert.equal(scrolls, 2, 'followed the shift');
+  advance(150);
+  assert.equal(scrolls, 2, 'no scroll when it is already in place');
+  // The reader scrolls: the follow ends.
+  top = 1500;
+  pane.dispatchEvent(new win.Event('wheel'));
+  advance(1000);
+  assert.equal(scrolls, 2, 'a wheel stops it');
+  // Without the reader, the follow still ends on its own once the section settled.
+  const t2 = doc.createElement('div');
+  t2.dataset.anchor = 'other';
+  let n2 = 0;
+  t2.getBoundingClientRect = () => ({ top: 700 });   // never settles
+  t2.scrollIntoView = () => { n2 += 1; };
+  pane.append(t2);
+  revealAnchor(pane, 'other', { timers, settleMs: 600, step: 150 });
+  advance(5000);
+  assert.equal(n2, 1 + 4, 'found once, then at most settleMs/step corrections');
+});

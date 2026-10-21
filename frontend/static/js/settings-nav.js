@@ -225,3 +225,66 @@ export function mountSettingsSearch({ input, results, index, go, t = (k) => k })
   input.addEventListener('blur', () => setTimeout(close, 150));
   return { close, reset: () => { entries = null; } };
 }
+
+// ------------------------------------------------------------------ deep links
+
+const cssAttr = (s) => String(s).replace(/["\\]/g, '\\$&');
+
+/** Open `anchor` inside `pane` (a data-anchor name, or key:<schema key>): open any
+ *  closed <details> on the way, scroll it to the top and flash it.
+ *
+ *  Sections fill in after fetches (schema rows, the backups card, a module's
+ *  groups), so the target may not exist yet, and content that arrives above it
+ *  pushes it down after the first scroll. It looks again until it exists, then
+ *  keeps it at the top while the section settles - until the reader scrolls,
+ *  types or taps, which ends the follow at once. `timers` is for tests. */
+export function revealAnchor(pane, anchor, { timers = globalThis, settleMs = 2000, step = 150 } = {}) {
+  if (!pane || !anchor) return () => {};
+  const sel = anchor.startsWith('key:')
+    ? `[data-key="${cssAttr(anchor.slice(4))}"]`
+    : `[data-anchor="${cssAttr(anchor)}"]`;
+  let stopped = false;
+  let handle = null;
+  const events = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (handle != null) timers.clearTimeout(handle);
+    for (const ev of events) pane.removeEventListener(ev, stop, true);
+  };
+  for (const ev of events) pane.addEventListener(ev, stop, { capture: true, passive: true });
+  const toTop = (node, smooth) => {
+    try { node.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' }); } catch { /* ignore */ }
+  };
+  const follow = (node, left) => {
+    if (stopped) return;
+    if (left <= 0) { stop(); return; }
+    handle = timers.setTimeout(() => {
+      if (stopped) return;
+      const off = node.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      if (Math.abs(off) > 4) toTop(node, false);
+      follow(node, left - step);
+    }, step);
+  };
+  const find = (tries) => {
+    if (stopped) return;
+    const node = pane.querySelector(sel);
+    if (!node) {
+      if (tries < 20) handle = timers.setTimeout(() => find(tries + 1), 100);
+      else stop();
+      return;
+    }
+    for (let n = node; n && n !== pane; n = n.parentElement) {
+      if (n.tagName === 'DETAILS' && !n.open) { n.open = true; n.dispatchEvent(new Event('toggle')); }
+    }
+    if (node.tagName === 'DETAILS' && !node.open) { node.open = true; node.dispatchEvent(new Event('toggle')); }
+    toTop(node, true);
+    node.classList.remove('settings-flash');
+    void node.offsetWidth;
+    node.classList.add('settings-flash');
+    timers.setTimeout(() => node.classList.remove('settings-flash'), 1600);
+    follow(node, settleMs);
+  };
+  find(0);
+  return stop;
+}

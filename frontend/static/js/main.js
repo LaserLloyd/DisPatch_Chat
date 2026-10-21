@@ -58,7 +58,7 @@ import { rowControls, addBotRow, backendKind } from './bots-edit.js?v=4';
 import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=1';
 // 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
 import {
-  SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch,
+  SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, revealAnchor,
 } from './settings-nav.js?v=1';
 import { mountConnections } from './connections.js?v=2';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
@@ -4600,31 +4600,7 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
     }
   }
   wireAdvancedDisclosures(pane);
-  if (anchor) revealSettingsAnchor(pane, anchor);
-}
-
-/** Open `anchor` inside `pane` (a data-anchor name, or key:<schema key>): any
- *  closed <details> around it opens, it scrolls into view and flashes once. */
-function revealSettingsAnchor(pane, anchor, tries = 0) {
-  if (!pane || !anchor) return;
-  const sel = anchor.startsWith('key:')
-    ? `[data-key="${CSS.escape(anchor.slice(4))}"]`
-    : `[data-anchor="${CSS.escape(anchor)}"]`;
-  const node = pane.querySelector(sel);
-  if (!node) {
-    // Schema rows and module-built groups arrive after a fetch: look again shortly.
-    if (tries < 20) setTimeout(() => revealSettingsAnchor(pane, anchor, tries + 1), 100);
-    return;
-  }
-  for (let n = node; n && n !== pane; n = n.parentElement) {
-    if (n.tagName === 'DETAILS' && !n.open) { n.open = true; n.dispatchEvent(new Event('toggle')); }
-  }
-  if (node.tagName === 'DETAILS' && !node.open) { node.open = true; node.dispatchEvent(new Event('toggle')); }
-  try { node.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch { /* ignore */ }
-  node.classList.remove('settings-flash');
-  void node.offsetWidth;
-  node.classList.add('settings-flash');
-  setTimeout(() => node.classList.remove('settings-flash'), 1600);
+  if (anchor) revealAnchor(pane, anchor);
 }
 
 /** Advanced ▸ disclosures remember, per device, whether they were left open. */
