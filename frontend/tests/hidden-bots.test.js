@@ -108,10 +108,15 @@ test('the Characters row has one Who can see it select over safe + hide_unlocked
   const rows = fnBody(MAIN, 'renderBotManager');
   assert.match(rows, /WHO_OPTIONS\.map\(\(o\) => el\('option', \{ value: o, text: t\(`chars\.who_\$\{o\}`\) \}\)\)/);
   assert.match(rows, /who\.value = whoCanSee\(bot\);/);
-  assert.match(rows, /Object\.assign\(bmBots\[idx\], flagsForWho\(to\)\);/);
+  // The change and its undo find the character by id (a reorder in between must not
+  // revert someone else): characters.js setWho, never a captured row index.
+  assert.match(rows, /const change = setWho\(\(\) => bmBots, bot\.id, to\);/);
+  assert.match(rows, /undo: \(\) => \{ if \(change\.undo\(\)\) \{ renderBotManager\(\); saveRoster\(\{ quiet: true \}\); \} \}/);
+  assert.doesNotMatch(rows, /bmBots\[idx\]/);
+  assert.doesNotMatch(fnBody(MAIN, 'fillDrawer'), /bmBots\[idx\]/);
   // Widening to Restricted asks first.
   assert.match(rows, /widensToRestricted\(from, to\)\s+&& !await uiConfirm\(t\('chars\.who_confirm'/);
-  assert.match(rows, /row\.classList\.toggle\('bm-row--hidden', whoCanSee\(bmBots\[idx\]\) === 'hidden'\)/);
+  assert.match(rows, /row\.classList\.toggle\('bm-row--hidden', whoCanSee\(bmBots\.find\(\(b\) => b\.id === bot\.id\) \|\| bot\) === 'hidden'\)/);
   assert.doesNotMatch(rows, /bmBots\[idx\]\.visible/);
   const save = fnBody(MAIN, 'doSaveRoster');
   assert.match(save, /safe: !!b\.safe/);
@@ -133,6 +138,30 @@ test('Who can see it is a lossless 4-row truth table over (safe, hide_unlocked),
   assert.equal(C.widensToRestricted('hidden', 'restricted'), true);
   assert.equal(C.widensToRestricted('everyone', 'restricted'), false);
   assert.equal(C.widensToRestricted('restricted', 'members'), false);
+});
+
+test('Who can see it: undo after a reorder reverts the character that was changed, not whoever took its row', async () => {
+  const C = await import(`../static/js/characters.js?t=${Math.random()}`);
+  let roster = [
+    { id: 'a', safe: false, hide_unlocked: false },
+    { id: 'b', safe: true, hide_unlocked: false },
+    { id: 'c', safe: false, hide_unlocked: true },
+  ];
+  const change = C.setWho(() => roster, 'a', 'restricted');
+  assert.equal(change.from, 'members');
+  assert.equal(C.whoCanSee(roster[0]), 'restricted');
+  // The rows are dragged: 'a' moves to the end, 'b' now sits in a's old row.
+  roster = [roster[1], roster[2], roster[0]];
+  assert.equal(change.undo(), true);
+  assert.equal(C.whoCanSee(roster.find((b) => b.id === 'a')), 'members', 'a is back');
+  assert.equal(C.whoCanSee(roster.find((b) => b.id === 'b')), 'everyone', 'b untouched');
+  assert.equal(C.whoCanSee(roster.find((b) => b.id === 'c')), 'hidden', 'c untouched');
+  // A roster reloaded with fresh objects still finds it; a removed character is a no-op.
+  roster = roster.map((b) => ({ ...b }));
+  const again = C.setWho(() => roster, 'c', 'everyone');
+  roster = roster.filter((b) => b.id !== 'c');
+  assert.equal(again.undo(), false);
+  assert.equal(C.setWho(() => roster, 'zzz', 'members'), null);
 });
 
 test('shownNowhere is exactly "neither switch on"', () => {

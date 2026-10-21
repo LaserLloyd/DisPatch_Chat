@@ -47,6 +47,27 @@ export function flagsForWho(value) {
 /** Does going from `from` to `to` let Restricted profiles see a character they could not? */
 export const widensToRestricted = (from, to) => !WHO_FLAGS[from].safe && WHO_FLAGS[to].safe;
 
+/** Set who can see the character `id` in the roster `getRoster()` returns, and
+ *  hand back an undo. Both look the character up by id at the time they run:
+ *  the roster may have been reordered, filtered or reloaded in between, so a
+ *  row index captured at change time could point at someone else. */
+export function setWho(getRoster, id, to) {
+  const find = () => (getRoster() || []).find((b) => b && b.id === id);
+  const bot = find();
+  if (!bot) return null;
+  const from = whoCanSee(bot);
+  Object.assign(bot, flagsForWho(to));
+  return {
+    from,
+    undo() {
+      const b = find();
+      if (!b) return false;
+      Object.assign(b, flagsForWho(from));
+      return true;
+    },
+  };
+}
+
 /** The PATCH body for what changed between a character as the server returned it and the form. */
 export function diffCharacter(orig, form) {
   const out = {};

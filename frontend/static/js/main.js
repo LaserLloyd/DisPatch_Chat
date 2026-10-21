@@ -64,7 +64,7 @@ import { mountConnections } from './connections.js?v=2';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
 import { mountBackups } from './backup.js?v=2';
 import {
-  characterPanel, audienceLabel, WHO_OPTIONS, whoCanSee, flagsForWho, widensToRestricted,
+  characterPanel, audienceLabel, WHO_OPTIONS, whoCanSee, widensToRestricted, setWho,
 } from './characters.js?v=2';
 import { maybeStartWizard } from './wizard.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
@@ -4821,25 +4821,29 @@ function renderBotManager() {
     }, WHO_OPTIONS.map((o) => el('option', { value: o, text: t(`chars.who_${o}`) })));
     who.value = whoCanSee(bot);
     who.addEventListener('change', async () => {
-      const from = whoCanSee(bmBots[idx]);
+      // By id, not by row index: the list can be reordered before the undo runs.
+      const current = bmBots.find((b) => b.id === bot.id);
+      if (!current) return;
+      const from = whoCanSee(current);
       const to = who.value;
       if (widensToRestricted(from, to)
           && !await uiConfirm(t('chars.who_confirm', { name: bot.name }), { okText: t('chars.who_confirm_ok') })) {
         who.value = from;
         return;
       }
-      Object.assign(bmBots[idx], flagsForWho(to));
+      const change = setWho(() => bmBots, bot.id, to);
+      if (!change) return;
       paintRow();
       saveRoster({
         toastKey: 'chars.who_saved', vars: { name: bot.name, who: t(`chars.who_${to}`) },
-        undo: () => { Object.assign(bmBots[idx], flagsForWho(from)); renderBotManager(); saveRoster({ quiet: true }); },
+        undo: () => { if (change.undo()) { renderBotManager(); saveRoster({ quiet: true }); } },
       });
     });
     const parkedTag = isMenuBot(bot.id) ? el('span', { class: 'bm-parked', text: t('chars.parked') }) : null;
     const narrowed = (bot.profiles || []).length
       ? el('span', { class: 'bm-narrow', title: t('chars.who_profiles_title'), text: t('chars.who_profiles', { count: bot.profiles.length }) })
       : null;
-    const paintRow = () => { row.classList.toggle('bm-row--hidden', whoCanSee(bmBots[idx]) === 'hidden'); };
+    const paintRow = () => { row.classList.toggle('bm-row--hidden', whoCanSee(bmBots.find((b) => b.id === bot.id) || bot) === 'hidden'); };
 
     // ▲/▼: HTML5 drag never fires on touch, so these are the reorder affordance that
     // works everywhere; shown on a phone in Reorder mode, always on a desktop row's hover.
@@ -4943,11 +4947,12 @@ function renderBotManager() {
 /** Details: the features as switches, then the character's model, description
  *  and profile list (js/characters.js). */
 function fillDrawer(drawer, bot, idx, ctl) {
+  const cur = () => bmBots.find((b) => b.id === bot.id) || bot;   // by id: rows can move
   const feats = el('div', { class: 'dev-group-body chr-features', role: 'group', 'aria-label': t('chars.features') });
   const sw = (key, field, hint, extra = {}) => {
     const id = `chr-f-${field}-${bot.id}`.replace(/[^a-zA-Z0-9_-]/g, '-');
     const cb = el('input', { type: 'checkbox', role: 'switch', id, ...extra });
-    cb.checked = field === 'tools' ? bot.tools !== false : !!bmBots[idx][field];
+    cb.checked = field === 'tools' ? bot.tools !== false : !!cur()[field];
     cb.addEventListener('change', async () => {
       if (field === 'tools') {
         cb.disabled = true;
@@ -4960,7 +4965,7 @@ function fillDrawer(drawer, bot, idx, ctl) {
         } finally { cb.disabled = false; }
         return;
       }
-      bmBots[idx][field] = cb.checked;
+      cur()[field] = cb.checked;
       saveRoster({ toastKey: 'chars.saved_name', vars: { name: bot.name } });
     });
     return el('div', { class: 'dev-row chr-feature', dataset: { feature: field } }, [
@@ -4977,12 +4982,13 @@ function fillDrawer(drawer, bot, idx, ctl) {
   if (backendKind(bot) === 'direct') feats.append(sw('chars.feat_lookups', 'tools', 'bots_edit.lookups_title'));
   // Extensions' per-character controls (the voice add-on's Voice pill). A change
   // saves at once like the switches beside it; only the add-on's fields may be set.
-  const extras = botRowExtrasFor(bmBots[idx], (patch) => {
+  const extras = botRowExtrasFor(cur(), (patch) => {
     let any = false;
     for (const [k, v] of Object.entries(patch || {})) {
       if (!EXT_BOT_FIELDS.includes(k) || typeof v !== 'string') continue;
-      bmBots[idx][k] = v;
-      (bmBots[idx]._extDirty ||= new Set()).add(k);
+      const b = cur();
+      b[k] = v;
+      (b._extDirty ||= new Set()).add(k);
       any = true;
     }
     if (any) saveRoster({ toastKey: 'chars.saved_name', vars: { name: bot.name } });
