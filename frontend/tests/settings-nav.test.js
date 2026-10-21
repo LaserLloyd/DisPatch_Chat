@@ -74,7 +74,7 @@ test('the voice add-on\'s settings.open(\'voice\') and shell.settings.pane(\'voi
   assert.match(HTML, /id="spane-voice"[^>]*>\s*<div class="ext-pane" id="ext-pane-voice"><\/div>/);
   assert.match(MAIN, /openSettings: \(id\) => openSettingsTab\(id\)/);
   // The add-on's per-character control saves at once now, like the switches beside it.
-  assert.match(MAIN, /const extras = botRowExtrasFor\(bmBots\[idx\], \(patch\) => \{[\s\S]{0,400}if \(any\) saveRoster\(/);
+  assert.match(MAIN, /const extras = botRowExtrasFor\(cur\(\), \(patch\) => \{[\s\S]{0,400}if \(any\) saveRoster\(/);
 });
 
 test('every static search row names a section, an anchor that exists in the markup or a module, and a real label', () => {

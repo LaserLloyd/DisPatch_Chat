@@ -213,9 +213,10 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v178 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
+test('the sw.js CACHE is local-chat-v179 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
+  // v179: review fixes (viewer Open settings -> system#viewer, undo by character id, missing default connection).
   // v178: 3.2 Settings — seven sections with a side nav / phone list, search, settings-nav.js joins
   // SHELL, tabstrip.js leaves it; everything applies when changed.
   // v176: review fixes on the v175 round (phone sheet + profile menu, drag MIME, card timing, wording).
@@ -287,7 +288,7 @@ test('the sw.js CACHE is local-chat-v178 (3.0.0, W5 + W11b, the api.js importer 
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v178');
+  assert.equal(m[1], 'local-chat-v179');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
