@@ -565,7 +565,7 @@ on a phone, in a few of the ten themes.
   <tr>
     <td width="33%">
       <img src="docs/screenshots/mobile-chats.png"
-           alt="DisPatch Chat at phone width showing one bot's thread list under a Today heading, with previews and relative timestamps, and a bottom tab bar for Bots, Chats and Messages." />
+           alt="DisPatch Chat at phone width showing one bot's thread list under a Today heading, with previews and relative timestamps, and a bottom tab bar for Bots, Chats and New chat." />
     </td>
     <td width="33%">
       <img src="docs/screenshots/mobile-thread.png"

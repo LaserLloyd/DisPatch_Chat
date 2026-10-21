@@ -13,29 +13,79 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newChatAllowed, pickNewChatTarget, latestByBot } from '../static/js/newchat.js';
+import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from '../static/js/newchat.js';
 
 const STATIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'static');
 const read = (f) => readFileSync(join(STATIC, f), 'utf8');
 
-test('the selected character wins, even when another was used more recently', () => {
-  const r = pickNewChatTarget({ selectedId: 'a', usableIds: ['a', 'b'], latest: { a: '2026-01-01', b: '2026-09-01' } });
+const base = { usableIds: ['a', 'b', 'c'], recentIds: ['a', 'b', 'c'] };
+
+test('the character on screen wins, even when another was used more recently', () => {
+  const r = pickNewChatTarget({ ...base, currentId: 'a', lastId: 'b', latest: { a: '2026-01-01', b: '2026-09-01' } });
   assert.deepEqual(r, { botId: 'a', via: 'current' });
 });
 
-test('nothing selected: the usable character with the newest thread', () => {
-  const r = pickNewChatTarget({ selectedId: null, usableIds: ['a', 'b', 'c'], latest: { a: '2026-01-01T00:00:00Z', b: '2026-09-01T00:00:00Z', c: '' } });
+test('a character this profile may use but the rail hides is still "current" (roster, not rail)', () => {
+  // recentIds (the rail) lacks 'h'; usableIds (the server roster) has it.
+  const r = pickNewChatTarget({ currentId: 'h', usableIds: ['a', 'h'], recentIds: ['a'], latest: { a: '2026-09-01' } });
+  assert.deepEqual(r, { botId: 'h', via: 'current' });
+});
+
+test('an app pane / deep link thread: the open thread beats the stale selection', () => {
+  assert.equal(currentCharacter({ view: 'chat', activeBotId: 'charlie', selectedId: 'bravo' }), 'charlie');
+  assert.equal(currentCharacter({ view: 'threads', activeBotId: 'charlie', selectedId: 'bravo' }), 'bravo');
+  assert.equal(currentCharacter({ view: 'chat', activeBotId: null, selectedId: 'bravo' }), 'bravo');
+  assert.equal(currentCharacter({ view: 'bots', activeBotId: null, selectedId: null }), null);
+});
+
+test('nothing on screen: the device\'s last-used character, if still usable', () => {
+  assert.deepEqual(pickNewChatTarget({ ...base, currentId: null, lastId: 'c', latest: {} }), { botId: 'c', via: 'last' });
+  const gone = pickNewChatTarget({ ...base, currentId: null, lastId: 'zzz', latest: { a: '2026-02-01' } });
+  assert.deepEqual(gone, { botId: 'a', via: 'recent' });
+});
+
+test('no last-used: the usable character with the newest thread', () => {
+  const r = pickNewChatTarget({ ...base, currentId: null, lastId: '', latest: { a: '2026-01-01T00:00:00Z', b: '2026-09-01T00:00:00Z', c: '' } });
   assert.deepEqual(r, { botId: 'b', via: 'recent' });
 });
 
-test('a selection this profile cannot use is ignored; unusable characters are never picked', () => {
-  const r = pickNewChatTarget({ selectedId: 'x', usableIds: ['a', 'b'], latest: { a: '2026-01-01', b: '2026-02-01', x: '2026-12-31' } });
+test('unusable characters are never picked', () => {
+  const r = pickNewChatTarget({ currentId: 'x', usableIds: ['a', 'b'], recentIds: ['a', 'b', 'x'], latest: { a: '2026-01-01', b: '2026-02-01', x: '2026-12-31' } });
   assert.deepEqual(r, { botId: 'b', via: 'recent' });
 });
 
-test('no selection and no history: open the picker', () => {
-  assert.deepEqual(pickNewChatTarget({ selectedId: null, usableIds: ['a', 'b'], latest: {} }), { botId: null, via: 'picker' });
-  assert.deepEqual(pickNewChatTarget({ selectedId: null, usableIds: [], latest: {} }), { botId: null, via: 'picker' });
+test('no history: open the picker', () => {
+  assert.deepEqual(pickNewChatTarget({ ...base, currentId: null, latest: {} }), { botId: null, via: 'picker' });
+  assert.deepEqual(pickNewChatTarget({ usableIds: [], recentIds: [], latest: {} }), { botId: null, via: 'picker' });
+});
+
+test('lookups: all failed = offline; some failed = picker, never a guess', () => {
+  const latest = { a: '2026-09-01' };
+  assert.equal(pickNewChatTarget({ ...base, currentId: null, latest: {}, attempted: 3, failed: 3 }).via, 'offline');
+  assert.equal(pickNewChatTarget({ ...base, currentId: null, latest, attempted: 3, failed: 1 }).via, 'picker');
+  assert.equal(pickNewChatTarget({ ...base, currentId: 'b', latest, attempted: 3, failed: 3 }).via, 'current');
+});
+
+test('an empty newest thread is reused; a used or archived one is not', () => {
+  const T = (id, at, extra = {}) => ({ id, updated_at: at, message_count: 0, ...extra });
+  assert.equal(reusableEmptyThread([T('old', '2026-01-01', { message_count: 4 }), T('new', '2026-02-01')]).id, 'new');
+  assert.equal(reusableEmptyThread([T('old', '2026-01-01'), T('new', '2026-02-01', { message_count: 2 })]), null);
+  assert.equal(reusableEmptyThread([T('n', '2026-02-01', { last_message: 'hi' })]), null);
+  assert.equal(reusableEmptyThread([T('old', '2026-01-01', { message_count: 1 }), T('arch', '2026-03-01', { is_archived: true })]), null);
+  assert.equal(reusableEmptyThread([]), null);
+});
+
+test('the last-used character is remembered per device, and storage failing is harmless', () => {
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, v) };
+  assert.equal(readLastCharacter(), '');
+  rememberCharacter('bee');
+  assert.equal(readLastCharacter(), 'bee');
+  rememberCharacter('');
+  assert.equal(readLastCharacter(), 'bee');
+  globalThis.localStorage = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  assert.equal(readLastCharacter(), '');
+  assert.doesNotThrow(() => rememberCharacter('x'));
 });
 
 test('latestByBot takes the newest updated_at per character', () => {
@@ -59,8 +109,17 @@ test('wiring: index.html tab is an action, main.js routes and hides it', () => {
   const main = read('js/main.js');
   assert.match(main, /dataset\.action === 'new-chat'/);
   assert.match(main, /syncNewChatTab\(\);/);
-  assert.match(main, /from '\.\/newchat\.js\?v=1'/);
+  assert.match(main, /from '\.\/newchat\.js\?v=2'/);
   assert.ok(read('sw.js').includes("'/static/js/newchat.js'"));
+  // review fixes: usability from the roster, the rail only for the fallback; the
+  // active tab in the chat view; the last-used key is wiped by privacy mode.
+  assert.match(main, /usableIds = state\.bots\.filter/);
+  assert.match(main, /new-chat' && view === 'chat'/);
+  assert.match(main, /rememberCharacter\(/);
+  assert.match(main, /reusableEmptyThread\(/);
+  assert.ok(read('js/privacy.js').includes("'dispatch-last-character'"));
+  assert.match(read('index.html'), /main\.js\?v=155/);
+  assert.match(readFileSync(join(STATIC, '..', '..', 'README.md'), 'utf8'), /Bots, Chats and New chat/);
 });
 
 test('every locale labels the tab and has dropped Messages', () => {

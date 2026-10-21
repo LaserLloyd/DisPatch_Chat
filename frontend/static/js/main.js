@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=13';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=13';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=14';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=4';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=17';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=18';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -94,7 +94,7 @@ import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './vi
 import { aboutRow } from './about.js?v=22';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
-import { newChatAllowed, pickNewChatTarget, latestByBot } from './newchat.js?v=1';
+import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=2';
 import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, avatarSpec } from './profiles.js?v=2';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
@@ -762,7 +762,8 @@ function announceMessage(msg) {
 function setView(view) {
   dom.app.dataset.view = view;
   dom['mobile-tabs'].querySelectorAll('.tab').forEach((t) => {
-    const on = t.dataset.view === view;
+    // The New chat tab is an action, not a view: it lights up while a chat is open.
+    const on = t.dataset.view === view || (t.dataset.action === 'new-chat' && view === 'chat');
     t.classList.toggle('active', on);
     if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
@@ -790,7 +791,7 @@ function navigate(view) {
     setView(view);
   } else if (target > cur) {
     // Push every intermediate level so Back never skips a screen
-    // (e.g. the "Active" tab jumps bots → chat through threads).
+    // (e.g. a deep link or the Back stack jumping bots → chat through threads).
     for (let d = cur + 1; d <= target; d++) {
       history.pushState({ view: VIEW_AT_DEPTH[d] }, '');
     }
@@ -3648,6 +3649,7 @@ async function openThread(id, { background = false, botId = null } = {}) {
   // server); clears come from thinking/stopped events and server-fetched
   // reconciliation in selectBot()/resync().
   if (t && t.status === 'thinking') state.thinking[id] = true;
+  if (!background) rememberCharacter((t && t.bot_id) || botId || state.selectedBotId);
   if (switching && !background) {
     clearAttachments();
     clearReplyTarget();
@@ -3799,31 +3801,47 @@ async function newChat() {
   } catch (e) { toast(e.message, true); }
 }
 
-/** The phone "New chat" tab: a new thread with the character selected now, else
- *  the most recently used one this profile can reach, else the character picker
- *  (the Bots screen). openThread() shows the chat view and focuses the composer. */
+/** The phone "New chat" tab: a new thread with the character on screen (the open
+ *  thread's, else the selected one), else the one this device used last, else the
+ *  most recent among the rail's characters, else the character picker (the Bots
+ *  screen). The server's roster decides what is usable, not this device's rail.
+ *  An empty newest thread is reused. openThread() shows the chat view and
+ *  focuses the composer. */
 let newChatTabBusy = false;
 async function newChatFromTab() {
   if (newChatTabBusy || !newChatAllowed(state.auth && state.auth.permissions)) return;
   newChatTabBusy = true;
   try {
-    const usable = visibleBots().filter((b) => !isToolId(b.id)).map((b) => b.id);
-    let latest = {};
-    const sel = state.selectedBotId;
-    if (!(sel && usable.includes(sel))) {
-      // Nothing selected: ask each reachable character for its threads (the
-      // list is per character) and take the newest updated_at.
+    const usableIds = state.bots.filter((b) => !isToolId(b.id)).map((b) => b.id);
+    const currentId = currentCharacter({
+      view: dom.app.dataset.view,
+      activeBotId: state.activeThreadId && state.activeThread && state.activeThread.bot_id,
+      selectedId: state.selectedBotId,
+    });
+    const lastId = readLastCharacter();
+    const base = { currentId, usableIds, lastId };
+    let pick = pickNewChatTarget(base);
+    if (pick.via === 'picker' || pick.via === 'offline') {
+      // Nothing to go on yet: ask each character on this device's rail for its
+      // threads (the list is per character) and take the newest updated_at.
+      const recentIds = visibleBots().map((b) => b.id).filter((id) => usableIds.includes(id));
+      const snap = [state.selectedBotId, state.activeThreadId];
       const lists = {};
-      await Promise.all(usable.map(async (id) => {
-        try { lists[id] = (await api.threads(id)).threads || []; } catch { lists[id] = []; }
+      let failed = 0;
+      await Promise.all(recentIds.map(async (id) => {
+        try { lists[id] = (await api.threads(id)).threads || []; } catch { failed++; }
       }));
-      latest = latestByBot(lists);
+      if (state.selectedBotId !== snap[0] || state.activeThreadId !== snap[1]) return;   // the user moved on
+      pick = pickNewChatTarget({ ...base, recentIds, latest: latestByBot(lists), attempted: recentIds.length, failed });
     }
-    const pick = pickNewChatTarget({ selectedId: sel, usableIds: usable, latest });
+    if (pick.via === 'offline') { toast(t('toast.offline'), true); return; }
     if (!pick.botId) { navigate('bots'); return; }
     if (pick.botId !== state.selectedBotId) await selectBot(pick.botId);
     if (state.selectedBotId !== pick.botId) return;     // the user moved on meanwhile
-    await newChat();
+    // selectBot() just loaded this character's list (or it was already current).
+    const empty = reusableEmptyThread(state.threads.filter((th) => th.bot_id === pick.botId));
+    if (empty) await openThread(empty.id);
+    else await newChat();
   } finally { newChatTabBusy = false; }
 }
 /** Hide the tab when this profile may not start chats (the server decides; this
