@@ -94,6 +94,7 @@ import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './vi
 import { aboutRow } from './about.js?v=22';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
+import { newChatAllowed, pickNewChatTarget, latestByBot } from './newchat.js?v=1';
 import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, avatarSpec } from './profiles.js?v=2';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
@@ -3796,6 +3797,40 @@ async function newChat() {
     renderThreads();
     await openThread(t.id);
   } catch (e) { toast(e.message, true); }
+}
+
+/** The phone "New chat" tab: a new thread with the character selected now, else
+ *  the most recently used one this profile can reach, else the character picker
+ *  (the Bots screen). openThread() shows the chat view and focuses the composer. */
+let newChatTabBusy = false;
+async function newChatFromTab() {
+  if (newChatTabBusy || !newChatAllowed(state.auth && state.auth.permissions)) return;
+  newChatTabBusy = true;
+  try {
+    const usable = visibleBots().filter((b) => !isToolId(b.id)).map((b) => b.id);
+    let latest = {};
+    const sel = state.selectedBotId;
+    if (!(sel && usable.includes(sel))) {
+      // Nothing selected: ask each reachable character for its threads (the
+      // list is per character) and take the newest updated_at.
+      const lists = {};
+      await Promise.all(usable.map(async (id) => {
+        try { lists[id] = (await api.threads(id)).threads || []; } catch { lists[id] = []; }
+      }));
+      latest = latestByBot(lists);
+    }
+    const pick = pickNewChatTarget({ selectedId: sel, usableIds: usable, latest });
+    if (!pick.botId) { navigate('bots'); return; }
+    if (pick.botId !== state.selectedBotId) await selectBot(pick.botId);
+    if (state.selectedBotId !== pick.botId) return;     // the user moved on meanwhile
+    await newChat();
+  } finally { newChatTabBusy = false; }
+}
+/** Hide the tab when this profile may not start chats (the server decides; this
+ *  only avoids offering a button that could only 403). */
+function syncNewChatTab() {
+  const b = document.getElementById('tab-new-chat');
+  if (b) b.classList.toggle('hidden', !newChatAllowed(state.auth && state.auth.permissions));
 }
 
 // ===================== Thread menu (rename / archive / delete) =====================
@@ -8105,7 +8140,10 @@ function wireEvents() {
   });
 
   dom['mobile-tabs'].querySelectorAll('.tab').forEach((t) =>
-    t.addEventListener('click', () => navigate(t.dataset.view)));
+    t.addEventListener('click', () => {
+      if (t.dataset.action === 'new-chat') newChatFromTab();
+      else navigate(t.dataset.view);
+    }));
 
   window.addEventListener('keydown', (e) => {
     // The unlock overlay owns the keyboard while it's open (handled elsewhere).
@@ -8264,6 +8302,7 @@ function applyAuthChrome() {
   // The Household heading goes with its sections.
   document.getElementById('snav-h-household')?.toggleAttribute('hidden', !canAdmin());
   syncVoiceTab();
+  syncNewChatTab();
   if (!isHostRole()) unmountDashboard();
   if (!canAdmin()) {
     unmountReactionManager();
@@ -9812,7 +9851,7 @@ function iconifyChrome() {
     // Mobile tabs: the glyph is the first <span>, the label is the second.
     ['.mobile-tabs .tab[data-view="bots"]', RAIL_ICONS.bots, 'span:not(.tab-label)'],
     ['.mobile-tabs .tab[data-view="threads"]', RAIL_ICONS.chats, 'span:not(.tab-label)'],
-    ['.mobile-tabs .tab[data-view="chat"]', RAIL_ICONS.messages, 'span:not(.tab-label)'],
+    ['.mobile-tabs .tab[data-action="new-chat"]', RAIL_ICONS.plus, 'span:not(.tab-label)'],
     // (The Settings nav's line icons are data-icon spans, iconifyDataIcons; Voice's
     // mic glyph is filled in wireSettingsTabs.)
     // Chat header + thread list.
