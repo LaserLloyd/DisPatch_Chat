@@ -260,6 +260,11 @@ test('revealAnchor waits for a late target, opens its <details>, and keeps it at
     now = end;
   };
   pane.getBoundingClientRect = () => ({ top: 100 });
+  // Room to scroll: 5000px of content in a 700px pane, not at its end.
+  let scrollTop = 0;
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => 5000 });
+  Object.defineProperty(pane, 'clientHeight', { configurable: true, get: () => 700 });
+  Object.defineProperty(pane, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v) => { scrollTop = v; } });
   let top = 100;     // the target's top; 100 = at the pane's top
   let scrolls = 0;
   revealAnchor(pane, 'viewer', { timers, settleMs: 600, step: 150 });
@@ -294,6 +299,64 @@ test('revealAnchor waits for a late target, opens its <details>, and keeps it at
   revealAnchor(pane, 'other', { timers, settleMs: 600, step: 150 });
   advance(5000);
   assert.equal(n2, 1 + 4, 'found once, then at most settleMs/step corrections');
+  // The section re-renders its rows: the follow keeps the NEW node in view, never the detached one.
+  const t3 = doc.createElement('div');
+  t3.dataset.anchor = 'rerendered';
+  let old3 = 0;
+  let new3 = 0;
+  t3.getBoundingClientRect = () => ({ top: 100 });
+  t3.scrollIntoView = () => { old3 += 1; };
+  pane.append(t3);
+  revealAnchor(pane, 'rerendered', { timers, settleMs: 600, step: 150 });
+  advance(1);
+  assert.equal(old3, 1, 'found');
+  const t3b = doc.createElement('div');
+  t3b.dataset.anchor = 'rerendered';
+  t3b.getBoundingClientRect = () => ({ top: 800 });
+  t3b.scrollIntoView = () => { new3 += 1; t3b.getBoundingClientRect = () => ({ top: 100 }); };
+  t3.replaceWith(t3b);
+  advance(150);
+  assert.equal(old3, 1, 'the detached node is left alone');
+  assert.equal(new3, 1, 'the replacement is brought to the top');
+  advance(2000);
+  // A second deep link: the caller stops the first follow, which then never scrolls again.
+  const first = doc.createElement('div');
+  first.dataset.anchor = 'first';
+  let nFirst = 0;
+  first.getBoundingClientRect = () => ({ top: 900 });     // keeps drifting
+  first.scrollIntoView = () => { nFirst += 1; };
+  const second = doc.createElement('div');
+  second.dataset.anchor = 'second';
+  let nSecond = 0;
+  second.getBoundingClientRect = () => ({ top: 100 });
+  second.scrollIntoView = () => { nSecond += 1; };
+  pane.append(first, second);
+  const stopFirst = revealAnchor(pane, 'first', { timers, settleMs: 2000, step: 150 });
+  advance(300);
+  const before = nFirst;
+  stopFirst();
+  revealAnchor(pane, 'second', { timers, settleMs: 2000, step: 150 });
+  advance(3000);
+  assert.equal(nFirst, before, 'the first follow ended');
+  assert.equal(nSecond, 1, 'the second target was shown');
+  // A pane already at its end cannot lift a lower target: no pointless scrolling.
+  scrollTop = 4300;
+  const low = doc.createElement('div');
+  low.dataset.anchor = 'low';
+  let nLow = 0;
+  low.getBoundingClientRect = () => ({ top: 500 });
+  low.scrollIntoView = () => { nLow += 1; };
+  pane.append(low);
+  revealAnchor(pane, 'low', { timers, settleMs: 600, step: 150 });
+  advance(3000);
+  assert.equal(nLow, 1, 'scrolled when found, then left alone at the end');
+});
+
+test('main.js: one deep-link follow at a time - a new reveal, a section change or closing Settings ends it', () => {
+  assert.match(MAIN, /if \(anchor\) stopReveal = revealAnchor\(pane, anchor\);/);
+  assert.match(MAIN, /function endReveal\(\) \{ const stop = stopReveal; stopReveal = \(\) => \{\}; stop\(\); \}/);
+  assert.match(MAIN, /async function setSettingsTab\(target, \{ focusTab = false \} = \{\}\) \{\n  endReveal\(\);/);
+  assert.match(MAIN, /function deactivateSettingsTab\(\) \{\n  endReveal\(\);/);
 });
 
 test('app.css: plain notes inside Settings cards read at the card size, not the fluid body size', () => {

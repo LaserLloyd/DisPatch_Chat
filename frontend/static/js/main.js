@@ -4439,7 +4439,12 @@ function settingsOpen(id = null) {
 
 /** Tear down whatever the ACTIVE section has running. Idempotent by design: it is
  *  called on every switch, on Back to the list, and again when the modal closes. */
+// The deep-link follow in progress (settings-nav.js revealAnchor returns its stop):
+// a new reveal, a section change, the phone list and closing Settings all end it.
+let stopReveal = () => {};
+function endReveal() { const stop = stopReveal; stopReveal = () => {}; stop(); }
 function deactivateSettingsTab() {
+  endReveal();
   if (settingsTab === 'system') unmountDashboard();
   if (settingsTab === 'characters') unmountReactionManager();
   if (settingsTab === 'voice' && voicePaneHost) voicePaneHost.hide();
@@ -4515,6 +4520,7 @@ function backToSettingsList({ fromHistory = false } = {}) {
  *  'section#anchor'. Swaps the tablist state and the panes, then lets the
  *  section's modules take over, then opens and scrolls to the anchor. */
 async function setSettingsTab(target, { focusTab = false } = {}) {
+  endReveal();
   let { id, anchor } = resolveSettingsTarget(target);
   if (!id || !SETTINGS_TABS.includes(id)) { id = homeSettingsTab(); anchor = ''; }
   // A hidden section (a Member's household one) is not a destination. Resolve the
@@ -4600,7 +4606,7 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
     }
   }
   wireAdvancedDisclosures(pane);
-  if (anchor) revealAnchor(pane, anchor);
+  if (anchor) stopReveal = revealAnchor(pane, anchor);
 }
 
 /** Advanced ▸ disclosures remember, per device, whether they were left open. */

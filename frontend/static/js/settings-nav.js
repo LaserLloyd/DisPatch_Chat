@@ -256,14 +256,22 @@ export function revealAnchor(pane, anchor, { timers = globalThis, settleMs = 200
   const toTop = (node, smooth) => {
     try { node.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' }); } catch { /* ignore */ }
   };
-  const follow = (node, left) => {
+  // Each tick looks the target up again: a section may re-render its rows (the
+  // schema hosts do, shortly after mounting), and a replaced node is the one to keep
+  // in view, not the detached original. A pane already scrolled to its end cannot
+  // bring a lower target any higher, so that tick does nothing.
+  const follow = (left) => {
     if (stopped) return;
     if (left <= 0) { stop(); return; }
     handle = timers.setTimeout(() => {
       if (stopped) return;
-      const off = node.getBoundingClientRect().top - pane.getBoundingClientRect().top;
-      if (Math.abs(off) > 4) toTop(node, false);
-      follow(node, left - step);
+      const node = pane.querySelector(sel);
+      if (node) {
+        const off = node.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        const atEnd = pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+        if (off < -4 || (off > 4 && !atEnd)) toTop(node, false);
+      }
+      follow(left - step);
     }, step);
   };
   const find = (tries) => {
@@ -283,7 +291,7 @@ export function revealAnchor(pane, anchor, { timers = globalThis, settleMs = 200
     void node.offsetWidth;
     node.classList.add('settings-flash');
     timers.setTimeout(() => node.classList.remove('settings-flash'), 1600);
-    follow(node, settleMs);
+    follow(settleMs);
   };
   find(0);
   return stop;
