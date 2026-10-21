@@ -629,7 +629,7 @@ export function openViewer({ path, url, title, returnFocus } = {}) {
         class: 'viewer-card-btn', type: 'button', text: t('viewer.open_settings'),
         onclick: () => {
           close();
-          doc.dispatchEvent(new CustomEvent('dispatch:open-settings', { detail: { tab: 'device' } }));
+          doc.dispatchEvent(new CustomEvent('dispatch:open-settings', { detail: { tab: 'system#viewer' } }));
         },
       }));
     }

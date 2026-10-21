@@ -90,7 +90,7 @@ import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: never in
 // Safe Mode, which is why isDecoy is a live callback rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=6';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=7';
 import { aboutRow } from './about.js?v=22';
 // 3.0 profiles, roles and policy: pure decisions (profiles.js), the sign-in /
 // setup / Restricted DOM (signin.js) and Settings -> People & Profiles (people.js).
@@ -10703,7 +10703,7 @@ async function init() {
   // the operator to go find it. It cannot import openSettingsTab (that would be
   // a cycle back into main.js), so it asks by event and this is the answer.
   document.addEventListener('dispatch:open-settings', (ev) => {
-    const tab = (ev.detail && ev.detail.tab) || 'device';
+    const tab = (ev.detail && ev.detail.tab) || 'system#viewer';
     closeViewer();          // Settings is a modal too — do not stack them
     openSettingsTab(tab);
   });

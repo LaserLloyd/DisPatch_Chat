@@ -181,3 +181,51 @@ test('Restricted: the gear says Companions (with a people icon), not Settings', 
   assert.match(fn, /railIcon\(comp \? RAIL_ICONS\.users : RAIL_ICONS\.gear\)/);
   assert.match(MAIN, /if \(dom\['unlock-btn'\]\) dom\['unlock-btn'\]\.classList\.toggle\('hidden', !state\.decoy\);\n  syncGearButton\(\);/);
 });
+
+// Every literal Settings target in the code must land where its content lives:
+// an alias names the section an old tab *mostly* became, which is wrong for a
+// group that moved somewhere else (the local viewer left Device for System).
+const paneOf = (html, id) => {
+  const start = html.indexOf(`id="spane-${id}"`);
+  if (start < 0) return '';
+  const next = html.indexOf('id="spane-', start + 10);
+  return html.slice(start, next < 0 ? undefined : next);
+};
+
+test('the viewer\'s "Open settings" lands on the System pane\'s viewer group', () => {
+  const src = read('js/viewer.js');
+  const m = src.match(/'dispatch:open-settings',\s*\{\s*detail:\s*\{\s*tab:\s*'([^']+)'/);
+  assert.ok(m, 'viewer.js sends dispatch:open-settings with a literal tab');
+  const r = resolveSettingsTarget(m[1]);
+  assert.equal(r.anchor, 'viewer');
+  assert.match(paneOf(HTML, r.id), /data-anchor="viewer"/, `#spane-${r.id} holds data-anchor="viewer"`);
+});
+
+test('every literal settings target in the frontend and the bundled apps resolves to a section holding its anchor', () => {
+  const files = [];
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, f.name);
+      if (f.isDirectory()) { if (f.name !== 'vendor' && f.name !== 'node_modules') walk(p); } else if (f.name.endsWith('.js')) files.push(p);
+    }
+  };
+  walk(join(STATIC, 'js'));
+  walk(join(HERE, '..', '..', 'apps'));
+  const re = /(?:openSettingsTab|setSettingsTab|openTab|settings\.open)\(\s*'([a-z][\w-]*(?:#[\w:.-]+)?)'|'dispatch:open-settings',\s*\{\s*detail:\s*\{\s*tab:\s*'([^']+)'/g;
+  const seen = [];
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(re)) {
+      const target = m[1] || m[2];
+      const r = resolveSettingsTarget(target);
+      seen.push(target);
+      assert.ok(SECTION_IDS.includes(r.id), `${f}: '${target}' resolves to a section (got ${r.id})`);
+      if (r.anchor && !r.anchor.startsWith('key:')) {
+        const pane = paneOf(HTML, r.id);
+        const inMarkup = pane.includes(`data-anchor="${r.anchor}"`) || pane.includes(`data-schema="${r.id}#${r.anchor}"`);
+        const inRows = STATIC_ROWS.some((row) => row.section === r.id && row.anchor === r.anchor);
+        assert.ok(inMarkup || inRows, `${f}: '${target}' -> #spane-${r.id} has anchor ${r.anchor}`);
+      }
+    }
+  }
+  assert.ok(seen.length >= 10, `found the callers (${seen.length})`);
+});
