@@ -295,3 +295,8 @@ test('revealAnchor waits for a late target, opens its <details>, and keeps it at
   advance(5000);
   assert.equal(n2, 1 + 4, 'found once, then at most settleMs/step corrections');
 });
+
+test('app.css: plain notes inside Settings cards read at the card size, not the fluid body size', () => {
+  const css = read('app.css');
+  assert.match(css, /#botmanager \.settings-pane :is\(p\.muted, \.bkp-check\) \{ font-size: 13px;/);
+});
