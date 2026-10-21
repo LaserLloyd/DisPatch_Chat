@@ -58,7 +58,7 @@ import { rowControls, addBotRow, backendKind } from './bots-edit.js?v=4';
 import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=1';
 // 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
 import {
-  SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, revealAnchor,
+  SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
 } from './settings-nav.js?v=1';
 import { mountConnections } from './connections.js?v=2';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
@@ -4439,10 +4439,14 @@ function settingsOpen(id = null) {
 
 /** Tear down whatever the ACTIVE section has running. Idempotent by design: it is
  *  called on every switch, on Back to the list, and again when the modal closes. */
-// The deep-link follow in progress (settings-nav.js revealAnchor returns its stop):
-// a new reveal, a section change, the phone list and closing Settings all end it.
-let stopReveal = () => {};
-function endReveal() { const stop = stopReveal; stopReveal = () => {}; stop(); }
+// Deep links (settings-nav.js createRevealer): a newer section change voids an older
+// one still mounting, and a section no longer on screen (closed, another section,
+// the phone list) is never scrolled. A section change and closing end the follow.
+const revealer = createRevealer({
+  isActive: (pane, id) => settingsOpen() && !settingsListView && settingsTab === id
+    && !!pane && !pane.classList.contains('hidden'),
+});
+function endReveal() { revealer.end(); }
 function deactivateSettingsTab() {
   endReveal();
   if (settingsTab === 'system') unmountDashboard();
@@ -4520,7 +4524,7 @@ function backToSettingsList({ fromHistory = false } = {}) {
  *  'section#anchor'. Swaps the tablist state and the panes, then lets the
  *  section's modules take over, then opens and scrolls to the anchor. */
 async function setSettingsTab(target, { focusTab = false } = {}) {
-  endReveal();
+  const ticket = revealer.begin();
   let { id, anchor } = resolveSettingsTarget(target);
   if (!id || !SETTINGS_TABS.includes(id)) { id = homeSettingsTab(); anchor = ''; }
   // A hidden section (a Member's household one) is not a destination. Resolve the
@@ -4606,7 +4610,7 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
     }
   }
   wireAdvancedDisclosures(pane);
-  if (anchor) stopReveal = revealAnchor(pane, anchor);
+  if (anchor) revealer.reveal(ticket, pane, anchor, id);
 }
 
 /** Advanced ▸ disclosures remember, per device, whether they were left open. */

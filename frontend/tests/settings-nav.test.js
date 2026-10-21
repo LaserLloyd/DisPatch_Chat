@@ -353,9 +353,12 @@ test('revealAnchor waits for a late target, opens its <details>, and keeps it at
 });
 
 test('main.js: one deep-link follow at a time - a new reveal, a section change or closing Settings ends it', () => {
-  assert.match(MAIN, /if \(anchor\) stopReveal = revealAnchor\(pane, anchor\);/);
-  assert.match(MAIN, /function endReveal\(\) \{ const stop = stopReveal; stopReveal = \(\) => \{\}; stop\(\); \}/);
-  assert.match(MAIN, /async function setSettingsTab\(target, \{ focusTab = false \} = \{\}\) \{\n  endReveal\(\);/);
+  // The ticket is taken BEFORE the section's awaits and checked after them (createRevealer).
+  assert.match(MAIN, /async function setSettingsTab\(target, \{ focusTab = false \} = \{\}\) \{\n  const ticket = revealer\.begin\(\);/);
+  assert.match(MAIN, /if \(anchor\) revealer\.reveal\(ticket, pane, anchor, id\);/);
+  assert.match(MAIN, /isActive: \(pane, id\) => settingsOpen\(\) && !settingsListView && settingsTab === id/);
+  assert.match(MAIN, /function endReveal\(\) \{ revealer\.end\(\); \}/);
+  assert.doesNotMatch(MAIN, /stopReveal = revealAnchor/);
   assert.match(MAIN, /function deactivateSettingsTab\(\) \{\n  endReveal\(\);/);
 });
 
@@ -364,4 +367,51 @@ test('app.css: plain notes inside Settings cards read at the card size, not the 
   assert.match(css, /#botmanager \.settings-pane :is\(\.sys-backups-host > p\.muted, \.sys-backups-host \.bkp-check, \.chr-drawer \.chr-panel > p\.muted\) \{ font-size: 13px;/);
   // Only those three: other notes in Settings (the Account card's .muted) keep their own size.
   assert.doesNotMatch(css, /\.settings-pane :is\(p\.muted\b/);
+});
+
+
+// createRevealer: a section mounts asynchronously, so two deep links can overlap. The
+// later one wins whichever mount finishes first, and a section that is no longer on
+// screen when its mount finishes (Settings closed) is never followed.
+test('createRevealer: the later deep link wins in either order, and closing mid-mount arms nothing', async () => {
+  const { createRevealer } = await import(`../static/js/settings-nav.js?t=${Math.random()}`);
+  let active = true;
+  const armed = [];
+  const stopped = [];
+  const r = createRevealer({
+    isActive: () => active,
+    reveal: (pane, anchor) => { armed.push(anchor); return () => stopped.push(anchor); },
+  });
+  const deferred = () => { let done; const p = new Promise((res) => { done = res; }); return { p, done }; };
+  // Like setSettingsTab: take a ticket, await the section, then reveal.
+  const go = async (anchor, mount) => { const ticket = r.begin(); await mount.p; r.reveal(ticket, {}, anchor, 'system'); };
+
+  // Order 1: the first section is slow; the second link's mount finishes first.
+  let slow = deferred(); let quick = deferred();
+  const a = go('viewer', slow); const b = go('key:system.backup_interval', quick);
+  quick.done(); await b;
+  slow.done(); await a;
+  assert.deepEqual(armed, ['key:system.backup_interval'], 'the stale link never arms');
+  assert.deepEqual(stopped, [], 'and does not stop the newer follow');
+
+  // Order 2: the first finishes first (armed), then the newer one replaces it.
+  armed.length = 0;
+  slow = deferred(); quick = deferred();
+  const c = go('viewer', quick); quick.done(); await c;
+  const d = go('key:system.backup_interval', slow); slow.done(); await d;
+  assert.deepEqual(armed, ['viewer', 'key:system.backup_interval']);
+  assert.ok(stopped.includes('viewer'), 'the older follow was stopped');
+
+  // Closing Settings while a section is still mounting: nothing is armed.
+  armed.length = 0;
+  const m = deferred();
+  const e = go('viewer', m);
+  active = false;            // the backdrop is hidden now
+  m.done(); await e;
+  assert.deepEqual(armed, []);
+  // end() stops a follow without voiding the ticket of the change in progress.
+  active = true;
+  const ticket = r.begin();
+  r.end();
+  assert.equal(r.reveal(ticket, {}, 'viewer', 'system'), true);
 });

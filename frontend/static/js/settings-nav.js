@@ -296,3 +296,27 @@ export function revealAnchor(pane, anchor, { timers = globalThis, settleMs = 200
   find(0);
   return stop;
 }
+
+/** One deep-link follow at a time, across sections that mount asynchronously.
+ *
+ *  `begin()` at the start of a section change hands out a ticket and stops the
+ *  follow in progress. `reveal(ticket, pane, anchor, id)` runs after the section
+ *  has mounted: it does nothing if a newer `begin()` happened meanwhile (a later
+ *  link wins, whichever mount finishes first) or if `isActive(pane, id)` says the
+ *  section is no longer on screen (Settings closed, another section, the phone
+ *  list). `end()` stops the follow without voiding the ticket. */
+export function createRevealer({ isActive = () => true, reveal = revealAnchor } = {}) {
+  let gen = 0;
+  let stop = () => {};
+  const end = () => { const s = stop; stop = () => {}; s(); };
+  return {
+    begin() { end(); gen += 1; return gen; },
+    reveal(ticket, pane, anchor, id) {
+      if (!anchor || ticket !== gen || !isActive(pane, id)) return false;
+      end();
+      stop = reveal(pane, anchor) || (() => {});
+      return true;
+    },
+    end,
+  };
+}
