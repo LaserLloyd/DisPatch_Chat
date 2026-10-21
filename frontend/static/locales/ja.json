@@ -1823,7 +1823,8 @@
     "reset_done": "{name} を既定値に戻しました",
     "restart_banner": {
       "other": "{count} 件の変更を反映するには DisPatch を再起動してください。"
-    }
+    },
+    "missing_connection": "見つからない接続 ({id})"
   },
   "cxn": {
     "title": "[ja] Connections",

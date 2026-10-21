@@ -659,3 +659,22 @@ test('schema rows: a host-control row is read-only to a Member granted manage_se
   assert.equal(row2.querySelector('input').disabled, false);
   assert.equal(row2.querySelector('.schema-owner-only'), null);
 });
+
+test('schema rows: a default connection whose connection was deleted shows as missing, not as None', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const S = await fresh('settings_schema.js');
+  const def = { key: 'connections.default', type: 'choice', default: '', label: 'Default connection', description: 'd',
+    group: 'connections', section: '', level: 'basic', choices_from: 'connections', choices: ['', 'c1'],
+    choice_labels: { '': 'None', c1: 'Box' }, ui_section: 'connections#list' };
+  const schema = { ...SCHEMA, settings: [...SCHEMA.settings, def] };
+  const values = { ...VALUES, values: { ...VALUES.values,
+    'connections.default': { value: 'gone-1', source: 'store', default: '', is_default: false } } };
+  const api = { settingsSchema: async () => schema, settings: async () => values, patchSettings: async () => ({ ok: true, changed: [] }) };
+  const h = slotHost(win);
+  await S.mountSchemaRows(h, { api, section: 'connections', anchor: 'list', claimed: new Set(['list']), role: 'owner', force: true });
+  const sel = h.querySelector('[data-key="connections.default"] select');
+  assert.ok(sel, 'the row is drawn');
+  assert.equal(sel.value, 'gone-1');
+  assert.equal(sel.selectedOptions[0].textContent, EN.schema.missing_connection.replace('{id}', 'gone-1'));
+  assert.deepEqual([...sel.options].map((o) => o.value), ['', 'c1', 'gone-1']);
+});

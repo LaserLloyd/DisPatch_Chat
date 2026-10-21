@@ -1823,7 +1823,8 @@
     "reset_done": "{name} 已恢复为默认值",
     "restart_banner": {
       "other": "重启 DisPatch 以应用 {count} 项更改。"
-    }
+    },
+    "missing_connection": "缺失的连接 ({id})"
   },
   "cxn": {
     "title": "[zh] Connections",

@@ -304,9 +304,15 @@ function controlFor(row, ctx) {
     input.checked = !!row.value;
     input.addEventListener('change', () => ctx.commit(row, input.checked, input));
   } else if (def.type === 'choice') {
-    input = el('select', { ...common, class: 'ui-select' },
-      (def.choices || []).map((c) => el('option', { value: c, text: (def.choice_labels && def.choice_labels[c]) || c || t('schema.none') })));
-    input.value = String(row.value ?? def.default ?? '');
+    const current = String(row.value ?? def.default ?? '');
+    const opts = (def.choices || []).map((c) => el('option', { value: c, text: (def.choice_labels && def.choice_labels[c]) || c || t('schema.none') }));
+    // A stored connection id whose connection was deleted is still the value (it was
+    // free text before 3.2): show it as missing rather than as "None".
+    if (def.choices_from === 'connections' && current && !(def.choices || []).includes(current)) {
+      opts.push(el('option', { value: current, text: t('schema.missing_connection', { id: current }) }));
+    }
+    input = el('select', { ...common, class: 'ui-select' }, opts);
+    input.value = current;
     input.addEventListener('change', () => ctx.commit(row, input.value, input));
   } else if (measureOf(def) && Array.isArray(def.presets) && def.presets.length) {
     input = measureControl(row, common, (v) => ctx.commit(row, v, input));

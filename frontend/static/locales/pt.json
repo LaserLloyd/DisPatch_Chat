@@ -1875,7 +1875,8 @@
     "restart_banner": {
       "one": "Reinicia o DisPatch para aplicar {count} alteração.",
       "other": "Reinicia o DisPatch para aplicar {count} alterações."
-    }
+    },
+    "missing_connection": "Conexão ausente ({id})"
   },
   "cxn": {
     "title": "[pt] Connections",

@@ -1958,7 +1958,8 @@
       "few": "أعد تشغيل DisPatch لتطبيق {count} تغييرات.",
       "many": "أعد تشغيل DisPatch لتطبيق {count} تغييرًا.",
       "other": "أعد تشغيل DisPatch لتطبيق {count} تغيير."
-    }
+    },
+    "missing_connection": "اتصال مفقود ({id})"
   },
   "cxn": {
     "title": "[ar] Connections",

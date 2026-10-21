@@ -1850,7 +1850,8 @@
     "restart_banner": {
       "one": "Starte DisPatch neu, um {count} Änderung zu übernehmen.",
       "other": "Starte DisPatch neu, um {count} Änderungen zu übernehmen."
-    }
+    },
+    "missing_connection": "Fehlende Verbindung ({id})"
   },
   "cxn": {
     "title": "[de] Connections",

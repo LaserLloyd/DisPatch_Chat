@@ -649,8 +649,13 @@ def _bad(d: SettingDef, why: str) -> SettingError:
     return SettingError(d.key, f"{d.label}: {why}")
 
 
-def coerce(d: SettingDef, raw: Any) -> Any:
-    """``raw`` (from JSON, an env variable or a YAML file) as ``d``'s type, or SettingError."""
+def coerce(d: SettingDef, raw: Any, *, strict: bool = True) -> Any:
+    """``raw`` (from JSON, an env variable or a YAML file) as ``d``'s type, or SettingError.
+
+    ``strict=False`` is for reading back what is already stored. A choice over the
+    connections (``connections.default``) was free text in schema 1, so a stored id
+    whose connection has since been deleted still reads back as itself (the page shows
+    it as a missing connection) instead of turning into the default."""
     t = d.type
     if raw is None:
         if d.secret or t == "secret":
@@ -687,6 +692,10 @@ def coerce(d: SettingDef, raw: Any) -> Any:
         return n
     if t == "choice":
         s = str(raw).strip()
+        if not strict and d.choices_from == "connections":
+            if isinstance(raw, (dict, list)) or len(s) > 256 or "\x00" in s:
+                raise _bad(d, "must be a connection id")
+            return s
         allowed = (dynamic_choices(d.choices_from) if d.choices_from else []) or d.choices
         if allowed and s not in allowed:
             raise _bad(d, "must be one of " + ", ".join(allowed))
@@ -730,17 +739,22 @@ def to_env_text(d: SettingDef, value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def validate_all(values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """(coerced values, {key: error}) for a PATCH body."""
+def validate_all(values: dict[str, Any], *,
+                 current: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, str]]:
+    """(coerced values, {key: error}) for a PATCH body. ``current`` holds keys' values as
+    they stand: writing back exactly that value is read-style (lenient), so the page's
+    Undo can restore a stored value that is no longer one of the choices."""
     ok: dict[str, Any] = {}
     errs: dict[str, str] = {}
+    current = current or {}
     for k, raw in values.items():
         d = get_def(k)
         if d is None:
             errs[k] = "unknown setting"
             continue
+        same = k in current and raw is not None and str(raw).strip() == str(current[k])
         try:
-            ok[k] = coerce(d, raw)
+            ok[k] = coerce(d, raw, strict=not same)
         except SettingError as e:
             errs[k] = str(e)
     return ok, errs

@@ -27,7 +27,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`people#signin-rules`, `system#backups`…; additive schema fields `ui_section` and `presets`, schema version
   unchanged). Rarely used ones sit under a section's **Advanced** disclosure (remembered per device,
   `dispatch-settings-adv`). Durations and sizes are dropdowns of sensible values plus *Custom…*; on/off rows are
-  switches; *Default connection* is a list of your connections.
+  switches; *Default connection* is a list of your connections. That is an additive tightening of
+  `connections.default` within schema 1 (it was free text): a stored id whose connection has been deleted still
+  reads back as itself and shows as *Missing connection (id)*, never silently as None; a new value must name an
+  existing connection (writing back the stored value, as Undo does, stays allowed).
 - **Changes apply when they are made.** No Save buttons in the Characters roster, the tools table, schema rows,
   reactions or the reaction pool; a toast offers **Undo** for a few seconds where it can. A setting that needs a
   restart says so, and the section shows one "Restart DisPatch to apply N changes" line. Forms that need several
@@ -57,6 +60,9 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Connections, People & Access, Plugins & Apps).
 
 ### Fixed
+
+- Changing your PIN or password no longer ends "remember this device": the session it re-issues keeps the old
+  one's persistence (a plain sign-in is not promoted).
 
 - Image Studio: only the "pictures changed" 409 of *Clear from here down* counts again; the other one (a
   generation is running) shows the server's message, and a failed re-read says so.

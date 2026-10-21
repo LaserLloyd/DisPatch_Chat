@@ -1850,7 +1850,8 @@
     "restart_banner": {
       "one": "Restart DisPatch to apply {count} change.",
       "other": "Restart DisPatch to apply {count} changes."
-    }
+    },
+    "missing_connection": "Missing connection ({id})"
   },
   "cxn": {
     "title": "Connections",

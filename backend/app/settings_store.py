@@ -260,7 +260,7 @@ def resolve(key: str) -> Resolved:
     if hit is not None:
         env_name = hit[0]
         try:
-            value = settings_schema.coerce(d, hit[1] if hit[1] != "" else None)
+            value = settings_schema.coerce(d, hit[1] if hit[1] != "" else None, strict=False)
             source = "env"
         except SettingError as e:
             invalid = f"{hit[0]} is set to a value DisPatch cannot use ({e}); using the stored value or default"
@@ -276,7 +276,7 @@ def resolve(key: str) -> Resolved:
         row = _row(key)
         if row is not None:
             try:
-                value = settings_schema.coerce(d, json.loads(row["value"]))
+                value = settings_schema.coerce(d, json.loads(row["value"]), strict=False)
                 source = "store"
             except (ValueError, SettingError):
                 value = MISSING
@@ -384,7 +384,15 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
     whether the caller holds ``admin_system``)."""
     res = ChangeResult()
     reset = list(reset or [])
-    coerced, errs = settings_schema.validate_all(changes)
+    # A choice over the connections may hold an id whose connection was deleted (it was
+    # free text in schema 1); writing that same value back stays allowed.
+    current = {}
+    for k in changes:
+        d = settings_schema.get_def(k)
+        if d is not None and d.choices_from == "connections":
+            with contextlib.suppress(Exception):
+                current[k] = resolve(k).value
+    coerced, errs = settings_schema.validate_all(changes, current=current)
     res.errors.update(errs)
     for k in reset:
         if settings_schema.get_def(k) is None:

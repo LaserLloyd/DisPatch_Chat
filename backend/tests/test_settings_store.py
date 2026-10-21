@@ -475,3 +475,24 @@ def test_the_default_connection_is_a_choice_of_connections(world):
     assert S.coerce(S.get_def("connections.default"), c.id) == c.id
     with pytest.raises(S.SettingError):
         S.coerce(S.get_def("connections.default"), "nope")
+
+
+def test_a_default_connection_that_was_deleted_is_kept_not_dropped(world):
+    """Schema 1 stored connections.default as free text; 3.2 made it a choice. A stored id
+    whose connection has gone must still read back (the page shows it as missing) rather
+    than silently becoming "None"; a NEW write is checked against the connections."""
+    from app import connections
+    c = connections.create(type="openai_compatible", name="Gone", base_url="http://127.0.0.1:9/v1")
+    assert settings_store.set_many({"connections.default": c.id}).ok
+    connections.delete(c.id)
+    r = settings_store.resolve("connections.default")
+    assert (r.value, r.source) == (c.id, "store")
+    assert settings_store.get("connections.default", "") == c.id
+    # Writing back the value it already has (the page's Undo) is accepted...
+    assert settings_store.set_many({"connections.default": c.id}).ok
+    # ...another unknown id is refused, and an existing one or None is fine.
+    bad = settings_store.set_many({"connections.default": "no-such-connection"})
+    assert not bad.ok and "connections.default" in bad.errors
+    other = connections.create(type="openai_compatible", name="Here", base_url="http://127.0.0.1:9/v1")
+    assert settings_store.set_many({"connections.default": other.id}).ok
+    assert settings_store.set_many({"connections.default": ""}).ok
