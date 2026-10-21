@@ -361,5 +361,7 @@ test('main.js: one deep-link follow at a time - a new reveal, a section change o
 
 test('app.css: plain notes inside Settings cards read at the card size, not the fluid body size', () => {
   const css = read('app.css');
-  assert.match(css, /#botmanager \.settings-pane :is\(p\.muted, \.bkp-check\) \{ font-size: 13px;/);
+  assert.match(css, /#botmanager \.settings-pane :is\(\.sys-backups-host > p\.muted, \.sys-backups-host \.bkp-check, \.chr-drawer \.chr-panel > p\.muted\) \{ font-size: 13px;/);
+  // Only those three: other notes in Settings (the Account card's .muted) keep their own size.
+  assert.doesNotMatch(css, /\.settings-pane :is\(p\.muted\b/);
 });

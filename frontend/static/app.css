@@ -5223,5 +5223,5 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .bm-parked { white-space: nowrap; }
 /* 3.2: plain notes inside Settings cards (a module's status line, the agent note in a
    character's Details, the backups checkbox) read at the card's size, not the body's. */
-#botmanager .settings-pane :is(p.muted, .bkp-check) { font-size: 13px; line-height: 1.45; }
+#botmanager .settings-pane :is(.sys-backups-host > p.muted, .sys-backups-host .bkp-check, .chr-drawer .chr-panel > p.muted) { font-size: 13px; line-height: 1.45; }
 #botmanager .settings-pane .sys-backups-host > p.muted { margin: 4px 2px 8px; }
