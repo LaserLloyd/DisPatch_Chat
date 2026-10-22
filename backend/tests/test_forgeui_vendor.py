@@ -87,7 +87,7 @@ def test_settings_name_themes_the_bundle_has() -> None:
     known = {t["slug"] for t in registry}
     assert set(settings["themes"]) <= known
     assert settings["default"] == "auto" or settings["default"] in settings["themes"]
-    # ForgeUI 1.2's accessibility themes are offered.
+    # The accessibility themes (ForgeUI 1.2 onward) are offered.
     assert {"slate", "high-contrast", "high-contrast-light"} <= set(settings["themes"])
 
 

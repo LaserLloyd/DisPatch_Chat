@@ -325,10 +325,12 @@ const SHELL = [
   // before anything else, so an offline start without it has no theme at all.
   '/static/ui-theme/ui-theme.js', '/static/ui-theme/ui-theme.css',
   '/static/ui-theme/adapters/dispatch-extra.css',
-  // ForgeUI 1.2.0 component layer (v168): index.html links the sheet and
+  // ThemeForge component layer (v168): index.html links the sheet and
   // defers the script; the string tables are fetched on demand by
   // UIComponents.loadLocale(), so an offline switch of language still works.
   '/static/ui-theme/ui-components.css', '/static/ui-theme/ui-components.js',
+  // ThemeForge 2.0 icon sprite: railIcon()/uiIcon() draw every chrome icon from it.
+  '/static/ui-theme/icons.svg',
   '/static/ui-theme/locales/en.json', '/static/ui-theme/locales/ja.json',
   '/static/theme.css',
   '/static/app.css',

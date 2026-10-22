@@ -1,7 +1,7 @@
-/* GENERATED theme tokens: ThemeForge 1.2.0, drop-in bundle (ui-theme/).
+/* GENERATED theme tokens: ThemeForge 2.0.1, drop-in bundle (ui-theme/).
    https://github.com/LaserLloyd/ThemeForge . Do not edit this copy: update the whole
    folder (python ui-theme/update.py) and keep app styles in the app.
-   body sha256: 059625214785c466 */
+   body sha256: d754fedd1b0171fe */
 /* ============================================================================
    theme-base.css — the token contract, Purple (the base theme), and the
    theme-agnostic element layer.
@@ -295,6 +295,9 @@
   --font-serif:   var(--font-sans);
   --font-mono:    'JetBrains Mono', 'Fira Code', ui-monospace, monospace;  /* no SFMono-Regular/Menlo: ui-monospace covers Apple, and Linux fontconfig maps both names to a proportional sans */
   --font-display: var(--font-sans);
+  /* Typed emoji drawn in the text colour (.ui-emoji). Noto Emoji is monochrome:
+     load it (data-fonts-href) to draw faces, which system fonts only have in colour. */
+  --font-emoji:   'Noto Emoji', 'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', sans-serif;
 
   /* ---- Elevation ---- */
   --shadow-1: 0 1px 2px rgba(0,0,0,.30);
@@ -320,7 +323,8 @@
 
 /* ==========================================================================
    B. THEME-INVARIANT TOKENS
-   Themes may override radii, control heights and shell metrics. Themes NEVER
+   Themes may override radii, control heights, shell metrics and the icon
+   stroke. Themes NEVER
    override --z-*.
    ========================================================================== */
 
@@ -349,6 +353,10 @@
   --rail-w:      72px;
   --bar-h:       60px;
   --content-max: 1200px;
+
+  /* Icons: the stroke of ui-theme/icons.svg, in units of its 24px grid (2 = 1/12
+     of the icon's size). A theme may change it; the high-contrast pair draws heavier. */
+  --icon-stroke: 2;
 
   /* Component tokens */
   --slider-track-h: 4px;
@@ -1594,6 +1602,9 @@
   --scrollbar-hover: #e6e6e6;  /* D */
   /* The empty part of a slider: 5.3:1 on surface-2, 6.2:1 on surface-0. */
   --control-track: #8c8c8c;
+
+  /* Heavier icon lines, like the rest of this theme. */
+  --icon-stroke: 2.5;
 }
 
 /* theme-high-contrast-light.css — CORE
@@ -1760,6 +1771,9 @@
   --scrollbar-hover: #000000;  /* D */
   /* The empty part of a slider: 5.3:1 on white. */
   --control-track: #6b6b6b;
+
+  /* Heavier icon lines, like the rest of this theme. */
+  --icon-stroke: 2.5;
 }
 
 /* theme-electric-yellow.css — OPT-IN
@@ -2627,6 +2641,15 @@
 :lang(zh) h1, :lang(zh) h2, :lang(zh) h3, :lang(zh) h4 {
   letter-spacing: normal;
 }
+/* Arabic is joined script: any tracking pulls the letters of a word apart,
+   so every tracked role sets solid. Inter has no Arabic, so the system face draws it. */
+:lang(ar) {
+  --font-sans: 'Inter', 'Noto Sans Arabic', 'Segoe UI', 'Geeza Pro', Tahoma, sans-serif;
+  --font-display: var(--font-sans);
+  --ls-tight: 0;
+  --ls-snug: 0;
+  --ls-label: 0;
+}
 
 /* ---- More contrast — every theme ----
    When the system asks for more contrast, lines take the control-edge
@@ -2639,6 +2662,7 @@
     --divider: var(--border-strong);
     --glass-stroke: var(--border-strong);
     --text-tertiary: var(--text-secondary);
+    --icon-stroke: 2.5;
   }
 }
 

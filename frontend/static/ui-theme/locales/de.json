@@ -1,0 +1,17 @@
+{
+  "$locale": "de",
+  "cancel": "Abbrechen",
+  "ok": "OK",
+  "confirm": "Bestätigen",
+  "input": "Eingabe",
+  "message": "Nachricht",
+  "value": "Wert",
+  "copy": "Kopieren",
+  "copied": "Kopiert",
+  "copyFailed": "Kopieren fehlgeschlagen",
+  "reset": "Auf Standard zurücksetzen",
+  "resetNamed": "{name} auf Standard zurücksetzen",
+  "basic": "Einfach",
+  "advanced": "Erweitert",
+  "setByEnv": "Von der Umgebung festgelegt"
+}
