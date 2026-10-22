@@ -40,7 +40,8 @@ def _drain(ws) -> list[dict]:
 @pytest.fixture
 def people(world):
     owner = world.create_owner(world.client())
-    world.person(owner, "Sam", "member", pin="5555")
+    # 4.0: alpha/beta are agent characters in the test roster: a User needs dispatch_agents
+    world.person(owner, "Sam", "member", pin="5555", grants=["dispatch_agents"])
     world.person(owner, "Robin", "restricted")
     from agents_world import sibling
     member = sibling(world, owner, LAN)
@@ -151,19 +152,18 @@ def test_owner_creation_also_adopts_rows_whose_owner_no_longer_exists(world):
     assert _owner_of(world, "threads", t.id) == accounts.get_owner().id
 
 
-def test_an_unsigned_device_stamps_the_single_restricted_profile_else_the_owner(world):
+def test_an_unsigned_device_stamps_the_default_profile_else_nothing(world):
+    """4.0: an unsigned device is the lock-target default profile (it owns what it creates)
+    or nobody (who creates nothing)."""
+    from app import auth
     owner = world.create_owner(world.client())
-    rows = accounts.list_profiles()
-    assert ownership.anonymous_target(rows) == accounts.get_owner().id     # no Restricted profile
-    world.person(owner, "Robin", "restricted")
-    robin = accounts.get_by_name("Robin")
-    assert ownership.anonymous_target() == robin.id
-    assert ownership.for_principal(world.main.policy.anonymous()) == robin.id
-    world.person(owner, "Kit", "restricted")
-    assert ownership.anonymous_target() == accounts.get_owner().id         # two: never guess
-    assert ownership.anonymous_target(designated=robin.id) == robin.id
-    assert ownership.for_principal(world.main.policy.machine_principal("loopback")) == accounts.get_owner().id
-    assert ownership.for_principal(world.main.policy.open_principal()) == accounts.get_owner().id
+    pol = world.main.policy
+    assert ownership.for_principal(pol.nobody()) is None
+    lobby = world.person(owner, "Lobby", "user")
+    auth.set_lock_target("default_profile", lobby["id"])
+    assert ownership.for_principal(pol.unsigned()) == lobby["id"]
+    assert ownership.for_principal(pol.machine_principal("loopback")) == accounts.get_owner().id
+    assert ownership.for_principal(pol.open_principal()) == accounts.get_owner().id
 
 
 def test_every_create_call_in_the_app_passes_an_owner():

@@ -465,6 +465,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # Every socket is then narrowed to the characters ITS profile may use (3.0
     # per-profile visibility), broadcasts included - not only the roster and hello.
     manager.scoper = scope_frame_for_principal
+    # 4.0 ownership: before a frame goes out, the owner of the thread it names is cached so
+    # the scoper can send it to that owner's sockets only (and drop what it cannot attribute).
+    manager.prime = lambda frame: ownership.prime_for_frame(db, frame)
     manager.is_session_live = lambda tok: auth.get_session(tok) is not None
     # Lets the manager demote token-less "full" connections (opened while no
     # PIN existed) the moment a PIN is set. auth.load() is mtime-cached.
@@ -874,8 +877,8 @@ async def auth_gate(request: Request, call_next):
 
     1. Identify the principal: a session cookie -> that profile; else, on a route
        that has a machine surface, an agent holding the api_token (or an on-box
-       process while ``machine_loopback_trust`` is on); else a device bound to a
-       default profile; else **anonymous = Restricted** (what used to be Safe Mode).
+       process while ``machine_loopback_trust`` is on); else the lock-target default
+       profile (``policy.unsigned``); else nobody, who gets 401 ``signin_required``.
        An install with no owner and no PIN is open to this machine only, until the
        owner account exists (``POST /api/auth/setup``).
     2. Look up the route's declared requirement (``app/route_policy.py``). A route
@@ -900,7 +903,7 @@ async def auth_gate(request: Request, call_next):
     # authenticated by the random ticket in the URL (minted by a cookie-bearing
     # call, client-bound, expiring). The route is its own lock and fails closed.
     if path.startswith((localview.TICKET_PREFIX, tools.TICKET_PREFIX)):
-        _attach_principal(request, policy.anonymous(), None)
+        _attach_principal(request, policy.nobody(), None)
         return await call_next(request)
 
     tmpl, req = _route_index.match("GET" if method == "HEAD" else method, path)
@@ -913,7 +916,7 @@ async def auth_gate(request: Request, call_next):
                     request.client.host if request.client else "", _proxied_request(request))):
             # Reachable from the network with no owner: the only thing a stranger
             # may do is finish setup (with the one-time token) or read the shell.
-            _attach_principal(request, policy.anonymous(device_id), None)
+            _attach_principal(request, policy.nobody(device_id), None)
             if req is not None and req.public:
                 return await call_next(request)
             if tmpl is None:
@@ -946,18 +949,22 @@ async def auth_gate(request: Request, call_next):
             if early is not None:
                 return early
     if principal is None:
-        principal = policy.for_device(device_id) or policy.anonymous(device_id)
+        # 4.0 (BUILD-PLAN-v2 §1.4): an unsigned device is the lock-target default profile,
+        # or nobody. No device binding is consulted any more.
+        principal = policy.unsigned(cfg) or policy.nobody(device_id)
 
-    # ---- an install that shows nothing to a device nobody has signed in on --------
-    if (principal.kind == "anonymous" and cfg.anonymous_access == "none"
-            and tmpl is not None and not (req is not None and req.public)):
+    # ---- nobody signed in and no default profile to land on: the sign-in screen ----
+    if (principal.kind == "none" and tmpl is not None
+            and not (req is not None and req.public)):
         _attach_principal(request, principal, sess)
         return _gate_denial(request, policy.Decision(
             False, 401, "signin_required", "Sign in to continue."), req)
 
     # ---- CSRF: a cookie-carrying browser may not be driven by another origin ----
-    # (Ambient authority is the cookie. An anonymous caller has none to abuse.)
-    if (method not in _SAFE_METHODS and (sess is not None or device_id is not None)
+    # (Ambient authority is the cookie - or, on the lock-target default profile, simply
+    # being a browser on this network: another origin's page must not act as it either.)
+    if (method not in _SAFE_METHODS
+            and (sess is not None or device_id is not None or principal.via == "default")
             and _cross_origin(request)):
         _attach_principal(request, principal, sess)
         return _gate_denial(request, policy.Decision(
@@ -980,6 +987,14 @@ async def auth_gate(request: Request, call_next):
     request.state.policy.scoped = decision.scoped
 
     # ---- item-level rules that depend on the path ---------------------------------
+    if principal.kind == "none" and _gated_avatar_static(path):
+        # Avatars are behind sign-in: the static mount is public for the app shell only.
+        return _gate_denial(request, policy.Decision(
+            False, 401, "signin_required", "Sign in to continue."), req)
+    if _foreign_character_item(method, path, principal):
+        return JSONResponse({"detail": "Unknown bot",
+                             "error": errors.envelope("not_found", message="Unknown bot")},
+                            status_code=404)
     if principal.is_restricted:
         if _gated_avatar_static(path) and not _safe_avatar_static(path):
             return _gate_denial(request, policy.Decision(
@@ -1007,7 +1022,9 @@ def _attach_principal(request: Request, principal: policy.Principal,
     request.state.principal = principal
     request.state.policy = policy.Policy(principal)
     request.state.session = sess
-    request.state.decoy = principal.is_restricted
+    # The 3.x handlers' "locked caller" flag: a Basic profile until WP-DEL, and nobody (an
+    # unsigned device with no default profile) - fail closed wherever a handler still asks.
+    request.state.decoy = principal.is_restricted or principal.kind == "none"
     request.state.machine = principal.is_machine
 
 
@@ -1813,45 +1830,114 @@ _FRAME_PERMISSION = {
 _PROFILE_SCOPED_EXTRA = frozenset({"reaction", "progress"})
 
 
-def scope_frame_for_principal(frame: dict, principal) -> dict | None:
-    """Per-profile character visibility on EVERY outgoing frame (3.0).
+#: Frames that are about ONE conversation (4.0 ownership). They go to the thread owner's
+#: sockets only, and one that names no thread - or a thread whose owner cannot be established
+#: (it was deleted before anyone cached it) - is DROPPED for everyone: fail closed. The set is
+#: every bot-scoped frame plus the ones that carry a thread's content or state without being
+#: about a character as such. ``tests/test_privacy_matrix.py`` walks it.
+_THREAD_FRAMES = _BOT_SCOPED_FRAMES | frozenset({
+    "reaction", "progress", "message_feedback", "messages", "notice",
+})
 
-    ``characters.may_use`` decides who sees a character: its ``audience`` and, when set,
-    its ``profiles`` list. The roster (``GET /api/bots``) and the ``hello`` frame were
-    already filtered with it; the broadcasts that follow (a Bot Manager save, an avatar
-    upload, a thread created or renamed, a reply landing) were sent to every socket
-    unfiltered, so a Member - or a Restricted profile - left off a character's list
-    learned its new name and avatar the moment the Owner edited it. Installed as
-    ``manager.scoper`` and run after the Safe-Mode redactor, per connection:
+#: Thread-attributed frames that are a neutral reply to the requesting socket itself (an ack,
+#: a validation error). A TARGETED one always reaches the requester - about someone else's
+#: thread it says exactly what it says about a thread that does not exist; broadcast, it
+#: follows the thread's owner like any other thread frame.
+_REPLY_FRAMES = frozenset({"error", "ack"})
 
-    - ``bots`` / ``hello`` lists keep only the characters this profile may use;
-    - an operator frame (:data:`_FRAME_PERMISSION`: harness, pool telemetry, agent
-      progress) is dropped unless the profile holds the permission behind it;
-    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` / ``progress``
-      item, or an ``error`` attributed to one) is dropped when the profile may not use that
-      character.
-      An UNATTRIBUTED frame passes: for a Restricted socket the redactor has already
-      failed closed on it, and a Member's unattributed frames (an ack, a plain error)
-      carry nothing about a character.
 
-    Owner, Admin, the open install and machines see everything (``may_use`` says so).
-    """
-    if principal is None or getattr(principal, "kind", "") in ("open", "machine") \
-            or getattr(principal, "is_admin", False):
-        return frame
+def _frame_owner_allows(frame: dict, principal, *, targeted: bool) -> bool:
+    """The ownership half of :func:`scope_frame_for_principal`."""
     t = frame.get("type")
-    need = _FRAME_PERMISSION.get(t)
-    if need is not None and not principal.can(need):
+    if targeted and t in _REPLY_FRAMES:
+        # A neutral reply to this socket's own request (an ack, "Thread not found"): the
+        # same answer whether the thread is someone else's or does not exist at all.
+        return True
+    tid = ownership.frame_thread_id(frame)
+    if tid is None:
+        if t == "reaction":
+            # A reaction fired at no thread ("pop it on every screen") is the machine's, and a
+            # machine's sphere is the Owner's: it reaches the Owner's sockets only.
+            return ownership.may_see_thread(principal, None, write=True)
+        # A conversation frame that names no conversation cannot be attributed: drop it.
+        return t not in _THREAD_FRAMES
+    owner = ownership.cached_owner(tid)
+    if not ownership.is_known(owner):
+        return targeted and t in _REPLY_FRAMES
+    return ownership.may_see_thread(principal, owner, write=True)
+
+
+#: Frames that name a character's roster entry (the rail): filtered through
+#: ``characters.visible_to`` for every principal, Admins included.
+_ROSTER_FRAMES = frozenset({"hello", "bots"})
+
+
+def _frame_app_permission(t: str) -> str | None:
+    """``app:<id>:<kind>`` frames (an app's own live updates) need the app's manifest
+    permission: the Job Board's comment or state change is that app's data."""
+    if not isinstance(t, str) or not t.startswith("app:"):
         return None
-    if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
+    app_id = t.split(":", 2)[1] if t.count(":") >= 2 else ""
+    la = apps_loader.get(app_id) if app_id else None
+    return la.manifest.permission if la is not None else Permission.ADMIN_SYSTEM.value
+
+
+def scope_frame_for_principal(frame: dict, principal, targeted: bool = False) -> dict | None:
+    """Per-profile visibility on EVERY outgoing frame (4.0 ownership + characters).
+
+    Installed as ``manager.scoper`` and run after the Safe-Mode redactor, per connection.
+    There is no Admin short-circuit anywhere in here (Fable amendment 15):
+
+    - **no principal** (a socket that has not finished its handshake, an observer that
+      did not say who it serves): only frames about nothing in particular pass - a thread
+      frame, a roster, a character-scoped frame or an operator frame is dropped;
+    - **ownership**: a frame about one conversation (:data:`_THREAD_FRAMES`, or any frame
+      naming a ``thread_id`` / ``thread`` / ``message``) reaches only the sockets of the
+      thread's OWNER - an Admin's too only when the chat is the Admin's. A thread frame that
+      cannot be attributed is dropped (fail closed);
+    - ``bots`` / ``hello`` lists keep only what ``characters.visible_to`` lists for this
+      principal (another profile's personal character never, for anyone);
+    - an operator frame (:data:`_FRAME_PERMISSION`, an app's ``app:<id>:*`` frame) needs
+      the permission behind it;
+    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` /
+      ``progress`` item, an ``error`` attributed to one) is dropped unless
+      ``characters.may_use`` lets this principal use that character."""
+    t = frame.get("type")
+    if principal is None:
+        if (t in _THREAD_FRAMES or t in _ROSTER_FRAMES or t in _FRAME_PERMISSION
+                or t in _BOT_SCOPED_FRAMES or t in agents_ws.FRAME_TYPES
+                or _frame_app_permission(t) is not None
+                or ownership.frame_thread_id(frame) is not None or _frame_bot(frame)):
+            return None
+        return frame
+    if not _frame_owner_allows(frame, principal, targeted=targeted):
+        return None
+    kind = getattr(principal, "kind", "")
+    if kind == "open":
+        return frame
+    if kind != "machine":
+        need = _FRAME_PERMISSION.get(t) or _frame_app_permission(t)
+        if need is not None and not principal.can(need):
+            return None
+    if t in _ROSTER_FRAMES and isinstance(frame.get("bots"), list):
         return {**frame, "bots": [b for b in frame["bots"]
-                                  if not isinstance(b, dict)
-                                  or characters.may_use_id(b.get("id"), principal)]}
+                                  if isinstance(b, dict) and _roster_row_visible(b, principal)]}
     if t in _BOT_SCOPED_FRAMES or t in _PROFILE_SCOPED_EXTRA or t == "error":
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
     return frame
+
+
+def _roster_row_visible(row: dict, principal) -> bool:
+    b = config.resolve_bot(row.get("id")) if row.get("id") else None
+    if b is None:
+        # A row for a character that is not (or no longer) in config.yaml: a personal row
+        # is never trusted; a household one follows the row's own scope fields.
+        if row.get("scope") == "personal":
+            return False
+        return getattr(principal, "kind", "") == "open"
+    return characters.visible_to(b, principal)
 
 
 def redact_for_decoy(frame: dict):
@@ -2080,7 +2166,7 @@ def _decoy_blocked(method: str, path: str) -> bool:
     _, req = _route_index.match("GET" if method.upper() == "HEAD" else method.upper(), path)
     if req is None:
         return False
-    d = policy.authorize(policy.anonymous(), req)
+    d = policy.authorize(policy.unsigned() or policy.nobody(), req)
     return not d.allowed
 
 
@@ -2103,6 +2189,45 @@ def _restricted_item_denied(method: str, path: str) -> bool:
     return False
 
 
+#: Paths that name ONE character (4.0): another profile's personal character answers 404
+#: here for everyone, Admins included, before any handler runs.
+_CHARACTER_ITEM_RE = re.compile(
+    r"^/api/(?:bots|characters|avatar-pool|me/characters)/([^/]+)(?:/|$)")
+_AVATAR_STEM_SUFFIX_RE = re.compile(r"-(?:face|full|thumb)$")
+
+
+def _avatar_stem(name: str) -> str:
+    stem = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return _AVATAR_STEM_SUFFIX_RE.sub("", stem).lower()
+
+
+def _personal_bot_for_avatar(path: str) -> config.Bot | None:
+    """The personal character whose avatar file ``/static/avatars/...<file>`` is, if any."""
+    stem = _avatar_stem(path)
+    if not stem:
+        return None
+    for b in config.load_bots():
+        if characters.is_personal(b) and b.avatar and _avatar_stem(b.avatar) == stem:
+            return b
+    return None
+
+
+def _foreign_character_item(method: str, path: str, principal) -> bool:
+    """True when ``path`` names a PERSONAL character ``principal`` may not use - by id
+    (``/api/bots/<id>...``, ``/api/characters/<id>...``) or by its avatar file
+    (``/static/avatars/...``). Answered as a 404, so its existence is not revealed.
+    ``/api/bots/all`` and ``/api/bots/order`` are lists, filtered by their handlers."""
+    m = _CHARACTER_ITEM_RE.match(path)
+    if m:
+        bot = config.resolve_bot(m.group(1))
+        return bot is not None and characters.is_personal(bot) \
+            and not characters.may_use(bot, principal)
+    if _gated_avatar_static(path):
+        bot = _personal_bot_for_avatar(path)
+        return bot is not None and not characters.may_use(bot, principal)
+    return False
+
+
 def _restricted_limit_denied(principal: policy.Principal, req) -> policy.Decision | None:
     """Time limits / quiet hours of a Restricted PROFILE (not an anonymous device)."""
     if principal.kind != "profile" or req.public or req.permission not in (
@@ -2116,23 +2241,59 @@ def _note_active_time(principal: policy.Principal) -> None:
 
 
 def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
-    """403 a Safe-Mode request that targets a bot not flagged for Safe Mode."""
+    """403 a Safe-Mode request that targets a bot not flagged for Safe Mode.
+
+    4.0 (``characters.may_use``): a character this caller may not use is refused - 404 for
+    another profile's PERSONAL character (Admins included: its existence is private), 403
+    for a household one left off the caller's list. An unknown id passes here: the route
+    answers its own 404, and the caller's own thread with a character since deleted stays
+    readable (ownership has already been checked on thread routes)."""
     if _is_decoy(request) and bot_id not in _safe_bot_ids():
         raise HTTPException(403, "Unlock for full access")
-    # 3.0 per-profile visibility: a character limited to some profiles is closed to the rest.
     pr = policy.of(request).principal
-    if not characters.may_use_id(bot_id, pr):
-        raise policy.denied(pr, "character")
+    bot = config.resolve_bot(bot_id) if bot_id else None
+    if bot is None or characters.may_use(bot, pr):
+        return
+    if characters.is_personal(bot):
+        raise HTTPException(404, "Unknown bot")
+    raise policy.denied(pr, "character")
 
 
-async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
-    """403 when the caller may not use the character behind ``thread_id``: a Restricted caller
-    outside the safe set, and (3.0) any profile left off the character's ``profiles`` list. The
-    second half used to run only for Restricted callers, so a Member could rename, archive,
-    mark read, edit or delete messages in a thread of a character made for someone else."""
+async def _deny_decoy_thread(request: Request, thread_id: str, *, write: bool = True):
+    """The thread, after both access rules, or the refusal:
+
+    * **ownership (4.0)**: 404 unless the caller owns the thread. This used to be skipped
+      for every Owner/Admin and machine - the operator short-circuit that let the Owner open
+      every profile's chats;
+    * **the character** (``characters.may_use``): 403 for a Restricted caller outside the safe
+      set, and for any profile left off the character's ``profiles`` list."""
     pr = policy.of(request).principal
-    if _is_decoy(request) or not (pr.is_admin or pr.is_machine):
-        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
+    thread = await ownership.require_thread(db, pr, thread_id, write=write)
+    _thread_bot.setdefault(thread.id, thread.bot_id)
+    _deny_decoy_bot(request, thread.bot_id)
+    return thread
+
+
+async def _require_thread(request: Request, thread_id: str, *, write: bool = False):
+    """A thread route's whole check: the canonical id (case-insensitive, 404 when there is
+    none), then :func:`_deny_decoy_thread`. Returns the thread."""
+    thread_id = await _canonical_thread_id(thread_id)
+    return await _deny_decoy_thread(request, thread_id, write=write)
+
+
+async def _require_message(request: Request, message_id: str, *, write: bool = True):
+    """``(message, thread)`` for a message route: 404 unless the message exists AND its thread
+    passes :func:`_deny_decoy_thread` (``write``: the owner only)."""
+    msg = await db.get_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    try:
+        thread = await _deny_decoy_thread(request, msg.thread_id, write=write)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(404, "Message not found") from None
+        raise
+    return msg, thread
 
 
 async def _canonical_thread_id(thread_id: str) -> str:
@@ -2269,7 +2430,7 @@ def _require_full_access(request: Request) -> None:
     from anywhere but the middleware chain still refuses a Restricted caller.
     An authenticated machine passes (on-box agents list files this way)."""
     pol = policy.of(request)
-    if pol.restricted:
+    if pol.restricted or pol.principal.kind == "none":
         raise policy.denied(pol.principal, "authenticated")
 
 
@@ -2528,6 +2689,23 @@ class _Prepared(NamedTuple):
     pic_drops: Sequence = ()
 
 
+async def _thread_owner_can(thread_id: str, permission: Permission | str) -> bool:
+    """Does the OWNER of ``thread_id`` hold ``permission``? (NULL owner = the protected
+    Admin; an open install: yes; an unknown thread or owner: no.)"""
+    if not policy.claimed():
+        return True
+    with contextlib.suppress(Exception):
+        exists, owner = await db.thread_owner_lookup(thread_id)
+        if not exists:
+            return False
+        pid = ownership.effective_owner(owner)
+        prof = accounts.get_profile(pid) if pid else None
+        if prof is None:
+            return False
+        return policy.profile_principal(prof).can(permission)
+    return False
+
+
 async def _prepare_persist(
     thread_id: str, role: str, content: str,
     media_url: str | None, metadata: dict | None, created_at: str | None,
@@ -2606,6 +2784,11 @@ async def _prepare_persist(
         # picture, and obeys the same replay rule: an old reply keeps its
         # marker stripped but must not occupy a GPU for news that has already
         # been read.
+        if "[[pic:" in content.lower() and not await _thread_owner_can(
+                thread_id, Permission.USE_IMAGES):
+            # 4.0 (BUILD-PLAN-v2 §1.2): no pictures in the chat of a profile without
+            # use_images (Basic by default) - the marker is dropped, nothing is rendered.
+            content = image_jobs.strip_pic_markers(content)
         content, pic_specs, pic_drops = await _pic_specs_from_markers(
             content, bot_id, thread_id, metadata=metadata,
             replaying=replaying and not _replay_is_fresh(created_at))
@@ -7256,6 +7439,18 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
                                                 "cannot answer. Start a chat with another one."})
         return
     direct = bool(bot.api or bot.advisor)
+    if not direct and characters.is_personal(bot):
+        # 4.0: a personal character answers through a direct backend only - never an agent
+        # on the host (an agent can read anyone's chats). The validator refuses saving one;
+        # this refuses a hand-edited config.yaml too.
+        log.warning("turn on %s refused: personal character %r has no direct backend",
+                    thread_id, bot_id)
+        with contextlib.suppress(Exception):
+            await manager.broadcast({"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                                     "code": "personal_needs_direct",
+                                     "message": "This character has no direct AI connection, "
+                                                "so it cannot answer."})
+        return
     # Composed ONCE, before the backends diverge, so an API bot and a gateway
     # bot are sent the same thing (bar a spoken turn's instructions, which
     # each backend gets in its own slot — see _compose_agent_text).
@@ -7278,7 +7473,8 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
         kw = _direct_turn_kwargs(advisor.run_turn, opts)
         if opts.model:
             kw["model"] = opts.model
-        if opts.locked:
+        if opts.locked and _accepts(advisor.run_turn, "locked"):
+            # 4.0 (WP-ADV) removed the locked turn; only a 3.x advisor still takes it.
             kw["locked"] = True
         if not opts.dispatch:
             kw["dispatch"] = False
@@ -7616,7 +7812,8 @@ async def _agents_thread_info(thread_id: str) -> dict | None:
     # A character a Restricted profile may chat with (audience all / restricted), or one that no
     # longer exists, is a thread whose lines they can read: agent prompts and results never go there.
     visible = bot is None or bot.audience in ("all", "restricted")
-    return {"bot_id": thread.bot_id, "restricted_visible": visible}
+    return {"bot_id": thread.bot_id, "restricted_visible": visible,
+            "owner_profile_id": thread.owner_profile_id}
 
 
 # Hand the task manager the three pieces of this module it needs. Lambdas re-resolve the
@@ -7656,7 +7853,17 @@ async def _advisor_ask_agent(agent_id: str, session_key: str, message: str,
 
 async def _advisor_threads_since(bot_id: str, since_iso: str
                                    ) -> list[tuple[str, str]]:
-    threads = await db.list_threads(bot_id, include_archived=True)
+    # 4.0: the nightly digest feeds the advisor's corpus, which every later turn of the
+    # character run for the corpus profile reads - so it is built from THAT profile's chats
+    # only (``advisor.corpus_profile``, default the protected Admin), never another one's.
+    bot = config.resolve_bot(bot_id)
+    corpus = ownership.corpus_profile_id(getattr(bot, "advisor", None) if bot else None)
+    if not corpus:
+        return []
+    owners: set[str | None] = {corpus}
+    if corpus == ownership.protected_admin_id():
+        owners.add(None)                    # NULL-owner rows are the protected Admin's
+    threads = await db.list_threads(bot_id, include_archived=True, owner_ids=owners)
     return [(t.id, t.title or "") for t in threads
             if str(t.updated_at or "") >= since_iso[:19]]
 
@@ -7691,6 +7898,9 @@ advisor.bind(advisor.Hooks(
     track=_track,
     data_dir=config.DATA_DIR,
     merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
+    # 4.0 (WP-ADV): the thread owner is resolved inside advisor from the thread id.
+    **({"get_thread": lambda tid: db.get_thread(tid)}
+       if "get_thread" in getattr(advisor.Hooks, "__dataclass_fields__", {}) else {}),
 ))
 
 
@@ -7956,10 +8166,32 @@ def _notify_push(kind: str, thread_id: str, title: str) -> None:
     try:
         if not push.has_subscriptions():
             return
-        _track(asyncio.create_task(push.notify(kind, thread_id, title),
+        _track(asyncio.create_task(_notify_thread_owner(kind, thread_id, title),
                                    name=f"push:{kind}:{thread_id}"))
     except Exception:
         log.exception("could not schedule a push")
+
+
+async def _notify_thread_owner(kind: str, thread_id: str, title: str) -> int:
+    """4.0: a ping goes to the devices of the thread's OWNER only (push subscriptions record
+    their profile). A thread that no longer exists pings nobody."""
+    if thread_id.startswith("task:"):
+        # An agent task's ping (approval wanted, done, failed) goes to the task's owner.
+        from . import agents_store
+        row = agents_store.get_task(thread_id[5:])
+        towner = str((row or {}).get("owner") or "")
+        if not towner:
+            return 0
+        if towner == "owner":                       # dispatched while the install was open
+            towner = ownership.owner_id() or ""
+        return await push.notify(kind, thread_id, title, owner=towner or None) if towner else 0
+    try:
+        exists, owner = await db.thread_owner_lookup(thread_id)
+    except Exception:
+        return 0
+    if not exists:
+        return 0
+    return await push.notify(kind, thread_id, title, owner=ownership.effective_owner(owner))
 
 
 async def _newest_message_id(thread_id: str) -> str | None:
@@ -8083,8 +8315,9 @@ async def auth_status(request: Request):
     pr = policy.of(request).principal
     claimed = policy.claimed(cfg)
     sess = _session_of(request)            # middleware attaches it for /api/auth
-    # "authed" keeps its 2.x meaning: an UNLOCKED session (not Restricted).
-    authed = bool(sess) and not pr.is_restricted
+    # "authed" keeps its 2.x meaning: an unlocked profile (not Restricted). 4.0: the
+    # lock-target default profile an unsigned device lands on counts (it has no session).
+    authed = (bool(sess) or pr.via == "default") and not pr.is_restricted
     prof = pr.profile
     setup_required = (not claimed and not policy.allow_open_install()
                       and not policy.is_loopback_origin(
@@ -8095,7 +8328,14 @@ async def auth_status(request: Request):
         "decoy": claimed and not authed,       # Restricted (was Safe Mode) = claimed, not unlocked
         # 3.0: accounts
         "claimed": claimed,
-        "anonymous_access": cfg.anonymous_access,   # "none": a device must sign in to see anything
+        # 4.0: where a lock and an unsigned device land, and (signed in on it) whether this is
+        # that shared default profile ("profile.shared"). The sign-in popup reads both, and
+        # "notices" ([{kind: "pin_reset", by, at}], this session's) - the same as /api/auth/me.
+        "lock_target": cfg.lock_target,
+        "default_profile": (people_api.public_profile(accounts.get_profile(cfg.default_profile))
+                            if claimed and cfg.lock_target == "default_profile"
+                            and cfg.default_profile else None),
+        "notices": people_api.notices_for(pr),
         "owner_exists": accounts.has_owner(),
         "setup_required": setup_required,      # remote caller, no owner: needs the setup token
         "signed_in": bool(sess),
@@ -8113,14 +8353,14 @@ async def auth_status(request: Request):
         # Absolute local paths — recon for an unauthenticated caller on a
         # 0.0.0.0-bound service, and only the Security panel (unlocked) shows
         # them. Empty strings keep the response shape stable for the client.
-        "recovery_path": str(auth.RECOVERY_PATH) if authed else "",
-        "config_path": str(auth.SECURITY_PATH) if authed else "",
+        "recovery_path": str(auth.RECOVERY_PATH) if authed and pr.is_admin else "",
+        "config_path": str(auth.SECURITY_PATH) if authed and pr.is_admin else "",
         # Remembered-device ("keep this device unlocked") feature. The days
         # value is public — the unlock overlay needs it to offer the checkbox —
         # but the device COUNT is only revealed to an unlocked session.
         "remember_days": cfg.remember_days,
         "remembered": bool(sess and sess.persistent),
-        "trusted_devices": auth.trusted_count() if authed else 0,
+        "trusted_devices": auth.trusted_count() if authed and pr.is_admin else 0,
         # Which optional subsystems this build has switched on. The client used
         # to discover these by CALLING them and catching the 404, which works
         # but writes a failed request to the console on every boot of a default
@@ -8189,14 +8429,18 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
 
 @app.post("/api/auth/lock")
 async def auth_lock(request: Request):
-    # A Restricted profile locking its screen leaves the device as that profile's, not a
-    # fresh guest's (people_api.keep_device_for_restricted): the lock is no way out of its
-    # quiet hours or budgets.
-    pr = policy.of(request).principal
-    if pr.kind == "profile" and pr.is_restricted and pr.profile is not None:
-        people_api.keep_device_for_restricted(_device_id_of(request), pr.profile)
-    auth.revoke(request.cookies.get(COOKIE_NAME))
-    resp = JSONResponse({"ok": True})
+    """Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):
+    the default profile (``lock_target: default_profile``) or the profile list. The push
+    subscription of the session being closed goes with it (a locked device pings nobody)."""
+    old = request.cookies.get(COOKIE_NAME)
+    if old:
+        with contextlib.suppress(Exception):
+            push.rebind(auth.device_hash(old), None, None)
+    auth.revoke(old)
+    cfg = auth.load()
+    landed = policy.unsigned(cfg)
+    resp = JSONResponse({"ok": True, "lock_target": cfg.lock_target,
+                         "landed": people_api.public_profile(landed.profile) if landed else None})
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
 
@@ -8302,6 +8546,10 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
         auth.burn_setup_token()
         accounts.log_activity("owner_created", profile_id=owner.id if owner else None,
                               subject=policy.request_quota_ip(request), category="audit")
+        if owner is not None:
+            # 4.0: the first Admin of a fresh install sees the household Atlas - no own copy
+            # (profiles_service decides; first_admin=True says this is that profile).
+            people_api.profile_created(owner, first_admin=True)
         return _issue_cookie_response(
             {"ok": True, "pin_set": cfg.pin_set or bool(new_pin), "claimed": True,
              "needs_password": bool(owner and not owner.has_password)},
@@ -8433,7 +8681,23 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 async def advisor_status(request: Request):
     """Each advisor's provider chain, knowledge index and recent requests."""
     _deny_agent_route_to_browser(request)
-    return await advisor.status()
+    out = await advisor.status()
+    # 4.0: a request's brief is lifted from a conversation, so only requests made from a
+    # chat the caller may read are listed (a machine: the protected Admin's).
+    pr = policy.of(request).principal
+    rows = await asyncio.to_thread(advisor.ledger().list, limit=200)
+    readable: set[str] = set()
+    for r in rows:
+        tid = r.get("thread_id")
+        if not tid:
+            continue
+        exists, towner = await db.thread_owner_lookup(tid)
+        if exists and ownership.may_see_thread(pr, towner):
+            readable.add(str(r.get("id")))
+    for a in out.get("advisors") or []:
+        if isinstance(a.get("requests"), list):
+            a["requests"] = [q for q in a["requests"] if str(q.get("id")) in readable]
+    return out
 
 
 @app.post("/api/advisor/digest", responses=problem.MACHINE)
@@ -8454,11 +8718,24 @@ async def advisor_digest(request: Request, day: str | None = None,
     return {"results": await advisor.digest(day, force=force and full)}
 
 
+async def _require_advisor_request_owned(request: Request, rid: str) -> None:
+    """4.0: a handoff card lives in one chat; only that chat's owner presses its buttons
+    (404 otherwise - the same as a request that does not exist)."""
+    req = await asyncio.to_thread(advisor.ledger().get, rid)
+    tid = (req or {}).get("thread_id")
+    if not req or not tid:
+        raise HTTPException(404, "Unknown request")
+    exists, towner = await db.thread_owner_lookup(tid)
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
+        raise HTTPException(404, "Unknown request")
+
+
 @app.post("/api/advisor/requests/{rid}/send",
           dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
-async def advisor_request_send(rid: str, payload: AdvisorActionIn):
+async def advisor_request_send(request: Request, rid: str, payload: AdvisorActionIn):
     """The handoff card's Send button. A real unlocked session only: the
     machine surface must never be able to approve its own handoff."""
+    await _require_advisor_request_owned(request, rid)
     try:
         return {"ok": True, "request": await advisor.send_handoff(
             rid, message_id=payload.message_id)}
@@ -8472,7 +8749,8 @@ async def advisor_request_send(rid: str, payload: AdvisorActionIn):
 
 @app.post("/api/advisor/requests/{rid}/dismiss",
           dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
-async def advisor_request_dismiss(rid: str, payload: AdvisorActionIn):
+async def advisor_request_dismiss(request: Request, rid: str, payload: AdvisorActionIn):
+    await _require_advisor_request_owned(request, rid)
     try:
         return {"ok": True, "request": await advisor.dismiss_handoff(
             rid, message_id=payload.message_id)}
@@ -8726,7 +9004,7 @@ async def get_bots(request: Request):
     Restricted profile, the character's profile list) allows - characters.may_use."""
     _is_safe_mode_caller(request)
     bots = await asyncio.to_thread(config.load_bots)
-    return {"bots": [b.to_dict() for b in characters.visible_to(policy.of(request).principal, bots)]}
+    return {"bots": [b.to_dict() for b in characters.visible_bots(policy.of(request).principal, bots)]}
 
 
 @app.get("/api/bots/all")
@@ -8736,7 +9014,11 @@ async def get_all_bots(request: Request):
     # `voice` / `voice_rp` (which recorded person a bot speaks as, and how its
     # role-play text is read aloud) ride only on this full-access listing,
     # never on the broadcast `bots` frame.
-    return {"bots": [_bot_row(b) for b in config.load_bots()]}
+    # 4.0: household characters plus the caller's own personal ones - never another
+    # profile's personal character, Admins included.
+    pr = policy.of(request).principal
+    return {"bots": [_bot_row(b) for b in config.load_bots()
+                     if not characters.is_personal(b) or characters.may_use(b, pr)]}
 
 
 def _bot_row(b: config.Bot) -> dict:
@@ -8832,6 +9114,11 @@ def _complete_bot_order(items) -> list[dict]:
 @app.put("/api/bots/order")
 async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     _require_full_access(request)      # second lock, see _require_full_access
+    pr = policy.of(request).principal
+    for item in payload.bots:
+        known = config.resolve_bot(item.id)
+        if known is not None and characters.is_personal(known) and not characters.may_use(known, pr):
+            raise HTTPException(404, "Unknown bot")     # 4.0: another profile's character
     for item in payload.bots:
         for field in extensions.BOT_FIELDS:
             value = getattr(item, field, None)
@@ -8841,7 +9128,8 @@ async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
     return {"bots": [{**d, "voice": b.voice, "voice_rp": b.voice_rp}
-                     for d, b in zip(data, bots, strict=True)]}
+                     for d, b in zip(data, bots, strict=True)
+                     if not characters.is_personal(b) or characters.may_use(b, pr)]}
 
 
 @app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
@@ -9282,7 +9570,9 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
     if bot:
         bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
     _deny_decoy_bot(request, bot_id)
-    threads = await db.list_threads(bot_id, include_archived=include_archived)
+    # 4.0: the caller's OWN chats with this character.
+    threads = await db.list_threads(bot_id, include_archived=include_archived,
+                                    principal=policy.of(request).principal)
     out = [t.model_dump() for t in threads]
     # Redact BEFORE truncating: the cut can land inside a [[media:…]]
     # directive, and a half directive no longer matches the strip regex, so
@@ -9331,11 +9621,7 @@ async def create_thread(request: Request, payload: dict = Body(...)):
 @app.get("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def get_thread(request: Request, thread_id: str):
     _is_safe_mode_caller(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
+    thread = await _require_thread(request, thread_id)
     data = thread.model_dump()
     return _redact_thread_dict(data) if _is_decoy(request) else data
 
@@ -9359,7 +9645,9 @@ async def bot_avatar_history(request: Request, bot_id: str):
     _deny_decoy_bot(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
-    threads = await db.all_threads(include_archived=True)
+    # 4.0: built from the caller's OWN threads - how many chats somebody else started, and
+    # when, is their activity, not the character's.
+    threads = await db.all_threads(include_archived=True, principal=policy.of(request).principal)
     items = avatar_snapshots.history(bot_id, threads)
     return {"bot_id": bot_id, "avatars": [
         {**e, "url": f"/api/bots/{bot_id}/avatar/history/{e['id']}"} for e in items]}
@@ -9388,7 +9676,7 @@ async def bot_avatar_history_image(request: Request, bot_id: str, snapshot_id: s
     _deny_decoy_bot(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
-    threads = await db.all_threads(include_archived=True)
+    threads = await db.all_threads(include_archived=True, principal=policy.of(request).principal)
     if snapshot_id not in {e["id"] for e in avatar_snapshots.history(bot_id, threads)}:
         raise HTTPException(404, "No such avatar snapshot")
     full_path = avatar_snapshots.path_for_full(snapshot_id) if full else None
@@ -9495,11 +9783,8 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
     Immutable by construction (the filename IS the hash of the bytes), so it is
     safe to cache hard.
     """
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
+    thread = await _require_thread(request, thread_id)
+    thread_id = thread.id
     if full:
         # Full resolution is PIN-gated even for safe bots, same as
         # /api/bots/<id>/avatar/full — Safe Mode sees thumbnails only.
@@ -9554,10 +9839,8 @@ async def pin_thread_avatar(
     thread's avatar URL changes with the pin (cache-busted by snapshot hash).
     """
     _deny_agent_route_to_browser(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
+    thread = await _require_thread(request, thread_id, write=True)
+    thread_id = thread.id
 
     if file is not None:
         ctype = (file.content_type or "").lower()
@@ -9629,10 +9912,7 @@ async def get_message_mood_face(request: Request, message_id: str):
     Gated exactly like GET /api/threads/{id}/avatar: full-session sees any
     bot, Safe Mode only a safe bot's own thread (_deny_decoy_thread).
     """
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id, write=False)
     mood = (msg.metadata or {}).get("mood") if isinstance(msg.metadata, dict) else None
     if not mood:
         raise HTTPException(404, "This message has no mood")
@@ -9657,11 +9937,8 @@ async def get_messages(request: Request, thread_id: str,
                        limit: int = Query(200, ge=1, le=500),
                        before_id: str | None = None):
     _is_safe_mode_caller(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
+    thread = await _require_thread(request, thread_id)
+    thread_id = thread.id
     msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before_id)
     out = [m.model_dump() for m in msgs]
     if _is_decoy(request):
@@ -9822,15 +10099,16 @@ async def abort_turn(request: Request, thread_id: str):
     """
     _deny_decoy_mutation(request)
     _require_full_access(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    return await _abort_thread_turn(thread_id)
+    thread = await _require_thread(request, thread_id, write=True)
+    return await _abort_thread_turn(thread.id)
 
 
 @app.get("/api/unread", responses=problem.MACHINE)
 async def unread_summary(request: Request):
     """Threads with unread bot messages, across all bots (for sidebar dots)."""
     _is_safe_mode_caller(request)
-    unread = await db.unread_summary()
+    # 4.0: the caller's OWN chats only (the sidebar dots of nobody else's conversations).
+    unread = await db.unread_summary(principal=policy.of(request).principal)
     if _is_decoy(request):
         safe = _safe_bot_ids()
         unread = [u for u in unread if u.get("bot_id") in safe]
@@ -9844,10 +10122,7 @@ async def unread_summary(request: Request):
 async def delete_message_endpoint(request: Request, message_id: str):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
         raise HTTPException(409, "Cannot delete messages while a reply is in progress")
@@ -9919,10 +10194,7 @@ async def edit_message_endpoint(request: Request, message_id: str,
     """
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
         # Same rule as delete: the turn in flight is reading these rows.
@@ -9973,10 +10245,7 @@ async def update_message_checklist(request: Request, message_id: str,
     """
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     if not _CHECKLIST_FENCE_RE.search(msg.content or ""):
         raise HTTPException(400, "Message is not a checklist")
 
@@ -10084,10 +10353,7 @@ async def message_feedback(request: Request, message_id: str,
     daily-budget mechanism as every other decoy action (DECOY_FEEDBACK_QUOTA).
     """
     _is_safe_mode_caller(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     if msg.role != "assistant" or bool((msg.metadata or {}).get("sub")):
         raise HTTPException(
             400, "Feedback only applies to one of the bot's own replies")
@@ -10115,11 +10381,10 @@ async def message_feedback(request: Request, message_id: str,
 async def delete_thread(request: Request, thread_id: str, hard: bool = False):
     _is_safe_mode_caller(request)
     _deny_decoy_mutation(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
+    # Ownership caches the owner before the row goes, so the thread_deleted frame below can
+    # still be attributed (and sent to the owner's other devices only).
+    thread = await _require_thread(request, thread_id, write=True)
+    thread_id = thread.id
     if hard:
         # Same reasoning as deleting one placeholder, one level up: the rows
         # go with the messages, so read them first and withdraw the renders
@@ -10324,7 +10589,11 @@ async def _resolve_drop_thread(request: Request, thread_id: str | None):
     """
     if thread_id:
         thread = await db.get_thread(thread_id)
-        if thread and not (_is_decoy(request) and thread.bot_id not in _safe_bot_ids()):
+        # 4.0: and only a thread the caller owns - anybody else's falls back, like an unsafe one.
+        if (thread and not (_is_decoy(request) and thread.bot_id not in _safe_bot_ids())
+                and ownership.may_see_thread(policy.of(request).principal,
+                                             thread.owner_profile_id, write=True)
+                and characters.may_use_id(thread.bot_id, policy.of(request).principal)):
             return thread, False
     bot_id = _drop_notice_bot()
     if not bot_id:
@@ -10820,6 +11089,11 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
         canonical_fire_tid = await db.resolve_thread_id(payload.thread_id)
         if canonical_fire_tid is None:
             raise HTTPException(404, "Unknown thread")
+        # 4.0: into a thread the caller may write (a machine: the Owner's).
+        exists, towner = await db.thread_owner_lookup(canonical_fire_tid)
+        if not exists or not ownership.may_see_thread(policy.of(request).principal, towner,
+                                                      write=True):
+            raise HTTPException(404, "Unknown thread")
         payload.thread_id = canonical_fire_tid
 
     # Every fire must claim agent kind. The claim is caller-supplied, so it
@@ -10870,6 +11144,10 @@ async def image_job_create(request: Request, payload: ImageJobIn):
 
     canonical = await db.resolve_thread_id(payload.thread_id)
     if canonical is None:
+        raise HTTPException(404, "Unknown thread")
+    # 4.0: a picture lands in the thread as a message - the caller must own it.
+    exists, towner = await db.thread_owner_lookup(canonical)
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
         raise HTTPException(404, "Unknown thread")
 
     # Explicit, not the model's own default: this route always has a
@@ -10942,6 +11220,10 @@ async def image_job_status(request: Request, job_id: str):
         raise HTTPException(403, "Unlock for full access")
     job = await db.get_image_job(job_id)
     if job is None:
+        raise HTTPException(404, "Unknown image job")
+    # 4.0: a job is part of its thread (its prompt is that conversation's) - owner only.
+    exists, towner = await db.thread_owner_lookup(job["thread_id"])
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
         raise HTTPException(404, "Unknown image job")
     spec = _image_job_spec(job)
     # The callback token is deliberately absent: this route is readable by any
@@ -11158,6 +11440,12 @@ async def inject_message(request: Request, payload: InjectIn):
     fire `:react:` markers) via the machine-to-machine bypass.
     """
     _deny_agent_route_to_browser(request)
+    pr = policy.of(request).principal
+    source_id = f"inject:{payload.delivery_key}" if payload.delivery_key else None
+    if source_id:
+        dup = await _inject_duplicate(pr, source_id)
+        if dup is not None:
+            return dup
     thread: ThreadOut | None = None
     created = False
     if payload.thread_id:
@@ -11168,7 +11456,11 @@ async def inject_message(request: Request, payload: InjectIn):
         # paths must too.
         canonical = await db.resolve_thread_id(payload.thread_id)
         thread = await db.get_thread(canonical) if canonical else None
-        if not thread:
+        # 4.0 (BUILD-PLAN-v2 §1.7): a machine WRITES into any existing thread (a run's
+        # result lands in the chat that asked for it) but READS only the protected Admin's;
+        # anyone else only into a thread they own. The reply echoes nothing of the thread.
+        if not thread or (not pr.is_machine and not ownership.may_see_thread(
+                pr, thread.owner_profile_id, write=True)):
             raise HTTPException(404, "thread_id not found")
     elif payload.bot_id:
         # Case-forgiving for the same reason thread_id is: agents echo the
@@ -11187,16 +11479,24 @@ async def inject_message(request: Request, payload: InjectIn):
     if created:
         await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
 
-    msg = await _persist_and_broadcast_message(
-        thread.id, payload.role, payload.content,
-        media_url=_normalize_media(payload.media_url),
-        # Stamp the ROUTE, not the payload. This is what lets the reaction (and
-        # any future image) autopilot tell a machine post from a bot's own
-        # conversational reply -- see the origin gate in _prepare_persist. A
-        # caller cannot spoof its way out of it by omitting metadata, and a
-        # caller that sets its own `origin` is overridden here on purpose.
-        metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
-    )
+    try:
+        msg = await _persist_and_broadcast_message(
+            thread.id, payload.role, payload.content,
+            media_url=_normalize_media(payload.media_url),
+            # Stamp the ROUTE, not the payload. This is what lets the reaction (and
+            # any future image) autopilot tell a machine post from a bot's own
+            # conversational reply -- see the origin gate in _prepare_persist. A
+            # caller cannot spoof its way out of it by omitting metadata, and a
+            # caller that sets its own `origin` is overridden here on purpose.
+            metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
+            source_id=source_id,
+        )
+    except sqlite3.IntegrityError:
+        # The same delivery_key raced in a moment earlier (the unique source_id index).
+        dup = await _inject_duplicate(pr, source_id) if source_id else None
+        if dup is not None:
+            return dup
+        raise
     await _broadcast_thread_update(thread.id)
     if payload.notify and msg.content:
         # A machine post the family should hear about (a morning brief). The
@@ -11204,7 +11504,25 @@ async def inject_message(request: Request, payload: InjectIn):
         title = (payload.notify if isinstance(payload.notify, str)
                  else f"{_bot_display_name(thread.bot_id)} posted")
         _notify_push("post", thread.id, title)
-    return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}
+    return {"thread_id": thread.id, "created": created, "message": msg.model_dump(),
+            "duplicate": False}
+
+
+async def _inject_duplicate(principal, source_id: str) -> dict | JSONResponse | None:
+    """The reply to an inject whose ``delivery_key`` was already delivered: the first
+    message, ``duplicate: true`` - or 409 when that message sits in a thread the caller may
+    not read (nothing of it is echoed)."""
+    prior = await db.message_by_source_id(source_id)
+    if prior is None:
+        return None
+    exists, towner = await db.thread_owner_lookup(prior.thread_id)
+    if not exists or not ownership.may_see_thread(principal, towner):
+        return JSONResponse({"detail": "That delivery_key was already used.",
+                             "error": errors.envelope("conflict",
+                                                      message="That delivery_key was already used.")},
+                            status_code=409)
+    return {"thread_id": prior.thread_id, "created": False, "message": prior.model_dump(),
+            "duplicate": True}
 
 
 @app.post("/api/daily", responses=problem.MACHINE)
@@ -11336,16 +11654,20 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     if not canonical:
         raise HTTPException(404, "Thread not found")
     thread_id = canonical
+    # 4.0: only into a thread the caller owns (a machine: the Owner's). A thread somebody
+    # else owns is a 404, the same as one that does not exist.
+    owned = await ownership.require_thread(db, policy.of(request).principal, thread_id, write=True)
     role = payload.get("role", "assistant")
     if role not in ("assistant", "user", "system"):
         role = "assistant"
     pr = policy.of(request).principal
-    if not (pr.is_machine or pr.is_admin):
-        # 3.0: use_chat lets a Member reach this agent route. It must not become a way to
-        # write into a thread of a character made for someone else, or to put words in a
-        # character's (or the system's) mouth: that is the agents' and the Owner's job.
-        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
-        if role != "user":
+    if not pr.is_machine:
+        # use_chat lets a person reach this agent route. It must not become a way to write
+        # into a thread of a character they may not use (every role, Admins included: 4.0),
+        # or - for anyone but an Admin - to put words in a character's (or the system's)
+        # mouth: that is the agents' job.
+        _deny_decoy_bot(request, owned.bot_id)
+        if role != "user" and not pr.is_admin:
             raise policy.denied(pr, Permission.MANAGE_AGENTS,
                                 "Only an agent, the Owner or an Admin may post as a character or the system.")
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
@@ -11400,10 +11722,21 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 @app.get("/api/search")
 async def search_messages(request: Request, q: str = Query(...),
                           bot_id: str | None = None, limit: int = 60):
-    """Full-text search across every thread's messages (FTS5, LIKE fallback)."""
-    _require_full_access(request)      # reads every thread, Safe-Mode-unredacted
+    """Full-text search across the CALLER'S OWN conversations (FTS5, LIKE fallback).
+
+    4.0: every role searches its own chats, and only those - Admins included (before 4.0
+    this read every thread in the house), Basic profiles too (their chats are theirs)."""
+    policy.of(request).require(Permission.USE_CHAT)     # second lock: nobody / a machine
+    pr = policy.of(request).principal
+    if bot_id:
+        bot = config.resolve_bot(bot_id)
+        if bot is not None:
+            bot_id = bot.id
+        _deny_decoy_bot(request, bot_id)
     bot_ids = [bot_id] if bot_id else None
-    results = await db.search_messages(q, bot_ids=bot_ids, limit=limit)
+    results = await db.search_messages(q, bot_ids=bot_ids, limit=limit, principal=pr)
+    # A character made for other profiles is not searched either (characters.may_use).
+    results = [r for r in results if characters.may_use_id(r.get("bot_id"), pr)]
     return {"query": q, "results": results, "fts": db.fts_ok}
 
 
@@ -11462,13 +11795,17 @@ async def export_all(
     request: Request, format: str = Query("json"),
     bot_id: str | None = None, thread_id: str | None = None,
 ):
-    """Export all messages (or one bot / one thread) as JSON, Markdown, or HTML.
+    """Export YOUR messages (or one bot / one thread of yours) as JSON, Markdown, or HTML.
 
-    The user's 'retrieve ALL messages' guarantee: a single action that dumps the
-    full conversation history into an open, human-readable + re-importable file.
+    The 'retrieve ALL my messages' guarantee: a single action that dumps the caller's whole
+    conversation history into an open, human-readable + re-importable file. 4.0: own
+    threads only, for everyone - the full dump of every profile's chats is the encrypted
+    backup (Settings > System > Backups, admin_system), not this route.
     """
-    _require_full_access(request)      # dumps EVERY thread, unredacted
-    threads = await db.all_threads(include_archived=True)
+    # 4.0: every role exports its own history (manage_history), Basic profiles included.
+    policy.of(request).require(Permission.MANAGE_HISTORY)   # second lock: nobody / a machine
+    threads = await db.all_threads(include_archived=True,
+                                   principal=policy.of(request).principal)
     if thread_id:
         threads = [t for t in threads if t.id == thread_id]
     elif bot_id:
@@ -11511,7 +11848,9 @@ async def recover_transcript(request: Request, payload: dict = Body(...)):
     _require_full_access(request)
     if payload.get("all"):
         total, scanned = 0, 0
-        for t in await db.all_threads(include_archived=True):
+        # 4.0: the caller's own threads (a transcript is that conversation's content).
+        for t in await db.all_threads(include_archived=True,
+                                      principal=policy.of(request).principal):
             scanned += 1
             with contextlib.suppress(Exception):
                 total += await _import_transcript_messages(
@@ -11520,13 +11859,28 @@ async def recover_transcript(request: Request, payload: dict = Body(...)):
     thread_id = payload.get("thread_id")
     if not thread_id:
         raise HTTPException(400, "thread_id (or all:true) required")
-    t = await db.get_thread(thread_id)
-    if not t:
-        raise HTTPException(404, "Thread not found")
+    t = await _require_thread(request, thread_id, write=True)
+    thread_id = t.id
     n = await _import_transcript_messages(thread_id, t.bot_id, mark_followup=True)
     if n:
         await _broadcast_thread_update(thread_id)
     return {"ok": True, "thread_id": thread_id, "recovered": n}
+
+
+async def _owns_thread(principal, thread_id: str) -> bool:
+    exists, owner = await db.thread_owner_lookup(thread_id)
+    return exists and ownership.may_see_thread(principal, owner, write=True)
+
+
+async def _require_session_key_owned(request: Request, session_key: str) -> None:
+    """An agent session named ``agent:<seat>:<thread>`` IS that DisPatch thread's
+    conversation: reading or importing it needs the thread (404 otherwise, 4.0). A session
+    DisPatch never made (cron, main, a subagent) names no thread and stays an agent matter."""
+    key = str(session_key or "")
+    tid = key.split(":", 2)[2] if key.count(":") >= 2 else None
+    real = await db.resolve_thread_id(tid) if tid else None
+    if real and not await _owns_thread(policy.of(request).principal, real):
+        raise HTTPException(404, "No transcript for that session")
 
 
 @app.get("/api/openclaw/sessions")
@@ -11540,6 +11894,8 @@ async def openclaw_sessions(request: Request, bot_id: str = Query(...)):
         raise HTTPException(400, "Unknown bot_id")
     bot_id = bot.id
     sessions = openclaw.list_agent_sessions(bot_id)
+    pr = policy.of(request).principal
+    kept = []
     # Flag which sessions correspond to an existing DisPatch thread.
     for s in sessions:
         key = s["session_key"]
@@ -11548,9 +11904,12 @@ async def openclaw_sessions(request: Request, bot_id: str = Query(...)):
         # mixed-case bots' daily threads all show as "not in DisPatch" and
         # invite a duplicate import.
         real_tid = await db.resolve_thread_id(tid) if tid else None
+        if real_tid and not await _owns_thread(pr, real_tid):
+            continue        # 4.0: the session of somebody else's chat is not listed
         s["thread_id"] = real_tid or tid
         s["in_dispatch"] = bool(real_tid)
-    return {"bot_id": bot_id, "sessions": sessions}
+        kept.append(s)
+    return {"bot_id": bot_id, "sessions": kept}
 
 
 @app.get("/api/openclaw/transcript")
@@ -11568,11 +11927,13 @@ async def openclaw_transcript(
     bot_id = bot.id
     in_db: set[str] = set()
     if thread_id:
+        thread_id = (await _require_thread(request, thread_id, write=True)).id
         session_key = openclaw.session_key_for(bot_id, thread_id)
         msgs = await db.dump_messages(thread_id)
         in_db = {_canon_msg(m.content or "") for m in msgs if m.role == "assistant"}
     if not session_key:
         raise HTTPException(400, "thread_id or session_key required")
+    await _require_session_key_owned(request, session_key)
     path = openclaw.resolve_session_file(bot_id, session_key)
     if path is None:
         return {"bot_id": bot_id, "session_key": session_key, "items": [],
@@ -11601,6 +11962,7 @@ async def openclaw_import_session(request: Request, payload: dict = Body(...)):
     session_key = payload.get("session_key")
     if not session_key:
         raise HTTPException(400, "session_key required")
+    await _require_session_key_owned(request, session_key)
     path = openclaw.resolve_session_file(bot_id, session_key)
     if path is None:
         raise HTTPException(404, "No transcript for that session")
@@ -12654,8 +13016,22 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
     if manager.conn_decoy(ws) and bot_id not in _safe_bot_ids():
         await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
         return False
-    # 3.0 per-profile visibility (characters.may_use): the same character list the roster shows.
-    if not characters.may_use_id(bot_id, manager.principal_of(ws)):
+    # 4.0 characters.may_use: the same rule as the roster. A turn needs a character that
+    # exists; reading / archiving the socket's own thread of a deleted one does not.
+    bot_row = config.resolve_bot(bot_id) if bot_id else None
+    pr_ws = manager.principal_of(ws)
+    if (dispatch and bot_row is not None and characters.is_agent_backed(bot_row)
+            and not characters.is_personal(bot_row) and pr_ws is not None
+            and not pr_ws.can(Permission.DISPATCH_AGENTS)):
+        # The one thing missing is the agents permission: say so (the client offers nothing
+        # to retry), the same frame extensions.may_dispatch's refusal sends below.
+        msg = extensions.DISPATCH_REFUSED
+        await manager.send(ws, {"type": "error", "code": "permission_denied", "message": msg,
+                                "error": errors.envelope("permission_denied", message=msg),
+                                "required_permission": "dispatch_agents"})
+        return False
+    if (bot_row is None and dispatch) or (
+            bot_row is not None and not characters.may_use(bot_row, pr_ws)):
         await manager.send(ws, {"type": "error", "message": "Unlock for full access"
                                 if manager.conn_decoy(ws) else
                                 "Your profile may not use that character."})
@@ -12670,6 +13046,24 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
                                     "required_permission": "dispatch_agents"})
             return False
     return True
+
+
+async def _ws_thread(ws: WebSocket, thread_id: str | None, *, write: bool = True,
+                     quiet: bool = False):
+    """The thread, when this socket's person owns it (4.0 ownership), else None after a
+    neutral "Thread not found" error frame - word for word what a thread that does not exist
+    answers, so a socket learns nothing from an id it does not own. Every /ws action that
+    names a thread goes through here; the character rule (``_ws_bot_allowed``) runs after it."""
+    thread = await db.get_thread(thread_id) if isinstance(thread_id, str) and thread_id else None
+    if thread is not None:
+        ownership.remember(thread.id, thread.owner_profile_id)
+        if not ownership.may_see_thread(manager.principal_of(ws), thread.owner_profile_id,
+                                        write=write):
+            thread = None
+    if thread is None and not quiet:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Thread not found"})
+    return thread
 
 
 # Recently persisted client_msg_ids (WS send-ack protocol). A reconnecting
@@ -12761,7 +13155,10 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         if not seen.get("scheduled") and seen.get("thread_id"):
             # Stored but never dispatched (see _ACK_SEEN). Finish the job
             # rather than confirming a turn that was never started - after the
-            # same gate a fresh send passes (the id is the client's own string).
+            # same gate a fresh send passes (the id is the client's own string,
+            # so the thread must be THIS socket's person's, 4.0).
+            if await _ws_thread(ws, seen.get("thread_id"), quiet=True) is None:
+                return
             if not await _ws_bot_allowed(ws, seen.get("bot_id"), dispatch=True):
                 return
             log.warning("resend of %s: the message was stored but its turn "
@@ -12789,10 +13186,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
                                 "message": "Message too long (max 64KB)."})
         await _ack(ws, cmid, "rejected", "Message too long")
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)        # 4.0: the sender's own thread only
     if not thread:
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Thread not found"})
         await _ack(ws, cmid, "rejected", "Thread not found")
         return
     if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
@@ -12991,7 +13386,8 @@ async def _handle_get_threads(ws: WebSocket, data: dict) -> None:
         return
     if not await _ws_bot_allowed(ws, bot_id):
         return
-    threads = await db.list_threads(bot_id)
+    # 4.0: the socket's person's OWN chats with this character.
+    threads = await db.list_threads(bot_id, principal=manager.principal_of(ws))
     await manager.send(ws, {
         "type": "threads_list", "bot_id": bot_id,
         "threads": [t.model_dump() for t in threads],
@@ -13002,9 +13398,13 @@ async def _handle_get_messages(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
+    # 4.0: the socket's person's own thread.
+    thread = await _ws_thread(ws, thread_id)
+    if thread is None:
+        return
     # Every connection, not only a Restricted one: a Member left off a character's
     # profile list may not read its threads by id either (characters.may_use).
-    if not await _ws_bot_allowed(ws, await _bot_of_thread(thread_id)):
+    if not await _ws_bot_allowed(ws, thread.bot_id):
         return
     try:
         limit = max(1, min(500, int(data.get("limit") or 200)))
@@ -13030,7 +13430,10 @@ async def _handle_archive(ws: WebSocket, data: dict) -> None:
     if manager.conn_decoy(ws):
         await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
         return
-    bot_id = await _bot_of_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
+    if thread is None:
+        return
+    bot_id = thread.bot_id
     if not await _ws_bot_allowed(ws, bot_id):
         return
     await db.archive_thread(thread_id)
@@ -13343,7 +13746,7 @@ async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "Unlock for full access"})
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread:
         return
     if thread.status == "thinking" or thread_id in _regen_inflight:
@@ -13390,7 +13793,7 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
                                 "message": f"Message is too long (max "
                                            f"{MESSAGE_MAX_CHARS} characters)"})
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread:
         return
     if thread.status == "thinking" or thread_id in _regen_inflight:
@@ -13424,7 +13827,7 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread or thread.status == "thinking":
         return
     if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
@@ -13458,6 +13861,8 @@ async def _handle_abort(ws: WebSocket, data: dict) -> None:
         # WebSocket never passes through the HTTP middleware that enforces it.
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "Unlock for full access"})
+        return
+    if await _ws_thread(ws, thread_id) is None:
         return
     try:
         result = await _abort_thread_turn(thread_id)
@@ -13506,9 +13911,9 @@ async def websocket_endpoint(ws: WebSocket):
             await ws.close(code=1008)
             return
     # HTTP middleware doesn't run for the websocket scope, so the same principal
-    # resolution happens here: a session -> that profile; else the device's default
-    # profile; else anonymous = Restricted. An install nobody has claimed is open
-    # to this machine only (see auth_gate).
+    # resolution happens here: a session -> that profile; else the lock-target default
+    # profile (policy.unsigned); else the socket is closed (sign in first). An install
+    # nobody has claimed is open to this machine only (see auth_gate).
     cfg = auth.load()
     session = None
     claimed = policy.claimed(cfg)
@@ -13526,9 +13931,10 @@ async def websocket_endpoint(ws: WebSocket):
         principal = policy.for_session(session, device_id)
         if principal is None:
             session = None
-            principal = policy.for_device(device_id) or policy.anonymous(device_id)
-            if principal.kind == "anonymous" and cfg.anonymous_access == "none":
-                await ws.close(code=1008)      # sign in first
+            # 4.0: the lock-target default profile, or nobody (sign in first).
+            principal = policy.unsigned(cfg)
+            if principal is None:
+                await ws.close(code=1008)
                 return
     decoy = principal.is_restricted
     await manager.connect(ws, decoy=decoy, token=(session.token if session else None),
@@ -13537,7 +13943,7 @@ async def websocket_endpoint(ws: WebSocket):
         bots = config.load_bots()
         if decoy:
             bots = [b for b in bots if b.safe]
-        bots = characters.visible_to(principal, bots)      # per-profile character visibility
+        bots = characters.visible_bots(principal, bots)    # 4.0: what this profile's rail lists
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
@@ -13572,15 +13978,18 @@ async def websocket_endpoint(ws: WebSocket):
                 with contextlib.suppress(Exception):
                     await ws.send_json({"type": "locked"})
                 break
-            elif device_id is not None and principal.kind in ("profile", "anonymous"):
-                # A device bound to a default profile (the kitchen tablet) has no session to
-                # re-read, so the profile was a snapshot from the handshake: quiet hours or a
-                # budget the Owner set afterwards, disabling the profile or re-binding the
-                # device never reached a socket that stays open for days. Resolve it again.
-                fresh = policy.for_device(device_id) or policy.anonymous(device_id)
+            elif principal.via == "default":
+                # The lock-target default profile has no session to re-read, so the profile
+                # was a snapshot from the handshake: the lock target changing, the profile
+                # being disabled or edited never reached a socket that stays open for days.
+                # Resolve it again; a different answer (or none) ends the socket.
+                fresh = policy.unsigned()
+                if fresh is None or fresh.profile_id != principal.profile_id:
+                    with contextlib.suppress(Exception):
+                        await ws.send_json({"type": "locked"})
+                    break
                 current = fresh
-                if (fresh.kind != principal.kind or fresh.profile_id != principal.profile_id
-                        or fresh.role != principal.role or fresh.permissions != principal.permissions):
+                if fresh.role != principal.role or fresh.permissions != principal.permissions:
                     principal = fresh
                     manager.set_principal(ws, principal)
                     decoy = principal.is_restricted
@@ -13704,6 +14113,22 @@ async def _discard_run(run: Any) -> None:
         log.exception("ext: discarding a speculative run failed")
 
 
+def _thread_owner_may_use(thread) -> bool:
+    """May the thread's OWNER use its character (``characters.may_use``)? An extension turn
+    is told no caller; its socket's person is the thread owner (the socket's ownership
+    check), so the owner is who the character rule is asked about. An open install: yes."""
+    bot = config.get_bot(thread.bot_id)
+    if bot is None:
+        return False
+    if not policy.claimed():
+        return True
+    owner = ownership.effective_owner(thread.owner_profile_id)
+    prof = accounts.get_profile(owner) if owner else None
+    if prof is None or prof.disabled:
+        return False
+    return characters.may_use(bot, policy.profile_principal(prof))
+
+
 async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
                            instructions: Any = None, thinking: str | None = None,
                            metadata: dict | None = None, prefetched: Any = None) -> str | None:
@@ -13715,6 +14140,15 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
     thread = await db.get_thread(thread_id)
     if not thread:
         raise ValueError("thread not found")
+    if not _thread_owner_may_use(thread):
+        # 4.0 (BUILD-PLAN-v2 §1.2): every turn entry point asks characters.may_use for the
+        # thread's owner (the socket's person by construction).
+        if prefetched is not None:
+            await _discard_run(prefetched)
+        bot_now = config.get_bot(thread.bot_id)
+        if bot_now is not None and characters.is_agent_backed(bot_now):
+            raise PermissionError(extensions.DISPATCH_REFUSED)
+        raise PermissionError("Your profile may not use that character.")
     text = _clean_spoken_text(text)
     if not text:
         if prefetched is not None:
@@ -13833,7 +14267,7 @@ async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = 
     bot = config.get_bot(thread.bot_id) if thread else None
     backend = extensions.bot_backend_of(bot)
     if (bot is None or backend not in ("advisor", "api") or _turn_running(thread_id)
-            or extensions.turn_locked(thread_id)):
+            or extensions.turn_locked(thread_id) or not _thread_owner_may_use(thread)):
         return None
     old = _speculations.pop(thread_id, None)
     if old is not None:

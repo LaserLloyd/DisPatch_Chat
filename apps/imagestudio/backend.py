@@ -427,8 +427,11 @@ def build(ctx):
         return {"deleted": len(removed), "files": files, "in_chat": len(in_chat)}
 
     @router.get("/chat-images", dependencies=op)
-    async def chat_images(limit: int = Query(48, ge=1, le=120)):
-        threads = await ctx.db.all_threads(include_archived=False)
+    async def chat_images(request: Request, limit: int = Query(48, ge=1, le=120)):
+        from app import policy
+        # 4.0: the caller's OWN chats only (before 4.0 every thread in the house).
+        threads = await ctx.db.all_threads(include_archived=False,
+                                           principal=policy.of(request).principal)
         threads.sort(key=lambda t: t.updated_at, reverse=True)
         out: list[dict] = []
         seen: set[str] = set()
@@ -447,14 +450,20 @@ def build(ctx):
         return {"images": out[:limit]}
 
     @router.get("/targets", dependencies=op)
-    async def targets():
-        threads = await ctx.db.all_threads(include_archived=False)
+    async def targets(request: Request):
+        from app import characters, policy
+        pr = policy.of(request).principal
+        # 4.0: the caller's OWN chats, with characters the caller may use (before 4.0 every
+        # thread title and character in the house reached any Member who may make pictures).
+        threads = await ctx.db.all_threads(include_archived=False, principal=pr)
+        threads = [t for t in threads if characters.may_use_id(t.bot_id, pr)]
         threads.sort(key=lambda t: t.updated_at, reverse=True)
-        names = {b.id: b.name for b in ctx.config.load_bots()}
+        bots = [b for b in ctx.config.load_bots() if characters.may_use(b, pr)]
+        names = {b.id: b.name for b in bots}
         return {
             "threads": [{"id": t.id, "title": t.title or "", "bot_id": t.bot_id,
                          "bot": names.get(t.bot_id, t.bot_id)} for t in threads[:60]],
-            "bots": [{"id": b.id, "name": b.name} for b in ctx.config.load_bots()],
+            "bots": [{"id": b.id, "name": b.name} for b in bots],
         }
 
     return router

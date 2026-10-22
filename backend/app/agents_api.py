@@ -14,9 +14,10 @@ before a handler runs (the ``Depends`` below say the same sentence again at the 
 ``approve_agent_actions``   answer an approval card (``/api/approvals/{id}``) and press the Send
                             on a held handoff (``/api/tasks/{id}/release``)
 
-Who sees which task is one rule (``agents_ws.may_see_task``): an Owner or Admin sees all, a
-profile sees its own. A task you may not see answers 404, exactly like one that does not
-exist. An agent you may not use answers 404 too.
+Who sees which task is one rule (``agents_ws.may_see_task``): a profile sees its OWN tasks -
+the Owner and Admins included since 4.0 (they keep the aggregate spend, ``/api/agents/usage``).
+A task you may not see answers 404, exactly like one that does not exist. An agent you may not
+use answers 404 too.
 
 Secrets: the Claude API key and MCP header secrets are WRITE-ONLY. No route returns one, no
 event, log line or error carries one (``tests/agents/test_ag_no_secret_leaks.py``,
@@ -609,11 +610,15 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
         repo = str(p)
     thread_id = body.origin_thread_id
     if thread_id:
+        from . import ownership
         info = await mgr.hooks.thread_info(thread_id) if mgr.hooks.thread_info else None
-        allowed = {b.id for b in config.load_bots()} if pr.is_admin else policy.of(request).allowed_bot_ids(config.load_bots())
-        # characters.may_use: per-profile visibility (the character's profiles list), as in the roster.
-        if (info is None or info.get("bot_id") not in allowed
-                or not characters.may_use_id(info.get("bot_id"), pr)):
+        # 4.0: a task posts into its origin chat, so that chat must be the dispatcher's own.
+        if info is not None and not ownership.may_see_thread(
+                pr, info.get("owner_profile_id"), write=True):
+            raise HTTPException(404, "Thread not found")
+        # characters.may_use (4.0): the character must be one the dispatcher may use - the
+        # same rule for every role, Admins included.
+        if info is None or not characters.may_use_id(info.get("bot_id"), pr):
             raise HTTPException(404, "Thread not found")
         if info.get("restricted_visible", True):
             # What the agent is asked and what it answers is posted into this chat; a Restricted
@@ -649,9 +654,10 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
                 date.fromisoformat(v[:10])
             except ValueError:
                 return _problem(422, "validation_error", f"{label}: use YYYY-MM-DD")
-    # Only an Owner/Admin may look at other people's tasks; everyone else is pinned to their own.
+    # 4.0: everyone is pinned to their own tasks, the Owner and Admins included (``profile`` is
+    # accepted for old clients and ignored). An open install (no accounts) sees all.
     owner: str | None
-    if pr.is_admin:
+    if pr.kind == "open":
         owner = profile or None
     else:
         owner = agents_service.principal_key(pr)
