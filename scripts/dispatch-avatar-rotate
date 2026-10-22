@@ -419,9 +419,9 @@ def repin_daily_thread(bot_id: str, today: str, log: Log) -> None:
     want = f"daily-{bot_id}-{today}"
     try:
         proc = subprocess.run(
-            ["curl", "-s", "--max-time", "20",
+            ["curl", "-s", "--max-time", "20", "-K", "-",
              f"{BASE_URL}/api/threads?bot_id={bot_id}"],
-            capture_output=True, text=True, timeout=40)
+            capture_output=True, text=True, timeout=40, input=_dp_key_config())
     except subprocess.TimeoutExpired:
         log.warn(f"{bot_id}: thread list fetch timed out; daily re-pin skipped")
         return
@@ -477,11 +477,14 @@ def _dp_key_config() -> str:
     """curl config carrying DisPatch's machine API key (R1.5, 2026-10-22: loopback
     is no longer trusted by position). Fed to curl on stdin (`-K -`) so the key
     never appears in argv. Key: $DISPATCH_API_KEY, else
-    ~/.config/local-chat/machine.env. Empty when there is none."""
+    $DISPATCH_KEY_FILE (default ~/.config/local-chat/machine.env). Empty when
+    there is none."""
     key = os.environ.get("DISPATCH_API_KEY", "").strip()
     if not key:
+        path = Path(os.environ.get("DISPATCH_KEY_FILE")
+                    or HOME / ".config/local-chat/machine.env")
         try:
-            for line in (HOME / ".config/local-chat/machine.env").read_text().splitlines():
+            for line in path.read_text().splitlines():
                 if line.startswith("DISPATCH_API_KEY="):
                     key = line.split("=", 1)[1].strip().strip("'\"")
                     break

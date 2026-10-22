@@ -517,8 +517,8 @@
       "machine": [],
       "mcp": null,
       "permission": "use_chat",
-      "title": "Drop a file into a chat from a signed-out device",
-      "ui": null,
+      "title": "Drop a file one-way into a chat (the locked side's upload)",
+      "ui": "api.drop",
       "ws": []
     },
     {
