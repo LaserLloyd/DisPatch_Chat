@@ -187,20 +187,6 @@ test('rail: a backend without /api/tools still shows the builtins', { skip: dom.
   assert.deepEqual(listedIds(win), ['deepseek-harness', 'studioforge-panel', 'mail-panel']);
 });
 
-test('Safe Mode: only safe static/url tools, never a builtin', { skip: dom.skip }, async () => {
-  const win = setup();
-  const mod = await freshTools();
-  wire(mod, { state: { decoy: true, selectedBotId: null } });
-  await mod.loadTools();
-  assert.deepEqual(listedIds(win), ['family-page']);
-  // And no refresh control, even if the tool had one.
-  mod.openTool('family-page');
-  assert.ok(win.document.getElementById('tool-refresh').classList.contains('hidden'));
-  // Deep links are unlocked-only.
-  win.location.hash = '#tool=family-page';
-  assert.equal(mod.openFromHash(), false);
-});
-
 test('opening a static tool: full-page, strict sandbox, served path, refresh shown', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
@@ -384,7 +370,7 @@ test('serializeTools sends only schema fields; builtins only id/kind/enabled', {
   assert.deepEqual(out[0], { id: 'deepseek-harness', kind: 'builtin', enabled: true });
   assert.deepEqual(out[1], { id: 'studioforge-panel', kind: 'builtin', enabled: false });
   const bench = out.find((x) => x.id === 'benchmark');
-  assert.deepEqual(Object.keys(bench).sort(), ['enabled', 'entry', 'icon', 'id', 'kind', 'root', 'safe', 'title']);
+  assert.deepEqual(Object.keys(bench).sort(), ['enabled', 'entry', 'icon', 'id', 'kind', 'root', 'title']);
   assert.equal('has_refresh' in bench, false);
   assert.equal('builtin_feature' in bench, false);
 });
@@ -502,16 +488,6 @@ test('an app entry that points outside /apps/<id>/ is ignored', { skip: dom.skip
   mod.openTool('jobboard');
   assert.equal(win.document.getElementById('tool-frame').getAttribute('src'), '/apps/jobboard/',
     'an unsandboxed frame only ever holds our own origin');
-});
-
-test('Safe Mode: a non-safe app has no tile, no pane and owns no bot', { skip: dom.skip }, async () => {
-  const win = setup();
-  const mod = await freshTools();
-  wire(mod, { state: { decoy: true, selectedBotId: null } });
-  await mod.loadTools();
-  assert.equal(listedIds(win).includes('jobboard'), false);
-  assert.equal(mod.openTool('jobboard'), false);
-  assert.equal(mod.appForBot('jobboard'), null);
 });
 
 test('appForBot: the enabled app that owns a roster bot (case-insensitive)', { skip: dom.skip }, async () => {

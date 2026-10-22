@@ -130,9 +130,6 @@ export function personaPanel(bot, ctx) {
     const reset = el('button', { type: 'button', class: 'btn-secondary', text: t('persona.reset'), dataset: { bm: 'persona-reset' } });
     const close = el('button', { type: 'button', class: 'btn-secondary', text: t('common.close'), dataset: { bm: 'persona-close' } });
     const notes = [];
-    if (bot.safe) {
-      notes.push(el('p', { class: 'bm-persona-safe', dataset: { bm: 'persona-safe-note' }, text: t('persona.safe_note') }));
-    }
     notes.push(el('p', { class: 'muted bm-persona-hint', text: t(kind === 'legacy-api' ? 'persona.hint_legacy' : 'persona.hint') }));
     panel.append(
       head,

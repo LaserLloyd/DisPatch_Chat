@@ -51,12 +51,12 @@
          install with the feature off gets this policy byte-for-byte.
        · frame-src covers the DeepSeek Harness UI (loopback :3080, only ever
          framed when the browser is on the host itself) and the local viewer,
-         which frames a page the UNLOCKED operator explicitly asked for — a
+         which frames a page an Admin explicitly asked for — a
          file under a configured root (same-origin /local/file/…) or an http(s)
          URL they saved as a link button. Every framed document is sandboxed
          WITHOUT allow-same-origin, so it gets an opaque origin and can read
-         nothing of DisPatch's DOM, cookies or storage. Safe Mode never opens
-         the viewer, and the server 403s its routes for a decoy session. -->
+         nothing of DisPatch's DOM, cookies or storage. Only an Admin opens the
+         viewer, and the server refuses its routes to everyone else. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-B/4P8AyGy4SqUiBYgvGoQKCc5tVl0U48Z9aEDREIG1U=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
@@ -277,7 +277,7 @@
       <div class="tools-sep" id="tools-bots-sep" role="separator" hidden></div>
       <div id="tools-bots" role="none"></div>
       <!-- Rail buttons moved off the bar (js/railmenu.js moves the real elements
-           in and out; drag them, or use "Arrange the bar…"). Never in Restricted. -->
+           in and out; drag them, or use "Arrange the bar…"). -->
       <div class="tools-sep" id="tools-more-sep" role="separator" hidden></div>
       <div class="tools-more" id="tools-more" role="none"></div>
       <button class="tools-item tools-arrange" id="tools-arrange" type="button" tabindex="-1" hidden data-i18n="rail.arrange">Arrange the bar…</button>
@@ -317,9 +317,7 @@
         </div>
         <span class="conn-dot reconnecting" id="conn-dot" title="Connecting…" aria-label="Connection status" data-i18n-attr="title=conn.connecting;aria-label=conn.aria"></span>
         <span class="model-pill" id="ch-model" hidden></span>
-        <!-- Per-thread model/thinking override chip (operator-only — CSS
-             hides it in Safe Mode, same rule as #thread-menu-btn below).
-             The label shows "model · used/window"; a refusal from the
+        <!-- Per-thread model/thinking override chip. The label shows "model · used/window"; a refusal from the
              gateway (AgentRefused) adds .warning without clearing the
              underlying preference, so the operator can open the picker and
              see exactly what was refused. -->
@@ -330,7 +328,7 @@
         <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
         <!-- Extension actions (js/ext-sdk.js chatHeader.addAction): an installed
              add-on puts its header button here — the voice add-on's
-             microphone. Empty and hidden without one; unlocked tier only. -->
+             microphone. Empty and hidden without one. -->
         <span class="chat-actions-ext" id="chat-actions-ext" hidden></span>
         <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking" data-i18n-attr="aria-label=chat.model_chip">
@@ -413,8 +411,7 @@
           <!-- Stop sits BESIDE Send, not in place of it: sends are queued
                server-side while a reply runs, so the composer stays live and
                swapping the button would take that away. Hidden by default and
-               shown only for an unlocked session with a turn in flight —
-               Safe Mode never sees it (the server 403s the abort anyway). -->
+               shown only while a turn is in flight. -->
           <button class="stop-btn hidden" id="stop" aria-label="Stop reply" title="Stop reply" data-i18n-attr="aria-label=composer.stop;title=composer.stop">⏹</button>
           <button class="send-btn" id="send" aria-label="Send" data-i18n-attr="aria-label=composer.send" disabled>↑</button>
         </div>
@@ -428,7 +425,7 @@
       </div>
 
       <!-- DeepSeek Harness (dsh): replaces the chat pane when the Harness pseudo-bot
-           is selected. Full-session only (never appears in Safe Mode). The dsh Web
+           is selected. Admin only. The dsh Web
            UI is embedded from loopback; the bar controls its systemd unit, the
            default model, and one-shot headless jobs. -->
       <div class="terminal-view harness-view hidden" id="harness-view">
@@ -572,7 +569,7 @@
 
       <!-- Emails tab: MailForge's own dashboard, iframed at its own launch URL
            (see backend/app/mailforge_bridge.py for why this is not a
-           same-origin reverse proxy). Unlocked-session only, same gate as the
+           same-origin reverse proxy). Admin only, same gate as the
            two panels above. -->
       <div class="terminal-view mail-view hidden" id="mail-view">
         <header class="terminal-head">
@@ -634,7 +631,7 @@
       <!-- Extension tool pane (js/ext-sdk.js tools.openPane): ONE native pane an
            installed add-on fills with Settings-style groups (the voice add-on's
            Voice cloning, Built-in voices and Voice lab). Same terminal-view
-           chrome as Clients; unlocked only, never in Safe Mode. -->
+           chrome as Clients. -->
       <div class="terminal-view ext-tool-view hidden" id="ext-tool-view">
         <header class="terminal-head">
           <button class="back-btn" id="ext-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
@@ -1046,7 +1043,7 @@
         <button type="button" data-k="0">0</button>
         <button type="button" data-k="back" class="kp-action" aria-label="Backspace" data-i18n-attr="aria-label=lock.backspace">⌫</button>
       </div>
-      <button class="btn-primary lock-submit" id="lock-submit" data-i18n="lock.submit">Unlock</button>
+      <button class="btn-primary lock-submit" id="lock-submit" data-i18n="lock.submit">Sign in</button>
       <!-- Options, BELOW the button on purpose. Entering the PIN is what
            everyone comes here to do; these two are occasional. Above the
            button they sat between the keypad and the action, reading as a
@@ -1056,16 +1053,16 @@
         <!-- Shown only when remember_device_days > 0 in security.yaml -->
         <label class="lock-remember hidden" id="lock-remember-row">
           <input type="checkbox" id="lock-remember" />
-          <span data-i18n="lock.remember">K_Unlocked</span>
+          <span data-i18n="lock.remember">Keep this device signed in</span>
         </label>
         <!-- No-Image Mode. Unlike the remember row this is ALWAYS shown: a
-             Safe-Mode family device must be able to turn pictures off without
-             a PIN. Turning it back OFF is what needs the PIN, so when it is
-             already on and the session is locked this renders checked+disabled
-             rather than hidden — a missing control would just look like a bug. -->
+             shared device must be able to turn pictures off without a PIN.
+             Turning it back OFF is what needs the PIN, so when it is already
+             on and the session is locked this renders checked+disabled rather
+             than hidden — a missing control would just look like a bug. -->
         <label class="lock-remember lock-nim" id="lock-nim-row">
           <input type="checkbox" id="lock-nim" />
-          <span data-i18n="nim.lock_label">NI_Mode</span>
+          <span data-i18n="nim.lock_label">No-Image Mode</span>
         </label>
       </div>
       <div class="lock-links">

@@ -1573,3 +1573,7 @@ because no code used them after wave 2. WP-FE-CORE removed 69; INT-2 removed 55.
 - `wiz.family_add_member`
 - `wiz.family_animals`
 - `wiz.family_assistants`
+
+## WP-UIREV (4.0 UI review)
+
+English only, for WP-LOC to translate: `nim.lock_label` is now "No-Image Mode" (it read the placeholder "NI_Mode") and `nim.lock_locked` is now "No-Image Mode — sign in to change". Every other locale still carries the old English placeholder text for both. `lock.submit` already reads "Sign in" in `en.json`; the "Unlock" left in `index.html` was only the pre-translation fallback text and now says "Sign in" too.

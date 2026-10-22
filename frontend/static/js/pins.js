@@ -5,17 +5,12 @@
 // this browser (No-Image Mode, Privacy mode), never a server setting and never
 // anything that mutates the roster. A pin is a shortcut, and a shortcut to a
 // gated action would be a second path to it. Keeping the registry to
-// device-local toggles means a pin cannot become a way around the tier gate,
+// device-local toggles means a pin cannot become a way around a permission,
 // because there is no server call behind any of them.
 //
-// The gate still applies to what is DRAWN. Each entry declares `safe`: false
-// means the button is omitted entirely in Safe Mode, and because the rail is
-// re-rendered on every tier change, a device that locks loses those pins on
-// the spot rather than keeping a stale button that would 403 on use.
-//
 // Storage is localStorage, like the settings themselves: a pin is a per-device
-// convenience, not an account preference, and the family tablet wanting a
-// different rail from the phone is the normal case, not an edge one.
+// convenience, not an account preference, and a tablet wanting a different
+// rail from the phone is the normal case, not an edge one.
 
 import { railIcon, RAIL_ICONS } from './util.js?v=20';
 import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
@@ -44,7 +39,6 @@ export const PINNABLE = [
     icon: RAIL_ICONS.nim,
     titleKey: 'nim.title',
     titleEn: 'No-Image Mode',
-    safe: true,                       // works in Safe Mode; that is its point
     enabled: () => nimEnabled(),
     toggle: (on) => setNim(on),
     blocked: (decoy) =>
@@ -57,7 +51,6 @@ export const PINNABLE = [
     icon: RAIL_ICONS.privacy,
     titleKey: 'privacy.title',
     titleEn: 'Privacy mode',
-    safe: true,
     enabled: () => privacyEnabled(),
     toggle: (on) => setPrivacy(on),
     blocked: () => null,
@@ -67,7 +60,6 @@ export const PINNABLE = [
     icon: RAIL_ICONS.avatars,
     titleKey: 'settings.minimal_avatars',
     titleEn: 'Minimal avatars',
-    safe: true,                       // pure CSS display preference, no gate behind it
     enabled: () => minimalAvatarsEnabled(),
     toggle: (on) => setMinimalAvatars(on),
     // While NIM is on the attribute is borrowed and the preference read-only —
@@ -85,7 +77,6 @@ export const PINNABLE = [
     icon: null,
     titleKey: 'nav.theme',
     titleEn: 'Theme',
-    safe: false,               // the palette picker is a full-session surface
     pinnedByDefault: true,
     enabled: () => false,      // not a switch: there is no on/off state to show
     toggle: () => {},
@@ -147,18 +138,13 @@ export function setPinned(id, on) {
   return next;
 }
 
-/** Which pins may be DRAWN for this session.
- *
- *  Safe Mode sees only entries marked `safe`. Everything else is omitted, not
- *  disabled: a greyed-out button for a surface a locked device may never reach
- *  advertises the surface, which is the opposite of what Safe Mode is for.
- */
-export function visiblePins(decoy) {
+/** Which pins are DRAWN: the pinned entries that are not the theme button. */
+export function visiblePins() {
   return pinnedIds()
     .map(pinnableById)
     // `kind: 'rail'` entries own a button in the markup already (🎨). Drawing
     // one here too would put the same shortcut on the rail twice.
-    .filter((entry) => entry && entry.kind !== 'rail' && (entry.safe || !decoy));
+    .filter((entry) => entry && entry.kind !== 'rail');
 }
 
 /** Render the pinned buttons into the rail.
@@ -171,7 +157,7 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
   if (!container) return;
   container.querySelectorAll('.pin-btn').forEach((el) => el.remove());
   const anchor = container.querySelector('#manage-bots');   // pins sit before ⚙
-  for (const entry of visiblePins(decoy)) {
+  for (const entry of visiblePins()) {
     const btn = document.createElement('button');
     btn.className = 'gear-btn pin-btn';
     btn.dataset.pin = entry.id;

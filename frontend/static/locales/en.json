@@ -911,8 +911,8 @@
     "hint": "hide every picture — chat images, avatars and reactions. Nothing is downloaded. Once on, it takes the PIN to turn off.",
     "hint_locked": "pictures are hidden. Sign in to turn this off.",
     "hint_nopin": "hide every picture — chat images, avatars and reactions. Nothing is downloaded. Set a PIN to stop this being switched off.",
-    "lock_label": "NI_Mode",
-    "lock_locked": "NI_Mode — unlock to change",
+    "lock_label": "No-Image Mode",
+    "lock_locked": "No-Image Mode — sign in to change",
     "controls_avatars": "No-Image Mode controls this"
   },
   "about": {

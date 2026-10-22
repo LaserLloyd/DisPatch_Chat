@@ -185,7 +185,7 @@ const SANDBOX_URL = 'allow-scripts allow-forms allow-popups allow-same-origin';
 // Fields the manifest schema accepts. Everything else in a ToolOut
 // (has_refresh, builtin_feature) is output-only and must not be sent back —
 // the schema is closed and would 422 it.
-const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'safe', 'refresh', 'open'];
+const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'refresh', 'open'];
 
 // A framed page that has not fired `load` by now gets the "not finished
 // loading" card (the frame keeps loading underneath and is shown if it lands).
@@ -323,14 +323,12 @@ export function toolTitle(tool) {
 }
 
 /** The enabled app row whose roster bot is `botId` — the app that owns that
- *  bot's threads (and may hook them). Null in Safe Mode for a non-safe app. */
+ *  bot's threads (and may hook them). */
 export function appForBot(botId) {
   if (!botId || !tools) return null;
-  const st = deps && deps.state;
   for (const x of tools) {
     if (!isApp(x) || x.enabled === false || !x.bot_id) continue;
     if (String(x.bot_id).toLowerCase() !== String(botId).toLowerCase()) continue;
-    if (st && st.decoy && !x.safe) return null;
     return x;
   }
   return null;
@@ -358,11 +356,8 @@ export function railEntries() {
       if (st.decoy || !b || !deps.builtinOn(b.feature)) continue;
       builtins.push(tool);
     } else if (isApp(tool)) {
-      if (st.decoy && !tool.safe) continue;
       apps.push(tool);
     } else if (tool.kind === 'static' || tool.kind === 'url') {
-      // The API already filters for Safe Mode; this is the belt to its braces.
-      if (st.decoy && !tool.safe) continue;
       others.push(tool);
     }
   }
@@ -1095,7 +1090,6 @@ export function openTool(id, { launch = true } = {}) {
   }
   if (!tool || tool.enabled === false) return false;
   if (tool.kind !== 'static' && tool.kind !== 'url' && !isApp(tool)) return false;
-  if (st.decoy && !tool.safe) return false;
   if (openMode(tool) === 'window' && launch && launchWindow(tool)) return true;
 
   rememberPrev();

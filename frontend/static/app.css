@@ -4596,10 +4596,6 @@ body.tools-sheet-open::after {
 .bm-persona-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .bm-persona-pick { max-width: 320px; }
 .bm-persona-desc, .bm-persona-hint, .bm-persona-note { margin: 0; font-size: 12.5px; }
-.bm-persona-safe {
-  margin: 0; font-size: 12.5px; padding: 6px 9px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong); background: var(--bg-secondary); color: var(--text-secondary);
-}
 .bm-persona-text {
   width: 100%; box-sizing: border-box; min-height: 9lh; resize: vertical;
   padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.45; color: var(--text-primary);
@@ -5121,8 +5117,6 @@ body.tools-sheet-open::after {
 .rx-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rx-tile-thumb { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); object-fit: cover; background: var(--bg-primary); display: grid; place-items: center; font-weight: 700; color: var(--text-secondary); }
 .rx-tile-name { width: 100%; font-size: 12px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rx-tile-badge { position: absolute; top: 9px; inset-inline-end: 9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-  background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
 .rx-sheet { display: flex; gap: 14px; margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--bg-secondary); }
 .rx-sheet-img { width: 120px; height: 120px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
 .rx-sheet-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
