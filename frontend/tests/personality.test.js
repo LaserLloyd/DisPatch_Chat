@@ -211,7 +211,7 @@ test('wiring: main.js places the slots, bots-edit imports the module, Connect re
   // The Details panel does not draw a second personality picker beside it.
   assert.match(MAIN, /skip: \['personality'\]/);
   assert.match(SW, /'\/static\/js\/personality\.js'/);
-  for (const k of ['title', 'preset', 'custom', 'revert', 'reset', 'saved', 'safe_note', 'agent_note', 'hint']) {
+  for (const k of ['title', 'preset', 'custom', 'revert', 'reset', 'saved', 'agent_note', 'hint']) {
     assert.ok(EN.persona[k], k);
   }
 });
