@@ -46,7 +46,7 @@ import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
 } from './ext-sdk.js?v=18';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { maybeShowPrivacyCard } from './host-notice.js?v=1';
+import { maybeShowSignInNotice, armSignInNotice } from './host-notice.js?v=1';
 import { createChatDrop } from './chatdrop.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
@@ -99,7 +99,7 @@ import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusa
 import { normalizeRole, isAdminRole, signInMode, blockNoticeKey, wsErrorKind, avatarSpec } from './profiles.js?v=2';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
-  paintRestrictedBanner, openRestrictedPanel, paintAccessNotice,
+  paintAccessNotice,
 } from './signin.js?v=3';
 import { mountPeopleSettings } from './people.js?v=3';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
@@ -307,8 +307,8 @@ const dom = {};
  'sec-note',
  'lock-remember-row', 'lock-remember',
  'lock-nim-row', 'lock-nim',
- // 3.0 profiles: tiles host, rail chip + menu, Restricted strip, setup/notice overlays, first-run card, account block
- 'lock-tiles', 'profile-chip', 'profile-menu', 'restricted-banner', 'setup-screen', 'setup-card',
+ // 3.0 profiles: tiles host, rail chip + menu, setup/notice overlays, first-run card, account block
+ 'lock-tiles', 'profile-chip', 'profile-menu', 'setup-screen', 'setup-card',
  'access-notice', 'firstrun-card', 'firstrun-open', 'firstrun-dismiss', 'sec-account',
  'acct-change', 'acct-change-row', 'acct-password-host', 'acct-who', 'sec-pin-form', 'sec-cancel',
  'bm-avatar-select', 'bm-avatar-style-row', 'bm-lang-row',
@@ -8351,7 +8351,7 @@ function applyAuthChrome() {
   // Extensions follow the tier: mounted while unlocked, unmounted (and every
   // slot they filled emptied) the moment the device locks.
   syncExtensions();
-  // 3.0: the rail chip, the Restricted strip, the first-run card, the account block.
+  // 3.0: the rail chip, the first-run card, the account block.
   paintProfileChrome();
 }
 
@@ -8845,14 +8845,18 @@ const canAdmin = () => !state.decoy && isAdminRole(state.role);
 /** anonymous_access: none and nobody signed in -> only the sign-in screen. */
 const gateActive = () => !!(state.auth.claimed && state.auth.anonymousAccess === 'none' && !state.auth.signedIn);
 
-/** The one-time "stored on the host computer" card, when the app is on a normal
- *  page: booted, not gated, no lock / setup screen and no wizard up. */
-function showPrivacyCardWhenReady() {
-  maybeShowPrivacyCard({
+/** The sign-in notice (js/host-notice.js): once per sign-in, when the app is on a
+ *  normal page: booted, not gated, no lock / setup screen and no wizard up. */
+function showSignInNoticeWhenReady() {
+  const p = state.auth.profile;
+  maybeShowSignInNotice({
     ready: () => state.started && !gateActive()
       && dom['lock-screen'].classList.contains('hidden')
       && !(dom['setup-screen'] && !dom['setup-screen'].classList.contains('hidden') && !dom['setup-screen'].hidden)
       && !document.querySelector('.wizard-backdrop'),
+    who: `${state.role || 'none'}:${(p && p.id) || ''}`,
+    shared: !!(p && p.shared),
+    notices: state.auth.notices,
   });
 }
 
@@ -8888,6 +8892,7 @@ function applyAuthStatus(s, { keepFeatures = false } = {}) {
     profile: s.profile || null,
     needsPassword: !!s.needs_password,
     profiles: Array.isArray(s.profiles) ? s.profiles : [],
+    notices: Array.isArray(s.notices) ? s.notices : [],
     disclosure: s.disclosure || null,
     anonymousAccess: s.anonymous_access === 'none' ? 'none' : 'restricted',
   };
@@ -8929,6 +8934,7 @@ async function finishSignIn(r) {
   await refreshAuthQuiet();
   state.auth.remembered = !!(r && r.remembered);
   if (r && r.profile && !state.auth.profile) state.auth.profile = r.profile;
+  armSignInNotice();   // a sign-in: the notice shows again once the app is up
   await reboot();
   armIdleTimer();
   const name = (state.auth.profile && state.auth.profile.name) || '';
@@ -9017,7 +9023,8 @@ async function createOwner(vals) {
   hideSetup();
   await refreshAuthQuiet();
   state.auth.signedIn = true;
-  if (wasStarted) await reboot(); else await startApp();
+  armSignInNotice();
+  if (wasStarted) await reboot(); else { await startApp(); showSignInNoticeWhenReady(); }
   armIdleTimer();
   toast(t('setup.done'));
 }
@@ -9068,7 +9075,7 @@ function paintAccountBlock() {
   host.hidden = !host.childNodes.length;
 }
 
-// ---- Rail chip, Restricted strip ----
+// ---- Rail chip ----
 let chipMenuCtl = null;
 function wireProfileChip() {
   if (chipMenuCtl || !dom['profile-chip'] || !dom['profile-menu']) return;
@@ -9085,10 +9092,6 @@ function wireProfileChip() {
   });
 }
 
-function openRestrictedInfo() {
-  openRestrictedPanel({ fetchActivity: () => api.myActivity(7) });
-}
-
 function paintProfileChrome() {
   wireProfileChip();
   const chip = dom['profile-chip'];
@@ -9099,21 +9102,8 @@ function paintProfileChrome() {
     if (showChip) paintChip(chip, p, state.role);
     else if (chipMenuCtl) chipMenuCtl.close();
   }
-  const banner = dom['restricted-banner'];
-  if (banner) {
-    const restricted = state.auth.claimed && state.role === 'restricted' && !gateActive();
-    paintRestrictedBanner(banner, { show: restricted, onMore: openRestrictedInfo });
-    document.body.classList.toggle('has-restricted-banner', restricted);
-    if (restricted) {
-      // The strip can wrap to two lines on a phone; the layout below it shrinks
-      // by exactly its height (app.css, body.has-restricted-banner).
-      const fit = () => document.documentElement.style.setProperty('--rb-h', `${banner.offsetHeight}px`);
-      fit();
-      requestAnimationFrame(fit);
-    } else {
-      document.documentElement.style.removeProperty('--rb-h');
-    }
-  }
+  // No permanent Restricted strip any more (2026-10-22): the sign-in notice says
+  // what others can see (js/host-notice.js).
   paintFirstRun();
   paintAccountBlock();
 }
@@ -9398,12 +9388,13 @@ async function reboot() {
   if (gateActive()) { enterGate(); return; }   // anonymous_access none: nothing to start
   await startApp();
   // A sign-in (or a switch to another profile) rebuilds the app like a page load:
-  // a device that first opened on the sign-in screen sees the one-time card here.
-  showPrivacyCardWhenReady();
+  // a device that first opened on the sign-in screen sees the sign-in notice here.
+  showSignInNoticeWhenReady();
 }
 
 // Drop to Safe Mode (manual lock, idle auto-lock, or server-signalled expiry).
 async function goSafe(announce) {
+  armSignInNotice();   // a lock: the next sign-in shows the notice again
   // Flip the mode SYNCHRONOUSLY: every trigger (idle timer, REST 401, WS
   // locked frame) guards on state.decoy, so setting it before any await
   // prevents concurrent goSafe → double reboot → leaked WebSocket.
@@ -9470,6 +9461,7 @@ async function submitUnlock() {
     state.decoy = false;
     lockPin = '';
     hideUnlock({ force: true });
+    armSignInNotice();   // a sign-in: the notice shows again once the app is up
     // 3.0: the install PIN signs in as the Owner -- learn the role/profile, and
     // whether the Owner still has to set a password.
     if (await refreshAuthQuiet()) state.auth.remembered = !!(r && r.remembered);
@@ -10808,11 +10800,11 @@ async function init() {
     onFinished: () => { refreshAuthAndBoot(); },
     // Finished or "Set up later": the card follows the wizard right away, never
     // from a timer in the middle of a session.
-    onClosed: () => showPrivacyCardWhenReady(),
+    onClosed: () => showSignInNoticeWhenReady(),
   });
-  // "Stored on the host computer", once per device (js/host-notice.js): on the
-  // first normal page load, never over the wizard, the lock screen or setup.
-  if (!wizard) showPrivacyCardWhenReady();
+  // The sign-in notice (js/host-notice.js): on the first normal page of a tab,
+  // never over the wizard, the lock screen or setup.
+  if (!wizard) showSignInNoticeWhenReady();
 
   // Say it out loud when NO dictionary loaded at all. i18n keeps the shipped
   // English markup in that case (applyDom declines to run), which is the right

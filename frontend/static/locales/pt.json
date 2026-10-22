@@ -1685,8 +1685,6 @@
   },
   "restricted": {
     "banner": "O owner pode ver um resumo da atividade deste perfil. As conversas ficam no computador anfitrião e são partilhadas: qualquer pessoa que possa usar a mesma personagem pode lê-las, também outros perfis e dispositivos sem sessão iniciada, se esta instalação o permitir.",
-    "region": "[pt] Restricted profile",
-    "more": "Quem pode ver o quê?",
     "panel_title": "Quem pode ver o quê",
     "panel_chats": "O owner e os admins também podem abrir as conversas deste perfil, como qualquer pessoa que possa usar a mesma personagem. Abaixo está o resumo que eles veem.",
     "summary_title": "O seu resumo de atividade",

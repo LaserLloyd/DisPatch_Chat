@@ -1660,8 +1660,6 @@
   },
   "restricted": {
     "banner": "The owner can see a summary of this profile's activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven't signed in if this install lets them.",
-    "region": "Restricted profile",
-    "more": "Who can see what?",
     "panel_title": "Who can see what",
     "panel_chats": "The Owner and Admins can open this profile's chats too, like anyone else who can use the same character. Below is the summary they see.",
     "summary_title": "Your activity summary",
@@ -2145,7 +2143,7 @@
     "chats_body": "Every chat is saved on the computer that runs DisPatch, not on this device. Chats are not private and not end-to-end encrypted. A chat belongs to its character, not to one person: anyone who can use that character can open its chats, other profiles (Restricted ones included) and devices that haven't signed in if this install lets them. Members can use every character that isn't limited to certain profiles; the Owner and Admins can use every character, so they can read every chat. To keep someone's chats apart, limit a character to their profile. Anyone with access to that computer, its files or its backups can read them too.",
     "card_title": "Before you start",
     "card_files": "What you upload or create here is saved on the computer that runs DisPatch, not on this device.",
-    "card_chats": "Chats are kept there too, and they are not private: anyone who can use the same character can read them, including other profiles and devices that haven't signed in (if this install lets them), and so can anyone with access to that computer.",
+    "card_chats": "Chats are kept there too. Each profile's chats are private to that profile, except the shared DisPatch profile, but anyone with access to that computer or its backups can read them.",
     "card_more": "The details are in Settings → Account.",
     "card_ok": "Got it",
     "shared": "This profile is shared: everyone who uses it sees its bots and chats.",

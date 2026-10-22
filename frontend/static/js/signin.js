@@ -6,9 +6,9 @@
 //   renderSetup    the form that creates the Owner: full page when the install
 //                  is reached from the network (needs the setup token printed in
 //                  the server log), inline in Settings -> Security on the box.
-//   restrictedBanner / openRestrictedPanel
-//                  the slim, non-dismissible "the owner can see a summary"
-//                  strip and the panel behind its link (GET /api/me/activity).
+//   openRestrictedPanel
+//                  the "Who can see what" panel (GET /api/me/activity). Nothing
+//                  opens it any more (2026-10-22); it goes with the Restricted tier.
 //   accessNotice   "today's time is used up" / "not available right now".
 //   profileMenu    the rail chip's Switch profile / Lock menu.
 //
@@ -311,18 +311,10 @@ export function paintChip(btn, profile, role) {
   btn.dataset.label = (profile && profile.name) || roleLabel(role);
 }
 
-// ---- Restricted banner + panel ---------------------------------------------------------
-
-/** The slim strip. Non-dismissible by design: a Restricted profile is told, in
- *  plain words, what the owner can see. `disclosure` is the server's string
- *  when it sent one; the localized text is the default. */
-export function paintRestrictedBanner(host, { show, onMore }) {
-  host.hidden = !show;
-  if (!show) { host.replaceChildren(); return; }
-  const more = el('button', { type: 'button', class: 'restricted-more', text: t('restricted.more') });
-  more.addEventListener('click', onMore);
-  host.replaceChildren(el('span', { class: 'restricted-text', text: t('restricted.banner') }), ' ', more);
-}
+// ---- Restricted panel ------------------------------------------------------------------
+// (The permanent strip is gone since 2026-10-22: the sign-in notice in
+// js/host-notice.js is the one place that says what others can see. Nothing
+// calls openRestrictedPanel any more.)
 
 /** Today's usage against the limits + the 7-day counts, from /api/me/activity. */
 export async function openRestrictedPanel({ fetchActivity }) {
