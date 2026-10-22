@@ -132,8 +132,8 @@ test('main.js: the overlay replaces the old straight-to-composer drop and picks 
   assert.match(main, /import \{ createChatDrop \} from '\.\/chatdrop\.js\?v=1';/);
   assert.match(main, /createChatDrop\(\{\s+host: \$\('chatview'\)/);
   assert.match(main, /onInsert: \(files\) => handleFiles\(files\)/);
-  assert.match(main, /uploadToFileServer\(files\); return;/);
-  assert.match(main, /openDropSheet\(\);\s+sendDrops\(files\);/);
+  assert.match(main, /onServer: \(files\) => \{ uploadToFileServer\(files\); \}/);
+  assert.doesNotMatch(main, /openDropSheet|sendDrops/, 'the one-way drop sheet is gone with the locked side');
   assert.doesNotMatch(main, /cv\.addEventListener\('drop'/);
   for (const k of ['insert_title', 'server_title', 'send_title', 'cancel_hint']) assert.ok(EN.chatdrop[k], k);
 });

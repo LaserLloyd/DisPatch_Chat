@@ -29,8 +29,7 @@ export const KEY = 'dispatch-rail-layout';
 export const RAIL_DRAG_TYPE = 'application/x-dispatch-rail';
 
 /** Every managed button, in the shipped (index.html) order. */
-export const RAIL_ITEMS = ['theme-toggle', 'profile-chip', 'lock-now', 'unlock-btn',
-  'drop-btn', 'tasks-btn', 'fs-chip', 'manage-bots'];
+export const RAIL_ITEMS = ['theme-toggle', 'profile-chip', 'lock-now', 'tasks-btn', 'fs-chip', 'manage-bots'];
 
 /** Where each one goes when nobody has moved anything. */
 export const DEFAULT_MENU = ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle'];

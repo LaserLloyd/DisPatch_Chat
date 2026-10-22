@@ -1,53 +1,48 @@
-// Pure helpers for DisPatch Chat 3.0 "profiles, roles and policy".
+// Pure helpers for the profile model (4.0, "chat-first profiles"): three profile types,
+// Admin, User and Basic, one of the Admins being the protected first Admin.
 //
 // No DOM, no fetch, no imports: everything here is a function of its arguments,
-// so frontend/tests/people.test.js can drive it under plain node. The DOM
-// halves live in people.js (Settings -> People & Profiles) and signin.js (the
-// lock screen tiles, first-run setup, the Restricted banner).
+// so frontend/tests/profiles.test.js can drive it under plain node. The DOM
+// halves live in people.js (Settings -> People) and signin.js (the sign-in
+// tiles, first-run setup, the rail chip).
 //
-// NOTHING in this file is a security decision. The server enforces every role,
-// budget and permission; these helpers only decide what the UI OFFERS, so a
-// Member is not shown an admin tab that could only 403.
+// NOTHING in this file is a security decision. The server enforces every role and
+// permission; these helpers only decide what the UI OFFERS, so a User is not shown an
+// admin tab that could only 403.
 
-export const ROLES = ['owner', 'admin', 'member', 'restricted'];
-const RANK = { restricted: 0, member: 1, admin: 2, owner: 3 };
+export const ROLES = ['admin', 'user', 'basic'];
+const RANK = { basic: 0, user: 1, admin: 2 };
 
 export const roleRank = (role) => (role in RANK ? RANK[role] : -1);
-/** 4.0 role word -> the 3.x word this UI still uses (WP-FE-CORE removes it). */
-const LEGACY_OF_40 = { admin: 'admin', user: 'member', basic: 'restricted' };
 
-/** The role the UI should act as, from a /api/auth/status or /api/auth/me body.
- *  A server that predates 3.0 sends no `role`: derive it the way 2.x worked
- *  (decoy = locked/limited, otherwise the operator). */
+/** The role the UI acts as, from a /api/auth/status or /api/auth/me body. The server says
+ *  admin | user | basic; anything else (a server that predates 4.0, a missing field) reads as
+ *  the lowest type, so the UI never offers more than the server will allow. */
 export function normalizeRole(s) {
-  // 4.0 (Foundation, transitional until WP-FE-CORE moves the UI to Admin/User/Basic): the
-  // server now says admin + protected / user / basic; this UI still speaks the 3.x words.
-  if (s && typeof s.role === 'string' && s.role in LEGACY_OF_40) {
-    return s.role === 'admin' && s.protected ? 'owner' : LEGACY_OF_40[s.role];
-  }
-  if (s && typeof s.role === 'string' && s.role in RANK) return s.role;
-  return s && s.decoy ? 'restricted' : 'owner';
+  return s && typeof s.role === 'string' && s.role in RANK ? s.role : 'basic';
 }
 
-export const isAdminRole = (role) => role === 'owner' || role === 'admin';
-export const isRestrictedRole = (role) => role === 'restricted';
+export const isAdminRole = (role) => role === 'admin';
+export const isBasicRole = (role) => role === 'basic';
 
-/** Mirrors the server's rule (people_api._may_manage): the Owner and every Admin
- *  manage every profile except THE Owner's (nobody may lock the owner out). */
-export function canManage(actorRole, targetRole) {
-  if (isAdminRole(actorRole)) return roleRank(targetRole) >= 0 && targetRole !== 'owner';
-  return false;
+/** Mirrors the server's rule (people_api._may_manage): every Admin manages every profile except the
+ *  protected first Admin (nobody may lock the install out). `target` is a profile row (or just a
+ *  role word for a caller that has no row; then only the protected flag is unknown). */
+export function canManage(actorRole, target) {
+  const row = target && typeof target === 'object' ? target : { role: target };
+  if (!isAdminRole(actorRole)) return false;
+  return roleRank(row.role) >= 0 && !row.protected;
 }
 
-/** Roles a create/edit form may offer. Admin only for the Owner or an Admin, and only once
- *  the Owner has a password of their own (the server answers 409
- *  `password_required` otherwise). `adminBlocked` says why it is missing so the
- *  form can explain rather than silently omit it. */
-export function roleOptions(actorRole, ownerHasPassword) {
-  const options = ['member', 'restricted'];
+/** Profile types a create/edit form may offer. Only an Admin creates profiles at all; Admin
+ *  accounts need a password of their own (the server answers 409 `password_required` for
+ *  a protected Admin without one), so `adminBlocked` says why the option is missing and the form
+ *  can explain it rather than silently omit it. */
+export function roleOptions(actorRole, protectedHasPassword) {
+  const options = ['user', 'basic'];
   let adminBlocked = null;
-  if (!isAdminRole(actorRole)) adminBlocked = 'not_owner';
-  else if (!ownerHasPassword) adminBlocked = 'owner_needs_password';
+  if (!isAdminRole(actorRole)) adminBlocked = 'not_admin';
+  else if (!protectedHasPassword) adminBlocked = 'owner_needs_password';
   else options.unshift('admin');
   return { options, adminBlocked };
 }
@@ -75,27 +70,28 @@ export function credentialOptions(mode, secret, remember = false) {
   return o;
 }
 
-/** Should the lock overlay show profile tiles, or stay the 2.x PIN keypad?
- *  The keypad stays when the only profile is the Owner and the install has a
- *  PIN: there is nobody to pick and a PIN is what the keypad takes. (The
- *  server's lock-screen list calls the Owner "pin_or_password" whether or not a
- *  password exists, so the PIN's existence is read from pin_set instead.) An
- *  Owner with no PIN gets the tile, because only a password can sign them in.
- *  An older server sends no `profiles` at all -> keypad. Accepts the raw
- *  status body (pin_set) or main.js's state.auth (pinSet). */
+/** Should the sign-in overlay show profile tiles, or stay the 2.x PIN keypad?
+ *  The keypad stays when the only profile is the protected Admin and the install has a PIN:
+ *  there is nobody to pick and a PIN is what the keypad takes. (The server's profile list calls
+ *  that Admin "pin_or_password" whether or not a password exists, so the PIN's existence is read
+ *  from pin_set instead.) A protected Admin with no PIN gets the tile, because only a password
+ *  can sign them in. An older server sends no `profiles` at all -> keypad. Accepts the raw status
+ *  body (pin_set) or main.js's state.auth (pinSet). */
 export function signInMode(status) {
   const profiles = status && Array.isArray(status.profiles) ? status.profiles : [];
   if (!status || !status.claimed || !profiles.length) return 'keypad';
   const pinSet = !!(status.pin_set ?? status.pinSet);
   const only = profiles.length === 1 ? profiles[0] : null;
-  if (only && only.role === 'owner' && (only.credential === 'pin' || (pinSet && only.credential === 'pin_or_password'))) return 'keypad';
+  if (only && only.protected && (only.credential === 'pin' || (pinSet && only.credential === 'pin_or_password'))) return 'keypad';
   return 'tiles';
 }
 
-/** Tiles in display order: Owner first, then by role, then name. */
+/** Tiles in display order: the shared default profile first (where a lock lands), then the
+ *  protected Admin, then by type, then name. */
 export function sortTiles(profiles) {
+  const lead = (p) => (p.shared ? 2 : p.protected ? 1 : 0);
   return [...(profiles || [])].sort((a, b) =>
-    (roleRank(b.role) - roleRank(a.role)) || String(a.name).localeCompare(String(b.name)));
+    (lead(b) - lead(a)) || (roleRank(b.role) - roleRank(a.role)) || String(a.name).localeCompare(String(b.name)));
 }
 
 /** How to draw a profile's picture. `avatar` is server data: an image is only
@@ -227,17 +223,15 @@ export function formToBudgets(form) {
   return { budgets, session_timeout, errors };
 }
 
-/** Body for POST /api/people. Throws nothing: returns {body, errors}. */
+/** Body for POST /api/people. Throws nothing: returns {body, errors}. A PIN is optional on every
+ *  User and Basic profile (but at least 4 digits when given); an Admin needs a password. */
 export function createPayload(form) {
   const errors = {};
   const name = String(form.name || '').trim();
   if (!name) errors.name = 'required';
   const role = form.role;
   const body = { name, role };
-  if (role === 'member') {
-    if (!form.pin || String(form.pin).length < 4) errors.pin = 'min_4';
-    else body.pin = String(form.pin);
-  } else if (role === 'restricted') {
+  if (role === 'user' || role === 'basic') {
     if (form.pin) {
       if (String(form.pin).length < 4) errors.pin = 'min_4'; else body.pin = String(form.pin);
     }
@@ -245,10 +239,10 @@ export function createPayload(form) {
     if (!form.password || String(form.password).length < 8) errors.password = 'min_8';
     else body.password = String(form.password);
   }
+  if (role === 'basic' && Array.isArray(form.householdBots)) body.household_bots = form.householdBots;
   if (form.avatar) body.avatar = String(form.avatar).trim();
   const b = formToBudgets(form);
   Object.assign(errors, b.errors);
-  if (Object.keys(b.budgets).length) body.budgets = b.budgets;
   if (b.session_timeout) body.session_timeout = b.session_timeout;
   return { body, errors };
 }
@@ -260,20 +254,14 @@ export function patchPayload(person, form) {
   const name = String(form.name || '').trim();
   if (!name) errors.name = 'required';
   else if (name !== person.name) patch.name = name;
-  if (form.role && form.role !== person.role && person.role !== 'owner') patch.role = form.role;
+  if (form.role && form.role !== person.role && !person.protected) patch.role = form.role;
   const avatar = String(form.avatar || '').trim();
   if (avatar !== (person.avatar || '')) patch.avatar = avatar;
   const b = formToBudgets(form);
   Object.assign(errors, b.errors);
-  const before = JSON.stringify(sortedEntries(person.budgets || {}));
-  if (JSON.stringify(sortedEntries(b.budgets)) !== before) patch.budgets = b.budgets;
   if (b.session_timeout && b.session_timeout !== person.session_timeout) patch.session_timeout = b.session_timeout;
   if (typeof form.disabled === 'boolean' && form.disabled !== !!person.disabled) patch.disabled = form.disabled;
   return { patch, errors };
-}
-
-function sortedEntries(o) {
-  return Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 // ---- Activity (counts only, never message content) -------------------------
@@ -305,66 +293,30 @@ export function activityTotals(rows) {
   return totals;
 }
 
-/** Today's usage against the limits, for the Restricted profile's own panel.
- *  `today` is the server's usage_daily map (active_seconds, upload_bytes,
- *  action:turn ...); `limits` its budgets. A line with no limit still shows
- *  what was used. */
-export function usageLines(today, limits) {
-  const u = today || {};
-  const l = limits || {};
-  const pick = (...keys) => { for (const k of keys) if (Number.isFinite(u[k])) return u[k]; return 0; };
-  const lines = [
-    { key: 'minutes', used: Math.floor(pick('active_seconds') / 60), limit: Number.isInteger(l.minutes_per_day) ? l.minutes_per_day : null },
-    { key: 'turns', used: pick('action:turn', 'turn', 'turns'), limit: Number.isInteger(l.turns) ? l.turns : null },
-    { key: 'threads', used: pick('action:thread', 'thread', 'threads'), limit: Number.isInteger(l.threads) ? l.threads : null },
-    { key: 'feedback', used: pick('action:feedback', 'feedback'), limit: Number.isInteger(l.feedback) ? l.feedback : null },
-    { key: 'upload_mb', used: Math.round(pick('upload_bytes') / (1024 * 1024) * 10) / 10, limit: Number.isInteger(l.upload_mb) ? l.upload_mb : null },
-  ];
-  return lines.map((x) => ({ ...x, over: x.limit != null && x.limit > 0 && x.used >= x.limit }));
-}
+// ---- Refusals --------------------------------------------------------------
 
-// ---- Policy refusals --------------------------------------------------------
-
-/** 403 error.code values that mean "this profile may not use the app right
- *  now" rather than "you lack a permission". Value = locale key stem. */
-export const BLOCK_NOTICES = {
-  time_limit: 'notice.time_limit',
-  quiet_hours: 'notice.quiet_hours',
-};
-
-export const blockNoticeKey = (code) => BLOCK_NOTICES[code] || null;
-
-/** A /ws error frame (`{type:'error', code?, error?}`) -> what the UI does.
- *  'safe_mode' = the session is Restricted, 'permission_denied' = a plain
- *  refusal toast, time_limit/quiet_hours = the full-screen notice. */
+/** A /ws error frame (`{type:'error', code?, error?}`) -> what the UI does:
+ *  'denied' = a plain "you may not do that" toast, anything else stays a plain error. */
 export function wsErrorKind(frame) {
   const code = frame && (frame.code || (frame.error && frame.error.code));
-  if (code === 'time_limit' || code === 'quiet_hours') return { kind: 'notice', code };
-  if (code === 'safe_mode') return { kind: 'restricted', code };
   if (code === 'permission_denied') return { kind: 'denied', code };
   return { kind: 'plain', code: code || null };
 }
 
-// ---- Device binding ---------------------------------------------------------
-
-/** Profiles a browser can be opened as: Members and Restricted only (the
- *  server refuses to bind an Admin or the Owner), never a disabled one. */
-export function bindableProfiles(profiles) {
-  return (profiles || []).filter((p) => (p.role === 'member' || p.role === 'restricted') && !p.disabled);
-}
-
 // ---- Characters ("bots") ----------------------------------------------------
 
-/** Who sees a character: 'all' | 'members' | 'restricted'. Derived from the two
- *  switches (safe = "Show to Restricted profiles", hide_unlocked = "not on the
- *  Owner's rail") so the caption follows a click before Save; falls back to the
- *  server's own `audience` when the flags are absent. restricted = safe &&
- *  hide_unlocked, all = safe && !hide_unlocked, members = !safe. */
-export function audienceOf(bot) {
-  if (bot && typeof bot.safe === 'boolean') {
-    if (!bot.safe) return 'members';
-    return bot.hide_unlocked ? 'restricted' : 'all';
-  }
-  const a = bot && bot.audience;
-  return a === 'all' || a === 'members' || a === 'restricted' ? a : 'members';
+/** Is this character the signed-in profile's own (private to it), or a household one? The server
+ *  stamps `scope` on every character record it sends. */
+export const isMineBot = (bot) => !!bot && bot.scope === 'personal';
+
+/** The rail's two groups, Mine and Household, from the characters a profile may list. Household
+ *  characters the profile owns a copy of (`cloned_from`) are left out: the copy stands for them, so
+ *  the rail never shows the same name twice. (Their threads still open by link.) `bots` keeps its
+ *  order; nothing is dropped from the data, only from the groups. */
+export function railGroups(bots) {
+  const list = Array.isArray(bots) ? bots : [];
+  const copied = new Set(list.filter((b) => isMineBot(b) && b.cloned_from).map((b) => b.cloned_from));
+  const mine = list.filter(isMineBot);
+  const household = list.filter((b) => !isMineBot(b) && !copied.has(b.id));
+  return { mine, household };
 }

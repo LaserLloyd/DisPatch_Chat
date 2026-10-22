@@ -68,8 +68,6 @@ function flatten(obj, prefix = '') {
 const DYNAMIC = [
   // js/settings_schema.js  customUnits() / the Custom… unit picker:  t(`schema.unit_${u}`)
   { re: /^schema\.unit_(seconds|minutes|hours|days|megabytes|gigabytes)$/, built: 'settings_schema.js  t(`schema.unit_${u}`)' },
-  // js/main.js  renderBotManager():  t(`chars.who_${o}`) over characters.js WHO_OPTIONS
-  { re: /^chars\.who_(everyone|members|restricted|hidden)$/, built: 'main.js  t(`chars.who_${o}`)' },
   // js/main.js  paintAccountChoices():  t(`acct.opt_${c}`) over accountChoices()
   { re: /^acct\.opt_(pin_change|pin_set|pin_remove|pw_set|pw_change|my_pin)$/, built: 'main.js  t(`acct.opt_${c}`)' },
   // js/plugins.js  lookupLabel():  `plugins.lookup_${id}` over the server's livetools names
@@ -115,17 +113,8 @@ const DYNAMIC = [
   { re: /^msg\.notice_level_(error|warn|ok|info)$/,
     built: 'main.js  t(`msg.notice_level_${notice.level}`)' },
   // 3.0 profiles, roles and policy -- keys built from a closed vocabulary.
-  // js/main.js  bot row audience caption:  t(`settings.audience_${aud}`), aud from profiles.js audienceOf()
-  { re: /^settings\.audience_(all|members|restricted)$/,
-    built: 'main.js  t(`settings.audience_${aud}`)' },
   // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`), profiles.js ROLES
-  { re: /^role\.(owner|admin|member|restricted|user|basic)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
-  // js/signin.js  openRestrictedPanel():  t(`restricted.use_${l.key}`), profiles.js usageLines()
-  { re: /^restricted\.use_(minutes|turns|threads|feedback|upload_mb)$/,
-    built: 'signin.js  t(`restricted.use_${l.key}`)' },
-  // js/signin.js  paintAccessNotice():  t(`${stem}_title|_body`), stem from profiles.js BLOCK_NOTICES
-  { re: /^notice\.(time_limit|quiet_hours)_(title|body)$/,
-    built: 'signin.js  t(`${stem}_title|_body`)' },
+  { re: /^role\.(admin|user|basic)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
   // js/people.js  errorText():  t(`people.err_${code}`), codes from profiles.js formToBudgets()/createPayload()
   { re: /^people\.err_(required|min_4|min_8|range_1_1440|range_0_100000|both_times|same_times|range_1_43200)$/,
     built: 'people.js  t(`people.err_${code}`)' },

@@ -144,13 +144,9 @@ test('phase keys are literals, not a key built from server text', () => {
   assert.ok(en.turn.phase_generic, 'an unknown phase must still say something');
 });
 
-test('Stop is unlocked-only, and one gate serves the composer and the palette', () => {
+test('one Stop gate serves the composer and the palette', () => {
   const fn = MAIN.slice(MAIN.indexOf('function canStopReply()'),
                         MAIN.indexOf('function stopReply()'));
-  assert.match(fn, /!state\.decoy/,
-    'Safe Mode must never show a Stop button: the server 403s the abort, so '
-    + 'the control could only fail — and it would advertise that a full '
-    + 'session exists');
   assert.match(fn, /state\.thinking\[state\.activeThreadId\]/,
     'nothing to stop unless this thread is working');
   // Both surfaces ask the same question. Two copies of the rule is how one of

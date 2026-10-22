@@ -155,13 +155,13 @@ test('app.css: the side nav is a desktop column; under 900px the nav is the page
   assert.match(css, /\[dir="rtl"\] \.settings-back svg \{ transform: scaleX\(-1\); \}/);
 });
 
-test('Account: one sign-in change at a time, by role; a Member changes their own PIN; paths only for the Owner', () => {
+test('Account: one sign-in change at a time, by profile; every non-shared profile changes its own PIN; paths only for the protected Admin', () => {
   const fn = MAIN.slice(MAIN.indexOf('function accountChoices()'), MAIN.indexOf('let accountChoice ='));
   assert.match(fn, /out\.push\(a\.pinSet \? 'pin_change' : 'pin_set'\);/);
   assert.match(fn, /if \(a\.claimed\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);/);
   assert.match(fn, /if \(a\.pinSet\) out\.push\('pin_remove'\);/);
-  assert.match(fn, /\} else if \(state\.role === 'admin'\) \{\s+out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);/);
-  assert.match(fn, /\} else if \(state\.role === 'member'\) \{\s+out\.push\('my_pin'\);/);
+  assert.match(fn, /\} else if \(!\(a\.profile && a\.profile\.shared\)\) \{/);
+  assert.match(fn, /if \(state\.role === 'admin'\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);\s+out\.push\('my_pin'\);/);
   // The PIN form and the password form never show together.
   const open = MAIN.slice(MAIN.indexOf('function openAccountForm('), MAIN.indexOf('function activateSecurityPane('));
   assert.match(open, /pinForm\.hidden = !pinModes\.includes\(accountChoice\);/);
@@ -175,11 +175,9 @@ test('Account: one sign-in change at a time, by role; a Member changes their own
   for (const c of ['pin_change', 'pin_set', 'pin_remove', 'pw_set', 'pw_change', 'my_pin']) assert.ok(EN.acct[`opt_${c}`], c);
 });
 
-test('Restricted: the gear says Companions (with a people icon), not Settings', () => {
-  const fn = MAIN.slice(MAIN.indexOf('function syncGearButton()'), MAIN.indexOf('function wireRecoveryUi()'));
-  assert.match(fn, /const key = comp \? 'companions\.title' : 'nav\.settings';/);
-  assert.match(fn, /railIcon\(comp \? RAIL_ICONS\.users : RAIL_ICONS\.gear\)/);
-  assert.match(MAIN, /if \(dom\['unlock-btn'\]\) dom\['unlock-btn'\]\.classList\.toggle\('hidden', !state\.decoy\);\n  syncGearButton\(\);/);
+test('the gear always opens Settings (no Companions face, no unlock button)', () => {
+  assert.doesNotMatch(MAIN, /syncGearButton|companions|unlock-btn/);
+  assert.match(MAIN, /dom\['manage-bots'\]\.addEventListener\('click', \(\) => \{ openBotManager\(\); \}\);/);
 });
 
 // Every literal Settings target in the code must land where its content lives:

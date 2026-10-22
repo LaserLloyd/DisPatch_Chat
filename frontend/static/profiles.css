@@ -8,6 +8,31 @@
 
 /* ===== WP-FE-CORE: rail Mine / Household, profile switch, sign-in tiles ===== */
 
+/* The rail's two groups: a small label above each. On the phone bots grid the label spans the row. */
+.bot-group-label {
+  align-self: stretch; text-align: center; margin: 2px 0 -4px;
+  font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bot-group-label:not(:first-child) {
+  border-top: 1px solid var(--border-subtle, var(--border-strong)); padding-top: 8px; margin-top: 4px;
+}
+.bot-make-btn {
+  width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
+  background: none; color: var(--text-secondary); cursor: pointer;
+  border: 1px dashed var(--border-strong);
+}
+.bot-make-btn:hover, .bot-make-btn:focus-visible { color: var(--text-primary); border-style: solid; }
+.bot-make-btn svg { width: 22px; height: 22px; }
+@media (max-width: 768px) {
+  .app[data-view="bots"] .bot-group-label, .app[data-view="bots"] .bot-make-btn { grid-column: 1 / -1; justify-self: center; }
+  .app[data-view="bots"] .bot-group-label { text-align: start; justify-self: stretch; }
+}
+
+/* Sign-in tiles: the protected / shared marks under the type. */
+.signin-badge { font-size: 11px; color: var(--text-secondary); }
+
 /* ===== WP-FE-YOU: My bots, bot editor, AI build, Reset to default ===== */
 
 /* ===== WP-FE-PEOPLE: People & Access types, permissions, lock target ===== */

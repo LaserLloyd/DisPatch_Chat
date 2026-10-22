@@ -115,8 +115,8 @@ test('sw.js shows a title only and opens the thread on click', () => {
   assert.match(SW, /'\/static\/js\/push\.js'/);
 });
 
-test('main.js mounts the row and hides the Notifications card in Safe Mode', () => {
+test('main.js mounts the Notifications row for every profile', () => {
   const MAIN = readFileSync(join(HERE, '..', 'static', 'js', 'main.js'), 'utf8');
-  assert.match(MAIN, /notifyGroup\.hidden = !!state\.decoy/);
-  assert.match(MAIN, /pushRow\(t, \{ decoy: !!state\.decoy/);
+  assert.match(MAIN, /notifyGroup\.hidden = false/);
+  assert.match(MAIN, /pushRow\(t, \{ onToast: toast \}\)/);
 });

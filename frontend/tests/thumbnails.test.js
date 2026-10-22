@@ -127,11 +127,10 @@ test('the delegated listener exists and is installed at boot', () => {
     'the listener no longer keys off the data-full convention');
 });
 
-test('Safe Mode strips the full-resolution affordance rather than hiding it', () => {
-  // Full-res avatars are PIN-gated. Leaving data-full on a Safe-Mode avatar
-  // would offer a click that 403s — worse than offering nothing.
-  assert.match(MAIN, /delete\s+\w+\.dataset\.full/,
-    'nothing removes data-full for a Safe-Mode session');
+test('every shown avatar is wired for full resolution at the source (no per-profile strip any more)', () => {
+  // 4.0: every profile may open an avatar's original, so nothing deletes data-full.
+  assert.doesNotMatch(MAIN, /delete\s+\w+\.dataset\.full/);
+  assert.match(MAIN, /setFullRes\(img, pinned \? threadFaceFullUrl\(thread\)/);
 });
 
 test('a thread avatar opens the THREAD\'S image, not the bot\'s current one', () => {
