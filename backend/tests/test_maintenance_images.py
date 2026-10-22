@@ -85,6 +85,10 @@ class W:
         return [p for v in self.expect_expired.values() for p in v]
 
     def index(self):
+        # the app indexes a message when it is written (at "now"); the fixture then back-dates the
+        # messages, so rebuild the index from the rows as they stand
+        self.con.execute("DELETE FROM media_refs")
+        self.con.execute("DELETE FROM maintenance_state")
         run(["sync_media_index"])
 
 
