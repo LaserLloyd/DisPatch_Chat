@@ -23,17 +23,39 @@ call the functions here.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import secrets
+import tempfile
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
-from . import accounts, apps_loader, config, connections, extensions, personas
+import yaml
+
+from . import (
+    accounts,
+    apps_loader,
+    backends_policy,
+    config,
+    connections,
+    ext_profile_hooks,
+    extensions,
+    personas,
+)
 from .config import Bot
 
 log = logging.getLogger("local-chat.characters")
 
 
 _UNSET: Any = object()
+
+
+def _hidden_field() -> str:
+    """The Bot field the Admin's "Hide" switch writes: ``hidden`` once the roster model has it,
+    ``hide_unlocked`` (its 3.x spelling, which migration 010 renames) until then."""
+    return "hidden" if "hidden" in Bot.__dataclass_fields__ else "hide_unlocked"
 
 
 class CharacterError(Exception):
@@ -124,7 +146,8 @@ def character_out(b: Bot) -> dict:
     row["voice_link"] = {"section": "voice", "anchor": "voices", "character": b.id}
     row["flags"] = {"reactions": b.reactions, "reaction_autopilot": b.reaction_autopilot,
                     "avatar_pool": b.avatar_pool, "image_jobs": b.image_jobs,
-                    "quick_actions": b.quick_actions, "hide_unlocked": b.hide_unlocked}
+                    "quick_actions": b.quick_actions, "hide_unlocked": b.hide_unlocked,
+                    "hidden": bool(getattr(b, "hidden", False) or b.hide_unlocked)}
     return row
 
 
@@ -378,7 +401,7 @@ def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: 
            tools: bool | None = None, connection: str | None = None, model: str | None = None,
            description: str = "", profiles: list[str] | None = None, pack: str = "",
            persona: str | None = None, color: str = "", voice: str = "", voice_rp: str = "",
-           ) -> Bot:
+           hidden: bool = False) -> Bot:
     bots = config.load_bots()
     taken = {b.id for b in bots}
     if id is not None:
@@ -413,16 +436,27 @@ def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: 
             check_extension_field(fld, bot_id, val.strip())
     if voice or voice_rp:
         bot = replace(bot, voice=voice.strip()[:80], voice_rp=voice_rp.strip()[:32])
+    if hidden:
+        bot = replace(bot, **{_hidden_field(): True})
     if connection:
         bot = with_connection(bot, connection, model)
     return config.upsert_bot(bot)
 
 
 def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
-    """Apply a PATCH body (already validated for shape) under the roster lock."""
+    """Apply a PATCH body (already validated for shape) under the roster lock.
+
+    HOUSEHOLD characters only (an Admin's surface): a personal one answers 404, exactly as if
+    it did not exist - an Admin cannot see or edit another profile's bot. The owner's route is
+    :func:`patch_personal`."""
     from fastapi import HTTPException  # the old handler raised these inside the lock
 
+    existing = config.get_bot(bot_id)
+    if existing is not None and existing.scope == "personal":
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
     changes = dict(changes)
+    if "hidden" in changes:                                  # the Admin's "Hide"
+        changes[_hidden_field()] = bool(changes.pop("hidden"))
     for fld in extensions.BOT_FIELDS:
         if changes.get(fld) is not None:
             check_extension_field(fld, bot_id, str(changes[fld]).strip())
@@ -493,7 +527,10 @@ def _detach(b: Bot) -> Bot:
 
 
 def remove(bot_id: str) -> None:
-    if config.get_bot(bot_id) is None:
+    """Remove a HOUSEHOLD character (a personal one is 404 here; its owner uses
+    :func:`remove_personal`)."""
+    existing = config.get_bot(bot_id)
+    if existing is None or existing.scope == "personal":
         raise CharacterError("bot_not_found", "Unknown bot", 404)
     if apps_loader.owns_bot(bot_id):
         raise CharacterError("bot_owned_by_app",
@@ -502,3 +539,270 @@ def remove(bot_id: str) -> None:
         config.remove_bot(bot_id)
     except ValueError as e:
         raise CharacterError("character_last", str(e), 409) from e
+
+
+# --------------------------------------------------------------------------- #
+# Personal characters (4.0): a profile's own bots
+# --------------------------------------------------------------------------- #
+#
+# A personal character is a config.yaml entry with ``scope: personal`` and
+# ``owner_profile: <profile id>``. Its id is opaque (``p`` + 12 hex digits) because ids reach logs
+# and add-ons and must say nothing about the bot or its owner. Direct backend only: a personal
+# bot never reaches an agent runtime, runs no image jobs, keeps no reaction pool and reads no
+# knowledge folder. Who may SEE one is decided by ``may_use`` (WP-CORE); everything here is
+# the owner's own surface and answers 404 for anybody else's bot, Admins included.
+
+#: The editor's "own text" limit (the global ceiling, personas.MAX_CHARS, is larger).
+MAX_PERSONAL_PERSONA = 4000
+#: A cap per profile, so a runaway client cannot grow config.yaml without bound.
+MAX_PERSONAL_BOTS = 50
+#: What the owner's PATCH may carry. Everything else (flags, agent, pools, audience) is household.
+PERSONAL_PATCH_FIELDS = frozenset({
+    "name", "emoji", "description", "color", "quick_actions", "tools", "persona", "personality",
+    "voice", "connection", "model"})
+AVATAR_ROLES = ("face", "full", "thumb")
+AVATAR_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def new_personal_id(taken: set[str] | None = None) -> str:
+    """A fresh opaque personal-bot id, never one already on the roster."""
+    used = {t.lower() for t in (taken if taken is not None else {b.id for b in config.load_bots()})}
+    while True:
+        bid = "p" + secrets.token_hex(6)
+        if bid not in used:
+            return bid
+
+
+def personal_bots(profile_id: str) -> list[Bot]:
+    """Every personal character ``profile_id`` owns (config order)."""
+    return [b for b in config.load_bots()
+            if b.scope == "personal" and b.owner_profile == profile_id]
+
+
+def get_personal(bot_id: str, profile_id: str) -> Bot:
+    """``bot_id`` if ``profile_id`` owns it, else the same 404 an unknown bot gets."""
+    b = config.get_bot(bot_id)
+    if b is None or b.scope != "personal" or not profile_id or b.owner_profile != profile_id:
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
+    return b
+
+
+def _personal_text(persona: str | None, personality: str | None) -> str | None:
+    """The personality text the editor asked for (None = leave it alone, "" = the default)."""
+    if personality:
+        if personality == personas.DEFAULT_ID:
+            return ""
+        preset = next((p for p in personas.presets() if p.id == personality), None)
+        if preset is None:
+            raise CharacterError("character_invalid", f"Unknown personality {personality!r}", 422)
+        return preset.text
+    if persona is None:
+        return None
+    text = str(persona)
+    if len(text.strip()) > MAX_PERSONAL_PERSONA:
+        raise CharacterError("character_invalid",
+                             f"A personality is at most {MAX_PERSONAL_PERSONA} characters", 422)
+    return text
+
+
+def _check_personal_voice(voice: str, bot_id: str, owner: str) -> str:
+    """The voice to store: it must pass the add-on's validator AND be one this owner may use
+    (a household voice or one of the owner's own clones; BUILD-PLAN-v2 §1.12)."""
+    v = str(voice or "").strip()[:80]
+    if not v:
+        return ""
+    check_extension_field("voice", bot_id, v)
+    if not ext_profile_hooks.voice_allowed(v, owner):
+        raise CharacterError("voice_not_allowed", "That voice is not available to you.", 422)
+    return v
+
+
+def _connect_personal(bot: Bot, profile, connection: str | None, model: str | None, *,
+                      may_choose: bool, fallback_ok: bool = False, soft: bool = False) -> Bot:
+    """Point a personal bot at a connection ``profile`` may use (see backends_policy).
+
+    ``soft`` (the automatic Atlas and copies): a connection with no model to offer leaves the
+    bot unconnected instead of failing - it answers with the "not connected" notice."""
+    wanted = (connection or "").strip() or None
+    if wanted and not may_choose:
+        # Without the permission the pick is not honoured: the bot gets the household default.
+        if not fallback_ok:
+            raise CharacterError("backend_not_allowed",
+                                 "Your profile may not choose a bot's backend.", 403)
+        wanted = None
+    try:
+        cid = backends_policy.resolve_connection(profile, wanted, fallback_ok=fallback_ok)
+    except backends_policy.BackendsError as e:
+        raise CharacterError(e.code, str(e), 404 if e.code == "connection_not_found" else 422) from e
+    if not cid:
+        return bot
+    # A copy that fell back to another connection cannot carry the source's model name over.
+    use_model = model if (not wanted or cid == wanted) else None
+    try:
+        return with_connection(bot, cid, use_model)
+    except CharacterError:
+        if soft:
+            return bot
+        raise
+
+
+def create_personal(profile, *, name: str, emoji: str = "", description: str = "",
+                    persona: str | None = None, personality: str | None = None,
+                    voice: str = "", connection: str | None = None, model: str | None = None,
+                    tools: bool = True, color: str = "", quick_actions: bool = True,
+                    cloned_from: str = "", pack: str = "", avatar: str = "",
+                    may_choose_backend: bool = True, fallback_ok: bool = False,
+                    soft_connection: bool = False) -> Bot:
+    """Make a personal character for ``profile`` (an ``accounts.Profile``) and save it.
+
+    Direct backend only. The backend is checked against ``profile.backends.allowed`` and the
+    voice against ``ext_profile_hooks.voice_allowed``; both refuse with a 422
+    :class:`CharacterError`. Returns the saved :class:`Bot`."""
+    name = str(name or "").strip()[:40]
+    if not name:
+        raise CharacterError("character_invalid", "A bot needs a name", 422)
+    if len(personal_bots(profile.id)) >= MAX_PERSONAL_BOTS:
+        raise CharacterError("too_many_bots",
+                             f"A profile can have at most {MAX_PERSONAL_BOTS} bots", 409)
+    bot_id = new_personal_id()
+    bot = Bot(
+        id=bot_id, name=name, emoji=(emoji or "🌍").strip()[:8], model_hint="Direct API",
+        quick_actions=bool(quick_actions), color=str(color or "").strip()[:32],
+        description=str(description or "")[:400], pack=pack, avatar=avatar,
+        scope="personal", owner_profile=profile.id, cloned_from=cloned_from,
+        advisor={"providers": [], "tools": bool(tools)})
+    text = _personal_text(persona, personality)
+    if text:
+        try:
+            bot = personas.apply(bot, text)
+        except ValueError as e:
+            raise CharacterError("character_invalid", str(e), 422) from e
+    voice = _check_personal_voice(voice, bot_id, profile.id)
+    if voice:
+        bot = replace(bot, voice=voice)
+    bot = _connect_personal(bot, profile, connection, model, may_choose=may_choose_backend,
+                           fallback_ok=fallback_ok, soft=soft_connection)
+    return config.upsert_bot(bot)
+
+
+def patch_personal(bot_id: str, profile, changes: dict[str, Any], *,
+                   may_choose_backend: bool = True) -> Bot:
+    """Change one of ``profile``'s own characters. Only :data:`PERSONAL_PATCH_FIELDS` are
+    accepted; anything else is a 422. An unknown bot or somebody else's is a 404."""
+    get_personal(bot_id, profile.id)
+    changes = dict(changes)
+    bad = sorted(set(changes) - PERSONAL_PATCH_FIELDS)
+    if bad:
+        raise CharacterError("character_invalid", f"Cannot change {bad[0]!r} on your own bot", 422)
+    connection = changes.pop("connection", _UNSET)
+    model = changes.pop("model", None)
+    persona = changes.pop("persona", None)
+    personality = changes.pop("personality", None)
+    if persona is not None and personality:
+        raise CharacterError("character_invalid", "Send a personality preset or your own text, not both", 422)
+    text = _personal_text(persona, personality)
+    if "name" in changes:
+        changes["name"] = str(changes["name"] or "").strip()[:40]
+        if not changes["name"]:
+            raise CharacterError("character_invalid", "A bot needs a name", 422)
+    if "emoji" in changes:
+        changes["emoji"] = str(changes["emoji"] or "").strip()[:8]
+    if "description" in changes:
+        changes["description"] = str(changes["description"] or "")[:400]
+    if "color" in changes:
+        changes["color"] = str(changes["color"] or "").strip()[:32]
+    if "voice" in changes:
+        changes["voice"] = _check_personal_voice(changes["voice"], bot_id, profile.id)
+    tools = changes.pop("tools", None)
+
+    def _apply(bot: Bot) -> Bot:
+        updated = replace(bot, **changes)
+        if tools is not None:
+            updated = replace(updated, advisor=config.set_direct_tools(updated.advisor, bool(tools)))
+        if text is not None:
+            try:
+                updated = personas.apply(updated, text)
+            except ValueError as e:
+                raise CharacterError("character_invalid", str(e), 422) from e
+        if connection is not _UNSET or model is not None:
+            if connection is _UNSET or not connection:
+                if model is not None:
+                    updated = with_model(updated, model)
+            else:
+                updated = _connect_personal(updated, profile, connection, model,
+                                            may_choose=may_choose_backend)
+        return updated
+
+    saved = config.update_bot(bot_id, _apply)
+    if saved is None:
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
+    return saved
+
+
+def _unlink_quiet(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def drop_bot_assets(bots: list[Bot]) -> None:
+    """Delete what a removed personal bot leaves on disk: its avatar triplet and its entry in
+    ``voice-acks.yaml``. (Chats are the caller's: ``profiles_service`` deletes them first.)"""
+    ids = [b.id for b in bots if b.scope == "personal"]
+    if not ids:
+        return
+    avatar_dir = Path(config.AVATAR_DIR)
+    for bid in ids:
+        for role in AVATAR_ROLES:
+            for ext in AVATAR_EXTS:
+                _unlink_quiet(avatar_dir / f"{bid}-{role}{ext}")
+        with contextlib.suppress(OSError):
+            for stray in avatar_dir.glob(f".{bid}-*.partial"):
+                _unlink_quiet(stray)
+    _drop_voice_ack_entries(ids, [b.name for b in bots if b.scope == "personal"])
+
+
+def _drop_voice_ack_entries(bot_ids: list[str], names: list[str]) -> None:
+    """Remove ``bots.<id>`` entries from the voice add-on's ``voice-acks.yaml`` (its style
+    keys are a bot's id or display name; a name is only dropped when no surviving bot has it).
+    Rewritten only when something was removed, atomically and 0600."""
+    path = Path(config.DATA_DIR) / "voice-acks.yaml"
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return
+    bots = doc.get("bots") if isinstance(doc, dict) else None
+    if not isinstance(bots, dict):
+        return
+    surviving = {b.name.lower() for b in config.load_bots() if b.id not in set(bot_ids)}
+    drop = {k for k in bots if str(k) in set(bot_ids)}
+    drop |= {k for k in bots if str(k).lower() in {n.lower() for n in names}
+             and str(k).lower() not in surviving}
+    if not drop:
+        return
+    for k in drop:
+        bots.pop(k, None)
+    if not bots:
+        doc.pop("bots", None)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".voice-acks.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        _unlink_quiet(Path(tmp))
+        raise
+
+
+def remove_personal(bot_id: str, profile_id: str) -> Bot:
+    """Remove one of ``profile_id``'s own characters (config entry, avatars, voice-acks entry).
+    Its chats are NOT touched here - ``profiles_service.delete_personal`` deletes them first so
+    nothing is left pointing at a bot that is gone. Returns the removed bot."""
+    bot = get_personal(bot_id, profile_id)
+    try:
+        config.remove_bot(bot_id)
+    except ValueError as e:
+        raise CharacterError("character_last", str(e), 409) from e
+    drop_bot_assets([bot])
+    return bot

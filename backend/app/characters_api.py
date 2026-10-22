@@ -1,13 +1,15 @@
 """``/api/characters`` and ``/api/starter-packs`` - the 3.0 character API.
 
 * ``GET    /api/characters``            the characters this caller may talk to (public fields)
-* ``GET    /api/characters/all``        every character with its settings   (manage_characters)
+* ``GET    /api/characters/all``        every HOUSEHOLD character with its settings (manage_characters)
+                                        - a profile's personal bots are not here for anyone
 * ``GET    /api/characters/personas``   the personality presets             (manage_characters)
 * ``GET    /api/characters/{id}``       one character, in full              (manage_characters)
 * ``POST   /api/characters``            add one                             (manage_characters)
 * ``PATCH  /api/characters/{id}``       change it - audience, profiles, connection, model,
                                         personality, voice, flags...        (manage_characters)
 * ``DELETE /api/characters/{id}``       remove it; its chats stay           (manage_characters)
+* ``GET    /api/characters/{id}/delete-preview``  how many chats and profiles use it (counts only)
 * ``PUT    /api/characters/order``      reorder / flags in bulk             (manage_characters)
 * ``GET    /api/starter-packs``         the packs and what is installed     (manage_characters)
 * ``POST   /api/starter-packs/{id}/install``                                 (manage_characters)
@@ -25,7 +27,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import characters, config, personas, policy, starter_packs
+from . import characters, config, personas, policy, profiles_service, starter_packs
 from .api_common import audit, caller, fail
 from .contracts.permissions import Permission
 from .models import AGENT_ID_PATTERN, BOT_ID_PATTERN, UpdateBotOrderIn
@@ -62,6 +64,7 @@ class CharacterCreateIn(BaseModel):
     voice_rp: str = Field(default="", max_length=32)
     quick_actions: bool = True
     tools: bool | None = None
+    hidden: bool = False                 # keep it off the rail; an explicit list on a profile still shows it
 
     @field_validator("name", "emoji", "model_hint")
     @classmethod
@@ -109,6 +112,7 @@ class CharacterPatchIn(BaseModel):
     agent: str | None = Field(default=None, pattern=AGENT_ID_PATTERN)
     voice: str | None = Field(default=None, max_length=80)
     voice_rp: str | None = Field(default=None, max_length=32)
+    hidden: bool | None = None           # the Admin's "Hide"
 
     @field_validator("name", "emoji", "model_hint", "color")
     @classmethod
@@ -154,10 +158,16 @@ async def list_characters(request: Request):
     return {"characters": [b.to_dict() for b in characters.visible_to(pr, bots)]}
 
 
+def _household(bots: list[config.Bot]) -> list[config.Bot]:
+    """The Admin's surface lists household characters only: a profile's own bots are private
+    to it, Admins included (BUILD-PLAN-v2 §1.2)."""
+    return [b for b in bots if b.scope == "household"]
+
+
 @router.get("/api/characters/all", dependencies=[_MANAGE])
 async def list_all_characters():
     bots = await asyncio.to_thread(config.load_bots)
-    return {"characters": [characters.character_out(b) for b in bots]}
+    return {"characters": [characters.character_out(b) for b in _household(bots)]}
 
 
 @router.get("/api/characters/personas", dependencies=[_MANAGE])
@@ -167,6 +177,10 @@ async def personality_presets():
 
 @router.put("/api/characters/order", dependencies=[_MANAGE])
 async def put_order(payload: UpdateBotOrderIn):
+    known = {b.id for b in _household(await asyncio.to_thread(config.load_bots))}
+    for item in payload.bots:
+        if item.id not in known:         # a personal bot is as good as absent for an Admin
+            raise fail(404, "bot_not_found", "Unknown bot")
     try:
         for item in payload.bots:
             for fld in ("voice", "voice_rp"):
@@ -177,15 +191,26 @@ async def put_order(payload: UpdateBotOrderIn):
         raise _err(e) from e
     bots = await asyncio.to_thread(config.save_bot_order, [i.model_dump() for i in payload.bots])
     await manager.broadcast({"type": "bots", "bots": [b.to_dict() for b in bots]})
-    return {"characters": [characters.character_out(b) for b in bots]}
+    return {"characters": [characters.character_out(b) for b in _household(bots)]}
 
 
 @router.get("/api/characters/{character_id}", dependencies=[_MANAGE])
 async def get_character(character_id: str):
     b = await asyncio.to_thread(config.get_bot, character_id)
-    if b is None:
+    if b is None or b.scope != "household":
         raise fail(404, "bot_not_found", "Unknown bot")
     return characters.character_out(b)
+
+
+@router.get("/api/characters/{character_id}/delete-preview", dependencies=[_MANAGE])
+async def character_delete_preview(character_id: str):
+    """What deleting a household character leaves behind, as numbers: the chats people have
+    with it (they stay, but can no longer be continued) and how many profiles they belong to.
+    Copies people made of it are their own bots and are not touched."""
+    b = await asyncio.to_thread(config.get_bot, character_id)
+    if b is None or b.scope != "household":
+        raise fail(404, "bot_not_found", "Unknown bot")
+    return await asyncio.to_thread(profiles_service.household_bot_usage, character_id)
 
 
 @router.post("/api/characters", status_code=201, dependencies=[_MANAGE])
