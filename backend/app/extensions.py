@@ -1928,8 +1928,10 @@ def locked_client_ip(thread_id: str) -> str | None:
 def runs_agent(bot) -> bool:
     """Does a turn on this character run an AGENT on the host (the OpenClaw gateway
     backend, which can use tools and run commands)? A direct provider (``api``) or an
-    advisor is only a model call."""
-    return bot is not None and bot_backend_of(bot) == "gateway"
+    advisor is only a model call. An UNKNOWN character (None: removed from config.yaml
+    while its threads remain) counts as one - fail closed; main._run_agent_turn refuses
+    its turns outright."""
+    return bot is None or bot_backend_of(bot) == "gateway"
 
 
 def caller_may_dispatch(principal) -> bool:
@@ -1945,9 +1947,16 @@ def caller_may_dispatch(principal) -> bool:
 def may_dispatch(principal, bot) -> bool:
     """May ``principal`` start a turn on ``bot``? The ONE rule every turn entry point
     applies (typed /ws sends, retries, regenerate, edit & re-run, extension turns, app
-    turns): an agent-backed character needs ``dispatch_agents``. A Restricted caller's
-    turn always runs LOCKED (no tools, no hand-off), so it is not a dispatch; no
-    principal = an unclaimed/open install, where everyone is the owner."""
+    turns): an agent-backed character needs ``dispatch_agents``. No principal = an
+    unclaimed/open install, where everyone is the owner.
+
+    A Restricted caller is exempt, and that is NOT because its turn is harmless: on a
+    gateway character ``TurnOptions.locked`` changes nothing - the agent runs with its
+    own OpenClaw configuration (tools included). What protects a Restricted caller is
+    audience curation: it only ever reaches characters the Owner marked for it
+    (audience ``restricted``/``all``, ``safe``), and a gateway character there must be
+    one whose agent is safe to hand to a child (docs/security.md). An advisor's locked
+    turn does drop research/handoff and narrows its tools."""
     if principal is None or not runs_agent(bot):
         return True
     if principal.is_restricted:
@@ -1958,37 +1967,56 @@ def may_dispatch(principal, bot) -> bool:
 DISPATCH_REFUSED = ("Your profile may not run agents. Ask the Owner for the "
                     "dispatch_agents permission.")
 
-#: thread id -> [open extension sockets whose principal may NOT dispatch agents,
-#: monotonic time the last one closed]. Extension turns (``ctx.submit_turn``) carry no
-#: caller, so the host remembers who has a socket on the thread - the same pattern as
-#: the locked registry above, with the same grace window (a turn committed on hang-up).
-_nodispatch_threads: dict[str, list] = {}
+#: Extension turns (``ctx.submit_turn``) carry no caller, so the host remembers WHO has a
+#: socket on each thread: thread id -> {socket key: (principal kind, profile id)} for the
+#: open sockets, and thread id -> (monotonic close time, (kind, profile id)) for the last
+#: one that closed (a turn committed on hang-up, LOCKED_GRACE_S). The permission is
+#: re-checked on every submit, so a mid-call grant or revocation takes effect at once.
+_ext_callers: dict[str, dict[int, tuple[str, str | None]]] = {}
+_ext_last_closed: dict[str, tuple[float, tuple[str, str | None]]] = {}
 
 
-def _nodispatch_open(thread_id: str) -> None:
-    row = _nodispatch_threads.setdefault(thread_id, [0, 0.0])
-    row[0] += 1
+def _caller_open(thread_id: str, key: int, who: tuple[str, str | None]) -> None:
+    _ext_callers.setdefault(thread_id, {})[key] = who
 
 
-def _nodispatch_closed(thread_id: str) -> None:
-    row = _nodispatch_threads.get(thread_id)
-    if row is None:
+def _caller_closed(thread_id: str, key: int) -> None:
+    open_ = _ext_callers.get(thread_id)
+    if open_ is None:
         return
-    row[0] = max(0, row[0] - 1)
-    row[1] = time.monotonic()
+    who = open_.pop(key, None)
+    if not open_:
+        _ext_callers.pop(thread_id, None)
+    if who is not None:
+        _ext_last_closed[thread_id] = (time.monotonic(), who)
+
+
+def _who_may_dispatch(who: tuple[str, str | None]) -> bool:
+    """Does this socket's person hold dispatch_agents NOW (re-read from the profile)?"""
+    kind, pid = who
+    if kind != "profile":
+        return kind in ("open", "machine")
+    from . import accounts, policy
+    prof = accounts.get_profile(pid) if pid else None
+    if prof is None or getattr(prof, "disabled", False):
+        return False                       # deleted or disabled since: fail closed
+    return caller_may_dispatch(policy.profile_principal(prof))
 
 
 def turn_dispatch_refused(thread_id: str) -> bool:
-    """Must an extension turn on this thread be refused if its character runs an agent?
-    True while a socket of a profile without ``dispatch_agents`` is open on it, and for
-    LOCKED_GRACE_S after the last one closed. Fail closed: another caller's extension turn
-    on the same thread in that window is refused too - never the reverse."""
-    row = _nodispatch_threads.get(thread_id)
-    if row is None:
+    """Is an extension turn on this thread asked for by someone without dispatch_agents?
+    While sockets are open: True if any open socket's person lacks it NOW. With none
+    open: the person whose socket closed last, within LOCKED_GRACE_S (the turn a hang-up
+    commits). Otherwise False (no extension caller: the extension's own doing)."""
+    open_ = _ext_callers.get(thread_id)
+    if open_:
+        return any(not _who_may_dispatch(w) for w in list(open_.values()))
+    last = _ext_last_closed.get(thread_id)
+    if last is None:
         return False
-    if row[0] > 0 or time.monotonic() - row[1] < LOCKED_GRACE_S:
-        return True
-    _nodispatch_threads.pop(thread_id, None)
+    if time.monotonic() - last[0] < LOCKED_GRACE_S:
+        return not _who_may_dispatch(last[1])
+    _ext_last_closed.pop(thread_id, None)
     return False
 
 
@@ -2141,12 +2169,14 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             except Exception:
                 client_ip = "?"
         _locked_open(thread_id, client_ip)
-    # Remembered for ctx.submit_turn, which is told no caller (defence in depth behind 3b:
-    # a character switched to an agent backend while this socket is open).
-    nodispatch = (principal is not None and not principal.is_restricted
-                  and not principal.can(Permission.DISPATCH_AGENTS))
-    if nodispatch:
-        _nodispatch_open(thread_id)
+    # Remembered for ctx.submit_turn, which is told no caller: whose socket this is, so an
+    # extension turn is checked against that person's dispatch_agents at submit time (an
+    # advisor's markers; defence in depth behind 3b for an agent character). Restricted
+    # callers run locked and are not recorded.
+    who = None
+    if principal is not None and not principal.is_restricted:
+        who = (principal.kind, principal.profile_id)
+        _caller_open(thread_id, id(me), who)
     try:
         # Inside the try: a handshake cancelled mid-eviction (shutdown) still
         # gives its slot back in the finally below.
@@ -2170,8 +2200,8 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     finally:
         if locked:
             _locked_closed(thread_id)
-        if nodispatch:
-            _nodispatch_closed(thread_id)
+        if who is not None:
+            _caller_closed(thread_id, id(me))
         cur = _slots.get((name, key))
         if cur is not None and me in cur:
             cur.remove(me)

@@ -62,7 +62,7 @@ def _refused(k, path):
 @pytest.fixture
 def hh(ext_env):
     c, _ = ext_env
-    getattr(extensions, "_nodispatch_threads", {}).clear()
+    extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
     extensions._locked_threads.clear()
     config.upsert_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
     install()
@@ -72,7 +72,7 @@ def hh(ext_env):
     finally:
         for k in made:
             k.__exit__(None, None, None)
-        getattr(extensions, "_nodispatch_threads", {}).clear()
+        extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
 
 
 async def _rows(tid):
@@ -206,4 +206,4 @@ def test_an_app_turn_on_an_agent_bot_needs_dispatch_agents(hh, monkeypatch):
     assert attempt(max_pol) is False                              # a Member, agent bot
     assert attempt(max_pol, "adv") is True                        # a Member, advisor bot
     assert attempt(policy.Policy(policy.machine_principal("test"))) is True   # a cron
-    assert attempt(None) is True                                  # no app request (shell code)
+    assert attempt(None) is False                                 # no recorded caller: fail closed

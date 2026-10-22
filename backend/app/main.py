@@ -6414,10 +6414,14 @@ async def _sweep_orphan_blobs() -> None:
     # orphaned. A handful of phantoms is normal housekeeping; a large share of the
     # table is a storage fault, and deleting the records would turn it into data loss.
     try:
-        gone, total = await db.files_missing_from(FILES_DIR)
+        gone, _now_total = await db.files_missing_from(FILES_DIR)
     except Exception:
         log.exception("orphan sweep: could not check file records against disk")
+        _file_sweep_skipped = {"reason": "check_failed"}
         return
+    # The share is taken against the records that existed BEFORE this boot adopted
+    # untracked blobs: adopted rows have blobs by definition and would dilute it.
+    total = len(rows)
     if len(gone) > ORPHAN_PURGE_MIN_RECORDS and len(gone) > total * ORPHAN_PURGE_MAX_FRACTION:
         log.error("orphan sweep: %d of %d file record(s) have no blob in %s — that reads "
                   "as missing storage, not phantoms; purging NOTHING. Fix the storage "
@@ -7210,7 +7214,18 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
     # lock (queued turns serialise identically) and still persists through
     # _deliver_assistant_text, so from the UI's side the two are the same thing.
     bot = config.get_bot(bot_id)
-    direct = bot is not None and bool(bot.api or bot.advisor)
+    if bot is None:
+        # A character removed from config.yaml while its threads remain. Its turn used to
+        # go to the gateway under the old id - an agent nobody configured here any more.
+        # Refused for every caller (no machine route starts a turn; REST never does).
+        log.warning("turn on %s refused: unknown character %r", thread_id, bot_id)
+        with contextlib.suppress(Exception):
+            await manager.broadcast({"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                                     "code": "unknown_character",
+                                     "message": "This character no longer exists, so it "
+                                                "cannot answer. Start a chat with another one."})
+        return
+    direct = bool(bot.api or bot.advisor)
     # Composed ONCE, before the backends diverge, so an API bot and a gateway
     # bot are sent the same thing (bar a spoken turn's instructions, which
     # each backend gets in its own slot — see _compose_agent_text).
@@ -12057,17 +12072,28 @@ def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
     bot = config.get_bot(bot_id)
     if bot is None:
         return False
-    # The caller of the app route that asked (apps_loader.current_caller: set by the
-    # app's require_access / require_operator). A person needs dispatch_agents for an
-    # agent-backed character, as on /ws; an authenticated machine (a cron) may.
+    # The caller of the app route that asked (apps_loader.current_caller: recorded by an
+    # async dependency on every mounted app route). A person needs dispatch_agents for an
+    # agent-backed character, as on /ws; an authenticated machine (a cron) may. No
+    # recorded caller = nobody we can vouch for: FAIL CLOSED (no agent turn, and an
+    # advisor runs with dispatch off).
     pol = apps_loader.current_caller()
-    person = pol.principal if pol is not None and not pol.machine else None
-    if person is not None and not extensions.may_dispatch(person, bot):
+    if pol is not None and pol.machine:
+        allowed, dispatch = True, True
+    else:
+        person = pol.principal if pol is not None else None
+        allowed = (extensions.may_dispatch(person, bot) if person is not None
+                   else not extensions.runs_agent(bot))
+        dispatch = person is not None and extensions.caller_may_dispatch(person)
+        if pol is None:
+            log.warning("app turn on %s: no caller recorded for this request - treated "
+                        "as one who may not run agents", thread_id)
+    if not allowed:
         log.info("app turn on %s refused: the caller may not run agents", thread_id)
         return False
     if not bot.api and not openclaw.cli_available():
         return False
-    if person is not None and not extensions.caller_may_dispatch(person):
+    if not dispatch:
         # An advisor asked on behalf of someone without dispatch_agents: no markers acted on.
         _track(asyncio.create_task(run_agent_turn(thread_id, bot_id, text,
                                                   TurnOptions(dispatch=False))))

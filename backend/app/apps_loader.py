@@ -340,11 +340,19 @@ def _permission_for(request: Request) -> str:
     return la.manifest.permission if la is not None else "use_tools"
 
 
-#: The Policy of the request whose app route is running, recorded by require_access /
-#: require_operator (every app route calls one first). ``ctx.dispatch_turn`` takes no
-#: caller, so the shell reads it from here to apply the same agent rule as /ws. A
-#: ContextVar: each request runs in its own context, so nothing leaks between callers.
+#: The Policy of the request whose app route is running. ``ctx.dispatch_turn`` takes no
+#: caller, so the shell reads it from here to apply the same agent rule as /ws. Recorded
+#: by ``_record_caller``, an ASYNC dependency the loader puts on every mounted app route:
+#: FastAPI runs a plain ``def`` dependency (``Depends(ctx.require_access)``, the documented
+#: style) in a worker thread whose context copy is thrown away, so a value set there never
+#: reaches the route. A ContextVar: each request has its own context, nothing leaks.
 _caller: contextvars.ContextVar[Any] = contextvars.ContextVar("dispatch_app_caller", default=None)
+
+
+async def _record_caller(request: Request) -> None:
+    """Every mounted app route's first dependency: remember who is asking."""
+    from . import policy
+    _caller.set(policy.of(request))
 
 
 def current_caller():
@@ -700,7 +708,7 @@ def load_one(app: FastAPI, m: Manifest, hooks: Hooks) -> LoadedApp:
         log.exception("app %s: failed to load — app skipped", m.id)
         return la
 
-    dep = [Depends(_gate_for(m.id))]
+    dep = [Depends(_record_caller), Depends(_gate_for(m.id))]
     before = list(app.router.routes)
     prefixes = [f"{API_PREFIX}/{m.id}"]
     try:

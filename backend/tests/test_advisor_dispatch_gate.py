@@ -94,7 +94,7 @@ def test_dispatch_off_restricts_nothing_else():
 def hh(ext_env, monkeypatch):
     from fastapi.testclient import TestClient
     c, _ = ext_env
-    getattr(extensions, "_nodispatch_threads", {}).clear()
+    extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
     config.upsert_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
     install()
     r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"})
@@ -117,7 +117,7 @@ def hh(ext_env, monkeypatch):
     finally:
         for k in made:
             k.__exit__(None, None, None)
-        getattr(extensions, "_nodispatch_threads", {}).clear()
+        extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
 
 
 def _dispatch_of(turn) -> bool:
