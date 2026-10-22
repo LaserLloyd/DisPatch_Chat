@@ -30,7 +30,7 @@ def house(tmp_path, monkeypatch):
         {"id": "direct1", "name": "D1", "advisor": PROV},
         {"id": "direct2", "name": "D2", "advisor": PROV},
         # `hidden` once config.py reads it (migration 010 renames hide_unlocked -> hidden)
-        {"id": "hidden1", "name": "H1", "advisor": PROV, "hide_unlocked": True},
+        {"id": "hidden1", "name": "H1", "advisor": PROV, "hidden": True},
         {"id": "agent1", "name": "A1"},                                  # gateway agent
         {"id": "p00000000mine", "name": "Mine", "advisor": PROV, "scope": "personal",
          "owner_profile": user_all.id},

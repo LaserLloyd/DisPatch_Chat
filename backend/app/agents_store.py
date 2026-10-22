@@ -225,27 +225,6 @@ def all_settings() -> dict[str, Any]:
     return out
 
 
-def profile_budget(profile_id: str) -> dict[str, Any]:
-    """The per-profile agent budget (USD/day, max turns, wall-clock, token cap), {} if none."""
-    v = get_setting(f"profile_budget:{profile_id}", default={})
-    return v if isinstance(v, dict) else {}
-
-
-def set_profile_budget(profile_id: str, budget: dict[str, Any] | None) -> None:
-    if not budget:
-        with _lock, connect() as con:
-            con.execute("DELETE FROM agent_settings WHERE key=?", (f"profile_budget:{profile_id}",))
-        return
-    set_setting(f"profile_budget:{profile_id}", budget)
-
-
-def all_profile_budgets() -> dict[str, dict]:
-    with connect() as con:
-        rows = con.execute("SELECT key,value FROM agent_settings "
-                           "WHERE key LIKE 'profile_budget:%'").fetchall()
-    return {r["key"].split(":", 1)[1]: _j(r["value"], {}) for r in rows}
-
-
 # --------------------------------------------------------------------------- #
 # Agents
 # --------------------------------------------------------------------------- #

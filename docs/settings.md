@@ -12,7 +12,6 @@ Who you talk to: personalities, voices, avatars and who may see them.
 
 | Key | Type | Default | Level | Restart | Env | Shown in | What it does |
 |---|---|---|---|---|---|---|---|
-| `characters.default_audience` | choice | `members` | basic |  |  | Characters → Advanced | Who a character you add can be seen by unless you pick: Members (signed-in people), Restricted (made for Restricted profiles) or Everyone. One of: `members`, `restricted`, `all`. |
 | `characters.greeting` | boolean | `false` | basic |  | `DISPATCH_GREETING` / `LOCAL_CHAT_GREETING` | Characters → Advanced | Show a short canned greeting at the top of a new chat (no model call is made). |
 
 ## Connections
@@ -73,21 +72,18 @@ Plugins, agent runtimes and the optional panes.
 
 ## People & Profiles
 
-Sign-in, session lengths and what a Restricted profile may do in a day.
+Sign-in, session lengths, and what programs holding the API key may do.
 
 | Key | Type | Default | Level | Restart | Env | Shown in | What it does |
 |---|---|---|---|---|---|---|---|
 | `people.lock_timeout_seconds` | integer | `600` | basic |  |  | People & Access → Sign-in rules | How long an Owner or Admin session may sit idle before it locks. Range 30..604800 seconds. |
 | `people.session_timeout_user` | integer | `3600` | advanced |  |  | People & Access → Sign-in rules | How long a User profile's session may sit idle before it ends. Range 30..2.592e+06 seconds. |
 | `people.session_timeout_basic` | integer | `1800` | advanced |  |  | People & Access → Sign-in rules | How long a Basic profile's session may sit idle before it ends. Range 30..2.592e+06 seconds. |
-| `people.lock_target` | choice | `profile_list` | basic |  |  | People & Access → Sign-in rules | Where a lock and a device that has not signed in land: the default profile (shared by everyone who uses it) or the profile list. One of: `default_profile`, `profile_list`. *(host control)* |
-| `people.default_profile` | string |  | advanced |  |  | People & Access → Sign-in rules | The profile id a lock lands on when 'When locked, show' is the default profile. It must not be an Admin; agents and voice cloning are always off for it. *(host control)* |
+| `people.lock_target` | choice | `profile_list` | basic |  |  | People & Access → When locked | Where a lock and a device that has not signed in land: the default profile (shared by everyone who uses it) or the profile list. One of: `default_profile`, `profile_list`. *(host control)* |
+| `people.default_profile` | string |  | advanced |  |  | People & Access → When locked | The profile id a lock lands on when 'When locked, show' is the default profile. It must not be an Admin; agents and voice cloning are always off for it. *(host control)* |
 | `people.remember_device_days` | integer | `0` | basic |  |  | People & Access → Sign-in rules | Off, or how many days a device that ticks 'keep this device signed in' at sign-in stays signed in (renewed by use). Turning it off forgets every remembered device. Range 0..365 days. |
 | `people.machine_loopback_trust` | boolean | `true` | advanced |  |  | People & Access → Machine access | Let programs running on the same computer (agents, cron jobs) call the API without a key. Turn off once every program uses the machine API key. *(host control)* |
-| `people.restricted_daily_turns` | integer | `200` | basic | yes | `DISPATCH_DECOY_TURN_QUOTA` / `LOCAL_CHAT_DECOY_TURN_QUOTA` | People & Access → Restricted limits | How many messages one Restricted device or profile may send per day. Range 0..100000. |
-| `people.restricted_daily_threads` | integer | `50` | basic | yes | `DISPATCH_DECOY_THREAD_QUOTA` / `LOCAL_CHAT_DECOY_THREAD_QUOTA` | People & Access → Restricted limits | How many new conversations one Restricted device or profile may start per day. Range 0..100000. |
-| `people.restricted_daily_feedback` | integer | `100` | advanced | yes | `DISPATCH_DECOY_FEEDBACK_QUOTA` / `LOCAL_CHAT_DECOY_FEEDBACK_QUOTA` | People & Access → Restricted limits | How many reply ratings one Restricted device or profile may give per day. Range 0..100000. |
-| `people.restricted_daily_upload_bytes` | integer | `209715200` | advanced | yes | `DISPATCH_DECOY_UPLOAD_QUOTA` / `LOCAL_CHAT_DECOY_UPLOAD_QUOTA` | People & Access → Restricted limits | How much in pictures and files one Restricted device or profile may upload per day. Range 0.. bytes. |
+| `people.machine_daily_upload_bytes` | integer | `209715200` | advanced | yes | `DISPATCH_MACHINE_UPLOAD_QUOTA` / `LOCAL_CHAT_MACHINE_UPLOAD_QUOTA` | People & Access → Machine access | How much programs holding the API key (agents, cron jobs) may upload through /api/upload per day, all together, so a looping agent cannot fill the disk. People have no daily limit. Range 0.. bytes. |
 
 ## Appearance
 

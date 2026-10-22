@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     pin_hash       TEXT,                       -- quick-switch PIN (argon2id, or the legacy pbkdf2 string)
     password_hash  TEXT,                       -- owner/admin credential (argon2id)
     avatar         TEXT NOT NULL DEFAULT '',
-    budgets        TEXT NOT NULL DEFAULT '{}', -- JSON: per-day limits and quiet hours
+    budgets        TEXT NOT NULL DEFAULT '{}', -- 3.x per-day limits; unused since 4.0 (always '{}' on new rows)
     grants         TEXT NOT NULL DEFAULT '[]', -- JSON: extra permissions (incl. use_tools:<id>)
     denies         TEXT NOT NULL DEFAULT '[]', -- JSON: permissions removed from the role's set
     session_timeout INTEGER,                   -- seconds of inactivity; NULL = role default
@@ -220,16 +220,16 @@ class Profile:
     pin_hash: str | None = None
     password_hash: str | None = None
     avatar: str = ""
-    budgets: dict = field(default_factory=dict)
+    budgets: dict = field(default_factory=dict)   # 3.x column, read but never used or shown
     grants: list[str] = field(default_factory=list)
     denies: list[str] = field(default_factory=list)
     session_timeout: int | None = None
     created: str = ""
     disabled: bool = False
     epoch: int = 0
-    # 4.0: which AI backends this profile may use - {"allowed": [...], "default": ...,
-    # "models": {...}}. {} = inherit the install's (today's behaviour). Stored and read
-    # only for now: nothing consults it yet, and it is not in public().
+    # 4.0: which household connections this profile's own bots may use - {"allowed": [...]};
+    # {} = every household connection (backends_policy). Shown in public() for the People
+    # editor; never carries a key.
     backends: dict = field(default_factory=dict)
     #: 4.0: the household bots this profile may use - ``"all"`` or a list of bot ids
     #: (``characters.may_use``). A Basic profile's list is what an Admin picked for it.
@@ -257,9 +257,10 @@ class Profile:
         return {
             "id": self.id, "name": self.name, "role": self.role.value, "protected": self.protected,
             "avatar": self.avatar, "has_pin": self.has_pin, "has_password": self.has_password,
-            "budgets": dict(self.budgets), "grants": list(self.grants),
+            "grants": list(self.grants),
             "denies": list(self.denies), "session_timeout": self.session_timeout,
             "created": self.created, "disabled": self.disabled,
+            "backends": dict(self.backends),
             "household_bots": self.household_bots if self.household_bots == "all"
             else list(self.household_bots),
         }
@@ -416,7 +417,7 @@ def _check_role(role: Role | str) -> tuple[Role, bool]:
 def create_profile(name: str, role: Role | str, *, protected: bool = False,
                    pin_hash: str | None = None,
                    password_hash: str | None = None, avatar: str = "",
-                   budgets: dict | None = None, grants: list[str] | None = None,
+                   grants: list[str] | None = None,
                    denies: list[str] | None = None,
                    session_timeout: int | None = None,
                    household_bots: str | list[str] | None = None,
@@ -440,7 +441,7 @@ def create_profile(name: str, role: Role | str, *, protected: bool = False,
                 "grants,denies,session_timeout,created,household_bots) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, name, stored_role(r, protected=protected), pin_hash, password_hash,
-                 avatar or "", json.dumps(budgets or {}), json.dumps(grants or []),
+                 avatar or "", "{}", json.dumps(grants or []),
                  json.dumps(denies or []), session_timeout, now_iso(),
                  json.dumps(_household_value(household_bots))))
         except sqlite3.IntegrityError as e:
@@ -472,7 +473,7 @@ def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
                         "OR owner_profile_id NOT IN (SELECT id FROM profiles)", (owner_id,))
 
 
-_UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "budgets", "grants",
+_UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "grants",
               "denies", "session_timeout", "disabled", "backends", "household_bots"}
 
 
@@ -512,8 +513,8 @@ def update_profile(profile_id: str, **fields) -> Profile:
             v = stored_role(r, protected=cur.protected)
         if k == "household_bots":
             v = json.dumps(_household_value(v))
-        elif k in ("budgets", "backends"):
-            if k == "backends" and not isinstance(v or {}, dict):
+        elif k == "backends":
+            if not isinstance(v or {}, dict):
                 raise AccountError("profile_field_invalid", "backends must be an object.")
             v = json.dumps(v or {})
         elif k in ("grants", "denies"):

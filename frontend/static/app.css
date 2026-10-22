@@ -822,19 +822,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    the PIN fields above it. */
 .sec-body .sec-lock-row { padding-inline: 0; }
 
-/* Safe-Mode companions panel (the gear's locked face). */
-.comp-list { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
-.comp-row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
-.comp-avatar { width: 38px; height: 38px; border-radius: 10px; font-size: 17px; flex-shrink: 0; object-fit: cover; }
-.comp-avatar-pick { cursor: pointer; }
-.comp-avatar-pick:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
-.comp-name { font-weight: 600; }
-.comp-empty { padding: 8px 4px; }
-/* Deliberately understated — reads as a quiet "show more", not an unlock. */
-.comp-footer { justify-content: center; }
-.comp-more { background: none; border: none; color: var(--text-muted); font-size: 12.5px; padding: 4px 12px; cursor: pointer; letter-spacing: .02em; }
-.comp-more:hover { color: var(--text-secondary); }
-
 /* ===================== Toast / Reconnect ===================== */
 .toast {
   /* Sits above a single-line composer, not on top of it. */
@@ -1066,42 +1053,6 @@ body.drive-open .toast { z-index: 1100; }
 .fs-modal { width: min(640px, 94vw); max-height: 88vh; }
 .fs-modal.drop-hot { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .fs-header-actions { display: flex; gap: 10px; align-items: center; }
-/* ---- Locked-side drop sheet ---- */
-.drop-modal { max-width: 460px; }
-.drop-list {
-  padding: 6px 18px 14px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 8px; min-height: 92px;
-}
-.drop-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 22px 0; }
-.drop-row { display: flex; align-items: center; gap: 11px; }
-.drop-icon { flex-shrink: 0; width: 26px; display: flex; align-items: center; justify-content: center; }
-.drop-icon .rail-icon { width: 22px; height: 22px; display: block; }
-.drop-info { flex: 1; min-width: 0; }
-.drop-name {
-  font-size: 13.5px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.drop-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-.drop-row.failed .drop-detail { color: var(--error-text); }
-/* --success, not --ok. There has never been an --ok custom property in this
-   codebase, so this rule always fell through to its literal #4ade80 — a fixed
-   green that ignores the palette and, on the two light skins, sits on a pale
-   surface at well under 3:1. --success is the token that actually exists and
-   is tuned per palette. */
-.drop-row.done .drop-icon { color: var(--success-text); }
-.drop-row.failed .drop-icon { color: var(--error-text); }
-/* Determinate bar; hidden once the row settles so finished rows stay compact. */
-.drop-bar {
-  height: 4px; margin-top: 6px; border-radius: 2px;
-  background: var(--bg-tertiary); overflow: hidden;
-}
-.drop-row.done .drop-bar, .drop-row.failed .drop-bar { display: none; }
-.drop-bar > i {
-  display: block; height: 100%; width: 0; border-radius: 2px;
-  background: var(--accent-hover); transition: width .15s linear;
-}
-.drop-footer { justify-content: space-between; gap: 10px; }
-
 .fs-list { padding: 8px 14px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; min-height: 160px; }
 .fs-day {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1367,15 +1318,8 @@ body.drive-open .toast { z-index: 1100; }
 
 }
 
-/* ===================== Lock / PIN / Safe Mode ===================== */
-/* Safe Mode hides full-mode-only controls entirely (they'd only fail with an
-   unlock hint, defeating the deniability model). Auto-restores on unlock —
-   applyAuthChrome() toggles body.decoy-mode. */
-body.decoy-mode #search-btn,
-body.decoy-mode #ch-modelchip,
-body.decoy-mode #thread-menu-btn { display: none; }
-
-/* Generic letter-block avatar (Safe Mode: no images). Sits on the same base
+/* ===================== Lock / PIN ===================== */
+/* Generic letter-block avatar (No-Image Mode: no pictures). Sits on the same base
    classes (bot-avatar / thread-avatar / msg-avatar / tl-avatar / ch-avatar)
    that already define size + radius, so we only supply look + glyph sizing. */
 .letter-avatar {
@@ -1559,7 +1503,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .bm-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px 0; }
 .bm-actions .btn-secondary { flex: 1 1 auto; font-size: 13px; }
 
-/* Per-bot Safe Mode toggle (Bot Manager, full mode only) */
+/* Pill toggle in a Characters row (bots-edit.js: Lookups on/off). */
 .bm-safe-btn {
   font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 4px 8px;
   border-radius: 999px; border: 1px solid var(--border-light);
@@ -1567,15 +1511,9 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .bm-safe-btn:hover { border-color: var(--accent); }
 .bm-safe-btn.on { background: var(--accent-wash); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
-/* 2.4.2: a bot with neither "Show locked" nor "Show unlocked" is on no
-   device. The row stays editable; only its identity dims, plus a Hidden tag. */
+/* A character the Admin hid from lists: the row stays editable; only its
+   identity dims, next to the Hidden tag. */
 .bm-row--hidden .bm-avatar-pick, .bm-row--hidden .bm-name { opacity: .45; }
-.bm-hidden-tag {
-  flex: none; font-size: 10px; font-weight: 700; letter-spacing: 1px;
-  padding: 3px 8px; border-radius: 999px;
-  border: 1px dashed var(--text-muted); color: var(--text-muted);
-}
-.bm-hidden-tag[hidden] { display: none; }
 
 /* ===================== Modern message surface ===================== */
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT
@@ -2396,9 +2334,6 @@ body.tool-full #collapse-threads { display: none; }
 .llm-firstrun-body { font-size: 13.5px; line-height: 1.6; color: var(--text-secondary); }
 .llm-firstrun .btn-primary { margin-top: 4px; }
 
-/* Dedicated unlock padlock (locked mode only). Matches the gear-btn chrome. */
-.unlock-btn { font-size: 18px; }
-
 /* Narrow widths: compact the bar so it doesn't crowd the
    Start/Restart/Stop controls. */
 @media (max-width: 560px) {
@@ -3020,9 +2955,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   .reaction-cell:hover { transform: none; }
 }
 
-/* Companions panel: which safe bots carry reaction images (read-only there). */
-.comp-react { margin-inline-start: auto; opacity: .85; display: inline-flex; }
-.comp-react .rail-icon { width: 14px; height: 14px; }
 /* Reaction traces are centred dividers, not bubbles — no avatar column. */
 .msg.reaction-trace-row { justify-content: center; padding: 2px 0; }
 
@@ -4761,7 +4693,7 @@ body.tools-sheet-open::after {
 @media (max-width: 480px) { .cat-grid { grid-template-columns: 1fr; } }
 
 /* ===================== 3.0 profiles, roles and policy =====================
-   Sign-in tiles, first-run setup, the Restricted strip, the rail chip and
+   Sign-in tiles, first-run setup, the rail chip and
    Settings -> People & Profiles. Tokens only (no colour literals), so every
    palette applies; focus rings come from the global :focus-visible rule. */
 
@@ -4811,12 +4743,6 @@ body.tools-sheet-open::after {
 .firstrun-card p { margin: 6px 0 10px; font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
 @media (max-width: 768px) { .firstrun-card { bottom: calc(68px + env(safe-area-inset-bottom)); inset-inline-end: 16px; } }
 
-/* ---- Restricted panel ---- */
-.restricted-panel { width: min(560px, 94vw); }
-.restricted-usage { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
-.restricted-over { color: var(--error-text); }
-.access-card { text-align: center; align-items: center; gap: 8px; max-width: 380px; }
-.access-actions { justify-content: center; flex-wrap: wrap; }
 
 /* ---- Rail chip + menu ---- */
 .profile-chip { overflow: hidden; padding: 0; }
@@ -4847,11 +4773,6 @@ body.tools-sheet-open::after {
 .people-field input, .people-field select { width: 100%; max-width: 360px; }
 .people-field-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
 .people-group-label { font-size: 12.5px; color: var(--text-secondary); }
-.people-budgets { border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 10px 12px 12px;
-  display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.people-budgets legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
-.people-quiet-row { display: flex; flex-wrap: wrap; gap: 10px; }
-.people-quiet-row .people-field { flex: 1 1 130px; }
 .people-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
 .people-actions-extra { border-top: 1px solid var(--border-strong); padding-top: 10px; }
 .people-disabled-row { align-self: flex-start; }
@@ -5066,8 +4987,6 @@ body.tools-sheet-open::after {
 .bm-meta:empty { display: none; }
 .bm-feat { display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--text-secondary); }
 .bm-feat .rail-icon { width: 14px; height: 14px; }
-.bm-narrow { white-space: nowrap; }
-.bm-who { flex: 0 1 190px; min-width: 0; max-width: 210px; }
 .bm-details-btn { flex: none; min-height: 34px; }
 .bm-more-btn { flex: none; color: var(--text-secondary); }
 .bm-more-btn:hover, .bm-more-btn[aria-expanded="true"] { color: var(--text-primary); }
@@ -5154,10 +5073,9 @@ body.tools-sheet-open::after {
 @media (max-width: 899px) {
   .chars-reorder-btn { display: inline-flex; align-items: center; justify-content: center; }
   .bm-row { flex-wrap: wrap; gap: 8px 10px; }
-  /* Line one: picture, name, ⋯. Line two: Who can see it, Details. */
+  /* Line one: picture, name, ⋯. Line two: Details. */
   .bm-name-block { flex: 1 1 calc(100% - 36px - 44px - 20px); }
   .bm-more-btn { order: 4; }
-  .bm-who { order: 5; flex: 1 1 0; min-width: 0; max-width: none; }
   .bm-details-btn { order: 6; flex: none; }
   .bm-list.reordering .bm-name-block { flex-basis: calc(100% - 36px - 44px - 92px - 30px); }
   .bm-list.reordering .bm-move { order: -1; flex-direction: row; gap: 4px; }

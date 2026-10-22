@@ -194,8 +194,11 @@ export function presetValues(def) {
 
 // ------------------------------------------------------------------ which rows go where
 
-/** Keys drawn by a section's own controls, never as a schema row (they stay searchable). */
-export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled']);
+/** Keys drawn by a section's own controls, never as a schema row (they stay searchable).
+ *  people.lock_target / people.default_profile: the "When locked, show" picker
+ *  (people-perms.js lockTargetGroup) sets both together, so no slot draws them a second time. */
+export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled',
+  'people.lock_target', 'people.default_profile']);
 
 /** `ui_section` 'people#signin-rules' -> ['people', 'signin-rules']; falls back to the group. */
 export function uiTarget(def) {

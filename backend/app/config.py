@@ -748,6 +748,8 @@ class Bot:
             "model_hint": self.model_hint,
             "order": self.order,
             "visible": self.visible,
+            "scope": self.scope,
+            "cloned_from": self.cloned_from,
             "safe": self.safe,
             "hide_unlocked": self.hide_unlocked,
             "hidden": self.hidden,
@@ -1149,10 +1151,11 @@ def reconcile_flags(audience, flags: dict) -> dict:
 
 
 def save_bot_order(items: list[dict]) -> list[Bot]:
-    """Persist ordering/safe/hide_unlocked/reactions flags.
+    """Persist the order and the per-character flags (reactions, pools, pictures, voice).
 
-    `items` = [{id, order?, safe?, hide_unlocked?, reactions?, visible?}] --
-    `visible: false` from an older client folds to "neither" (fold_visible).
+    `items` = [{id, order?, reactions?, avatar_pool?, image_jobs?, voice?, voice_rp?}]. The
+    3.x visibility keys (`safe`, `hide_unlocked`, `audience`, `visible`) are refused by the
+    route (models.BotOrderItem) and never read here: they stay in the file as inert data.
 
     Preserves all other bot fields from the current config so the Bot Manager
     only needs to send the fields it manages.
@@ -1169,11 +1172,6 @@ def save_bot_order(items: list[dict]) -> list[Bot]:
         payload_bots.append(_bot_entry(replace(
             b,
             order=idx,
-            **audience_flags(it.get("audience"), fold_visible(
-                it.get("visible"),
-                bool(it["safe"]) if it.get("safe") is not None else b.safe,
-                (bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
-                 else b.hide_unlocked))),
             reactions=(bool(it["reactions"]) if it.get("reactions") is not None
                        else b.reactions),
             avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None

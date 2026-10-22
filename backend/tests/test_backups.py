@@ -417,14 +417,13 @@ def test_the_bundle_download_is_a_zip_and_is_audited(world, owner):
 
 
 def test_per_user_export_and_erase(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
+    mia = world.person(owner, "Mia", "user")
     accounts.log_activity("turn", profile_id=mia["id"], subject="thread-1")
     accounts.usage_add(mia["id"], "turn", 3)
     r = owner.get(f"/api/users/{mia['id']}/export")
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     doc = r.json()
-    assert doc["profile"]["name"] == "Mia" and doc["characters_limited_to_this_profile"] == ["mias"]
+    assert doc["profile"]["name"] == "Mia" and len(doc["own_characters"]) == 1   # its Atlas
     assert any(a["kind"] == "turn" for a in doc["activity"]) and doc["usage"][0]["amount"] == 3
     text = r.text
     assert "pin_hash" not in text and "password_hash" not in text
@@ -432,9 +431,6 @@ def test_per_user_export_and_erase(world, owner):
     erased = owner.delete(f"/api/users/{mia['id']}").json()
     assert erased["erased"] == mia["id"] and erased["activity_rows"] >= 1 and erased["usage_rows"] == 1
     assert accounts.get_profile(mia["id"]) is None
-    # Off Mia's list - but an empty list means "everyone", so the character she alone could use
-    # is left to the Owner rather than opened to every profile and every anonymous device.
-    assert config.get_bot("mias").profiles == [accounts.get_owner().id]
     assert owner.get(f"/api/users/{mia['id']}/export").status_code == 404
 
 

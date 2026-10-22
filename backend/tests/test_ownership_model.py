@@ -117,7 +117,7 @@ def test_files_uploaded_belong_to_the_uploader_and_adopted_blobs_to_the_owner(wo
     r = people["owner"].post("/api/files", files={"file": ("a.bin", io.BytesIO(b"x" * 10), "application/x")})
     assert r.status_code == 200, r.text
     assert _owner_of(world, "files", r.json()["id"]) == ids["Olive"]
-    r = people["member"].post("/api/drop", files={"file": ("d.txt", io.BytesIO(b"drop"), "text/plain")})
+    r = people["member"].post("/api/files", files={"file": ("d.txt", io.BytesIO(b"drop"), "text/plain")})
     assert r.status_code == 200, r.text
     assert _owner_of(world, "files", r.json()["id"]) == ids["Sam"]
     # An agent writes a blob straight into the File Server directory: adopted as the Owner's.
@@ -223,7 +223,7 @@ def test_no_client_payload_carries_an_owner_id(world, people):
     blob = "\n".join(bodies)
     assert "threads_list" in blob and "thread_created" in blob
     assert "owner_profile_id" not in blob
-    assert '"backends"' not in blob
+    # (``backends`` - connection ids only - is in the Admin's People rows since INT-2.)
     # The Member's own id is legitimately in /api/auth/me and /api/people; the Owner's
     # threads must not carry it, and nothing above carries a key named for ownership.
     assert ids["Olive"] not in t.text and ids["Olive"] not in up.text
@@ -255,12 +255,14 @@ def test_character_scope_fields_round_trip_and_are_not_written_by_default(world)
     got = config.get_bot("copy1")
     assert (got.scope, got.owner_profile, got.cloned_from) == ("personal", "p1", "alpha")
     assert config.get_bot("alpha").scope == "household"
-    # Neither field reaches the public record yet.
-    assert "scope" not in got.to_dict() and "owner_profile" not in got.to_dict()
+    # scope and cloned_from ride the public record (the rail groups Mine / Household by them);
+    # the owner's id never does.
+    assert got.to_dict()["scope"] == "personal" and got.to_dict()["cloned_from"] == "alpha"
+    assert "owner_profile" not in got.to_dict()
     assert config.parse_scope("Personal") == "personal" and config.parse_scope("other") == "household"
 
 
-def test_profile_backends_are_stored_and_read_but_not_public(world):
+def test_profile_backends_are_stored_read_and_shown_to_the_people_editor(world):
     world.create_owner(world.client())
     p = accounts.create_profile("Sam", "member")
     assert p.backends == {}
@@ -269,7 +271,7 @@ def test_profile_backends_are_stored_and_read_but_not_public(world):
     assert q.backends == want and q.epoch == p.epoch       # not a credential change
     accounts.invalidate()
     assert accounts.get_profile(p.id).backends == want
-    assert "backends" not in q.public()
+    assert q.public()["backends"] == want
     with pytest.raises(accounts.AccountError):
         accounts.update_profile(p.id, backends=["not", "a", "dict"])
 

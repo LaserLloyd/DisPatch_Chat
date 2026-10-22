@@ -803,8 +803,7 @@ def _upload_ceiling(path: str) -> int | None:
     out at the video cap; /api/files at the File Server max. Checked against the
     declared Content-Length BEFORE FastAPI buffers, so a genuinely-oversized
     upload is rejected without spooling the body to disk/RAM at all."""
-    # /api/drop shares /api/upload's ceiling: both top out at the video cap.
-    if path in ("/api/upload", "/api/drop"):
+    if path == "/api/upload":
         return UPLOAD_MAX_VIDEO + _MULTIPART_SLACK
     if path == "/api/files":
         return FILE_UPLOAD_MAX + _MULTIPART_SLACK
@@ -10122,110 +10121,6 @@ async def upload_media(request: Request, file: UploadFile = File(...)):
             "kind": "video" if is_video else "image"}
 
 
-def _fmt_bytes(n: int) -> str:
-    """Human-readable size for the drop notice (1023 B, 2.3 MB, 1.1 GB)."""
-    size = float(n)
-    for unit in ("B", "KB", "MB"):
-        if size < 1024:
-            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
-
-
-def _drop_notice_bot() -> str | None:
-    """Default bot whose daily thread receives drop notices: the first household
-    character in sidebar order. None when there is none."""
-    for b in config.load_bots():
-        if not characters.is_personal(b):
-            return b.id
-    return None
-
-
-async def _resolve_drop_thread(request: Request, thread_id: str | None):
-    """Pick the thread a drop notice lands in.
-
-    A caller may name a thread (the chat open on their device): one it owns, with a
-    character it may use (ownership + characters.may_use). Otherwise the notice goes to
-    the protected Admin's daily thread - but only when the dropped file is the protected
-    Admin's (a drop by the protected Admin, an open install), so nobody's file name ever
-    lands in someone else's chat. Returns (thread, created) or None."""
-    pr = policy.of(request).principal
-    if thread_id:
-        thread = await db.get_thread(thread_id)
-        if (thread and ownership.may_see_thread(pr, thread.owner_profile_id, write=True)
-                and characters.may_use_id(thread.bot_id, pr)):
-            return thread, False
-    if ownership.for_principal(pr) != ownership.protected_admin_id():
-        return None
-    bot_id = _drop_notice_bot()
-    if not bot_id:
-        return None
-    return await db.find_or_create_daily_thread(bot_id, date=local_date(),
-                                                owner=ownership.owner_id())
-
-
-@app.post("/api/drop")
-async def drop_file(
-    request: Request,
-    file: UploadFile = File(...),
-    thread_id: str | None = Form(None),
-):
-    """One-way file drop into the File Server (``files_upload``, every role by default).
-
-    - Bytes land in the File Server store tagged `source="fileserver"` and owned by the
-      dropper; reading one back needs ``files_read`` and ownership (`_file_access`), so a
-      Basic profile drops files it cannot pull back.
-    - The notice posted into chat is TEXT ONLY (no `media_url`), in a thread the dropper
-      owns (`_resolve_drop_thread`).
-
-    The upload is reported as successful once the bytes are safely stored; a
-    failure to post the chat notice is logged and surfaced as `notice: false`
-    rather than losing a file the sender was told had failed.
-    """
-    orig = (Path(file.filename or "file").name or "file")[:255]
-    ctype = (file.content_type or "").lower()
-    if ctype in ("", "application/octet-stream"):
-        ctype = (mimetypes.guess_type(orig)[0] or "").lower()
-    # Same per-type ceilings as /api/upload so a phone can drop a video, but
-    # everything is stored as a File Server blob regardless of type — a drop is
-    # never inline chat media.
-    if ctype.startswith("image/") and ctype != "image/svg+xml":
-        cap, kind = UPLOAD_MAX_IMAGE, "image"
-    elif ctype.startswith("video/"):
-        cap, kind = UPLOAD_MAX_VIDEO, "video"
-    else:
-        cap, kind = UPLOAD_MAX_DOC, "document"
-
-    stored = f"{uuid.uuid4().hex}{Path(orig).suffix.lower()[:16]}"
-    size = await _stream_upload(file, FILES_DIR, stored,
-                               max_size=cap, request=request, quota=True)
-    rec = await db.add_file(orig, stored, size, ctype or None, source="fileserver",
-                            owner_profile_id=ownership.for_request(request))
-
-    # Bytes are safe from here on — a notice failure must not fail the drop.
-    posted_thread: str | None = None
-    try:
-        resolved = await _resolve_drop_thread(request, thread_id)
-        if resolved:
-            thread, created = resolved
-            if created:
-                await manager.broadcast(
-                    {"type": "thread_created", "thread": thread.model_dump()})
-            origin = request.client.host if request.client else "an unknown device"
-            # Line 1 says the file arrived; line 2 is the download link (its owner's).
-            content = (f"📎 **{orig}** · {_fmt_bytes(size)} · dropped from {origin}\n\n"
-                       f"[[doc:{rec['id']}|Download {orig}]]")
-            await _persist_and_broadcast_message(
-                thread.id, "system", content, metadata={"kind": "drop"})
-            await _broadcast_thread_update(thread.id)
-            posted_thread = thread.id
-    except Exception:
-        log.exception("drop: file %s stored but chat notice failed", rec["id"])
-
-    return {"id": rec["id"], "name": orig, "size": size, "kind": kind,
-            "thread_id": posted_thread, "notice": posted_thread is not None}
-
-
 @app.get("/api/media")
 async def serve_media(request: Request, path: str = Query(...)):
     """Serve a local image/video file, but only from allow-listed base directories.
@@ -11008,9 +10903,10 @@ async def inject_message(request: Request, payload: InjectIn):
     if created:
         await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
 
+    content = await _hand_over_attachments(pr, thread, payload.content)
     try:
         msg = await _persist_and_broadcast_message(
-            thread.id, payload.role, payload.content,
+            thread.id, payload.role, content,
             media_url=_normalize_media(payload.media_url),
             # Stamp the ROUTE, not the payload. This is what lets the reaction (and
             # any future image) autopilot tell a machine post from a bot's own
@@ -11035,6 +10931,51 @@ async def inject_message(request: Request, payload: InjectIn):
         _notify_push("post", thread.id, title)
     return {"thread_id": thread.id, "created": created, "message": msg.model_dump(),
             "duplicate": False}
+
+
+async def _hand_over_attachments(principal, thread: ThreadOut, content: str) -> str:
+    """A file a MACHINE attaches (``[[doc:<id>]]``) into another profile's thread becomes
+    that profile's: the chat attachment is copied (row and bytes) into the thread owner's own
+    store and the reference is rewritten to the copy, so the owner can download it (a file is
+    otherwise only its owner's - ``_file_access``). The original stays the protected Admin's
+    (the machine's sphere), so one upload can be handed to several profiles.
+
+    Only for a machine, only into a thread the protected Admin does not own, and only for a
+    file inside the machine's own sphere (a chat attachment; never a File Server file and
+    never another profile's file: a machine cannot read those, so it cannot hand them on)."""
+    if not getattr(principal, "is_machine", False) or not content or "[[doc:" not in content:
+        return content
+    towner = thread.owner_profile_id
+    if not towner or towner == ownership.protected_admin_id():
+        return content
+    copies: dict[str, str] = {}
+    for m in _DOC_REF_RE.finditer(content):
+        fid = m.group(1).strip()
+        if fid in copies:
+            continue
+        rec = await db.get_file(fid)
+        if not rec or (rec.get("source") or "chat") == "fileserver":
+            continue
+        if not ownership.may_see_thread(principal, await db.file_owner(fid)):
+            continue
+        src = _safe_file_path(rec["stored_name"])
+        if src is None:
+            continue
+        stored = f"{uuid.uuid4().hex}{src.suffix.lower()[:16]}"
+        await asyncio.to_thread(shutil.copyfile, src, FILES_DIR / stored)
+        new = await db.add_file(rec["name"], stored, int(rec.get("size") or 0), rec.get("mime"),
+                                source="chat", owner_profile_id=towner)
+        copies[fid] = new["id"]
+    if not copies:
+        return content
+
+    def _swap(m: re.Match) -> str:
+        fid = m.group(1).strip()
+        if fid not in copies:
+            return m.group(0)
+        label = m.group(2)
+        return f"[[doc:{copies[fid]}|{label}]]" if label is not None else f"[[doc:{copies[fid]}]]"
+    return _DOC_REF_RE.sub(_swap, content)
 
 
 async def _inject_duplicate(principal, source_id: str,

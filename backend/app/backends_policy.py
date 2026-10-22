@@ -84,8 +84,8 @@ def resolve_connection(profile: Any, wanted: str | None = None, *,
     ``wanted`` is the editor's pick (or the source bot's connection when copying). A pick the
     profile may not use raises :class:`BackendsError` ``backend_not_allowed`` - unless
     ``fallback_ok`` (a copy: fall back instead of failing). With no pick: the install's
-    default connection when allowed, else the first allowed one that exists, else ``""`` (no
-    connection yet - the bot answers with the "not connected" notice until one exists)."""
+    default connection when allowed, else the first allowed one that exists (with no explicit
+    list: the first chat-capable household connection), else ``""`` (no connection yet - the bot answers with the "not connected" notice until one exists)."""
     if wanted:
         if connections.get(wanted) is None:
             raise BackendsError("connection_not_found", "Unknown connection.")
@@ -98,7 +98,12 @@ def resolve_connection(profile: Any, wanted: str | None = None, *,
     if default and permits(profile, default):
         return default
     allowed = allowed_backends(profile)
-    for cid in allowed or []:
+    if allowed is None:
+        # Every household connection is allowed but none is the default (an Admin who
+        # connected a bot from Settings rather than the wizard): the first chat-capable one,
+        # so a new bot is not left "not connected" while a working connection exists.
+        allowed = [c.id for c in connections.list_all() if "chat" in c.capabilities]
+    for cid in allowed:
         if connections.get(cid) is not None:
             return cid
     return ""

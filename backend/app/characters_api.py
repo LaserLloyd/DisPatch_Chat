@@ -6,7 +6,7 @@
 * ``GET    /api/characters/personas``   the personality presets             (manage_characters)
 * ``GET    /api/characters/{id}``       one character, in full              (manage_characters)
 * ``POST   /api/characters``            add one                             (manage_characters)
-* ``PATCH  /api/characters/{id}``       change it - audience, profiles, connection, model,
+* ``PATCH  /api/characters/{id}``       change it - hidden, connection, model,
                                         personality, voice, flags...        (manage_characters)
 * ``DELETE /api/characters/{id}``       remove it; its chats stay           (manage_characters)
 * ``GET    /api/characters/{id}/delete-preview``  how many chats and profiles use it (counts only)
@@ -54,8 +54,6 @@ class CharacterCreateIn(BaseModel):
     connection: str | None = Field(default=None, max_length=48)
     model: str | None = Field(default=None, max_length=200)
     model_hint: str = Field(default="", max_length=60)
-    audience: Literal["all", "members", "restricted"] | None = None
-    profiles: list[str] | None = None
     description: str = Field(default="", max_length=400)
     personality: str | None = Field(default=None, max_length=32)
     persona: str | None = Field(default=None, max_length=8000)
@@ -93,11 +91,6 @@ class CharacterPatchIn(BaseModel):
     emoji: str | None = Field(default=None, max_length=8)
     model_hint: str | None = Field(default=None, max_length=60)
     description: str | None = Field(default=None, max_length=400)
-    visible: bool | None = None
-    safe: bool | None = None
-    hide_unlocked: bool | None = None
-    audience: Literal["all", "members", "restricted"] | None = None
-    profiles: list[str] | None = None
     quick_actions: bool | None = None
     reactions: bool | None = None
     reaction_autopilot: bool | None = None
@@ -139,7 +132,6 @@ class StarterPackInstallIn(BaseModel):
     connection: str | None = Field(default=None, max_length=48)
     model: str | None = Field(default=None, max_length=200)
     only: list[str] | None = None
-    profiles: list[str] | None = None
 
 
 def _err(e: characters.CharacterError | starter_packs.PackError) -> Any:
@@ -264,7 +256,7 @@ async def install_starter_pack(request: Request, pack_id: str, payload: StarterP
     try:
         out = await asyncio.to_thread(
             starter_packs.install, pack_id, connection=p.connection, model=p.model,
-            only=p.only, profiles=p.profiles)
+            only=p.only)
     except (starter_packs.PackError, characters.CharacterError) as e:
         raise _err(e) from e
     audit(request, "starter_pack.install", pack_id, ",".join(out["installed"])[:200])

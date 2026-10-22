@@ -829,7 +829,8 @@ def build_support_bundle(*, include_prompts: bool = False, log_lines: int = 2000
     from . import characters
     chars = []
     for b in config.load_bots():
-        chars.append({"id": b.id, "name": b.name, "audience": b.audience,
+        chars.append({"id": b.id, "name": b.name, "scope": b.scope,
+                      "hidden": b.hidden,
                       "backend": characters.backend_kind(b),
                       "connection": characters.connection_of(b) or None,
                       "model": characters.model_of(b), "reactions": b.reactions, "pack": b.pack,

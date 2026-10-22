@@ -209,12 +209,15 @@ def export_user(prof: accounts.Profile) -> dict:
         devices = [dict(r) for r in con.execute(
             "SELECT id, label, bound_at, created, last_seen FROM devices WHERE default_profile_id=?", (prof.id,))]
     sessions = accounts.list_sessions(prof.id)
-    chars = [b.id for b in config.load_bots() if prof.id in b.profiles]
+    # 4.0: the profile's own bots (setup only - ids); which household bots it may use is
+    # ``profile.household_bots``.
+    chars = [b.id for b in config.load_bots()
+             if b.scope == "personal" and b.owner_profile == prof.id]
     return {
         "schema": 1, "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "profile": prof.public(), "devices": devices, "sessions": sessions, "usage": usage,
         "activity": activity, "audit_entries_about_this_profile": about,
-        "characters_limited_to_this_profile": chars,
+        "own_characters": chars,
         "conversations": ("Chats belong to the profile that started them (4.0) and are not part of this "
                           "account export. Each person takes their own with the History export (Settings > "
                           "Account > Recovery & Export), signed in as themselves."),

@@ -131,3 +131,23 @@ def test_basic_needs_use_images_and_then_sees_only_its_own(studio):
     _make(bea, "SENT-BEA-PIC")
     r = bea.get(BASE + "/images")
     assert "SENT-BEA-PIC" in r.text and "SENT-UMA-B" not in r.text
+
+
+def test_the_hard_line_guard_and_the_owner_ledger_both_hold(studio):
+    """INT-2: WP-DEL's per-owner ledger and WP-IMG's prompt guard sit on the same /generate
+    path. A refused prompt is a 422 that writes no ledger row and no recent prompt, for any
+    profile; an allowed one is stamped with its maker and stays invisible to everyone else."""
+    uma, uma_id = studio["Uma"]
+    una, _ = studio["Una"]
+    before = len(_ledger()) if (Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "images.jsonl").exists() else 0
+    r = uma.post(f"{BASE}/generate", json={"prompt": "a naked child SENT-REFUSED", "ratio": "1:1", "n": 1})
+    assert r.status_code == 422 and "adults only" in r.json()["detail"]
+    r = uma.post(f"{BASE}/generate", json={"prompt": "nsfw photo of Emma Watson", "ratio": "1:1", "n": 1})
+    assert r.status_code == 422
+    rows = _ledger() if before or (Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "images.jsonl").exists() else []
+    assert len(rows) == before
+    assert "SENT-REFUSED" not in json.dumps(uma.get(BASE + "/state").json())
+    ok = _make(uma, "SENT-UMA-ALLOWED an adult portrait")
+    assert [r["owner_profile_id"] for r in _ledger() if r["id"] == ok["id"]] == [uma_id]
+    for c in (una, studio["owner"]):
+        assert "SENT-UMA-ALLOWED" not in c.get(BASE + "/images").text

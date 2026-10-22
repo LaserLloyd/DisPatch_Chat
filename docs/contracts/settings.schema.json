@@ -21,7 +21,7 @@
       "label": "Tools & Modules"
     },
     {
-      "description": "Sign-in, session lengths and what a Restricted profile may do in a day.",
+      "description": "Sign-in, session lengths, and what programs holding the API key may do.",
       "id": "people",
       "label": "People & Profiles"
     },
@@ -36,7 +36,9 @@
       "label": "System"
     }
   ],
-  "retired": {},
+  "retired": {
+    "characters.default_audience": "4.0: who uses a character is each profile's household list (People), not an audience"
+  },
   "schema": 1,
   "settings": [
     {
@@ -635,7 +637,7 @@
       "section": "Sessions",
       "since": 1,
       "type": "choice",
-      "ui_section": "people#signin-rules",
+      "ui_section": "people#lock-target",
       "unit": ""
     },
     {
@@ -662,7 +664,7 @@
       "section": "Sessions",
       "since": 1,
       "type": "string",
-      "ui_section": "people#signin-rules",
+      "ui_section": "people#lock-target",
       "unit": ""
     },
     {
@@ -730,106 +732,16 @@
       "choice_labels": {},
       "choices": [],
       "choices_from": "",
-      "default": 200,
-      "description": "How many messages one Restricted device or profile may send per day.",
-      "env": "DISPATCH_DECOY_TURN_QUOTA",
-      "env_names": [
-        "DISPATCH_DECOY_TURN_QUOTA",
-        "LOCAL_CHAT_DECOY_TURN_QUOTA"
-      ],
-      "group": "people",
-      "key": "people.restricted_daily_turns",
-      "label": "Restricted: replies per day",
-      "legacy_prefix_alias": true,
-      "level": "basic",
-      "max": 100000.0,
-      "min": 0.0,
-      "owner": "core",
-      "owner_only": false,
-      "placeholder": "",
-      "presets": [],
-      "restart_required": true,
-      "secret": false,
-      "section": "Restricted limits",
-      "since": 1,
-      "type": "integer",
-      "ui_section": "people#restricted-limits",
-      "unit": ""
-    },
-    {
-      "choice_labels": {},
-      "choices": [],
-      "choices_from": "",
-      "default": 50,
-      "description": "How many new conversations one Restricted device or profile may start per day.",
-      "env": "DISPATCH_DECOY_THREAD_QUOTA",
-      "env_names": [
-        "DISPATCH_DECOY_THREAD_QUOTA",
-        "LOCAL_CHAT_DECOY_THREAD_QUOTA"
-      ],
-      "group": "people",
-      "key": "people.restricted_daily_threads",
-      "label": "Restricted: new chats per day",
-      "legacy_prefix_alias": true,
-      "level": "basic",
-      "max": 100000.0,
-      "min": 0.0,
-      "owner": "core",
-      "owner_only": false,
-      "placeholder": "",
-      "presets": [],
-      "restart_required": true,
-      "secret": false,
-      "section": "Restricted limits",
-      "since": 1,
-      "type": "integer",
-      "ui_section": "people#restricted-limits",
-      "unit": ""
-    },
-    {
-      "choice_labels": {},
-      "choices": [],
-      "choices_from": "",
-      "default": 100,
-      "description": "How many reply ratings one Restricted device or profile may give per day.",
-      "env": "DISPATCH_DECOY_FEEDBACK_QUOTA",
-      "env_names": [
-        "DISPATCH_DECOY_FEEDBACK_QUOTA",
-        "LOCAL_CHAT_DECOY_FEEDBACK_QUOTA"
-      ],
-      "group": "people",
-      "key": "people.restricted_daily_feedback",
-      "label": "Restricted: ratings per day",
-      "legacy_prefix_alias": true,
-      "level": "advanced",
-      "max": 100000.0,
-      "min": 0.0,
-      "owner": "core",
-      "owner_only": false,
-      "placeholder": "",
-      "presets": [],
-      "restart_required": true,
-      "secret": false,
-      "section": "Restricted limits",
-      "since": 1,
-      "type": "integer",
-      "ui_section": "people#restricted-limits",
-      "unit": ""
-    },
-    {
-      "choice_labels": {},
-      "choices": [],
-      "choices_from": "",
       "default": 209715200,
-      "description": "How much in pictures and files one Restricted device or profile may upload per day.",
-      "env": "DISPATCH_DECOY_UPLOAD_QUOTA",
+      "description": "How much programs holding the API key (agents, cron jobs) may upload through /api/upload per day, all together, so a looping agent cannot fill the disk. People have no daily limit.",
+      "env": "DISPATCH_MACHINE_UPLOAD_QUOTA",
       "env_names": [
-        "DISPATCH_DECOY_UPLOAD_QUOTA",
-        "LOCAL_CHAT_DECOY_UPLOAD_QUOTA"
+        "DISPATCH_MACHINE_UPLOAD_QUOTA",
+        "LOCAL_CHAT_MACHINE_UPLOAD_QUOTA"
       ],
       "group": "people",
-      "key": "people.restricted_daily_upload_bytes",
-      "label": "Restricted: uploads per day",
+      "key": "people.machine_daily_upload_bytes",
+      "label": "Machine uploads per day",
       "legacy_prefix_alias": true,
       "level": "advanced",
       "max": null,
@@ -847,46 +759,11 @@
       ],
       "restart_required": true,
       "secret": false,
-      "section": "Restricted limits",
+      "section": "Machines",
       "since": 1,
       "type": "integer",
-      "ui_section": "people#restricted-limits",
+      "ui_section": "people#machine",
       "unit": "bytes"
-    },
-    {
-      "choice_labels": {
-        "all": "Everyone",
-        "members": "Members",
-        "restricted": "Restricted profiles"
-      },
-      "choices": [
-        "members",
-        "restricted",
-        "all"
-      ],
-      "choices_from": "",
-      "default": "members",
-      "description": "Who a character you add can be seen by unless you pick: Members (signed-in people), Restricted (made for Restricted profiles) or Everyone.",
-      "env": null,
-      "env_names": [],
-      "group": "characters",
-      "key": "characters.default_audience",
-      "label": "Audience for new characters",
-      "legacy_prefix_alias": true,
-      "level": "basic",
-      "max": null,
-      "min": null,
-      "owner": "core",
-      "owner_only": false,
-      "placeholder": "",
-      "presets": [],
-      "restart_required": false,
-      "secret": false,
-      "section": "",
-      "since": 1,
-      "type": "choice",
-      "ui_section": "characters",
-      "unit": ""
     },
     {
       "choice_labels": {},

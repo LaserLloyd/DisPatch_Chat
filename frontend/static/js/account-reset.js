@@ -1,7 +1,7 @@
 // Settings -> You -> Account: "Reset to default" (preview with counts, blunt confirm,
 // token, 409 on a stale preview) and "My data" (export own). Owned by WP-FE-YOU.
 //
-//   GET  /api/me/reset/preview -> {counts:{bots,chats,pictures,voices}, token, expires_in,
+//   GET  /api/me/reset/preview -> {counts:{bots,chats,pictures,files,voices}, token, expires_in,
 //                                  keeps_voices, outcome:"atlas"|"household"}
 //   POST /api/me/reset {token} -> {deleted:{...}, keeps_voices}      409 reset_stale: look again
 //   GET  /api/me/export        -> the caller's chats and bot setup as a download
@@ -26,7 +26,9 @@ export function initAccountReset(deps = {}) {
 export function confirmLines(preview, { name = '', shared = false } = {}) {
   const c = (preview && preview.counts) || {};
   const lines = [
-    t('reset.confirm_counts', { bots: Number(c.bots || 0), chats: Number(c.chats || 0), pictures: Number(c.pictures || 0) }),
+    t('reset.confirm_counts', {
+      bots: Number(c.bots || 0), chats: Number(c.chats || 0), pictures: Number(c.pictures || 0), files: Number(c.files || 0),
+    }),
     preview && preview.outcome === 'household' ? t('reset.confirm_basic') : t('reset.confirm_atlas'),
   ];
   if (preview && preview.keeps_voices !== false) lines.push(t('reset.voices_kept'));

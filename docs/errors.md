@@ -64,7 +64,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`bot_id_unknown`](#bot_id_unknown) | 400 | Unknown bot_id |
 | [`bot_not_found`](#bot_not_found) | 404 | Unknown bot |
 | [`bot_owned_by_app`](#bot_owned_by_app) | 409 | This bot belongs to an app; remove or disable the app instead |
-| [`budgets_invalid`](#budgets_invalid) | 400 | A budget value is invalid. |
 | [`captioner_unavailable`](#captioner_unavailable) | 503 | The image captioner is unavailable. |
 | [`character_invalid`](#character_invalid) | 422 | That character change is not valid |
 | [`character_last`](#character_last) | 409 | A DisPatch install needs at least one bot |
@@ -91,14 +90,12 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`crop_invalid`](#crop_invalid) | 400 | crop_x/crop_y/crop_size must be fractions in 0..1 |
 | [`csrf_origin`](#csrf_origin) | 403 | Cross-origin request refused |
 | [`current_pin_incorrect`](#current_pin_incorrect) | 403 | Current PIN is incorrect |
-| [`daily_limit`](#daily_limit) | 429 | Daily limit reached on this device |
-| [`daily_upload_limit`](#daily_upload_limit) | 429 | Daily upload limit reached — try again tomorrow or unlock |
+| [`daily_upload_limit`](#daily_upload_limit) | 429 | Daily machine upload limit reached — try again tomorrow |
 | [`day_format`](#day_format) | 422 | day must be YYYY-MM-DD |
 | [`days_not_number`](#days_not_number) | 400 | days must be a number |
 | [`days_out_of_range`](#days_out_of_range) | 400 | days must be 0–365 |
 | [`deep_check_running`](#deep_check_running) | 409 | A deep check is already running |
 | [`delete_stale`](#delete_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
-| [`device_bind_role`](#device_bind_role) | 409 | A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential. |
 | [`draft_failed`](#draft_failed) | 502 | The AI did not return a usable bot. Try again, or add more detail. |
 | [`draft_unavailable`](#draft_unavailable) | 503 | No AI connection is available for building a bot. |
 | [`empty_file`](#empty_file) | 400 | Empty file |
@@ -126,6 +123,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`household_bots_invalid`](#household_bots_invalid) | 422 | household_bots must be "all" or a list of character ids. |
 | [`household_invalid`](#household_invalid) | 422 | household_bots must be a list of bot ids. |
 | [`image_dimensions_too_large`](#image_dimensions_too_large) | 400 | Image dimensions too large (max 64 megapixels) |
+| [`image_minor_sexual`](#image_minor_sexual) | 422 | That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters. |
+| [`image_real_person_sexual`](#image_real_person_sexual) | 422 | That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead. |
 | [`image_request_failed`](#image_request_failed) | 500 | Could not start the image request |
 | [`image_requests_disabled`](#image_requests_disabled) | 403 | Image requests aren't enabled for {} |
 | [`image_unavailable`](#image_unavailable) | 503 | Image generation isn't configured |
@@ -215,7 +214,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`push_subscription_invalid`](#push_subscription_invalid) | 400 | Expected a JSON push subscription |
 | [`quick_action_target_invalid`](#quick_action_target_invalid) | 422 | bad_action: a quick action applies to user messages |
 | [`quick_action_unknown`](#quick_action_unknown) | 422 | bad_action: unknown quick action |
-| [`quiet_hours`](#quiet_hours) | 403 | This profile is not available right now. |
 | [`rate_limited`](#rate_limited) | 429 | Rate limited. |
 | [`reaction_not_found`](#reaction_not_found) | 404 | reaction not found |
 | [`recovery_needs_new_pin`](#recovery_needs_new_pin) | 409 | Choose a new PIN: other people have profiles here, so the lock cannot simply be removed. |
@@ -226,7 +224,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`reset_stale`](#reset_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`role_change_stale`](#role_change_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`route_undeclared`](#route_undeclared) | 403 | This endpoint has no access policy. |
-| [`safe_mode`](#safe_mode) | 403 | Unlock for full access |
 | [`session_key_required`](#session_key_required) | 400 | session_key required |
 | [`session_not_found`](#session_not_found) | 404 | no such session |
 | [`settings_invalid`](#settings_invalid) | 400 | Invalid settings |
@@ -238,7 +235,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
 | [`task_not_found`](#task_not_found) | 404 | Task not found |
 | [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
-| [`task_thread_not_allowed`](#task_thread_not_allowed) | 409 | Tasks cannot be assigned from a chat that Restricted profiles can read. |
 | [`test_flag_invalid`](#test_flag_invalid) | 422 | test must be true or false |
 | [`thread_id_required`](#thread_id_required) | 400 | thread_id (or all:true) required |
 | [`thread_not_found`](#thread_not_found) | 404 | Thread not found |
@@ -246,7 +242,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`thread_or_session_required`](#thread_or_session_required) | 400 | thread_id or session_key required |
 | [`thread_other_bot`](#thread_other_bot) | 403 | That thread belongs to another bot |
 | [`thread_update_failed`](#thread_update_failed) | 500 | Could not update the thread |
-| [`time_limit`](#time_limit) | 403 | Today's time for this profile is used up. |
 | [`title_required`](#title_required) | 400 | title required |
 | [`too_many_attempts`](#too_many_attempts) | 429 | Too many attempts — wait {}s. |
 | [`too_many_bots`](#too_many_bots) | 409 | A profile can have at most {} bots |
@@ -646,14 +641,6 @@ HTTP **409** - This bot belongs to an app; remove or disable the app instead
 
 **Fix:** The state conflicts with the request; reload and retry.
 
-## budgets_invalid
-
-<a id="budgets_invalid"></a>
-
-HTTP **400** - A budget value is invalid.
-
-**Fix:** Use whole numbers in range; quiet hours look like 20:30-07:00.
-
 ## captioner_unavailable
 
 <a id="captioner_unavailable"></a>
@@ -862,21 +849,13 @@ HTTP **403** - Current PIN is incorrect
 
 **Fix:** Enter your current PIN to change or remove it.
 
-## daily_limit
-
-<a id="daily_limit"></a>
-
-HTTP **429** - Daily limit reached on this device
-
-**Fix:** This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.
-
 ## daily_upload_limit
 
 <a id="daily_upload_limit"></a>
 
-HTTP **429** - Daily upload limit reached — try again tomorrow or unlock
+HTTP **429** - Daily machine upload limit reached — try again tomorrow
 
-**Fix:** Today's upload allowance is used. It resets at local midnight; the Owner can raise it.
+**Fix:** Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.
 
 ## day_format
 
@@ -917,14 +896,6 @@ HTTP **409** - A deep check is already running
 HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
 
 **Fix:** Fetch the delete preview again and confirm with its new token.
-
-## device_bind_role
-
-<a id="device_bind_role"></a>
-
-HTTP **409** - A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.
-
-**Fix:** Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.
 
 ## draft_failed
 
@@ -1141,6 +1112,22 @@ HTTP **422** - household_bots must be a list of bot ids.
 HTTP **400** - Image dimensions too large (max 64 megapixels)
 
 **Fix:** Check the request and resend it.
+
+## image_minor_sexual
+
+<a id="image_minor_sexual"></a>
+
+HTTP **422** - That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.
+
+**Fix:** Describe adult characters only. This rule cannot be switched off.
+
+## image_real_person_sexual
+
+<a id="image_real_person_sexual"></a>
+
+HTTP **422** - That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead.
+
+**Fix:** Remove the real person's name or likeness, or describe an original character. This rule cannot be switched off.
 
 ## image_request_failed
 
@@ -1660,7 +1647,7 @@ HTTP **403** - Your profile does not have permission to do that.
 
 HTTP **400** - A permission is invalid.
 
-**Fix:** Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.
+**Fix:** Use the permission names from docs/contracts/permissions.json; a profile can only be granted what its type allows (contracts.permissions ROLE_GRANTABLE).
 
 ## personal_needs_direct
 
@@ -1820,7 +1807,7 @@ HTTP **409** - Sign in to a profile first.
 
 HTTP **400** - Unknown role {}.
 
-**Fix:** Use owner, admin, member or restricted.
+**Fix:** Use admin, user or basic (the 3.x words owner, member and restricted are still accepted as input).
 
 ## prompt_bank_malformed
 
@@ -1853,14 +1840,6 @@ HTTP **422** - bad_action: a quick action applies to user messages
 HTTP **422** - bad_action: unknown quick action
 
 **Fix:** Fix the fields in detail and resend.
-
-## quiet_hours
-
-<a id="quiet_hours"></a>
-
-HTTP **403** - This profile is not available right now.
-
-**Fix:** This profile is not available at this time of day. Ask the Owner to change quiet hours.
 
 ## rate_limited
 
@@ -1941,14 +1920,6 @@ HTTP **409** - What would be deleted has changed. Look at the numbers again befo
 HTTP **403** - This endpoint has no access policy.
 
 **Fix:** This is a bug: the endpoint has no declared permission. Report it; it is refused until it has one.
-
-## safe_mode
-
-<a id="safe_mode"></a>
-
-HTTP **403** - Unlock for full access
-
-**Fix:** Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.
 
 ## session_key_required
 
@@ -2038,14 +2009,6 @@ HTTP **409** - The task cannot do that in its current state.
 
 **Fix:** Reload the task: it may have just finished, or it is still running.
 
-## task_thread_not_allowed
-
-<a id="task_thread_not_allowed"></a>
-
-HTTP **409** - Tasks cannot be assigned from a chat that Restricted profiles can read.
-
-**Fix:** Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.
-
 ## test_flag_invalid
 
 <a id="test_flag_invalid"></a>
@@ -2101,14 +2064,6 @@ HTTP **403** - That thread belongs to another bot
 HTTP **500** - Could not update the thread
 
 **Fix:** This is a server fault; check the logs (Settings > System) and retry.
-
-## time_limit
-
-<a id="time_limit"></a>
-
-HTTP **403** - Today's time for this profile is used up.
-
-**Fix:** This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.
 
 ## title_required
 

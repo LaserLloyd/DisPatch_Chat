@@ -284,13 +284,17 @@ test('api.js carries the three bot calls', async () => {
   assert.match(src, /deleteBot: \(id\) => j\(`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/);
 });
 
-test('main.js builds every Characters row: who-can-see select, Details, the ⋯ menu, drag and ▲/▼, instant save', () => {
+test('main.js builds every Characters row: Hidden tag, Details, the ⋯ menu, drag and ▲/▼, instant save', () => {
   assert.match(MAIN, /import \{ rowControls, addBotRow, backendKind \} from '\.\/bots-edit\.js\?v=\d+';/);
   assert.match(MAIN, /const ctl = rowControls\(bot, botEditCtx\(\)\);/);
   // Rename / Personality / Remove are the ⋯ menu's, using the same controls bots-edit.js builds.
   assert.match(MAIN, /run: \(\) => ctl\.edit\.click\(\)/);
   assert.match(MAIN, /run: \(\) => ctl\.persona\.click\(\)/);
-  assert.match(MAIN, /run: \(\) => ctl\.remove\.click\(\), danger: true/);
+  // Remove goes through characters.js (delete-preview counts, Delete or Hide instead).
+  assert.match(MAIN, /import \{ characterPanel, isHidden, removeCharacter \} from '\.\/characters\.js\?v=\d+';/);
+  assert.match(MAIN, /const done = await removeCharacter\(bot, \{ toast \}\);/);
+  assert.match(MAIN, /if \(done === 'deleted'\) await botEditCtx\(\)\.onRemoved\(bot\.id\);/);
+  assert.doesNotMatch(MAIN, /bm-who|whoCanSee|WHO_OPTIONS|audienceLabel/);
   // Parking a character in Tools & more (this device only) moved from the ⌥ pill into the ⋯ menu.
   assert.match(MAIN, /label: t\(parked \? 'chars\.menu_unpark' : 'chars\.menu_park'\),\s+run: \(\) => \{ toggleMenuBot\(bot\.id\); renderSidebar\(\); renderBotManager\(\); \},/);
   // Add is a menu: a blank character, or a starter pack.

@@ -296,6 +296,10 @@ export const api = {
   // A profile without the permission gets 403 from every one of these, listing included. The Claude key
   // and MCP secrets are WRITE-ONLY: nothing here ever returns one.
   agentsAvailable: () => j('/api/agents/available'),
+  // 4.0: what a profile that makes its own bots may read (create_characters): the preset
+  // personalities, and only the household connections it may use (ids and names, no keys).
+  myPersonas: () => j('/api/me/personas'),
+  myBackends: () => j('/api/me/backends'),
   agents: () => j('/api/agents'),
   agentCreate: (body) => j('/api/agents', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
   agentSave: (id, body) => j(`/api/agents/${encodeURIComponent(id)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }),
@@ -309,8 +313,6 @@ export const api = {
   deleteAgentSecret: (name) => j(`/api/agents/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   agentSettings: () => j('/api/agents/settings'),
   saveAgentSettings: (body) => j('/api/agents/settings', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-  agentProfileBudgets: () => j('/api/agents/profile-budgets'),
-  saveAgentProfileBudget: (profileId, body) => j(`/api/agents/profile-budgets/${encodeURIComponent(profileId)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body) }),
   agentUsage: () => j('/api/agents/usage'),
   purgeAgentTasks: () => j('/api/agents/retention/purge', { method: 'POST' }),
   tasks: (query) => {

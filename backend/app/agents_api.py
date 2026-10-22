@@ -350,7 +350,6 @@ async def delete_agent(agent_id: str, request: Request, _=_MANAGE):
 async def available_agents(request: Request, _=_DISPATCH):
     pr = _principal(request)
     mgr = _mgr()
-    owner = agents_service.principal_key(pr)
     leaves = {b["name"]: bool((b["capabilities"] or {}).get("data_leaves_host", True))
               for b in mgr.backend_info()}
     out = []
@@ -368,11 +367,7 @@ async def available_agents(request: Request, _=_DISPATCH):
         entry["available"] = problem is None and not a["disabled"]
         entry["problem"] = None if problem is None else {"code": problem[0].value, "message": problem[1]}
         out.append(entry)
-    pb = store.profile_budget(owner) if owner else {}
-    return {"agents": out,
-            "budget": {"usd_per_day": pb.get("usd_per_day"),
-                       "spent_today_usd": round(store.spent_today("profile", owner), 4) if owner else 0.0,
-                       "estimate": True}}
+    return {"agents": out}
 
 
 @router.get("/api/agents/backends")
@@ -523,29 +518,6 @@ async def put_settings(body: AgentSettingsIn, request: Request, _=_MANAGE):
                           detail=",".join(sorted(k for k, v in body.model_dump().items() if v is not None)),
                           category="audit")
     return _settings_view()
-
-
-class AgentProfileBudgetIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    usd_per_day: float | None = Field(default=None, gt=0, le=100_000)
-    max_turns: int | None = Field(default=None, gt=0, le=100_000)
-    max_wall_clock_s: float | None = Field(default=None, gt=0, le=7 * 86400)
-    max_tokens: int | None = Field(default=None, gt=0, le=1_000_000_000)
-
-
-@router.get("/api/agents/profile-budgets")
-async def get_profile_budgets(request: Request, _=_MANAGE):
-    return {"budgets": store.all_profile_budgets()}
-
-
-@router.put("/api/agents/profile-budgets/{profile_id}")
-async def put_profile_budget(profile_id: str, body: AgentProfileBudgetIn, request: Request, _=_MANAGE):
-    if accounts.get_profile(profile_id) is None:
-        return _problem(404, "agent_invalid", "profile-budgets: that is not a profile")
-    budget = {k: v for k, v in body.model_dump().items() if v is not None}
-    store.set_profile_budget(profile_id, budget or None)
-    return {"profile_id": profile_id, "budget": budget}
 
 
 @router.get("/api/agents/usage")

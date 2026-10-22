@@ -64,7 +64,7 @@ import {
 import { mountConnections } from './connections.js?v=2';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
 import { mountBackups } from './backup.js?v=2';
-import { characterPanel } from './characters.js?v=2';
+import { characterPanel, isHidden, removeCharacter } from './characters.js?v=2';
 import { maybeStartWizard } from './wizard.js?v=3';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -104,8 +104,7 @@ import { mountPeopleSettings } from './people.js?v=3';
 import { createTasksUi } from './tasks.js?v=1';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
-import * as myBots from './my-bots.js?v=1';
-import { initMyBots } from './my-bots.js?v=1';
+import { initMyBots, copyMenuItem } from './my-bots.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=1';
 import { initAccountReset } from './account-reset.js?v=1';
 import { initPeoplePerms } from './people-perms.js?v=1';
@@ -3829,12 +3828,12 @@ function toggleThreadMenu(show) {
   if (btn) btn.setAttribute('aria-expanded', String(!dom['thread-menu'].hidden));
 }
 /** "Make my own copy" (my-bots.js): offered for a household bot this profile may copy, never for an
- *  agent bot. Guarded so the menu still works where that export is absent. */
+ *  agent bot, a personal bot or a profile without create_characters (copyMenuItem returns null). */
 function paintCopyMenuItem() {
   document.getElementById('thread-menu-copy')?.remove();
   const bot = state.activeThread && botById(state.activeThread.bot_id);
-  if (!bot || typeof myBots.copyMenuItem !== 'function') return;
-  const item = myBots.copyMenuItem(bot, { state, toast }, {
+  if (!bot) return;
+  const item = copyMenuItem(bot, { state, toast }, {
     mine: state.bots.filter(isMineBot),
     onDone: async () => { try { const r = await api.bots(); state.bots = r.bots || []; renderSidebar(); } catch { /* the roster frame follows */ } },
   });
@@ -4778,10 +4777,10 @@ function openSettingsTab(tab) {
 }
 // ---- Settings -> Characters: the roster ----
 // One compact row per character: drag handle (▲/▼ in Reorder mode on a phone),
-// picture, name with small read-only feature icons, a "Who can see it" select,
-// Details (features, model, description, profiles) and a ⋯ menu (Change photo,
-// Rename, Personality, Remove). Everything applies when it is changed: order,
-// visibility and features through POST /api/bots/order, the rest through the
+// picture, name with small read-only feature icons (and a Hidden tag), Details
+// (features, model, description, Hide from lists, Copy to a profile) and a ⋯ menu
+// (Change photo, Rename, Personality, Remove with counts or Hide instead). Order and
+// features apply through POST /api/bots/order, the rest through the
 // modules' own PATCH routes.
 let charsReorder = false;             // phone: show ▲/▼ instead of relying on drag
 const bmOpenDetails = new Set();      // bot ids whose Details drawer is open (survives a rebuild)
@@ -4810,8 +4809,8 @@ function renderBotManager() {
     }
     const parkedTag = isMenuBot(bot.id) ? el('span', { class: 'bm-parked', text: t('chars.parked') }) : null;
     // A character the Admin keeps off every rail (reachable only by a profile whose own list names it).
-    const hiddenTag = bot.hidden ? el('span', { class: 'bm-parked', text: t('profiles.hidden_badge') }) : null;
-    const paintRow = () => { row.classList.toggle('bm-row--hidden', !!(bmBots.find((b) => b.id === bot.id) || bot).hidden); };
+    const hiddenTag = isHidden(bot) ? el('span', { class: 'bm-parked', text: t('profiles.hidden_badge') }) : null;
+    const paintRow = () => { row.classList.toggle('bm-row--hidden', isHidden(bmBots.find((b) => b.id === bot.id) || bot)); };
 
     // ▲/▼: HTML5 drag never fires on touch, so these are the reorder affordance that
     // works everywhere; shown on a phone in Reorder mode, always on a desktop row's hover.
@@ -4869,7 +4868,15 @@ function renderBotManager() {
         label: t(parked ? 'chars.menu_unpark' : 'chars.menu_park'),
         run: () => { toggleMenuBot(bot.id); renderSidebar(); renderBotManager(); },
       });
-      items.push({ label: t('bots_edit.remove'), run: () => ctl.remove.click(), danger: true });
+      // Remove = js/characters.js: the delete-preview counts, then Delete or Hide instead.
+      items.push({
+        label: t('bots_edit.remove'), danger: true,
+        run: async () => {
+          const done = await removeCharacter(bot, { toast });
+          if (done === 'deleted') await botEditCtx().onRemoved(bot.id);
+          else if (done === 'hidden') await characterCtx().reload();
+        },
+      });
       openRowMenu(moreBtn, items);
     });
 

@@ -33,8 +33,7 @@
         "method": "GET",
         "path": "/api/voice/preview",
         "requirement": {
-          "not_restricted": true,
-          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "note": "a voice user's read (every role that holds use_voice). The add-on's other routes are manage_plugins",
           "permission": "use_voice"
         }
       },
@@ -42,8 +41,7 @@
         "method": "GET",
         "path": "/api/voice/profiles",
         "requirement": {
-          "not_restricted": true,
-          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "note": "a voice user's read (every role that holds use_voice). The add-on's other routes are manage_plugins",
           "permission": "use_voice"
         }
       },
@@ -51,8 +49,7 @@
         "method": "GET",
         "path": "/api/voice/status",
         "requirement": {
-          "not_restricted": true,
-          "note": "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads locked_status in /api/extensions). The add-on's other routes are manage_plugins",
+          "note": "a voice user's read (every role that holds use_voice). The add-on's other routes are manage_plugins",
           "permission": "use_voice"
         }
       }
@@ -60,15 +57,15 @@
   },
   "mounts": {
     "/media": {
-      "note": "chat media",
-      "permission": "use_images"
+      "note": "chat media (photos a profile attached, pictures in its chats)",
+      "permission": "use_chat"
     },
     "/static": {
       "note": "the app's own JS/CSS/icons; carries no user data",
       "public": true
     },
     "/static/avatars": {
-      "note": "avatar files; the gate itself narrows to audience=restricted|all characters for a Restricted caller",
+      "note": "avatar files; the gate itself refuses a character the caller may not use (characters.may_use)",
       "public": true
     }
   },
@@ -122,7 +119,7 @@
       "method": "GET",
       "path": "/api/agents",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -130,7 +127,7 @@
       "method": "POST",
       "path": "/api/agents",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -146,7 +143,7 @@
       "method": "GET",
       "path": "/api/agents/backends",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -154,7 +151,7 @@
       "method": "DELETE",
       "path": "/api/agents/credentials/claude",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -162,7 +159,7 @@
       "method": "GET",
       "path": "/api/agents/credentials/claude",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -170,24 +167,7 @@
       "method": "PUT",
       "path": "/api/agents/credentials/claude",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
-        "permission": "manage_agents"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/agents/profile-budgets",
-      "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
-        "permission": "manage_agents"
-      }
-    },
-    {
-      "method": "PUT",
-      "path": "/api/agents/profile-budgets/{profile_id}",
-      "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
-        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -195,7 +175,7 @@
       "method": "POST",
       "path": "/api/agents/retention/purge",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -203,7 +183,7 @@
       "method": "GET",
       "path": "/api/agents/secrets",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -211,7 +191,7 @@
       "method": "DELETE",
       "path": "/api/agents/secrets/{name}",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "owner_scoped": "none: write-only household secret (manage_agents)",
         "permission": "manage_agents"
       }
@@ -220,7 +200,7 @@
       "method": "PUT",
       "path": "/api/agents/secrets/{name}",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "owner_scoped": "none: write-only household secret (manage_agents)",
         "permission": "manage_agents"
       }
@@ -229,7 +209,7 @@
       "method": "GET",
       "path": "/api/agents/settings",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -237,7 +217,7 @@
       "method": "PUT",
       "path": "/api/agents/settings",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -245,7 +225,7 @@
       "method": "GET",
       "path": "/api/agents/usage",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "permission": "manage_agents"
       }
     },
@@ -253,7 +233,7 @@
       "method": "DELETE",
       "path": "/api/agents/{agent_id}",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "owner_scoped": "none: an agent definition is household configuration (manage_agents)",
         "permission": "manage_agents"
       }
@@ -262,7 +242,7 @@
       "method": "PATCH",
       "path": "/api/agents/{agent_id}",
       "requirement": {
-        "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "note": "define agents, credentials, agent budgets, retention (write-only secrets)",
         "owner_scoped": "none: an agent definition is household configuration (manage_agents)",
         "permission": "manage_agents"
       }
@@ -284,7 +264,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -296,7 +276,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -308,7 +288,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -320,7 +300,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -332,7 +312,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -344,7 +324,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -593,7 +573,7 @@
       "method": "GET",
       "path": "/api/auth/me",
       "requirement": {
-        "note": "who am I, what may I do - answers Restricted too",
+        "note": "who am I, what may I do - answers every caller",
         "public": true
       }
     },
@@ -851,8 +831,9 @@
         "machine": [
           "machine:avatars"
         ],
+        "note": "a character the caller may use",
         "owner_scoped": "character",
-        "permission": "use_images"
+        "permission": "use_chat"
       }
     },
     {
@@ -1107,15 +1088,6 @@
       }
     },
     {
-      "method": "POST",
-      "path": "/api/drop",
-      "requirement": {
-        "note": "daily byte quota for Restricted",
-        "owner_scoped": "thread",
-        "permission": "use_chat"
-      }
-    },
-    {
       "method": "GET",
       "path": "/api/export",
       "requirement": {
@@ -1142,46 +1114,50 @@
         "machine": [
           "machine:files_list"
         ],
-        "permission": "use_tools"
+        "note": "the caller's own files",
+        "permission": "files_read"
       }
     },
     {
       "method": "POST",
       "path": "/api/files",
       "requirement": {
-        "permission": "use_tools"
+        "permission": "files_upload"
       }
     },
     {
       "method": "POST",
       "path": "/api/files/wipe",
       "requirement": {
-        "note": "deletes the whole File Server",
-        "permission": "admin_system"
+        "note": "deletes the caller's OWN File Server files up to a date",
+        "permission": "files_read"
       }
     },
     {
       "method": "DELETE",
       "path": "/api/files/{file_id}",
       "requirement": {
-        "owner_scoped": "none: WP-DEL - files.owner_profile_id is stamped; the per-owner File Server checks land in wave 2",
-        "permission": "use_tools"
+        "note": "owner only; files_read (File Server) or manage_history (chat attachment)",
+        "owner_scoped": "file",
+        "permission": "use_chat"
       }
     },
     {
       "method": "GET",
       "path": "/api/files/{file_id}/download",
       "requirement": {
-        "owner_scoped": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
-        "permission": "use_tools"
+        "note": "owner only; a File Server file also needs files_read",
+        "owner_scoped": "file",
+        "permission": "use_chat"
       }
     },
     {
       "method": "GET",
       "path": "/api/files/{file_id}/raw",
       "requirement": {
-        "owner_scoped": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
-        "permission": "use_tools"
+        "note": "owner only; a File Server file also needs files_read",
+        "owner_scoped": "file",
+        "permission": "use_chat"
       }
     },
     {
@@ -1671,10 +1647,10 @@
     },
     {
       "method": "GET",
-      "path": "/api/me/activity",
+      "path": "/api/me/backends",
       "requirement": {
-        "note": "a profile's own summary - the disclosure the Restricted UI shows",
-        "permission": "use_chat"
+        "note": "ids and names of the connections the caller's own bots may use; never a key or URL; empty without choose_backend",
+        "permission": "create_characters"
       }
     },
     {
@@ -1746,6 +1722,14 @@
       }
     },
     {
+      "method": "GET",
+      "path": "/api/me/personas",
+      "requirement": {
+        "note": "the personality presets (shipped content) for the owner's bot editor",
+        "permission": "create_characters"
+      }
+    },
+    {
       "method": "POST",
       "path": "/api/me/reset",
       "requirement": {
@@ -1765,7 +1749,8 @@
       "method": "GET",
       "path": "/api/media",
       "requirement": {
-        "permission": "use_images"
+        "note": "the media store for everyone; agent media folders need dispatch_agents",
+        "permission": "use_chat"
       }
     },
     {
@@ -1799,7 +1784,7 @@
       "method": "POST",
       "path": "/api/messages/{message_id}/feedback",
       "requirement": {
-        "note": "daily feedback quota for Restricted",
+        "note": "a message in the caller's own chat",
         "owner_scoped": "message",
         "permission": "use_chat"
       }
@@ -2235,7 +2220,7 @@
       "method": "GET",
       "path": "/api/reactions/{rid}/image",
       "requirement": {
-        "owner_scoped": "none: a household reaction card (safe flag decides Restricted)",
+        "owner_scoped": "none: a household reaction card (every signed-in role)",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2421,7 +2406,7 @@
         "machine": [
           "machine:threads"
         ],
-        "note": "daily thread quota for Restricted",
+        "note": "a character the caller may use (characters.may_use)",
         "owner_scoped": "thread",
         "permission": "use_chat"
       }
@@ -2527,7 +2512,7 @@
       "method": "GET",
       "path": "/api/tools",
       "requirement": {
-        "note": "Restricted sees only tools flagged safe",
+        "note": "lists only the panels the caller's use_tools:<id> grants name",
         "permission": "use_tools",
         "scoped": true
       }
@@ -2575,8 +2560,8 @@
         "machine": [
           "machine:upload"
         ],
-        "note": "daily byte quota for Restricted",
-        "permission": "use_chat"
+        "note": "a chat attachment; a machine has a 200 MB/day byte guard",
+        "permission": "attach_files"
       }
     },
     {
@@ -2740,7 +2725,7 @@
       "permission": "manage_history"
     },
     "create_thread": {
-      "note": "quota-charged for Restricted",
+      "note": "a character the caller may use",
       "owner_scoped": "none: the new thread is stamped with its creator",
       "permission": "use_chat"
     },
@@ -2768,12 +2753,12 @@
       "permission": "manage_history"
     },
     "retry": {
-      "note": "quota-charged for Restricted",
+      "note": "a character the caller may use, in its own chat",
       "owner_scoped": "thread",
       "permission": "use_chat"
     },
     "send": {
-      "note": "quota-charged for Restricted",
+      "note": "a character the caller may use, in its own chat",
       "owner_scoped": "thread",
       "permission": "use_chat"
     }

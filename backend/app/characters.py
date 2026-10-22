@@ -1,16 +1,14 @@
 """Characters: the 3.0 name for what 2.x called a bot, and the operations on them.
 
 A character is a persona: who it is (name, emoji, avatar, personality), what answers for it (a
-Connection and model, or an agent), who may see it (``audience`` plus an optional list of
-profiles) and how it sounds (a voice reference the voice add-on validates).
+Connection and model, or an agent) and how it sounds (a voice reference the voice add-on
+validates). Who may use it is :func:`may_use` (4.0: scope, the profile's ``household_bots``).
 
 Storage did not move. ``config.yaml`` stays the roster and ``config.Bot`` the record, so every
 existing bot, preset, avatar and pool is a character with no data migration to get wrong; what
 changed is the vocabulary and the API (``/api/characters``; ``/api/bots*`` keep working as thin
 aliases for one release). What the split adds to a record:
 
-``profiles``    profile ids allowed to see it in addition to ``audience`` (empty = everyone the
-                audience allows). Owner and Admin always see everything.
 ``pack``        the starter pack it came from
 ``description`` a line for the picker
 ``connection`` / ``model``  are NOT stored on the bot: they are the first entry of its provider
@@ -126,7 +124,6 @@ def bot_row(b: Bot) -> dict:
         row["provider"] = str((first or {}).get("provider") or "")
         row["model"] = str((first or {}).get("model") or "")
     row["connection"] = connection_of(b)
-    row["profiles"] = list(b.profiles)
     row["description"] = b.description
     row["pack"] = b.pack
     return row
@@ -146,8 +143,7 @@ def character_out(b: Bot) -> dict:
     row["voice_link"] = {"section": "voice", "anchor": "voices", "character": b.id}
     row["flags"] = {"reactions": b.reactions, "reaction_autopilot": b.reaction_autopilot,
                     "avatar_pool": b.avatar_pool, "image_jobs": b.image_jobs,
-                    "quick_actions": b.quick_actions, "hide_unlocked": b.hide_unlocked,
-                    "hidden": is_hidden(b)}
+                    "quick_actions": b.quick_actions, "hidden": is_hidden(b)}
     return row
 
 
@@ -162,9 +158,11 @@ def is_personal(b: Bot) -> bool:
 
 
 def is_hidden(b: Bot) -> bool:
-    """The Admin's "keep it off the rail" flag (``hidden``; 3.x ``hide_unlocked`` until
-    migration 010 renames it). Display only: a hidden character still opens by link."""
-    return bool(getattr(b, "hidden", False) or getattr(b, "hide_unlocked", False))
+    """The Admin's "keep it off the rail" flag (``hidden``). Display only: a hidden character
+    still opens by link. Migration 010 wrote ``hidden`` for every 3.x ``hide_unlocked`` bot;
+    the legacy ``hide_unlocked`` / ``safe`` / ``audience`` keys are inert data since then and
+    are never read here (an ``audience: restricted`` left in config.yaml hides nothing)."""
+    return bool(getattr(b, "hidden", False))
 
 
 def is_agent_backed(b: Bot) -> bool:
@@ -378,23 +376,10 @@ def refresh_inline_mirrors(conn: connections.Connection) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def _clean_profiles(ids: Any) -> list[str]:
-    if ids is None:
-        return []
-    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-        raise CharacterError("character_invalid", "profiles must be a list of profile ids", 422)
-    known = {p.id for p in accounts.list_profiles()}
-    bad = [i for i in ids if i not in known]
-    if bad:
-        raise CharacterError("character_invalid", f"Unknown profile {bad[0]!r}", 422)
-    return list(dict.fromkeys(ids))
-
-
 def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: str = "",
-           agent: str | None = None, model_hint: str = "", safe: bool = False, hide_unlocked: bool = False,
-           audience: str | None = None, quick_actions: bool = True, visible: bool = True,
+           agent: str | None = None, model_hint: str = "", quick_actions: bool = True,
            tools: bool | None = None, connection: str | None = None, model: str | None = None,
-           description: str = "", profiles: list[str] | None = None, pack: str = "",
+           description: str = "", pack: str = "",
            persona: str | None = None, color: str = "", voice: str = "", voice_rp: str = "",
            hidden: bool = False) -> Bot:
     bots = config.load_bots()
@@ -410,17 +395,10 @@ def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: 
         kw["advisor"] = {"providers": [], "tools": True if tools is None else tools}
     else:
         kw["agent"] = (agent or "").strip()
-    if audience is None:
-        from . import settings_store
-        default_aud = settings_store.get("characters.default_audience", "members")
-        if not safe and not hide_unlocked and visible and default_aud != "members":
-            audience = default_aud
     bot = Bot(
         id=bot_id, name=name, emoji=emoji or ("🌍" if backend == "direct" else "🤖"),
         model_hint=model_hint or ("Direct API" if backend == "direct" else ""),
-        quick_actions=quick_actions, color=color, description=description[:400], pack=pack,
-        profiles=_clean_profiles(profiles),
-        **config.audience_flags(audience, config.fold_visible(visible, safe, hide_unlocked)), **kw)
+        quick_actions=quick_actions, color=color, description=description[:400], pack=pack, **kw)
     if persona is not None and persona.strip():
         try:
             bot = personas.apply(bot, persona)
@@ -454,14 +432,12 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
         want = bool(changes.pop("hidden"))
         changes[_hidden_field()] = want
         if not want:
-            # 010 keeps the 3.x hide_unlocked beside hidden and is_hidden reads either, so
-            # showing a bot again clears both.
+            # 010 keeps the 3.x hide_unlocked beside hidden as inert data; showing a bot
+            # again clears it too, so the file never says two things.
             changes["hide_unlocked"] = False
     for fld in extensions.BOT_FIELDS:
         if changes.get(fld) is not None:
             check_extension_field(fld, bot_id, str(changes[fld]).strip())
-    if "profiles" in changes:
-        changes["profiles"] = _clean_profiles(changes["profiles"])
     if "description" in changes:
         changes["description"] = str(changes["description"] or "")[:400]
     connection = changes.pop("connection", _UNSET)         # None / "" detaches; absent leaves it alone
@@ -476,13 +452,6 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
                 raise HTTPException(422, "tools only applies to direct-API bots")
             ch["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
         persona = ch.pop("persona", None)
-        if "visible" in ch:
-            ch.update(config.fold_visible(ch.pop("visible"), ch.get("safe", bot.safe),
-                                          ch.get("hide_unlocked", bot.hide_unlocked)))
-        if "audience" in ch:
-            ch.update(config.audience_flags(ch.pop("audience"), {
-                "safe": ch.get("safe", bot.safe),
-                "hide_unlocked": ch.get("hide_unlocked", bot.hide_unlocked)}))
         for fld in ("voice", "voice_rp"):
             if fld in ch:
                 ch[fld] = str(ch[fld]).strip()[:80 if fld == "voice" else 32]

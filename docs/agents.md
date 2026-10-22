@@ -177,7 +177,7 @@ All routes are declared in `backend/app/route_policy.py` and listed in
 | Route | Permission |
 |---|---|
 | `GET/POST /api/agents`, `PATCH/DELETE /api/agents/{id}` | `manage_agents` |
-| `GET /api/agents/backends`, `…/settings`, `…/usage`, `…/profile-budgets`, `POST …/retention/purge` | `manage_agents` |
+| `GET /api/agents/backends`, `…/settings`, `…/usage`, `POST …/retention/purge` | `manage_agents` |
 | `GET/PUT/DELETE /api/agents/credentials/claude`, `GET/PUT/DELETE /api/agents/secrets/{name}` | `manage_agents` (write-only secrets) |
 | `GET /api/agents/available` | `dispatch_agents` (only agents published to you) |
 | `POST/GET /api/tasks`, `GET /api/tasks/{id}`, `…/events?after_seq=`, `POST …/send`, `…/interrupt`, `…/resume`, `…/cancel` | `dispatch_agents` |

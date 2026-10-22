@@ -1,4 +1,4 @@
-# Assistants - general helpers for adults and teenagers (Members).
+# Assistants - general helpers.
 #
 # Plain, capable assistants without a persona gimmick: explaining, writing, coding and
 # planning. Each is a direct character: pick a Connection when you install the pack (or later
@@ -7,7 +7,6 @@ schema: 1
 id: assistants
 name: Assistants
 description: Four everyday helpers - explain, write, code and plan.
-audience: members
 defaults:
   tools: true
 characters:

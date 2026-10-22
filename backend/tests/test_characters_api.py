@@ -108,12 +108,6 @@ def test_removing_the_only_character_is_refused(tmp_path):
     assert e.value.code == "character_last" and e.value.status == 409
 
 
-def test_the_default_audience_setting_applies_to_new_characters(owner):
-    owner.patch("/api/settings", json={"set": {"characters.default_audience": "restricted"}})
-    assert owner.post("/api/characters", json={"name": "Kidbot"}).json()["audience"] == "restricted"
-    assert owner.post("/api/characters", json={"name": "Adultbot", "audience": "members"}).json()["audience"] == "members"
-
-
 def test_the_bots_aliases_return_the_same_data_under_the_old_name(owner, conn):
     owner.post("/api/characters", json={"name": "Nova", "connection": conn, "model": "m"})
     old = {b["id"]: b for b in owner.get("/api/bots/all").json()["bots"]}["nova"]
@@ -131,9 +125,9 @@ def test_the_bots_aliases_return_the_same_data_under_the_old_name(owner, conn):
 # --------------------------------------------------------------------------- #
 
 
-def test_the_profile_list_must_name_real_profiles(owner):
+def test_the_3x_profile_list_is_refused(owner):
     r = owner.post("/api/characters", json={"name": "Bad", "profiles": ["nobody"]})
-    assert r.status_code == 422 and r.json()["error"]["code"] == "character_invalid"
+    assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
 
 
 def test_only_manage_characters_may_change_characters(world, owner):

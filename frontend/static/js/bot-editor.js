@@ -7,12 +7,13 @@
 //   POST   /api/me/characters/{id}/avatar  (multipart "file")
 //   POST   /api/me/characters/draft      {description} -> {draft:{name,emoji,description,persona}}
 //   GET    /api/voice/profiles           the voice add-on: rows carry `household` / `mine`
-//   GET    /api/characters/personas      preset personalities   (Admin-only today, see the report)
-//   GET    /api/connections              backends to choose from (Admin-only today)
+//   GET    /api/me/personas              preset personalities (create_characters)
+//   GET    /api/me/backends              {may_choose, default, connections:[{id,name,...}]}: only the
+//                                        connections this profile may use, never a key
 //
 // Everything is a text node (el() has no innerHTML). Nothing runs at import time.
 
-import { t, has } from './i18n.js?v=4';
+import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 
 export const NAME_MAX = 40;
@@ -25,12 +26,6 @@ let shell = {};
 export function initBotEditor(deps = {}) { shell = deps || {}; }
 /** The helpers handed to init, overlaid by whatever the caller passes. */
 export function withShell(deps = {}) { return { ...shell, ...(deps || {}) }; }
-
-/** t(key) with an English fallback for a key the locale files do not carry yet. */
-export function tr(key, fallback, vars) {
-  if (has(key)) return t(key, vars);
-  return String(fallback).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? vars[k] : m));
-}
 
 // ------------------------------------------------------------------ requests
 
@@ -87,9 +82,9 @@ export function can(perm, deps = {}) {
 export function validateBot({ name = '', emoji = '', persona = '' } = {}) {
   const out = {};
   const n = String(name).trim();
-  if (!n) out.name = tr('editor.name_required', 'Give the bot a name.');
-  else if ([...n].length > NAME_MAX) out.name = tr('editor.name_long', 'The name can be at most {max} characters.', { max: NAME_MAX });
-  if ([...String(emoji).trim()].length > EMOJI_MAX) out.emoji = tr('editor.emoji_long', 'At most {max} characters.', { max: EMOJI_MAX });
+  if (!n) out.name = t('editor.name_required');
+  else if ([...n].length > NAME_MAX) out.name = t('editor.name_long', { max: NAME_MAX });
+  if ([...String(emoji).trim()].length > EMOJI_MAX) out.emoji = t('editor.emoji_long', { max: EMOJI_MAX });
   const count = [...String(persona)].length;
   if (count > PERSONA_MAX) out.persona = t('editor.too_long', { count });
   return out;
@@ -142,8 +137,8 @@ export function draftToForm(draft) {
 
 /** Message for a failed AI build call. */
 export function draftErrorText(e) {
-  if (e && e.status === 503) return tr('aibuild.unavailable', 'AI build needs a connected model. Ask an Admin to connect one.');
-  if (e && e.status === 403) return tr('aibuild.not_allowed', 'You are not allowed to make bots.');
+  if (e && e.status === 503) return t('aibuild.unavailable');
+  if (e && e.status === 403) return t('aibuild.not_allowed');
   return t('aibuild.failed');
 }
 
@@ -156,21 +151,27 @@ async function tryGet(path) {
 /** Everything the editor offers besides the fields: presets, voices, backends. Each part
  *  that the caller cannot read (403/404) is simply absent. */
 export async function loadEditorOptions(deps = {}) {
+  // The voice routes exist only when the voice add-on is installed and loaded: ask
+  // /api/extensions first, so an install without it never logs a 404.
+  const exts = await tryGet('/api/extensions');
+  const voiceOn = !!(exts && Array.isArray(exts.extensions)
+    && exts.extensions.some((e) => e && e.id === 'voice' && e.entry));
   const [personas, voices, conns, status] = await Promise.all([
-    tryGet('/api/characters/personas'),
-    tryGet('/api/voice/profiles'),
-    can('choose_backend', deps) ? tryGet('/api/connections') : Promise.resolve(null),
-    tryGet('/api/voice/status'),
+    tryGet('/api/me/personas'),
+    voiceOn ? tryGet('/api/voice/profiles') : Promise.resolve(null),
+    can('choose_backend', deps) ? tryGet('/api/me/backends') : Promise.resolve(null),
+    voiceOn ? tryGet('/api/voice/status') : Promise.resolve(null),
   ]);
   const rows = (voices && (voices.voices || voices.profiles)) || [];
   const builtin = ((status && (status.builtin_voices || (status.voice_choices && status.voice_choices.builtin_voices))) || [])
     .filter((v) => v && v.id).map((v) => ({ id: String(v.id), name: String(v.name || v.id) }));
-  const list = (conns && (conns.connections || conns)) || [];
+  const list = (conns && conns.may_choose !== false && conns.connections) || [];
   return {
     presets: (personas && personas.presets) || [],
     voices: { ...voiceGroups(rows), builtin },
     connections: (Array.isArray(list) ? list : [])
       .filter((c) => c && c.id).map((c) => ({ id: String(c.id), name: String(c.name || c.id) })),
+    defaultConnection: (conns && typeof conns.default === 'string') ? conns.default : '',
   };
 }
 
@@ -299,7 +300,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     };
     addGroup(t('editor.voice_mine'), options.voices.mine);
     addGroup(t('editor.voice_household'), options.voices.household);
-    addGroup(tr('editor.voice_builtin', 'Built-in voices'), options.voices.builtin || []);
+    addGroup(t('editor.voice_builtin'), options.voices.builtin || []);
     if (form.voice && ![...voiceSel.options].some((o) => o.value === form.voice)) {
       voiceSel.append(option(form.voice, form.voice, true));
     }
@@ -308,7 +309,10 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     const showBackend = options.connections.length > 1;
     if (showBackend) {
       for (const c of options.connections) connSel.append(option(c.id, c.name, c.id === form.connection));
-      if (!form.connection) connSel.value = options.connections[0].id;
+      if (!form.connection) {
+        const def = options.connections.find((c) => c.id === options.defaultConnection);
+        connSel.value = (def || options.connections[0]).id;
+      }
     }
 
     // picture controls

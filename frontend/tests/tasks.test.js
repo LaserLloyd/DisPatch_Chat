@@ -260,7 +260,7 @@ function fakeApi(over = {}) {
     agentsAvailable: rec('agentsAvailable', { agents: [
       { id: 'a1', name: 'Helper', backend: 'openclaw', backend_label: 'OpenClaw', available: true, data_leaves_host: false, description: 'helps' },
       { id: 'a2', name: 'Code Reviewer', backend: 'claude_sdk', backend_label: 'Claude Agent', available: true, data_leaves_host: true },
-    ], budget: { usd_per_day: 2, spent_today_usd: 0.5 } }),
+    ] }),
     tasks: rec('tasks', (q) => ({ tasks: [TASK(), TASK({ id: 't2', agent_name: 'Other', state: 'awaiting_approval', pending_approval_count: 1 })]
       .filter((x) => !q || !q.state || x.state === q.state) })),
     task: rec('task', (id) => ({ task: TASK({ id }), approvals: [] })),
@@ -480,7 +480,7 @@ test('Assign task: the dialog posts the origin thread, tells where the prompt go
   select.value = 'a2';
   select.dispatchEvent(new win.Event('change'));
   assert.match(dlg.querySelector('#assign-hint').textContent, /sent to Claude Agent's service/);
-  assert.match(dlg.textContent, /about \$0\.50 of your \$2\.00 limit/);
+  assert.doesNotMatch(dlg.textContent, /limit/, '4.0: no per-profile agent budget line');
   dlg.querySelector('#assign-prompt').value = 'review the diff';
   fail = Object.assign(new Error('x'), { userMessage: "This agent's budget for today is used up.", fix: 'Try tomorrow.' });
   dlg.querySelector('form').dispatchEvent(new win.Event('submit', { cancelable: true }));
@@ -557,7 +557,6 @@ const AGENTS_DATA = (over = {}) => ({
   ] },
   creds: { route: 'api_key', routes: ['api_key', 'bedrock', 'google', 'foundry'], api_key_set: false, api_key_source: null, provider_env: null },
   settings: { unified_dispatch: false, unified_dispatch_from_env: false, retention_days: 30, max_concurrent: 4 },
-  budgets: { budgets: { p1: { usd_per_day: 1 } } },
   usage: { day: '2026-10-18', estimate: true, spend: [{ day: '2026-10-18', kind: 'agent', subject: 'ag1', usd: 0.0123, tokens: 10, turns: 1, tasks: 1 }] },
   secrets: { secrets: [{ name: 'STUDIOFORGE_MCP_KEY_RO', set: false }] },
   ...over,
@@ -570,11 +569,11 @@ function agentsApi(data = AGENTS_DATA()) {
     calls,
     agents: rec('agents', data.agents), agentBackends: rec('agentBackends', data.backends),
     claudeCredentials: rec('claudeCredentials', data.creds), agentSettings: rec('agentSettings', data.settings),
-    agentProfileBudgets: rec('agentProfileBudgets', data.budgets), agentUsage: rec('agentUsage', data.usage),
+    agentUsage: rec('agentUsage', data.usage),
     agentSecrets: rec('agentSecrets', data.secrets),
     saveClaudeCredentials: rec('saveClaudeCredentials', {}), clearClaudeKey: rec('clearClaudeKey', {}),
     agentCreate: rec('agentCreate', {}), agentSave: rec('agentSave', {}), agentDelete: rec('agentDelete', {}),
-    saveAgentSettings: rec('saveAgentSettings', {}), saveAgentProfileBudget: rec('saveAgentProfileBudget', {}),
+    saveAgentSettings: rec('saveAgentSettings', {}),
     saveAgentSecret: rec('saveAgentSecret', {}), deleteAgentSecret: rec('deleteAgentSecret', {}),
     purgeAgentTasks: rec('purgeAgentTasks', { purged: 2 }),
   };
@@ -671,7 +670,8 @@ test('Agents: limits, retention and the unified-dispatch switch (off by default)
   await tick(10);
   assert.ok(rec.toasts.some(([m]) => /Transcripts removed: 2/.test(m)));
   assert.match(lim.textContent, /about \$0\.0123 across 1 tasks/);
-  assert.equal([...lim.querySelectorAll('.agents-profile-budget legend')].length, 1, 'a Restricted profile has no agent limits to set');
+  assert.equal(lim.querySelector('.agents-profile-budget'), null, '4.0: no per-profile agent budgets');
+  assert.ok(!api.calls.some((c) => /ProfileBudget/.test(c[0])));
 });
 
 test('Agents: MCP secrets show a name and whether it is set - never a value', { skip: dom.skip }, async () => {
@@ -690,7 +690,7 @@ test('Agents: MCP secrets show a name and whether it is set - never a value', { 
 test('api.js carries the agent, task and approval calls with the routes the server declares', () => {
   for (const fn of ['agentsAvailable', 'agents', 'agentCreate', 'agentSave', 'agentDelete', 'agentBackends',
     'claudeCredentials', 'saveClaudeCredentials', 'clearClaudeKey', 'agentSecrets', 'saveAgentSecret',
-    'deleteAgentSecret', 'agentSettings', 'saveAgentSettings', 'agentProfileBudgets', 'saveAgentProfileBudget',
+    'deleteAgentSecret', 'agentSettings', 'saveAgentSettings',
     'agentUsage', 'purgeAgentTasks', 'tasks', 'task', 'taskEvents', 'createTask', 'taskSend', 'taskInterrupt',
     'taskResume', 'taskCancel', 'taskRelease', 'taskDismiss', 'answerApproval']) {
     assert.match(API_SRC, new RegExp(`^\\s{2}${fn}:`, 'm'), fn);

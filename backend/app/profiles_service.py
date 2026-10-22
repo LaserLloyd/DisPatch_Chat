@@ -682,7 +682,7 @@ def spawn_atlas(profile_id: str) -> str:
                 model = characters.model_of(household) or None
         bot = characters.create_personal(
             prof, name=tmpl.name, emoji=tmpl.emoji, tools=True, pack=firstrun.ATLAS_PACK,
-            connection=connection, model=model, soft_connection=True, fallback_ok=True)
+            cloned_from=firstrun.BOT_ID, connection=connection, model=model, soft_connection=True, fallback_ok=True)
         face = firstrun.copy_atlas_avatar(bot.id)
         if face:
             config.save_bot_avatar(bot.id, face)

@@ -159,78 +159,14 @@ test('createCountdown ticks once a second, finishes at zero, and stop() cancels'
   assert.equal(d3, 1, 'a zero wait is done at once');
 });
 
-// ------------------------------------------------------------------ budgets
-
-test('budgets: the server row -> the form strings', () => {
-  const f = P.budgetsToForm({
-    budgets: { minutes_per_day: 45, quiet_hours: '20:30-07:00', turns: 100, upload_mb: 50 },
-    session_timeout: 1800,
-  });
-  assert.deepEqual(f, {
-    minutes: '45', quietStart: '20:30', quietEnd: '07:00', turns: '100', threads: '', feedback: '',
-    uploadMb: '50', sessionMinutes: '30',
-  });
-  assert.deepEqual(P.budgetsToForm({}), P.EMPTY_BUDGET_FORM);
-  assert.equal(P.budgetsToForm({ budgets: { quiet_hours: '7:05-9:00' } }).quietStart, '07:05');
-});
-
-test('budgets: the form -> the API payload; an empty box is absent, not zero', () => {
-  const r = P.formToBudgets({ minutes: '45', quietStart: '20:30', quietEnd: '07:00', turns: '100', threads: '', feedback: '0', uploadMb: '', sessionMinutes: '30' });
-  assert.deepEqual(r.errors, {});
-  assert.deepEqual(r.budgets, { minutes_per_day: 45, quiet_hours: '20:30-07:00', turns: 100, feedback: 0 });
-  assert.equal(r.session_timeout, 1800);
-  assert.deepEqual(P.formToBudgets({}).budgets, {});
-});
-
-test('budgets: bad input is reported by field and nothing is silently coerced', () => {
-  assert.equal(P.formToBudgets({ minutes: '0' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ minutes: '1441' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ minutes: '4.5' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ turns: '-1' }).errors.turns, 'range_0_100000');
-  assert.equal(P.formToBudgets({ uploadMb: '100001' }).errors.uploadMb, 'range_0_100000');
-  assert.equal(P.formToBudgets({ quietStart: '20:00' }).errors.quiet, 'both_times');
-  assert.equal(P.formToBudgets({ quietStart: '20:00', quietEnd: '20:00' }).errors.quiet, 'same_times');
-  assert.equal(P.formToBudgets({ sessionMinutes: '0' }).errors.sessionMinutes, 'range_1_43200');
-  assert.equal(P.formToBudgets({ sessionMinutes: '43201' }).errors.sessionMinutes, 'range_1_43200');
-});
-
-test('quiet hours parse and format symmetrically', () => {
-  assert.deepEqual(P.parseQuietHours('20:30-07:00'), { start: '20:30', end: '07:00' });
-  assert.deepEqual(P.parseQuietHours('garbage'), { start: '', end: '' });
-  assert.equal(P.formatQuietHours('20:30', '07:00'), '20:30-07:00');
-  assert.equal(P.formatQuietHours('20:30', ''), '');
-});
-
-test('createPayload: a PIN is optional on User and Basic, an Admin needs a password', () => {
-  assert.deepEqual(P.createPayload({ name: ' Sam ', role: 'user', pin: '1234' }).body, { name: 'Sam', role: 'user', pin: '1234' });
-  assert.equal(P.createPayload({ name: 'Sam', role: 'user', pin: '12' }).errors.pin, 'min_4');
-  assert.deepEqual(P.createPayload({ name: 'Sam', role: 'user' }).errors, {});
-  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'basic' }).errors, {});
-  assert.equal(P.createPayload({ name: 'Kid', role: 'basic', pin: '1' }).errors.pin, 'min_4');
-  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'basic', householdBots: ['atlas'] }).body, { name: 'Kid', role: 'basic', household_bots: ['atlas'] });
-  assert.equal(P.createPayload({ name: 'Ops', role: 'admin', password: 'short' }).errors.password, 'min_8');
-  assert.deepEqual(P.createPayload({ name: 'Ops', role: 'admin', password: 'longenough' }).body, { name: 'Ops', role: 'admin', password: 'longenough' });
-  assert.equal(P.createPayload({ name: '  ', role: 'user', pin: '1234' }).errors.name, 'required');
-  assert.equal(P.createPayload({ name: 'Kid', role: 'basic', sessionMinutes: '10' }).body.session_timeout, 600);
-});
-
-test('patchPayload sends only what changed', () => {
-  const person = { id: 'p1', name: 'Kid', role: 'basic', avatar: '', disabled: false, session_timeout: 600 };
-  const same = P.budgetsToForm(person);
-  assert.deepEqual(P.patchPayload(person, { ...same, name: 'Kid', role: 'basic', avatar: '', disabled: false }).patch, {});
-  const changed = P.patchPayload(person, { ...same, name: 'Kiddo', role: 'user', avatar: '🦊', disabled: true });
-  assert.deepEqual(changed.patch, { name: 'Kiddo', role: 'user', avatar: '🦊', disabled: true });
-  assert.equal(P.patchPayload({ ...person, role: 'admin', protected: true }, { ...same, name: 'Kid', role: 'user' }).patch.role, undefined, 'the protected Admin\'s role is never patched');
-});
-
 // ----------------------------------------------------------------- activity
 
-test('activity rows: newest first, six columns, zero-filled, at most 7 days', () => {
+test('activity rows: newest first, five columns, zero-filled, at most 7 days', () => {
   const days = Array.from({ length: 9 }, (_, i) => ({ day: `2026-10-${String(10 + i).padStart(2, '0')}`, counts: i === 8 ? { turn: 4, upload: 1, odd_kind: 9 } : {} }));
   const rows = P.activityRows({ days }, 7);
   assert.equal(rows.length, 7);
   assert.equal(rows[0].day, '2026-10-18');
-  assert.deepEqual(rows[0].counts, { login: 0, turn: 4, thread: 0, upload: 1, feedback: 0, limit_hit: 0 });
+  assert.deepEqual(rows[0].counts, { login: 0, turn: 4, thread: 0, upload: 1, feedback: 0 });
   assert.equal(rows[0].total, 5, 'unknown kinds are not summed into the visible columns');
   assert.deepEqual(P.activityRows(null), []);
   const totals = P.activityTotals(rows);
@@ -574,17 +510,14 @@ test('setup: the token field exists only for a network install, and the form val
 
 const PEOPLE = () => ({
   profiles: [
-    { id: 'o1', name: 'Boss', role: 'owner', avatar: '', has_pin: true, has_password: true, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'a1', name: 'Ops', role: 'admin', avatar: '', has_pin: false, has_password: true, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'm1', name: 'Sam', role: 'member', avatar: '🦊', has_pin: true, has_password: false, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'r1', name: 'Kid', role: 'restricted', avatar: '', has_pin: false, has_password: false,
-      budgets: { minutes_per_day: 45, quiet_hours: '20:30-07:00' }, grants: [], denies: [], session_timeout: 900, disabled: true },
+    { id: 'o1', name: 'Boss', role: 'admin', protected: true, avatar: '', has_pin: true, has_password: true, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'a1', name: 'Ops', role: 'admin', avatar: '', has_pin: false, has_password: true, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'm1', name: 'Sam', role: 'user', avatar: '🦊', has_pin: true, has_password: false, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'r1', name: 'Pat', role: 'basic', avatar: '', has_pin: false, has_password: false, grants: [], denies: [], session_timeout: 900, disabled: true },
   ],
-  me: { id: 'o1', role: 'owner' },
-  roles: ['owner', 'admin', 'member', 'restricted'],
+  me: { id: 'o1', role: 'admin' },
+  roles: ['admin', 'user', 'basic'],
   role_permissions: {},
-  can_create_admin: true,
-  owner_has_password: true,
   disclosure: 'x',
 });
 
@@ -608,7 +541,7 @@ function peopleRoutes(over = {}) {
   };
 }
 
-async function mountPeople(role = 'owner', over = {}) {
+async function mountPeople(role = 'admin', over = {}) {
   const win = await boot();
   peopleRoutes(over);
   const mod = await import(`../static/js/people.js?t=${Math.random()}`);
@@ -626,7 +559,7 @@ async function mountPeople(role = 'owner', over = {}) {
 }
 
 test('People tab: This device lists remembered devices with Forget only (4.0: no binding)', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
+  const { pane } = await mountPeople('admin');
   assert.equal(pane.querySelector('#people-device-select'), null);
   const devs = [...pane.querySelectorAll('.people-device')];
   assert.equal(devs.length, 2);
@@ -638,7 +571,7 @@ test('People tab: This device lists remembered devices with Forget only (4.0: no
 });
 
 test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: dom.skip }, async () => {
-  const { pane, rec } = await mountPeople('owner');
+  const { pane, rec } = await mountPeople('admin');
   const group = pane.querySelector('#people-machine');
   assert.ok(group);
   assert.match(group.textContent, /A key is set\./);
@@ -658,13 +591,13 @@ test('People tab: Machine access shows the rotated key once, with a Copy button'
   assert.equal(keyBox.querySelector('input'), null, 'the key is gone from the page');
 });
 
-test('People & Access: the caller\'s groups go after This device; Activity & audit is closed, last but the extras', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
+test('People & Access: the caller\'s groups go after This device; Activity & audit is closed, last but the extras', { skip: dom.skip }, async () => {
   const groups = (doc) => {
     const mk = (id) => { const n = doc.createElement('section'); n.id = id; return n; };
     return { afterDevices: [mk('x-rules'), mk('x-limits')], end: [mk('x-adv')] };
   };
   let win = null;
-  const { pane } = await mountPeople('owner', { deps: { extraGroups: () => groups(globalThis.document), collapseActivity: true } });
+  const { pane } = await mountPeople('admin', { deps: { extraGroups: () => groups(globalThis.document), collapseActivity: true } });
   win = pane.ownerDocument;
   const order = [...pane.children].map((n) => n.id || n.dataset.anchor || n.className);
   const at = (x) => order.findIndex((o) => String(o).includes(x));
@@ -681,12 +614,12 @@ test('People & Access: the caller\'s groups go after This device; Activity & aud
 });
 
 test('People & Access: the activity filter is a themed select', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
+  const { pane } = await mountPeople('admin');
   assert.ok(pane.querySelector('#people-activity-who').classList.contains('ui-select'));
 });
 
 test('People tab: every control has a label (no placeholder-only inputs)', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
+  const { pane } = await mountPeople('admin');
   pane.querySelector('#people-add').click();
   for (const c of pane.querySelectorAll('input:not([type="hidden"]), select')) {
     const labelled = c.getAttribute('aria-label')

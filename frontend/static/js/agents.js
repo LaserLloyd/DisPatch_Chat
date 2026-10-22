@@ -224,11 +224,11 @@ export async function mountAgentsSettings(host, deps = {}) {
   host.replaceChildren(el('p', { class: 'muted', text: t('common.loading') }));
   let data;
   try {
-    const [agents, backends, creds, settings, budgets, usage, secrets] = await Promise.all([
+    const [agents, backends, creds, settings, usage, secrets] = await Promise.all([
       api.agents(), api.agentBackends(), api.claudeCredentials(), api.agentSettings(),
-      api.agentProfileBudgets(), api.agentUsage(), api.agentSecrets(),
+      api.agentUsage(), api.agentSecrets(),
     ]);
-    data = { agents, backends: backends.backends, creds, settings, budgets: budgets.budgets, usage, secrets: secrets.secrets };
+    data = { agents, backends: backends.backends, creds, settings, usage, secrets: secrets.secrets };
   } catch (e) {
     host.replaceChildren(el('p', { class: 'task-error', role: 'alert', text: errText(e) }));
     return;
@@ -571,11 +571,7 @@ function limitsBody(data, deps, api, guard, reload, toast) {
     field(t('agents.max_concurrent'), maxc),
     unified,
     el('div', { class: 'agents-actions' }, [save, purge]),
-    el('h4', { text: t('agents.profile_limits') }),
-    hintLine(t('agents.profile_limits_hint')),
   );
-  const people = (data.agents.profiles || []).filter((p) => p.role !== 'restricted');
-  for (const p of people) body.append(profileBudgetRow(p, data.budgets[p.id] || {}, api, guard, toast));
   const spend = data.usage.spend || [];
   if (spend.length) {
     const names = new Map([...(data.agents.agents || []).map((a) => [a.id, a.name]), ...(data.agents.profiles || []).map((p) => [p.id, p.name])]);
@@ -585,32 +581,6 @@ function limitsBody(data, deps, api, guard, reload, toast) {
       }))));
   }
   return body;
-}
-
-function profileBudgetRow(p, b, api, guard, toast) {
-  const mk = (key, value, step) => el('input', { type: 'number', min: '0', step, inputmode: 'decimal', value: value ?? '' });
-  const usd = mk('usd', b.usd_per_day, '0.01');
-  const turns = mk('turns', b.max_turns, '1');
-  const mins = mk('mins', b.max_wall_clock_s ? Math.round(b.max_wall_clock_s / 60) : '', '1');
-  const toks = mk('toks', b.max_tokens, '1');
-  const save = el('button', { type: 'button', class: 'btn-secondary', text: t('agents.save_limits'), 'aria-label': t('agents.save_limits_for', { name: p.name }) });
-  save.addEventListener('click', () => guard(async () => {
-    const num = (i) => { const v = numOrNull(i.value); if (Number.isNaN(v)) throw new Error(t('agents.err_number')); return v; };
-    const body = {};
-    const set = (k, v) => { if (v != null) body[k] = v; };
-    set('usd_per_day', num(usd));
-    set('max_turns', num(turns));
-    const m = num(mins);
-    set('max_wall_clock_s', m == null ? null : m * 60);
-    set('max_tokens', num(toks));
-    await api.saveAgentProfileBudget(p.id, body);
-    toast(t('agents.saved'));
-  }));
-  return el('fieldset', { class: 'agents-profile-budget' }, [
-    el('legend', { text: `${p.name} (${t(`role.${p.role}`)})` }),
-    field(t('agents.budget_day'), usd), field(t('agents.budget_turns'), turns),
-    field(t('agents.budget_minutes'), mins), field(t('agents.budget_tokens'), toks), save,
-  ]);
 }
 
 // ---- MCP secrets ----

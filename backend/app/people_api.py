@@ -947,12 +947,3 @@ async def people_activity(request: Request, profile_id: str | None = None, days:
 @router.get("/api/people/audit", dependencies=[_VIEW])
 async def people_audit(request: Request):
     return {"entries": accounts.recent_activity(None, category="audit", limit=200)}
-
-
-@router.get("/api/me/activity", dependencies=[_CHAT])
-async def my_activity(request: Request, days: int = 7):
-    """A profile's own activity summary: what an Admin's activity view counts about it."""
-    pr = _caller(request)
-    pid = pr.profile_id
-    return {"disclosure": DISCLOSURE, "visible_to_owner": True,
-            "summary": accounts.activity_summary(pid, max(1, min(days, 30))) if pid else {"days": []}}

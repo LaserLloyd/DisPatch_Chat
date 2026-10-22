@@ -115,22 +115,18 @@ const DYNAMIC = [
   // 3.0 profiles, roles and policy -- keys built from a closed vocabulary.
   // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`), profiles.js ROLES
   { re: /^role\.(admin|user|basic)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
-  // js/people.js  errorText():  t(`people.err_${code}`), codes from profiles.js formToBudgets()/createPayload()
-  { re: /^people\.err_(required|min_4|min_8|range_1_1440|range_0_100000|both_times|same_times|range_1_43200)$/,
-    built: 'people.js  t(`people.err_${code}`)' },
   // js/people.js + js/signin.js  activity table:  t(`people.col_${c}`), profiles.js ACTIVITY_COLUMNS
-  { re: /^people\.col_(login|turn|thread|upload|feedback|limit_hit)$/,
+  { re: /^people\.col_(login|turn|thread|upload|feedback)$/,
     built: 'people.js / signin.js  t(`people.col_${c}`)' },
   // js/people.js  auditKind():  t(`people.audit_${kind}`) for the kinds the server writes (people_api._audit, main.py)
   { re: /^people\.audit_[a-z_]+$/, built: 'people.js  t(`people.audit_${kind}`)' },
-  // 4.0 chat-first profiles: keys the Foundation package created AHEAD of the wave
-  // packages that use them (BUILD-PLAN-v2 §2.0: a package uses only keys Foundation made).
-  // Each package deletes its lines here as its code starts using the keys; WP-LOC (wave 3b)
-  // removes whatever is left, so a key no package ended up using is caught then.
-  { re: /^(profiles|reset|mybots|editor|aibuild|perms|copybot|voices|storage|retention|archive|media)\.[a-z_]+$/,
-    built: '4.0 Foundation: reserved for the wave packages' },
-  { re: /^lock\.(target_title|target_default|target_list|target_hint|landed)$/,
-    built: '4.0 Foundation: reserved for WP-FE-CORE / WP-FE-PEOPLE' },
+  // 4.0 chat-first profiles: keys the Foundation package created AHEAD of the wave-3
+  // packages that use them (storage, image retention, chat archiving, expired media:
+  // WP-SCALE-OPS / WP-SCALE-FE). The wave-2 namespaces were released at INT-2, so every
+  // profiles/reset/mybots/editor/aibuild/perms/copybot/lock key is now checked like any other.
+  // WP-LOC (wave 3b) removes whatever is left here.
+  { re: /^(voices|storage|retention|archive|media)\.[a-z_]+$/,
+    built: '4.0 Foundation: reserved for the wave-3 packages' },
   // js/people.js  typeLabel() / typeHint():  t(`people.type_${role}`), role from TYPES (user | basic | admin)
   { re: /^people\.type_(admin|user|basic)(_hint)?$/, built: 'people.js  t(`people.type_${role}`)' },
   // js/people-perms.js  permissionsPanel():  t(`perms.${r.perm}`), perm from PERM_ORDER

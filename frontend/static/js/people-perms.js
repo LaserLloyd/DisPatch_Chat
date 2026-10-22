@@ -21,90 +21,10 @@
 
 import { api as realApi } from './api.js?v=35';
 import { w5 as realW5, failure, errorText } from './w5-api.js?v=1';
-import { t, has } from './i18n.js?v=4';
+import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 
 // ------------------------------------------------------------------ words
-
-// The keys below that Foundation did not create yet. `tk` shows the English here until the
-// lead adds them to the locales (BUILD-PLAN-v2 §2.0: a package never edits the locale files).
-// Listed in the WP-FE-PEOPLE report. Once a key exists in the dictionary it wins.
-const EN = {
-  'people.page_hint': 'Who uses this install, what each profile can do and which household bots it gets.',
-  'people.page_intro': 'Admins manage every profile. The first Admin is protected: it can\'t be demoted, disabled or deleted.',
-  'people.devices_title': 'Remembered devices',
-  'people.devices_intro': 'Devices that stay signed in. Forgetting one asks who is using it next time.',
-  'people.you_tag': 'you',
-  'people.type_hint_admin_all': 'Admins can do everything. There is nothing to switch.',
-  'people.pin_optional': 'PIN (optional)',
-  'people.password_optional': 'Password (optional)',
-  'people.self_note': 'This is your own profile. Change your PIN or password in Settings, Account.',
-  'people.protected_note': 'The first Admin can only be edited by itself.',
-  'people.reset_button': 'Reset this profile…',
-  'people.reset_hint': 'Deletes its bots and chats. You see how many, never what they contain.',
-  'people.reset_title': 'Reset {name}?',
-  'people.reset_done': '{name} was reset.',
-  'people.reset_outcome_atlas': '{name} gets a fresh Atlas afterwards.',
-  'people.reset_outcome_household': '{name} goes back to the household bots you picked for it.',
-  'people.delete_title': 'Delete {name}?',
-  'people.delete_body': '{name} can no longer sign in. Everything below is deleted with it.',
-  'people.delete_button': 'Delete profile',
-  'people.downgrade_button': 'Make Basic',
-  'people.downgrade_kept': 'The profile keeps only the household bots you pick afterwards.',
-  'people.upgrade_note': 'Making a Basic profile a User keeps its chats.',
-  'people.tally_bots': 'bots',
-  'people.tally_chats': 'chats',
-  'people.tally_pictures': 'pictures',
-  'people.tally_voices': 'cloned voices',
-  'people.dialog_cancel': 'Cancel',
-  'people.counts_failed': 'Could not count what would be deleted: {error}',
-  'people.sections_perms': 'What this profile can do',
-  'people.disabled_note': 'Disabled profiles can\'t sign in.',
-  'people.lock_confirm': 'Agent bots and voice cloning will be switched off for {name}: it\'s the profile everyone lands on without signing in. Continue?',
-  'people.lock_saved': 'Lock screen updated.',
-  'people.lock_default_none': 'The default profile',
-  'people.lock_none': 'Add a User or Basic profile first: an Admin can\'t be the default profile.',
-  'people.lock_default_pick': 'Default profile',
-  'people.save_error': 'Could not save: {error}',
-  'perms.admin_all': 'Admins can do everything.',
-  'perms.agents_confirm': 'Switch on agent bots for {name}? Agent bots can run commands on this computer, including reading anyone\'s chats.',
-  'perms.agents_confirm_ok': 'Switch on',
-  'perms.changed': 'Changed from the default',
-  'perms.saved': '{name}: saved.',
-  'perms.household_basic_hint': 'A Basic profile only sees the bots you tick here.',
-  'perms.household_user_hint': 'A User sees every household bot, or just the ones you tick.',
-  'perms.household_agent': 'agent bot: also needs agent bots switched on',
-  'perms.household_hidden': 'hidden from lists',
-  'perms.household_save': 'Save household bots',
-  'perms.household_saved': 'Household bots saved.',
-  'perms.household_empty': 'No household bots yet.',
-  'perms.backends_hint': 'Which connections (AI accounts) this profile\'s own bots can run on. Keys stay with the household.',
-  'perms.backends_only': 'Only these',
-  'perms.backends_save': 'Save backends',
-  'perms.backends_saved': 'Backends saved.',
-  'perms.backends_none': 'No connections yet. Add one under AI & Connections.',
-  'chars.hidden': 'Hide from lists',
-  'chars.hidden_hint': 'A hidden bot stays out of everyone\'s bot list, but still opens from a link and shows for profiles that have it ticked in People.',
-  'chars.hidden_saved': '{name} is now hidden.',
-  'chars.shown_saved': '{name} is now shown.',
-  'chars.copy_button': 'Copy',
-  'chars.remove_title': 'Delete {name}?',
-  'chars.remove_body': '{chats} chats in {profiles} profiles stay but can\'t be continued. Copies people made of it are theirs and stay.',
-  'chars.remove_hide': 'Hide instead',
-  'chars.remove_button': 'Delete bot',
-  'chars.removed': '{name} deleted.',
-  'chars.tag_hidden': 'hidden',
-  'chars.tag_agent': 'agent',
-};
-
-function fill(text, vars) {
-  return String(text).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
-}
-
-/** `t()` with an English fallback for keys the lead has not added yet. */
-export function tk(key, vars) {
-  return has(key) ? t(key, vars) : fill(EN[key] ?? key, vars);
-}
 
 export { errorText };
 
@@ -211,7 +131,7 @@ export function askDialog({ title, body, notes = [], tally = [], okText, altText
       resolve(v);
     };
     const ok = el('button', { type: 'button', class: danger ? 'btn-primary danger' : 'btn-primary', text: okText || t('common.ok') });
-    const cancel = el('button', { type: 'button', class: 'btn-secondary', text: tk('people.dialog_cancel') });
+    const cancel = el('button', { type: 'button', class: 'btn-secondary', text: t('people.dialog_cancel') });
     const alt = altText ? el('button', { type: 'button', class: 'btn-secondary', text: altText }) : null;
     ok.addEventListener('click', () => done('ok'));
     cancel.addEventListener('click', () => done(null));
@@ -245,11 +165,12 @@ export function askDialog({ title, body, notes = [], tally = [], okText, altText
 export function countsTally(c, { voices = true } = {}) {
   const x = c || {};
   const out = [
-    { n: x.bots || 0, label: tk('people.tally_bots') },
-    { n: x.chats || 0, label: tk('people.tally_chats') },
-    { n: x.pictures || 0, label: tk('people.tally_pictures') },
+    { n: x.bots || 0, label: t('people.tally_bots') },
+    { n: x.chats || 0, label: t('people.tally_chats') },
+    { n: x.pictures || 0, label: t('people.tally_pictures') },
+    { n: x.files || 0, label: t('people.tally_files') },
   ];
-  if (voices) out.push({ n: x.voices || 0, label: tk('people.tally_voices') });
+  if (voices) out.push({ n: x.voices || 0, label: t('people.tally_voices') });
   return out;
 }
 
@@ -284,7 +205,7 @@ export function permissionsPanel(person, ctx) {
     const rows = permissionRows(person, ctx.tables, { lockTarget: !!person.lock_target });
     box.replaceChildren(el('legend', { class: 'dev-group-title', text: t('perms.title') }));
     if (person.role === 'admin') {
-      box.append(el('p', { class: 'dev-group-hint', text: tk('perms.admin_all') }));
+      box.append(el('p', { class: 'dev-group-hint', text: t('perms.admin_all') }));
       return;
     }
     // The reason once for the whole group, not under every locked row.
@@ -296,13 +217,13 @@ export function permissionsPanel(person, ctx) {
       const id = uidn(`pe-${r.perm}`);
       const sw = switchRow({
         id, dataPerm: r.perm, label: t(`perms.${r.perm}`), checked: r.on, disabled: r.fenced,
-        tag: r.fenced ? t('perms.locked') : (r.changed ? tk('perms.changed') : ''),
+        tag: r.fenced ? t('perms.locked') : (r.changed ? t('perms.changed') : ''),
         warn: r.perm === 'dispatch_agents' && !r.fenced ? t('perms.agents_warning') : '',
       });
       sw.cb.addEventListener('change', async () => {
         const want = sw.cb.checked;
-        if (want && r.agent && !await ctx.confirm(tk('perms.agents_confirm', { name: person.name }),
-          { danger: true, okText: tk('perms.agents_confirm_ok') })) {
+        if (want && r.agent && !await ctx.confirm(t('perms.agents_confirm', { name: person.name }),
+          { danger: true, okText: t('perms.agents_confirm_ok') })) {
           sw.cb.checked = false;
           return;
         }
@@ -311,7 +232,7 @@ export function permissionsPanel(person, ctx) {
           const next = withToggle(person, r.perm, want, ctx.tables);
           const saved = await api.patchPerson(person.id, next);
           Object.assign(person, { grants: saved.grants || next.grants, denies: saved.denies || next.denies });
-          ctx.toast(tk('perms.saved', { name: person.name }));
+          ctx.toast(t('perms.saved', { name: person.name }));
           if (ctx.onChanged) ctx.onChanged(person);
           paint();
         } catch (e) {
@@ -331,7 +252,7 @@ export function permissionsPanel(person, ctx) {
         try {
           const saved = await api.patchPerson(person.id, { grants: [], denies: [] });
           Object.assign(person, { grants: saved.grants || [], denies: saved.denies || [] });
-          ctx.toast(tk('perms.saved', { name: person.name }));
+          ctx.toast(t('perms.saved', { name: person.name }));
           if (ctx.onChanged) ctx.onChanged(person);
           paint();
         } catch (e) { back.disabled = false; ctx.toast(errorText(e), true); }
@@ -374,15 +295,15 @@ export function householdPanel(person, ctx) {
     list.replaceChildren();
     list.hidden = mode === 'all';
     if (mode === 'all') return;
-    if (!bots.length) { list.append(el('p', { class: 'muted', text: tk('perms.household_empty') })); return; }
+    if (!bots.length) { list.append(el('p', { class: 'muted', text: t('perms.household_empty') })); return; }
     for (const b of bots) {
       const id = uidn('pe-hb');
       const cb = el('input', { type: 'checkbox', id, class: 'ui-checkbox', value: b.id });
       cb.checked = picked.has(b.id);
       cb.addEventListener('change', () => { if (cb.checked) picked.add(b.id); else picked.delete(b.id); });
       const tags = [];
-      if (b.backend_kind === 'agent' || (b.backend && b.backend.kind === 'agent') || b.agent) tags.push(tk('perms.household_agent'));
-      if (b.hidden || (b.flags && b.flags.hidden)) tags.push(tk('perms.household_hidden'));
+      if (b.backend_kind === 'agent' || (b.backend && b.backend.kind === 'agent') || b.agent) tags.push(t('perms.household_agent'));
+      if (b.hidden || (b.flags && b.flags.hidden)) tags.push(t('perms.household_hidden'));
       list.append(el('label', { class: 'bkp-check pe-hb', for: id }, [
         cb, ' ', `${b.emoji ? `${b.emoji} ` : ''}${b.name}`,
         tags.length ? el('span', { class: 'dev-row-hint', text: ` (${tags.join(', ')})` }) : null]));
@@ -390,7 +311,7 @@ export function householdPanel(person, ctx) {
   };
 
   box.append(el('legend', { class: 'dev-group-title', text: t('perms.household_bots') }),
-    el('p', { class: 'dev-group-hint', text: tk(role === 'basic' ? 'perms.household_basic_hint' : 'perms.household_user_hint') }),
+    el('p', { class: 'dev-group-hint', text: t(role === 'basic' ? 'perms.household_basic_hint' : 'perms.household_user_hint') }),
     el('div', { class: 'pe-radios', role: 'radiogroup', 'aria-label': t('perms.household_bots') }, [
       role === 'user' ? radio('all', t('perms.household_all')) : null,
       radio('pick', t('perms.household_pick'))]),
@@ -399,7 +320,7 @@ export function householdPanel(person, ctx) {
 
   box.getValue = () => householdValue(role, mode, picked);
   if (ctx.save) {
-    const save = el('button', { type: 'button', class: 'btn-secondary', text: tk('perms.household_save') });
+    const save = el('button', { type: 'button', class: 'btn-secondary', text: t('perms.household_save') });
     save.addEventListener('click', async () => {
       save.disabled = true;
       err.hidden = true;
@@ -407,7 +328,7 @@ export function householdPanel(person, ctx) {
         const v = box.getValue();
         const saved = await api.setHouseholdBots(person.id, v);
         person.household_bots = saved && saved.household_bots !== undefined ? saved.household_bots : v;
-        ctx.toast(tk('perms.household_saved'));
+        ctx.toast(t('perms.household_saved'));
         if (ctx.onChanged) ctx.onChanged(person);
       } catch (e) { err.textContent = errorText(e); err.hidden = false; } finally { save.disabled = false; }
     });
@@ -440,7 +361,7 @@ export function backendsPanel(person, ctx) {
     list.replaceChildren();
     list.hidden = mode === 'all';
     if (mode === 'all') return;
-    if (!conns.length) { list.append(el('p', { class: 'muted', text: tk('perms.backends_none') })); return; }
+    if (!conns.length) { list.append(el('p', { class: 'muted', text: t('perms.backends_none') })); return; }
     for (const c of conns) {
       const id = uidn('pe-bc');
       const cb = el('input', { type: 'checkbox', id, class: 'ui-checkbox', value: c.id });
@@ -449,20 +370,20 @@ export function backendsPanel(person, ctx) {
       list.append(el('label', { class: 'bkp-check', for: id }, [cb, ' ', `${c.name}${c.type_label ? ` (${c.type_label})` : ''}`]));
     }
   };
-  const save = el('button', { type: 'button', class: 'btn-secondary', text: tk('perms.backends_save') });
+  const save = el('button', { type: 'button', class: 'btn-secondary', text: t('perms.backends_save') });
   save.addEventListener('click', async () => {
     save.disabled = true;
     err.hidden = true;
     try {
       const r = await calls.setBackends(person.id, mode === 'all' ? null : [...picked]);
       person.backends = (r && r.backends) || (mode === 'all' ? {} : { allowed: [...picked] });
-      ctx.toast(tk('perms.backends_saved'));
+      ctx.toast(t('perms.backends_saved'));
     } catch (e) { err.textContent = errorText(e); err.hidden = false; } finally { save.disabled = false; }
   });
   box.append(el('legend', { class: 'dev-group-title', text: t('perms.backends') }),
-    el('p', { class: 'dev-group-hint', text: tk('perms.backends_hint') }),
+    el('p', { class: 'dev-group-hint', text: t('perms.backends_hint') }),
     el('div', { class: 'pe-radios', role: 'radiogroup', 'aria-label': t('perms.backends') }, [
-      radio('all', t('perms.backends_all')), radio('only', tk('perms.backends_only'))]),
+      radio('all', t('perms.backends_all')), radio('only', t('perms.backends_only'))]),
     list, err, el('div', { class: 'pe-actions' }, [save]));
   paintList();
   return box;
@@ -495,14 +416,14 @@ export function lockTargetGroup(deps) {
   let pid = state.profileId || (cands[0] ? cands[0].id : '');
   const name = uidn('pe-lt');
   const err = el('div', { class: 'lock-error people-error', role: 'alert', hidden: '' });
-  const pick = el('select', { class: 'ui-select pe-lock-pick', 'aria-label': tk('people.lock_default_pick') },
+  const pick = el('select', { class: 'ui-select pe-lock-pick', 'aria-label': t('people.lock_default_pick') },
     cands.map((p) => el('option', { value: p.id, text: p.name })));
   pick.value = pid;
   const fence = el('p', { class: 'dev-row-hint pe-fence', role: 'note' });
   const paintFence = () => {
     const p = cands.find((x) => x.id === pid);
     const lab = group.querySelector('.pe-lock-default-label');
-    if (lab) lab.textContent = p ? t('lock.target_default', { name: p.name }) : tk('people.lock_default_none');
+    if (lab) lab.textContent = p ? t('lock.target_default', { name: p.name }) : t('people.lock_default_none');
     fence.hidden = target !== 'default_profile' || !p;
     fence.textContent = p ? t('perms.lock_target_fence', { name: p.name }) : '';
     pick.disabled = !cands.length;
@@ -524,7 +445,7 @@ export function lockTargetGroup(deps) {
     const prev = { target, pid };
     const p = cands.find((x) => x.id === nextPid);
     if (nextTarget === 'default_profile' && p && (prev.target !== 'default_profile' || prev.pid !== nextPid)
-      && !await deps.confirm(tk('people.lock_confirm', { name: p.name }), { danger: false })) {
+      && !await deps.confirm(t('people.lock_confirm', { name: p.name }), { danger: false })) {
       repaint(prev.target, prev.pid);
       return;
     }
@@ -532,7 +453,7 @@ export function lockTargetGroup(deps) {
       await w5.patchSettings({ 'people.default_profile': nextPid || '', 'people.lock_target': nextTarget });
       target = nextTarget;
       pid = nextPid;
-      deps.toast(tk('people.lock_saved'));
+      deps.toast(t('people.lock_saved'));
       paintFence();
       if (deps.onChanged) deps.onChanged();
     } catch (e) {
@@ -558,7 +479,7 @@ export function lockTargetGroup(deps) {
       radio('default_profile', '', pick),
       radio('profile_list', t('lock.target_list'), null),
     ]),
-    cands.length ? null : el('p', { class: 'dev-row-hint', text: tk('people.lock_none') }),
+    cands.length ? null : el('p', { class: 'dev-row-hint', text: t('people.lock_none') }),
     fence, err,
   ]);
   paintFence();

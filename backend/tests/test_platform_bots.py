@@ -274,10 +274,10 @@ def test_create_an_agent_bot(env):
     c = env(real_defaults=True)
     r = c.post("/api/bots", json={"id": "worker", "name": "Worker",
                                   "backend": "agent", "agent": "oc-worker",
-                                  "model_hint": "agent", "safe": False, "visible": False})
+                                  "model_hint": "agent"})
     assert r.status_code == 201, r.text
     row = r.json()
-    assert (row["backend"], row["agent"], row["visible"]) == ("agent", "oc-worker", False)
+    assert (row["backend"], row["agent"]) == ("agent", "oc-worker")
     assert config.get_bot("worker").advisor is None
 
 
@@ -304,14 +304,13 @@ def test_create_with_a_taken_id_is_409(env):
 def test_patch_changes_only_what_it_names(env):
     c = env(real_defaults=True)
     r = c.patch("/api/bots/atlas", json={"name": "Globe", "emoji": "🧭",
-                                         "model_hint": "mine", "visible": False,
-                                         "safe": False, "reactions": True,
+                                         "model_hint": "mine", "reactions": True,
                                          "avatar_pool": True, "tools": False})
     assert r.status_code == 200, r.text
     row = r.json()
-    assert (row["name"], row["emoji"], row["model_hint"], row["visible"],
-            row["safe"], row["reactions"], row["avatar_pool"], row["tools"]) == (
-        "Globe", "🧭", "mine", False, False, True, True, False)
+    assert (row["name"], row["emoji"], row["model_hint"],
+            row["reactions"], row["avatar_pool"], row["tools"]) == (
+        "Globe", "🧭", "mine", True, True, False)
     b = config.get_bot("atlas")
     assert b.advisor == {"providers": [], "tools": False}
     r = c.patch("/api/bots/atlas", json={"name": "Atlas"})

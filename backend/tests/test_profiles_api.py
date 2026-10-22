@@ -368,3 +368,59 @@ def test_the_connections_a_profiles_own_bots_may_use(team):
     assert team["Eve"].put(f"/api/people/{max_id}/backends", json={"allowed": ["nope"]}).status_code == 422
     assert team["Eve"].put(f"/api/people/{max_id}/backends", json={"allowed": None}).json()["backends"] == {}
     assert team["Eve"].put(f"/api/people/{max_id}/backends", json={"extra": 1}).status_code == 422
+
+
+# ---- What the owner's bot editor may read (INT-2 lead decision) -------------------------- #
+
+def test_a_user_reads_the_presets_and_only_its_allowed_backends(team):
+    from app import connections
+    a = connections.create(type="openai", name="Probe A", api_key="sk-probe-a-0123456789",  # scrub-ok: test fixture
+                           default_model="m-a")
+    b = connections.create(type="openai", name="Probe B", api_key="sk-probe-b-0123456789",  # scrub-ok: test fixture
+                           default_model="m-b")
+    max_, dee = team["Max"], team["Dee"]
+    presets = max_.get("/api/me/personas")
+    assert presets.status_code == 200
+    assert presets.json() == team["Olive"].get("/api/characters/personas").json()
+    assert max_.get("/api/characters/personas").status_code == 403       # the Admin manager stays theirs
+    body = max_.get("/api/me/backends").json()
+    assert body["may_choose"] is True
+    assert {r["id"] for r in body["connections"]} == {a.id, b.id}
+    text = json.dumps(body)
+    for leak in ("sk-probe", "base_url", "credential", "api.openai.com", "in_use_by"):
+        assert leak not in text, leak
+    # The Admin narrows the profile to one connection: only that one is listed.
+    r = team["Olive"].put(f"/api/people/{team['ids']['Max']}/backends", json={"allowed": [b.id]})
+    assert r.status_code == 200, r.text
+    assert [r["id"] for r in max_.get("/api/me/backends").json()["connections"]] == [b.id]
+    people = {p["id"]: p for p in team["Olive"].get("/api/people").json()["profiles"]}
+    assert people[team["ids"]["Max"]]["backends"] == {"allowed": [b.id]}      # Profile.public()
+    assert people[team["ids"]["Dee"]]["backends"] == {}
+    # Without choose_backend: an empty list, never an error.
+    accounts.update_profile(team["ids"]["Max"], denies=["choose_backend"])
+    assert max_.get("/api/me/backends").json() == {"may_choose": False, "default": "", "connections": []}
+    # A Basic profile has no bots of its own: both are refused.
+    assert dee.get("/api/me/backends").status_code == 403
+    assert dee.get("/api/me/personas").status_code == 403
+
+
+def test_the_roster_rows_carry_scope_and_cloned_from(team):
+    """The rail groups Mine / Household and hides the household original of a personal copy
+    (FE-CORE railGroups), so every roster row says what it is and where it came from - and the
+    automatic Atlas says it is a copy of the household ``atlas``."""
+    rows = team["Max"].get("/api/bots").json()["bots"]
+    mine = [b for b in rows if b["scope"] == "personal"]
+    assert [b["cloned_from"] for b in mine] == ["atlas"]
+    assert all("scope" in b and "cloned_from" in b for b in rows)
+    assert all(b["scope"] == "household" for b in rows if b not in mine)
+
+
+def test_a_new_bot_uses_a_household_connection_when_none_is_the_default(team):
+    """A connection made from Settings (not the wizard) sets no install default; a User's new
+    bot must still land on a working connection instead of "not connected"."""
+    from app import connections, settings_store
+    c = connections.create(type="openai", name="Probe C", api_key="sk-probe-c-0123456789",  # scrub-ok: test fixture
+                           default_model="m-c")
+    assert not settings_store.get("connections.default", "")
+    bot = _bot(team["Max"], "Wired")
+    assert bot["backend"]["connection"] == c.id

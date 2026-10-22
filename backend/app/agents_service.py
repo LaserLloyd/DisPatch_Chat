@@ -498,28 +498,20 @@ class TaskManager:
         rems: list[tuple[float, str]] = []
         if spec.budget.max_usd_per_day is not None:
             rems.append((spec.budget.max_usd_per_day - store.spent_today("agent", agent_id), "agent"))
-        pb = store.profile_budget(owner) if owner else {}
-        if pb.get("usd_per_day"):
-            rems.append((float(pb["usd_per_day"]) - store.spent_today("profile", owner), "profile"))
         if not rems:
             return None, ""
         return min(rems)
 
     def effective_budget(self, spec: AgentSpec, agent_id: str, owner: str, task_usd: float) -> Budget:
-        """The budget one run is held to: the agent's own limits, tightened by the profile's,
-        with the per-day cap turned into what is LEFT today (+ what this task already spent,
-        because the tracker counts the task's lifetime total). Raises BudgetExhausted."""
+        """The budget one run is held to: the agent's own limits, with the per-day cap turned
+        into what is LEFT today (+ what this task already spent, because the tracker counts
+        the task's lifetime total). Raises BudgetExhausted."""
         b = spec.budget.model_dump()
-        rem, who = self._day_remaining(spec, agent_id, owner)
+        rem, _who = self._day_remaining(spec, agent_id, owner)
         if rem is not None:
             if rem <= 0:
-                raise BudgetExhausted("usd_per_day", "This agent's budget for today is used up."
-                                      if who == "agent" else "Your daily agent budget is used up.")
+                raise BudgetExhausted("usd_per_day", "This agent's budget for today is used up.")
             b["max_usd_per_day"] = round(rem + (task_usd or 0.0), 6)
-        pb = store.profile_budget(owner) if owner else {}
-        for key in ("max_turns", "max_wall_clock_s", "max_tokens"):
-            vals = [v for v in (b.get(key), pb.get(key)) if v]
-            b[key] = min(vals) if vals else None
         return Budget(**b)
 
     # -- dispatch ------------------------------------------------------------------ #
@@ -802,9 +794,6 @@ class TaskManager:
         checks: list[tuple[float, float]] = []
         if spec.budget.max_usd_per_day:
             checks.append((spec.budget.max_usd_per_day, store.spent_today("agent", row["agent_id"])))
-        pb = store.profile_budget(row["owner"]) if row["owner"] else {}
-        if pb.get("usd_per_day"):
-            checks.append((float(pb["usd_per_day"]), store.spent_today("profile", row["owner"])))
         for limit, spent in checks:
             if spent > limit:
                 be.stop_for_budget(row["task_id"], BudgetVerdict("usd_per_day", limit, spent))

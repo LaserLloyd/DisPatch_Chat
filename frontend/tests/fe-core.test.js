@@ -25,8 +25,10 @@ test('no decoy / Restricted / device-binding / companions code is left in the sh
     const m = gone.exec(read(f).replace(/\/\/[^\n]*/g, ''));
     assert.equal(m, null, `${f} still mentions ${m && m[0]}`);
   }
-  // (profiles.js keeps the budgets form helpers only until people.js stops importing them.)
-  for (const f of ['js/main.js', 'js/signin.js', 'js/api.js']) assert.doesNotMatch(read(f), /time_limit|quiet_hours/, f);
+  // 4.0 has no budgets of any kind: no per-profile budget form, no agent per-profile budgets.
+  for (const f of ['js/main.js', 'js/signin.js', 'js/api.js', 'js/profiles.js', 'js/people.js', 'js/people-perms.js', 'js/agents.js', 'js/tasks.js']) {
+    assert.doesNotMatch(read(f), /time_limit|quiet_hours|budgetsToForm|formToBudgets|EMPTY_BUDGET_FORM|profile-budgets|ProfileBudget|budgets:/, f);
+  }
   const html = read('index.html');
   for (const id of ['unlock-btn', 'drop-btn', 'companions-backdrop', 'drop-backdrop', 'access-notice']) {
     assert.ok(!html.includes(`id="${id}"`), `${id} left with its screen`);
@@ -84,4 +86,23 @@ test('the wizard People step builds User and Basic rows, with an optional PIN', 
     { people: [{ name: 'A', role: 'user', pin: '1234' }, { name: 'B', role: 'basic' }] });
   const src = read('js/wizard.js');
   assert.doesNotMatch(src, /member|restricted|animals|assistants/);
+});
+
+test('INT-2 wiring: My bots tab and the chat-menu copy item are wired; the profile switch sits on the bar', async () => {
+  assert.match(MAIN, /import \{ initMyBots, copyMenuItem \} from '\.\/my-bots\.js\?v=\d+';/);
+  assert.match(MAIN, /function syncMyBotsTab\(\) \{\s+const b = document\.getElementById\('stab-mybots'\);\s+if \(b\) b\.classList\.toggle\('hidden', !sessionCan\('create_characters'\)\);/);
+  assert.match(MAIN, /syncVoiceTab\(\);\s+syncMyBotsTab\(\);/);
+  assert.match(MAIN, /const item = copyMenuItem\(bot, \{ state, toast \}, \{/);
+  assert.match(MAIN, /if \(!dom\['thread-menu'\]\.hidden\) paintCopyMenuItem\(\);/);
+  const { DEFAULT_MENU, defaultLayout } = await import('../static/js/railmenu.js');
+  assert.ok(!DEFAULT_MENU.includes('profile-chip'));
+  assert.equal(defaultLayout().rail[0], 'profile-chip');
+});
+
+test('INT-2: the Account privacy text says chats and files are private to their profile', () => {
+  const en = JSON.parse(read('locales/en.json'));
+  assert.match(en.host_notice.chats_body, /other profiles, Admins included, can't open it/);
+  assert.match(en.host_notice.chats_body, /shared DisPatch profile/);
+  assert.match(en.host_notice.files_body, /They belong to your profile/);
+  assert.doesNotMatch(en.host_notice.chats_body + en.host_notice.files_body, /not private|Restricted|Member|Owner/);
 });

@@ -268,19 +268,6 @@
     {
       "cli": null,
       "http": [
-        "GET /api/me/activity"
-      ],
-      "id": "me.activity",
-      "machine": [],
-      "mcp": null,
-      "permission": "use_chat",
-      "title": "My own activity summary (the Restricted disclosure)",
-      "ui": "api.myActivity",
-      "ws": []
-    },
-    {
-      "cli": null,
-      "http": [
         "GET /api/threads"
       ],
       "id": "threads.list",
@@ -502,22 +489,9 @@
         "machine:upload"
       ],
       "mcp": null,
-      "permission": "use_chat",
+      "permission": "attach_files",
       "title": "Attach a picture or file to a chat",
       "ui": "api.upload",
-      "ws": []
-    },
-    {
-      "cli": null,
-      "http": [
-        "POST /api/drop"
-      ],
-      "id": "uploads.drop",
-      "machine": [],
-      "mcp": null,
-      "permission": "use_chat",
-      "title": "Drop a file one-way into a chat (the locked side's upload)",
-      "ui": "api.drop",
       "ws": []
     },
     {
@@ -1037,8 +1011,6 @@
         "GET /api/agents/backends",
         "GET /api/agents/settings",
         "PUT /api/agents/settings",
-        "GET /api/agents/profile-budgets",
-        "PUT /api/agents/profile-budgets/{profile_id}",
         "GET /api/agents/usage",
         "POST /api/agents/retention/purge"
       ],
@@ -1129,8 +1101,8 @@
         "machine:files_list"
       ],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "List the file server",
+      "permission": "files_read",
+      "title": "List your own File Server files",
       "ui": "api.files",
       "ws": []
     },
@@ -1142,8 +1114,8 @@
       "id": "files.upload",
       "machine": [],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "Upload to the file server",
+      "permission": "files_upload",
+      "title": "Upload to your File Server",
       "ui": "api.uploadFile",
       "ws": []
     },
@@ -1155,8 +1127,8 @@
       "id": "files.delete",
       "machine": [],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "Delete a file",
+      "permission": "use_chat",
+      "title": "Delete one of your own files (File Server: files_read; a chat attachment: manage_history)",
       "ui": "api.deleteFile",
       "ws": []
     },
@@ -1168,8 +1140,8 @@
       "id": "files.wipe",
       "machine": [],
       "mcp": null,
-      "permission": "admin_system",
-      "title": "Wipe the file server",
+      "permission": "files_read",
+      "title": "Delete your own File Server files up to a date",
       "ui": "api.wipeFiles",
       "ws": []
     },
@@ -1360,9 +1332,11 @@
     "GET /api/jobs/{job_id}",
     "GET /api/llm/quicksetup",
     "GET /api/mail/status",
+    "GET /api/me/backends",
     "GET /api/me/characters",
     "GET /api/me/characters/{bot_id}",
     "GET /api/me/export",
+    "GET /api/me/personas",
     "GET /api/me/reset/preview",
     "GET /api/media",
     "GET /api/messages/{message_id}/mood-face",

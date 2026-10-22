@@ -130,8 +130,8 @@ test('who may be edited: every Admin manages everyone but THE protected Admin, w
 test('characters: hidden reads the 4.0 flag, then the 3.x one; diff sends hidden only when it changed', () => {
   assert.equal(CH.isHidden({ hidden: true }), true);
   assert.equal(CH.isHidden({ flags: { hidden: true } }), true);
-  assert.equal(CH.isHidden({ hide_unlocked: true }), true);
-  assert.equal(CH.isHidden({ hidden: false, hide_unlocked: true }), false, 'hidden wins');
+  assert.equal(CH.isHidden({ hide_unlocked: true }), false, 'the 3.x flag is inert: only hidden hides');
+  assert.equal(CH.isHidden({ audience: 'restricted', safe: true }), false, 'a legacy audience hides nothing');
   const orig = { description: '', hidden: false, backend: { connection: 'c1', model: 'm1' }, personality: { preset: 'default' } };
   assert.deepEqual(CH.diffCharacter(orig, { description: '', hidden: false }), {});
   assert.deepEqual(CH.diffCharacter(orig, { hidden: true, description: 'Hi' }), { hidden: true, description: 'Hi' });
@@ -460,9 +460,9 @@ test('backends: every connection by default, or a pick, saved through the backen
 
 const dialog = () => document.querySelector('.pe-dialog');
 
-test('downgrade User to Basic: a dialog with the counts including cloned voices; Cancel changes nothing', { skip: dom.skip }, async () => {
+test('downgrade User to Basic: a dialog with the counts including File Server files and cloned voices; Cancel changes nothing', { skip: dom.skip }, async () => {
   const { pane } = await mount({ routes: {
-    'GET /api/people/u1/role/preview?role=basic': () => [200, { counts: { bots: 2, chats: 7, pictures: 1, voices: 3 }, token: 'tok', deletes: true }],
+    'GET /api/people/u1/role/preview?role=basic': () => [200, { counts: { bots: 2, chats: 7, pictures: 1, files: 4, voices: 3 }, token: 'tok', deletes: true }],
     'POST /api/people/u1/role': () => [200, { id: 'u1', role: 'basic' }],
   } });
   const ed = await edit(pane, 'u1');
@@ -474,8 +474,8 @@ test('downgrade User to Basic: a dialog with the counts including cloned voices;
   assert.ok(d, 'the dialog');
   assert.equal(d.getAttribute('role'), 'alertdialog');
   assert.match(d.querySelector('.pe-dialog-title').textContent, /Make Riley a Basic profile\?/);
-  assert.match(d.textContent, /deletes 2 bots, 7 chats and 3 cloned voices/);
-  assert.deepEqual([...d.querySelectorAll('.pe-tally li')].map((li) => li.textContent), ['2bots', '7chats', '1pictures', '3cloned voices']);
+  assert.match(d.textContent, /deletes 2 bots, 7 chats, 4 File Server files and 3 cloned voices/);
+  assert.deepEqual([...d.querySelectorAll('.pe-tally li')].map((li) => li.textContent), ['2bots', '7chats', '1pictures', '4File Server files', '3cloned voices']);
   assert.equal(document.activeElement.textContent, 'Cancel', 'the safe choice has focus');
   btn(d, 'Cancel').click();
   await settle();
@@ -517,7 +517,7 @@ test('Basic to User keeps the chats: no dialog, no token', { skip: dom.skip }, a
 
 test('reset another profile: counts in the dialog, the outcome, then the token goes back', { skip: dom.skip }, async () => {
   const { pane } = await mount({ routes: {
-    'GET /api/people/u1/reset/preview': () => [200, { counts: { bots: 1, chats: 4, pictures: 2, voices: 1 }, token: 'rt', keeps_voices: true, outcome: 'atlas' }],
+    'GET /api/people/u1/reset/preview': () => [200, { counts: { bots: 1, chats: 4, pictures: 2, files: 5, voices: 1 }, token: 'rt', keeps_voices: true, outcome: 'atlas' }],
     'POST /api/people/u1/reset': () => [200, { bots: 1, chats: 4 }],
   } });
   const ed = await edit(pane, 'u1');
@@ -525,7 +525,7 @@ test('reset another profile: counts in the dialog, the outcome, then the token g
   await settle();
   const d = dialog();
   assert.match(d.querySelector('.pe-dialog-title').textContent, /Reset Riley\?/);
-  assert.match(d.textContent, /1 bots, 4 chats and 2 pictures/);
+  assert.match(d.textContent, /1 bots, 4 chats, 2 pictures and 5 File Server files/);
   assert.match(d.textContent, /Riley gets a fresh Atlas afterwards/);
   assert.match(d.textContent, /cloned voices are kept/);
   btn(d, 'Delete and reset').click();
@@ -549,14 +549,14 @@ test('reset a Basic profile: it goes back to the household bots; a stale token i
 
 test('delete: the dialog shows what goes with the profile, and the token confirms those numbers', { skip: dom.skip }, async () => {
   const { pane } = await mount({ routes: {
-    'GET /api/people/u1/delete/preview': () => [200, { counts: { bots: 3, chats: 9, pictures: 0, voices: 2 }, token: 'dt' }],
+    'GET /api/people/u1/delete/preview': () => [200, { counts: { bots: 3, chats: 9, pictures: 0, files: 6, voices: 2 }, token: 'dt' }],
     'POST /api/people/u1/delete': () => [200, { ok: true }],
   } });
   const ed = await edit(pane, 'u1');
   btn(ed, 'Delete').click();
   await settle();
   assert.match(dialog().querySelector('.pe-dialog-title').textContent, /Delete Riley\?/);
-  assert.deepEqual([...dialog().querySelectorAll('.pe-tally-n')].map((n) => n.textContent), ['3', '9', '0', '2']);
+  assert.deepEqual([...dialog().querySelectorAll('.pe-tally-n')].map((n) => n.textContent), ['3', '9', '0', '6', '2']);
   btn(dialog(), 'Delete profile').click();
   await settle();
   assert.equal(call('POST /api/people/u1/delete').body.confirm_token, 'dt');

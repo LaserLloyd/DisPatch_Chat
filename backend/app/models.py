@@ -68,14 +68,14 @@ class CreateThreadIn(BaseModel):
     bot_id: str
 
 
+#: 3.x visibility keys a client may no longer send: who uses a character is each profile's
+#: household list (People), and the Admin's "Hide" is PATCH /api/characters/{id} ``hidden``.
+LEGACY_BOT_KEYS = ("visible", "safe", "hide_unlocked", "audience", "profiles")
+
+
 class BotOrderItem(BaseModel):
     id: str
     order: int = 0
-    visible: bool | None = None   # pre-2.4.2 clients: False = "neither", True = no change
-    safe: bool | None = None      # None = leave unchanged (3.x "Show locked" flag; inert in 4.0)
-    hide_unlocked: bool | None = None  # None = leave unchanged (NOT "Show unlocked", 2.4.0)
-    # 3.0: who the character is for. Wins over `safe`/`hide_unlocked` when present.
-    audience: Literal["all", "members", "restricted"] | None = None
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
@@ -84,6 +84,16 @@ class BotOrderItem(BaseModel):
     # (422), and without the add-on only "" or the stored value is accepted.
     voice: str | None = Field(default=None, max_length=80)
     voice_rp: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_legacy_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            sent = [k for k in LEGACY_BOT_KEYS if k in data]
+            if sent:
+                raise ValueError(f"{sent[0]!r} is no longer accepted (4.0: People decides who "
+                                 "uses a character; use 'hidden' on the character to hide it)")
+        return data
 
 
 class UpdateBotOrderIn(BaseModel):
@@ -116,11 +126,7 @@ class BotCreateIn(BaseModel):
     backend: Literal["direct", "agent"] = "direct"
     agent: str | None = Field(default=None, pattern=AGENT_ID_PATTERN)
     model_hint: str = Field(default="", max_length=60)
-    safe: bool = False
-    hide_unlocked: bool = False
-    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool = True
-    visible: bool = True             # pre-2.4.2: False = "neither" (config.fold_visible)
     tools: bool | None = None        # direct-API bots only; default on
 
     @field_validator("name", "emoji", "model_hint")
@@ -147,10 +153,6 @@ class BotPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     emoji: str | None = Field(default=None, max_length=8)
     model_hint: str | None = Field(default=None, max_length=60)
-    visible: bool | None = None      # pre-2.4.2: False = "neither", True = no change
-    safe: bool | None = None
-    hide_unlocked: bool | None = None
-    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None

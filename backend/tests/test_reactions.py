@@ -410,8 +410,7 @@ def test_bot_gate_applies_to_threads_too(rx_env):
 def test_bot_manager_can_enable_a_companion(rx_env):
     c = rx_env()
     bots = c.get("/api/bots/all").json()["bots"]
-    payload = [{"id": b["id"], "order": b["order"], "visible": b["visible"],
-                "safe": b["safe"], "reactions": b["id"] == "alpha"} for b in bots]
+    payload = [{"id": b["id"], "order": b["order"], "reactions": b["id"] == "alpha"} for b in bots]
     assert c.put("/api/bots/order", json={"bots": payload}).status_code == 200
     config._invalidate_bots_cache()
     assert config.get_bot("alpha").reactions is True

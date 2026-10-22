@@ -20,16 +20,16 @@
 import { w5 as realApi } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
-import { tk, askDialog, profileCalls, errorText } from './people-perms.js?v=1';
+import { askDialog, profileCalls, errorText } from './people-perms.js?v=1';
 
 // ------------------------------------------------------------------ pure
 
-/** Is the character kept off the bot lists? (`hidden`; `hide_unlocked` is the 3.x name.) */
+/** Is the character kept off the bot lists? (`hidden` alone: the 3.x `hide_unlocked` /
+ *  `audience` keys are inert data since migration 010 and never read here.) */
 export function isHidden(bot) {
   if (!bot) return false;
   if (typeof bot.hidden === 'boolean') return bot.hidden;
-  if (bot.flags && typeof bot.flags.hidden === 'boolean') return bot.flags.hidden;
-  return !!bot.hide_unlocked;
+  return !!(bot.flags && bot.flags.hidden === true);
 }
 
 /** Can this character be given a connection? Agent and app characters are answered elsewhere. */
@@ -85,21 +85,21 @@ export async function removeCharacter(bot, ctx) {
     return null;
   }
   const r = await askDialog({
-    title: tk('chars.remove_title', { name: bot.name }),
-    body: tk('chars.remove_body', { chats: pv.chats || 0, profiles: pv.profiles || 0 }),
-    okText: tk('chars.remove_button'),
-    altText: isHidden(bot) ? '' : tk('chars.remove_hide'),
+    title: t('chars.remove_title', { name: bot.name }),
+    body: t('chars.remove_body', { chats: pv.chats || 0, profiles: pv.profiles || 0 }),
+    okText: t('chars.remove_button'),
+    altText: isHidden(bot) ? '' : t('chars.remove_hide'),
   });
   if (!r) return null;
   try {
     if (r === 'alt') {
       await setCharacterHidden(bot.id, true, api);
-      ctx.toast(tk('chars.hidden_saved', { name: bot.name }));
+      ctx.toast(t('chars.hidden_saved', { name: bot.name }));
       if (ctx.reload) await ctx.reload();
       return 'hidden';
     }
     await profileCalls.deleteCharacter(bot.id);
-    ctx.toast(tk('chars.removed', { name: bot.name }));
+    ctx.toast(t('chars.removed', { name: bot.name }));
     if (ctx.reload) await ctx.reload();
     return 'deleted';
   } catch (e) {
@@ -137,7 +137,7 @@ function copySection(bot, orig, people, ctx, calls) {
   };
   pick.addEventListener('change', syncNote);
   syncNote();
-  const go = el('button', { type: 'button', class: 'btn-secondary', text: tk('chars.copy_button') });
+  const go = el('button', { type: 'button', class: 'btn-secondary', text: t('chars.copy_button') });
   const err = el('p', { class: 'lock-error', role: 'alert', hidden: '' });
   go.addEventListener('click', async () => {
     const p = targets.find((x) => x.id === pick.value);
@@ -229,7 +229,7 @@ export async function characterPanel(bot, ctx) {
     el('div', { class: 'dev-group-body chr-hide' }, [
       el('div', { class: 'dev-row chr-feature', dataset: { feature: 'hidden' } }, [
         el('label', { class: 'dev-row-text', for: hide.id }, [
-          el('strong', { text: tk('chars.hidden') }), el('span', { class: 'dev-row-hint', text: tk('chars.hidden_hint') })]),
+          el('strong', { text: t('chars.hidden') }), el('span', { class: 'dev-row-hint', text: t('chars.hidden_hint') })]),
         hide])]),
     copySection(bot, orig, people, { ...ctx, meId }, calls));
 

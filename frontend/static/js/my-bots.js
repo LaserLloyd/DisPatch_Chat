@@ -14,7 +14,7 @@
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import {
-  can, profileReq, renderAiBuild, renderBotEditor, loadEditorOptions, tr, withShell, initBotEditor,
+  can, profileReq, renderAiBuild, renderBotEditor, loadEditorOptions, withShell, initBotEditor,
 } from './bot-editor.js?v=1';
 
 let shell = {};
@@ -92,7 +92,7 @@ function botRow(bot, ctx) {
     pic,
     el('div', { class: 'mb-text' }, [
       el('strong', { class: 'mb-name', text: `${bot.emoji ? `${bot.emoji} ` : ''}${bot.name}` }),
-      el('span', { class: 'mb-sub muted', text: bot.description || tr('mybots.chats_count', '{count} chats', { count: chats }) }),
+      el('span', { class: 'mb-sub muted', text: bot.description || t('mybots.chats_count', { count: chats }) }),
     ]),
     el('div', { class: 'mb-actions' }, [
       el('button', { class: 'ui-btn', type: 'button', text: t('mybots.edit'), onclick: () => ctx.edit(bot) }),

@@ -83,8 +83,6 @@ CAPABILITIES: tuple[Capability, ...] = (
        ui="api.devices"),
     _c("people.activity", "Activity summary and admin audit log", "view_activity",
        http=["GET /api/people/activity", "GET /api/people/audit"], ui="api.peopleActivity"),
-    _c("me.activity", "My own activity summary (the Restricted disclosure)", "use_chat",
-       http=["GET /api/me/activity"], ui="api.myActivity"),
     # ---- chat ----------------------------------------------------------------
     _c("threads.list", "List threads", "use_chat", http=["GET /api/threads"], ws=["get_threads"],
        ui="api.threads", machine=["machine:threads"]),
@@ -115,8 +113,6 @@ CAPABILITIES: tuple[Capability, ...] = (
        ui="api.messageFeedback"),
     _c("uploads.attach", "Attach a picture or file to a chat", "attach_files",
        http=["POST /api/upload"], ui="api.upload", machine=["machine:upload"]),
-    _c("uploads.drop", "Drop a file into your File Server (a one-way drop for a profile that may not read it back)", "files_upload",
-       http=["POST /api/drop"], ui="api.drop"),
     _c("search", "Search your own conversations", "use_chat", http=["GET /api/search"], ui="api.search"),
     _c("export", "Export your own history", "manage_history", http=["GET /api/export"], ui="api.exportUrl"),
     # ---- characters -----------------------------------------------------------
@@ -200,8 +196,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("agents.manage", "Create, edit, publish, budget and delete agents", "manage_agents",
        http=["GET /api/agents", "POST /api/agents", "PATCH /api/agents/{agent_id}",
              "DELETE /api/agents/{agent_id}", "GET /api/agents/backends", "GET /api/agents/settings",
-             "PUT /api/agents/settings", "GET /api/agents/profile-budgets",
-             "PUT /api/agents/profile-budgets/{profile_id}", "GET /api/agents/usage",
+             "PUT /api/agents/settings", "GET /api/agents/usage",
              "POST /api/agents/retention/purge"], ui="api.agents"),
     _c("agents.credentials", "Store the Claude API key and MCP secrets (write-only)", "manage_agents",
        http=["GET /api/agents/credentials/claude", "PUT /api/agents/credentials/claude",

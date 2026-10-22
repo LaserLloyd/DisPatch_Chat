@@ -119,8 +119,6 @@
 .agents-budget { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .agents-publish { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; }
 .agents-publish-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.agents-profile-budget { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; margin-block: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.agents-profile-budget legend { padding-inline: 6px; }
 .agents-spend { margin: 6px 0; padding-inline-start: 1.2em; }
 .agents-secret .agents-actions input { min-width: 12em; }
 

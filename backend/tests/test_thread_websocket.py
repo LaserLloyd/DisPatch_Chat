@@ -328,26 +328,6 @@ def test_session_live_false_when_the_thread_is_deleted(ext_env):
         assert _live(ws) is False
 
 
-def test_session_live_stays_true_when_the_bot_turns_safe(ext_env):
-    """Marking the bot `safe` mid-call widens who may chat with it; it does not
-    end an unlocked device's socket (2.3.1). Removing the bot still does."""
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        assert _live(ws) is True
-        bots = c.get("/api/bots/all").json()["bots"]
-        items = [{"id": b["id"], "order": i, "safe": (True if b["id"] == "main" else None)}
-                 for i, b in enumerate(bots)]
-        assert c.put("/api/bots/order", json={"bots": items}).status_code == 200
-        assert config.get_bot("main").safe is True
-        assert _live(ws) is True
-        assert c.delete("/api/bots/main").status_code == 200
-        assert _live(ws) is False
-
-
 def test_session_live_false_when_a_pin_appears_on_a_pinless_install(ext_env):
     c, _ = ext_env
     KNOBS.handler_mode = "hold"

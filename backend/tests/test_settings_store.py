@@ -57,7 +57,8 @@ def test_schema_document_is_versioned_and_complete():
     assert doc["schema"] == settings_schema.SCHEMA_VERSION == 1
     keys = {s["key"] for s in doc["settings"]}
     assert {"system.backup_keep", "people.lock_timeout_seconds", "tools.livetools_enabled",
-            "characters.default_audience", "connections.allow_private_targets"} <= keys
+            "connections.allow_private_targets"} <= keys
+    assert "characters.default_audience" not in keys          # 4.0: no audiences
     first = next(s for s in doc["settings"] if s["key"] == "system.backup_keep")
     assert first["env_names"] == ["DISPATCH_BACKUP_KEEP", "LOCAL_CHAT_BACKUP_KEEP"]
     assert first["restart_required"] is True and first["level"] == "basic"

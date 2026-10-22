@@ -374,8 +374,7 @@ def test_the_owner_sees_an_activity_summary_and_the_profile_is_told(world, owner
     # What the profile sees: the disclosure, and its own summary.
     me = c.get("/api/auth/me").json()
     assert "admin can see" in me["disclosure"].lower()
-    mine = c.get("/api/me/activity").json()
-    assert mine["visible_to_owner"] is True and "today" not in mine and "limits" not in mine
+    assert c.get("/api/me/activity").status_code == 404      # 4.0: no per-profile activity page
     # What the owner sees: counts, not content.
     act = owner.get("/api/people/activity", params={"profile_id": mia["id"]}).json()
     counts = act["summary"]["days"][0]["counts"]

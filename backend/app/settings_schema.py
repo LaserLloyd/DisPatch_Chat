@@ -240,11 +240,6 @@ _CORE: tuple[SettingDef, ...] = (
        restart_required=True, min=0, unit="bytes"),
 
     # ========================== CHARACTERS =============================== #
-    _d("characters.default_audience", "choice", "members", "Audience for new characters",
-       "Who a character you add can be seen by unless you pick: Members (signed-in people), "
-       "Restricted (made for Restricted profiles) or Everyone.", "characters",
-       choices=["members", "restricted", "all"],
-       choice_labels={"members": "Members", "restricted": "Restricted profiles", "all": "Everyone"}),
     _d("characters.greeting", "boolean", False, "Greet new chats",
        "Show a short canned greeting at the top of a new chat (no model call is made).",
        "characters", env="DISPATCH_GREETING"),
@@ -436,8 +431,10 @@ UI_SECTIONS: tuple[tuple[str, str], ...] = (
     ("people.lock_timeout_seconds", "people#signin-rules"),
     ("people.session_timeout_", "people#signin-rules"),
     ("people.remember_device_days", "people#signin-rules"),
-    ("people.lock_target", "people#signin-rules"),
-    ("people.default_profile", "people#signin-rules"),
+    # Drawn by the People pane's own "When locked, show" picker (people-perms.js lockTargetGroup,
+    # anchor lock-target), never as schema rows: the frontend lists both in BESPOKE_KEYS.
+    ("people.lock_target", "people#lock-target"),
+    ("people.default_profile", "people#lock-target"),
     ("people.machine_", "people#machine"),
     ("characters.", "characters"),
     ("connections.default", "connections#list"),
@@ -502,7 +499,10 @@ def _placed(d: SettingDef) -> SettingDef:
 CORE_SETTINGS = tuple(_placed(d) for d in CORE_SETTINGS)
 
 #: key -> reason it was removed, so an old database row is reported rather than dropped.
-RETIRED: dict[str, str] = {}
+RETIRED: dict[str, str] = {
+    "characters.default_audience": "4.0: who uses a character is each profile's household list "
+                                   "(People), not an audience",
+}
 
 _registry: dict[str, SettingDef] = {d.key: d for d in CORE_SETTINGS}
 _plugin_keys: dict[str, set[str]] = {}          # owner -> keys it contributed
@@ -775,6 +775,7 @@ _SECTION_NAMES = {"appearance": "Appearance", "account": "Account", "voice": "Vo
                   "characters": "Characters", "connections": "AI & Connections",
                   "people": "People & Access", "plugins": "Plugins & Apps", "system": "System"}
 _ANCHOR_NAMES = {"network": "Network", "backups": "Backups", "signin-rules": "Sign-in rules",
+                 "lock-target": "When locked",
                  "machine": "Machine access",
                  "list": "Connections", "images": "Image generation", "agents": "Agents",
                  "lookups": "Built-in lookups"}

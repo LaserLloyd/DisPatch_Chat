@@ -84,7 +84,6 @@ export function createTasksUi(deps = {}) {
   const api = deps.api || realApi;
   let access = NO_ACCESS;
   let agents = [];                         // agents published to me (api.agentsAvailable)
-  let budget = null;
   let backdrop = null;
   let listEl = null;
   let emptyEl = null;
@@ -151,7 +150,6 @@ export function createTasksUi(deps = {}) {
       try {
         const res = await api.agentsAvailable();
         agents = res.agents || [];
-        budget = res.budget || null;
         const waitingRes = await api.tasks({ state: 'awaiting_approval', limit: 100 });
         waiting = (waitingRes.tasks || []).length;
       } catch { agents = []; }
@@ -385,9 +383,6 @@ export function createTasksUi(deps = {}) {
       el('label', { for: 'assign-agent', text: t('tasks.assign_agent') }), select,
       hint,
       el('label', { for: 'assign-prompt', text: t('tasks.assign_prompt') }), area,
-      budget && budget.usd_per_day != null
-        ? el('p', { class: 'muted', text: t('tasks.assign_budget', { spent: budget.spent_today_usd.toFixed(2), limit: Number(budget.usd_per_day).toFixed(2) }) })
-        : null,
       err,
       el('div', { class: 'assign-actions' }, [cancel, go]),
     ]);

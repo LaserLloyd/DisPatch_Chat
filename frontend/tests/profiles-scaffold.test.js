@@ -56,7 +56,7 @@ test('SECTION_HOOKS names the sections and a failing hook stops nothing', () => 
 test('main.js wires the four modules once and index.html loads profiles.css', () => {
   const main = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
   for (const name of ['initMyBots', 'initBotEditor', 'initAccountReset', 'initPeoplePerms']) {
-    assert.equal(main.split(`import { ${name} }`).length - 1, 1, name);
+    assert.equal(main.split(new RegExp(`import \\{ ${name}[ ,]`)).length - 1, 1, name);
   }
   assert.equal(main.split('runSectionHooks(id, pane').length - 1, 1);
   const html = readFileSync(join(STATIC, 'index.html'), 'utf8');

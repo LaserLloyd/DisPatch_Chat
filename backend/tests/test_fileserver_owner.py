@@ -102,8 +102,8 @@ def test_a_basic_profile_uploads_but_never_reads_the_file_server(house):
         r = bea.get(path)
         assert r.status_code == 403 and "SENT-BEA" not in r.text
     assert bea.delete(f"/api/files/{f['id']}").status_code == 403
-    r = bea.post("/api/drop", files={"file": ("SENT-BEA-DROP.txt", b"x", "text/plain")})
-    assert r.status_code == 200, r.text
+    # 4.0: the 3.x one-way /api/drop is gone; the File Server upload is the one way in.
+    assert bea.post("/api/drop", files={"file": ("SENT-BEA-DROP.txt", b"x", "text/plain")}).status_code in (404, 405)
 
 
 def test_a_chat_attachment_is_its_owners_to_download_and_delete(house):
@@ -156,3 +156,50 @@ def test_reset_deletes_the_profiles_files_and_counts_them(house):
     profiles_service.reset_profile(una_id, prev["token"])
     assert uma.get(f"/api/files/{kept['id']}/download").status_code == 200
     assert una.get(f"/api/files/{gone['id']}/download").status_code == 404
+
+
+def test_a_file_a_machine_attaches_into_a_users_thread_is_that_users_to_download(house):
+    """Lead decision (INT-2): an agent uploads a document (owned by the protected Admin, the
+    machine's sphere) and posts ``[[doc:<id>]]`` into a User's thread. The thread's owner can
+    download it (a copy in their own store); nobody else can, and the original stays the
+    protected Admin's."""
+    uma, uma_id = house["people"]["Uma"]
+    una, _ = house["people"]["Una"]
+    machine = house["machine"]
+    tid = uma.post("/api/threads", json={"bot_id": "chatty"}).json()["id"]
+    up = _attach(machine, "SENT-AGENT-REPORT.pdf")
+    r = machine.post("/api/inject", json={"thread_id": tid, "role": "assistant",
+                                          "content": f"Here it is [[doc:{up['id']}|the report]]"})
+    assert r.status_code == 200, r.text
+    msgs = uma.get(f"/api/threads/{tid}/messages").json()
+    text = " ".join(m["content"] for m in (msgs["messages"] if isinstance(msgs, dict) else msgs))
+    import re
+    refs = re.findall(r"\[\[doc:([^\]|]+)\|the report\]\]", text)
+    assert len(refs) == 1 and refs[0] != up["id"], text
+    copy = refs[0]
+    assert uma.get(f"/api/files/{copy}/download").status_code == 200
+    assert uma.get(f"/api/files/{up['id']}/download").status_code == 404      # the original is not hers
+    for c in (una, house["owner"]):
+        assert c.get(f"/api/files/{copy}/download").status_code == 404
+    import sqlite3
+    con = sqlite3.connect(config.DATA_DIR / "chats.db")
+    try:
+        own = dict(con.execute("SELECT id, owner_profile_id FROM files WHERE id IN (?, ?)",
+                               (copy, up["id"])).fetchall())
+    finally:
+        con.close()
+    assert own[copy] == uma_id
+    assert own[up["id"]] == ownership.protected_admin_id()      # the original stays the machine's
+
+
+def test_a_machine_cannot_hand_on_a_file_it_cannot_read(house):
+    """The hand-over only copies files in the machine's own sphere: another profile's file id
+    named in an inject stays as it was (no copy for the target)."""
+    uma, _ = house["people"]["Uma"]
+    una, _ = house["people"]["Una"]
+    theirs = _attach(una, "SENT-UNA-DOC.pdf")
+    tid = uma.post("/api/threads", json={"bot_id": "chatty"}).json()["id"]
+    r = house["machine"].post("/api/inject", json={"thread_id": tid, "role": "assistant",
+                                                   "content": f"[[doc:{theirs['id']}|x]]"})
+    assert r.status_code == 200, r.text
+    assert uma.get(f"/api/files/{theirs['id']}/download").status_code == 404

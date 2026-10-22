@@ -32,7 +32,7 @@ export const RAIL_DRAG_TYPE = 'application/x-dispatch-rail';
 export const RAIL_ITEMS = ['theme-toggle', 'profile-chip', 'lock-now', 'tasks-btn', 'fs-chip', 'manage-bots'];
 
 /** Where each one goes when nobody has moved anything. */
-export const DEFAULT_MENU = ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle'];
+export const DEFAULT_MENU = ['tasks-btn', 'fs-chip', 'theme-toggle'];
 
 export function defaultLayout() {
   return {

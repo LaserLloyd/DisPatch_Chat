@@ -114,18 +114,17 @@ class CharacterBackend(BaseModel):
 
 
 class CharacterManifest(_Manifest):
-    """A character (the 2.x "bot"): who it is, who it is for, and what answers for it."""
+    """A character (the 2.x "bot"): who it is and what answers for it. Who may use it is not
+    part of the manifest (4.0: each profile's household list)."""
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,48}$")
     name: str = Field(min_length=1, max_length=40)
     emoji: str = Field(default="", max_length=8)
     avatar: str = Field(default="", max_length=120)
     color: str = Field(default="", max_length=32)
     description: str = Field(default="", max_length=400)
-    audience: Literal["all", "members", "restricted"] = "members"
     persona: str = Field(default="", max_length=8000)
     backend: CharacterBackend = Field(default_factory=CharacterBackend)
     voice: str = Field(default="", max_length=80)
-    guardrails: str = Field(default="", max_length=4000)   # appended for Restricted turns
     pack: str | None = Field(default=None, pattern=ID_PATTERN)    # starter pack it came from
 
 

@@ -84,8 +84,8 @@ test('every static search row names a section, an anchor that exists in the mark
   }
   const anchors = new Set([...HTML.matchAll(/data-anchor="([^"]+)"/g)].map((m) => m[1]));
   // Anchors set by modules at mount time.
-  for (const a of ['people', 'device', 'machine', 'activity', 'signin-rules', 'restricted-limits', 'addons', 'tools', 'lookups',
-    'discover', 'hidden-bots', 'reset', 'mydata']) anchors.add(a);
+  for (const a of ['people', 'device', 'machine', 'activity', 'signin-rules', 'lock-target', 'addons', 'tools', 'lookups',
+    'discover', 'reset', 'mydata']) anchors.add(a);
   for (const r of STATIC_ROWS) if (r.anchor) assert.ok(anchors.has(r.anchor), `anchor ${r.anchor}`);
 });
 

@@ -27,8 +27,7 @@ AGENT_ROUTES = [
     ("PUT", "/api/agents/credentials/claude"), ("DELETE", "/api/agents/credentials/claude"),
     ("GET", "/api/agents/secrets"), ("PUT", "/api/agents/secrets/MCP_X"),
     ("DELETE", "/api/agents/secrets/MCP_X"), ("GET", "/api/agents/settings"),
-    ("PUT", "/api/agents/settings"), ("GET", "/api/agents/profile-budgets"),
-    ("PUT", "/api/agents/profile-budgets/{profile}"), ("GET", "/api/agents/usage"),
+    ("PUT", "/api/agents/settings"), ("GET", "/api/agents/usage"),
     ("POST", "/api/agents/retention/purge"),
     ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task}"),
     ("GET", "/api/tasks/{task}/events?after_seq=-1"), ("POST", "/api/tasks/{task}/send"),
@@ -311,32 +310,27 @@ def test_the_daily_limit_is_shared_by_every_task_of_the_agent(aw):
     assert spent[("agent", a["id"])] == pytest.approx(0.02)
 
 
-def test_a_profile_budget_limits_what_that_profile_can_spend(aw):
+def test_there_are_no_per_profile_agent_budgets(aw):
+    """SPEC section 5: no daily limits or budgets of any kind. The per-profile agent cost caps are
+    gone: the routes do not exist, /available carries no budget, and one profile's spend never
+    stops another's task. The agent's OWN budget (its spec) still applies (test above)."""
     a = make_agent(aw.owner, "Shared", published=["*"])
-    r = aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}", json={"usd_per_day": 0.015})
-    assert r.status_code == 200
-    ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.eve, ok, TERMINAL)["state"] == "succeeded"
-    over = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.eve, over, TERMINAL)["reason"] == "budget_exceeded"
-    assert aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x"}).status_code == 429
-    # Fay is not limited by Eve's budget
-    fay = aw.fay.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.fay, fay, TERMINAL)["state"] == "succeeded"
-    b = aw.eve.get("/api/agents/available").json()["budget"]
-    assert b["usd_per_day"] == 0.015 and b["estimate"] is True and b["spent_today_usd"] > 0.015 - 0.001
+    assert aw.owner.get("/api/agents/profile-budgets").status_code in (403, 404, 405)
+    assert aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}",
+                        json={"usd_per_day": 0.015}).status_code in (403, 404, 405)
+    body = aw.eve.get("/api/agents/available").json()
+    assert "budget" not in body
+    for _ in range(3):
+        tid = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
+        assert wait_state(aw.eve, tid, TERMINAL)["state"] == "succeeded"
 
 
-def test_turn_and_time_limits_come_from_the_tighter_of_agent_and_profile(aw):
+def test_turn_and_time_limits_come_from_the_agent_alone(aw):
     from app.agents.interface import AgentSpec
     a = make_agent(aw.owner, "Limits", published=["*"], spec=spec(budget={"max_turns": 10, "max_wall_clock_s": 600}))
-    aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}", json={"max_turns": 3, "max_tokens": 5000})
     b = aw.mgr.effective_budget(AgentSpec.model_validate(store.get_agent(a["id"])["spec"]),
                                 a["id"], aw.eve_id, 0.0)
-    assert (b.max_turns, b.max_wall_clock_s, b.max_tokens) == (3, 600, 5000)
-    b2 = aw.mgr.effective_budget(AgentSpec.model_validate(store.get_agent(a["id"])["spec"]),
-                                 a["id"], "someone-else", 0.0)
-    assert (b2.max_turns, b2.max_tokens) == (10, None)
+    assert (b.max_turns, b.max_wall_clock_s, b.max_tokens) == (10, 600, None)
 
 
 def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):

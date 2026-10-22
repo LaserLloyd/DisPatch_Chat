@@ -57,18 +57,8 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A character (the 2.x \"bot\"): who it is, who it is for, and what answers for it.",
+  "description": "A character (the 2.x \"bot\"): who it is and what answers for it. Who may use it is not\npart of the manifest (4.0: each profile's household list).",
   "properties": {
-    "audience": {
-      "default": "members",
-      "enum": [
-        "all",
-        "members",
-        "restricted"
-      ],
-      "title": "Audience",
-      "type": "string"
-    },
     "avatar": {
       "default": "",
       "maxLength": 120,
@@ -94,12 +84,6 @@
       "default": "",
       "maxLength": 8,
       "title": "Emoji",
-      "type": "string"
-    },
-    "guardrails": {
-      "default": "",
-      "maxLength": 4000,
-      "title": "Guardrails",
       "type": "string"
     },
     "id": {

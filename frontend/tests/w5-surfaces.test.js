@@ -433,6 +433,11 @@ test('which rows go where: a row whose anchor has no slot falls back to the sect
   assert.deepEqual(S.rowsForSlot(defs, 'system', '', claimed).map((d) => d.key), ['a.y', 'a.z']);
   assert.deepEqual(S.rowsForSlot(defs, 'people', '', new Set()).map((d) => d.key), [], 'drawn by the section itself');
   assert.deepEqual(S.uiTarget({ group: 'tools' }), ['plugins', '']);
+  // 4.0: the lock-target pair is drawn by People's "When locked, show" picker only, never as rows.
+  const lock = [{ key: 'people.lock_target', ui_section: 'people#lock-target' },
+    { key: 'people.default_profile', ui_section: 'people#lock-target' }, { key: 'people.other', ui_section: 'people' }];
+  assert.deepEqual(S.rowsForSlot(lock, 'people', '', new Set()).map((d) => d.key), ['people.other']);
+  assert.deepEqual(S.rowsForSlot(lock, 'people', 'lock-target', new Set(['lock-target'])).map((d) => d.key), []);
 });
 
 const CONN_TYPES = [

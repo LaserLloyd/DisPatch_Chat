@@ -30,7 +30,7 @@ import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=2';
 import {
-  tk, askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
+  askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
   profileCalls, errorText,
 } from './people-perms.js?v=1';
 
@@ -42,7 +42,7 @@ const nextId = (p) => `${p}-${++uid}`;
 const isAdminActor = (role) => role === 'admin' || role === 'owner';
 
 /** The people table shows no "limit hits" column: 4.0 has no limits to hit. */
-const COLUMNS = ACTIVITY_COLUMNS.filter((c) => c !== 'limit_hit');
+const COLUMNS = ACTIVITY_COLUMNS;
 
 function errText(e) {
   if (!e) return '';
@@ -190,7 +190,7 @@ function personRow(p, ctx) {
       el('strong', {}, [p.name, ' ', typeBadge(p.role),
         p.protected ? el('span', { class: 'ui-badge people-protected', title: t('people.protected_hint'), text: t('people.protected') }) : null,
         p.lock_target ? el('span', { class: 'ui-badge people-lockscreen', text: t('people.lock_target_badge') }) : null,
-        mine ? el('span', { class: 'ui-badge', text: tk('people.you_tag') }) : null]),
+        mine ? el('span', { class: 'ui-badge', text: t('people.you_tag') }) : null]),
       el('span', { class: 'people-inds' }, indicators(p)),
       warn,
     ]),
@@ -210,20 +210,20 @@ function listBody(ctx) {
 
 async function countsOrError(ctx, fn) {
   try { return await fn(); } catch (e) {
-    ctx.toast(tk('people.counts_failed', { error: errText(e) }), true);
+    ctx.toast(t('people.counts_failed', { error: errText(e) }), true);
     return null;
   }
 }
 
-/** User -> Basic: the downgrade dialog, with the counts including cloned voices. */
+/** User -> Basic: the downgrade dialog, with the counts including File Server files and cloned voices. */
 async function confirmDowngrade(ctx, person, pv) {
   const c = pv.counts || {};
   const r = await askDialog({
     title: t('people.downgrade_title', { name: person.name }),
-    body: t('people.downgrade_confirm', { bots: c.bots || 0, chats: c.chats || 0, voices: c.voices || 0 }),
+    body: t('people.downgrade_confirm', { bots: c.bots || 0, chats: c.chats || 0, files: c.files || 0, voices: c.voices || 0 }),
     tally: countsTally(c),
-    notes: [tk('people.downgrade_kept')],
-    okText: tk('people.downgrade_button'),
+    notes: [t('people.downgrade_kept')],
+    okText: t('people.downgrade_button'),
   });
   return r === 'ok';
 }
@@ -232,12 +232,12 @@ async function resetProfile(ctx, person, showErr) {
   const pv = await countsOrError(ctx, () => profileCalls.resetPreview(person.id));
   if (!pv) return;
   const c = pv.counts || {};
-  const notes = [tk(pv.outcome === 'household' ? 'people.reset_outcome_household' : 'people.reset_outcome_atlas', { name: person.name })];
+  const notes = [t(pv.outcome === 'household' ? 'people.reset_outcome_household' : 'people.reset_outcome_atlas', { name: person.name })];
   if (pv.keeps_voices !== false) notes.push(t('reset.voices_kept'));
   if (person.lock_target) notes.push(t('reset.shared_warning'));
   const r = await askDialog({
-    title: tk('people.reset_title', { name: person.name }),
-    body: `${t('reset.admin_desc')} ${t('reset.confirm_counts', { bots: c.bots || 0, chats: c.chats || 0, pictures: c.pictures || 0 })}`,
+    title: t('people.reset_title', { name: person.name }),
+    body: `${t('reset.admin_desc')} ${t('reset.confirm_counts', { bots: c.bots || 0, chats: c.chats || 0, pictures: c.pictures || 0, files: c.files || 0 })}`,
     tally: countsTally(c, { voices: false }),
     notes,
     okText: t('reset.confirm_button'),
@@ -245,7 +245,7 @@ async function resetProfile(ctx, person, showErr) {
   if (r !== 'ok') return;
   try {
     await profileCalls.reset(person.id, pv.token);
-    ctx.toast(tk('people.reset_done', { name: person.name }));
+    ctx.toast(t('people.reset_done', { name: person.name }));
     ctx.closeEditor();
     await ctx.reload();
   } catch (e) {
@@ -258,10 +258,10 @@ async function deleteProfile(ctx, person, showErr) {
   const pv = await countsOrError(ctx, () => ctx.api.deletePreview(person.id));
   if (!pv) return;
   const r = await askDialog({
-    title: tk('people.delete_title', { name: person.name }),
-    body: tk('people.delete_body', { name: person.name }),
+    title: t('people.delete_title', { name: person.name }),
+    body: t('people.delete_body', { name: person.name }),
     tally: countsTally(pv.counts),
-    okText: tk('people.delete_button'),
+    okText: t('people.delete_button'),
   });
   if (r !== 'ok') return;
   try {
@@ -298,14 +298,14 @@ function editorPanel(ctx, person) {
   const showErr = (m) => { err.textContent = m || ''; err.hidden = !m; };
 
   const pinField = field(t(creating ? 'people.pin_new' : 'people.pin_change'), pin, t('people.pin_hint'));
-  if (creating) pinField.querySelector('label').textContent = tk('people.pin_optional');
+  if (creating) pinField.querySelector('label').textContent = t('people.pin_optional');
   const pwField = field(t(creating ? 'people.password_new' : 'people.password_change'), password, t('people.password_hint'));
-  if (creating) pwField.querySelector('label').textContent = tk('people.password_optional');
+  if (creating) pwField.querySelector('label').textContent = t('people.password_optional');
   const noCred = el('p', { class: 'people-field-hint people-warn', role: 'note', hidden: '', text: t('people.no_credential_warning') });
   const syncRole = () => {
     const r = role.value;
     roleHint.textContent = r === 'user' && person && person.role === 'basic'
-      ? `${typeHint(r)} ${tk('people.upgrade_note')}` : typeHint(r);
+      ? `${typeHint(r)} ${t('people.upgrade_note')}` : typeHint(r);
     pwField.hidden = r !== 'admin' || limited;
     pinField.hidden = limited;
     const none = creating && r === 'admin' && !pin.value && !password.value;
@@ -359,7 +359,7 @@ function editorPanel(ctx, person) {
   const extra = [];
 
   if (!creating) {
-    const reset = el('button', { type: 'button', class: 'btn-secondary', text: tk('people.reset_button') });
+    const reset = el('button', { type: 'button', class: 'btn-secondary', text: t('people.reset_button') });
     reset.addEventListener('click', () => resetProfile(ctx, person, showErr));
     extra.push(reset);
     if (!limited) {
@@ -463,7 +463,7 @@ function editorPanel(ctx, person) {
   const root = el('div', { class: 'people-editor dev-group-body', id: 'people-editor', role: 'group', 'aria-label': title }, [
     el('div', { class: 'people-form' }, [
       el('h4', { class: 'people-editor-title', text: title }),
-      limited ? el('p', { class: 'people-field-hint', text: tk(mine ? 'people.self_note' : 'people.protected_note') }) : null,
+      limited ? el('p', { class: 'people-field-hint', text: t(mine ? 'people.self_note' : 'people.protected_note') }) : null,
       field(t('people.name'), name),
       field(t('people.type_label'), role), roleHint,
       field(t('people.avatar'), avatar, t('people.avatar_hint')),
@@ -514,7 +514,7 @@ function deviceGroup(ctx) {
       el('span', { class: 'people-row-actions' }, [forget]),
     ]));
   }
-  return group('people-devices', tk('people.devices_title'), tk('people.devices_intro'),
+  return group('people-devices', t('people.devices_title'), t('people.devices_intro'),
     el('div', { class: 'dev-group-body', id: 'people-devices-body' }, rows));
 }
 
@@ -703,7 +703,7 @@ export async function mountPeopleSettings(pane, deps) {
   const a = deps.api || realApi;
   const w5 = deps.w5 || realW5;
   const mine = ++seq;
-  const intro = el('p', { class: 'muted modal-hint', text: tk('people.page_hint') });
+  const intro = el('p', { class: 'muted modal-hint', text: t('people.page_hint') });
   pane.replaceChildren(intro, el('p', { class: 'muted modal-hint', text: t('common.loading') }));
   let data;
   let devices = null;
@@ -737,7 +737,7 @@ export async function mountPeopleSettings(pane, deps) {
   const machineHost = el('div', { class: 'people-machine-host' });
 
   const renderList = () => {
-    const g = group('people-people', t('people.title'), tk('people.page_intro'), listBody(ctx));
+    const g = group('people-people', t('people.title'), t('people.page_intro'), listBody(ctx));
     if (ctx.data.disclosure) {
       g.querySelector('.dev-group-hint').after(el('p', { class: 'dev-group-hint people-disclosure', text: ctx.data.disclosure }));
     }

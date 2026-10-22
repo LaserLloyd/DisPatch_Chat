@@ -58,12 +58,6 @@ const EXEMPT = [
        + 'profile picture, not a bot image); profiles have no full-resolution route',
   },
   {
-    match: "class: 'comp-avatar', src: url",
-    why: 'Companions is a Safe-Mode-only screen and /api/bots/<id>/avatar/full '
-       + 'is PIN-gated, so a full-res affordance there is a guaranteed 403 — '
-       + 'thumbnails-only is the Safe-Mode rule everywhere',
-  },
-  {
     match: 'const probe = new Image();',
     why: 'mood-face flash (feature 22): a throwaway preloader, never attached '
        + 'to the DOM and never shown — it only tests whether the mood-face URL '

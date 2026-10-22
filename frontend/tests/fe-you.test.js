@@ -43,10 +43,11 @@ async function setup(extra = {}) {
   calls = [];
   routes = {
     'GET /static/locales/en.json': () => [200, EN],
-    'GET /api/characters/personas': () => [200, PRESETS],
+    'GET /api/me/personas': () => [200, PRESETS],
+    'GET /api/extensions': () => [200, { extensions: [{ id: 'voice', entry: 'index.js' }] }],
     'GET /api/voice/profiles': () => [200, VOICES],
     'GET /api/voice/status': () => [404, { detail: 'Not Found' }],
-    'GET /api/connections': () => [403, { detail: 'no' }],
+    'GET /api/me/backends': () => [200, { may_choose: false, default: '', connections: [] }],
     ...extra,
   };
   globalThis.fetch = async (u, opts = {}) => {
@@ -104,9 +105,16 @@ test('voiceGroups splits the caller\'s clones from household voices; options hid
   const o = await editor.loadEditorOptions({ state: { auth: { permissions: ['create_characters'] } } });
   assert.equal(o.voices.mine.length, 1);
   assert.deepEqual(o.connections, []);              // no choose_backend: not even asked
-  assert.equal(posts(/\/api\/connections/).length, 0);
-  routes['GET /api/characters/personas'] = () => [403, { detail: 'no' }];
+  assert.equal(posts(/\/api\/me\/backends|\/api\/connections/).length, 0);
+  routes['GET /api/me/personas'] = () => [403, { detail: 'no' }];
   assert.deepEqual((await editor.loadEditorOptions()).presets, []);   // a 403 hides presets, never throws
+});
+
+test('without the voice add-on the editor never calls the voice routes (no 404 in the console)', { skip: dom.skip }, async () => {
+  const { editor } = await setup({ 'GET /api/extensions': () => [200, { extensions: [] }] });
+  const o = await editor.loadEditorOptions({ state: { auth: { permissions: ['create_characters'] } } });
+  assert.deepEqual(o.voices, { mine: [], household: [], builtin: [] });
+  assert.equal(posts(/\/api\/voice\//).length, 0);
 });
 
 // ------------------------------------------------------------------ the editor
@@ -156,12 +164,15 @@ test('editor: a picture chosen in the form is uploaded after the bot exists', { 
 });
 
 test('editor: a backend picker only appears when there is more than one connection', { skip: dom.skip }, async () => {
-  const { editor, win } = await setup({ 'GET /api/connections': () => [200, { connections: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }] });
+  const { editor, win } = await setup({ 'GET /api/me/backends': () => [200, { may_choose: true, default: 'b', connections: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }] });
   const host = win.document.createElement('div');
   editor.renderBotEditor(host, null, {});
   await tick();
   assert.ok(host.querySelector('#yo-conn'));
-  routes['GET /api/connections'] = () => [200, { connections: [{ id: 'a', name: 'A' }] }];
+  assert.equal(host.querySelector('#yo-conn').value, 'b', 'the household default is preselected');
+  assert.ok(calls.some((c) => c.key === 'GET /api/me/backends'), 'the profile-safe list, not /api/connections');
+  assert.ok(!calls.some((c) => c.key === 'GET /api/connections'));
+  routes['GET /api/me/backends'] = () => [200, { may_choose: true, default: '', connections: [{ id: 'a', name: 'A' }] }];
   const host2 = win.document.createElement('div');
   editor.renderBotEditor(host2, null, {});
   await tick();
@@ -283,7 +294,7 @@ test('copy: an agent bot the server refuses (422 not_copyable) shows the plain r
 
 // ------------------------------------------------------------------ Reset to default
 
-const PREVIEW = (bots) => ({ counts: { bots, chats: 5, pictures: 3, voices: 1 }, token: `tok-${bots}`,
+const PREVIEW = (bots) => ({ counts: { bots, chats: 5, pictures: 3, files: 4, voices: 1 }, token: `tok-${bots}`,
   expires_in: 300, keeps_voices: true, outcome: 'atlas' });
 
 test('Reset: preview names the counts, the POST carries the token, a stale 409 re-previews', { skip: dom.skip }, async () => {
@@ -304,7 +315,7 @@ test('Reset: preview names the counts, the POST carries the token, a stale 409 r
   const panel = host.querySelector('.ar-confirm');
   assert.equal(panel.hidden, false);
   assert.match(panel.textContent, /Reset Uma\?/);
-  assert.match(panel.textContent, /This deletes 2 bots, 5 chats and 3 pictures\. It can't be undone\./);
+  assert.match(panel.textContent, /This deletes 2 bots, 5 chats, 3 pictures and 4 File Server files\. It can't be undone\./);
   assert.match(panel.textContent, /fresh Atlas/);
   assert.match(panel.textContent, /Your cloned voices are kept\./);
   click(win, host.querySelector('#ar-confirm')); await tick(30);

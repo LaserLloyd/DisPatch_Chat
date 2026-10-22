@@ -169,7 +169,7 @@ def test_exactly_one_owner_and_unique_names(world):
 def test_updates_bump_the_epoch_only_when_they_must(world):
     p = accounts.create_profile("Max", "member", pin_hash="x")
     e0 = p.epoch
-    assert accounts.update_profile(p.id, avatar="a.png", budgets={"turns": 3}).epoch == e0
+    assert accounts.update_profile(p.id, avatar="a.png", grants=[]).epoch == e0
     assert accounts.update_profile(p.id, role="restricted").epoch == e0 + 1
     assert accounts.update_profile(p.id, disabled=True).epoch == e0 + 2
     assert accounts.update_profile(p.id, pin_hash="y").epoch == e0 + 3

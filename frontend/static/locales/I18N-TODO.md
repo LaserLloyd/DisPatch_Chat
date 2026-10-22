@@ -16,14 +16,10 @@ because a stale term next to the new UI is worse than an untranslated sentence. 
 (was Safe Mode / locked device / limited), **Owner** and **Admin** (was Unlocked / operator / full session),
 **Member**, **sign in** (was unlock).
 
-## de: German (208 new, 33 reworded)
+## de: German (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -38,8 +34,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -54,10 +48,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -110,28 +101,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -145,7 +114,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -160,18 +128,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -179,7 +135,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -188,15 +143,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -216,7 +165,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -255,14 +203,10 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## es: Spanish (208 new, 33 reworded)
+## es: Spanish (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -277,8 +221,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -293,10 +235,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -349,28 +288,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -384,7 +301,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -399,18 +315,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -418,7 +322,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -427,15 +330,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -455,7 +352,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -494,14 +390,10 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## fr: French (208 new, 33 reworded)
+## fr: French (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -516,8 +408,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -532,10 +422,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -588,28 +475,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -623,7 +488,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -638,18 +502,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -657,7 +509,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -666,15 +517,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -694,7 +539,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -733,14 +577,10 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## pt: Portuguese (208 new, 33 reworded)
+## pt: Portuguese (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -755,8 +595,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -771,10 +609,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -827,28 +662,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -862,7 +675,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -877,18 +689,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -896,7 +696,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -905,15 +704,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -933,7 +726,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -972,14 +764,10 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## zh: Chinese (208 new, 33 reworded)
+## zh: Chinese (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -994,8 +782,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -1010,10 +796,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -1066,28 +849,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -1101,7 +862,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -1116,18 +876,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -1135,7 +883,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -1144,15 +891,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -1172,7 +913,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -1211,14 +951,10 @@ New:
 - `people.machine_trust_on`
 - `people.machine_trust_off`
 
-## ar: Arabic (208 new, 33 reworded)
+## ar: Arabic (154 new, 27 reworded)
 
 Reworded:
-- `nav.unlock_title`
-- `nav.unlock_aria`
-- `nav.label_unlock`
 - `settings.hint`
-- `settings.show_hidden_desc`
 - `harness.sidebar_aria`
 - `harness.session_panel_body`
 - `mail.sidebar_aria`
@@ -1233,8 +969,6 @@ Reworded:
 - `lock.submit`
 - `lock.unlocked`
 - `lock.unlocked_remembered`
-- `lock.locked_toast`
-- `lock.auto_locked_toast`
 - `security.note`
 - `reactions.locked`
 - `reactions.safe_label`
@@ -1249,10 +983,7 @@ Reworded:
 - `persona.safe_note`
 
 New:
-- `role.owner`
 - `role.admin`
-- `role.member`
-- `role.restricted`
 - `signin.title`
 - `signin.switch_title`
 - `signin.sub`
@@ -1305,28 +1036,6 @@ New:
 - `chip.menu_aria`
 - `chip.switch`
 - `chip.lock`
-- `restricted.region`
-- `restricted.today`
-- `restricted.today_empty`
-- `restricted.week`
-- `restricted.week_empty`
-- `restricted.load_failed`
-- `restricted.of`
-- `restricted.use_minutes`
-- `restricted.use_turns`
-- `restricted.use_threads`
-- `restricted.use_feedback`
-- `restricted.use_upload_mb`
-- `notice.time_limit_title`
-- `notice.time_limit_body`
-- `notice.quiet_hours_title`
-- `notice.quiet_hours_body`
-- `notice.check_again`
-- `notice.switch`
-- `settings.audience_all`
-- `settings.audience_members`
-- `settings.audience_restricted`
-- `people.hint`
 - `people.title`
 - `people.empty`
 - `people.add`
@@ -1340,7 +1049,6 @@ New:
 - `people.new_title`
 - `people.edit_title`
 - `people.name`
-- `people.role`
 - `people.avatar`
 - `people.avatar_hint`
 - `people.pin_new`
@@ -1355,18 +1063,6 @@ New:
 - `people.pin_removed`
 - `people.password_save`
 - `people.password_saved`
-- `people.admin_owner_only`
-- `people.budgets`
-- `people.budgets_hint`
-- `people.minutes_per_day`
-- `people.quiet_hours`
-- `people.quiet_from`
-- `people.quiet_to`
-- `people.quiet_hint`
-- `people.turns_per_day`
-- `people.threads_per_day`
-- `people.feedback_per_day`
-- `people.upload_mb`
 - `people.session_minutes`
 - `people.session_hint`
 - `people.disabled_label`
@@ -1374,7 +1070,6 @@ New:
 - `people.created`
 - `people.saved`
 - `people.delete`
-- `people.delete_confirm`
 - `people.deleted`
 - `people.sign_out_everywhere`
 - `people.signed_out`
@@ -1383,15 +1078,9 @@ New:
 - `people.err_min_8`
 - `people.err_pin_short`
 - `people.err_password_short`
-- `people.err_range_1_1440`
-- `people.err_range_0_100000`
-- `people.err_both_times`
-- `people.err_same_times`
 - `people.err_range_1_43200`
 - `people.err_denied`
 - `people.load_failed`
-- `people.device_title`
-- `people.device_intro`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
@@ -1411,7 +1100,6 @@ New:
 - `people.col_thread`
 - `people.col_upload`
 - `people.col_feedback`
-- `people.col_limit_hit`
 - `people.col_total`
 - `people.audit_title`
 - `people.audit_empty`
@@ -1472,17 +1160,6 @@ storage, image retention and chat archiving). English (`en`) is the source. Per 
 other locales carry the SAME English text (no `[xx] ` prefix), so `check-locales.py` reports them only as
 "identical to English" warnings. WP-LOC (wave 3b) translates them; delete this section when it has.
 
-- `profiles.title`
-- `profiles.switch`
-- `profiles.switch_aria`
-- `profiles.pick_title`
-- `profiles.pick_sub`
-- `profiles.enter_pin`
-- `profiles.enter_password`
-- `profiles.no_credential`
-- `profiles.signed_in_as`
-- `profiles.back_to`
-- `profiles.default_badge`
 - `profiles.shared_badge`
 - `profiles.rail_mine`
 - `profiles.rail_household`
@@ -1503,7 +1180,6 @@ other locales carry the SAME English text (no `[xx] ` prefix), so `check-locales
 - `reset.confirm_button`
 - `reset.stale`
 - `reset.done`
-- `reset.admin_title`
 - `reset.admin_desc`
 - `reset.my_data`
 - `reset.export`
@@ -1552,10 +1228,7 @@ other locales carry the SAME English text (no `[xx] ` prefix), so `check-locales
 - `aibuild.failed`
 - `aibuild.retry`
 - `perms.title`
-- `perms.on`
-- `perms.off`
 - `perms.locked`
-- `perms.never`
 - `perms.reset_defaults`
 - `perms.agents_warning`
 - `perms.lock_target_fence`
@@ -1584,7 +1257,6 @@ other locales carry the SAME English text (no `[xx] ` prefix), so `check-locales
 - `lock.target_list`
 - `lock.target_hint`
 - `lock.landed`
-- `copybot.title`
 - `copybot.to_profile`
 - `copybot.pick_profile`
 - `copybot.admin_note`
@@ -1666,3 +1338,238 @@ The meaning changed (chats are private to each profile in 4.0), so the old trans
 just stale: replaced by the English text, as for the Foundation keys above. WP-LOC translates them.
 
 - `host_notice.card_chats`
+
+## 4.0 chat-first profiles (INT-2): new keys, English in all 8 locales
+
+Added at the wave-2 integration for WP-FE-PEOPLE (People list and editor, permissions, household bots,
+backends, the lock-target picker, the Characters roster), WP-FE-YOU (My bots, the bot editor, AI build) and
+WP-FE-CORE (the wizard's People step), plus the File Server count every delete/reset confirmation now names.
+The packages had shipped English fallbacks in code (`people-perms.js` EN table, `bot-editor.js` `tr()`);
+those are gone, so these keys are the only source of the text. English (`en`) is the source; the other
+seven locales carry the SAME English. WP-LOC translates them.
+
+- `aibuild.not_allowed`
+- `aibuild.unavailable`
+- `chars.copy_button`
+- `chars.hidden`
+- `chars.hidden_hint`
+- `chars.hidden_saved`
+- `chars.remove_body`
+- `chars.remove_button`
+- `chars.remove_hide`
+- `chars.remove_title`
+- `chars.removed`
+- `editor.emoji_long`
+- `editor.name_long`
+- `editor.voice_builtin`
+- `mybots.chats_count`
+- `people.counts_failed`
+- `people.delete_body`
+- `people.delete_button`
+- `people.delete_title`
+- `people.devices_intro`
+- `people.devices_title`
+- `people.dialog_cancel`
+- `people.downgrade_button`
+- `people.downgrade_kept`
+- `people.lock_confirm`
+- `people.lock_default_none`
+- `people.lock_default_pick`
+- `people.lock_none`
+- `people.lock_saved`
+- `people.page_hint`
+- `people.page_intro`
+- `people.password_optional`
+- `people.pin_optional`
+- `people.protected_note`
+- `people.reset_button`
+- `people.reset_done`
+- `people.reset_outcome_atlas`
+- `people.reset_outcome_household`
+- `people.reset_title`
+- `people.self_note`
+- `people.tally_bots`
+- `people.tally_chats`
+- `people.tally_files`
+- `people.tally_pictures`
+- `people.tally_voices`
+- `people.upgrade_note`
+- `people.you_tag`
+- `perms.admin_all`
+- `perms.agents_confirm`
+- `perms.agents_confirm_ok`
+- `perms.backends_hint`
+- `perms.backends_none`
+- `perms.backends_only`
+- `perms.backends_save`
+- `perms.backends_saved`
+- `perms.changed`
+- `perms.household_agent`
+- `perms.household_basic_hint`
+- `perms.household_empty`
+- `perms.household_hidden`
+- `perms.household_save`
+- `perms.household_saved`
+- `perms.household_user_hint`
+- `perms.saved`
+- `wiz.family_add_basic`
+- `wiz.family_add_user`
+
+## 4.0 chat-first profiles (INT-2): reworded keys, English in all 8 locales
+
+The English changed for 4.0 and the old translations were replaced by it (WP-FE-CORE's setup/wizard/lock
+wording for Admin/User/Basic and the default profile; INT-2's `{files}` placeholder in the two counts
+sentences; the Account privacy text, which said chats were not private and belonged to a character).
+WP-LOC translates them.
+
+- `host_notice.chats_body`
+- `host_notice.files_body`
+- `lock.unlock_sub`
+- `password.prompt_body`
+- `people.downgrade_confirm`
+- `reset.confirm_counts`
+- `settings.hint`
+- `setup.card_body`
+- `setup.create`
+- `setup.default_name`
+- `setup.done`
+- `setup.name`
+- `setup.settings_hint`
+- `setup.sub`
+- `setup.sub_remote`
+- `wiz.family_intro`
+- `wiz.owner_done`
+- `wiz.owner_intro`
+- `wiz.owner_pin_hint`
+- `wiz.step_family`
+
+## 4.0 chat-first profiles (INT-2): deleted keys (record only, nothing to translate)
+
+Removed from all 8 locales with the screens that used them (the Restricted tier, budgets and quiet hours,
+the "who can see it" select, device binding, the drop sheet, Companions, agent per-profile budgets) or
+because no code used them after wave 2. WP-FE-CORE removed 69; INT-2 removed 55.
+
+- `agents.profile_limits`
+- `agents.profile_limits_hint`
+- `agents.save_limits_for`
+- `chars.audience`
+- `chars.audience_all`
+- `chars.audience_hint`
+- `chars.audience_members`
+- `chars.audience_restricted`
+- `chars.visibility`
+- `chars.visibility_hint`
+- `chars.visibility_none`
+- `chars.who_aria`
+- `chars.who_confirm`
+- `chars.who_confirm_ok`
+- `chars.who_everyone`
+- `chars.who_hidden`
+- `chars.who_members`
+- `chars.who_profiles.one`
+- `chars.who_profiles.other`
+- `chars.who_profiles_title`
+- `chars.who_restricted`
+- `chars.who_saved`
+- `chars.who_title`
+- `cmdk.action_send_file`
+- `companions.empty`
+- `companions.more`
+- `companions.reacts`
+- `companions.title`
+- `copybot.title`
+- `drop.choose`
+- `drop.empty`
+- `drop.failed`
+- `drop.hint`
+- `drop.sending`
+- `drop.sending_short`
+- `drop.sent`
+- `drop.sent_no_thread`
+- `drop.title`
+- `drop.waiting`
+- `lock.auto_locked_toast`
+- `lock.locked_toast`
+- `nav.drop_aria`
+- `nav.drop_title`
+- `nav.label_send_file`
+- `nav.label_unlock`
+- `nav.unlock_aria`
+- `nav.unlock_title`
+- `notice.check_again`
+- `notice.quiet_hours_body`
+- `notice.quiet_hours_title`
+- `notice.switch`
+- `notice.time_limit_body`
+- `notice.time_limit_title`
+- `people.admin_needs_password`
+- `people.admin_owner_only`
+- `people.budgets`
+- `people.budgets_hint`
+- `people.col_limit_hit`
+- `people.delete_confirm`
+- `people.device_intro`
+- `people.device_title`
+- `people.err_both_times`
+- `people.err_password_required`
+- `people.err_range_0_100000`
+- `people.err_range_1_1440`
+- `people.err_same_times`
+- `people.feedback_per_day`
+- `people.hint`
+- `people.intro`
+- `people.limits_hint`
+- `people.limits_title`
+- `people.minutes_per_day`
+- `people.quiet_from`
+- `people.quiet_hint`
+- `people.quiet_hours`
+- `people.quiet_to`
+- `people.role`
+- `people.threads_per_day`
+- `people.turns_per_day`
+- `people.upload_mb`
+- `perms.never`
+- `perms.off`
+- `perms.on`
+- `profiles.back_to`
+- `profiles.default_badge`
+- `profiles.enter_password`
+- `profiles.enter_pin`
+- `profiles.no_credential`
+- `profiles.pick_sub`
+- `profiles.pick_title`
+- `profiles.signed_in_as`
+- `profiles.switch`
+- `profiles.switch_aria`
+- `profiles.title`
+- `reset.admin_title`
+- `restricted.banner`
+- `restricted.load_failed`
+- `restricted.of`
+- `restricted.panel_chats`
+- `restricted.panel_title`
+- `restricted.summary_title`
+- `restricted.today`
+- `restricted.today_empty`
+- `restricted.use_feedback`
+- `restricted.use_minutes`
+- `restricted.use_threads`
+- `restricted.use_turns`
+- `restricted.use_upload_mb`
+- `restricted.week`
+- `restricted.week_empty`
+- `role.member`
+- `role.owner`
+- `role.restricted`
+- `settings.audience_all`
+- `settings.audience_members`
+- `settings.audience_restricted`
+- `settings.show_hidden`
+- `settings.show_hidden_desc`
+- `tasks.assign_budget`
+- `toast.not_available`
+- `wiz.family_add_child`
+- `wiz.family_add_member`
+- `wiz.family_animals`
+- `wiz.family_assistants`

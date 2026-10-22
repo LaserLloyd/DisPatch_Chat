@@ -11,6 +11,9 @@ Yours (the signed-in profile)
 * ``GET/POST /api/me/characters``, ``GET/PATCH/DELETE /api/me/characters/{bot_id}``,
   ``POST /api/me/characters/{bot_id}/avatar``: your own bots (never anyone else's: 404)
 * ``GET  /api/me/export``: your chats and your bots' setup, as JSON
+* ``GET  /api/me/personas``: the personality presets the bot editor offers
+* ``GET  /api/me/backends``: the household connections YOUR bots may run on (ids, names and
+  model names only - never a key or a URL); empty without ``choose_backend``
 
 Copies
 ------
@@ -244,6 +247,38 @@ async def _do_reset(request: Request, pid: str, token: str) -> dict:
 # --------------------------------------------------------------------------- #
 # My bots
 # --------------------------------------------------------------------------- #
+
+
+@router.get("/api/me/personas", dependencies=[_CREATE])
+async def my_personas(request: Request):
+    """The personality presets, for the owner's bot editor (the Admin manager reads the same
+    list at ``/api/characters/personas``). Preset texts are shipped content, not anyone's data."""
+    from . import personas
+    return personas.public()
+
+
+@router.get("/api/me/backends", dependencies=[_CREATE])
+async def my_backends(request: Request):
+    """The connections the caller's own bots may use: chat-capable household connections
+    within the profile's ``backends.allowed``. No key, no base URL, no usage - those stay
+    with the Admin's Connections page. A profile without ``choose_backend`` gets an empty
+    list (its bots run on the household default)."""
+    from . import accounts, backends_policy, connections
+    pid = _my_id(request)
+    prof = await asyncio.to_thread(accounts.get_profile, pid)
+    if prof is None:
+        raise fail(404, "profile_not_found", "No such profile.")
+    may_choose = Permission.CHOOSE_BACKEND.value in policy.effective_permissions(prof)
+    rows: list[dict[str, Any]] = []
+    default = ""
+    if may_choose:
+        for c in await asyncio.to_thread(connections.list_all):
+            if "chat" not in c.capabilities or not backends_policy.permits(prof, c.id):
+                continue
+            rows.append({"id": c.id, "name": c.name, "type": c.type, "type_label": c.ctype.label,
+                         "default_model": c.default_model, "models": list(c.models)})
+        default = await asyncio.to_thread(backends_policy.resolve_connection, prof, None)
+    return {"may_choose": may_choose, "default": default, "connections": rows}
 
 
 @router.get("/api/me/characters", dependencies=[_CREATE])

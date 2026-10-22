@@ -117,13 +117,10 @@ def test_settings_default_and_roundtrip(db):
     assert store.get_setting("agents.unified_dispatch") is False
     store.set_setting("agents.retention_days", 7)
     assert store.get_setting("agents.retention_days") == 7
-    store.set_profile_budget("p1", {"usd_per_day": 2.5})
-    assert store.profile_budget("p1") == {"usd_per_day": 2.5}
-    assert store.profile_budget("p2") == {}
-    assert store.all_profile_budgets() == {"p1": {"usd_per_day": 2.5}}
+    # A 3.x per-profile budget row left in an old database is never surfaced as a setting.
+    store.set_setting("profile_budget:p1", {"usd_per_day": 2.5})
     assert "profile_budget:p1" not in store.all_settings()
-    store.set_profile_budget("p1", None)
-    assert store.all_profile_budgets() == {}
+    assert not hasattr(store, "profile_budget") and not hasattr(store, "all_profile_budgets")
 
 
 def test_a_batch_is_all_or_nothing(db):

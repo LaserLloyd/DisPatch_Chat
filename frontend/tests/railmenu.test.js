@@ -46,11 +46,11 @@ async function boot() {
 const R = () => import(`../static/js/railmenu.js?t=${Math.random()}`);
 const ids = (host) => [...host.children].map((n) => n.id).filter(Boolean);
 
-test('default: profile chip, Tasks, File Server and theme in the popup; lock and Settings on the bar', async () => {
+test('default: Tasks, File Server and theme in the popup; the profile switch, lock and Settings on the bar', async () => {
   const M = await R();
   assert.deepEqual(M.defaultLayout(), {
-    rail: ['lock-now', 'manage-bots'],
-    menu: ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle'],
+    rail: ['profile-chip', 'lock-now', 'manage-bots'],
+    menu: ['tasks-btn', 'fs-chip', 'theme-toggle'],
   });
   for (const id of M.RAIL_ITEMS) assert.ok(HTML.includes(`id="${id}"`), `${id} is a real rail button`);
 });
@@ -59,7 +59,9 @@ test('moving in, out and along both lists; normalize repairs junk and keeps new 
   const M = await R();
   let l = M.defaultLayout();
   l = M.moveItem(l, 'manage-bots', 'menu', 'tasks-btn');
-  assert.deepEqual(l.menu, ['profile-chip', 'manage-bots', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(l.menu, ['manage-bots', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  l = M.moveItem(l, 'profile-chip', 'menu', 'tasks-btn');
+  assert.deepEqual(l.menu, ['manage-bots', 'profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   l = M.moveItem(l, 'profile-chip', 'rail', 'lock-now');
   assert.deepEqual(l.rail, ['profile-chip', 'lock-now']);
   l = M.moveItem(l, 'tasks-btn', 'rail', null);
@@ -68,8 +70,8 @@ test('moving in, out and along both lists; normalize repairs junk and keeps new 
   assert.deepEqual(l.rail.slice(-2), ['tasks-btn', 'lock-now']);
   assert.deepEqual(M.nudgeItem(l, 'profile-chip', -1), l, 'the first one cannot move up');
   const n = M.normalizeLayout({ rail: ['manage-bots', 'nope', 'manage-bots', 7], menu: ['lock-now'] });
-  assert.deepEqual(n.rail, ['manage-bots']);
-  assert.deepEqual(n.menu, ['lock-now', 'profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(n.rail, ['manage-bots', 'profile-chip']);
+  assert.deepEqual(n.menu, ['lock-now', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   assert.deepEqual(M.normalizeLayout('garbage'), M.defaultLayout());
 });
 
@@ -94,8 +96,8 @@ test('applyLayout moves the real buttons; hidden ones stay hidden; pins stay bef
   rail.insertBefore(pin, doc.getElementById('manage-bots'));
   const tasks = doc.getElementById('tasks-btn');
   const shown = M.applyLayout(M.defaultLayout(), { rail, menu });
-  assert.deepEqual(ids(menu), ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
-  assert.deepEqual(ids(rail), ['lock-now', 'pin-x', 'manage-bots']);
+  assert.deepEqual(ids(menu), ['tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(ids(rail), ['profile-chip', 'lock-now', 'pin-x', 'manage-bots']);
   assert.equal(doc.getElementById('tasks-btn'), tasks, 'the same element, handlers and all');
   assert.equal(tasks.getAttribute('role'), 'menuitem');
   assert.ok(tasks.classList.contains('hidden'), 'its own visibility rule still applies');
@@ -147,9 +149,9 @@ test('drag: rail -> popup button -> into the popup; popup row -> bar; reorder in
   assert.deepEqual(ids(rail).slice(-2), ['fs-chip', 'manage-bots']);
   assert.ok(!ids(menu).includes('fs-chip'));
 
-  const chip = doc.getElementById('profile-chip');
+  const first = doc.getElementById('tasks-btn');
   drag(win, doc.getElementById('lock-now'), 'dragstart');
-  drag(win, chip, 'drop', { y: -100 });
+  drag(win, first, 'drop', { y: -100 });
   assert.equal(ids(menu)[0], 'lock-now', 'reordered inside the popup');
   // A text/bot drag that did not start on a rail button does nothing.
   assert.equal(drag(win, gear, 'dragover').defaultPrevented, false);

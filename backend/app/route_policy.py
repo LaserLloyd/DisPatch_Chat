@@ -84,7 +84,6 @@ _r("GET", "/api/people/devices", _R(P.MANAGE_USERS))
 _r("DELETE", "/api/people/devices/{device_id}", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/activity", _R(P.VIEW_ACTIVITY))
 _r("GET", "/api/people/audit", _R(P.VIEW_ACTIVITY))
-_r("GET", "/api/me/activity", _R(P.USE_CHAT, note="a profile's own activity summary"))
 
 # Web Push
 _r(("POST", "DELETE"), "/api/push/subscribe", _R(P.USE_NOTIFICATIONS))
@@ -104,7 +103,6 @@ _r("GET", "/api/unread", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
 _r("POST", "/api/messages/{message_id}/feedback", _R(P.USE_CHAT, note="a message in the caller's own chat"))
 _r("GET", "/api/messages/{message_id}/mood-face", _R(P.USE_CHAT, scoped=True))
 _r("POST", "/api/upload", _R(P.ATTACH_FILES, machine=[M.UPLOAD], note="a chat attachment; a machine has a 200 MB/day byte guard"))
-_r("POST", "/api/drop", _R(P.FILES_UPLOAD, note="a one-way File Server drop, owned by the dropper"))
 _r("GET", "/api/threads/{thread_id}/avatar", _R(P.USE_CHAT, scoped=True))
 _r("GET", "/api/bots/{bot_id}/avatar", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
 _r("GET", "/api/bots/{bot_id}/avatar/thumb", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
@@ -224,10 +222,9 @@ for _methods, _path in (
     ("DELETE", "/api/agents/credentials/claude"), ("GET", "/api/agents/secrets"),
     ("PUT", "/api/agents/secrets/{name}"), ("DELETE", "/api/agents/secrets/{name}"),
     ("GET", "/api/agents/settings"), ("PUT", "/api/agents/settings"),
-    ("GET", "/api/agents/profile-budgets"), ("PUT", "/api/agents/profile-budgets/{profile_id}"),
     ("GET", "/api/agents/usage"), ("POST", "/api/agents/retention/purge"),
 ):
-    _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, budgets, retention (write-only secrets)"))
+    _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, agent budgets, retention (write-only secrets)"))
 _r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Owner/Admin sees all)"))
 for _methods, _path in (
     ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task_id}"),
@@ -324,6 +321,8 @@ _r(("GET", "POST"), "/api/me/characters", _R(P.CREATE_CHARACTERS, note="the call
 _r(("GET", "PATCH", "DELETE"), "/api/me/characters/{bot_id}", _R(P.CREATE_CHARACTERS, note="the caller's own bot; anyone else's is 404"))
 _r(("POST",), "/api/me/characters/{bot_id}/avatar", _R(P.CREATE_CHARACTERS, note="the caller's own bot"))
 _r(("GET",), "/api/me/export", _R(P.MANAGE_HISTORY, note="the caller's own chats and bot setup"))
+_r(("GET",), "/api/me/personas", _R(P.CREATE_CHARACTERS, note="the personality presets (shipped content) for the owner's bot editor"))
+_r(("GET",), "/api/me/backends", _R(P.CREATE_CHARACTERS, note="ids and names of the connections the caller's own bots may use; never a key or URL; empty without choose_backend"))
 _r(("POST",), "/api/characters/{bot_id}/clone", _R(P.CREATE_CHARACTERS, note="a household bot into the caller's own profile; agent bots refused"))
 _r(("POST",), "/api/characters/{bot_id}/clone-to/{profile_id}", _R(P.MANAGE_USERS, note="an Admin copies setup into a profile; chats are never copied"))
 _r(("POST",), "/api/people/{profile_id}/reset", _R(P.MANAGE_USERS, note="counts only; the protected Admin only by itself"))
@@ -428,7 +427,6 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/reactions/{rid}": "none: the household reaction library (manage_characters)",
     "/api/reactions/{rid}/image": "none: a household reaction card (every signed-in role)",
     "/api/agents/{agent_id}": "none: an agent definition is household configuration (manage_agents)",
-    "/api/agents/profile-budgets/{profile_id}": _NONE_ADMIN,
     "/api/agents/secrets/{name}": "none: write-only household secret (manage_agents)",
     "/api/people/{profile_id}": _NONE_ADMIN,
     "/api/people/{profile_id}/pin": _NONE_ADMIN,
@@ -482,7 +480,6 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/export": "thread",
     "/api/inject": "thread",
     "/api/daily": "none: the Owner's daily thread (a machine's sphere)",
-    "/api/drop": "thread",
     "/api/reactions/fire": "thread",
     "/api/image-jobs": "thread",
     "/api/recover/transcript": "thread",

@@ -135,7 +135,8 @@
       "message": "Only agents may fire reactions",
       "patterns": [
         "Only agents may fire reactions",
-        "Only agents may call this."
+        "Only agents may call this.",
+        "Only the image server calls this"
       ],
       "status": 403
     },
@@ -474,16 +475,6 @@
       "status": 409
     },
     {
-      "code": "budgets_invalid",
-      "docs": "budgets_invalid",
-      "fix": "Use whole numbers in range; quiet hours look like 20:30-07:00.",
-      "message": "A budget value is invalid.",
-      "patterns": [
-        "A budget value is invalid."
-      ],
-      "status": 400
-    },
-    {
       "code": "captioner_unavailable",
       "docs": "captioner_unavailable",
       "fix": "The captioning model is busy. DisPatch retries.",
@@ -731,22 +722,12 @@
       "status": 403
     },
     {
-      "code": "daily_limit",
-      "docs": "daily_limit",
-      "fix": "This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.",
-      "message": "Daily limit reached on this device",
-      "patterns": [
-        "Daily limit reached on this device"
-      ],
-      "status": 429
-    },
-    {
       "code": "daily_upload_limit",
       "docs": "daily_upload_limit",
-      "fix": "Today's upload allowance is used. It resets at local midnight; the Owner can raise it.",
-      "message": "Daily upload limit reached — try again tomorrow or unlock",
+      "fix": "Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.",
+      "message": "Daily machine upload limit reached — try again tomorrow",
       "patterns": [
-        "Daily upload limit reached — try again tomorrow or unlock"
+        "Daily machine upload limit reached — try again tomorrow"
       ],
       "status": 429
     },
@@ -796,16 +777,6 @@
       "fix": "Fetch the delete preview again and confirm with its new token.",
       "message": "What would be deleted has changed. Look at the numbers again before confirming.",
       "patterns": [],
-      "status": 409
-    },
-    {
-      "code": "device_bind_role",
-      "docs": "device_bind_role",
-      "fix": "Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.",
-      "message": "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.",
-      "patterns": [
-        "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential."
-      ],
       "status": 409
     },
     {
@@ -1081,6 +1052,26 @@
         "Image dimensions too large (max 64 megapixels)"
       ],
       "status": 400
+    },
+    {
+      "code": "image_minor_sexual",
+      "docs": "image_minor_sexual",
+      "fix": "Describe adult characters only. This rule cannot be switched off.",
+      "message": "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.",
+      "patterns": [
+        "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters."
+      ],
+      "status": 422
+    },
+    {
+      "code": "image_real_person_sexual",
+      "docs": "image_real_person_sexual",
+      "fix": "Remove the real person's name or likeness, or describe an original character. This rule cannot be switched off.",
+      "message": "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead.",
+      "patterns": [
+        "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead."
+      ],
+      "status": 422
     },
     {
       "code": "image_request_failed",
@@ -1736,7 +1727,7 @@
     {
       "code": "permissions_invalid",
       "docs": "permissions_invalid",
-      "fix": "Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.",
+      "fix": "Use the permission names from docs/contracts/permissions.json; a profile can only be granted what its type allows (contracts.permissions ROLE_GRANTABLE).",
       "message": "A permission is invalid.",
       "patterns": [
         "A permission is invalid."
@@ -1934,7 +1925,7 @@
     {
       "code": "profile_role_invalid",
       "docs": "profile_role_invalid",
-      "fix": "Use owner, admin, member or restricted.",
+      "fix": "Use admin, user or basic (the 3.x words owner, member and restricted are still accepted as input).",
       "message": "Unknown role {}.",
       "patterns": [
         "Unknown role {}."
@@ -1982,16 +1973,6 @@
       "status": 422
     },
     {
-      "code": "quiet_hours",
-      "docs": "quiet_hours",
-      "fix": "This profile is not available at this time of day. Ask the Owner to change quiet hours.",
-      "message": "This profile is not available right now.",
-      "patterns": [
-        "This profile is not available right now."
-      ],
-      "status": 403
-    },
-    {
       "code": "rate_limited",
       "docs": "rate_limited",
       "fix": "Slow down and retry after a moment.",
@@ -2033,7 +2014,8 @@
       "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
       "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
       "patterns": [
-        "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked."
+        "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+        "Notifications need a signed-in, remembered device."
       ],
       "status": 403
     },
@@ -2082,16 +2064,6 @@
       "message": "This endpoint has no access policy.",
       "patterns": [
         "This endpoint has no access policy."
-      ],
-      "status": 403
-    },
-    {
-      "code": "safe_mode",
-      "docs": "safe_mode",
-      "fix": "Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
-      "message": "Unlock for full access",
-      "patterns": [
-        "Unlock for full access"
       ],
       "status": 403
     },
@@ -2156,7 +2128,8 @@
       "fix": "Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).",
       "message": "Sign in to continue.",
       "patterns": [
-        "Sign in to continue."
+        "Sign in to continue.",
+        "Sign in first: forgetting devices keeps this session."
       ],
       "status": 401
     },
@@ -2206,16 +2179,6 @@
       "message": "The task cannot do that in its current state.",
       "patterns": [
         "The task cannot do that in its current state."
-      ],
-      "status": 409
-    },
-    {
-      "code": "task_thread_not_allowed",
-      "docs": "task_thread_not_allowed",
-      "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
-      "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
-      "patterns": [
-        "Tasks cannot be assigned from a chat that Restricted profiles can read."
       ],
       "status": 409
     },
@@ -2291,16 +2254,6 @@
         "Could not update the thread"
       ],
       "status": 500
-    },
-    {
-      "code": "time_limit",
-      "docs": "time_limit",
-      "fix": "This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.",
-      "message": "Today's time for this profile is used up.",
-      "patterns": [
-        "Today's time for this profile is used up."
-      ],
-      "status": 403
     },
     {
       "code": "title_required",
