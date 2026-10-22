@@ -21,8 +21,8 @@ const EN = JSON.parse(read('locales/en.json'));
 const get = (o, k) => k.split('.').reduce((a, p) => (a == null ? a : a[p]), o);
 
 test('seven sections in two groups (plus Voice), in nav order', () => {
-  assert.deepEqual(SECTION_IDS, ['appearance', 'account', 'voice', 'characters', 'connections', 'people', 'plugins', 'system']);
-  assert.deepEqual(SECTIONS.filter((s) => s.group === 'you').map((s) => s.id), ['appearance', 'account', 'voice']);
+  assert.deepEqual(SECTION_IDS, ['appearance', 'account', 'mybots', 'voice', 'characters', 'connections', 'people', 'plugins', 'system']);
+  assert.deepEqual(SECTIONS.filter((s) => s.group === 'you').map((s) => s.id), ['appearance', 'account', 'mybots', 'voice']);
   assert.deepEqual(SECTIONS.filter((s) => s.group === 'household').map((s) => s.id),
     ['characters', 'connections', 'people', 'plugins', 'system']);
   for (const s of SECTIONS) assert.ok(get(EN, s.label), `${s.id}: ${s.label} is in en.json`);
@@ -85,7 +85,7 @@ test('every static search row names a section, an anchor that exists in the mark
   const anchors = new Set([...HTML.matchAll(/data-anchor="([^"]+)"/g)].map((m) => m[1]));
   // Anchors set by modules at mount time.
   for (const a of ['people', 'device', 'machine', 'activity', 'signin-rules', 'restricted-limits', 'addons', 'tools', 'lookups',
-    'discover', 'hidden-bots']) anchors.add(a);
+    'discover', 'hidden-bots', 'reset', 'mydata']) anchors.add(a);
   for (const r of STATIC_ROWS) if (r.anchor) assert.ok(anchors.has(r.anchor), `anchor ${r.anchor}`);
 });
 

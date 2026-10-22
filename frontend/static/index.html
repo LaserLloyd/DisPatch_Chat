@@ -735,6 +735,8 @@
             <h3 class="snav-heading" id="snav-h-you" data-i18n="settings.group_you">You</h3>
             <button class="settings-tab" id="stab-appearance" role="tab" data-tab="appearance" aria-selected="false" aria-controls="spane-appearance" tabindex="0"><span class="stab-glyph" data-icon="palette" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_appearance">Appearance</span><span class="stab-summary" id="ssum-appearance"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
             <button class="settings-tab" id="stab-account" role="tab" data-tab="account" aria-selected="false" aria-controls="spane-account" tabindex="-1"><span class="stab-glyph" data-icon="user" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_account">Account</span><span class="stab-summary" id="ssum-account"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
+            <!-- My bots (4.0): a profile's own bots; shown to whoever holds create_characters (main.js). -->
+            <button class="settings-tab hidden" id="stab-mybots" role="tab" data-tab="mybots" aria-selected="false" aria-controls="spane-mybots" tabindex="-1"><span class="stab-glyph" data-icon="bots" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="mybots.title">My bots</span><span class="stab-summary" id="ssum-mybots" data-i18n="mybots.sum">Bots only you can see</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
             <!-- Voice: an add-on. Shown to the Owner and Admins always (the absent page
                  says how to add it) and to anyone with use_voice once it is mounted. -->
             <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph stab-glyph-mic" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_voice">Voice</span><span class="stab-summary" id="ssum-voice" data-i18n="settings.sum_voice">Voice chat and voices</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
@@ -880,6 +882,9 @@
           <div class="dev-group-body" id="dev-body-about"></div>
         </section>
       </section>
+
+      <!-- ===== You: My bots (filled by js/my-bots.js through SECTION_HOOKS) ===== -->
+      <section class="settings-pane hidden" id="spane-mybots" role="tabpanel" aria-labelledby="stab-mybots" tabindex="0"></section>
 
       <!-- ===== You: Voice. The voice chat add-on renders its own settings into
            #ext-pane-voice once mounted (js/ext-sdk.js settings.pane); until then

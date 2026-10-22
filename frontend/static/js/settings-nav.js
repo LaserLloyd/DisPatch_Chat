@@ -23,6 +23,7 @@ import { renderPeoplePerms } from './people-perms.js?v=1';
 export const SECTIONS = [
   { id: 'appearance', group: 'you', icon: 'palette', label: 'settings.sec_appearance', perm: null },
   { id: 'account', group: 'you', icon: 'user', label: 'settings.sec_account', perm: null },
+  { id: 'mybots', group: 'you', icon: 'bots', label: 'mybots.title', perm: 'create_characters' },
   { id: 'voice', group: 'you', icon: 'mic', label: 'settings.sec_voice', perm: 'voice' },
   { id: 'characters', group: 'household', icon: 'bots', label: 'settings.sec_characters', perm: 'admin' },
   { id: 'connections', group: 'household', icon: 'plug', label: 'settings.sec_connections', perm: 'admin' },
@@ -110,6 +111,9 @@ export const STATIC_ROWS = [
   { section: 'account', anchor: 'pictures', label: 'settings.dev_pictures', terms: 'no-image nim privacy mode hide pictures' },
   { section: 'account', anchor: 'recovery', label: 'settings.recovery', terms: 'export restore backup messages' },
   { section: 'account', anchor: 'about', label: 'about.title', terms: 'version source licence' },
+  { section: 'account', anchor: 'reset', label: 'reset.title', terms: 'reset default wipe delete bots chats start over' },
+  { section: 'account', anchor: 'mydata', label: 'reset.my_data', terms: 'export download chats backup' },
+  { section: 'mybots', anchor: '', label: 'mybots.title', terms: 'my bots characters create build ai copy personality voice' },
   { section: 'voice', anchor: '', label: 'settings.sec_voice', terms: 'speech microphone talk tts stt' },
   { section: 'characters', anchor: 'roster', label: 'settings.sec_characters', terms: 'bots order rename avatar photo remove add', perm: 'admin' },
   { section: 'characters', anchor: 'add', label: 'chars.add', terms: 'new starter pack', perm: 'admin' },

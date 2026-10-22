@@ -24,7 +24,7 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
 // ---------------------------------------------------------------- section order (3.2)
 
-const SECTION_ORDER = ['appearance', 'account', 'voice', 'characters', 'connections', 'people', 'plugins', 'system'];
+const SECTION_ORDER = ['appearance', 'account', 'mybots', 'voice', 'characters', 'connections', 'people', 'plugins', 'system'];
 
 test('the nav reads Appearance, Account, Voice, then Characters, AI & Connections, People & Access, Plugins & Apps, System', () => {
   const tabs = [...HTML.matchAll(/<button class="settings-tab[^"]*" id="stab-([a-z]+)"/g)].map((m) => m[1]);
