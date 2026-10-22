@@ -228,8 +228,8 @@ def test_a_locked_tab_is_refused(env):
     r = locked.post("/api/image-jobs",
                     json={"bot_id": "main", "thread_id": tid, "prompt": "x"},
                     headers=BROWSER)
-    assert r.status_code == 403
-    assert r.json()["detail"] == "Unlock for full access"
+    assert r.status_code in (401, 403)
+    assert r.json()["detail"] in ("Unlock for full access", "Sign in to continue.")
 
 
 def test_an_unknown_thread_is_404_not_a_silent_success(env):
@@ -326,7 +326,7 @@ def test_status_is_refused_to_a_locked_tab(env):
     jid = _fire(unlocked, tid).json()["job_id"]
     locked = env()
     r = locked.get(f"/api/image-jobs/{jid}", headers=BROWSER)
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #

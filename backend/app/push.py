@@ -237,8 +237,8 @@ def open_key(endpoint: str) -> str:
 
 def subscribe(key: str, sub: Any, *, ua: str = "", profile_id: str | None = None) -> None:
     """``profile_id`` (4.0): the profile the subscribing device is signed in as, recorded
-    beside the subscription. Not consulted when sending yet - every live device is still
-    pinged, as before."""
+    beside the subscription; :func:`notify` pings only the thread owner's devices
+    (:func:`for_owner`) and a profile switch on the device re-binds it (:func:`rebind`)."""
     clean = validate(sub)
     with _lock:
         subs = _load_subs()
@@ -252,6 +252,27 @@ def subscribe(key: str, sub: Any, *, ua: str = "", profile_id: str | None = None
         while len(subs) > MAX_DEVICES:
             subs.pop(min(subs, key=lambda k: subs[k].get("created", 0)))
         _save_subs(subs)
+
+
+def rebind(old_key: str | None, new_key: str | None, profile_id: str | None) -> str:
+    """A device switched profile (or re-signed in): its subscription follows the device
+    only as the NEW profile (4.0, BUILD-PLAN-v2 §1.9). ``new_key`` None (the new session
+    is not a remembered one, so it cannot receive pushes) or no ``profile_id`` -> the old
+    subscription is dropped; otherwise it moves to ``new_key`` with the new ``profile_id``.
+    Returns ``"moved"``, ``"dropped"`` or ``""`` (nothing was subscribed)."""
+    if not old_key:
+        return ""
+    with _lock:
+        subs = _load_subs()
+        sub = subs.pop(old_key, None)
+        if sub is None:
+            return ""
+        out = "dropped"
+        if new_key and profile_id:
+            subs[new_key] = {**sub, "profile_id": str(profile_id)}
+            out = "moved"
+        _save_subs(subs)
+        return out
 
 
 def unsubscribe(key: str) -> bool:
@@ -317,16 +338,46 @@ def payload(kind: str, thread_id: str, title: str) -> dict:
             "title": " ".join(str(title).split())[:TITLE_MAX]}
 
 
-async def notify(kind: str, thread_id: str, title: str) -> int:
-    """Ping every live device. Returns how many pushes were accepted.
+_NO_OWNER: object = object()
+
+
+def for_owner(subs: dict[str, dict], owner: str | None) -> dict[str, dict]:
+    """The subscriptions of ``owner``'s devices (4.0 ownership).
+
+    A subscription records the profile its device was signed in as (``profile_id``,
+    since 4.0; migration 009 filled it in for older ones). One without a profile is an
+    ``open:`` install's (no PIN: everyone is the Owner) or a leftover nobody could map: the
+    first counts as the Owner's, the second gets nothing - fail closed - until its device
+    subscribes again (the app re-subscribes when Settings > Device > Push is switched on)."""
+    from . import accounts
+    own = accounts.get_owner()
+    own_id = own.id if own is not None else None
+    out: dict[str, dict] = {}
+    for key, sub in subs.items():
+        pid = sub.get("profile_id")
+        if not pid and key.startswith("open:"):
+            pid = own_id
+        if pid and owner and pid == owner:
+            out[key] = sub
+        elif owner is None and own_id is None and key.startswith("open:"):
+            out[key] = sub                      # no accounts at all: the open install
+    return out
+
+
+async def notify(kind: str, thread_id: str, title: str, *, owner: object = _NO_OWNER) -> int:
+    """Ping the live devices of the thread's owner. Returns how many pushes were accepted.
+
+    ``owner`` (4.0, required): the profile that owns ``thread_id`` (``None`` only on an
+    install with no Owner yet). Only that profile's devices are pinged; a call that names no
+    owner pings nobody.
 
     Never raises: a push is a courtesy on top of a message that has already
     landed, and its failure must not become the turn's failure.
     """
-    if kind not in KINDS or not thread_id:
+    if kind not in KINDS or not thread_id or owner is _NO_OWNER:
         return 0
     try:
-        subs = _load_subs()
+        subs = for_owner(_load_subs(), owner if isinstance(owner, str) else None)
         if not subs:
             return 0
         now = time.monotonic()

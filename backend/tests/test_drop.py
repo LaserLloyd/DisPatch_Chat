@@ -50,6 +50,11 @@ def drop_env(tmp_path, monkeypatch):
     with TestClient(main.app, client=("testclient", 50000)) as client:
         auth.set_pin("1234")
         auth._bust_cache()
+        # 4.0: an unsigned device is the lock-target default profile (or nobody, who can
+        # do nothing): the drop is that shared profile's.
+        from app import accounts
+        lobby = accounts.create_profile("Lobby", "user")
+        auth.set_lock_target("default_profile", lobby.id)
         yield client
     asyncio.run(temp_db.close())
 
@@ -94,19 +99,12 @@ def test_drop_posts_a_notice_naming_the_file(drop_env):
     assert not notice[0]["media_url"]
 
 
-def test_notice_download_link_is_hidden_from_the_sender(drop_env):
-    """The `[[doc:...]]` link reaches an unlocked viewer, never a locked one."""
+def test_the_notice_lands_in_a_chat_the_sender_cannot_read(drop_env):
+    """4.0: the notice (with its [[doc:]] link) goes to the protected Admin's daily thread;
+    the sender - here the shared default profile - cannot open that chat (404)."""
     tid = _drop(drop_env, name="secret.pdf").json()["thread_id"]
-
-    # Browser-shaped: the locked VIEWER is a tab; a bare GET is a machine
-    # since the thread routes joined the inbound surface (2026-08-14).
-    locked = drop_env.get(f"/api/threads/{tid}/messages",
-                          headers={"origin": "http://testserver"}).json()["messages"]
-    locked_notice = [m for m in locked if (m.get("metadata") or {}).get("kind") == "drop"][0]
-    assert "[[doc:" not in locked_notice["content"]
-    # …but the sender still gets confirmation that their file landed.
-    assert "secret.pdf" in locked_notice["content"]
-
+    r = drop_env.get(f"/api/threads/{tid}/messages", headers={"origin": "http://testserver"})
+    assert r.status_code == 404
     _unlock(drop_env)
     full = drop_env.get(f"/api/threads/{tid}/messages").json()["messages"]
     full_notice = [m for m in full if (m.get("metadata") or {}).get("kind") == "drop"][0]
@@ -158,12 +156,16 @@ def test_locked_caller_cannot_target_an_unsafe_bots_thread(drop_env):
     assert not [m for m in msgs if (m.get("metadata") or {}).get("kind") == "drop"]
 
 
-def test_drop_honours_a_safe_thread_the_sender_named(drop_env):
-    _unlock(drop_env)
-    safe = drop_env.post("/api/threads", json={"bot_id": "alpha"}).json()
-    drop_env.post("/api/auth/lock")
-
-    assert _drop(drop_env, thread_id=safe["id"]).json()["thread_id"] == safe["id"]
+def test_drop_honours_a_thread_the_sender_owns(drop_env):
+    import yaml
+    doc = yaml.safe_load(config.CONFIG_PATH.read_text()) or {}
+    doc.setdefault("bots", []).append({"id": "chatty", "name": "Chatty", "safe": True, "advisor": {
+        "providers": [{"provider": "openai", "model": "m", "base_url": "http://127.0.0.1:9/v1"}]}})
+    config.CONFIG_PATH.write_text(yaml.safe_dump(doc))
+    config._invalidate_bots_cache()
+    mine = drop_env.post("/api/threads", json={"bot_id": "chatty"},
+                         headers={"origin": "http://testserver"}).json()
+    assert _drop(drop_env, thread_id=mine["id"]).json()["thread_id"] == mine["id"]
 
 
 def test_unknown_thread_id_falls_back_rather_than_failing(drop_env):
@@ -175,14 +177,6 @@ def test_unknown_thread_id_falls_back_rather_than_failing(drop_env):
 # --------------------------------------------------------------------------- #
 # Availability guards.
 # --------------------------------------------------------------------------- #
-
-def test_decoy_drops_spend_the_daily_quota(drop_env, monkeypatch):
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 100)
-    assert _drop(drop_env, body=b"x" * 80).status_code == 200
-    r = _drop(drop_env, body=b"x" * 80)
-    assert r.status_code == 429
-    assert "limit" in r.json()["detail"].lower()
-
 
 def test_oversized_drop_is_refused(drop_env, monkeypatch):
     monkeypatch.setattr(main, "UPLOAD_MAX_DOC", 1024)

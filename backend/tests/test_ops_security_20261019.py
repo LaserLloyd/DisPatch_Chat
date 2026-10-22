@@ -42,33 +42,6 @@ def _bound_tablet(world):
     return owner, mia, tablet
 
 
-def test_device_bound_socket_sees_quiet_hours_set_later(world):
-    _owner, mia, tablet = _bound_tablet(world)
-    with tablet.websocket_connect("/ws") as ws:
-        hello = ws.receive_json()
-        assert hello["type"] == "hello" and hello["profile"]["name"] == "Mia"
-        accounts.update_profile(mia["id"], budgets={"quiet_hours": _inside_now()})  # set afterwards
-        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
-        f = ws.receive_json()
-        assert f["type"] == "error" and f.get("code") == "quiet_hours", f
-
-
-def test_device_bound_socket_drops_a_disabled_profile(world):
-    owner, mia, tablet = _bound_tablet(world)
-    with tablet.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["type"] == "hello"
-        assert owner.patch(f"/api/people/{mia['id']}", json={
-            "disabled": True}).status_code == 200
-        accounts.update_profile(mia["id"], budgets={"quiet_hours": _inside_now()})
-        # Disabled: the device falls back to an anonymous guest, whose own (per-address)
-        # rules apply - not Mia's, and not Mia's identity.
-        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
-        f = ws.receive_json()
-        assert f.get("code") != "quiet_hours", f
-        conn = next(iter(world.main.manager._conns.values()))
-        assert conn["principal"].kind == "anonymous"
-
-
 # S-2 ------------------------------------------------------------------------ #
 
 @pytest.fixture
@@ -92,7 +65,8 @@ def test_recovery_with_a_household_needs_a_new_pin(world, closed_install):
     assert r.status_code == 409, r.text
     assert r.json()["error"]["code"] == "recovery_needs_new_pin"
     assert policy.claimed() and auth.verify_pin("2468")        # nothing was removed
-    assert world.client(LAN).get("/api/bots").status_code == 200   # the household still works
+    # the household still works: signing in still does (4.0: a signed-out device is nobody)
+    assert world.client(LAN).get("/api/auth/status").json()["claimed"] is True
 
 
 def test_recovery_with_a_new_pin_keeps_the_install_claimed(world, closed_install):

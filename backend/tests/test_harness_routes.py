@@ -198,7 +198,7 @@ def test_models_route_offers_whatever_settings_configures(route_client, fake_svc
     assert "MiniMax-M3" in text and "MiniMax (cloud)" in text
     # Locked again → the whole surface is 403, models included.
     route_client.post("/api/auth/lock")
-    assert route_client.get("/api/harness/models").status_code == 403
+    assert route_client.get("/api/harness/models").status_code in (401, 403)
 
 
 def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
@@ -233,7 +233,7 @@ def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
 def test_safe_mode_gets_403_everywhere(route_client, fake_svc, method, path):
     auth.set_pin("1234")            # a PIN exists, no session → Safe Mode
     r = route_client.request(method, path, json={} if method == "POST" else None)
-    assert r.status_code == 403, (path, r.status_code, r.text)
+    assert r.status_code in (401, 403), (path, r.status_code, r.text)
     assert fake_svc["calls"] == [] and fake_svc["runner"].calls == []
 
 

@@ -94,8 +94,8 @@ _GLOBAL_COOLDOWN = 30.0
 
 #: Admin sessions follow ``lock_timeout``; these are the other roles' idle windows (seconds)
 #: unless security.yaml or the profile says otherwise. Keyed by ``Role`` value; the YAML keys
-#: are still the 3.x ``session_timeout_member`` / ``session_timeout_restricted`` (WP-CORE
-#: renames them to ``session_timeout_user`` / ``_basic``, reading the old ones as a fallback).
+#: are ``session_timeout_user`` / ``session_timeout_basic`` (4.0; the 3.x
+#: ``session_timeout_member`` / ``_restricted`` are read as a fallback).
 DEFAULT_SESSION_TIMEOUTS = {"admin": None, "user": 3600, "basic": 1800}
 #: 4.0: where a lock and an unsigned device land (``lock_target``).
 LOCK_TARGETS = ("default_profile", "profile_list")
@@ -169,11 +169,8 @@ remember_device_days: {remember_days}
 # REFUSED outright.
 api_token: {api_token}
 
-# What a device that has not signed in may do once the install has an owner:
-#   restricted - the old Safe Mode: chat with the characters made for Restricted
-#                profiles (budgets apply). The default, so a tablet on the counter works.
-#   none       - nothing but the sign-in page. Use this when the app is reachable from
-#                outside your home network.
+# 3.x only (retired in 4.0; read once by migration 010, which turns it into lock_target
+# below). It no longer changes anything.
 anonymous_access: {anonymous_access}
 
 # On-box processes (agents, crons) on 127.0.0.1 are trusted as MACHINES while this is
@@ -197,8 +194,8 @@ default_profile: {default_profile}
 
 # Idle seconds before a session of each role locks. owner/admin follow
 # lock_timeout_seconds above. A profile can override its own in People & Profiles.
-session_timeout_member: {timeout_member}
-session_timeout_restricted: {timeout_restricted}
+session_timeout_user: {timeout_member}
+session_timeout_basic: {timeout_restricted}
 """
 
 
@@ -482,8 +479,10 @@ def load() -> SecurityConfig:
                               else "restricted"),
             machine_scopes=_scope_list(raw.get("machine_scopes")),
             session_timeouts={
-                "user": _pos_int(raw.get("session_timeout_member"), DEFAULT_SESSION_TIMEOUTS["user"]),
-                "basic": _pos_int(raw.get("session_timeout_restricted"),
+                "user": _pos_int(raw.get("session_timeout_user", raw.get("session_timeout_member")),
+                                 DEFAULT_SESSION_TIMEOUTS["user"]),
+                "basic": _pos_int(raw.get("session_timeout_basic",
+                                          raw.get("session_timeout_restricted")),
                                   DEFAULT_SESSION_TIMEOUTS["basic"]),
             },
             lock_target=("default_profile"
@@ -612,9 +611,10 @@ def _sync_owner_pin(cfg: SecurityConfig) -> None:
                 accounts.create_profile("Owner", Role.ADMIN, protected=True, pin_hash=mirror)
             return
         if owner.pin_hash != mirror:
-            if mirror is None and not owner.has_password and len(accounts.list_profiles()) == 1:
-                accounts.delete_owner_row()
-                return
+            # 4.0: the protected Admin's row is NEVER deleted here (every chat, file and
+            # corpus it owns hangs off its id). Removing the PIN (the documented "delete
+            # security.yaml" recovery) clears the mirror; the install reads as unclaimed
+            # again until a PIN or password exists, and the same row takes it back.
             accounts.update_profile(owner.id, pin_hash=mirror)
     except accounts.AccountError:
         log.warning("could not mirror the PIN onto the owner profile", exc_info=True)
@@ -770,6 +770,38 @@ def trusted_count() -> int:
 
 def remember_days() -> int:
     return load().remember_days
+
+
+def set_lock_target(target: str, default_profile: str | None = None) -> SecurityConfig:
+    """Set where a lock and an unsigned device land (4.0, BUILD-PLAN-v2 §1.4): the default
+    profile (``"default_profile"`` + its id) or the profile list. The default profile must
+    exist, be enabled and not be an Admin (it opens with no credential). Re-checks the
+    lock-target fence: stored grants of agents / voice cloning on the new target are removed
+    (``policy.effective_permissions`` already ignores them; this keeps the row honest)."""
+    from .contracts.permissions import LOCK_TARGET_FENCE
+    if target not in LOCK_TARGETS:
+        raise accounts.AccountError("lock_target_invalid",
+                                    "lock_target must be default_profile or profile_list.", 422)
+    pid = (default_profile or "").strip() or None
+    if target == "default_profile":
+        prof = accounts.get_profile(pid) if pid else None
+        if prof is None or prof.disabled:
+            raise accounts.AccountError("lock_target_invalid", "Pick an existing, enabled profile.", 422)
+        if prof.role is Role.ADMIN:
+            raise accounts.AccountError(
+                "lock_target_invalid", "An Admin profile cannot be the default profile: it opens "
+                "without a credential on every device.", 422)
+        fenced = {p.value for p in LOCK_TARGET_FENCE}
+        if any(g in fenced for g in prof.grants):
+            accounts.update_profile(prof.id, grants=[g for g in prof.grants if g not in fenced])
+    with _lock:
+        cfg = load()
+        cfg.lock_target = target
+        # profile_list keeps a named default (so switching back is one step) or clears it
+        cfg.default_profile = pid
+        _write(cfg)
+        _bust_cache()
+    return load()
 
 
 def set_remember_days(days: int) -> None:

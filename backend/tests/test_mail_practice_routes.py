@@ -67,7 +67,7 @@ def test_mail_status_403_no_pin(route_client):
 def test_mail_status_403_locked(route_client):
     auth.set_pin("1234")
     r = route_client.get("/api/mail/status")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 def test_practice_proxy_403_no_pin(route_client):
@@ -78,7 +78,7 @@ def test_practice_proxy_403_no_pin(route_client):
 def test_practice_proxy_403_locked(route_client):
     auth.set_pin("1234")
     r = route_client.get("/api/practice/board")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 def test_mail_and_practice_404_when_disabled(route_client, monkeypatch):
@@ -330,8 +330,8 @@ def test_practice_links_403_no_pin(route_client):
 
 def test_practice_links_403_locked(route_client):
     auth.set_pin("1234")
-    assert route_client.get("/api/practice-links/c1").status_code == 403
-    assert route_client.put("/api/practice-links/c1", json={}).status_code == 403
+    assert route_client.get("/api/practice-links/c1").status_code in (401, 403)
+    assert route_client.put("/api/practice-links/c1", json={}).status_code in (401, 403)
 
 
 def test_practice_links_404_when_disabled(route_client, monkeypatch):

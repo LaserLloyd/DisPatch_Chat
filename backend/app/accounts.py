@@ -583,32 +583,6 @@ def _row_device(r: sqlite3.Row) -> Device:
                   user_agent=r["user_agent"] or "")
 
 
-#: path -> {device id: default profile id}. A bound device is looked up on every
-#: sessionless request, so it must not cost a query.
-_bound: dict[str, dict[str, str | None]] = {}
-
-
-def _bound_map() -> dict[str, str | None]:
-    key = str(db_path())
-    with _lock:
-        hit = _bound.get(key)
-        if hit is None:
-            with connect() as con:
-                rows = con.execute("SELECT id, default_profile_id FROM devices "
-                                   "WHERE default_profile_id IS NOT NULL").fetchall()
-            hit = {r["id"]: r["default_profile_id"] for r in rows}
-            _bound[key] = hit
-        return hit
-
-
-def default_profile_for_device(device_id: str | None) -> Profile | None:
-    if not device_id:
-        return None
-    pid = _bound_map().get(device_id)
-    p = get_profile(pid) if pid else None
-    return p if p is not None and not p.disabled else None
-
-
 def ensure_device(device_id: str, user_agent: str = "", label: str = "") -> Device:
     ua = (user_agent or "")[:160]
     with _lock, connect() as con:
@@ -632,32 +606,9 @@ def list_devices() -> list[Device]:
     return [_row_device(r) for r in rows]
 
 
-def bind_device(device_id: str, profile_id: str | None, label: str | None = None) -> Device:
-    """Bind a device to a default profile (``None`` unbinds). Owner/Admin profiles
-    cannot be a device default: a bound device opens WITHOUT a credential."""
-    if profile_id is not None:
-        p = get_profile(profile_id)
-        if p is None:
-            raise AccountError("profile_not_found", "No such profile.", 404)
-        if p.role is Role.ADMIN:
-            raise AccountError(
-                "device_bind_role", "A device can only open as a Member or Restricted profile; "
-                "Admins and the Owner always sign in with their credential.", 409)
-    with _lock, connect() as con:
-        if label is not None:
-            con.execute("UPDATE devices SET label = ? WHERE id = ?", (label[:60], device_id))
-        con.execute("UPDATE devices SET default_profile_id = ?, bound_at = ? WHERE id = ?",
-                    (profile_id, now_iso() if profile_id else None, device_id))
-        _bound.pop(str(db_path()), None)
-    d = get_device(device_id)
-    assert d is not None
-    return d
-
-
 def delete_device(device_id: str) -> None:
     with _lock, connect() as con:
         con.execute("DELETE FROM devices WHERE id = ?", (device_id,))
-        _bound.pop(str(db_path()), None)
 
 
 # --------------------------------------------------------------------------- #

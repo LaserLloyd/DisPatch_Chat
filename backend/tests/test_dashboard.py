@@ -122,7 +122,7 @@ def _unlock(client: TestClient, pin: str = "1234") -> None:
 def test_locked_session_refused(dash_env, method, path):
     client = dash_env()
     auth.set_pin("1234")                     # PIN set, never unlocked -> Safe Mode
-    assert client.request(method, path).status_code == 403
+    assert client.request(method, path).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path", DASH_ROUTES)
@@ -146,7 +146,7 @@ def test_expired_session_falls_back_to_refused(dash_env, method, path):
     client = dash_env()
     _unlock(client)
     auth.revoke_all()                        # idle timeout / restart equivalent
-    assert client.request(method, path).status_code == 403
+    assert client.request(method, path).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path", DASH_ROUTES)

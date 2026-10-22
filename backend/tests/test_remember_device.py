@@ -99,7 +99,7 @@ def test_feature_off_by_default_remember_is_ignored(env):
 def test_remember_config_needs_session_once_pin_set(env):
     client = env()
     auth.set_pin(PIN)
-    assert client.post("/api/auth/remember-config", json={"days": 30}).status_code == 403
+    assert client.post("/api/auth/remember-config", json={"days": 30}).status_code in (401, 403)
     _unlock(client, remember=False)
     r = client.post("/api/auth/remember-config", json={"days": 30})
     assert r.status_code == 200 and r.json()["remember_days"] == 30
@@ -235,7 +235,7 @@ def test_forget_all_kills_others_demotes_caller(env):
 def test_forget_devices_requires_session(env):
     client = env()
     auth.set_pin(PIN)
-    assert client.post("/api/auth/forget-devices").status_code == 403
+    assert client.post("/api/auth/forget-devices").status_code in (401, 403)
 
 
 def test_disabling_feature_demotes_not_drops(env):

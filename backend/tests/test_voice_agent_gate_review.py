@@ -264,9 +264,11 @@ def test_the_owner_is_unaffected_once_the_members_socket_closed(hh):
     tid = thread_for(k, "adv")
     with k.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:  # the Owner, same thread
+    # 4.0: the Member's thread is the Member's; the Owner talks in its own one.
+    own = thread_for(c, "adv")
+    with c.websocket_connect(f"/ws/voice/{own}", headers=ORIGIN) as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
-        assert c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "owner speaking"))
+        assert c.portal.call(lambda: KNOBS.ctx.submit_turn(own, "owner speaking"))
     assert [_dispatch(t) for t in c.turns] == [True]
 
 

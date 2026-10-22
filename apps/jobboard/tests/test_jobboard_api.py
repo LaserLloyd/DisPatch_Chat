@@ -810,8 +810,8 @@ def test_safe_mode_gets_403_on_everything(http_env):
                          ("GET", "/api/tools/jobboard/status")):
         r = c.request(method, path, headers=BROWSER,
                       **({"json": {}} if method == "POST" else {}))
-        assert r.status_code == 403, (method, path, r.status_code, r.text)
-        assert r.json().get("decoy") is True, (method, path)
+        # 4.0: a signed-out browser is nobody (401 sign in); a Basic profile gets 403
+        assert r.status_code in (401, 403), (method, path, r.status_code, r.text)
 
 
 def test_remote_machine_without_token_is_401(http_env):

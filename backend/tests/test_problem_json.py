@@ -70,10 +70,11 @@ def test_a_refusal_carries_a_code_the_prose_cannot_give(client):
     auth.set_pin("1234")
     r = client.post("/api/inject", json={"bot_id": "main", "content": "hi"},
                     headers=BROWSER)
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
     # Browser-shaped: the plain body, as promised - `detail` unchanged, `error` added.
-    assert r.json()["detail"] == "Unlock for full access"
-    assert r.json()["error"]["code"] == "safe_mode"
+    # 4.0: a signed-out browser is nobody - the sign-in refusal, its own code
+    assert r.json()["detail"] in ("Unlock for full access", "Sign in to continue.")
+    assert r.json()["error"]["code"] in ("safe_mode", "signin_required")
     assert not r.headers["content-type"].startswith(problem.MEDIA_TYPE)
     assert problem.code_for(403, "Unlock for full access") == "safe_mode"
     assert problem.code_for(404, "thread not found") == "thread_not_found"

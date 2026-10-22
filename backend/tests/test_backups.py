@@ -402,10 +402,10 @@ def test_backups_and_the_bundle_are_owner_and_admin_only(world, owner):
     assert world.login(member, name="Max", pin="5555").status_code == 200
     stranger = world.client(("203.0.113.71", 42001))
     for c in (member, stranger):
-        assert c.get("/api/backups").status_code == 403
-        assert c.post("/api/backups", json={}).status_code == 403
-        assert c.post("/api/support-bundle").status_code == 403
-        assert c.delete("/api/backups/pending").status_code == 403
+        assert c.get("/api/backups").status_code in (401, 403)
+        assert c.post("/api/backups", json={}).status_code in (401, 403)
+        assert c.post("/api/support-bundle").status_code in (401, 403)
+        assert c.delete("/api/backups/pending").status_code in (401, 403)
 
 
 def test_the_bundle_download_is_a_zip_and_is_audited(world, owner):
@@ -428,7 +428,7 @@ def test_per_user_export_and_erase(world, owner):
     assert any(a["kind"] == "turn" for a in doc["activity"]) and doc["usage"][0]["amount"] == 3
     text = r.text
     assert "pin_hash" not in text and "password_hash" not in text
-    assert "not attributed" in doc["conversations"]
+    assert "not part of this account export" in doc["conversations"]
     erased = owner.delete(f"/api/users/{mia['id']}").json()
     assert erased["erased"] == mia["id"] and erased["activity_rows"] >= 1 and erased["usage_rows"] == 1
     assert accounts.get_profile(mia["id"]) is None

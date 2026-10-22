@@ -95,7 +95,7 @@ def test_the_preset_route_is_served_to_an_unlocked_session(env):
 def test_the_preset_route_refuses_locked_and_cookieless(env):
     c = _unlocked(env)
     c.post("/api/auth/lock")
-    assert c.get("/api/bots/personas").status_code == 403
+    assert c.get("/api/bots/personas").status_code in (401, 403)
     c.cookies.clear()
     assert c.get("/api/bots/personas").status_code in (401, 403)
     c.cookies.set("lc_session", "forged-token")

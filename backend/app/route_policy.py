@@ -24,6 +24,8 @@ role holds is the matrix there.
 
 from __future__ import annotations
 
+import re
+
 from .contracts.permissions import MachineScope as M
 from .contracts.permissions import Permission as P
 from .policy import R as _R
@@ -79,7 +81,6 @@ _r("DELETE", "/api/people/{profile_id}/pin", _R(P.MANAGE_USERS))
 _r("POST", "/api/people/{profile_id}/password", _R(P.MANAGE_USERS))
 _r("POST", "/api/people/{profile_id}/sign-out", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/devices", _R(P.MANAGE_USERS))
-_r("PUT", "/api/people/devices/this", _R(P.MANAGE_USERS, note="binds the CALLING device"))
 _r("DELETE", "/api/people/devices/{device_id}", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/activity", _R(P.VIEW_ACTIVITY))
 _r("GET", "/api/people/audit", _R(P.VIEW_ACTIVITY))
@@ -241,8 +242,8 @@ _r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allo
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/openapi.json", _R(P.MANAGE_SETTINGS, machine=[M.OPENAPI]))
 _r("POST", "/api/guide/seed", _R(P.MANAGE_SETTINGS, machine=[M.GUIDE_SEED]))
-_r("GET", "/api/search", _R(P.VIEW_ACTIVITY, note="searches every conversation"))
-_r("GET", "/api/export", _R(P.ADMIN_SYSTEM, note="dumps all history"))
+_r("GET", "/api/search", _R(P.USE_CHAT, note="the caller's OWN conversations (4.0), every role"))
+_r("GET", "/api/export", _R(P.MANAGE_HISTORY, note="the caller's OWN history (4.0); every profile's chats are only in the encrypted backup"))
 _r("POST", "/api/recover/transcript", _R(P.ADMIN_SYSTEM))
 for _path in ("/api/dashboard", "/api/dashboard/deep", "/api/dashboard/logs"):
     _r("GET", _path, _R(P.ADMIN_SYSTEM))
@@ -349,6 +350,149 @@ WS_ACTION_PERMISSIONS: dict[str, Requirement] = {
     "edit_rerun": _R(P.MANAGE_HISTORY),
 }
 
+# --------------------------------------------------------------------------- #
+# 4.0 ownership: what each path parameter names, and so which owner check runs
+# --------------------------------------------------------------------------- #
+#: path template -> ``thread`` | ``message`` | ``character`` | ``file`` | ``task`` |
+#: ``none: <why>``. EVERY parameterised route is listed (``tests/test_route_table.py``), so a
+#: new ``/{thing_id}`` route cannot ship without somebody saying whose thing it is.
+#:
+#: thread / message / task: enforced (``app/ownership.py``; tasks: ``agents_ws.may_see_task``)
+#: - a resource of somebody else's is a 404. ``character``: ``characters.may_use`` - another
+#: profile's PERSONAL character is a 404 for everyone, Admins included (the gate's
+#: ``_foreign_character_item``); a household one off the caller's list is the route's 403.
+#: ``none``: the parameter is not a per-profile resource - or its ownership check lands in a
+#: later package, which the reason says (the File Server and Image Studio ledger: WP-DEL).
+_NONE_ADMIN = "none: profile administration (manage_users, people_api rank rules)"
+OWNER_SCOPED: dict[str, str] = {
+    "/api/threads/{thread_id}": "thread",
+    "/api/threads/{thread_id}/messages": "thread",
+    "/api/threads/{thread_id}/read": "thread",
+    "/api/threads/{thread_id}/abort": "thread",
+    "/api/threads/{thread_id}/avatar": "thread",
+    "/ws/{name}/{thread_id}": "thread",
+    "/api/advisor/requests/{rid}/send": "thread",
+    "/api/advisor/requests/{rid}/dismiss": "thread",
+    "/api/image-jobs/{job_id}": "thread",
+    "/api/image-jobs/{job_id}/callback": "none: the rig's per-job token is the credential and nothing is returned",
+    "/api/messages/{message_id}": "message",
+    "/api/messages/{message_id}/checklist": "message",
+    "/api/messages/{message_id}/feedback": "message",
+    "/api/messages/{message_id}/mood-face": "message",
+    "/api/tasks/{task_id}": "task",
+    "/api/tasks/{task_id}/events": "task",
+    "/api/tasks/{task_id}/send": "task",
+    "/api/tasks/{task_id}/interrupt": "task",
+    "/api/tasks/{task_id}/resume": "task",
+    "/api/tasks/{task_id}/cancel": "task",
+    "/api/tasks/{task_id}/release": "task",
+    "/api/tasks/{task_id}/dismiss": "task",
+    "/api/approvals/{request_id}": "task",
+    "/api/bots/{bot_id}": "character",
+    "/api/bots/{bot_id}/avatar": "character",
+    "/api/bots/{bot_id}/avatar/full": "character",
+    "/api/bots/{bot_id}/avatar/thumb": "character",
+    "/api/bots/{bot_id}/avatar/history": "character",
+    "/api/bots/{bot_id}/avatar/history/{snapshot_id}": "character",
+    "/api/bots/{bot_id}/avatar/restore": "character",
+    "/api/bots/{bot_id}/models": "character",
+    "/api/characters/{character_id}": "character",
+    "/api/avatar-pool/{bot_id}": "character",
+    "/api/avatar-pool/{bot_id}/prompts": "character",
+    "/api/avatar-pool/{bot_id}/refill": "character",
+    "/api/files/{file_id}": "none: WP-DEL - files.owner_profile_id is stamped; the per-owner File Server checks land in wave 2",
+    "/api/files/{file_id}/download": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
+    "/api/files/{file_id}/raw": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
+    "/api/reactions/{rid}": "none: the household reaction library (manage_characters)",
+    "/api/reactions/{rid}/image": "none: a household reaction card (safe flag decides Restricted)",
+    "/api/agents/{agent_id}": "none: an agent definition is household configuration (manage_agents)",
+    "/api/agents/profile-budgets/{profile_id}": _NONE_ADMIN,
+    "/api/agents/secrets/{name}": "none: write-only household secret (manage_agents)",
+    "/api/people/{profile_id}": _NONE_ADMIN,
+    "/api/people/{profile_id}/pin": _NONE_ADMIN,
+    "/api/people/{profile_id}/password": _NONE_ADMIN,
+    "/api/people/{profile_id}/sign-out": _NONE_ADMIN,
+    "/api/people/devices/{device_id}": _NONE_ADMIN,
+    "/api/users/{profile_id}": _NONE_ADMIN,
+    "/api/users/{profile_id}/export": "none: account metadata only (no chats), manage_users; the own-data export is /api/me/export (WP-PROF)",
+    "/api/connections/{connection_id}": "none: household configuration (manage_connections)",
+    "/api/connections/{connection_id}/test": "none: household configuration (manage_connections)",
+    "/api/backups/{backup_id}": "none: host control (admin_system); a backup holds every profile's chats, stated in docs/security.md",
+    "/api/backups/{backup_id}/verify": "none: host control (admin_system)",
+    "/api/backups/{backup_id}/restore": "none: host control (admin_system)",
+    "/api/harness/jobs/{job_id}": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}/stop": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}/dismiss": "none: host control (admin_system: the coding harness)",
+    "/api/plugins/extensions/{ext_id}": "none: household plugin switch (manage_plugins)",
+    "/api/practice/{path:path}": "none: host control (admin_system proxy)",
+    "/api/practice-links/{client_id}": "none: host control (admin_system)",
+    "/api/starter-packs/{pack_id}/install": "none: household characters (manage_characters)",
+    "/api/tools/{tool_id}/refresh": "none: household tool (manage_plugins)",
+    "/api/tools/{tool_id}/status": "none: household tool status (use_tools)",
+    "/api/wizard/step/{step}": "none: first-run settings (manage_settings)",
+    "/apps/{app_id}": "none: an app's static page (its manifest permission)",
+    "/apps/{app_id}/{rel:path}": "none: an app's static files (its manifest permission)",
+    "/ext/{ext_id}/{rel:path}": "none: an add-on's public frontend files",
+    "/tools/{tool_id}": "none: a tool panel page (use_tools)",
+    "/tools/{tool_id}/{rel:path}": "none: a tool panel's files (use_tools)",
+    "/tools/_t/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
+    "/local/view/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
+    "/local/file/{path:path}": "none: host control (admin_system: files off the host)",
+    # Unparameterised routes that read or write conversations: listed so routes.json says so.
+    "/api/threads": "thread",
+    "/api/unread": "thread",
+    "/api/search": "thread",
+    "/api/export": "thread",
+    "/api/inject": "thread",
+    "/api/daily": "none: the Owner's daily thread (a machine's sphere)",
+    "/api/drop": "thread",
+    "/api/reactions/fire": "thread",
+    "/api/image-jobs": "thread",
+    "/api/recover/transcript": "thread",
+    "/api/openclaw/sessions": "thread",
+    "/api/openclaw/transcript": "thread",
+    "/api/openclaw/import": "thread",
+}
+#: App routes (mounted at runtime from ``apps/<id>``): prefix -> owner_scoped.
+OWNER_SCOPED_PREFIXES: dict[str, str] = {
+    "/api/apps/jobboard/": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
+    "/api/jobs/": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
+    "/api/apps/imagestudio/": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+}
+
+
+def owner_scoped_for(template: str) -> str:
+    """What :data:`OWNER_SCOPED` says about ``template`` ("" = undeclared)."""
+    hit = OWNER_SCOPED.get(template)
+    if hit:
+        return hit
+    for pre, val in OWNER_SCOPED_PREFIXES.items():
+        if template.startswith(pre):
+            return val
+    return ""
+
+
+#: Every /ws action that names a thread checks its owner (main._ws_thread); the list is the
+#: caller's own (get_threads); a new thread is stamped with its creator (create_thread).
+WS_ACTION_OWNER_SCOPED: dict[str, str] = {
+    "send": "thread", "retry": "thread", "abort": "thread", "archive_thread": "thread",
+    "regenerate": "thread", "edit_rerun": "thread", "get_messages": "thread",
+    "get_threads": "thread", "create_thread": "none: the new thread is stamped with its creator",
+    "ping": "none: liveness",
+}
+
+from dataclasses import replace as _replace  # noqa: E402
+
+ROUTES[:] = [(ms, p, _replace(req, owner_scoped=owner_scoped_for(p)) if owner_scoped_for(p) else req)
+             for ms, p, req in ROUTES]
+for _t, _req in list(WS_ROUTES.items()):
+    if owner_scoped_for(_t):
+        WS_ROUTES[_t] = _replace(_req, owner_scoped=owner_scoped_for(_t))
+for _a, _req in list(WS_ACTION_PERMISSIONS.items()):
+    if _a in WS_ACTION_OWNER_SCOPED:
+        WS_ACTION_PERMISSIONS[_a] = _replace(_req, owner_scoped=WS_ACTION_OWNER_SCOPED[_a])
+
 _BY_KEY: dict[tuple[str, str], Requirement] = {}
 for _ms, _p, _req in ROUTES:
     for _m in _ms:
@@ -380,11 +524,50 @@ EXTENSION_USE_ROUTES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
+#: 4.0 per-profile voice clones (BUILD-PLAN-v2 §1.12): the add-on enforces ownership inside
+#: its routes; the host gate is coarse. Only while an add-on has declared owned clones
+#: (``ext_profile_hooks.voice_owned_clones_active``) - with an add-on that has not (1.5.0)
+#: the table above applies and every clone route stays Admin-only.
+_EXTENSION_OWNED_USE_REQ = _R(P.USE_VOICE, note=(
+    "voice reads: the add-on lists household voices plus the caller's own clones and serves a "
+    "clone's recordings to its owner only"))
+_EXTENSION_VOICE_LAB_REQ = _R(P.VOICE_LAB, note=(
+    "create / rename / delete / try a line of the caller's own cloned voice (the add-on "
+    "answers 404 to a non-owner)"))
+_VOICE_PROFILE_ONE_RE = re.compile(r"^/api/voice/profiles/[^/]+$")
+_VOICE_PROFILE_FILE_RE = re.compile(r"^/api/voice/profiles/[^/]+/files/.+$")
+_VOICE_PROFILE_SAY_RE = re.compile(r"^/api/voice/profiles/[^/]+/say$")
+
+
+def _owned_voice_requirement(m: str, p: str) -> Requirement | None:
+    if m == "GET" and (p in ("/api/voice/status", "/api/voice/preview", "/api/voice/profiles")
+                       or (_VOICE_PROFILE_ONE_RE.match(p) and p != "/api/voice/profiles/analyse")
+                       or _VOICE_PROFILE_FILE_RE.match(p)):
+        return _EXTENSION_OWNED_USE_REQ
+    if m == "POST" and (p in ("/api/voice/profiles", "/api/voice/profiles/analyse")
+                        or _VOICE_PROFILE_SAY_RE.match(p)):
+        return _EXTENSION_VOICE_LAB_REQ
+    if m in ("PATCH", "DELETE") and _VOICE_PROFILE_ONE_RE.match(p) \
+            and p != "/api/voice/profiles/analyse":
+        return _EXTENSION_VOICE_LAB_REQ
+    return None
+
+
 def extension_requirement(method: str, path: str) -> Requirement:
-    """What one request on an add-on's own routes needs: ``use_voice`` for the reads listed in
-    EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
-    m = method.upper()
-    if (("GET" if m == "HEAD" else m), path.rstrip("/") or "/") in EXTENSION_USE_ROUTES:
+    """What one request on an add-on's own routes needs. While an add-on has declared
+    per-profile clones: ``use_voice`` for the voice reads (status, preview, the voice list,
+    one voice and its recordings) and ``voice_lab`` for creating and changing one's own
+    clones; ``manage_plugins`` (Admin) for everything else. Otherwise the 3.x table:
+    ``use_voice`` for the reads in EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
+    from . import ext_profile_hooks
+    m = "GET" if method.upper() == "HEAD" else method.upper()
+    p = path.rstrip("/") or "/"
+    if ext_profile_hooks.voice_owned_clones_active():
+        hit = _owned_voice_requirement(m, p)
+        if hit is not None:
+            return hit
+        return _EXTENSION_REQ
+    if (m, p) in EXTENSION_USE_ROUTES:
         return _EXTENSION_USE_REQ
     return _EXTENSION_REQ
 
@@ -393,7 +576,17 @@ def extension_document() -> dict:
     """routes.json's view of the add-on prefixes (registered at runtime, so not in ``routes``)."""
     return {"default": _EXTENSION_REQ.describe(),
             "use": [{"method": m, "path": p, "requirement": _EXTENSION_USE_REQ.describe()}
-                    for m, p in sorted(EXTENSION_USE_ROUTES)]}
+                    for m, p in sorted(EXTENSION_USE_ROUTES)],
+            # 4.0: the table while an add-on declares per-profile clones
+            "owned_clones": {
+                "use_voice": ["GET /api/voice/status", "GET /api/voice/preview",
+                              "GET /api/voice/profiles", "GET /api/voice/profiles/{pid}",
+                              "GET /api/voice/profiles/{pid}/files/{name}"],
+                "voice_lab": ["POST /api/voice/profiles", "POST /api/voice/profiles/analyse",
+                              "PATCH /api/voice/profiles/{pid}", "DELETE /api/voice/profiles/{pid}",
+                              "POST /api/voice/profiles/{pid}/say"],
+                "use_requirement": _EXTENSION_OWNED_USE_REQ.describe(),
+                "voice_lab_requirement": _EXTENSION_VOICE_LAB_REQ.describe()}}
 
 
 def declared() -> dict[tuple[str, str], Requirement]:
@@ -416,7 +609,10 @@ def requirement_for(method: str, template: str | None, path: str) -> Requirement
         return WS_ROUTES.get(template)
     if extensions.owns_path(path):
         return extension_requirement(method, path)
-    return apps_loader.requirement_for(method, path)
+    req = apps_loader.requirement_for(method, path)
+    if req is not None and not req.owner_scoped and owner_scoped_for(template):
+        req = _replace(req, owner_scoped=owner_scoped_for(template))
+    return req
 
 
 def requirement_for_unmatched(method: str, path: str) -> Requirement | None:

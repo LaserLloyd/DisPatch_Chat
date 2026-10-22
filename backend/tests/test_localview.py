@@ -148,7 +148,7 @@ def test_decoy_gets_403(view_env, method, path):
     c = make_client()
     auth.set_pin("1234")                     # PIN set, never unlocked -> decoy
     r = c.request(method, path, json={} if method == "PUT" else None)
-    assert r.status_code == 403, f"{method} {path} -> {r.status_code}"
+    assert r.status_code in (401, 403), f"{method} {path} -> {r.status_code}"
 
 
 @pytest.mark.parametrize("method,path", VIEWER_ROUTES)
@@ -165,7 +165,7 @@ def test_api_key_does_not_open_the_viewer(view_env, method, path):
     auth._bust_cache()
     r = c.request(method, path, headers={"X-API-Key": "tok-abc"},
                   json={} if method == "PUT" else None)
-    assert r.status_code == 403, f"{method} {path} -> {r.status_code}"
+    assert r.status_code in (401, 403), f"{method} {path} -> {r.status_code}"
 
 
 def test_loopback_machine_caller_also_refused(view_env):
@@ -175,7 +175,7 @@ def test_loopback_machine_caller_also_refused(view_env):
     _write_config([str(site)])
     c = make_client(("127.0.0.1", 51111))
     auth.set_pin("1234")
-    assert c.get("/api/local/roots").status_code == 403
+    assert c.get("/api/local/roots").status_code in (401, 403)
 
 
 def test_unlocked_gets_200(view_env):
@@ -833,7 +833,7 @@ def test_ticket_url_serves_subresources_without_a_cookie(view_env):
     frame = c.get(f"/api/local/stat?path={site}/index.html").json()["frame_url"]
     base = frame.rsplit("/", 1)[0] + "/"
     bare = make_client()                      # same host, no session cookie
-    assert bare.get(f"/local/file{site}/css/style.css").status_code == 403
+    assert bare.get(f"/local/file{site}/css/style.css").status_code in (401, 403)
     r = bare.get(base + "css/style.css")
     assert r.status_code == 200 and "color:red" in r.text
     assert r.headers["access-control-allow-origin"] == "*"
@@ -922,4 +922,4 @@ def test_ticket_route_is_not_machine_inbound(view_env):
     remote = make_client(("198.51.100.9", 5000))
     r = remote.get(f"/api/local/stat?path={site}/index.html",
                    headers={"X-API-Key": auth.load().api_token or "x"})
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)

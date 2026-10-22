@@ -175,22 +175,6 @@ def test_updates_bump_the_epoch_only_when_they_must(world):
     assert accounts.update_profile(p.id, pin_hash="y").epoch == e0 + 3
 
 
-def test_devices_bind_only_to_members_and_restricted(world):
-    admin = accounts.create_profile("Ada", "admin")
-    kid = accounts.create_profile("Mia", "restricted")
-    accounts.ensure_device("dev1", "UA")
-    with pytest.raises(accounts.AccountError) as e:
-        accounts.bind_device("dev1", admin.id)
-    assert e.value.code == "device_bind_role"
-    d = accounts.bind_device("dev1", kid.id, "Kitchen")
-    assert d.default_profile_id == kid.id and accounts.default_profile_for_device("dev1").id == kid.id
-    accounts.update_profile(kid.id, disabled=True)
-    assert accounts.default_profile_for_device("dev1") is None       # a disabled profile is not a default
-    accounts.update_profile(kid.id, disabled=False)
-    accounts.delete_profile(kid.id)                                   # ON DELETE SET NULL
-    assert accounts.get_device("dev1").default_profile_id is None
-
-
 def test_charging_a_budget_is_atomic_and_never_overshoots(world):
     ok = [accounts.usage_charge("s", "turn", 5) for _ in range(8)]
     assert ok == [True] * 5 + [False] * 3
@@ -258,9 +242,11 @@ def test_authorize_decisions():
     kid = policy.profile_principal(_prof("restricted"))
     member = policy.profile_principal(_prof("member"))
     owner = policy.profile_principal(_prof("owner"))
-    anon = policy.anonymous()
+    anon = policy.nobody()
     R = policy.R
     assert policy.authorize(anon, policy.PUBLIC).allowed
+    d = policy.authorize(anon, R(Permission.USE_CHAT))
+    assert (d.allowed, d.status, d.code) == (False, 401, "signin_required")
     assert policy.authorize(kid, R(Permission.USE_CHAT)).allowed
     d = policy.authorize(kid, R(Permission.MANAGE_SETTINGS))
     assert (d.allowed, d.status, d.code) == (False, 403, "safe_mode")

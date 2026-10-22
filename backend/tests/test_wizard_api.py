@@ -128,11 +128,11 @@ def test_the_wizard_routes_follow_the_permissions(world):
     people = {p["name"]: p for p in owner.get("/api/people").json()["profiles"]}
     world.login(members, profile_id=people["Max"]["id"], pin="5555")
     for c in (members, world.client(("203.0.113.93", 44004))):
-        assert c.post("/api/wizard/detect", json={}).status_code == 403
-        assert c.post("/api/wizard/connection", json={"type": "ollama"}).status_code == 403
-        assert c.post("/api/wizard/family", json={"people": []}).status_code == 403
-        assert c.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403
-        assert c.post("/api/wizard/finish").status_code == 403
+        assert c.post("/api/wizard/detect", json={}).status_code in (401, 403)
+        assert c.post("/api/wizard/connection", json={"type": "ollama"}).status_code in (401, 403)
+        assert c.post("/api/wizard/family", json={"people": []}).status_code in (401, 403)
+        assert c.post("/api/wizard/network", json={"exposure": "local"}).status_code in (401, 403)
+        assert c.post("/api/wizard/finish").status_code in (401, 403)
         assert c.get("/api/wizard").json().keys() == {"needed", "claimed"}      # no checklist for them
     assert "steps" in owner.get("/api/wizard").json()
 

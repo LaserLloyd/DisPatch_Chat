@@ -70,7 +70,7 @@ def test_the_manifests_route_needs_manage_plugins(world):
     assert r.status_code == 200 and "permission_labels" in r.json()
     assert {x["manifest"]["id"] for x in r.json()["manifests"]} >= {"jobboard", "imagestudio"}
     stranger = world.client(("203.0.113.80", 43001))
-    assert stranger.get("/api/plugins/manifests").status_code == 403
+    assert stranger.get("/api/plugins/manifests").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #

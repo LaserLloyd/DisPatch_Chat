@@ -395,7 +395,7 @@ def test_abort_is_refused_in_safe_mode(app_client, monkeypatch):
     auth.set_pin("135790")
     app_client.cookies.clear()
     monkeypatch.setattr(main, "_gateway_client", _AbortClient(), raising=False)
-    assert app_client.post(f"/api/threads/{tid}/abort").status_code == 403
+    assert app_client.post(f"/api/threads/{tid}/abort").status_code in (401, 403)
 
 
 def test_abort_resolves_the_session_key_and_the_named_run(app_client, monkeypatch):
@@ -413,15 +413,14 @@ def test_abort_resolves_the_session_key_and_the_named_run(app_client, monkeypatc
 
 
 def test_abort_over_the_websocket_is_refused_in_safe_mode(app_client, monkeypatch):
-    tid = app_client.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    _tid = app_client.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
     auth.set_pin("246802")
     app_client.cookies.clear()
     monkeypatch.setattr(main, "_gateway_client", _AbortClient(), raising=False)
-    with app_client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "abort", "thread_id": tid})
-        frame = ws.receive_json()
-    assert frame["type"] == "error" and "Unlock" in frame["message"]
+    # 4.0: a signed-out device is nobody: the socket is refused outright.
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect), app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()
 
 
 def test_abort_without_a_gateway_says_so_rather_than_pretending(app_client,

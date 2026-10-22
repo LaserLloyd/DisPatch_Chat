@@ -469,6 +469,29 @@ OWNER_INDEX_DDL = ("CREATE INDEX IF NOT EXISTS idx_threads_owner_bot_updated "
                    "ON threads(owner_profile_id, bot_id, updated_at DESC)")
 
 
+#: Default of the ``principal`` argument on the thread readers: no owner filter (the server's
+#: own housekeeping). A sentinel, not None - None would read as "nobody" by mistake.
+_ALL_OWNERS: Any = object()
+
+
+def _owner_where(principal: Any, owner_ids: set[str | None] | None) -> tuple[str, list]:
+    """The owner filter for a thread query (alias ``t``): from a principal
+    (``ownership.owner_filter_sql``, the caller's own chats), or from an explicit owner set."""
+    if owner_ids is not None:
+        named = sorted(i for i in owner_ids if i is not None)
+        parts, params = [], list(named)
+        if named:
+            parts.append(f"t.owner_profile_id IN ({','.join('?' * len(named))})")
+        if None in owner_ids:
+            parts.append("t.owner_profile_id IS NULL")
+        return ("(" + " OR ".join(parts) + ")" if parts else "0=1"), params
+    if principal is _ALL_OWNERS:
+        return "", []
+    from . import ownership
+    frag, params = ownership.owner_filter_sql(principal, "t")
+    return ("" if frag == "1=1" else frag), params
+
+
 def _public_file(row) -> dict:
     """A files row as every caller has always seen it: without the owner column, which
     stays server-side (ask :meth:`Database.file_owner`)."""
@@ -839,10 +862,13 @@ class Database:
         return " ".join(f'"{t}"*' for t in terms)
 
     async def search_messages(
-        self, query: str, bot_ids: list[str] | None = None, limit: int = 60
+        self, query: str, bot_ids: list[str] | None = None, limit: int = 60, *,
+        principal: Any = _ALL_OWNERS,
     ) -> list[dict]:
-        """Search message content across all threads. Returns newest-first hits
-        with a short snippet. Uses FTS5 when available, else a LIKE scan."""
+        """Search message content. Returns newest-first hits with a short snippet. Uses FTS5
+        when available, else a LIKE scan. ``principal`` (4.0): only that caller's own
+        threads - the same filter in both paths."""
+        own_frag, own_params = _owner_where(principal, None)
         q = (query or "").strip()
         if not q:
             return []
@@ -873,6 +899,9 @@ class Database:
             if bot_ids:
                 sql += f"AND t.bot_id IN ({','.join('?' * len(bot_ids))}) "
                 params += list(bot_ids)
+            if own_frag:
+                sql += f"AND {own_frag} "
+                params += own_params
             sql += "ORDER BY bm25(messages_fts), m.created_at DESC LIMIT ?"
             params.append(limit)
             try:
@@ -892,6 +921,9 @@ class Database:
             if bot_ids:
                 sql += f"AND t.bot_id IN ({','.join('?' * len(bot_ids))}) "
                 params += list(bot_ids)
+            if own_frag:
+                sql += f"AND {own_frag} "
+                params += own_params
             sql += "ORDER BY m.created_at DESC LIMIT ?"
             params.append(limit)
             cur = await self.db.execute(sql, params)
@@ -1038,7 +1070,12 @@ class Database:
 
     # -- export (full, unpaginated dump) ----------------------------------- #
 
-    async def all_threads(self, include_archived: bool = True) -> list[ThreadOut]:
+    async def all_threads(self, include_archived: bool = True, *,
+                          principal: Any = _ALL_OWNERS,
+                          owner_ids: set[str | None] | None = None) -> list[ThreadOut]:
+        """Every thread - or, with ``principal`` / ``owner_ids`` (4.0), one caller's own.
+        An unfiltered call is for the server's own housekeeping only; anything that answers a
+        person or an app passes the principal (``tests/test_ownership_gate.py`` lists them)."""
         sql = (
             "SELECT t.*, "
             f"  {self._LAST_MESSAGE_SQL}, "
@@ -1046,10 +1083,18 @@ class Database:
             f"  {self._UNREAD_SQL} "
             "FROM threads t "
         )
+        where: list[str] = []
+        params: list[Any] = []
         if not include_archived:
-            sql += "WHERE t.is_archived = 0 "
+            where.append("t.is_archived = 0")
+        frag, extra = _owner_where(principal, owner_ids)
+        if frag:
+            where.append(frag)
+            params += extra
+        if where:
+            sql += "WHERE " + " AND ".join(where) + " "
         sql += "ORDER BY t.bot_id, t.created_at"
-        cur = await self.db.execute(sql)
+        cur = await self.db.execute(sql, params)
         return [self._thread_from_row(r) for r in await cur.fetchall()]
 
     async def dump_messages(self, thread_id: str) -> list[MessageOut]:
@@ -1137,6 +1182,14 @@ class Database:
             "SELECT owner_profile_id FROM threads WHERE id = ?", (thread_id,))
         row = await cur.fetchone()
         return row[0] if row else None
+
+    async def thread_owner_lookup(self, thread_id: str) -> tuple[bool, str | None]:
+        """``(exists, owner_profile_id)`` - unlike :meth:`thread_owner`, tells a missing
+        thread from one whose owner is NULL (the Owner's)."""
+        cur = await self.db.execute(
+            "SELECT owner_profile_id FROM threads WHERE id = ?", (thread_id,))
+        row = await cur.fetchone()
+        return (True, row[0]) if row else (False, None)
 
     async def _claim_daily_face(self, bot_id: str) -> bool:
         """Take today's daily-face slot for a bot. True exactly once per day.
@@ -1233,7 +1286,12 @@ class Database:
         row = await cur.fetchone()
         return row[0] if row else None
 
-    async def list_threads(self, bot_id: str, include_archived: bool = False) -> list[ThreadOut]:
+    async def list_threads(self, bot_id: str, include_archived: bool = False, *,
+                           principal: Any = _ALL_OWNERS,
+                           owner_ids: set[str | None] | None = None) -> list[ThreadOut]:
+        """A character's threads. ``principal`` (4.0): only that caller's OWN threads
+        (``ownership.owner_filter_sql``); ``owner_ids``: exactly these owners (``None`` in the
+        set = NULL rows). Neither = every owner's - for internal callers only."""
         sql = f"""
             SELECT t.*,
                    {self._LAST_MESSAGE_SQL},
@@ -1242,10 +1300,15 @@ class Database:
             FROM threads t
             WHERE t.bot_id = ?
         """
+        params: list[Any] = [bot_id]
+        frag, extra = _owner_where(principal, owner_ids)
+        if frag:
+            sql += f" AND {frag}"
+            params += extra
         if not include_archived:
             sql += " AND t.is_archived = 0"
         sql += " ORDER BY t.is_pinned DESC, t.updated_at DESC, t.rowid DESC"
-        cur = await self.db.execute(sql, (bot_id,))
+        cur = await self.db.execute(sql, params)
         rows = await cur.fetchall()
         return [self._thread_from_row(r) for r in rows]
 
@@ -1428,15 +1491,17 @@ class Database:
         )
         await self.db.commit()
 
-    async def unread_summary(self) -> list[dict]:
-        """All threads with unread bot messages: [{thread_id, bot_id, unread_since}]."""
+    async def unread_summary(self, *, principal: Any = _ALL_OWNERS) -> list[dict]:
+        """Threads with unread bot messages: [{thread_id, bot_id, unread_since}]. With
+        ``principal`` (4.0) only that caller's own threads."""
+        frag, extra = _owner_where(principal, None)
         cur = await self.db.execute(
             f"""
             SELECT t.id AS thread_id, t.bot_id,
                    {self._UNREAD_SQL}
             FROM threads t
-            WHERE t.is_archived = 0
-            """
+            WHERE t.is_archived = 0 {"AND " + frag if frag else ""}
+            """, extra
         )
         rows = await cur.fetchall()
         return [
@@ -1568,6 +1633,16 @@ class Database:
 
     async def get_message(self, msg_id: str) -> MessageOut | None:
         cur = await self.db.execute("SELECT * FROM messages WHERE id = ?", (msg_id,))
+        row = await cur.fetchone()
+        return self._message_from_row(row) if row else None
+
+    async def message_by_source_id(self, source_id: str) -> MessageOut | None:
+        """The message stored under ``source_id`` (the inject ``delivery_key``, a gateway
+        id), or None."""
+        if not source_id:
+            return None
+        cur = await self.db.execute(
+            "SELECT * FROM messages WHERE source_id = ? LIMIT 1", (source_id,))
         row = await cur.fetchone()
         return self._message_from_row(row) if row else None
 

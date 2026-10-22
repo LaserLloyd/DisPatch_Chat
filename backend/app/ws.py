@@ -17,7 +17,7 @@ The redactor may return ``None`` to mean "drop this frame for Safe Mode".
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from fastapi import WebSocket
 
@@ -37,6 +37,10 @@ class ConnectionManager:
         # were not (the manager had no per-connection identity before 3.0).
         self.scoper: Callable[[dict, object], dict | None] | None = None
         self.is_session_live: Callable[[str], bool] | None = None
+        # (frame) -> awaitable, run before every fan-out and targeted send (4.0 ownership):
+        # it caches the owner of the thread a frame names, so the synchronous scoper can
+        # send a thread frame to its owner's sockets only - and drop one it cannot attribute.
+        self.prime: Callable[[dict], Awaitable[None]] | None = None
         self.pin_set: Callable[[], bool] | None = None
         # Synchronous observers of every broadcast frame (app/extensions.py:
         # the open-stream snapshot and per-thread frame subscriptions). Called
@@ -52,11 +56,16 @@ class ConnectionManager:
         if fn in self._observers:
             self._observers.remove(fn)
 
-    def frame_for_token(self, token: str | None, message: dict) -> dict | None:
+    def frame_for_token(self, token: str | None, message: dict, principal=None) -> dict | None:
         """The frame a FULL connection opened under ``token`` would receive
         right now — redacted (or None = dropped) the instant that session has
-        lapsed, exactly as for a browser tab of the same session."""
-        return self._frame_for({"decoy": False, "token": token}, message)
+        lapsed, exactly as for a browser tab of the same session.
+
+        Used by the add-on host's per-thread subscriptions, whose thread was owner-checked
+        when the subscribing socket opened; with ``principal`` given the per-profile scoper
+        runs too (4.0)."""
+        meta = {"decoy": False, "token": token, "principal": principal}
+        return self._frame_for(meta, message, scoped=principal is not None)
 
     async def connect(self, ws: WebSocket, decoy: bool = False, token: str | None = None,
                       principal=None) -> None:
@@ -90,8 +99,8 @@ class ConnectionManager:
         pr = meta.get("principal")
         if pr is not None and getattr(pr, "kind", "") == "profile" and not pr.is_restricted \
                 and not meta.get("token"):
-            # A signed-in profile with no live token can only be a device bound to a
-            # default profile (Member): its role decides, not the missing token.
+            # A profile with no live token is the lock-target default profile an unsigned
+            # device landed on (4.0): its role decides, not the missing token.
             return False
         # A full connection whose session has lapsed is treated as Safe Mode
         # immediately (don't wait for it to send a frame).
@@ -105,14 +114,20 @@ class ConnectionManager:
             return True
         return False
 
-    def _frame_for(self, meta: dict, message: dict) -> dict | None:
+    def _frame_for(self, meta: dict, message: dict, *, targeted: bool = False,
+                   scoped: bool = True) -> dict | None:
+        """``targeted``: a reply to this socket's own request (``send``), not a broadcast -
+        the scoper lets a neutral reply about a thread that does not exist through.
+
+        4.0: the scoper runs for EVERY live connection, including one with no principal
+        yet (it then drops anything about a thread, a character or an operator surface:
+        Fable amendment 15 - the 3.x manager skipped the scoper for those)."""
         if self._is_safe(meta) and self.redactor is not None:
             message = self.redactor(message)   # may be None -> drop
             if message is None:
                 return None
-        pr = meta.get("principal")
-        if pr is not None and self.scoper is not None:
-            return self.scoper(message, pr)    # may be None -> drop
+        if scoped and self.scoper is not None:
+            return self.scoper(message, meta.get("principal"), targeted=targeted)  # None -> drop
         return message
 
     async def send(self, ws: WebSocket, message: dict) -> None:
@@ -132,7 +147,8 @@ class ConnectionManager:
         meta = self._conns.get(ws)
         if meta is None:
             return
-        frame = self._frame_for(meta, message)
+        await self._prime(message)
+        frame = self._frame_for(meta, message, targeted=True)
         if frame is None:
             return
         stalled = await self._send_or_reap(ws, meta, frame)
@@ -157,7 +173,16 @@ class ConnectionManager:
         except Exception:
             return ws
 
+    async def _prime(self, message: dict) -> None:
+        if self.prime is None:
+            return
+        try:
+            await self.prime(message)
+        except Exception:      # an unprimed frame is dropped by the scoper (fail closed)
+            pass
+
     async def broadcast(self, message: dict) -> None:
+        await self._prime(message)
         for fn in tuple(self._observers):
             try:
                 fn(message)
@@ -199,6 +224,7 @@ class ConnectionManager:
         snapshot - are deliberately NOT called: a task frame is not conversation.
         Returns how many sockets were sent to.
         """
+        await self._prime(message)
         async with self._lock:
             targets = list(self._conns.items())
         sends = []

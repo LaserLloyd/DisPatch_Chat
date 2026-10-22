@@ -113,7 +113,7 @@ def test_a_pin_only_2x_install_is_claimed_on_upgrade(world, strict):
     accounts.delete_owner_row()           # as a 2.x data dir looks before the first 3.0 start
     lan = world.client(LAN)
     assert lan.get("/api/auth/status").json()["claimed"] is True
-    assert lan.get("/api/bots/all").status_code == 403           # Restricted, not "setup required"
+    assert lan.get("/api/bots/all").status_code in (401, 403)           # Restricted, not "setup required"
     assert lan.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     assert lan.get("/api/auth/me").json()["role"] == "admin"
     assert accounts.get_owner() is not None                       # created on first use

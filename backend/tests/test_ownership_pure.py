@@ -60,8 +60,8 @@ def test_open_install_reads_everything_and_unknown_reads_nothing(people):
     assert not ownership.may_see_thread(SimpleNamespace(kind="weird"), people.user.id)
 
 
-def test_the_transitional_anonymous_guest_reads_nothing(people):
-    guest = policy.anonymous()
+def test_nobody_reads_nothing(people):
+    guest = policy.nobody()
     for owner in (people.owner.id, people.basic.id, None):
         assert not ownership.may_see_thread(guest, owner)
     assert ownership.readable_owner_ids(guest) == set()

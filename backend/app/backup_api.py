@@ -215,9 +215,9 @@ def export_user(prof: accounts.Profile) -> dict:
         "profile": prof.public(), "devices": devices, "sessions": sessions, "usage": usage,
         "activity": activity, "audit_entries_about_this_profile": about,
         "characters_limited_to_this_profile": chars,
-        "conversations": ("Chats are shared by the household in this version and are not attributed to a "
-                          "single profile, so they are not part of a per-profile export. Use the full "
-                          "History export (Settings > Account > Recovery & Export) to take the conversations."),
+        "conversations": ("Chats belong to the profile that started them (4.0) and are not part of this "
+                          "account export. Each person takes their own with the History export (Settings > "
+                          "Account > Recovery & Export), signed in as themselves."),
     }
 
 

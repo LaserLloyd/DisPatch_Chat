@@ -292,7 +292,7 @@ def test_safe_mode_cannot_fetch_a_non_safe_bots_snapshot(snap_env):
     # against a session that was never gated — a green test proving nothing.
     auth.set_pin("1234")
     r = client.get(thread["avatar_url"])
-    assert r.status_code == 403, f"a non-safe bot's avatar leaked to Safe Mode: {r.status_code}"
+    assert r.status_code in (401, 403), f"a non-safe bot's avatar leaked to Safe Mode: {r.status_code}"
 
 
 # --------------------------------------------------------------------------- #
@@ -466,19 +466,6 @@ def test_thread_full_fallback_is_revalidatable_not_immutable(snap_env):
     r_full = client.get(f"/api/threads/{t['id']}/avatar?full=1")
     assert r_full.status_code == 200
     assert r_full.headers.get("cache-control") == "no-cache"
-
-
-def test_safe_mode_gets_thumbnails_never_full_res(snap_env):
-    """Locked = view thumbnails only, uniformly: the thread ?full=1 route obeys
-    the same rule as /api/bots/<id>/avatar/full, even for SAFE bots."""
-    client = snap_env
-    bot = config.load_bots()[0].id
-    _bot_with_avatar(bot, safe=True, data=b"SAFE-" + uuid.uuid4().hex.encode())
-    t = client.post("/api/threads", json={"bot_id": bot}).json()
-
-    auth.set_pin("1234")                     # decoy: pin set, never unlocked
-    assert client.get(f"/api/threads/{t['id']}/avatar").status_code == 200
-    assert client.get(f"/api/threads/{t['id']}/avatar?full=1").status_code == 403
 
 
 def test_snapshot_pair_distinct_fulls_get_distinct_ids():

@@ -92,42 +92,6 @@ def test_the_writer_drops_the_old_key_and_a_reload_round_trips(env):
 # Who sees what
 # --------------------------------------------------------------------------- #
 
-def test_unlocked_session_is_served_every_bot_including_neither(env):
-    c = _unlocked(env)
-    _write(env, ROSTER)
-    rows = {b["id"]: b for b in c.get("/api/bots").json()["bots"]}
-    assert set(rows) == {"atlas", "kid", "main", "ghost", "oldsafe"}
-    assert rows["ghost"]["hide_unlocked"] is True and rows["ghost"]["safe"] is False
-    assert rows["ghost"]["visible"] is False
-
-
-def test_locked_session_sees_only_show_locked_bots(env):
-    c = _unlocked(env)
-    _write(env, ROSTER)
-    c.cookies.clear()
-    assert _ids(c) == {"atlas", "kid"}
-    assert main._safe_bot_ids() == {"atlas", "kid"}
-
-
-def test_locked_websocket_hello_lists_only_show_locked_bots(env):
-    c = _unlocked(env)
-    _write(env, ROSTER)
-    c.cookies.clear()
-    with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
-        hello = ws.receive_json()
-    assert hello["type"] == "hello" and hello["decoy"] is True
-    assert {b["id"] for b in hello["bots"]} == {"atlas", "kid"}
-
-
-def test_unlocked_websocket_hello_carries_the_neither_bot(env):
-    c = _unlocked(env)
-    _write(env, ROSTER)
-    with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
-        hello = ws.receive_json()
-    assert hello["decoy"] is False
-    assert "ghost" in {b["id"] for b in hello["bots"]}
-
-
 def test_extension_locked_gate_follows_safe_alone():
     assert extensions.locked_may_see(config.Bot(id="a", name="A", safe=True, hide_unlocked=True))
     assert not extensions.locked_may_see(config.Bot(id="b", name="B", hide_unlocked=True))
@@ -169,7 +133,7 @@ def test_patch_and_create_fold_visible_false(env):
     assert r.status_code == 201, r.text
     assert (r.json()["safe"], r.json()["hide_unlocked"]) == (False, True)
     c.cookies.clear()
-    assert "n" not in _ids(c) and "atlas" not in _ids(c)
+    assert c.get("/api/bots").status_code == 401           # 4.0: signed out = nobody
 
 
 def test_a_neither_bots_thread_is_reachable_unlocked_only(env):
@@ -180,4 +144,4 @@ def test_a_neither_bots_thread_is_reachable_unlocked_only(env):
     tid = r.json()["id"]
     assert c.get(f"/api/threads/{tid}/messages").status_code == 200
     c.cookies.clear()
-    assert c.get(f"/api/threads/{tid}/messages").status_code in (403, 404)
+    assert c.get(f"/api/threads/{tid}/messages").status_code in (401, 403, 404)

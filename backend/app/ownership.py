@@ -8,10 +8,7 @@ thing being created right now?* - so every path stamps the same answer:
   device): that profile;
 * a profile session minted before accounts existed, an open install (no PIN), a
   machine caller (API token, image callback), a mirror of a gateway session, a
-  first-run seed: the **protected Admin** (the 3.x Owner);
-* TRANSITIONAL, until WP-CORE deletes the 3.x ``anonymous`` principal: an unsigned
-  guest stamps for the one Basic (3.x Restricted) profile when an install has exactly
-  one, else the protected Admin (:func:`anonymous_target`, migration 009's rule).
+  first-run seed: the **protected Admin** (the 3.x Owner).
 
 ``None`` comes back only while an install has no protected Admin yet; creating it
 adopts every row still without one (``accounts.create_profile``).
@@ -30,11 +27,10 @@ thread route, message route, WebSocket action and outgoing thread frame asks it:
   thread is decided by the route, not here (BUILD-PLAN-v2 §1.7).
 * **An open install** (nobody owns it yet) is everyone-is-the-Owner: everything.
 * **An unsigned device** is either the lock-target default profile (an ordinary ``profile``
-  principal: it reads that profile's chats) or nobody (nothing). The 3.x ``anonymous``
-  principal reads NOTHING here (fail closed; it is removed by WP-CORE).
+  principal: it reads that profile's chats) or nobody (nothing).
 
-Foundation landed this half (the pure functions and the owner cache); WP-CORE wires them
-into every route, WebSocket action and frame.
+Every thread route, message route, WebSocket action and outgoing frame asks these
+functions (``main._require_thread`` / ``_ws_thread`` / ``scope_frame_for_principal``).
 
 A thread you may not read is a **404**, the same answer as a thread that does not exist,
 so an id tells a stranger nothing (tasks have always worked this way).
@@ -47,13 +43,11 @@ whose owner cannot be established is dropped (fail closed).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 from fastapi import HTTPException
 
 from . import accounts
-from .contracts.permissions import Role
 
 #: What a thread you may not read answers - word for word the answer for one that does not
 #: exist, so the two cannot be told apart.
@@ -84,25 +78,6 @@ def corpus_profile_id(advisor_cfg: Any = None) -> str | None:
     return protected_admin_id()
 
 
-def anonymous_target(profiles: Iterable[accounts.Profile] | None = None,
-                     designated: str | None = None) -> str | None:
-    """TRANSITIONAL (the 3.x anonymous guest's stamping rule; WP-CORE removes it with the
-    ``anonymous`` principal): the profile an unsigned guest's new things belong to.
-
-    ``designated`` wins when it names an existing, enabled Basic profile. Otherwise exactly
-    one enabled Basic profile -> that one; none or several -> the protected Admin."""
-    rows = list(profiles) if profiles is not None else accounts.list_profiles()
-    restricted = [p for p in rows if p.role is Role.BASIC and not p.disabled]
-    if designated:
-        hit = next((p for p in restricted if p.id == designated), None)
-        if hit is not None:
-            return hit.id
-    if len(restricted) == 1:
-        return restricted[0].id
-    own = next((p for p in rows if p.protected), None)
-    return own.id if own is not None else None
-
-
 def for_principal(principal: Any) -> str | None:
     """Whose new thread / file this is, for the principal creating it."""
     if principal is None:
@@ -110,8 +85,8 @@ def for_principal(principal: Any) -> str | None:
     kind = getattr(principal, "kind", "")
     if kind == "profile":
         return getattr(principal, "profile_id", None) or owner_id()
-    if kind == "anonymous":
-        return anonymous_target()
+    if kind == "none":
+        return None                         # nobody: nothing is created for no one
     # "open" (no PIN: everyone is the Owner) and "machine" (agents, cron, callbacks).
     return owner_id()
 

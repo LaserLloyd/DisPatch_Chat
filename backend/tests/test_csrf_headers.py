@@ -55,21 +55,20 @@ def test_a_script_without_browser_headers_is_judged_by_its_cookie_alone(world, o
     assert owner.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200
 
 
-def test_an_anonymous_caller_has_no_cookie_to_abuse(world):
-    world.create_owner()
+def test_the_default_profile_is_csrf_checked_too(world):
+    """4.0: an unsigned device on the lock-target default profile has no cookie, but being a
+    browser on this network IS its authority, so another origin may not act as it."""
+    from app import auth
+    owner = world.create_owner()
+    lobby = world.person(owner, "Lobby", "user")
+    auth.set_lock_target("default_profile", lobby["id"])
     anon = world.client(("203.0.113.9", 1))
     anon.headers.pop("Origin", None)
     r = anon.post("/api/threads", json={"bot_id": "alpha"}, headers=EVIL)
-    assert r.status_code == 200          # Restricted may start a thread; no ambient authority
-
-
-def test_a_device_cookie_alone_also_triggers_the_check(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    owner.put("/api/people/devices/this", json={"profile_id": mia["id"]})
-    tablet = world.client(("203.0.113.9", 1))
-    tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    assert tablet.post("/api/threads", json={"bot_id": "alpha"}, headers=EVIL).status_code == 403
-    assert tablet.post("/api/threads", json={"bot_id": "alpha"}).status_code == 200      # our own origin
+    assert r.status_code == 403 and r.json()["error"]["code"] == "csrf_origin"
+    # nobody (the profile list) has no authority to abuse: it is refused sign-in first
+    auth.set_lock_target("profile_list", None)
+    assert anon.post("/api/threads", json={"bot_id": "alpha"}, headers=EVIL).status_code == 401
 
 
 def _session_cookie(response):

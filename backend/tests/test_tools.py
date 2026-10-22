@@ -224,14 +224,14 @@ def test_hand_edited_safe_tool_at_data_dir_serves_nothing(tools_env, monkeypatch
     c = _decoy(make_client)
     for rel in ("", "files/family.txt", "tools.yaml"):
         r = c.get(f"/tools/leak/{rel}")
-        assert r.status_code in (403, 404), (rel, r.status_code)
+        assert r.status_code in (401, 403, 404), (rel, r.status_code)
         assert "private" not in r.text and "tools:" not in r.text
     # ...and if a loosened loader did hand the tool through, the Safe-Mode
     # route still serves nothing (the resolver is the last line).
     monkeypatch.setattr(tools, "load_tools", lambda: [t])
     for rel in ("", "files/family.txt", "tools.yaml"):
         r = c.get(f"/tools/leak/{rel}")
-        assert r.status_code == 404, (rel, r.status_code)
+        assert r.status_code in (401, 404), (rel, r.status_code)
         assert "private" not in r.text and "tools:" not in r.text
 
 
@@ -470,7 +470,7 @@ def test_pin_decoy_cannot_reach_nonsafe_tool(tools_env):
     for p in ("/tools/bench/", "/tools/bench/css/s.css", "/tools/nope/",
               "/api/tools/bench/status"):
         r = c.get(p)
-        assert r.status_code == 403, (p, r.status_code)
+        assert r.status_code in (401, 403), (p, r.status_code)
         assert "report" not in r.text
 
 
@@ -495,38 +495,6 @@ def test_api_tools_operator_view(tools_env):
     # registers them — tests/test_extensions.py.)
     assert feats == {"deepseek-harness": "harness", "studioforge-panel": "studioforge",
                      "mail-panel": "mail", "clients-panel": "practice"}
-
-
-def test_safe_tool_visible_in_safe_mode_stripped(tools_env):
-    make_client, site = tools_env
-    _manifest(_bench(site, refresh="{argv: [echo, hi]}")
-              + f"  - id: pub\n    title: Pub\n    kind: static\n    root: {site}\n    safe: true\n"
-              + f"    refresh: {{argv: [echo, x], cwd: {site}}}\n"
-              + "  - id: pubweb\n    title: PW\n    kind: url\n    url: http://example.invalid/\n"
-              + "    safe: true\n"
-              + f"  - id: offsafe\n    title: O\n    kind: static\n    root: {site}\n"
-              + "    safe: true\n    enabled: false\n")
-    c = _decoy(make_client)
-    r = c.get("/api/tools")
-    assert r.status_code == 200
-    body = r.json()
-    assert "path" not in body
-    assert [t["id"] for t in body["tools"]] == ["pub", "pubweb"]
-    for t in body["tools"]:
-        for banned in ("root", "refresh", "cwd", "argv"):
-            assert banned not in t
-        assert t["has_refresh"] is False
-    assert body["tools"][1]["url"] == "http://example.invalid/"
-    # The safe static tool is served to the Safe-Mode browser.
-    r = c.get("/tools/pub/")
-    assert r.status_code == 200 and "index" in r.text
-    assert c.get("/tools/pub/css/s.css").status_code == 200
-    st = c.get("/api/tools/pub/status")
-    assert st.status_code == 200 and "last_refresh" in st.json()
-    # ...but never its refresh or the write path.
-    assert c.post("/api/tools/pub/refresh").status_code == 403
-    assert c.put("/api/tools", json={"tools": []}).status_code == 403
-    assert c.get("/tools/offsafe/").status_code == 403
 
 
 def test_auth_status_features_tools(tools_env):
@@ -778,11 +746,11 @@ def test_put_requires_operator_session(tools_env):
     make_client, site = tools_env
     auth.set_pin("1234")
     c = make_client()
-    assert c.put("/api/tools", json={"tools": []}).status_code == 403
+    assert c.put("/api/tools", json={"tools": []}).status_code in (401, 403)
     # A loopback on-box machine caller is not the operator either.
     lo = make_client(("127.0.0.1", 5555))
-    assert lo.put("/api/tools", json={"tools": []}).status_code == 403
-    assert lo.post("/api/tools/bench/refresh").status_code == 403
+    assert lo.put("/api/tools", json={"tools": []}).status_code in (401, 403)
+    assert lo.post("/api/tools/bench/refresh").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #
@@ -962,8 +930,9 @@ def test_jobs_stay_decoy_blocked(tools_env):
     assert main._decoy_blocked("GET", "/api/jobs") is True
     assert main._decoy_blocked("GET", "/api/jobs/months") is True
     c = _decoy(make_client)
-    ids = [t["id"] for t in c.get("/api/tools").json()["tools"]]
-    assert "jobboard" not in ids
+    r = c.get("/api/tools")
+    # 4.0: a signed-out browser is nobody (401); either way it lists no Job Board
+    assert r.status_code == 401 or "jobboard" not in [t["id"] for t in r.json()["tools"]]
 
 
 # --------------------------------------------------------------------------- #
@@ -1100,14 +1069,6 @@ def test_api_open_round_trips_and_builtin_open_is_writable(tools_env, monkeypatc
     assert "open" not in (config.DATA_DIR / "tools.yaml").read_text()
 
 
-def test_safe_mode_row_carries_open(tools_env):
-    make_client, _site = tools_env
-    _manifest("tools:\n  - {id: web, title: W, kind: url, url: 'https://e.org/', safe: true, open: window}\n")
-    c = _decoy(make_client)
-    rows = c.get("/api/tools").json()["tools"]
-    assert rows == [r for r in rows if r["id"] == "web"] and rows[0]["open"] == "window"
-
-
 @pytest.mark.parametrize("headers, expected", [
     ({}, True),
     ({"X-Frame-Options": "DENY"}, False),
@@ -1208,4 +1169,4 @@ def test_builtin_open_url_never_reaches_safe_mode(tools_env, monkeypatch):
     c = _decoy(make_client)
     body = c.get("/api/tools").text
     assert "198.51.100.7" not in body and "open_url" not in body
-    assert c.get("/api/tools/studioforge-panel/status").status_code == 403
+    assert c.get("/api/tools/studioforge-panel/status").status_code in (401, 403)

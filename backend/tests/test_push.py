@@ -29,6 +29,14 @@ SUB = {"endpoint": FCM,
        "keys": {"p256dh": "B" + "A" * 86, "auth": "c" * 22}}
 
 
+def _owner():
+    """4.0: a ping names the thread's owner (push.notify(owner=...)); these threads are the
+    protected Admin's (None on an install with no accounts)."""
+    from app import accounts
+    o = accounts.get_owner()
+    return o.id if o is not None else None
+
+
 @pytest.fixture
 def sent(monkeypatch):
     """Capture every push instead of sending it."""
@@ -78,7 +86,7 @@ def test_safe_mode_is_refused(env, method, path):
     auth.set_pin(PIN)
     kw = {"json": SUB} if method == "post" else {}
     r = getattr(client, method)(path, **kw)
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)       # 4.0: signed out = sign in first (401)
     assert not (config.DATA_DIR / push.SUBS_FILE).exists()
     assert not (config.DATA_DIR / push.VAPID_FILE).exists(), "no key minted for a locked caller"
 
@@ -98,7 +106,7 @@ def test_a_loopback_machine_caller_is_refused(env):
     from fastapi.testclient import TestClient
     auth.set_pin(PIN)
     with TestClient(main.app, client=("127.0.0.1", 40123)) as c:
-        assert c.post("/api/push/subscribe", json=SUB).status_code == 403
+        assert c.post("/api/push/subscribe", json=SUB).status_code in (401, 403)
 
 
 def test_cross_origin_is_refused(env):
@@ -168,7 +176,7 @@ def test_malformed_keys_are_refused(env):
 def test_payload_is_kind_thread_and_title_only(env, sent):
     client = _remembered(env)
     client.post("/api/push/subscribe", json=SUB)
-    n = asyncio.run(push.notify("reply", "t-1", "Nova   replied"))
+    n = asyncio.run(push.notify("reply", "t-1", "Nova   replied", owner=_owner()))
     assert n == 1
     assert sent[0]["data"] == {"kind": "reply", "thread_id": "t-1", "title": "Nova replied"}
     assert len(sent[0]["topic"]) <= 32
@@ -178,7 +186,7 @@ def test_a_revoked_device_gets_nothing_and_loses_its_subscription(env, sent):
     client = _remembered(env)
     client.post("/api/push/subscribe", json=SUB)
     assert client.post("/api/auth/lock").status_code == 200     # forgets the device
-    assert asyncio.run(push.notify("reply", "t-1", "Nova replied")) == 0
+    assert asyncio.run(push.notify("reply", "t-1", "Nova replied", owner=_owner())) == 0
     assert sent == [] and _subs() == {}
 
 
@@ -186,7 +194,7 @@ def test_a_pin_change_revokes_every_subscription(env, sent):
     client = _remembered(env)
     client.post("/api/push/subscribe", json=SUB)
     auth.set_pin("9876")
-    assert asyncio.run(push.notify("image", "t-1", "Image ready")) == 0
+    assert asyncio.run(push.notify("image", "t-1", "Image ready", owner=_owner())) == 0
     assert sent == [] and _subs() == {}
 
 
@@ -205,7 +213,7 @@ def test_push_service_answers(env, monkeypatch, status, kept):
         raise e
 
     monkeypatch.setattr(push, "_send", failing)
-    assert asyncio.run(push.notify("reply", "t-1", "x")) == 0
+    assert asyncio.run(push.notify("reply", "t-1", "x", owner=_owner())) == 0
     assert bool(_subs()) is kept
 
 
@@ -213,9 +221,9 @@ def test_open_install_keys_by_endpoint_until_a_pin_is_set(env, sent):
     client = env()                                     # no PIN at all
     assert client.post("/api/push/subscribe", json=SUB).status_code == 200
     assert list(_subs()) == [push.open_key(FCM)]
-    assert asyncio.run(push.notify("reply", "t", "x")) == 1
+    assert asyncio.run(push.notify("reply", "t", "x", owner=_owner())) == 1
     auth.set_pin(PIN)
-    assert asyncio.run(push.notify("reply", "t2", "x")) == 0
+    assert asyncio.run(push.notify("reply", "t2", "x", owner=_owner())) == 0
     assert _subs() == {}
 
 
@@ -235,7 +243,7 @@ def test_the_real_sender_is_called_with_vapid_and_no_content(env, monkeypatch):
 
     monkeypatch.setattr(pywebpush, "webpush", fake_webpush)
     push._last_sent.clear()
-    assert asyncio.run(push.notify("post", "t-9", "Morning brief posted")) == 1
+    assert asyncio.run(push.notify("post", "t-9", "Morning brief posted", owner=_owner())) == 1
     (args, kw), = calls
     assert args[0]["endpoint"] == FCM
     assert json.loads(kw["data"]) == {"kind": "post", "thread_id": "t-9",

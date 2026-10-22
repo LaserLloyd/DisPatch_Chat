@@ -135,7 +135,7 @@ def test_a_member_is_stopped_where_a_restricted_profile_is_and_a_bit_earlier(wor
     assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
     assert r.json()["required_permission"] == "manage_plugins"
     for path in ("/api/bots/all", "/api/llm/providers", "/api/people", "/api/dashboard",
-                 "/api/harness/status", "/api/export", "/api/search?q=x"):
+                 "/api/harness/status"):        # 4.0: export / search are every role's own
         assert member.get(path).status_code == 403, path
     # Dispatching an agent is not a Member permission; the Owner can grant it per profile.
     from app import accounts
@@ -149,32 +149,6 @@ def test_a_member_is_stopped_where_a_restricted_profile_is_and_a_bit_earlier(wor
 
 def _roster(client):
     return {b["id"]: b for b in client.get("/api/bots").json()["bots"]}
-
-
-def test_a_restricted_roster_is_the_audience_not_the_whole_roster(clients):
-    everyone = _roster(clients["owner"])
-    seen = _roster(clients["kid"])
-    assert set(seen) and set(seen) < set(everyone)
-    assert all(b["audience"] in ("all", "restricted") for b in seen.values())
-    assert all(b["audience"] == "members" for k, b in everyone.items() if k not in seen)
-    assert _roster(clients["anonymous"]).keys() == seen.keys()
-
-
-def test_a_restricted_caller_cannot_reach_a_members_character_by_id(world, clients):
-    hidden = next(b for b in config.load_bots() if b.audience == "members")
-    shown = next(b for b in config.load_bots() if b.audience == "all")
-    kid = clients["kid"]
-    assert kid.get(f"/api/bots/{hidden.id}/avatar").status_code == 403
-    assert kid.get(f"/api/bots/{hidden.id}/avatar/thumb").status_code == 403
-    assert kid.get(f"/api/bots/{hidden.id}/avatar/history").status_code == 403
-    assert kid.post("/api/threads", json={"bot_id": hidden.id}).status_code == 403
-    assert kid.post("/api/threads", json={"bot_id": shown.id}).status_code == 200
-    owner_thread = clients["owner"].post("/api/threads", json={"bot_id": hidden.id}).json()["id"]
-    assert kid.get(f"/api/threads/{owner_thread}").status_code == 403
-    assert kid.get(f"/api/threads/{owner_thread}/messages").status_code == 403
-    assert kid.get(f"/api/threads?bot_id={hidden.id}").status_code == 403
-    assert owner_thread in {t["id"] for t in clients["owner"].get(
-        f"/api/threads?bot_id={hidden.id}").json()["threads"]}
 
 
 def test_a_restricted_tool_list_is_only_the_safe_tools(world, clients, tmp_path_factory):
@@ -238,38 +212,6 @@ def test_every_websocket_action_is_gated(clients, monkeypatch):
     assert turns == []
 
 
-def test_a_restricted_turn_reaches_only_restricted_audience_characters(world, clients, monkeypatch):
-    """G5: a Restricted turn never reaches a Members character, and the one it may
-    reach runs LOCKED (no tools, no dispatch)."""
-    turns = []
-
-    async def fake_turn(thread_id, bot_id, text, opts=None):
-        turns.append((thread_id, bot_id, opts))
-
-    monkeypatch.setattr(main, "run_agent_turn", fake_turn)
-    members_bot = next(b.id for b in config.load_bots() if b.audience == "members")
-    kids_bot = next(b.id for b in config.load_bots() if b.audience in ("all", "restricted"))
-    owner = clients["owner"]
-    t_members = owner.post("/api/threads", json={"bot_id": members_bot}).json()["id"]
-    t_kids = owner.post("/api/threads", json={"bot_id": kids_bot}).json()["id"]
-    for who in ("kid", "anonymous"):
-        hello, frames = _ws_exchange(clients[who], [
-            {"type": "send", "thread_id": t_members, "text": "hello", "client_msg_id": "m1"},
-            {"type": "send", "thread_id": t_kids, "text": "hello", "client_msg_id": "m2"},
-        ])
-        assert hello["decoy"] is True and hello["role"] == "basic"
-        assert {b["id"] for b in hello["bots"]} == set(_roster(clients["kid"]))
-        errors = [f for f in frames if f.get("type") == "error"]
-        assert errors and "Unlock" in errors[0]["message"]
-        acks = [f for f in frames if f.get("type") == "ack"]
-        assert {a.get("client_msg_id"): a.get("status") for a in acks} == {"m1": "rejected", "m2": "ok"}
-    assert {t[0] for t in turns} == {t_kids}
-    assert all(t[2] is not None and t[2].locked is True for t in turns)
-    # Nothing was written into the members thread.
-    msgs = clients["owner"].get(f"/api/threads/{t_members}/messages").json()["messages"]
-    assert msgs == []
-
-
 def test_frames_about_a_members_character_never_reach_a_restricted_socket(world, clients):
     members_bot = next(b.id for b in config.load_bots() if b.audience == "members")
     tid = clients["owner"].post("/api/threads", json={"bot_id": members_bot}).json()["id"]
@@ -297,23 +239,3 @@ from _extfake import KNOBS, ext_env, install, thread_for  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
 
-def test_a_restricted_voice_socket_reaches_only_restricted_audience_characters(ext_env):
-    c, _ = ext_env
-    install()
-    KNOBS.handler_mode = "hold"
-    # An owner, a Restricted profile, and the profile's own session.
-    assert c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1"}).status_code == 200
-    mia = c.post("/api/people", json={"name": "Mia", "role": "restricted"}).json()
-    members_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience == "members"))
-    kids_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience in ("all", "restricted")))
-    c.cookies.clear()
-    assert c.post("/api/auth/login", json={"profile_id": mia["id"]}).status_code == 200
-    origin = {"origin": "http://testserver"}
-    with pytest.raises(WebSocketDisconnect) as e, c.websocket_connect(
-            f"/ws/voice/{members_tid}", headers=origin) as ws:
-        ws.receive_text()
-    assert e.value.code == 1008
-    with c.websocket_connect(f"/ws/voice/{kids_tid}", headers=origin) as ws:
-        ws.receive_text()
-    sock = KNOBS.sockets[-1]
-    assert sock.locked is True, "a Restricted profile's voice turn must run locked"

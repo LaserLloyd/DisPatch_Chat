@@ -218,6 +218,10 @@ class InjectIn(BaseModel):
     # "<bot> posted"; a string is the title ("Morning brief posted"). The
     # push never carries the content.
     notify: bool | str | None = Field(default=None)
+    # 4.0 idempotency: a caller-chosen key (a run id, a cron slot). A second inject with the
+    # same key stores nothing and answers the first one's message with `duplicate: true`.
+    delivery_key: str | None = Field(default=None, min_length=1, max_length=160,
+                                     pattern=r"^[A-Za-z0-9._:@/+-]+$")
 
     _validate_date = field_validator("date")(_check_real_date)
 
