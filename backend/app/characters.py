@@ -131,7 +131,7 @@ def character_out(b: Bot) -> dict:
 def may_use(b: Bot, principal) -> bool:
     """May ``principal`` see ``b`` and talk to it? Audience first, then the profile list. Owner,
     Admin, an open install and machines see everything."""
-    if principal is None or principal.kind in ("open", "machine") or principal.is_operator:
+    if principal is None or principal.kind in ("open", "machine") or principal.is_admin:
         return True
     if principal.kind == "anonymous":
         return not b.profiles and b.audience in ("all", "restricted")

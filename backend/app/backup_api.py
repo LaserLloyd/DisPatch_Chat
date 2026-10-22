@@ -192,7 +192,7 @@ def _target(request: Request, profile_id: str) -> accounts.Profile:
     if prof is None:
         raise fail(404, "profile_not_found", "No such profile.")
     me = caller(request)
-    if prof.id != me.profile_id and not _may_manage(me, prof.role):
+    if prof.id != me.profile_id and not _may_manage(me, prof.protected):
         raise fail(403, "permission_denied", "You cannot manage that profile.")
     return prof
 
@@ -237,7 +237,7 @@ async def erase_user(request: Request, profile_id: str):
     me = caller(request)
     if prof.id == me.profile_id:
         raise fail(409, "permission_denied", "You cannot delete the profile you are using.")
-    if prof.role == "owner":
+    if prof.protected:
         raise fail(409, "owner_immutable", "The owner cannot be deleted.")
 
     def run() -> dict:

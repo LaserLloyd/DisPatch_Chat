@@ -119,12 +119,12 @@ def test_the_dry_run_prints_the_table_and_writes_nothing(v3):
     assert "threads.owner_profile_id" in text and "files.owner_profile_id" in text
     assert "profiles.backends" in text
     rows = {line.split("'")[1]: line for line in text.splitlines() if "chat(s) ->" in line}
-    assert "2 chat(s) -> Robin (Restricted)" in rows["cub"]
-    assert "-> Sam (Member)" in rows["solo"] and "only Sam may use it" in rows["solo"]
+    assert "2 chat(s) -> Robin (Basic)" in rows["cub"]
+    assert "-> Sam (User)" in rows["solo"] and "only Sam may use it" in rows["solo"]
     for bot in ("pal", "work", "rx", "pair", "ghost"):
         assert "-> Olive (Owner)" in rows[bot], rows[bot]
     assert "no longer in the roster" in rows["ghost"]
-    assert "-> Robin (Restricted)" in rows["mixed"]        # matched case-insensitively
+    assert "-> Robin (Basic)" in rows["mixed"]        # matched case-insensitively
     assert "files: 2 File Server record(s) -> Olive (Owner)" in text
     assert "push subscriptions: 3 get their device's profile, 1 dropped" in text
     assert "'cub' could become a personal character of Robin" in text
@@ -170,7 +170,7 @@ def test_no_profile_gains_access_to_a_chat_it_could_not_read(v3):
         bot_id = con.execute("SELECT bot_id FROM threads WHERE id=?", (tid,)).fetchone()[0]
         con.close()
         bot = bots.get(bot_id.lower())
-        if prof.role != "owner":
+        if not prof.protected:
             assert bot is not None and characters.may_use(bot, policy.profile_principal(prof)), (tid, bot_id)
 
 
@@ -219,7 +219,7 @@ def test_assign_and_all_to_owner_override_the_rule(v3, capsys):
     d = str(v3["dir"])
     assert migrate.main(["--dry-run", "--data-dir", d, "--assign", "work=Sam", "--assign", "cub=Olive"]) == 0
     out = capsys.readouterr().out
-    assert "'work'" in out and "-> Sam (Member)  (--assign)" in out
+    assert "'work'" in out and "-> Sam (User)  (--assign)" in out
     assert migrate.main(["--data-dir", d, "--assign", "work=sam", "--assign", "cub=Olive"]) == 0
     got = _owners(v3["dir"])
     assert got["t3"] == v3["sam"].id and got["t0"] == v3["owner"].id

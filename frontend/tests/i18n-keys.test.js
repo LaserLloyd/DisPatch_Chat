@@ -119,7 +119,7 @@ const DYNAMIC = [
   { re: /^settings\.audience_(all|members|restricted)$/,
     built: 'main.js  t(`settings.audience_${aud}`)' },
   // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`), profiles.js ROLES
-  { re: /^role\.(owner|admin|member|restricted)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
+  { re: /^role\.(owner|admin|member|restricted|user|basic)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
   // js/signin.js  openRestrictedPanel():  t(`restricted.use_${l.key}`), profiles.js usageLines()
   { re: /^restricted\.use_(minutes|turns|threads|feedback|upload_mb)$/,
     built: 'signin.js  t(`restricted.use_${l.key}`)' },
@@ -134,6 +134,17 @@ const DYNAMIC = [
     built: 'people.js / signin.js  t(`people.col_${c}`)' },
   // js/people.js  auditKind():  t(`people.audit_${kind}`) for the kinds the server writes (people_api._audit, main.py)
   { re: /^people\.audit_[a-z_]+$/, built: 'people.js  t(`people.audit_${kind}`)' },
+  // 4.0 chat-first profiles: keys the Foundation package created AHEAD of the wave
+  // packages that use them (BUILD-PLAN-v2 §2.0: a package uses only keys Foundation made).
+  // Each package deletes its lines here as its code starts using the keys; WP-LOC (wave 3b)
+  // removes whatever is left, so a key no package ended up using is caught then.
+  { re: /^(profiles|reset|mybots|editor|aibuild|perms|copybot|voices|storage|retention|archive|media)\.[a-z_]+$/,
+    built: '4.0 Foundation: reserved for the wave packages' },
+  { re: /^lock\.(target_title|target_default|target_list|target_hint|landed)$/,
+    built: '4.0 Foundation: reserved for WP-FE-CORE / WP-FE-PEOPLE' },
+  { re: /^host_notice\.(shared|pin_reset)$/, built: '4.0 Foundation: reserved for WP-BANNER' },
+  { re: /^people\.(type_label|type_admin|type_user|type_basic|type_admin_hint|type_user_hint|type_basic_hint|protected|protected_hint|no_credential_warning|downgrade_title|downgrade_confirm|lock_target_badge)$/,
+    built: '4.0 Foundation: reserved for WP-FE-PEOPLE' },
 ];
 
 test('every key in en.json is used by the app', () => {

@@ -402,12 +402,18 @@ def test_a_manage_settings_grant_is_not_host_control(world, owner):
     world.login(admin, profile_id=boss["id"], password="boss-password-1")  # scrub-ok: throwaway test fixture
     r = admin.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}})
     assert r.status_code == 200, r.text
-    max_ = world.person(owner, "Max", "member", pin="5555", grants=["manage_settings"])
+    # 4.0: a Member (User) can no longer be granted manage_settings, and a grant forged into
+    # the database is not effective: the Member reaches no settings at all.
+    from app import accounts
+    r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
+                                        "grants": ["manage_settings"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    max_ = world.person(owner, "Max", "member", pin="5555")
+    accounts.update_profile(max_["id"], grants=["manage_settings"])      # forged straight into the DB
     member = world.client(("203.0.113.61", 40011))
     world.login(member, profile_id=max_["id"], pin="5555")
-    assert member.get("/api/settings").status_code == 200
-    ok = member.patch("/api/settings", json={"set": {"characters.greeting": True}})
-    assert ok.status_code == 200, ok.text
+    assert member.get("/api/settings").status_code == 403
+    assert member.patch("/api/settings", json={"set": {"characters.greeting": True}}).status_code == 403
     for body in ({"set": {"connections.image_cli": "/bin/evil"}}, {"set": {"tools.openclaw_bin": "/bin/evil"}},
                  {"reset": ["system.backup_keep"]}):
         r = member.patch("/api/settings", json=body)

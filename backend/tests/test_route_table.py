@@ -108,10 +108,11 @@ def test_state_changing_routes_are_never_public_without_a_stated_reason():
 
 
 def test_restricted_never_holds_a_management_permission():
-    from app.contracts.permissions import RESTRICTED_NEVER, ROLE_PERMISSIONS, Role
-    assert not (ROLE_PERMISSIONS[Role.RESTRICTED] & RESTRICTED_NEVER)
-    assert set(ROLE_PERMISSIONS[Role.ADMIN]) == set(Permission)      # Admin is full (2026-10-19)
-    assert set(ROLE_PERMISSIONS[Role.OWNER]) == set(Permission)
+    from app.contracts.permissions import ROLE_DEFAULTS, ROLE_NEVER, Role
+    for role in (Role.USER, Role.BASIC):
+        assert not (ROLE_DEFAULTS[role] & ROLE_NEVER[role])
+        assert Permission.MANAGE_USERS in ROLE_NEVER[role] and Permission.ADMIN_SYSTEM in ROLE_NEVER[role]
+    assert set(ROLE_DEFAULTS[Role.ADMIN]) == set(Permission)      # Admin is full (2026-10-19)
 
 
 def test_report_routes_per_permission(capsys):

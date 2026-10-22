@@ -3,7 +3,8 @@
 1. A profile cannot grant itself permissions: a Member holding ``manage_users`` could PATCH
    its own ``grants`` (host control included), bind its device to any Member's profile and
    forget anyone's device. ``admin_system`` is Owner-only for every role, in the matrix and
-   in the API.
+   in the API. (4.0: ``manage_users`` is in a User's "never" column, so the grant itself is
+   refused now; the checks below keep the escalation closed from both ends.)
 2. A connection's redirects get the same SSRF guard as the typed address.
 Run: cd backend && uv run pytest tests/test_review_fixes_20261018.py
 """
@@ -22,11 +23,14 @@ LAN = ("203.0.113.70", 42000)
 @pytest.fixture
 def family(world):
     owner = world.create_owner(world.client())
-    maxp = world.person(owner, "Max", "member", pin="5555", grants=["manage_users"])
+    r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
+                                        "grants": ["manage_users"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    maxp = world.person(owner, "Max", "member", pin="5555")
     eve = world.person(owner, "Eve", "member", pin="6666")
     max_c = world.client(LAN)
     assert world.login(max_c, name="Max", pin="5555").status_code == 200
-    assert "manage_users" in max_c.get("/api/auth/me").json()["permissions"]
+    assert "manage_users" not in max_c.get("/api/auth/me").json()["permissions"]
     return {"owner": owner, "max": max_c, "max_id": maxp["id"], "eve_id": eve["id"]}
 
 
@@ -40,8 +44,6 @@ def test_a_member_cannot_grant_itself_anything(family):
     me = family["max"].get("/api/auth/me").json()["permissions"]
     assert "admin_system" not in me and "manage_settings" not in me
     assert family["max"].get("/api/dashboard").status_code == 403
-    # Name and picture are still the profile's own business.
-    assert family["max"].patch(f"/api/people/{family['max_id']}", json={"name": "Maxi"}).status_code == 200
 
 
 def test_host_control_cannot_be_granted_below_admin(family):
@@ -51,7 +53,7 @@ def test_host_control_cannot_be_granted_below_admin(family):
     prof = accounts.get_profile(family["max_id"])
     forged = dataclasses.replace(prof, grants=["admin_system", "manage_settings"])
     perms = policy.effective_permissions(forged)
-    assert "admin_system" not in perms and "manage_settings" in perms
+    assert "admin_system" not in perms and "manage_settings" not in perms   # 4.0: never for a User
     admin = dataclasses.replace(prof, role="admin", grants=[])
     assert "admin_system" in policy.effective_permissions(admin)   # an Admin holds it by role
 
@@ -59,15 +61,14 @@ def test_host_control_cannot_be_granted_below_admin(family):
 def test_a_member_cannot_bind_its_device_to_another_profile_or_forget_other_devices(family):
     r = family["max"].put("/api/people/devices/this", json={"profile_id": family["eve_id"]})
     assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
-    assert family["max"].put("/api/people/devices/this", json={"profile_id": family["max_id"]}).status_code == 200
+    # 4.0: without manage_users a User cannot bind even its own device (device binding goes away).
+    assert family["max"].put("/api/people/devices/this", json={"profile_id": family["max_id"]}).status_code == 403
     # The Owner binds a (different) device to Eve; Max may not forget it.
     other = family["owner"]
     assert other.put("/api/people/devices/this", json={"profile_id": family["eve_id"]}).status_code == 200
     devices = other.get("/api/people/devices").json()["devices"]
     eves = next(d["id"] for d in devices if d.get("default_profile_id") == family["eve_id"])
     assert family["max"].delete(f"/api/people/devices/{eves}").status_code == 403
-    mine = family["max"].get("/api/people/devices").json()["this_device"]
-    assert family["max"].delete(f"/api/people/devices/{mine}").status_code == 200
     assert other.delete(f"/api/people/devices/{eves}").status_code == 200
 
 

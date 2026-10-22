@@ -1,0 +1,17 @@
+/* 4.0 chat-first profiles: styles for the new profile, bot and storage screens.
+ *
+ * One section per frontend package; a package edits ONLY its own section, so
+ * parallel packages never conflict here. Use the theme tokens (var(--...)) from
+ * ui-theme/ and app.css; no hard-coded colours. Loaded by index.html after
+ * app.css. Foundation created the file with empty sections.
+ */
+
+/* ===== WP-FE-CORE: rail Mine / Household, profile switch, sign-in tiles ===== */
+
+/* ===== WP-FE-YOU: My bots, bot editor, AI build, Reset to default ===== */
+
+/* ===== WP-FE-PEOPLE: People & Access types, permissions, lock target ===== */
+
+/* ===== WP-UIREV: review fixes (wave 3) ===== */
+
+/* ===== WP-SCALE-FE: thread pager, Archived view, load earlier, Storage and image cards ===== */

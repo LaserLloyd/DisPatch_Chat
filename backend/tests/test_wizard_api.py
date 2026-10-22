@@ -70,7 +70,7 @@ def test_the_whole_wizard_by_api(world, monkeypatch):
         "install_animal_friends": True})
     assert fam.status_code == 200, fam.text
     fb = fam.json()
-    assert [p["role"] for p in fb["created"]] == ["member", "restricted"] and len(fb["restricted"]) == 1
+    assert [p["role"] for p in fb["created"]] == ["user", "basic"] and len(fb["restricted"]) == 1
     assert fb["packs"]["animal_friends"]["installed"] == ["otto", "hazel", "hoot", "pip", "maple", "bruno"]
     otto = config.get_bot("otto")
     assert otto.audience == "restricted" and otto.advisor["providers"][0]["connection"] == body["connection"]["id"]

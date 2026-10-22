@@ -13,11 +13,18 @@ export const ROLES = ['owner', 'admin', 'member', 'restricted'];
 const RANK = { restricted: 0, member: 1, admin: 2, owner: 3 };
 
 export const roleRank = (role) => (role in RANK ? RANK[role] : -1);
+/** 4.0 role word -> the 3.x word this UI still uses (WP-FE-CORE removes it). */
+const LEGACY_OF_40 = { admin: 'admin', user: 'member', basic: 'restricted' };
 
 /** The role the UI should act as, from a /api/auth/status or /api/auth/me body.
  *  A server that predates 3.0 sends no `role`: derive it the way 2.x worked
  *  (decoy = locked/limited, otherwise the operator). */
 export function normalizeRole(s) {
+  // 4.0 (Foundation, transitional until WP-FE-CORE moves the UI to Admin/User/Basic): the
+  // server now says admin + protected / user / basic; this UI still speaks the 3.x words.
+  if (s && typeof s.role === 'string' && s.role in LEGACY_OF_40) {
+    return s.role === 'admin' && s.protected ? 'owner' : LEGACY_OF_40[s.role];
+  }
   if (s && typeof s.role === 'string' && s.role in RANK) return s.role;
   return s && s.decoy ? 'restricted' : 'owner';
 }

@@ -40,7 +40,7 @@ from . import (
     starter_packs,
 )
 from .api_common import audit, fail
-from .contracts.permissions import Permission
+from .contracts.permissions import Permission, Role
 
 router = APIRouter()
 
@@ -78,7 +78,7 @@ class Person(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=40)
-    role: Literal["member", "restricted"] = "member"
+    role: Literal["user", "basic", "member", "restricted"] = "user"     # member/restricted: 3.x words
     pin: str = Field(default="", max_length=128)
 
 
@@ -139,7 +139,7 @@ def _checklist() -> list[dict]:
     connected = [b for b in config.load_bots() if config.direct_connected(b) or b.api]
     voice = next((e for e in extensions.registry() if e.id == "voice"), None)
     profiles = accounts.list_profiles()
-    others = [p for p in profiles if p.role != "owner"]
+    others = [p for p in profiles if not p.protected]
     owner = accounts.get_owner()
     items = [
         {"id": "owner", "title": "Owner account", "done": _claimed(), "optional": False,
@@ -240,8 +240,8 @@ async def wizard_family(request: Request, payload: FamilyIn):
                 prof = accounts.create_profile(person.name, person.role, pin_hash=pin_hash)
             except accounts.AccountError as e:
                 raise fail(e.status, e.code, str(e)) from e
-            created.append({"id": prof.id, "name": prof.name, "role": prof.role})
-            if prof.role == "restricted":
+            created.append({"id": prof.id, "name": prof.name, "role": prof.role.value})
+            if prof.role is Role.BASIC:
                 restricted_ids.append(prof.id)
         packs: dict[str, Any] = {}
         default_conn = connections.default_id() or None

@@ -26,7 +26,11 @@ const HTML = read('index.html');
 const LANGS = ['en', 'ar', 'de', 'es', 'fr', 'ja', 'pt', 'zh'];
 const LOC = Object.fromEntries(LANGS.map((l) => [l, JSON.parse(read(`locales/${l}.json`))]));
 const EN = LOC.en;
-const KEYS = ['title', 'files_body', 'chats_body', 'card_title', 'card_files', 'card_chats', 'card_more', 'card_ok'];
+const KEYS = ['title', 'files_body', 'chats_body', 'card_title', 'card_files', 'card_chats', 'card_more', 'card_ok',
+  'shared', 'pin_reset'];
+// 4.0 (Foundation): added in English in all eight locales; WP-LOC translates them, then
+// they leave this set.
+const PENDING_TRANSLATION = new Set(['shared', 'pin_reset']);
 
 const require = createRequire(import.meta.url);
 let jsdom = null;
@@ -149,7 +153,9 @@ test('every locale has real strings for every key', () => {
     for (const [k, v] of Object.entries(h)) {
       assert.ok(typeof v === 'string' && v.trim().length > 1, `${l}.${k}`);
       assert.doesNotMatch(v, /^\[[a-z]{2}\]/, `${l}.${k} is translated`);
-      if (l !== 'en' && k !== 'card_ok') assert.notEqual(v, EN.host_notice[k], `${l}.${k} is not the English text`);
+      if (l !== 'en' && k !== 'card_ok' && !PENDING_TRANSLATION.has(k)) {
+        assert.notEqual(v, EN.host_notice[k], `${l}.${k} is not the English text`);
+      }
     }
   }
 });

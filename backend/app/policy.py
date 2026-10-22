@@ -8,11 +8,11 @@ satisfy this requirement?* - answered by :func:`authorize`, and exactly one plac
 every route and WebSocket action declares its answer (``app/route_policy.py``).
 ``tests/test_route_table.py`` fails the build if a route is missing from it.
 
-Principals
-----------
-``profile``    a signed-in person: Owner, Admin, Member or Restricted
-``anonymous``  nobody signed in on an installation that has an owner: **Restricted**
-               (this is the old "Safe Mode": the door is open to look, nothing more)
+Principals (4.0)
+----------------
+``profile``    a signed-in person: an Admin (the first one is *protected*), a User or a
+               Basic profile - or, on an unsigned device, the lock-target default profile
+               (:func:`unsigned`, ``via="default"``)
 ``machine``    an agent, cron or the image rig, holding named :class:`MachineScope`s.
                Identity is a *credential* (the install's ``api_token``). Network
                position - being on loopback - only counts while the owner leaves
@@ -21,6 +21,13 @@ Principals
 ``open``       a brand-new install with no owner and no PIN, reached from this
                machine. Everything is allowed - exactly the 2.x "no PIN" behaviour -
                until the owner account is created (``POST /api/auth/setup``).
+
+Transitional (Foundation -> WP-CORE / WP-DEL): the 3.x ``anonymous`` principal (an
+unsigned device on an install with ``anonymous_access: restricted``) still exists so the
+five unsigned sites keep today's behaviour until WP-CORE points them at :func:`unsigned`
+and deletes it; ``Principal.is_restricted`` (= a Basic profile or that anonymous guest)
+lives until WP-DEL removes the Restricted tier. Neither is part of the 4.0 vocabulary
+(``contracts.permissions.PRINCIPAL_KINDS``).
 """
 
 from __future__ import annotations
@@ -39,13 +46,14 @@ from starlette.routing import Match, Mount
 from . import accounts, auth, config
 from .contracts.permissions import (
     MACHINE_DEFAULT_SCOPES,
-    RESTRICTED_NEVER,
-    ROLE_PERMISSIONS,
     TOOL_PREFIX,
     MachineScope,
     Permission,
     Role,
     is_valid_permission,
+)
+from .contracts.permissions import (
+    effective_permissions as _table_permissions,
 )
 
 SESSION_COOKIE = "lc_session"
@@ -129,37 +137,47 @@ AUTHENTICATED = Requirement(authenticated=True)
 # --------------------------------------------------------------------------- #
 
 
-def effective_permissions(profile: accounts.Profile) -> frozenset[str]:
-    """Role set + the profile's grants - its denies, within the role's ceiling."""
-    role = Role(profile.role)
-    base = {p.value for p in ROLE_PERMISSIONS[role]}
-    if role is Role.OWNER:
-        return frozenset(base)                       # the owner cannot be restricted
-    for g in profile.grants:
-        if not is_valid_permission(g):
-            continue
-        if role is Role.RESTRICTED and g in {p.value for p in RESTRICTED_NEVER}:
-            continue
-        if g == Permission.ADMIN_SYSTEM.value and role is not Role.ADMIN:
-            continue                                  # host control is the Owner's and the Admins', never a grant
-        base.add(g)
-    for d in profile.denies:
-        base.discard(d)
-    return frozenset(base)
+#: What the transitional 3.x ``anonymous`` guest holds (exactly the 3.x Restricted set, so
+#: nothing an unsigned device may do changed in Foundation). Goes with :func:`anonymous`.
+_ANONYMOUS_PERMISSIONS = frozenset({Permission.USE_CHAT.value, Permission.USE_VOICE.value})
+
+
+def is_lock_target(profile: accounts.Profile | None,
+                   cfg: auth.SecurityConfig | None = None) -> bool:
+    """Is ``profile`` the current lock target - the default profile every unsigned device
+    and every lock lands on (``lock_target: default_profile`` + ``default_profile: <id>``
+    in security.yaml)? Such a profile is shared by everyone who can reach the port, so the
+    lock-target fence (``contracts.permissions.LOCK_TARGET_FENCE``) applies to it."""
+    if profile is None:
+        return False
+    cfg = cfg or auth.load()
+    return cfg.lock_target == "default_profile" and bool(cfg.default_profile) \
+        and cfg.default_profile == profile.id
+
+
+def effective_permissions(profile: accounts.Profile,
+                          cfg: auth.SecurityConfig | None = None) -> frozenset[str]:
+    """The profile's role table (``contracts.permissions.effective_permissions``: defaults +
+    grants within the grantable column - denies; an Admin holds everything) with the
+    lock-target fence applied when ``profile`` is the current lock target."""
+    return _table_permissions(profile.role, profile.grants, profile.denies,
+                              lock_target=is_lock_target(profile, cfg))
 
 
 @dataclass(frozen=True)
 class Principal:
-    kind: str                                   # profile | anonymous | machine | open
-    role: str | None = None                     # owner|admin|member|restricted (None for machine)
+    kind: str                                   # profile | machine | open (| anonymous, transitional)
+    role: str | None = None                     # a Role value: admin | user | basic (None for machine)
     profile_id: str | None = None
     name: str = ""
     permissions: frozenset[str] = frozenset()
     machine_scopes: frozenset[str] = frozenset()
     session_token: str | None = None
     device_id: str | None = None
-    via: str = ""                               # cookie | device | api_token | loopback | callback | open | anonymous
+    via: str = ""                               # cookie | device | default | api_token | loopback | callback | open | anonymous
     profile: accounts.Profile | None = field(default=None, compare=False, repr=False)
+    #: The first Admin (accounts.Profile.protected). An open install counts as protected too.
+    protected: bool = False
 
     # -- classification ---------------------------------------------------- #
     @property
@@ -168,17 +186,20 @@ class Principal:
 
     @property
     def is_restricted(self) -> bool:
-        """The old "decoy": Safe Mode, a locked device, a Restricted profile."""
-        return self.kind == "anonymous" or self.role == Role.RESTRICTED.value
+        """TRANSITIONAL shim until WP-DEL removes the Restricted tier: a Basic profile (the
+        3.x Restricted role) or the transitional anonymous guest. New code must not use it:
+        ask for a named permission instead."""
+        return self.kind == "anonymous" or self.role == Role.BASIC.value
 
     @property
-    def is_operator(self) -> bool:
-        """The old "operator": an Owner or Admin session, or an open install."""
-        return self.kind == "open" or self.role in (Role.OWNER.value, Role.ADMIN.value)
+    def is_admin(self) -> bool:
+        """An Admin session (protected or not), or an open install. (3.x ``is_operator``.)"""
+        return self.kind == "open" or self.role == Role.ADMIN.value
 
     @property
-    def is_owner(self) -> bool:
-        return self.kind == "open" or self.role == Role.OWNER.value
+    def is_protected(self) -> bool:
+        """THE protected first Admin (3.x ``is_owner``), or an open install."""
+        return self.kind == "open" or (self.kind == "profile" and self.protected)
 
     @property
     def signed_in(self) -> bool:
@@ -201,19 +222,20 @@ class Principal:
         return self.kind == "machine" and s in self.machine_scopes
 
     def summary(self) -> dict:
-        return {"kind": self.kind, "role": self.role, "profile_id": self.profile_id,
-                "name": self.name, "via": self.via,
+        return {"kind": self.kind, "role": self.role, "protected": self.protected,
+                "profile_id": self.profile_id, "name": self.name, "via": self.via,
                 "permissions": sorted(self.permissions) if self.kind != "open" else ["*"]}
 
 
 def anonymous(device_id: str | None = None) -> Principal:
-    return Principal(kind="anonymous", role=Role.RESTRICTED.value, name="Guest",
-                     permissions=frozenset(p.value for p in ROLE_PERMISSIONS[Role.RESTRICTED]),
-                     device_id=device_id, via="anonymous")
+    """TRANSITIONAL (deleted by WP-CORE): the 3.x unsigned guest, a Basic caller holding only
+    chat and voice."""
+    return Principal(kind="anonymous", role=Role.BASIC.value, name="Guest",
+                     permissions=_ANONYMOUS_PERMISSIONS, device_id=device_id, via="anonymous")
 
 
 def open_principal() -> Principal:
-    return Principal(kind="open", role=Role.OWNER.value, name="Owner", via="open")
+    return Principal(kind="open", role=Role.ADMIN.value, name="Owner", via="open", protected=True)
 
 
 def machine_principal(via: str, scopes: Iterable[str] | None = None) -> Principal:
@@ -223,9 +245,9 @@ def machine_principal(via: str, scopes: Iterable[str] | None = None) -> Principa
 
 def profile_principal(profile: accounts.Profile, *, token: str | None = None,
                       device_id: str | None = None, via: str = "cookie") -> Principal:
-    return Principal(kind="profile", role=profile.role, profile_id=profile.id, name=profile.name,
+    return Principal(kind="profile", role=profile.role.value, profile_id=profile.id, name=profile.name,
                      permissions=effective_permissions(profile), session_token=token,
-                     device_id=device_id, via=via, profile=profile)
+                     device_id=device_id, via=via, profile=profile, protected=profile.protected)
 
 
 def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
@@ -237,11 +259,12 @@ def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
     if pid is None:
         # A session minted before accounts existed (or before the owner row was
         # created): the Owner. With no owner row yet it is an owner with no profile.
-        owner = accounts.get_owner()
+        owner = accounts.get_protected_admin()
         if owner is None:
-            return Principal(kind="profile", role=Role.OWNER.value, name="Owner",
-                             permissions=frozenset(p.value for p in ROLE_PERMISSIONS[Role.OWNER]),
-                             session_token=token, device_id=device_id, via="cookie")
+            return Principal(kind="profile", role=Role.ADMIN.value, name="Owner",
+                             permissions=_table_permissions(Role.ADMIN),
+                             session_token=token, device_id=device_id, via="cookie",
+                             protected=True)
         return profile_principal(owner, token=token, device_id=device_id)
     prof = accounts.get_profile(pid)
     if prof is None or prof.disabled or prof.epoch != getattr(sess, "epoch", 0):
@@ -250,11 +273,32 @@ def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
 
 
 def for_device(device_id: str | None) -> Principal | None:
-    """A device bound to a default profile opens as that profile - capped at Member."""
+    """A device bound to a default profile opens as that profile - never an Admin.
+    (Device binding is removed in 4.0: WP-CORE deletes this.)"""
     prof = accounts.default_profile_for_device(device_id)
-    if prof is None or prof.role in (Role.OWNER.value, Role.ADMIN.value):
+    if prof is None or prof.role is Role.ADMIN:
         return None
     return profile_principal(prof, device_id=device_id, via="device")
+
+
+def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
+    """Who an unsigned device is (4.0, BUILD-PLAN-v2 §1.4): the lock-target default profile,
+    or nobody.
+
+    With ``lock_target: default_profile`` and a ``default_profile`` that exists and is
+    enabled -> that profile, as a ``profile`` principal with ``via="default"`` (shared by
+    everyone who reaches the port: the lock-target fence keeps agents and voice cloning off
+    it). Otherwise ``None``: the caller shows the sign-in screen with the profile tiles.
+    No device binding is consulted (4.0 removes it). Foundation lands the final body; WP-CORE points
+    the five unsigned sites at it (main ``auth_gate``, ``websocket_endpoint`` x2, the
+    extensions thread socket and ``_session_live_fn``) and deletes :func:`anonymous`."""
+    cfg = cfg or auth.load()
+    if cfg.lock_target != "default_profile" or not cfg.default_profile:
+        return None
+    prof = accounts.get_profile(cfg.default_profile)
+    if prof is None or prof.disabled:
+        return None
+    return profile_principal(prof, via="default")
 
 
 # --------------------------------------------------------------------------- #
@@ -333,7 +377,8 @@ class Policy:
 
     @property
     def operator(self) -> bool:
-        return self.principal.is_operator
+        """Compat name: an Admin (``Principal.is_admin``)."""
+        return self.principal.is_admin
 
     def can(self, permission: Permission | str) -> bool:
         return self.principal.can(permission)
@@ -346,9 +391,10 @@ class Policy:
         if not self.principal.signed_in:
             raise denied(self.principal, "authenticated")
 
-    def require_owner(self) -> None:
-        if not self.principal.is_owner:
-            raise denied(self.principal, "owner")
+    def require_protected(self) -> None:
+        """Only the protected first Admin (3.x ``require_owner``)."""
+        if not self.principal.is_protected:
+            raise denied(self.principal, "protected_admin")
 
     def can_use_tool(self, tool_id: str, *, safe: bool = False) -> bool:
         """Blanket ``use_tools``, an explicit ``use_tools:<id>`` grant, or - for the

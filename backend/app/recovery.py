@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import accounts, auth, config, credentials
+from .contracts.permissions import Role
 
 log = logging.getLogger("local-chat.recovery")
 
@@ -119,7 +120,8 @@ def set_owner_password(name: str, password: str, *, via: str) -> tuple[accounts.
     created = False
     try:
         if owner is None:
-            owner = accounts.create_profile(name, "owner", password_hash=credentials.hash_secret(password))
+            owner = accounts.create_profile(name, Role.ADMIN, protected=True,
+                                            password_hash=credentials.hash_secret(password))
             created = True
         else:
             if owner.name.casefold() != name.strip().casefold():

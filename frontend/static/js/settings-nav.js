@@ -13,6 +13,9 @@
 // Nothing runs at import time.
 
 import { el } from './util.js?v=20';
+import { renderMyBots } from './my-bots.js?v=1';
+import { renderAccountReset } from './account-reset.js?v=1';
+import { renderPeoplePerms } from './people-perms.js?v=1';
 
 /** The sections, in nav order. `group`: you (this person / device), household
  *  (Owner and Admin), addons (tabs an add-on adds; none built in). `perm` is
@@ -29,6 +32,26 @@ export const SECTIONS = [
 ];
 
 export const SECTION_IDS = SECTIONS.map((s) => s.id);
+
+/** 4.0 chat-first profiles: what the new modules add to a section when it mounts.
+ *  main.js setSettingsTab() calls runSectionHooks(id, pane, deps) once per mount, after
+ *  the section's own code, so a package fills its part of a section by editing ITS module
+ *  only (account-reset.js: Account; people-perms.js: People; my-bots.js: the You -> My
+ *  bots section, which WP-FE-YOU adds to SECTIONS with its pane - until then nothing calls
+ *  it). Foundation: every render is a no-op. */
+export const SECTION_HOOKS = Object.freeze({
+  account: [renderAccountReset],
+  people: [renderPeoplePerms],
+  mybots: [renderMyBots],
+});
+
+/** Run the SECTION_HOOKS of section `id` against its pane. One failing hook is logged and
+ *  never stops the section or the others. */
+export function runSectionHooks(id, pane, deps = {}) {
+  for (const fn of SECTION_HOOKS[id] || []) {
+    try { fn(pane, deps); } catch (e) { console.warn(`settings: ${id} hook failed`, e); }
+  }
+}
 
 /** Every tab id Settings has ever had (2.x / 3.0 / 3.1), and where it lives now.
  *  This is the compatibility contract for add-ons and old links: an id here

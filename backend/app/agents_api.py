@@ -7,9 +7,10 @@ before a handler runs (the ``Depends`` below say the same sentence again at the 
                             them to profiles, store the Claude API key and MCP secrets, set
                             budgets and retention
 ``dispatch_agents``         use the agents published to you: ``/api/agents/available``,
-                            ``/api/tasks`` and everything under it. A Restricted profile can
-                            never hold this permission (``RESTRICTED_NEVER``), so every route
-                            below answers 403 to it - listing included
+                            ``/api/tasks`` and everything under it. A User or Basic profile
+                            holds it only when an Admin switches it on (4.0 ``ROLE_GRANTABLE``;
+                            never on the lock-target profile), so every route below answers
+                            403 to anyone else - listing included
 ``approve_agent_actions``   answer an approval card (``/api/approvals/{id}``) and press the Send
                             on a held handoff (``/api/tasks/{id}/release``)
 
@@ -108,7 +109,7 @@ def _usable_agent(principal: policy.Principal, agent_id: str) -> dict[str, Any]:
     a = store.get_agent(agent_id)
     if a is None:
         raise _not_found_agent()
-    if not principal.is_operator and (a["disabled"] or not _published(a, principal)):
+    if not principal.is_admin and (a["disabled"] or not _published(a, principal)):
         raise _not_found_agent()
     need = (a["spec"] or {}).get("required_permission") or Permission.DISPATCH_AGENTS.value
     if not principal.can(need):
@@ -125,7 +126,7 @@ def _not_found_agent() -> HTTPException:
 def _still_usable(principal: policy.Principal, row: dict[str, Any]) -> None:
     """Following up on or resuming a task is dispatching again: the agent must still be one this
     person may use (not unpublished, switched off, deleted or given a stricter permission since)."""
-    if principal.is_operator:
+    if principal.is_admin:
         return
     a = store.get_agent(row["agent_id"])
     if a is None:
@@ -353,7 +354,7 @@ async def available_agents(request: Request, _=_DISPATCH):
               for b in mgr.backend_info()}
     out = []
     for a in store.list_agents():
-        if not pr.is_operator and (a["disabled"] or not _published(a, pr)):
+        if not pr.is_admin and (a["disabled"] or not _published(a, pr)):
             continue
         need = (a["spec"] or {}).get("required_permission") or Permission.DISPATCH_AGENTS.value
         if not pr.can(need):
@@ -609,7 +610,7 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
     thread_id = body.origin_thread_id
     if thread_id:
         info = await mgr.hooks.thread_info(thread_id) if mgr.hooks.thread_info else None
-        allowed = {b.id for b in config.load_bots()} if pr.is_operator else policy.of(request).allowed_bot_ids(config.load_bots())
+        allowed = {b.id for b in config.load_bots()} if pr.is_admin else policy.of(request).allowed_bot_ids(config.load_bots())
         # characters.may_use: per-profile visibility (the character's profiles list), as in the roster.
         if (info is None or info.get("bot_id") not in allowed
                 or not characters.may_use_id(info.get("bot_id"), pr)):
@@ -650,7 +651,7 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
                 return _problem(422, "validation_error", f"{label}: use YYYY-MM-DD")
     # Only an Owner/Admin may look at other people's tasks; everyone else is pinned to their own.
     owner: str | None
-    if pr.is_operator:
+    if pr.is_admin:
         owner = profile or None
     else:
         owner = agents_service.principal_key(pr)

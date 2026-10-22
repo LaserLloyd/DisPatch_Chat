@@ -12,8 +12,8 @@ import pytest
 
 from app import _filelock, accounts, credentials, policy
 from app.contracts.permissions import (
-    RESTRICTED_NEVER,
-    ROLE_PERMISSIONS,
+    ROLE_DEFAULTS,
+    ROLE_NEVER,
     MachineScope,
     Permission,
     Role,
@@ -228,15 +228,13 @@ def test_usage_map_keeps_the_dict_spelling_working(world):
 
 
 def test_the_matrix():
-    owner, admin = ROLE_PERMISSIONS[Role.OWNER], ROLE_PERMISSIONS[Role.ADMIN]
-    member, kid = ROLE_PERMISSIONS[Role.MEMBER], ROLE_PERMISSIONS[Role.RESTRICTED]
-    assert owner == set(Permission)
+    # 4.0: three roles (the full cell-by-cell table is tests/test_permissions_table.py).
+    admin, user, basic = (ROLE_DEFAULTS[r] for r in (Role.ADMIN, Role.USER, Role.BASIC))
     assert admin == set(Permission)                    # 2026-10-19: Admin is full
-    assert kid < member < admin == owner
-    assert kid == {Permission.USE_CHAT, Permission.USE_VOICE}
-    assert Permission.DISPATCH_AGENTS not in member
-    assert not (kid & RESTRICTED_NEVER)
-    assert [role_rank(r) for r in ("restricted", "member", "admin", "owner")] == [0, 1, 2, 3]
+    assert basic < user < admin
+    assert Permission.DISPATCH_AGENTS not in user
+    assert not (basic & ROLE_NEVER[Role.BASIC]) and not (user & ROLE_NEVER[Role.USER])
+    assert [role_rank(r) for r in ("restricted", "member", "admin", "owner")] == [0, 1, 2, 2]
 
 
 def _prof(role, grants=(), denies=()):
@@ -248,7 +246,8 @@ def test_grants_and_denies_stay_inside_the_role_ceiling():
     assert "use_voice" not in policy.effective_permissions(_prof("member", denies=["use_voice"]))
     kid = policy.effective_permissions(_prof("restricted", grants=["manage_settings", "use_images",
                                                                    tool_permission("weather")]))
-    assert "manage_settings" not in kid and "use_images" in kid and "use_tools:weather" in kid
+    # 4.0: tool panels are Admin-only, so a Basic profile can no longer be granted one.
+    assert "manage_settings" not in kid and "use_images" in kid and "use_tools:weather" not in kid
     adm = policy.effective_permissions(_prof("admin"))
     assert "admin_system" in adm                       # an Admin holds host control itself
     own = policy.effective_permissions(_prof("owner", denies=["manage_users"]))
@@ -271,8 +270,9 @@ def test_authorize_decisions():
     # scoped: let through, flagged so the handler narrows
     s = policy.authorize(kid, R(Permission.USE_TOOLS, scoped=True))
     assert s.allowed and s.scoped
-    # blanket use_tools satisfies a parametrised one; nothing else does
-    assert member.can(tool_permission("weather")) and not kid.can(tool_permission("weather"))
+    # blanket use_tools satisfies a parametrised one; nothing else does (4.0: Admins only)
+    assert owner.can(tool_permission("weather")) and not member.can(tool_permission("weather"))
+    assert not kid.can(tool_permission("weather"))
     # machines hold scopes, never roles
     m = policy.machine_principal("test", {MachineScope.INJECT.value})
     assert policy.authorize(m, R(Permission.MANAGE_AGENTS, machine=[MachineScope.INJECT])).allowed

@@ -146,22 +146,27 @@ def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
 
 def test_only_host_control_grants_host_level_powers_to_an_agent(aw):
     # Since 2026-10-19 an Admin holds admin_system like the Owner; the guard is for a profile
-    # that was only GRANTED manage_agents.
-    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
+    # that was only GRANTED manage_agents. 4.0: no such profile can exist (manage_agents is in
+    # a User's "never" column): the grant is refused, one forged into the database is not
+    # effective, and the route refuses before the host-control guard is reached.
+    from app import accounts
+    r = aw.owner.post("/api/people", json={"name": "Gil", "role": "member", "pin": "5555",
+                                           "grants": ["manage_agents"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
+    accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.world.client(("203.0.113.60", 1))
     assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
     real_admin = aw.world.client(("203.0.113.61", 1))
     assert aw.world.login(real_admin, name="Ada", password="admin-pass1").status_code == 200
-    # A manage_agents grant manages agents...
-    ok = admin.post("/api/agents", json={"name": "Plain", "spec": spec()})
-    assert ok.status_code == 201
-    # ...but not the powers that are code execution in effect.
+    r = admin.post("/api/agents", json={"name": "Plain", "spec": spec()})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied", r.text
     for extra in ({"workspace_policy": {"trust_repo_settings": True}},
                   {"mcp_servers": {"x": {"transport": "stdio", "command": "node", "args": ["s.js"]}}},
                   {"mcp_servers": {"x": {"transport": "http", "url": "http://localhost:9/mcp", "privileged": True}}}):
         r = admin.post("/api/agents", json={"name": "Risky", "spec": spec(**extra)})
-        assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", extra
+        assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied", extra
         assert aw.owner.post("/api/agents", json={"name": "Risky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
         assert real_admin.post("/api/agents", json={"name": "AdaRisky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
 
@@ -398,7 +403,11 @@ def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):
 
 def test_a_manage_agents_grant_cannot_point_a_stored_secret_at_a_server_of_their_choosing(aw):
     # An Admin may (admin_system, 2026-10-19); a Member granted manage_agents may not.
-    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
+    # 4.0: the grant itself is refused and a forged one is ineffective (see above), so the
+    # Member is stopped by the route before the secret guard.
+    from app import accounts
+    gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
+    accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.caller(9)
     assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     remote = {"s": {"transport": "http", "url": "https://attacker.example/mcp",
@@ -406,8 +415,8 @@ def test_a_manage_agents_grant_cannot_point_a_stored_secret_at_a_server_of_their
     local = {"s": {"transport": "http", "url": "http://127.0.0.1:1234/mcp",
                    "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
     r = admin.post("/api/agents", json={"name": "Exfil", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner"
-    assert admin.post("/api/agents", json={"name": "Local", "spec": spec(tool_allowlist=["Read"], mcp_servers=local)}).status_code == 201
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
+    assert admin.post("/api/agents", json={"name": "Local", "spec": spec(tool_allowlist=["Read"], mcp_servers=local)}).status_code == 403
     assert aw.owner.post("/api/agents", json={"name": "Remote", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)}).status_code == 201
 
 

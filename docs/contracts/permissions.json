@@ -1,4 +1,15 @@
 {
+  "legacy_roles": {
+    "admin": "admin",
+    "member": "user",
+    "owner": "admin",
+    "restricted": "basic"
+  },
+  "lock_target_fence": [
+    "approve_agent_actions",
+    "dispatch_agents",
+    "voice_lab"
+  ],
   "machine_default_scopes": [
     "machine:advisor",
     "machine:apps",
@@ -40,13 +51,13 @@
     "machine:upload"
   ],
   "naming": {
-    "Safe Mode": "restricted",
-    "Unlocked": "owner",
-    "decoy": "restricted",
-    "full session": "owner",
-    "limited tier": "restricted",
-    "locked device": "restricted",
-    "operator": "owner"
+    "Member": "user",
+    "Owner": "the protected Admin",
+    "Restricted": "basic",
+    "Safe Mode": "basic",
+    "decoy": "basic",
+    "locked device": "basic",
+    "operator": "admin"
   },
   "parametrised": [
     "use_tools:<tool_id>"
@@ -67,28 +78,31 @@
     "manage_users",
     "manage_settings",
     "view_activity",
-    "admin_system"
-  ],
-  "restricted_never": [
     "admin_system",
-    "approve_agent_actions",
-    "dispatch_agents",
-    "manage_agents",
-    "manage_characters",
-    "manage_connections",
-    "manage_history",
-    "manage_plugins",
-    "manage_settings",
-    "manage_users",
-    "use_notifications",
-    "use_tools",
-    "view_activity"
+    "attach_files",
+    "use_lookups",
+    "files_upload",
+    "files_read",
+    "voice_lab",
+    "create_characters",
+    "choose_backend"
   ],
-  "role_permissions": {
+  "principal_kinds": [
+    "profile",
+    "machine",
+    "open"
+  ],
+  "protected": "The first Admin is protected: it cannot be demoted, disabled or deleted, and only it may change its own credentials.",
+  "role_defaults": {
     "admin": [
       "admin_system",
       "approve_agent_actions",
+      "attach_files",
+      "choose_backend",
+      "create_characters",
       "dispatch_agents",
+      "files_read",
+      "files_upload",
       "manage_agents",
       "manage_characters",
       "manage_connections",
@@ -98,47 +112,82 @@
       "manage_users",
       "use_chat",
       "use_images",
+      "use_lookups",
       "use_notifications",
       "use_tools",
       "use_voice",
-      "view_activity"
+      "view_activity",
+      "voice_lab"
     ],
-    "member": [
+    "basic": [
+      "attach_files",
+      "files_upload",
+      "manage_history",
+      "use_chat",
+      "use_lookups",
+      "use_notifications",
+      "use_voice"
+    ],
+    "user": [
+      "attach_files",
+      "choose_backend",
+      "create_characters",
+      "files_read",
+      "files_upload",
       "manage_history",
       "use_chat",
       "use_images",
+      "use_lookups",
       "use_notifications",
-      "use_tools",
-      "use_voice"
-    ],
-    "owner": [
-      "admin_system",
+      "use_voice",
+      "voice_lab"
+    ]
+  },
+  "role_grantable": {
+    "admin": [],
+    "basic": [
       "approve_agent_actions",
       "dispatch_agents",
+      "use_images",
+      "voice_lab"
+    ],
+    "user": [
+      "approve_agent_actions",
+      "dispatch_agents"
+    ]
+  },
+  "role_never": {
+    "admin": [],
+    "basic": [
+      "admin_system",
+      "choose_backend",
+      "create_characters",
+      "files_read",
       "manage_agents",
       "manage_characters",
       "manage_connections",
-      "manage_history",
       "manage_plugins",
       "manage_settings",
       "manage_users",
-      "use_chat",
-      "use_images",
-      "use_notifications",
       "use_tools",
-      "use_voice",
       "view_activity"
     ],
-    "restricted": [
-      "use_chat",
-      "use_voice"
+    "user": [
+      "admin_system",
+      "manage_agents",
+      "manage_characters",
+      "manage_connections",
+      "manage_plugins",
+      "manage_settings",
+      "manage_users",
+      "use_tools",
+      "view_activity"
     ]
   },
   "roles": [
-    "restricted",
-    "member",
-    "admin",
-    "owner"
+    "basic",
+    "user",
+    "admin"
   ],
-  "schema": 1
+  "schema": 2
 }

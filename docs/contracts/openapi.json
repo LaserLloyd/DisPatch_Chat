@@ -2721,8 +2721,10 @@
             "type": "string"
           },
           "role": {
-            "default": "member",
+            "default": "user",
             "enum": [
+              "user",
+              "basic",
               "member",
               "restricted"
             ],
@@ -2816,9 +2818,11 @@
             "title": "Pin"
           },
           "role": {
-            "default": "member",
+            "default": "user",
             "enum": [
               "admin",
+              "user",
+              "basic",
               "member",
               "restricted"
             ],
@@ -2929,6 +2933,8 @@
               {
                 "enum": [
                   "admin",
+                  "user",
+                  "basic",
                   "member",
                   "restricted"
                 ],

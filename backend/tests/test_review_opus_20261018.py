@@ -118,11 +118,20 @@ def test_a_member_may_not_post_as_a_character_or_the_system(house):
 
 def test_a_manage_agents_grant_cannot_rewrite_what_host_control_approved_on_an_agent(aw):
     # Since 2026-10-19 an Admin holds admin_system; the guard is for a profile only granted
-    # manage_agents.
+    # manage_agents. 4.0: no such profile can exist (manage_agents is in a User's "never"
+    # column): the grant is refused, and one forged into the database is not effective, so
+    # the route itself refuses before the guard is reached.
     from agents_world import spec
-    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
+
+    from app import accounts
+    r = aw.owner.post("/api/people", json={"name": "Gil", "role": "member", "pin": "5555",
+                                           "grants": ["manage_agents"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
+    accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.world.client(("203.0.113.62", 1))
     assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
+    assert "manage_agents" not in admin.get("/api/auth/me").json()["permissions"]
     stdio = {"x": {"transport": "stdio", "command": "node", "args": ["server.js"]}}
     remote = {"r": {"transport": "http", "url": "https://mcp.example/mcp",
                     "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
@@ -134,24 +143,31 @@ def test_a_manage_agents_grant_cannot_rewrite_what_host_control_approved_on_an_a
     def patch(servers):
         return admin.patch(f"/api/agents/{aid}", json={"spec": spec(tool_allowlist=["Read"], mcp_servers=servers)})
 
-    # Same name, new command line: code execution on the host -> the Owner's call.
-    r = patch({"x": {"transport": "stdio", "command": "sh", "args": ["-c", "id"]}, **remote})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", r.text
-    # Same name, the stored secret sent somewhere else -> the Owner's call.
-    r = patch({**stdio, "r": {**remote["r"], "url": "https://attacker.example/mcp"}})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", r.text
-    # Leaving the approved grants exactly as they are, or removing one, is fine.
-    assert patch({**stdio, **remote}).status_code == 200
-    assert patch(stdio).status_code == 200
+    # Same name, new command line, or the stored secret sent somewhere else: refused, and so
+    # is every other edit (the profile does not hold manage_agents at all).
+    for servers in ({"x": {"transport": "stdio", "command": "sh", "args": ["-c", "id"]}, **remote},
+                    {**stdio, "r": {**remote["r"], "url": "https://attacker.example/mcp"}},
+                    {**stdio, **remote}):
+        r = patch(servers)
+        assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied", r.text
+    # The protected Admin still edits it.
+    assert aw.owner.patch(f"/api/agents/{aid}", json={"spec": spec(
+        tool_allowlist=["Read"], mcp_servers=stdio)}).status_code == 200
 
 
 # O-4 ------------------------------------------------------------------------ #
 
 def test_a_manage_connections_grant_cannot_move_a_saved_key_to_another_host(world):
     # Since 2026-10-19 an Admin holds admin_system and may; a Member granted
-    # manage_connections may not.
+    # manage_connections may not. 4.0: a Member (User) can no longer be granted it at all, and
+    # a grant forged into the database is not effective, so the route refuses first.
+    from app import accounts
     owner = world.create_owner(world.client())
-    world.person(owner, "Max", "member", pin="5555", grants=["manage_connections"])
+    r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
+                                        "grants": ["manage_connections"]})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    mx = world.person(owner, "Max", "member", pin="5555")
+    accounts.update_profile(mx["id"], grants=["manage_connections"])     # forged straight into the DB
     admin = world.client(("203.0.113.63", 1))
     assert world.login(admin, name="Max", pin="5555").status_code == 200
     r = owner.post("/api/connections", json={"type": "openai_compatible", "name": "Box",
@@ -161,10 +177,7 @@ def test_a_manage_connections_grant_cannot_move_a_saved_key_to_another_host(worl
     cid = r.json()["id"]
     r = admin.patch(f"/api/connections/{cid}", json={"base_url": "http://203.0.113.99:9/v1"})
     assert r.status_code == 403, r.text
-    # Same host (another port), a fresh key, or no key: nothing is carried to a stranger.
-    assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://127.0.0.1:10/v1"}).status_code == 200
-    assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://203.0.113.99:9/v1",
-                                                        "api_key": "sk-admins-own-0123456789"}).status_code == 200  # scrub-ok
+    assert admin.patch(f"/api/connections/{cid}", json={"base_url": "http://127.0.0.1:10/v1"}).status_code == 403
     # The Owner may move it, and so may an Admin.
     assert owner.patch(f"/api/connections/{cid}", json={"base_url": "http://198.51.100.7:9/v1"}).status_code == 200
     world.person(owner, "Ada", "admin", password="admin-pass1")

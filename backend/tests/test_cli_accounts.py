@@ -103,11 +103,11 @@ def test_list_shows_roles_and_never_a_hash(data, run):
     code, out, _ = run("users", "list")
     assert code == 0
     assert "Olive" in out and "owner" in out and "password" in out
-    assert "Kit" in out and "restricted" in out
+    assert "Kit" in out and "basic" in out
     assert "argon2" not in out and "pbkdf2" not in out
     code, out, _ = run("users", "list", "--json")
     rows = json.loads(out)
-    assert {r["name"]: r["role"] for r in rows} == {"Olive": "owner", "Kit": "restricted"}
+    assert {r["name"]: r["role"] for r in rows} == {"Olive": "admin", "Kit": "basic"}
     assert all("hash" not in k for r in rows for k in r)
 
 
@@ -126,7 +126,7 @@ def test_add_without_a_profile_is_the_lowest_role_with_no_pin(data, run):
     code, out, _ = run("users", "add", "Kit")
     assert code == 0
     kit = accounts.get_by_name("Kit")
-    assert kit.role == "restricted" and not kit.has_pin and not kit.has_password
+    assert kit.role == "basic" and not kit.has_pin and not kit.has_password
     assert "No PIN was set" in out
 
 
@@ -135,7 +135,7 @@ def test_add_member_takes_the_pin_from_stdin(data, run):
     code, out, err = run("users", "add", "Noor", "--profile", "member", "--password-stdin", stdin="4321\n")
     assert code == 0, err
     noor = accounts.get_by_name("Noor")
-    assert noor.role == "member" and noor.has_pin and not noor.has_password
+    assert noor.role == "user" and noor.has_pin and not noor.has_password
     assert auth.verify_profile_secret(noor, "pin", "4321")
     assert "4321" not in out + err
 
@@ -200,7 +200,7 @@ def test_add_owner_only_when_there_is_none(data, run):
     assert accounts.get_owner().name == "Olive" and accounts.get_owner().has_password
     code, _, err = run("users", "add", "Other", "--profile", "owner", "--password-stdin", stdin="owner-pass2\n")
     assert code == 1 and "already has an owner" in err and "owner reset" in err
-    assert len([p for p in accounts.list_profiles() if p.role == "owner"]) == 1
+    assert len([p for p in accounts.list_profiles() if p.protected]) == 1
 
 
 def test_add_rejects_a_duplicate_name_and_an_unknown_role(data, run):

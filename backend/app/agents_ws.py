@@ -51,7 +51,7 @@ def may_see_task(principal: Any, owner: str) -> bool:
         return True
     if kind != "profile" or getattr(principal, "is_restricted", True):
         return False
-    if principal.is_operator:
+    if principal.is_admin:
         return True
     return bool(owner) and getattr(principal, "profile_id", None) == owner \
         and principal.can(Permission.DISPATCH_AGENTS)

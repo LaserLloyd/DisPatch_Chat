@@ -67,7 +67,7 @@ def test_setup_from_the_network_needs_the_one_time_token(world, strict):
     again = world.client(LAN).post("/api/auth/setup", json={**body, "setup_token": auth.setup_token()})
     assert again.status_code == 403
     # And the new owner is signed in on that client.
-    assert lan.get("/api/auth/me").json()["role"] == "owner"
+    assert lan.get("/api/auth/me").json()["role"] == "admin"
 
 
 def test_guessing_the_setup_token_is_throttled(world, strict):
@@ -115,5 +115,5 @@ def test_a_pin_only_2x_install_is_claimed_on_upgrade(world, strict):
     assert lan.get("/api/auth/status").json()["claimed"] is True
     assert lan.get("/api/bots/all").status_code == 403           # Restricted, not "setup required"
     assert lan.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
-    assert lan.get("/api/auth/me").json()["role"] == "owner"
+    assert lan.get("/api/auth/me").json()["role"] == "admin"
     assert accounts.get_owner() is not None                       # created on first use

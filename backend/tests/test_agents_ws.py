@@ -122,7 +122,7 @@ def test_who_may_see_a_task_is_one_rule():
 
     class P:  # a stand-in with the attributes may_see_task reads
         def __init__(self, kind="profile", restricted=False, operator=False, pid=None, perms=()):
-            self.kind, self.is_restricted, self.is_operator, self.profile_id = kind, restricted, operator, pid
+            self.kind, self.is_restricted, self.is_admin, self.profile_id = kind, restricted, operator, pid
             self._perms = set(perms)
 
         def can(self, p):

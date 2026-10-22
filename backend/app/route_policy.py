@@ -210,9 +210,9 @@ _r("GET", "/api/openclaw/sessions", _R(P.MANAGE_AGENTS))
 _r("GET", "/api/openclaw/transcript", _R(P.MANAGE_AGENTS))
 _r("POST", "/api/openclaw/import", _R(P.MANAGE_AGENTS))
 
-# Agents and tasks (W11b). A Restricted profile can never hold dispatch_agents
-# (RESTRICTED_NEVER), and none of these is `scoped`, so every one answers 403 to it -
-# listing included. A task or agent you may not see is a 404, decided in the handler.
+# Agents and tasks (W11b). dispatch_agents is Admin-only unless an Admin grants it to a User
+# or Basic profile (4.0 ROLE_GRANTABLE; never the lock-target profile), and none of these is
+# `scoped`, so every one answers 403 to anyone without it - listing included. A task or agent you may not see is a 404, decided in the handler.
 for _methods, _path in (
     ("GET", "/api/agents"), ("POST", "/api/agents"), ("PATCH", "/api/agents/{agent_id}"),
     ("DELETE", "/api/agents/{agent_id}"), ("GET", "/api/agents/backends"),
@@ -304,6 +304,19 @@ _r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner a
 _r("DELETE", "/api/users/{profile_id}", _R(P.MANAGE_USERS, note="same rank rules as /api/people"))
 _r("GET", "/api/plugins/manifests", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/settings/defaults", public("default theme / language / avatar style for a device that has not signed in; no secrets"))
+
+# --------------------------------------------------------------------------- #
+# 4.0 chat-first profiles (BUILD-PLAN-v2). One section per package, so wave packages
+# add their routes here with ``_r(...)`` without touching another package's lines.
+# A route taking a thread / message / bot / profile id must ALSO be listed in
+# OWNER_SCOPED once WP-CORE has ported it (tests/test_route_table.py).
+# --------------------------------------------------------------------------- #
+
+# ---- WP-PROF: profile lifecycle (app/profiles_api.py): reset, my characters, export, copies
+
+# ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
+
+# ---- WP-SCALE-OPS: maintenance, storage, retention (app/maintenance_api.py), all P.ADMIN_SYSTEM
 
 # --------------------------------------------------------------------------- #
 # Mounts (static trees) and dynamic prefixes

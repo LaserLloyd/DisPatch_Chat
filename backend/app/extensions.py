@@ -71,7 +71,7 @@ from fastapi.routing import APIRoute
 from starlette.routing import Match, WebSocketRoute
 from starlette.websockets import WebSocketState
 
-from . import auth, config, fsperm, livetools, tools
+from . import auth, config, ext_profile_hooks, fsperm, livetools, tools
 from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.ext")
@@ -212,6 +212,11 @@ class BotView:
     #: and for an advisor, None for a gateway agent (its persona lives in the
     #: agent runtime, which DisPatch cannot see).
     has_persona: bool | None = None
+    #: Additive (4.0, BUILD-PLAN-v2 §1.12; read with ``getattr``): ``"household"`` or
+    #: ``"personal"``, and for a personal bot the profile id that owns it ("" otherwise).
+    #: The voice add-on passes ``owner_profile or None`` to its voice-access rule.
+    scope: str = "household"
+    owner_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -254,6 +259,10 @@ class ThreadSocket:
     #: for its thread ``locked`` itself (:func:`turn_locked`); an extension
     #: reads this only to show less (no settings, nothing that writes).
     locked: bool = False
+    #: Additive (4.0): the profile behind the socket - the principal's profile id, which is
+    #: the thread's owner by construction (WP-CORE fills it; None until then, and for an
+    #: open install). The voice add-on resolves a personal bot's voice with it.
+    profile_id: str | None = None
 
 
 def bot_backend_of(bot) -> Backend | None:
@@ -288,7 +297,9 @@ def bot_view(bot) -> BotView | None:
     return BotView(id=bot.id, name=bot.name, safe=bool(bot.safe),
                    voice=str(getattr(bot, "voice", "") or ""),
                    voice_rp=str(getattr(bot, "voice_rp", "") or ""),
-                   backend=backend, owner=owner, has_persona=has_persona)
+                   backend=backend, owner=owner, has_persona=has_persona,
+                   scope=str(getattr(bot, "scope", "") or "household"),
+                   owner_profile=str(getattr(bot, "owner_profile", "") or ""))
 
 
 class BotRegistryView:
@@ -999,6 +1010,29 @@ class ExtensionContext:
         pending = [t.name for t in self._ext.live_tools]
         self._ext.live_tools += livetools.validate_live_tools(specs, self.ext_id, pending=pending)
 
+    # -- 4.0 per-profile hooks (BUILD-PLAN-v2 §1.12; additive, EXT_API stays 1) ----------
+    # Thin delegates to app/ext_profile_hooks.py, which documents each one. An add-on
+    # feature-tests with hasattr(ctx, "register_voice_access").
+
+    def caller(self, request) -> ext_profile_hooks.Caller | None:
+        """Who is calling: ``Caller(profile_id, is_admin, role, can(perm))`` or None."""
+        return ext_profile_hooks.caller(request)
+
+    def bots_visible(self, request) -> list[BotView]:
+        """The bots the caller may see (never another profile's personal bot)."""
+        return ext_profile_hooks.bots_visible(request)
+
+    def register_voice_access(self, fn: Callable[[str, str | None], bool]) -> None:
+        """Declare per-profile voices: ``fn(voice_id, bot_owner) -> bool``."""
+        self._check_open("register_voice_access")
+        ext_profile_hooks.register_voice_access(self.ext_id, fn)
+
+    def register_profile_data(self, *, count: Callable[[str], Mapping[str, int]] | None = None,
+                              purge: Callable[[str], int] | None = None) -> None:
+        """``count(profile_id) -> {"voices": n}``; ``purge(profile_id) -> int`` (deleted)."""
+        self._check_open("register_profile_data")
+        ext_profile_hooks.register_profile_data(self.ext_id, count=count, purge=purge)
+
     def on_startup(self, fn: Callable[[], Any], *, thread: bool = False) -> None:
         self._check_open("on_startup")
         self._ext.startup.append((fn, bool(thread)))
@@ -1420,6 +1454,7 @@ def clear_boot_marker() -> None:
 
 
 def _reset_registrations(ext: Extension) -> None:
+    ext_profile_hooks.forget(ext.id)
     ext.static_dir = None
     ext.entry = None
     ext.css = []
@@ -1501,6 +1536,7 @@ def unload_all(app: FastAPI | None = None) -> None:
         with contextlib.suppress(Exception):
             tools.unregister_builtins(e.id)
         livetools.unregister_extension(e.id)
+        ext_profile_hooks.forget(e.id)
     _all.clear()
     _by_id.clear()
     _open_total.clear()

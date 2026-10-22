@@ -86,9 +86,11 @@ def test_an_app_route_gated_with_depends_applies_the_agent_rule(app_world):
     assert world.login(member, name="Max", pin="5555").status_code == 200
     tid = owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]
 
+    # 4.0: app routes need use_tools, which is Admin-only now, so a Member (User) is refused
+    # before the agent rule is reached (it never dispatches either way).
     r = member.post("/api/apps/turnprobe/go", json={"thread_id": tid, "bot_id": "main"})
-    assert r.status_code == 200, r.text
-    assert r.json()["dispatched"] is False and turns == []          # a Member, agent bot
+    assert r.status_code == 403, r.text
+    assert turns == []
 
     r = owner.post("/api/apps/turnprobe/go", json={"thread_id": tid, "bot_id": "main"})
     assert r.json()["dispatched"] is True and [t[0] for t in turns] == ["main"]
@@ -99,8 +101,7 @@ def test_an_app_route_gated_with_depends_applies_the_agent_rule(app_world):
     assert r.json()["dispatched"] is True and len(turns) == 2
 
     r = member.post("/api/apps/turnprobe/go", json={"thread_id": tid, "bot_id": "adv"})
-    assert r.json()["dispatched"] is True                            # an advisor: dispatch off
-    assert turns[-1][0] == "adv" and turns[-1][1].dispatch is False
+    assert r.status_code == 403 and len(turns) == 2
 
 
 def test_an_app_turn_with_no_recorded_caller_fails_closed(world, monkeypatch):

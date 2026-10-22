@@ -333,6 +333,8 @@ const SHELL = [
   '/static/theme.css',
   '/static/app.css',
   '/static/dashboard.css', '/static/w5.css', '/static/tasks.css',
+  // 4.0 chat-first profiles: one sheet, a section per frontend package.
+  '/static/profiles.css',
   '/static/js/main.js', '/static/js/api.js', '/static/js/ws.js',
   '/static/js/markdown.js', '/static/js/checklist.js', '/static/js/util.js', '/static/js/theme.js',
   '/static/js/reactions.js', '/static/js/i18n.js',
@@ -395,6 +397,10 @@ const SHELL = [
   '/static/js/railmenu.js',
   // 3.2: the Settings sections, the old tab ids (aliases) and the settings search.
   '/static/js/settings-nav.js',
+  // 4.0 chat-first profiles (Foundation scaffolding): My bots, the bot editor, Reset to
+  // default and People permissions, statically imported by main.js and settings-nav.js.
+  '/static/js/my-bots.js', '/static/js/bot-editor.js', '/static/js/account-reset.js',
+  '/static/js/people-perms.js',
   // Drop files on a chat: Insert into chat / Upload to File Server (main.js).
   '/static/js/chatdrop.js',
   // Install metadata + icons. These were missing, so a cold offline start had

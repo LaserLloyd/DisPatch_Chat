@@ -31,12 +31,15 @@ from . import accounts, auth, config, credentials, limits, policy
 from .contracts import errors
 from .contracts.permissions import (
     MACHINE_DEFAULT_SCOPES,
-    RESTRICTED_NEVER,
+    ROLE_DEFAULTS,
+    ROLE_GRANTABLE,
+    ROLE_NEVER,
     ROLE_ORDER,
-    ROLE_PERMISSIONS,
+    TOOL_PREFIX,
     Permission,
     Role,
     is_valid_permission,
+    normalise_role,
 )
 
 log = logging.getLogger("local-chat.people")
@@ -122,7 +125,8 @@ def device_for(request: Request) -> tuple[str, str | None]:
 def public_profile(p: accounts.Profile | None) -> dict | None:
     if p is None:
         return None
-    return {"id": p.id, "name": p.name, "role": p.role, "avatar": p.avatar}
+    return {"id": p.id, "name": p.name, "role": p.role.value, "protected": p.protected,
+            "avatar": p.avatar}
 
 
 def keep_device_for_restricted(device_id: str | None, profile: accounts.Profile | None) -> bool:
@@ -135,7 +139,7 @@ def keep_device_for_restricted(device_id: str | None, profile: accounts.Profile 
     the locked device opens as that profile, under its quiet hours, minutes and daily
     budgets (People & Profiles > This device shows it; an Owner or Admin can unbind or
     re-bind it). A device already bound to someone else is left alone. True if bound."""
-    if not device_id or profile is None or profile.role != Role.RESTRICTED.value or profile.disabled:
+    if not device_id or profile is None or profile.role is not Role.BASIC or profile.disabled:
         return False
     if accounts.default_profile_for_device(device_id) is not None:
         return False
@@ -154,7 +158,7 @@ def session_response(request: Request, body: dict, profile: accounts.Profile | N
     # remembered (or already has one). A plain sign-in leaves the response with the
     # session cookie alone.
     have = _device_token(request)
-    restricted = profile is not None and profile.role == Role.RESTRICTED.value
+    restricted = profile is not None and profile.role is Role.BASIC
     if have or persistent or restricted:
         dev, new_dev_tok = device_for(request)
     else:
@@ -237,18 +241,18 @@ def _find_profile(payload: LoginIn) -> accounts.Profile | None:
 def _verify_for_login(profile: accounts.Profile, payload: LoginIn, cfg) -> bool:
     """Check the credential the profile's role asks for."""
     role = profile.role
-    if role == Role.OWNER.value:
+    if profile.protected:
         if payload.password:
             return auth.verify_profile_secret(profile, "password", payload.password)
         if payload.pin:
             # The install PIN (security.yaml) is the owner's PIN.
             return cfg.pin_set and auth.verify_pin(payload.pin)
         return False
-    if role == Role.ADMIN.value:
+    if role is Role.ADMIN:
         return bool(payload.password) and auth.verify_profile_secret(profile, "password", payload.password)
-    # Member / Restricted: a PIN; a Restricted profile without one may simply be picked.
+    # User / Basic: a PIN; a Basic profile without one may simply be picked.
     if not profile.has_pin:
-        return role == Role.RESTRICTED.value and not payload.pin and not payload.password
+        return role is Role.BASIC and not payload.pin and not payload.password
     return bool(payload.pin) and auth.verify_profile_secret(profile, "pin", payload.pin)
 
 
@@ -270,9 +274,10 @@ def login_profile(request: Request, payload: LoginIn, *, swap: bool) -> JSONResp
         old = request.cookies.get(SESSION_COOKIE)
         if old:
             auth.revoke(old)
-    persistent = bool(payload.remember) and cfg.remember_days > 0 and profile.role != "restricted"
-    body = {"ok": True, "profile": public_profile(profile), "role": profile.role,
-            "needs_password": profile.role in ("owner", "admin") and not profile.has_password}
+    persistent = bool(payload.remember) and cfg.remember_days > 0 and profile.role is not Role.BASIC
+    body = {"ok": True, "profile": public_profile(profile), "role": profile.role.value,
+            "protected": profile.protected,
+            "needs_password": profile.role is Role.ADMIN and not profile.has_password}
     accounts.log_activity("login", profile_id=profile.id, subject=f"{policy.request_quota_ip(request)}")
     return session_response(request, body, profile, persistent=persistent)
 
@@ -299,15 +304,15 @@ def lock_screen_profiles() -> list[dict]:
     for p in accounts.list_profiles():
         if p.disabled:
             continue
-        if p.role == "owner":
+        if p.protected:
             cred = ("pin_or_password" if pin_set and p.has_password
                     else "password" if p.has_password else "pin")
-        elif p.role == "admin":
+        elif p.role is Role.ADMIN:
             cred = "password"
         else:
             cred = "pin" if p.has_pin else "none"
-        out.append({"id": p.id, "name": p.name, "role": p.role, "avatar": p.avatar,
-                    "credential": cred})
+        out.append({"id": p.id, "name": p.name, "role": p.role.value, "protected": p.protected,
+                    "avatar": p.avatar, "credential": cred})
     return out
 
 
@@ -327,19 +332,19 @@ def principal_document(request: Request) -> dict:
     prof = pr.profile
     cfg = auth.load()
     doc: dict[str, Any] = {
-        "kind": pr.kind, "role": pr.role, "signed_in": pr.signed_in,
+        "kind": pr.kind, "role": pr.role, "protected": pr.is_protected, "signed_in": pr.signed_in,
         "restricted": pr.is_restricted, "name": pr.name,
         "profile": public_profile(prof),
         "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
         "claimed": policy.claimed(cfg),
-        "needs_password": bool(prof and prof.role in ("owner", "admin") and not prof.has_password),
+        "needs_password": bool(prof and prof.role is Role.ADMIN and not prof.has_password),
         "disclosure": DISCLOSURE if pr.is_restricted and pr.kind != "machine" else None,
     }
     dev = pr.device_id or device_hash_of(request)
     if dev:
         d = accounts.get_device(dev)
         doc["device"] = d.public() if d else None
-    if prof is not None and prof.role == "restricted":
+    if prof is not None and prof.role is Role.BASIC:
         doc["today"] = accounts.usage_today(prof.id)
         doc["limits"] = {**default_limits(), **prof.budgets}
     elif pr.kind == "anonymous":
@@ -371,7 +376,7 @@ async def auth_password(request: Request, payload: PasswordIn):
     prof = pr.profile
     if prof is None:
         return _problem(409, "owner_required", "Create the owner account first.")
-    if prof.role not in ("owner", "admin"):
+    if prof.role is not Role.ADMIN:
         return _problem(403, "password_role", "Only the Owner and Admins have a password; "
                         "Members and Restricted profiles use a PIN.")
     pkey = prof.id
@@ -416,9 +421,9 @@ async def auth_own_pin(request: Request, payload: OwnPinIn):
     prof = pr.profile
     if prof is None:
         return _problem(403, "permission_denied", "Sign in to a profile to change its PIN.")
-    if prof.role == "owner":
+    if prof.protected:
         return _problem(409, "owner_immutable", "The Owner's PIN is the install PIN; change it in Settings > Account.")
-    if prof.role not in ("member", "admin"):
+    if prof.role is Role.BASIC:
         return _problem(403, "permission_denied", "The Owner or an Admin sets this profile's PIN.")
     pkey = prof.id
     blocked = _throttled(request, pkey)
@@ -454,7 +459,7 @@ class MachineIn(BaseModel):
 
 @router.get("/api/auth/api-token", dependencies=[_SETTINGS])
 async def api_token_get(request: Request):
-    if not _caller(request).is_operator:
+    if not _caller(request).is_admin:
         return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
     cfg = auth.load()
     return {"has_token": bool(cfg.api_token), "machine_loopback_trust": cfg.machine_loopback_trust,
@@ -467,7 +472,7 @@ async def api_token_get(request: Request):
 async def api_token_set(request: Request, payload: MachineIn):
     """Rotate the machine API key (shown once) and/or change how machines are
     recognised. The Owner and Admins."""
-    if not _caller(request).is_operator:
+    if not _caller(request).is_admin:
         return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
     cfg = auth.load()
     token = None
@@ -527,30 +532,40 @@ def clean_budgets(raw: Any) -> dict:
     return out
 
 
-def clean_permissions(role: str, items: Any, field_name: str) -> list[str]:
+def clean_permissions(role: Role | str, items: Any, field_name: str) -> list[str]:
+    """Validate a grants/denies list for a profile of ``role``. A grant the role can never
+    hold (``ROLE_NEVER``, which covers every ``use_tools:<id>`` panel for non-Admins) is
+    refused. (WP-CORE tightens grants to ``ROLE_GRANTABLE`` with a 422 and adds the
+    lock-target fence.)"""
     if items is None:
         return []
     if not isinstance(items, list):
         raise accounts.AccountError("permissions_invalid", f"{field_name} must be a list.")
+    r = normalise_role(role)
     out: list[str] = []
-    never = {p.value for p in RESTRICTED_NEVER}
+    never = {p.value for p in ROLE_NEVER[r]}
     for it in items:
         if not isinstance(it, str) or not is_valid_permission(it):
             raise accounts.AccountError("permissions_invalid", f"Unknown permission {it!r}.")
-        if field_name == "grants" and role == "restricted" and it in never:
+        base = Permission.USE_TOOLS.value if it.startswith(TOOL_PREFIX) else it
+        if field_name == "grants" and base in never:
+            if it == Permission.ADMIN_SYSTEM.value:
+                raise accounts.AccountError("permissions_invalid",
+                                            "Host control belongs to the Owner and Admins; it cannot be granted.")
             raise accounts.AccountError(
-                "permissions_invalid", f"A Restricted profile can never be granted {it}.")
-        if field_name == "grants" and it == "admin_system" and role not in ("owner", "admin"):
-            raise accounts.AccountError("permissions_invalid",
-                                        "Host control belongs to the Owner and Admins; it cannot be granted.")
+                "permissions_invalid", f"A {r.value.capitalize()} profile can never be granted {it}.")
         out.append(it)
     return list(dict.fromkeys(out))
+
+
+#: 4.0 role words, plus the 3.x ones old clients still send (normalised by ``normalise_role``).
+RoleIn = Literal["admin", "user", "basic", "member", "restricted"]
 
 
 class PersonIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=40)
-    role: Literal["admin", "member", "restricted"] = "member"
+    role: RoleIn = "user"
     pin: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=256)
     avatar: str = Field(default="", max_length=120)
@@ -563,7 +578,7 @@ class PersonIn(BaseModel):
 class PersonPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=40)
-    role: Literal["admin", "member", "restricted"] | None = None
+    role: RoleIn | None = None
     avatar: str | None = Field(default=None, max_length=120)
     budgets: dict | None = None
     grants: list[str] | None = None
@@ -578,15 +593,15 @@ class SecretIn(BaseModel):
     password: str = Field(default="", max_length=256)
 
 
-def _may_manage(caller: policy.Principal, target_role: str) -> bool:
-    """The Owner and every Admin manage every profile but THE Owner's.
+def _may_manage(caller: policy.Principal, target_protected: bool) -> bool:
+    """Every Admin manages every profile but THE protected Admin's (the 3.x Owner).
 
     That one exception is structural, not a permission: an Admin who could delete,
-    disable, demote or re-credential the Owner could lock the household's owner out of
-    their own install (and there is exactly one owner row). Everything else an Owner
-    may do to a profile - other Admins included - an Admin may do too."""
-    if caller.is_operator:
-        return target_role != Role.OWNER.value
+    disable, demote or re-credential the protected Admin could lock the household's
+    owner out of their own install (and there is exactly one). Everything else the
+    protected Admin may do to a profile - other Admins included - an Admin may do too."""
+    if caller.is_admin:
+        return not target_protected
     return False
 
 
@@ -607,8 +622,10 @@ async def people_list(request: Request):
         "profiles": [p.public() for p in accounts.list_profiles()],
         "me": caller.profile_id,
         "roles": [r.value for r in ROLE_ORDER],
-        "role_permissions": {r.value: sorted(p.value for p in ROLE_PERMISSIONS[r]) for r in ROLE_ORDER},
-        "can_create_admin": caller.is_operator,
+        "role_permissions": {r.value: sorted(p.value for p in ROLE_DEFAULTS[r]) for r in ROLE_ORDER},
+        "role_grantable": {r.value: sorted(p.value for p in ROLE_GRANTABLE[r]) for r in ROLE_ORDER},
+        "role_never": {r.value: sorted(p.value for p in ROLE_NEVER[r]) for r in ROLE_ORDER},
+        "can_create_admin": caller.is_admin,
         "owner_has_password": _owner_has_password(),
         "disclosure": DISCLOSURE,
     }
@@ -621,10 +638,11 @@ async def people_create(request: Request, payload: PersonIn):
         auth.ensure_owner_for_pin()
     if not accounts.has_owner():
         return _problem(409, "owner_required", "Create the owner account first (Settings > Account).")
-    if not _may_manage(caller, payload.role):
+    role = normalise_role(payload.role)
+    if not _may_manage(caller, False):
         return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
     try:
-        if payload.role == "admin":
+        if role is Role.ADMIN:
             if not _owner_has_password():
                 return _problem(409, "password_required", "Set a password for the owner first.")
             err = credentials.check_password(payload.password or "")
@@ -636,18 +654,18 @@ async def people_create(request: Request, payload: PersonIn):
             if err:
                 return _problem(400, "pin_invalid", err)
             pin_hash = credentials.hash_secret(payload.pin)
-        elif payload.role == "member":
+        elif role is Role.USER:
             return _problem(400, "pin_invalid", "A Member needs a PIN of at least 4 characters.")
         prof = accounts.create_profile(
-            payload.name, payload.role, pin_hash=pin_hash,
-            password_hash=credentials.hash_secret(payload.password) if payload.role == "admin" else None,
+            payload.name, role, pin_hash=pin_hash,
+            password_hash=credentials.hash_secret(payload.password) if role is Role.ADMIN else None,
             avatar=payload.avatar, budgets=clean_budgets(payload.budgets),
-            grants=clean_permissions(payload.role, payload.grants, "grants"),
-            denies=clean_permissions(payload.role, payload.denies, "denies"),
+            grants=clean_permissions(role, payload.grants, "grants"),
+            denies=clean_permissions(role, payload.denies, "denies"),
             session_timeout=payload.session_timeout)
     except accounts.AccountError as e:
         return _account_error(e)
-    _audit(request, "profile_created", prof.id, f"{prof.name} ({prof.role})")
+    _audit(request, "profile_created", prof.id, f"{prof.name} ({prof.role.value})")
     return JSONResponse(prof.public(), status_code=201)
 
 
@@ -656,7 +674,7 @@ def _target(request: Request, profile_id: str) -> tuple[accounts.Profile | None,
     if prof is None:
         return None, _problem(404, "profile_not_found", "No such profile.")
     caller = _caller(request)
-    if prof.id == caller.profile_id or _may_manage(caller, prof.role):
+    if prof.id == caller.profile_id or _may_manage(caller, prof.protected):
         return prof, None
     return None, _problem(403, "permission_denied", "You cannot manage that profile.")
 
@@ -672,25 +690,27 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
     own = prof.id == caller.profile_id
     try:
         if own and any(k in fields for k in ("role", "disabled")):
-            return _problem(409, "owner_immutable" if prof.role == "owner" else "permission_denied",
+            return _problem(409, "owner_immutable" if prof.protected else "permission_denied",
                             "You cannot change your own role or disable yourself.")
-        if prof.role == "owner" and set(fields) - {"name", "avatar"}:
+        if prof.protected and set(fields) - {"name", "avatar"}:
             return _problem(409, "owner_immutable", "The owner's role and limits cannot be changed here.")
-        if own and set(fields) - {"name", "avatar"} and not _may_manage(caller, prof.role):
+        if own and set(fields) - {"name", "avatar"} and not _may_manage(caller, prof.protected):
             # A profile edits its own name and picture, nothing else: grants, denies, budgets
             # and timeouts are set by someone who may manage it. Without this a Member holding
             # manage_users could grant itself every permission (host control included).
             return _problem(403, "permission_denied",
                             "You can change your own name and picture; limits and permissions are "
                             "set by the Owner or an Admin.")
-        new_role = fields.get("role", prof.role)
-        if "role" in fields and new_role != prof.role:
-            if not _may_manage(caller, new_role):
+        new_role = normalise_role(fields["role"]) if fields.get("role") else prof.role
+        if "role" in fields:
+            fields["role"] = new_role
+        if "role" in fields and new_role is not prof.role:
+            if not _may_manage(caller, False):
                 return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
-            if new_role == "admin" and not prof.has_password:
+            if new_role is Role.ADMIN and not prof.has_password:
                 return _problem(409, "password_required",
                                 "Set the new Admin's password first (People > the profile > Password).")
-            if new_role == "member" and not prof.has_pin:
+            if new_role is Role.USER and not prof.has_pin:
                 return _problem(409, "pin_invalid", "A Member needs a PIN; set one first.")
         if "budgets" in fields:
             fields["budgets"] = clean_budgets(fields["budgets"])
@@ -730,7 +750,7 @@ async def people_set_pin(request: Request, profile_id: str, payload: SecretIn):
     if err is not None:
         return err
     assert prof is not None
-    if prof.role == "owner":
+    if prof.protected:
         return _problem(409, "owner_immutable", "Change the Owner's PIN in Settings > Account.")
     try:
         auth.set_profile_pin(profile_id, payload.pin)
@@ -746,7 +766,7 @@ async def people_clear_pin(request: Request, profile_id: str):
     if err is not None:
         return err
     assert prof is not None
-    if prof.role == "member":
+    if prof.role is Role.USER:
         return _problem(409, "pin_invalid", "A Member needs a PIN; set a new one instead.")
     try:
         auth.clear_profile_pin(profile_id)
@@ -765,7 +785,7 @@ async def people_set_password(request: Request, profile_id: str, payload: Secret
     if err is not None:
         return err
     assert prof is not None
-    if prof.id == caller.profile_id or prof.role == "owner" or not caller.is_operator:
+    if prof.id == caller.profile_id or prof.protected or not caller.is_admin:
         return _problem(409, "permission_denied", "Use Settings > Account to change your own password.")
     try:
         auth.set_profile_password(profile_id, payload.password)
@@ -808,7 +828,7 @@ async def people_bind_this_device(request: Request, payload: DeviceIn):
         target = accounts.get_profile(payload.profile_id)
         # Binding opens the device as that profile with no credential: only someone who
         # may manage the profile (or the profile itself) may do it.
-        if target is not None and target.id != caller.profile_id and not _may_manage(caller, target.role):
+        if target is not None and target.id != caller.profile_id and not _may_manage(caller, target.protected):
             return _problem(403, "permission_denied", "You cannot bind a device to that profile.")
     dev, new_tok = device_for(request)
     try:
@@ -825,7 +845,7 @@ async def people_bind_this_device(request: Request, payload: DeviceIn):
 @router.delete("/api/people/devices/{device_id}", dependencies=[_MANAGE])
 async def people_forget_device(request: Request, device_id: str):
     caller = _caller(request)
-    if not caller.is_operator and device_id != device_hash_of(request):
+    if not caller.is_admin and device_id != device_hash_of(request):
         return _problem(403, "permission_denied", "You can only forget this device.")
     accounts.delete_device(device_id)
     _audit(request, "device_removed", device_id[:12])

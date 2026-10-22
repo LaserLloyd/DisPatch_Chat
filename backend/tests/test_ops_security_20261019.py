@@ -102,7 +102,7 @@ def test_recovery_with_a_new_pin_keeps_the_install_claimed(world, closed_install
     assert r.status_code == 200, r.text
     assert policy.claimed()
     me = phone.get("/api/auth/me").json()
-    assert (me["kind"], me["role"]) == ("profile", "owner"), me
+    assert (me["kind"], me["role"], me["protected"]) == ("profile", "admin", True), me
     assert phone.get("/api/people").status_code == 200          # straight in, from the network
     assert auth.verify_pin("1357") and not auth.verify_pin("2468")
     assert not auth.verify_recovery(code)                        # the used code is spent
@@ -127,5 +127,5 @@ def test_setup_claims_a_credential_less_owner_row(world, closed_install):
     r = local.post("/api/auth/setup", json={"password": "fresh-owner-pass1"})
     assert r.status_code == 200, r.text
     assert policy.claimed()
-    assert len([p for p in accounts.list_profiles() if p.role == "owner"]) == 1
+    assert len([p for p in accounts.list_profiles() if p.protected]) == 1
     assert world.login(world.client(LAN), name="Owner", password="fresh-owner-pass1").status_code == 200  # scrub-ok: throwaway test fixture

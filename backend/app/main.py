@@ -111,7 +111,7 @@ from . import (
 )
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .contracts import errors
-from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission
+from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission, Role
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
@@ -533,6 +533,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
     _track(asyncio.create_task(_image_job_loop()))
     # Backstop for answers every live path missed (see _gap_sweep_loop).
     _track(asyncio.create_task(_gap_sweep_loop()))
+    # 4.0: the daily maintenance task (pruning, archiving, image retention, FTS and
+    # SQLite upkeep; app/maintenance.py, WP-SCALE-OPS). This one call is all the wiring:
+    # start() schedules its own loop and must never stop the server.
+    with contextlib.suppress(Exception):
+        maintenance.start(app)
     # Advisor bots: say so about requests a restart orphaned, then keep
     # their knowledge indexes fresh. Only when an advisor is configured.
     if advisor.advisor_bots():
@@ -560,6 +565,8 @@ async def _lifespan_shutdown() -> None:
         await extensions.run_shutdown()
     with contextlib.suppress(Exception):
         await agents_service.shutdown()
+    with contextlib.suppress(Exception):
+        await maintenance.stop()
     harness.runner.remove_state_hook(_harness_state_changed)
     with contextlib.suppress(Exception):
         await harness.runner.shutdown()
@@ -1830,7 +1837,7 @@ def scope_frame_for_principal(frame: dict, principal) -> dict | None:
     Owner, Admin, the open install and machines see everything (``may_use`` says so).
     """
     if principal is None or getattr(principal, "kind", "") in ("open", "machine") \
-            or getattr(principal, "is_operator", False):
+            or getattr(principal, "is_admin", False):
         return frame
     t = frame.get("type")
     need = _FRAME_PERMISSION.get(t)
@@ -2124,7 +2131,7 @@ async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
     second half used to run only for Restricted callers, so a Member could rename, archive,
     mark read, edit or delete messages in a thread of a character made for someone else."""
     pr = policy.of(request).principal
-    if _is_decoy(request) or not (pr.is_operator or pr.is_machine):
+    if _is_decoy(request) or not (pr.is_admin or pr.is_machine):
         _deny_decoy_bot(request, await _bot_of_thread(thread_id))
 
 
@@ -7148,6 +7155,19 @@ async def _compose_agent_text(thread_id: str, text: str,
 _ACCEPTS: dict[tuple[int, str], bool] = {}
 
 
+def _accepts(fn, name: str) -> bool:
+    """Does ``fn`` take a ``name=`` keyword (cached per function)?"""
+    key = (id(fn), name)
+    if key not in _ACCEPTS:
+        try:
+            params = inspect.signature(fn).parameters
+            _ACCEPTS[key] = name in params or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        except (TypeError, ValueError):
+            _ACCEPTS[key] = False
+    return _ACCEPTS[key]
+
+
 def _direct_turn_kwargs(fn, opts: TurnOptions | None) -> dict:
     """voice= / prefetched= for advisor.run_turn / llm_api.run_api_turn, only
     when the turn carries them — an ordinary turn calls the backend exactly as
@@ -7264,6 +7284,14 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
             kw["dispatch"] = False
         if opts.action:
             kw["query"] = text          # lookups search the typed words, not the template
+        # 4.0: whose thread this is (advisor.run_turn resolves the owner from thread_id
+        # itself, WP-ADV; this is the same answer as the caller saw it). Only passed to a
+        # run_turn that takes it (a test double may not).
+        if _accepts(advisor.run_turn, "owner_profile_id"):
+            th = None
+            with contextlib.suppress(Exception):     # a hint only: never fails the turn
+                th = await db.get_thread(thread_id)
+            kw["owner_profile_id"] = th.owner_profile_id if th is not None else None
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
@@ -8071,12 +8099,13 @@ async def auth_status(request: Request):
         "owner_exists": accounts.has_owner(),
         "setup_required": setup_required,      # remote caller, no owner: needs the setup token
         "signed_in": bool(sess),
-        "role": pr.role if claimed else "owner",
+        "role": pr.role if claimed else Role.ADMIN.value,
+        "protected": pr.is_protected if claimed else True,
         "profile": people_api.public_profile(prof),
         # What this caller may do (the role matrix plus its grants): the client decides
         # what to OFFER from it, the server still decides every request. ["*"] = open.
         "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
-        "needs_password": bool(prof and prof.role in ("owner", "admin") and not prof.has_password),
+        "needs_password": bool(prof and prof.role is Role.ADMIN and not prof.has_password),
         "profiles": people_api.lock_screen_profiles() if claimed else [],
         "disclosure": people_api.DISCLOSURE if (claimed and pr.is_restricted) else None,
         "lock_timeout_seconds": cfg.lock_timeout,
@@ -8150,7 +8179,8 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
                           subject=policy.request_quota_ip(request))
     return _issue_cookie_response(
         {"ok": True, "remembered": persistent,
-         "role": "owner", "needs_password": bool(owner and not owner.has_password)},
+         "role": Role.ADMIN.value, "protected": True,
+         "needs_password": bool(owner and not owner.has_password)},
         persistent=persistent,
         user_agent=request.headers.get("user-agent") or "",
         request=request,
@@ -8262,7 +8292,7 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
                     owner = accounts.update_profile(stale.id, password_hash=credentials.hash_secret(password))
                 else:
                     owner = accounts.create_profile(
-                        str(payload.get("name") or "Owner")[:40] or "Owner", "owner",
+                        str(payload.get("name") or "Owner")[:40] or "Owner", Role.ADMIN, protected=True,
                         password_hash=credentials.hash_secret(password))
             if new_pin:
                 auth.set_pin(new_pin)               # mirrors onto the owner row
@@ -8279,7 +8309,7 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
 
     # ---- already claimed: only the Owner, with the current credential, may change it
     sess = _session_of(request)
-    if sess is None or not pr.is_owner:
+    if sess is None or not pr.is_protected:
         return JSONResponse({"detail": "Unlock with your PIN first",
                              "error": errors.envelope("unlock_first")}, status_code=403)
     owner = accounts.get_owner()
@@ -8290,7 +8320,7 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
         return JSONResponse({"detail": "Current PIN is incorrect",
                              "error": errors.envelope("current_pin_incorrect")}, status_code=403)
     if new_pin == "":
-        others = [p for p in accounts.list_profiles() if p.role != "owner"]
+        others = [p for p in accounts.list_profiles() if not p.protected]
         if others and not (owner and owner.has_password):
             return JSONResponse(
                 {"detail": "Other profiles exist; give the owner a password before removing the PIN.",
@@ -8348,7 +8378,7 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
                                       request=request, profile=accounts.get_owner())
     owner = accounts.get_owner()
     if (not (owner and owner.has_password)
-            and any(p.role != "owner" for p in accounts.list_profiles())):
+            and any(not p.protected for p in accounts.list_profiles())):
         # Removing the only Owner credential while other people have profiles would leave
         # an install with a household but no owner: closed to every other device ("setup
         # required"), the Members and Restricted profiles locked out with it. 2.x could
@@ -11310,7 +11340,7 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
     if role not in ("assistant", "user", "system"):
         role = "assistant"
     pr = policy.of(request).principal
-    if not (pr.is_machine or pr.is_operator):
+    if not (pr.is_machine or pr.is_admin):
         # 3.0: use_chat lets a Member reach this agent route. It must not become a way to
         # write into a thread of a character made for someone else, or to put words in a
         # character's (or the system's) mouth: that is the agents' and the Owner's job.
@@ -13741,7 +13771,7 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             raise PermissionError("Unlock for full access")
         ip = extensions.locked_client_ip(thread_id)
         kid = accounts.get_profile(ip) if ip is not None else None
-        if kid is not None and kid.role == "restricted":
+        if kid is not None and kid.role is Role.BASIC:
             # The socket belongs to a Restricted PROFILE (extensions.thread_websocket_endpoint):
             # its quiet hours and minutes hold for a spoken turn exactly as for a typed one.
             limited = limits.check(policy.profile_principal(kid))
@@ -14108,6 +14138,20 @@ app.include_router(connections_api.router)
 app.include_router(characters_api.router)
 app.include_router(wizard_api.router)
 app.include_router(backup_api.router)
+
+# 4.0 chat-first profiles: profile lifecycle (WP-PROF), AI build (WP-AIB) and maintenance
+# (WP-SCALE-OPS). Foundation included each router once, empty; the packages add routes to
+# them (and declare each in route_policy.py) without editing this file.
+from . import (  # noqa: E402  (one line per router)
+    bot_builder_api,
+    maintenance,
+    maintenance_api,
+    profiles_api,
+)
+
+app.include_router(profiles_api.router)
+app.include_router(bot_builder_api.router)
+app.include_router(maintenance_api.router)
 
 # --------------------------------------------------------------------------- #
 # "Works with DisPatch" (2.3.7): app/catalog.yaml + live status, and posting a

@@ -43,6 +43,7 @@ import yaml
 
 from . import accounts, credentials
 from .config import DATA_DIR, ensure_dirs
+from .contracts.permissions import Role
 
 log = logging.getLogger("local-chat.auth")
 
@@ -91,9 +92,13 @@ _GLOBAL_CEILING = 60                # failures in one window across the whole in
 _GLOBAL_WINDOW = 600.0
 _GLOBAL_COOLDOWN = 30.0
 
-#: Owner/Admin sessions follow ``lock_timeout``; these are the other roles' idle windows
-#: (seconds) unless security.yaml's ``session_timeouts`` or the profile says otherwise.
-DEFAULT_SESSION_TIMEOUTS = {"owner": None, "admin": None, "member": 3600, "restricted": 1800}
+#: Admin sessions follow ``lock_timeout``; these are the other roles' idle windows (seconds)
+#: unless security.yaml or the profile says otherwise. Keyed by ``Role`` value; the YAML keys
+#: are still the 3.x ``session_timeout_member`` / ``session_timeout_restricted`` (WP-CORE
+#: renames them to ``session_timeout_user`` / ``_basic``, reading the old ones as a fallback).
+DEFAULT_SESSION_TIMEOUTS = {"admin": None, "user": 3600, "basic": 1800}
+#: 4.0: where a lock and an unsigned device land (``lock_target``).
+LOCK_TARGETS = ("default_profile", "profile_list")
 
 # Reentrant: load() may call revoke_all() while already holding the lock.
 _lock = threading.RLock()
@@ -181,6 +186,15 @@ machine_loopback_trust: {machine_loopback_trust}
 # docs/contracts/permissions.json for the names.
 machine_scopes: {machine_scopes}
 
+# Where the screen goes when someone locks it, and what a device that has not signed in
+# sees (4.0):
+#   default_profile - the profile named by default_profile below (a shared User profile
+#                     with no PIN, "DisPatch" on a fresh install). Everyone who reaches
+#                     the app lands there; agents and voice cloning are always off for it.
+#   profile_list    - the sign-in screen with the profile tiles.
+lock_target: {lock_target}
+default_profile: {default_profile}
+
 # Idle seconds before a session of each role locks. owner/admin follow
 # lock_timeout_seconds above. A profile can override its own in People & Profiles.
 session_timeout_member: {timeout_member}
@@ -199,11 +213,17 @@ class SecurityConfig:
     recovery_salt: str | None = None
     remember_days: int = 0
     machine_loopback_trust: bool = True
-    anonymous_access: str = "restricted"          # restricted | none
+    anonymous_access: str = "restricted"          # restricted | none (3.x; read by migration 010 only once WP-CORE lands)
     machine_scopes: list[str] | None = None
     session_timeouts: dict = field(default_factory=lambda: {
-        "member": DEFAULT_SESSION_TIMEOUTS["member"],
-        "restricted": DEFAULT_SESSION_TIMEOUTS["restricted"]})
+        "user": DEFAULT_SESSION_TIMEOUTS["user"],
+        "basic": DEFAULT_SESSION_TIMEOUTS["basic"]})
+    #: 4.0: ``default_profile`` | ``profile_list`` (top-level security.yaml keys, NOT under a
+    #: ``people:`` mapping). Default ``profile_list``: an upgraded install shows the sign-in
+    #: screen until migration 010 (or an Admin) names a default profile.
+    lock_target: str = "profile_list"
+    #: 4.0: the id of the default (lock-target) profile, or None.
+    default_profile: str | None = None
 
     @property
     def pin_set(self) -> bool:
@@ -311,9 +331,11 @@ def _write(cfg: SecurityConfig, plaintext_pin: str | None = None) -> None:
                             else "restricted"),
         machine_scopes=_y(None) if cfg.machine_scopes is None
         else "[" + ", ".join(_y(x) for x in cfg.machine_scopes) + "]",
-        timeout_member=_pos_int(cfg.session_timeouts.get("member"), DEFAULT_SESSION_TIMEOUTS["member"]),
-        timeout_restricted=_pos_int(cfg.session_timeouts.get("restricted"),
-                                    DEFAULT_SESSION_TIMEOUTS["restricted"]),
+        timeout_member=_pos_int(cfg.session_timeouts.get("user"), DEFAULT_SESSION_TIMEOUTS["user"]),
+        timeout_restricted=_pos_int(cfg.session_timeouts.get("basic"),
+                                    DEFAULT_SESSION_TIMEOUTS["basic"]),
+        lock_target=_y(cfg.lock_target if cfg.lock_target in LOCK_TARGETS else "profile_list"),
+        default_profile=_y(cfg.default_profile),
     )
     # Atomic + 0600: the file holds the
     # api_token and PIN hash, and a crash mid-write (or a concurrent reader
@@ -460,10 +482,14 @@ def load() -> SecurityConfig:
                               else "restricted"),
             machine_scopes=_scope_list(raw.get("machine_scopes")),
             session_timeouts={
-                "member": _pos_int(raw.get("session_timeout_member"), DEFAULT_SESSION_TIMEOUTS["member"]),
-                "restricted": _pos_int(raw.get("session_timeout_restricted"),
-                                       DEFAULT_SESSION_TIMEOUTS["restricted"]),
+                "user": _pos_int(raw.get("session_timeout_member"), DEFAULT_SESSION_TIMEOUTS["user"]),
+                "basic": _pos_int(raw.get("session_timeout_restricted"),
+                                  DEFAULT_SESSION_TIMEOUTS["basic"]),
             },
+            lock_target=("default_profile"
+                         if str(raw.get("lock_target") or "").strip().lower() == "default_profile"
+                         else "profile_list"),
+            default_profile=_clean(raw.get("default_profile")),
         )
 
         # Apply a plaintext `pin:` recovery/set directive, then blank it out.
@@ -583,7 +609,7 @@ def _sync_owner_pin(cfg: SecurityConfig) -> None:
                   if cfg.pin_set and cfg.pin_hash != _LOCKDOWN_HASH else None)
         if owner is None:
             if mirror:
-                accounts.create_profile("Owner", "owner", pin_hash=mirror)
+                accounts.create_profile("Owner", Role.ADMIN, protected=True, pin_hash=mirror)
             return
         if owner.pin_hash != mirror:
             if mirror is None and not owner.has_password and len(accounts.list_profiles()) == 1:
@@ -784,7 +810,7 @@ def _role_timeout(profile: accounts.Profile | None, cfg: SecurityConfig) -> int:
     if profile is not None:
         if profile.session_timeout:
             return int(profile.session_timeout)
-        t = cfg.session_timeouts.get(profile.role)
+        t = cfg.session_timeouts.get(profile.role.value)
         if t:
             return int(t)
     return cfg.lock_timeout
@@ -1078,7 +1104,7 @@ def verify_profile_secret(profile: accounts.Profile, kind: str, secret: str) -> 
         return False
     # A PIN-only owner's PIN lives in security.yaml and stays PBKDF2 there; every
     # other secret is upgraded to the current argon2id cost on the way through.
-    if profile.role != "owner" and credentials.needs_rehash(stored):
+    if not profile.protected and credentials.needs_rehash(stored):
         field_name = "pin_hash" if kind == "pin" else "password_hash"
         with contextlib.suppress(Exception):
             accounts.update_profile_hash_silently(profile.id, field_name,
@@ -1093,7 +1119,7 @@ def set_profile_pin(profile_id: str, pin: str) -> None:
     p = accounts.get_profile(profile_id)
     if p is None:
         raise accounts.AccountError("profile_not_found", "No such profile.", 404)
-    if p.role == "owner":
+    if p.protected:
         set_pin(pin)                 # the Owner's PIN is the install PIN (security.yaml)
         return
     accounts.update_profile(profile_id, pin_hash=credentials.hash_secret(pin))
@@ -1104,7 +1130,7 @@ def clear_profile_pin(profile_id: str) -> None:
     p = accounts.get_profile(profile_id)
     if p is None:
         raise accounts.AccountError("profile_not_found", "No such profile.", 404)
-    if p.role == "owner":
+    if p.protected:
         raise accounts.AccountError("owner_immutable",
                                     "Remove the Owner's PIN from Security instead.", 409)
     accounts.update_profile(profile_id, pin_hash=None)
@@ -1118,12 +1144,12 @@ def set_profile_password(profile_id: str, password: str) -> None:
     p = accounts.get_profile(profile_id)
     if p is None:
         raise accounts.AccountError("profile_not_found", "No such profile.", 404)
-    if p.role not in ("owner", "admin"):
+    if p.role is not Role.ADMIN:
         raise accounts.AccountError("password_role", "Only the Owner and Admins have a password; "
                                     "Members and Restricted profiles use a PIN.", 409)
     accounts.update_profile(profile_id, password_hash=credentials.hash_secret(password))
     revoke_profile(profile_id)
-    if p.role == "owner":
+    if p.protected:
         burn_setup_token()               # the install is claimed: a pending setup token is void
 
 

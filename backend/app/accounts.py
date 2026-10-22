@@ -31,16 +31,40 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import config
+from .contracts.permissions import Role, normalise_role
 
 log = logging.getLogger("local-chat.accounts")
 
-ROLES = ("owner", "admin", "member", "restricted")
+# --------------------------------------------------------------------------- #
+# Stored role strings (4.0, BUILD-PLAN-v2 §1.1)
+#
+# The ``profiles.role`` column keeps the 3.x words - ``owner/admin/member/restricted`` - so
+# 4.0 needs no table rebuild (its CHECK constraint and the one-owner unique index stay).
+# THIS MODULE IS THE ONLY PLACE THAT KNOWS THEM: everything else sees a ``Role`` (``admin /
+# user / basic``) and ``Profile.protected``. ``tests/test_stored_role_strings.py`` fails the
+# build if another module compares or writes a stored string. The stored ``owner`` IS the
+# protected first Admin (``ux_profiles_one_owner`` guarantees there is at most one).
+# --------------------------------------------------------------------------- #
+
+#: Every value the ``profiles.role`` column may hold (its CHECK constraint).
+STORED_ROLES = ("owner", "admin", "member", "restricted")
+#: The stored word that marks the protected first Admin.
+_STORED_PROTECTED = "owner"
+#: stored string -> Role.
+ROLE_OF_STORED: dict[str, Role] = {
+    "owner": Role.ADMIN, "admin": Role.ADMIN, "member": Role.USER, "restricted": Role.BASIC,
+}
+#: Role -> stored string, for every profile but the protected Admin (stored ``owner``).
+STORED_OF_ROLE: dict[Role, str] = {Role.ADMIN: "admin", Role.USER: "member", Role.BASIC: "restricted"}
+#: A WHERE fragment naming the protected Admin's row, for read-only SQL elsewhere (the
+#: migration's dry run reads chats.db without this module's cache).
+PROTECTED_ROW_SQL = "role = 'owner'"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,
-    role           TEXT NOT NULL CHECK (role IN ('owner','admin','member','restricted')),
+    role           TEXT NOT NULL CHECK (role IN ('owner','admin','member','restricted')),  -- stored words, see ROLE_OF_STORED
     pin_hash       TEXT,                       -- quick-switch PIN (argon2id, or the legacy pbkdf2 string)
     password_hash  TEXT,                       -- owner/admin credential (argon2id)
     avatar         TEXT NOT NULL DEFAULT '',
@@ -51,7 +75,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     created        TEXT NOT NULL,
     disabled       INTEGER NOT NULL DEFAULT 0,
     epoch          INTEGER NOT NULL DEFAULT 0, -- bumped to invalidate every session of the profile
-    backends       TEXT NOT NULL DEFAULT '{}'  -- 4.0: JSON {allowed, default, models}; {} = inherit
+    backends       TEXT NOT NULL DEFAULT '{}', -- 4.0: JSON {allowed}; {} = every household connection
+    household_bots TEXT DEFAULT '"all"'        -- 4.0: JSON "all" or a list of household bot ids
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_name ON profiles(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_one_owner ON profiles(role) WHERE role = 'owner';
@@ -116,6 +141,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 #: column is ignored).
 _ADDED_COLUMNS = (
     "ALTER TABLE profiles ADD COLUMN backends TEXT NOT NULL DEFAULT '{}'",
+    # 4.0 (migration 010_profiles reports it; added here too so no reader ever meets a
+    # profiles table without it, exactly like ``backends``).
+    "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
@@ -182,9 +210,13 @@ def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 @dataclass
 class Profile:
+    """One profile. ``role`` is a :class:`Role` (``admin/user/basic``) and ``protected`` marks
+    the first Admin; the stored column words never leave this module (a 3.x word passed in
+    - ``Profile(role="owner")`` in an old test - is normalised by ``__post_init__``)."""
+
     id: str
     name: str
-    role: str
+    role: Role
     pin_hash: str | None = None
     password_hash: str | None = None
     avatar: str = ""
@@ -199,6 +231,18 @@ class Profile:
     # "models": {...}}. {} = inherit the install's (today's behaviour). Stored and read
     # only for now: nothing consults it yet, and it is not in public().
     backends: dict = field(default_factory=dict)
+    #: 4.0: the household bots this profile may use - ``"all"`` or a list of bot ids
+    #: (``characters.may_use``). A Basic profile's list is what an Admin picked for it.
+    household_bots: str | list[str] = "all"
+    #: 4.0: the protected first Admin (stored role ``owner``): cannot be demoted, disabled or
+    #: deleted; only it changes its own credentials.
+    protected: bool = False
+
+    def __post_init__(self) -> None:
+        raw = self.role
+        if isinstance(raw, str) and not isinstance(raw, Role) and raw.strip().lower() == _STORED_PROTECTED:
+            self.protected = True
+        self.role = normalise_role(raw)
 
     @property
     def has_pin(self) -> bool:
@@ -211,11 +255,13 @@ class Profile:
     def public(self) -> dict:
         """Everything a client may see - never a hash."""
         return {
-            "id": self.id, "name": self.name, "role": self.role, "avatar": self.avatar,
-            "has_pin": self.has_pin, "has_password": self.has_password,
+            "id": self.id, "name": self.name, "role": self.role.value, "protected": self.protected,
+            "avatar": self.avatar, "has_pin": self.has_pin, "has_password": self.has_password,
             "budgets": dict(self.budgets), "grants": list(self.grants),
             "denies": list(self.denies), "session_timeout": self.session_timeout,
             "created": self.created, "disabled": self.disabled,
+            "household_bots": self.household_bots if self.household_bots == "all"
+            else list(self.household_bots),
         }
 
 
@@ -226,14 +272,39 @@ def _row_profile(r: sqlite3.Row) -> Profile:
         except ValueError:
             return default
         return v if isinstance(v, type(default)) else default
+    keys = r.keys()
+    hb = None
+    if "household_bots" in keys:
+        try:
+            hb = json.loads(r["household_bots"] or "")
+        except ValueError:
+            hb = None
+    stored = str(r["role"] or "")
     return Profile(
-        id=r["id"], name=r["name"], role=r["role"], pin_hash=r["pin_hash"],
+        id=r["id"], name=r["name"], role=ROLE_OF_STORED.get(stored, Role.BASIC),
+        protected=stored == _STORED_PROTECTED, pin_hash=r["pin_hash"],
         password_hash=r["password_hash"], avatar=r["avatar"] or "",
         budgets=_j(r["budgets"], {}), grants=[str(x) for x in _j(r["grants"], [])],
         denies=[str(x) for x in _j(r["denies"], [])],
         session_timeout=r["session_timeout"], created=r["created"],
         disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0),
-        backends=_j(r["backends"], {}) if "backends" in r.keys() else {})
+        backends=_j(r["backends"], {}) if "backends" in keys else {},
+        household_bots=_household_bots(hb))
+
+
+def _household_bots(value) -> str | list[str]:
+    """The stored ``household_bots`` JSON as the model reads it: ``"all"`` or a list of ids.
+    NULL, garbage or a missing column read as ``"all"`` (3.x behaviour: every bot the old
+    rules allowed)."""
+    if isinstance(value, list):
+        return [str(x) for x in value if isinstance(x, str) and x]
+    return "all"
+
+
+def stored_role(role: Role | str, *, protected: bool = False) -> str:
+    """The ``profiles.role`` word for a Role (the protected Admin is ``owner``). Internal to
+    this module and the migration's raw writes."""
+    return _STORED_PROTECTED if protected else STORED_OF_ROLE[normalise_role(role)]
 
 
 #: path -> {id: Profile}. Invalidated by every write in this process.
@@ -310,12 +381,18 @@ def get_by_name(name: str) -> Profile | None:
     return next((p for p in _all().values() if p.name.casefold() == want), None) if want else None
 
 
+def get_protected_admin() -> Profile | None:
+    """THE protected first Admin (stored ``owner``), or None while an install has none."""
+    return next((p for p in _all().values() if p.protected), None)
+
+
 def get_owner() -> Profile | None:
-    return next((p for p in _all().values() if p.role == "owner"), None)
+    """3.x name of :func:`get_protected_admin` (kept: dozens of callers and the migration)."""
+    return get_protected_admin()
 
 
 def has_owner() -> bool:
-    return get_owner() is not None
+    return get_protected_admin() is not None
 
 
 def _clean_name(name: str) -> str:
@@ -325,21 +402,33 @@ def _clean_name(name: str) -> str:
     return n
 
 
-def _check_role(role: str) -> str:
-    if role not in ROLES:
-        raise AccountError("profile_role_invalid", f"Unknown role {role!r}.")
-    return role
+def _check_role(role: Role | str) -> tuple[Role, bool]:
+    """(Role, protected) from a Role, a 4.0 word or a 3.x word; the 3.x ``owner`` means the
+    protected Admin (old callers and tests still say ``create_profile(name, "owner")``)."""
+    is_owner_word = isinstance(role, str) and not isinstance(role, Role) \
+        and role.strip().lower() == _STORED_PROTECTED
+    try:
+        return normalise_role(role), is_owner_word
+    except ValueError:
+        raise AccountError("profile_role_invalid", f"Unknown role {role!r}.") from None
 
 
-def create_profile(name: str, role: str, *, pin_hash: str | None = None,
+def create_profile(name: str, role: Role | str, *, protected: bool = False,
+                   pin_hash: str | None = None,
                    password_hash: str | None = None, avatar: str = "",
                    budgets: dict | None = None, grants: list[str] | None = None,
                    denies: list[str] | None = None,
                    session_timeout: int | None = None,
+                   household_bots: str | list[str] | None = None,
                    profile_id: str | None = None) -> Profile:
+    """Create a profile. ``protected=True`` makes it THE protected first Admin (role must be
+    Admin; at most one per install)."""
     name = _clean_name(name)
-    _check_role(role)
-    if role == "owner" and has_owner():
+    r, owner_word = _check_role(role)
+    protected = bool(protected or owner_word)
+    if protected and r is not Role.ADMIN:
+        raise AccountError("profile_role_invalid", "Only an Admin can be the protected Admin.")
+    if protected and has_owner():
         raise AccountError("owner_exists", "This install already has an owner.", 409)
     if get_by_name(name) is not None:
         raise AccountError("profile_name_taken", f"A profile named {name!r} already exists.", 409)
@@ -348,14 +437,16 @@ def create_profile(name: str, role: str, *, pin_hash: str | None = None,
         try:
             con.execute(
                 "INSERT INTO profiles (id,name,role,pin_hash,password_hash,avatar,budgets,"
-                "grants,denies,session_timeout,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (pid, name, role, pin_hash, password_hash, avatar or "",
-                 json.dumps(budgets or {}), json.dumps(grants or []),
-                 json.dumps(denies or []), session_timeout, now_iso()))
+                "grants,denies,session_timeout,created,household_bots) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, name, stored_role(r, protected=protected), pin_hash, password_hash,
+                 avatar or "", json.dumps(budgets or {}), json.dumps(grants or []),
+                 json.dumps(denies or []), session_timeout, now_iso(),
+                 json.dumps(_household_value(household_bots))))
         except sqlite3.IntegrityError as e:
             raise AccountError("profile_conflict", "That profile could not be created "
                                "(duplicate name or second owner).", 409) from e
-        if role == "owner":
+        if protected:
             _adopt_unowned(con, pid)
         _bump_rev(con)
         invalidate()
@@ -382,7 +473,16 @@ def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
 
 
 _UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "budgets", "grants",
-              "denies", "session_timeout", "disabled", "backends"}
+              "denies", "session_timeout", "disabled", "backends", "household_bots"}
+
+
+def _household_value(value) -> str | list[str]:
+    """``household_bots`` as stored (JSON): ``"all"`` or a de-duplicated list of ids."""
+    if value is None or value == "all":
+        return "all"
+    if not isinstance(value, (list, tuple)) or not all(isinstance(x, str) for x in value):
+        raise AccountError("profile_field_invalid", 'household_bots must be "all" or a list of bot ids.')
+    return list(dict.fromkeys(x.strip() for x in value if x.strip()))
 
 
 def update_profile(profile_id: str, **fields) -> Profile:
@@ -403,20 +503,23 @@ def update_profile(profile_id: str, **fields) -> Profile:
             if other is not None and other.id != profile_id:
                 raise AccountError("profile_name_taken", f"A profile named {v!r} already exists.", 409)
         if k == "role":
-            _check_role(v)
-            if v == "owner" and cur.role != "owner":
+            r, owner_word = _check_role(v)
+            if owner_word and not cur.protected:
                 raise AccountError("owner_exists", "Ownership is not transferred through a role change.", 409)
-            if cur.role == "owner" and v != "owner":
+            if cur.protected and r is not Role.ADMIN:
                 raise AccountError("owner_immutable", "The owner's role cannot be changed.", 409)
-            bump = bump or v != cur.role
-        if k in ("budgets", "backends"):
+            bump = bump or r is not cur.role
+            v = stored_role(r, protected=cur.protected)
+        if k == "household_bots":
+            v = json.dumps(_household_value(v))
+        elif k in ("budgets", "backends"):
             if k == "backends" and not isinstance(v or {}, dict):
                 raise AccountError("profile_field_invalid", "backends must be an object.")
             v = json.dumps(v or {})
         elif k in ("grants", "denies"):
             v = json.dumps(list(v or []))
         elif k == "disabled":
-            if cur.role == "owner" and v:
+            if cur.protected and v:
                 raise AccountError("owner_immutable", "The owner cannot be disabled.", 409)
             v = 1 if v else 0
             bump = True
@@ -445,7 +548,7 @@ def delete_profile(profile_id: str) -> None:
     cur = get_profile(profile_id)
     if cur is None:
         raise AccountError("profile_not_found", "No such profile.", 404)
-    if cur.role == "owner":
+    if cur.protected:
         raise AccountError("owner_immutable", "The owner cannot be deleted.", 409)
     with _lock, connect() as con:
         con.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
@@ -536,7 +639,7 @@ def bind_device(device_id: str, profile_id: str | None, label: str | None = None
         p = get_profile(profile_id)
         if p is None:
             raise AccountError("profile_not_found", "No such profile.", 404)
-        if p.role in ("owner", "admin"):
+        if p.role is Role.ADMIN:
             raise AccountError(
                 "device_bind_role", "A device can only open as a Member or Restricted profile; "
                 "Admins and the Owner always sign in with their credential.", 409)
@@ -724,7 +827,7 @@ def recent_activity(profile_id: str | None = None, *, category: str = "activity"
 def delete_owner_row() -> None:
     """Remove the owner row - only for "remove the lock" on a PIN-only 2.x install."""
     with _lock, connect() as con:
-        con.execute("DELETE FROM profiles WHERE role = 'owner'")
+        con.execute(f"DELETE FROM profiles WHERE {PROTECTED_ROW_SQL}")
         _bump_rev(con)
         invalidate()
 

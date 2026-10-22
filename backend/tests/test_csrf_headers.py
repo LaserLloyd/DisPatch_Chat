@@ -43,7 +43,7 @@ def test_body_less_mutations_are_covered_too(world, owner):
                          ("delete", "/api/threads/x")):
         r = getattr(owner, method)(path, headers=EVIL)
         assert r.status_code == 403, path
-    assert owner.get("/api/auth/me").json()["role"] == "owner"        # lock was NOT executed
+    assert owner.get("/api/auth/me").json()["role"] == "admin"        # lock was NOT executed
 
 
 def test_reads_are_not_affected(world, owner):

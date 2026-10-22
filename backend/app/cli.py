@@ -36,10 +36,18 @@ import sys
 from pathlib import Path
 
 from . import accounts, auth, config, credentials, recovery
+from .contracts.permissions import Role, normalise_role
 
-#: Lowest first. ``users add`` without ``--profile`` gets ``restricted``.
-ROLE_CHOICES = ("restricted", "member", "admin", "owner")
-DEFAULT_ROLE = "restricted"
+#: Lowest first. ``users add`` without ``--profile`` gets ``basic``. ``owner`` = the protected
+#: first Admin (only when there is none); ``restricted`` / ``member`` are the 3.x words for
+#: ``basic`` / ``user``, still accepted.
+ROLE_CHOICES = ("basic", "user", "admin", "owner", "restricted", "member")
+DEFAULT_ROLE = "basic"
+
+
+def _label(p: accounts.Profile) -> str:
+    """How the command line names a profile's standing: ``owner`` for the protected Admin."""
+    return "owner" if p.protected else p.role.value
 
 
 class CliError(Exception):
@@ -158,7 +166,7 @@ def cmd_users_list(args: argparse.Namespace) -> int:
         return 0
     rows = [("NAME", "ROLE", "SIGN-IN", "STATE", "CREATED")]
     for p in profiles:
-        rows.append((p.name, p.role, _credentials_of(p), "disabled" if p.disabled else "active", p.created[:10]))
+        rows.append((p.name, _label(p), _credentials_of(p), "disabled" if p.disabled else "active", p.created[:10]))
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     for r in rows:
         print("  ".join(c.ljust(widths[i]) for i, c in enumerate(r)).rstrip())
@@ -166,19 +174,21 @@ def cmd_users_list(args: argparse.Namespace) -> int:
 
 
 def cmd_users_add(args: argparse.Namespace) -> int:
-    role = args.profile
+    word = args.profile
+    protected = word == "owner"
+    role = normalise_role(word)
     name = args.name
-    if role == "owner" and accounts.has_owner():
+    if protected and accounts.has_owner():
         owner = accounts.get_owner()
         raise CliError(f"This install already has an owner ({owner.name!r}). To get back into it: "
                        f"python -m app users passwd {owner.name!r}   or   python -m app owner reset")
-    if role == "admin":
+    if role is Role.ADMIN and not protected:
         owner = accounts.get_owner()
         if not (owner and owner.has_password):
             raise CliError("Give the owner a password first (python -m app users passwd <owner>): "
                            "an Admin's password is only as safe as the Owner's.")
-    needs_secret = role in ("owner", "admin", "member")
-    what = "password" if role in ("owner", "admin") else "PIN"
+    needs_secret = role is not Role.BASIC
+    what = "password" if role is Role.ADMIN else "PIN"
     secret = read_secret(args, what=what, required=needs_secret)
     pin_hash = password_hash = None
     if secret is not None:
@@ -190,26 +200,27 @@ def cmd_users_add(args: argparse.Namespace) -> int:
         else:
             pin_hash = credentials.hash_secret(secret)
     try:
-        prof = accounts.create_profile(name, role, pin_hash=pin_hash, password_hash=password_hash)
+        prof = accounts.create_profile(name, role, protected=protected, pin_hash=pin_hash,
+                                       password_hash=password_hash)
     except accounts.AccountError as e:
         raise _account_error(e) from e
-    _audit("profile_created", prof, f"{prof.name} ({prof.role})")
-    print(f"Added {prof.role} {prof.name!r} (sign-in: {_credentials_of(prof)}).")
-    if role == "restricted" and secret is None:
+    _audit("profile_created", prof, f"{prof.name} ({_label(prof)})")
+    print(f"Added {_label(prof)} {prof.name!r} (sign-in: {_credentials_of(prof)}).")
+    if role is Role.BASIC and secret is None:
         print("No PIN was set: anyone at the lock screen can pick this profile. "
               "Set one with: python -m app users passwd <name>")
-    if role == "owner":
+    if protected:
         auth.burn_setup_token()
     return 0
 
 
 def cmd_users_passwd(args: argparse.Namespace) -> int:
     prof = _find(args.name)
-    kind = args.kind or ("password" if prof.role in ("owner", "admin") else "pin")
-    if kind == "pin" and prof.role == "admin":
+    kind = args.kind or ("password" if prof.role is Role.ADMIN else "pin")
+    if kind == "pin" and prof.role is Role.ADMIN and not prof.protected:
         raise CliError("Admins sign in with a password; use --kind password.")
-    if kind == "password" and prof.role in ("member", "restricted"):
-        raise CliError(f"{prof.role.capitalize()} profiles sign in with a PIN; use --kind pin.")
+    if kind == "password" and prof.role is not Role.ADMIN:
+        raise CliError(f"{prof.role.value.capitalize()} profiles sign in with a PIN; use --kind pin.")
     secret = read_secret(args, what=kind)
     assert secret is not None
     try:
@@ -221,25 +232,25 @@ def cmd_users_passwd(args: argparse.Namespace) -> int:
         raise _account_error(e) from e
     _audit("pin_set" if kind == "pin" else "password_set", prof, "command line")
     label = "PIN" if kind == "pin" else "password"
-    print(f"Set a new {label} for {prof.role} {prof.name!r}. Its other sessions and remembered devices were signed out.")
-    if prof.role == "owner" and kind == "pin":
+    print(f"Set a new {label} for {_label(prof)} {prof.name!r}. Its other sessions and remembered devices were signed out.")
+    if prof.protected and kind == "pin":
         print(f"The PIN recovery code was regenerated: {auth.RECOVERY_PATH}")
     return 0
 
 
 def cmd_users_delete(args: argparse.Namespace) -> int:
     prof = _find(args.name)
-    if prof.role == "owner":
+    if prof.protected:
         raise CliError("The owner cannot be deleted (every install keeps exactly one). To lock the "
                        "owner out and start the owner's sign-in again: python -m app owner reset")
-    _confirm(f"Delete the {prof.role} profile {prof.name!r}, its sessions and remembered devices?", args)
+    _confirm(f"Delete the {_label(prof)} profile {prof.name!r}, its sessions and remembered devices?", args)
     try:
         auth.revoke_profile(prof.id)
         accounts.delete_profile(prof.id)
     except accounts.AccountError as e:
         raise _account_error(e) from e
     _audit("profile_deleted", prof, prof.name)
-    print(f"Deleted {prof.role} {prof.name!r}. Their chats are kept; they are signed out everywhere.")
+    print(f"Deleted {_label(prof)} {prof.name!r}. Their chats are kept; they are signed out everywhere.")
     return 0
 
 
@@ -327,14 +338,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = uv.add_parser("add", parents=[common], allow_abbrev=False, help="add a profile (the lowest role unless --profile says otherwise)")
     p.add_argument("name")
     p.add_argument("--profile", choices=ROLE_CHOICES, default=DEFAULT_ROLE,
-                   help="role of the new profile (default: restricted; owner only when there is none)")
+                   help="role of the new profile: basic (default), user, admin, or owner (the protected first "
+                        "Admin, only when there is none); restricted/member are the 3.x names")
     _secret_flags(p)
     p.set_defaults(fn=cmd_users_add)
 
     p = uv.add_parser("passwd", parents=[common], allow_abbrev=False, help="set a new password/PIN for a profile (signs it out)")
     p.add_argument("name")
     p.add_argument("--kind", choices=("password", "pin"),
-                   help="which credential (default: password for Owner/Admin, PIN for Member/Restricted)")
+                   help="which credential (default: password for an Admin, PIN for a User/Basic profile)")
     _secret_flags(p)
     p.set_defaults(fn=cmd_users_passwd)
 

@@ -202,8 +202,9 @@ def test_the_advisor_backend_receives_the_flag(monkeypatch):
 
 def test_handoff_send_and_dismiss_need_dispatch_agents(hh):
     c, member = hh
-    # Every permission those routes asked for before, but not dispatch_agents.
-    k = member(grants=["approve_agent_actions", "manage_characters"])
+    # Every permission those routes asked for before, but not dispatch_agents. (4.0: a User can
+    # no longer be granted manage_characters at all; approve_agent_actions is grantable.)
+    k = member(grants=["approve_agent_actions"])
     me = k.get("/api/auth/me").json()["permissions"]
     assert "approve_agent_actions" in me and "dispatch_agents" not in me
     for verb in ("send", "dismiss"):

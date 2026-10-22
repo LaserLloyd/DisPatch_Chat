@@ -29,7 +29,7 @@ def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
     assert r.status_code == 200
     assert r.json()["claimed"] is True
     st = c.get("/api/auth/status").json()
-    assert st["claimed"] and st["authenticated"] and st["role"] == "owner"
+    assert st["claimed"] and st["authenticated"] and st["role"] == "admin"
     assert st["profile"]["name"] == "Olive" and st["needs_password"] is False
     assert st["pin_set"] is True
     owner_row = accounts.get_owner()
@@ -37,7 +37,7 @@ def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
     # The Owner's PIN is the install PIN: the old unlock flow still works.
     c2 = world.client()
     assert c2.post("/api/auth/unlock", json={"pin": "2468"}).status_code == 200
-    assert c2.get("/api/auth/me").json()["role"] == "owner"
+    assert c2.get("/api/auth/me").json()["role"] == "admin"
 
 
 def test_setup_with_a_password_only_leaves_no_pin(world):
@@ -46,7 +46,7 @@ def test_setup_with_a_password_only_leaves_no_pin(world):
     assert c.get("/api/auth/status").json()["pin_set"] is False
     # Claimed all the same: a stranger is Restricted, not owner.
     stranger = world.client()
-    assert stranger.get("/api/auth/me").json()["role"] == "restricted"
+    assert stranger.get("/api/auth/me").json()["role"] == "basic"
     assert stranger.get("/api/bots/all").status_code == 403
 
 
@@ -135,7 +135,8 @@ def test_the_owner_is_immutable(world, owner):
     assert owner.patch(f"/api/people/{me.id}", json={"role": "member"}).status_code == 409
     assert owner.delete(f"/api/people/{me.id}").status_code == 409
     with pytest.raises(accounts.AccountError):
-        accounts.update_profile(me.id, role="admin")
+        accounts.update_profile(me.id, role="user")
+    assert accounts.update_profile(me.id, role="admin").protected      # 4.0: still the protected Admin
     with pytest.raises(accounts.AccountError):
         accounts.create_profile("Second", "owner")
 
@@ -176,14 +177,14 @@ def test_sign_in_credentials_follow_the_role(world, owner):
     assert world.login(c, profile_id=ada["id"], pin="5555").status_code == 401       # admin: password only
     assert world.login(c, profile_id=ada["id"], password="admin-pass1").status_code == 200
     assert world.login(c, profile_id=max_["id"], pin="0000").status_code == 401
-    assert world.login(c, profile_id=max_["id"], pin="5555").json()["role"] == "member"
-    assert world.login(c, profile_id=mia["id"]).json()["role"] == "restricted"        # no PIN: just pick it
+    assert world.login(c, profile_id=max_["id"], pin="5555").json()["role"] == "user"
+    assert world.login(c, profile_id=mia["id"]).json()["role"] == "basic"        # no PIN: just pick it
     assert world.login(c, profile_id=pin_kid["id"]).status_code == 401               # has a PIN: needs it
     assert world.login(c, profile_id=pin_kid["id"], pin="1212").status_code == 200
     # The Owner: password or the install PIN.
     me = accounts.get_owner()
-    assert world.login(c, profile_id=me.id, password="owner-pass1").json()["role"] == "owner"
-    assert world.login(c, profile_id=me.id, pin="2468").json()["role"] == "owner"
+    assert world.login(c, profile_id=me.id, password="owner-pass1").json()["role"] == "admin"
+    assert world.login(c, profile_id=me.id, pin="2468").json()["role"] == "admin"
     assert world.login(c, profile_id=me.id, pin="9999").status_code == 401
     assert world.login(c, profile_id="nope", pin="1").status_code == 401
 
@@ -196,7 +197,7 @@ def test_stepping_up_to_admin_needs_their_credential(world, owner):
     assert c.get("/api/people").status_code == 403                                    # Restricted
     r = c.post("/api/auth/switch", json={"name": "Ada", "pin": "1234"})
     assert r.status_code == 401
-    assert c.get("/api/auth/me").json()["role"] == "restricted"                      # still Mia
+    assert c.get("/api/auth/me").json()["role"] == "basic"                      # still Mia
     r = c.post("/api/auth/switch", json={"name": "Ada", "password": "admin-pass1"})
     assert r.status_code == 200 and c.get("/api/auth/me").json()["role"] == "admin"
     assert c.get("/api/people").status_code == 200
@@ -206,16 +207,16 @@ def test_lock_returns_to_restricted(world, owner):
     assert owner.get("/api/people").status_code == 200
     owner.post("/api/auth/lock")
     assert owner.get("/api/people").status_code == 403
-    assert owner.get("/api/auth/me").json()["role"] == "restricted"
+    assert owner.get("/api/auth/me").json()["role"] == "basic"
 
 
 def test_a_role_change_ends_the_old_sessions(world, owner):
     max_ = world.person(owner, "Max", "member", pin="5555")
     member = world.client()
     assert world.login(member, profile_id=max_["id"], pin="5555").status_code == 200
-    assert member.get("/api/auth/me").json()["role"] == "member"
+    assert member.get("/api/auth/me").json()["role"] == "user"
     assert owner.patch(f"/api/people/{max_['id']}", json={"role": "restricted"}).status_code == 200
-    assert member.get("/api/auth/me").json()["role"] == "restricted"       # session died -> anonymous
+    assert member.get("/api/auth/me").json()["role"] == "basic"       # session died -> anonymous
     assert member.get("/api/auth/me").json()["profile"] is None
 
 
@@ -348,7 +349,7 @@ def test_a_bound_device_opens_as_its_profile(world, owner):
     tablet = world.client()
     tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
     me = tablet.get("/api/auth/me").json()
-    assert me["role"] == "restricted" and me["profile"]["name"] == "Mia" and me["disclosure"]
+    assert me["role"] == "basic" and me["profile"]["name"] == "Mia" and me["disclosure"]
     # An unrelated browser (no device cookie) is plain anonymous Restricted.
     assert world.client().get("/api/auth/me").json()["profile"] is None
 
@@ -377,7 +378,7 @@ def test_a_device_bound_member_is_a_member_not_an_admin(world, owner):
     owner.put("/api/people/devices/this", json={"profile_id": max_["id"]})
     tablet = world.client()
     tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    assert tablet.get("/api/auth/me").json()["role"] == "member"
+    assert tablet.get("/api/auth/me").json()["role"] == "user"
     assert tablet.get("/api/people").status_code == 403
     assert tablet.get("/api/bots").status_code == 200
 

@@ -9,7 +9,7 @@ Run: cd backend && uv run pytest tests/test_ops_perms_20261019.py
 from __future__ import annotations
 
 from app import policy
-from app.contracts.permissions import ROLE_PERMISSIONS, Permission, Role
+from app.contracts.permissions import ROLE_DEFAULTS, Permission, Role
 
 LAN = ("203.0.113.81", 43001)
 
@@ -24,7 +24,7 @@ def _admin(world, owner, name="Ada", password="admin-pass1", addr=LAN):
 # P-1 ------------------------------------------------------------------------ #
 
 def test_admin_holds_every_permission_the_owner_has():
-    assert ROLE_PERMISSIONS[Role.ADMIN] == ROLE_PERMISSIONS[Role.OWNER] == frozenset(Permission)
+    assert ROLE_DEFAULTS[Role.ADMIN] == frozenset(Permission)    # 4.0: one Admin role
 
 
 def test_admin_reaches_every_owner_surface(world):
@@ -70,7 +70,7 @@ def test_admin_manages_other_admins(world):
 def test_the_owner_profile_stays_out_of_an_admins_reach(world):
     owner = world.create_owner(world.client())
     _ada, admin = _admin(world, owner)
-    olive = next(p for p in admin.get("/api/people").json()["profiles"] if p["role"] == "owner")
+    olive = next(p for p in admin.get("/api/people").json()["profiles"] if p["protected"])
     oid = olive["id"]
     assert admin.delete(f"/api/people/{oid}").status_code == 403
     assert admin.patch(f"/api/people/{oid}", json={"disabled": True}).status_code == 403

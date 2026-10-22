@@ -233,7 +233,7 @@ def test_starting_the_server_migrates_and_the_owner_unlocks_with_the_old_pin(leg
         assert st["claimed"] and st["decoy"] and not st["authenticated"]
         assert c.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
         me = c.get("/api/auth/me").json()
-        assert me["role"] == "owner" and me["needs_password"] is True
+        assert me["role"] == "admin" and me["needs_password"] is True
         # Characters kept their audience across the upgrade.
         bots = {b["id"]: b["audience"] for b in c.get("/api/bots/all").json()["bots"]}
         assert {k: bots[k] for k in ("kid", "helper", "work")} == {

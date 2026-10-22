@@ -544,3 +544,50 @@ export const RAIL_ICONS = {
     'M12 14.7a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4Z',
   ],
 };
+
+/** RAIL_ICONS key -> ThemeForge 2.0.1 icon name (BUILD-PLAN-v2 §9). 67 keys, one per
+ *  RAIL_ICONS entry; every value exists in ui-theme/icons.json of ThemeForge v2.0.1.
+ *  Foundation declares the map only: WP-TF points uiIcon()/railIcon() at the vendored
+ *  sprite (`<use href="/static/ui-theme/icons.svg#<name>">`), WP-ICONS replaces chrome
+ *  glyphs with it. Until then nothing reads it. */
+export const ICON_MAP = Object.freeze({
+  nim: 'image-off', privacy: 'eye-off', avatars: 'user', link: 'link', moon: 'moon', sun: 'sun',
+  lock: 'lock', unlock: 'lock-open', folder: 'folder', upload: 'upload',
+  'viewer-back': 'arrow-left', 'viewer-open': 'external-link', 'viewer-download': 'download',
+  'viewer-reload': 'refresh-cw', 'viewer-folder': 'folder', 'viewer-file': 'file-text',
+  gear: 'settings', bots: 'bot', chats: 'messages-square', messages: 'message-circle',
+  jobs: 'clipboard-list', bolt: 'zap', pulse: 'activity', chip: 'cpu', palette: 'palette',
+  device: 'smartphone', shield: 'shield', images: 'image', camera: 'camera', plug: 'plug',
+  search: 'search', plus: 'plus', close: 'x', back: 'arrow-left', forward: 'arrow-right',
+  'chevron-down': 'chevron-down', popout: 'external-link', menu: 'menu', copy: 'copy',
+  tick: 'check', reply: 'reply', regenerate: 'refresh-cw', attach: 'paperclip', send: 'send',
+  stop: 'square', tools: 'wrench', terminal: 'terminal', mail: 'mail', users: 'users',
+  chart: 'chart-column', pin: 'pin', rename: 'pencil', archive: 'archive', trash: 'trash',
+  lifering: 'life-buoy', thumbsup: 'thumbs-up', thumbsdown: 'thumbs-down', sparkle: 'sparkles',
+  check: 'circle-check', alert: 'triangle-alert', history: 'history', disk: 'save',
+  database: 'database', help: 'circle-question-mark', user: 'user', brain: 'brain', eye: 'eye',
+});
+
+/** One named chrome icon: `uiIcon('gear')` or `uiIcon('gear', { label: 'Settings', size: 20 })`.
+ *
+ *  Foundation: draws the existing RAIL_ICONS paths (no behaviour change: the same <svg>
+ *  railIcon() makes), `size` sets width/height in px, and `label` makes the icon an
+ *  image with that accessible name instead of aria-hidden decoration. WP-TF swaps the
+ *  body for the ThemeForge sprite through ICON_MAP; callers stay as they are. An unknown
+ *  name returns null. */
+export function uiIcon(name, { label = '', size = 0 } = {}) {
+  const paths = RAIL_ICONS[name];
+  if (!paths) return null;
+  const svg = railIcon(paths);
+  svg.dataset.icon = name;
+  if (size > 0) {
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+  }
+  if (label) {
+    svg.removeAttribute('aria-hidden');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', String(label));
+  }
+  return svg;
+}

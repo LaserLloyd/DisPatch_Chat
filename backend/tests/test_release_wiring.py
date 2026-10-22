@@ -96,3 +96,42 @@ def test_every_runtime_data_file_is_on_the_allowlist():
     missing = [f.relative_to(REPO).as_posix() for f in files
                if not _covered(f.relative_to(REPO).as_posix(), allow)]
     assert not missing, f"runtime data a deploy would not carry: {missing}"
+
+
+def test_the_profiles_stylesheet_and_the_ai_build_templates_ride_the_allowlist():
+    """4.0 (Fable amendment 19): frontend/static/profiles.css and backend/app/bot_templates/*.md
+    are runtime files no glob covered (CSS and templates are not *.py / js/*.js)."""
+    allow = _allow()
+    assert (REPO / "frontend" / "static" / "profiles.css").is_file()
+    assert _covered("frontend/static/profiles.css", allow)
+    assert _covered("backend/app/bot_templates/character.md", allow)
+    missing = [f.relative_to(REPO).as_posix()
+               for f in (REPO / "backend" / "app").glob("bot_templates/*.md")
+               if not _covered(f.relative_to(REPO).as_posix(), allow)]
+    assert not missing, missing
+
+
+def test_the_deploy_tool_carries_the_same_new_rows():
+    """An operator's deploy tool (outside this repo) mirrors ALLOW in its APP_PATHS. Point
+    ``DISPATCH_DEPLOY_TOOL`` at it (a path or a command on PATH) to check it; skipped
+    otherwise (CI)."""
+    import ast
+    import os
+    import shutil
+
+    import pytest
+
+    name = os.environ.get("DISPATCH_DEPLOY_TOOL", "").strip()
+    tool = (name if os.path.isfile(name) else shutil.which(name)) if name else None
+    if not tool:
+        pytest.skip("DISPATCH_DEPLOY_TOOL is not set")
+    tree = ast.parse(Path(tool).read_text(encoding="utf-8"))
+    rows = None
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else (
+            node.targets[0] if isinstance(node, ast.Assign) and node.targets else None)
+        if isinstance(target, ast.Name) and target.id == "APP_PATHS" and node.value is not None:
+            rows = set(ast.literal_eval(node.value))
+    assert rows is not None, "APP_PATHS not found in the deploy tool"
+    assert ("frontend/static", "profiles.css") in rows
+    assert ("backend/app/bot_templates", "*.md") in rows

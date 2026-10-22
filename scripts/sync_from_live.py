@@ -57,6 +57,8 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
     # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).
     ("backend/app/personas",        "backend/app/personas",        "*.md"),
+    # 4.0: the AI-build meta-prompt template(s) (app/bot_builder_api.py reads them).
+    ("backend/app/bot_templates",   "backend/app/bot_templates",   "*.md"),
     # 2.3.7: the "Works with DisPatch" catalog (app/catalog.py reads it).
     ("backend/app",                 "backend/app",                 "catalog.yaml"),
     ("frontend/static/guide",       "frontend/static/guide",       "*.png"),
@@ -72,6 +74,8 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend",                     "backend",                     "uv.lock"),
     ("frontend/static",             "frontend/static",             "index.html"),
     ("frontend/static",             "frontend/static",             "app.css"),
+    # 4.0: the chat-first profiles sheet (one section per frontend package).
+    ("frontend/static",             "frontend/static",             "profiles.css"),
     ("frontend/static",             "frontend/static",             "sw.js"),
     # The mark: one SVG, its raster fallbacks, and the .ico. Brand assets,
     # not user data — they were outside every list here until 2026-09-18,

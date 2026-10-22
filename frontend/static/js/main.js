@@ -59,6 +59,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, er
 // 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
+  runSectionHooks,
 } from './settings-nav.js?v=1';
 import { mountConnections } from './connections.js?v=2';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
@@ -104,6 +105,12 @@ import { mountPeopleSettings } from './people.js?v=3';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=1';
+// 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
+// WP-FE-PEOPLE in their own modules).
+import { initMyBots } from './my-bots.js?v=1';
+import { initBotEditor } from './bot-editor.js?v=1';
+import { initAccountReset } from './account-reset.js?v=1';
+import { initPeoplePerms } from './people-perms.js?v=1';
 import { mountAgentsSettings } from './agents.js?v=2';
 import { pushRow } from './push.js?v=2';
 import { imageJobMessageEl } from './imagejobs.js?v=5';
@@ -4662,6 +4669,8 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
       if (addin) addin.show();
     }
   }
+  // 4.0: what the profile modules add to this section (settings-nav.js SECTION_HOOKS).
+  runSectionHooks(id, pane, { toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role });
   wireAdvancedDisclosures(pane);
   if (anchor) revealer.reveal(ticket, pane, anchor, id);
 }
@@ -10785,6 +10794,11 @@ async function init() {
       renderThreads();
     }
   }, 60_000);
+  // 4.0 chat-first profiles: the new modules get the shell's helpers once (no-ops for now).
+  const profileDeps = { t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state };
+  for (const init of [initMyBots, initBotEditor, initAccountReset, initPeoplePerms]) {
+    try { init(profileDeps); } catch (e) { console.warn('profiles module init failed', e); }
+  }
   await refreshAuthAndBoot();
   // 3.0 (W5): the server's default theme / language / avatar style for a device that has none of its
   // own, and - on an install that is not set up - the first-run wizard (it can be put off for the session).

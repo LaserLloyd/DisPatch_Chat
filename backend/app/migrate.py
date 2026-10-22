@@ -42,6 +42,15 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        subscriptions record their device's profile; ones whose device is no
                        longer remembered (dead already) are dropped. Additive: a 3.x binary
                        ignores the new columns
+``010_profiles``       (4.0 chat-first profiles, BUILD-PLAN-v2 §1.6; minimal and additive, never
+                       raises, no table rebuild, no revert) profiles get ``household_bots``;
+                       security.yaml gets ``lock_target`` / ``default_profile`` (exactly one
+                       PIN-less Restricted profile with ``anonymous_access: restricted`` becomes
+                       the default profile, as a User; otherwise ``lock_target: profile_list``;
+                       ``--default-profile <id|name>`` picks it explicitly); config.yaml
+                       ``hide_unlocked`` -> ``hidden`` and a character ``profiles`` list folds into
+                       those profiles' ``household_bots``. FOUNDATION: registered with stub
+                       plan/apply (it plans nothing and is never recorded); WP-MIG implements it
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml,
@@ -66,6 +75,7 @@ from pathlib import Path
 import yaml
 
 from . import accounts, agents_store, auth, config, connections, settings_store, tool_manifests
+from .contracts.permissions import Role
 
 log = logging.getLogger("local-chat.migrate")
 
@@ -139,7 +149,7 @@ def _has_owner_row(path: Path) -> bool:
         return False
     con = sqlite3.connect(_ro_uri(path), uri=True)
     try:
-        return con.execute("SELECT 1 FROM profiles WHERE role='owner'").fetchone() is not None
+        return con.execute(f"SELECT 1 FROM profiles WHERE {accounts.PROTECTED_ROW_SQL}").fetchone() is not None
     finally:
         con.close()
 
@@ -168,11 +178,12 @@ class MigrateError(ValueError):
     """A migration option that cannot be honoured (an unknown character or profile)."""
 
 
-def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False) -> Report:
+def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False,
+         default_profile: str | None = None) -> Report:
     """What ``run`` would do, computed from the files as they are. Writes nothing.
 
     ``assign`` / ``all_to_owner`` are the 009_ownership overrides (``--assign``,
-    ``--all-to-owner``)."""
+    ``--all-to-owner``); ``default_profile`` is 010_profiles' ``--default-profile``."""
     rep = Report(dry_run=True)
     dbp = _db_file()
     have = _table_names(dbp)
@@ -257,7 +268,31 @@ def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False) ->
                             owner_pending="002_owner_from_pin" in {a.step for a in rep.actions})
         rep.actions.extend(Action("009_ownership", line) for line in p9.lines())
         rep.ownership = p9
+
+    if "010_profiles" not in done:
+        rep.actions.extend(Action("010_profiles", line)
+                           for line in plan_profiles(default_profile=default_profile))
     return rep
+
+
+# --------------------------------------------------------------------------- #
+# 010_profiles (4.0 chat-first profiles): WP-MIG implements both halves
+# --------------------------------------------------------------------------- #
+
+
+def plan_profiles(*, default_profile: str | None = None) -> list[str]:
+    """Read-only: the 010_profiles report lines (profile -> old stored role -> new role ->
+    household list; the capabilities the default profile gains; bot flag changes; the
+    security.yaml diff). ``[]`` = nothing to do. Never raises (an ambiguous install gets
+    ``lock_target: profile_list``); an unknown ``default_profile`` raises MigrateError.
+
+    FOUNDATION STUB: plans nothing, so ``run`` never applies or records 010 yet."""
+    return []
+
+
+def apply_profiles(*, default_profile: str | None = None) -> None:
+    """Apply 010_profiles (the backup was taken by ``run``). FOUNDATION STUB."""
+    raise NotImplementedError("migrate.apply_profiles: WP-MIG")
 
 
 # --------------------------------------------------------------------------- #
@@ -355,7 +390,7 @@ def _default_target(bot: config.Bot | None, by_id: dict[str, accounts.Profile],
         return None, "character no longer in the roster"
     if len(bot.profiles) == 1:
         p = by_id.get(bot.profiles[0])
-        if p is not None and p.role != "owner" and not p.disabled and _could_use(bot, p):
+        if p is not None and not p.protected and not p.disabled and _could_use(bot, p):
             return p, f"only {p.name} may use it"
     if bot.audience == "restricted" and anon is not None and _could_use(bot, anon):
         return anon, f"made for Restricted profiles; {anon.name} is the only Restricted profile"
@@ -433,11 +468,11 @@ def ownership_plan(*, assign: dict[str, str] | None = None, all_to_owner: bool =
     have = _table_names(dbp)
     profiles = _ro_profiles(dbp)
     by_id = {p.id: p for p in profiles}
-    owner = next((p for p in profiles if p.role == "owner"), None)
+    owner = next((p for p in profiles if p.protected), None)
     out.owner_name = (f"{owner.name} (Owner)" if owner is not None else
                       "the Owner" if owner_pending else
                       "nobody yet (the Owner, once one is created)")
-    restricted = [p for p in profiles if p.role == "restricted" and not p.disabled]
+    restricted = [p for p in profiles if p.role is Role.BASIC and not p.disabled]
     anon = restricted[0] if len(restricted) == 1 else None
 
     roster = _raw_roster() or []
@@ -486,17 +521,17 @@ def ownership_plan(*, assign: dict[str, str] | None = None, all_to_owner: bool =
         bot = _bot_of(e) if e is not None else None
         if bot_id.lower() in overrides:
             p = overrides[bot_id.lower()]
-            note = "" if (p.role == "owner" or bot is None or _could_use(bot, p)) else \
+            note = "" if (p.protected or bot is None or _could_use(bot, p)) else \
                 f"; NOTE: {p.name} could not use this character before"
             target, reason = p, f"--assign{note}"
         elif all_to_owner:
             target, reason = None, "--all-to-owner"
         else:
             target, reason = _default_target(bot, by_id, anon)
-        if target is not None and target.role == "owner":
+        if target is not None and target.protected:
             target = None
         tid = target.id if target is not None else (owner.id if owner is not None else None)
-        name = (f"{target.name} ({target.role.capitalize()})" if target is not None
+        name = (f"{target.name} ({target.role.value.capitalize()})" if target is not None
                 else out.owner_name)
         out.assignments.append(Assignment(bot_id, n, tid, name, reason))
     if nfiles:
@@ -678,14 +713,15 @@ def _apply_connections() -> None:
 
 
 def run(*, dry_run: bool = False, take_backup: bool = True,
-        assign: dict[str, str] | None = None, all_to_owner: bool = False) -> Report:
+        assign: dict[str, str] | None = None, all_to_owner: bool = False,
+        default_profile: str | None = None) -> Report:
     """Apply (or, with ``dry_run``, just describe) every pending step."""
     if not dry_run:
         # A restore staged from the app (Settings > System > Backups) is applied now, before the
         # database is opened and before anything below looks at the files.
         from . import backups
         backups.apply_pending_restore()
-    rep = plan(assign=assign, all_to_owner=all_to_owner)
+    rep = plan(assign=assign, all_to_owner=all_to_owner, default_profile=default_profile)
     rep.dry_run = dry_run
     if dry_run:
         return rep
@@ -726,6 +762,12 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
         # Re-planned now: 002 may just have created the Owner the chats default to.
         _apply_ownership(ownership_plan(assign=assign, all_to_owner=all_to_owner))
     _record("009_ownership")
+    if "010_profiles" in steps:
+        # Recorded only when it actually ran (unlike the steps above): until WP-MIG lands,
+        # plan_profiles() plans nothing, and a database must not be marked as migrated by
+        # the stub.
+        apply_profiles(default_profile=default_profile)
+        _record("010_profiles")
     rep.applied = sorted(steps)
     return rep
 
@@ -747,6 +789,9 @@ def main(argv: list[str] | None = None) -> int:
                          "(a name or id); repeatable")
     ap.add_argument("--all-to-owner", action="store_true",
                     help="009_ownership: give every existing chat to the Owner")
+    ap.add_argument("--default-profile", metavar="ID_OR_NAME",
+                    help="010_profiles: the profile unsigned devices and the lock screen land on "
+                         "(sets lock_target: default_profile); refused once 010 has run")
     args = ap.parse_args(argv)
     if args.data_dir:
         _repoint(Path(args.data_dir))
@@ -768,9 +813,14 @@ def main(argv: list[str] | None = None) -> int:
         print("009_ownership has already run on this data directory; --assign and --all-to-owner "
               "only shape that first run (restore its backup to run it again)", file=sys.stderr)
         return 2
+    if args.default_profile and "010_profiles" in _applied_ids(_db_file()):
+        print("010_profiles has already run on this data directory; --default-profile only shapes "
+              "that first run (change the lock target in People & Access instead)", file=sys.stderr)
+        return 2
     try:
         rep = run(dry_run=args.dry_run, take_backup=not args.no_backup,
-                  assign=assign or None, all_to_owner=args.all_to_owner)
+                  assign=assign or None, all_to_owner=args.all_to_owner,
+                  default_profile=args.default_profile)
     except MigrateError as e:
         print(str(e), file=sys.stderr)
         return 2

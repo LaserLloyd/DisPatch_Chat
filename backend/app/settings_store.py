@@ -145,8 +145,10 @@ def _security_read(d: SettingDef) -> Any:
         "remember_device_days": cfg.remember_days,
         "machine_loopback_trust": cfg.machine_loopback_trust,
         "anonymous_access": cfg.anonymous_access,
-        "session_timeout_member": cfg.session_timeouts.get("member"),
-        "session_timeout_restricted": cfg.session_timeouts.get("restricted"),
+        # 4.0: the dict is keyed by Role value; the setting keys keep their 3.x names until
+        # WP-CORE renames them (session_timeout_user / _basic).
+        "session_timeout_member": cfg.session_timeouts.get("user"),
+        "session_timeout_restricted": cfg.session_timeouts.get("basic"),
     }.get(n, MISSING)
 
 
@@ -165,7 +167,8 @@ def _security_write(d: SettingDef, value: Any) -> None:
         elif n == "anonymous_access":
             cfg.anonymous_access = str(value)
         elif n in ("session_timeout_member", "session_timeout_restricted"):
-            cfg.session_timeouts = {**cfg.session_timeouts, n.rsplit("_", 1)[1]: int(value)}
+            role = "user" if n == "session_timeout_member" else "basic"
+            cfg.session_timeouts = {**cfg.session_timeouts, role: int(value)}
         else:                                       # pragma: no cover - schema/adapter drift
             raise SettingError(d.key, f"{d.label}: no writer for this setting")
         auth._write(cfg)

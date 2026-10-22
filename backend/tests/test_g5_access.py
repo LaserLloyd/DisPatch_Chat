@@ -17,9 +17,10 @@ import pytest
 from fastapi.routing import APIRoute
 
 from app import config, main, route_policy
-from app.contracts.permissions import ROLE_PERMISSIONS, Role
+from app.contracts.permissions import Role, effective_permissions
 
-RESTRICTED = {p.value for p in ROLE_PERMISSIONS[Role.RESTRICTED]}
+#: What a Restricted (4.0: Basic) session holds.
+RESTRICTED = set(effective_permissions(Role.BASIC))
 LAN = ("203.0.113.50", 40000)
 
 #: Gate-level refusal codes: seeing one of these means the policy engine said no.
@@ -256,7 +257,7 @@ def test_a_restricted_turn_reaches_only_restricted_audience_characters(world, cl
             {"type": "send", "thread_id": t_members, "text": "hello", "client_msg_id": "m1"},
             {"type": "send", "thread_id": t_kids, "text": "hello", "client_msg_id": "m2"},
         ])
-        assert hello["decoy"] is True and hello["role"] == "restricted"
+        assert hello["decoy"] is True and hello["role"] == "basic"
         assert {b["id"] for b in hello["bots"]} == set(_roster(clients["kid"]))
         errors = [f for f in frames if f.get("type") == "error"]
         assert errors and "Unlock" in errors[0]["message"]

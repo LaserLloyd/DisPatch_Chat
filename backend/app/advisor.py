@@ -1443,8 +1443,14 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                    model: str | None = None,
                    locked: bool = False,
                    dispatch: bool = True,
-                   query: str | None = None) -> None:
+                   query: str | None = None,
+                   owner_profile_id: str | None = None) -> None:
     """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn.
+
+    ``owner_profile_id`` (4.0): the thread's owner as ``main`` read it. Accepted and
+    ignored for now (identity); WP-ADV resolves the owner from ``thread_id`` itself (so
+    run_turn, speculate and the digest gate identically) and may use this only as a
+    consistency check, never as the source of truth.
 
     Voice chat (C-§B.2): ``voice.system`` lands in the system prompt (see
     :func:`build_system_prompt`) and retrieval runs on the voice budget;
