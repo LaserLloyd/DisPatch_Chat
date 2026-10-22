@@ -612,7 +612,7 @@ def _anthropic_text(resp: Any) -> str:
     ``stop_reason == "refusal"`` means the model declined for safety reasons
     and the content blocks may be empty or partial. Reading them first and
     finding "" would surface as a mystery blank bubble; the operator (and the
-    family member watching the screen) is owed the actual reason.
+    person watching the screen) is owed the actual reason.
     """
     if getattr(resp, "stop_reason", None) == "refusal":
         raise ApiError(
@@ -1033,7 +1033,7 @@ def _message_tool_calls(message: dict) -> list[dict]:
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_DEFAULT_DELAY_S = 1.0
 #: A Retry-After longer than this is honoured by NOT retrying: the turn fails
-#: now with the provider's message instead of a family member watching a
+#: now with the provider's message instead of a person watching a
 #: spinner for a minute.
 RETRY_MAX_DELAY_S = 5.0
 
@@ -1935,7 +1935,7 @@ async def run_api_turn(thread_id: str, bot_id: str, text: str, *,
     "thinking", a `thinking` frame opens and closes, the reply lands through
     the shared funnel, and EVERY failure path sets the thread to "error",
     broadcasts an error frame and still stops the spinner. A silent hang here
-    would leave a family member watching a thinking dot forever, which is worse
+    would leave a person watching a thinking dot forever, which is worse
     than any error message.
 
     Voice chat (C-§B.2): ``voice.system`` is appended to the system prompt and
@@ -2272,7 +2272,7 @@ def connect_direct(spec: DirectConnectSpec) -> config.Bot:
     ``advisor.providers`` becomes ``[entry]`` and ``advisor.tools`` follows
     ``spec.tools``; every other key of an existing advisor block (owner,
     knowledge_dir, lookup, agents, ...) and every other field of the bot is
-    kept. A new id creates the bot (never Safe Mode, no reactions -- the
+    kept. A new id creates the bot (no reactions -- the
     operator opts in). An id that is an agent or legacy-API bot is refused
     rather than silently converted.
     """

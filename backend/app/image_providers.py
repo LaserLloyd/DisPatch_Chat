@@ -7,7 +7,7 @@ who install DisPatch do not have one; they have an API key. This module is the
 second backend for the same worker: it answers the five calls the worker makes
 on the MCP client (``readiness``, ``enqueue``, ``poll``, ``fetch``, ``cancel``,
 plus ``status`` for /api/health), so the placeholder → picture rewrite, the
-deadline, coalescing, rate limits and Safe-Mode redaction all apply unchanged.
+deadline, coalescing, rate limits and the image hard-line guard all apply unchanged.
 See docs/design/integrations-2-3.md.
 
 An API generation is ONE synchronous HTTP request that takes 5-60 s. ``enqueue``

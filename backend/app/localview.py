@@ -1,6 +1,6 @@
 """Local Viewer — serve files, folders and static sites off the host's disk.
 
-An unlocked operator taps a local path in a message and the bytes come back
+A signed-in Admin taps a local path in a message and the bytes come back
 through DisPatch, so any device that can reach the app can read a report, a log,
 a PDF or a whole static site without filesystem access of its own.
 
@@ -29,7 +29,7 @@ Two things this module deliberately does NOT do:
     makes and for the same reason: the gate must hold even if the middleware
     chain is not there.
   * It does not join the machine-inbound surface. This is a BROWSER feature: an
-    X-API-Key holder gets Safe Mode here, deliberately, because an api_token is
+    X-API-Key holder is refused here, deliberately, because an api_token is
     handed to on-box automation and a GPU rig, not to something that should be
     able to read ``~`` over HTTP.
 

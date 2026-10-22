@@ -7,7 +7,7 @@ with no window and no polling.
 
 WHAT IT DOES NOT DO
 -------------------
-It does not sanitize, strip reaction markers, ingest media, decide Safe Mode, or
+It does not sanitize, strip reaction markers, ingest media, decide who may see a thread, or
 classify speech versus working output. All of that stays in
 ``_deliver_assistant_text``, untouched, so swapping the transport cannot quietly
 change what a message MEANS. This module's entire job is: which thread, what
@@ -268,7 +268,7 @@ class SessionRouter:
         # carries `[[media:/abs/path]]`, `[[doc:…]]`, `[[pic:…]]` and
         # `:react:…:` markers, and the internal-context scaffolding the persist
         # chokepoint removes. Broadcasting it unsanitized would put absolute
-        # paths and internal markers on a LOCKED family device, which the
+        # paths and internal markers on every connected screen, which the
         # persisted copy has never done.
         self._broadcast = broadcast
         self._sanitize = sanitize or (lambda t: t)
@@ -497,8 +497,7 @@ class SessionRouter:
         pending, run.pending = run.pending, None
         # SANITIZE THE CUMULATIVE TEXT, THEN DIFF. Doing it the other way round
         # — sanitizing each chunk — leaks any directive that straddles two
-        # chunks, which is precisely why streaming frames were kept away from
-        # Safe Mode until now.
+        # chunks, which is precisely why streaming frames were once held back.
         clean = self._sanitize(pending)
         replace, run.replace = run.replace, False
         if clean == run.sent:

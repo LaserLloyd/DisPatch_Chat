@@ -367,11 +367,11 @@ async def auth_switch(request: Request, payload: LoginIn):
 
 
 def lock_screen_profiles() -> list[dict]:
-    """What the lock screen lists so a household member can pick their tile.
+    """What the lock screen lists so a person can pick their tile.
 
-    ``credential`` says what to ask for: the Owner's PIN lives in security.yaml, so the
-    Owner may have a PIN, a password or both; an Admin has a password; a Member a PIN; a
-    Restricted profile a PIN or nothing at all."""
+    ``credential`` says what to ask for: the protected Admin's PIN lives in security.yaml, so the
+    protected Admin may have a PIN, a password or both; another Admin has a password; a User
+    or Basic profile a PIN or nothing at all."""
     pin_set = auth.load().pin_set
     out = []
     for p in accounts.list_profiles():
@@ -479,7 +479,7 @@ async def auth_own_pin(request: Request, payload: OwnPinIn):
     """Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.
 
     Confirmed with the current PIN (an Admin without a PIN yet confirms with the password).
-    The Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted
+    The protected Admin's PIN is the install PIN and changes through ``/api/auth/setup``; a Basic
     profile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like
     every other credential check."""
     pr = _caller(request)

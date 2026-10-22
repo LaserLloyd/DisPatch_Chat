@@ -146,7 +146,7 @@ class Manifest:
     dir: Path
     source: str                      # "repo" | "data"
     #: The Permission a profile needs to use this app (3.0). Default: use_tools. (The
-    #: manifest's ``safe`` key is a 3.x Safe-Mode input: still accepted, never read.)
+    #: manifest's ``safe`` key is legacy 3.x data: still accepted, never read.)
     permission: str = "use_tools"
 
     @property
