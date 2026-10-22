@@ -153,7 +153,7 @@ The app keeps unlock sessions, WebSocket clients, rate-limit counters, the harne
 ledger and the backup/mirror loops **in process memory**. A second worker gets its own copy of
 all of it:
 
-- unlock the app in one tab, still locked in the next
+- sign in in one tab, still signed out in the next
 - two processes writing the same SQLite file
 - duplicated backup jobs and duplicated mirroring
 
@@ -202,9 +202,9 @@ a clean error rather than hanging.
 
 See `docs/configuration.md` § DeepSeek Harness. **Understand what this is.** A
 headless job runs a shell agent as your user, in your home directory. It is
-gated behind the PIN and restricted to fully-unlocked sessions — which makes
+gated behind the PIN and restricted to Admin sessions — which makes
 setting a PIN a precondition, not an afterthought, since with no credential
-configured there is no unlocked session for the gate to check. Set a strong
+configured there is no signed-in Admin for the gate to check. Set a strong
 PIN first, and do not enable this on a machine reachable from the internet.
 
 ---

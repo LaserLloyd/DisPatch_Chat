@@ -1,6 +1,6 @@
 # Integrations: what DisPatch works with, and how to connect it
 
-DisPatch on its own is a chat app with lookups, quick actions, Safe Mode and push
+DisPatch on its own is a chat app with lookups, quick actions, profiles and push
 pings. Everything else is a service you connect: an AI provider for answers, an
 image provider for pictures, an agent runtime for agent bots, an add-on for voice.
 This page lists each one, what it needs, what you can use instead, and the exact
@@ -132,7 +132,7 @@ graphics memory across cards and shares it with other programs through leases.
 Connect it like any provider: **Connect an AI → Local server (llama.cpp /
 StudioForge)** with its `/v1` address (StudioForge listens on port 1234 by
 default). Optionally, `DISPATCH_STUDIOFORGE=1` and `DISPATCH_STUDIOFORGE_URL` add
-its control panel as a tab for unlocked devices.
+its control panel as a tab for Admins.
 
 <a id="openclaw"></a>
 
@@ -192,7 +192,7 @@ Details: [advisor lookup](advisor.md#lookup-the-bot-reads-reference-material-its
 **The `[dispatch]` extra.** InfoForge also ships a DisPatch add-on
 (`src/infoforge_dispatch`, entry point `dispatch.extensions` named `infoforge`)
 that registers one live tool, `wiki_search(query, max_articles)`, which a bot
-lists in its `tools:` (and in `tools_locked` to allow it on a Safe Mode device).
+lists in its `tools:`.
 The add-on runs InfoForge in-process, read-only (`ensure=False`, never starts
 podman). Install it from the InfoForge clone into DisPatch's own environment
 (it is not on PyPI):
@@ -223,7 +223,7 @@ advisor:
 
 `kind: wikipedia` runs a Wikipedia full-text search and reads each hit's lead
 summary. It needs no install, but it sends the user's words to wikipedia.org,
-also from Safe Mode devices; the offline kind keeps them on your machine. Any
+from every profile; the offline kind keeps them on your machine. Any
 direct-API bot with lookups can also call the `wikipedia` tool itself.
 
 <a id="mailforge"></a>
@@ -232,7 +232,7 @@ direct-API bot with lookups can also call the `wikipedia` tool itself.
 
 [MailForge](https://github.com/LaserLloyd/MailForge) is a local email assistant
 that triages, screens and drafts, and never sends anything without a click.
-DisPatch shows it as an **Emails** tab for unlocked devices. Run it on the same
+DisPatch shows it as an **Emails** tab for Admins. Run it on the same
 machine; `DISPATCH_MAIL=auto` (the default) finds it by its data directory. No
 API substitute: mail needs MailForge.
 
@@ -282,7 +282,7 @@ What each feature needs, and what a fresh install shows without it.
 | StudioForge panel | `DISPATCH_STUDIOFORGE=1` + URL | — | env vars | tab hidden |
 | DeepSeek Harness panel | the `dsh` command | — | on PATH | tab hidden |
 | Web Push | the https address | — | Settings → Appearance | explains it needs https |
-| File Server, Local Viewer, quick actions, Safe Mode | nothing | — | built in | — |
+| File Server, Local Viewer, quick actions, profiles | nothing | — | built in | — |
 
 Known gaps (tracked for a later release): the Plugins tab's "not available" rows
 for built-in panels do not yet say what each needs; Add bot → Agent does not yet

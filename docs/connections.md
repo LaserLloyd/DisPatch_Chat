@@ -6,7 +6,7 @@ written into every character's own settings, so the same key was pasted once per
 server does this character use?" had no answer you could point at. In 3.0 each server is one record and
 a character *refers* to it.
 
-Open **Settings -> AI & Connections** (owner and admins), or use the API below.
+Open **Settings -> AI & Connections** (Admins), or use the API below.
 
 ## What a connection holds
 
@@ -17,7 +17,7 @@ Open **Settings -> AI & Connections** (owner and admins), or use the API below.
 | `base_url` | Where it is, e.g. `http://127.0.0.1:1234/v1`. Checked when saved (see *Safety*). |
 | credential | The key lives in the **secret store** (the OS keyring when one is usable, otherwise a `0600` file under `<data>/agents/`), or is read from an **environment variable** you name (`env:OPENAI_API_KEY`) every time it is used. A key is accepted when you save and is **never returned** by any route or written to `config.yaml`. |
 | `capabilities` | What it can do: `chat`, `vision`, `images`, `embeddings`, `tools`, `agent`. Defaults come from the type; you can change them. |
-| `required_permission` | What a profile needs to change it (`manage_connections`; only the Owner may change this). |
+| `required_permission` | What a profile needs to change it (`manage_connections`; only the first Admin may change this). Connections are **household property**: every profile's bots may use them (an Admin can narrow which ones a profile's own bots may pick), and only an Admin ever sees a key. |
 | `default_model`, `models` | The model a character uses when it does not choose one, and the list the last **Test** returned (a cache, not a source of truth). |
 
 `GET /api/connections` also returns the type table: what each type needs (a key, a fixed address) and its

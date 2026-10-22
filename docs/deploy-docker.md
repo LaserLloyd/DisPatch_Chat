@@ -50,10 +50,10 @@ docker compose ps               # STATUS should reach "healthy" within ~90s
                                 # (the first boot seeds assets; start_period is 90s)
 ```
 
-**Finish the setup wizard.** A fresh container is closed to the network until an owner
+**Finish the setup wizard.** A fresh container is closed to the network until an Admin
 account exists: the sign-in page is all anyone sees. The wizard asks for the one-time
 setup token the server printed (`docker compose logs app`, the `SETUP TOKEN: ...` line),
-creates the owner, and shows the recovery code once; write it down. (3.0; a 2.x
+creates the first Admin, and shows the recovery code once; write it down. (3.0; a 2.x
 container was open until a PIN was set.)
 
 ---
@@ -260,9 +260,9 @@ WARNING local-chat: openclaw CLI not found at 'openclaw' — agent replies will 
 ```
 
 **This is a supported configuration.** Chat between people, the File Server, media,
-threads, search, Safe Mode and remembered devices all work normally. Only bot replies
+threads, search, profiles and remembered devices all work normally. Only bot replies
 are unavailable, and they fail with a clean error rather than a hang. If you want a
-self-hosted family chat and no bots, you are already done.
+self-hosted chat and no bots, you are already done.
 
 ### Option 1 — bake the agent into a derived image (recommended if you want agents)
 
@@ -505,7 +505,7 @@ The command line works against the data volume from inside the container (servic
 ```bash
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive                 # prompts on your terminal
-printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile member --password-stdin
+printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile user --password-stdin
 docker compose exec app python -m app users delete Noor --yes
 docker compose exec app python -m app owner reset --yes                  # lost both the password and the PIN
 docker compose exec app python -m app token rotate                       # the machine API key
@@ -520,7 +520,7 @@ With no shell at all, only the volume: put a `RESET_LOGIN` file in the data dire
 and deleted first.
 
 ```bash
-docker compose exec app sh -c ': > /data/RESET_LOGIN'                     # empty: owner sign-in cleared, setup opens
+docker compose exec app sh -c ': > /data/RESET_LOGIN'                     # empty: first Admin's sign-in cleared, setup opens
 printf 'Olive:%s\n' "$NEWPW" | docker compose exec -T app sh -c 'cat > /data/RESET_LOGIN'   # or: set Olive's password
 docker compose restart app
 docker compose logs app | grep -E "login recovery|SETUP TOKEN"
@@ -529,7 +529,7 @@ docker compose logs app | grep -E "login recovery|SETUP TOKEN"
 or `DISPATCH_RESET_OWNER=1` in `.env`, then `docker compose up -d` (one-shot per value, remove it afterwards). Through
 a published port a browser is not "this computer", so after an empty-file or variable reset the wizard asks for the
 `SETUP TOKEN` in the log (also `docker compose exec app cat /data/SETUP-TOKEN.txt`). Data survives all of this: only the
-owner's sign-in changes. Full reference: [accounts.md](accounts.md).
+first Admin's sign-in changes. Full reference: [accounts.md](accounts.md).
 
 ## Upgrading
 

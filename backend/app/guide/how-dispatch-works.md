@@ -1,6 +1,6 @@
 ## What DisPatch is
 
-DisPatch is a private chat app for your own AI. You run it on one machine, protect it with a PIN, and everyone in the house opens it from their own phone, tablet or laptop. The conversations live in one SQLite file on your server, and the AI behind each bot is whatever you choose to connect. Nothing here needs an account with us, and nothing is sent anywhere you did not point it.
+DisPatch is a private chat app for your own AI. You run it on one machine, protect it with a PIN, and everyone you add opens it from their own phone, tablet or laptop with a profile of their own. The conversations live in one SQLite file on your server, and the AI behind each bot is whatever you choose to connect. Nothing here needs an account with us, and nothing is sent anywhere you did not point it.
 
 ![Welcome screen](/static/guide/welcome.png)
 
@@ -25,7 +25,7 @@ Atlas works the moment he has a model behind him.
 3. Paste the API key if the provider wants one, press Test, pick a model from the list that comes back and Save.
 4. In Settings → Characters, open Atlas's Details and choose that connection.
 
-The key is written to `config.yaml` in your data directory, which is set to owner-only (0600). It is not encrypted, and it is never shown again or sent back to the browser. If you would rather keep it out of the file, name an environment variable and DisPatch reads the key from there. Details per provider are in [llm-providers.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/llm-providers.md).
+The key is kept in your computer's keyring when one is available, otherwise in a file only the DisPatch user can read (mode 0600). It is not encrypted, and it is never shown again or sent back to the browser. If you would rather keep it out of both, name an environment variable and DisPatch reads the key from there. A connection belongs to the whole household: every profile's bots can use it, and only an Admin ever sees it. Details per provider are in [llm-providers.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/llm-providers.md).
 
 ![Settings, AI models](/static/guide/ai-models.png)
 
@@ -37,7 +37,7 @@ Quickest of all: Settings → AI & Connections → **Set up everything with one 
 
 A direct API bot on an OpenAI-compatible provider can look things up while it answers. There are eight: web search, news search, a page fetch, weather, Wikipedia, exchange rates, the current time and a calculator. They only read; none of them can run a program or touch your machine, and the page fetch refuses private and local addresses. Each lookup that runs leaves a small notice row before the answer.
 
-Lookups are on or off per bot. Safe Mode devices get a subset, by default all eight, and you can narrow it with `tools_locked`. An install-wide switch lives in Settings → Plugins & Apps.
+Lookups are on or off per bot, and every profile can use them. An install-wide switch lives in Settings → Plugins & Apps.
 
 Turn it on: Settings → Characters, open the bot's Details and switch Lookups on.
 
@@ -51,15 +51,17 @@ You can hide the built-in ones or add your own in `quick-actions.yaml` in the da
 
 Turn it on: nothing to do on desktop; open an empty thread. Edit `quick-actions.yaml` to change the list.
 
-## Safe Mode and the PIN
+## Profiles and the PIN
 
-DisPatch has two tiers. With the PIN entered, a device is unlocked and can do everything: settings, files, agents, deletion. Without it, a device is in Safe Mode: it can read and send, but only to bots you marked safe, with media stripped and every changing action refused by the server. That is the setting for a kitchen tablet or a child's phone.
+DisPatch has three kinds of profile. An **Admin** runs the install: settings, connections, agents, backups, the other profiles. A **User** makes their own bots, copies the household ones and picks what answers for them. A **Basic** profile gets only the household bots an Admin adds. PINs and passwords are optional. The first Admin can't be demoted or deleted, so you can't lock yourself out.
 
-You can mark a device as remembered so it stays unlocked for a while. Forgetting it, or locking it, puts it back in Safe Mode. A bot is reachable from a locked device only if you mark it safe, and a safe direct API bot answers there with the lookups you allow it (`tools_locked`; the eight built-in ones by default, add-on tools only when you name them).
+Chats are private. A chat belongs to the profile it was had in, and nobody else can open it in the app, Admins included. The exception is **DisPatch**, the shared profile with no PIN that a locked or signed-out device lands on (or the profile list, if you choose that under Settings → People & Access): everyone who uses it shares its bots and chats. It can never run agents or clone voices.
 
-![Safe Mode](/static/guide/safe-mode.png)
+Every new profile gets its own Atlas. **Reset to default** (Settings → Account) deletes a profile's own bots and chats and starts it over; copying a bot copies its setup, never its chats. There are no daily limits. Images stay unrestricted apart from two hard lines: adult-only depictions, and no sexual imagery of real, identifiable people.
 
-Turn it on: Settings → Account to set the PIN; Settings → Characters to choose who can see a bot.
+You can mark a device as remembered so it stays signed in for a while. Forgetting it, or locking it, puts it back on the lock screen.
+
+Turn it on: Settings → Account to set your PIN; Settings → People & Access to add profiles and choose what a locked device shows.
 
 ## Reactions and pictures
 
@@ -93,7 +95,7 @@ Turn it on: Settings → Plugins & Apps; see [apps.md](https://github.com/LaserL
 
 ## Agents
 
-An agent bot connects DisPatch to a runtime that can act: read and write files, run commands, work for an hour on a task. DisPatch speaks to an OpenClaw gateway over its WebSocket, or runs an agent command-line tool. Because agents act on real machines, they are never reachable from Safe Mode unless you say so. The Job Board is the example app: a board of tasks with a bot that works them through an agent.
+An agent bot connects DisPatch to a runtime that can act: read and write files, run commands, work for an hour on a task. DisPatch speaks to an OpenClaw gateway over its WebSocket, or runs an agent command-line tool. Because agents act on real machines, they are off for Users and Basic profiles until an Admin switches them on, and never available to the shared DisPatch profile. The Job Board is the example app: a board of tasks with a bot that works them through an agent.
 
 Turn it on: add an agent bot in Settings → Characters (Add → New character), choose Agent, and name the agent; see [agents.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/agents.md).
 

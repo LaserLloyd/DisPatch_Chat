@@ -82,24 +82,17 @@ DISPATCH_FILES_TOTAL_MAX=21474836480    # bytes; 20 GiB, the default. 0 disables
 
 The per-file ceiling is fixed at 4 GiB and is not configurable.
 
-Daily budgets for **Restricted** callers (the signed-out view, and any Restricted
-profile that has no value of its own). These are availability guards — they bound
-what a device on your network can spend:
+There are no per-profile daily budgets, quiet hours or time limits (removed in 4.0). One byte guard remains, as
+plumbing rather than a limit on people: a *machine* caller (an agent or cron handing a document back with
+`POST /api/upload`) shares a daily upload allowance so a looping agent cannot fill the disk:
 
 ```
-DISPATCH_DECOY_UPLOAD_QUOTA=209715200   # bytes uploaded per day
-DISPATCH_DECOY_TURN_QUOTA=200           # messages sent
-DISPATCH_DECOY_THREAD_QUOTA=50          # conversations created
-DISPATCH_DECOY_FEEDBACK_QUOTA=100       # thumbs-feedback votes cast
+DISPATCH_MACHINE_UPLOAD_QUOTA=209715200   # bytes a machine may upload per day (200 MB, the default)
 ```
 
-The message budget is the one to think about: each message to a bot spawns an
-agent turn, which may cost real money. Since 3.0 the counters live in `chats.db`
-(they survive a restart) and are charged to the **profile** when a Restricted
-profile is signed in or its device is bound, and to the client address only for an
-anonymous device. A profile's own numbers (Settings → People & Access → a person's Edit sheet → budgets:
-messages, conversations, ratings, upload MB, minutes per day, quiet hours)
-override these defaults. Counts reset at local midnight.
+The old `DISPATCH_DECOY_*` variables are ignored. Each message to a bot can spawn an agent turn or a paid model
+call, so decide which [connections](connections.md) a profile's bots may use (an Admin allows them per profile) and
+who gets agent bots at all.
 
 Access settings (environment; `security.yaml` keys are in [security.md](security.md)):
 
@@ -177,37 +170,16 @@ bots:
     emoji: "✨"
     avatar: assistant.png
     order: 0
-    audience: members    # who it is for: all | members | restricted (3.0)
-    safe: false          # legacy: true = reachable by Restricted profiles
-    hide_unlocked: false # legacy: true = kept off the Owner's/Members' rail
+    hidden: false        # keep it off the rail (an Admin's switch)
+    scope: household     # household (default) | personal (one profile's own bot)
 ```
 
-`audience` (3.0) says who a character is for: `all`, `members` (signed-in Members,
-Admins and the Owner; never a Restricted profile) or `restricted` (made for Restricted
-profiles; kept off the Owner's rail by default). The two legacy flags are still read
-and written for one release and always agree with it when this app writes the file
-(`restricted` = `safe` + `hide_unlocked`, `all` = `safe`, `members` = neither). If a
-hand edit makes them disagree, the more restrictive reading wins. `python -m
-app.migrate` adds `audience` to an existing roster.
-
-Where a bot shows is two independent switches (Settings → Characters, 2.4.2): **Show to
-Restricted profiles** (`safe`, was "Show locked") and **Show on the Owner's rail**
-(`hide_unlocked: false`, was "Show unlocked"). With
-neither on, the bot is shown on no device — it stays on the roster, the Bots tab
-lists it dimmed as *Hidden*, and its chats still open by link on an unlocked
-device. An unlocked device can bring back every bot with Show unlocked off via
-Settings → Appearance → Advanced → *Show hidden bots on this device*.
-
-`safe` is the access flag, and it is server-enforced: a bot without it is
-invisible *and* unreachable to a Safe-Mode session, not merely hidden. Turning
-it on is the deliberate decision — it means anyone who can reach the port,
-with no credential, can spend agent turns on that bot. `hide_unlocked` is only
-a display preference for unlocked devices; it never opens or closes Safe Mode.
-
-The pre-2.4.2 `visible` key is still read: `visible: false` means "shown
-nowhere" and loads as `safe: false` + `hide_unlocked: true` (it wins over a
-`safe: true` beside it). The next save drops the key. `visible` remains on the
-API's bot records as a derived, read-only "shown on some device".
+Who may use a bot is **not** a field on the bot any more. A household bot is available to a User by
+default (or per its `household_bots` list), to a Basic profile only when an Admin adds it; a personal bot belongs to
+`owner_profile` alone. See [characters.md](characters.md). The 3.x keys `audience`, `safe`, `hide_unlocked`, `visible`
+and `profiles` are **inert legacy data**: an old `config.yaml` keeps them, nothing reads them, and
+`python -m app.migrate` (step 010) turned `hide_unlocked` into `hidden`. A `hidden` bot is still on the roster and
+its chats still open by link.
 
 Other per-bot fields: `color` (pins the letter-block avatar colour),
 `reactions` (may this bot fire reaction images — off for every shipped bot),
@@ -246,7 +218,7 @@ actions:
 Limits: at most 50 entries, label 40 characters, instructions 4000, hint 120.
 An entry over a limit is skipped with a log line; an unreadable file means the
 defaults. Custom ids are `custom-<slug>`. `GET /api/quick-actions` returns the
-list in use (public, Safe Mode included). A send, retry or resend with an
+list in use (every signed-in profile). A send, retry or resend with an
 unknown or hidden `action` id is refused with `bad_action`.
 
 ## Posting in from outside
@@ -276,8 +248,8 @@ shipping configuration rather than the code — the container image and
 `.env.example` set it to `0`. On a bare-metal install started by hand it is on.
 
 **The harness pane stays unavailable (403) until a PIN is set** — it runs code,
-and with no credential there is no unlocked session for the gate to check. It
-is gated on a fully-unlocked session — which means **setting a PIN is a
+and with no credential there is no signed-in Admin for the gate to check. It
+is gated on an Admin session — which means **setting a PIN is a
 precondition, not an afterthought**. Set the PIN before you turn it on.
 
 Only `0`, `false`, `False` and empty read as off. `no` and `off` read as **on**;
@@ -286,7 +258,7 @@ write `0` when you mean off.
 ### Local viewer
 
 The local viewer opens a file, folder or static site from the **host's disk**
-inside the app, for a fully-unlocked session only. It is **off until you give it
+inside the app, for an Admin session only. It is **off until you give it
 a root**: with no roots configured every route answers
 `404 {"detail": "Local viewer is off — add a root in Settings"}`.
 
@@ -326,7 +298,7 @@ the surface cannot be used to probe the disk. Refusals are logged and counted as
 `viewer_denied_24h` in `/api/health`.
 
 The routes are **browser-only on purpose**: they are not on the machine-inbound
-surface, so an `X-API-Key` holder (an on-box cron, a GPU rig) gets Safe Mode
+surface, so an `X-API-Key` holder (an on-box cron, a GPU rig) is refused
 here even on loopback. See [security.md](security.md).
 
 ### Agent image jobs
@@ -371,7 +343,7 @@ Jobs submitted through a thread go to the image server's **interactive** queue
 band (`priority: 1`); `POST /api/image-jobs` accepts an explicit `priority` of
 `1`, `2` or `3` if a caller knows its picture is not urgent. Reaction- and
 avatar-pool refills submit at `3` (background), so a shelf top-up never puts a
-waiting family member behind it.
+waiting person behind it.
 
 A render can also end as **cancelled** — DisPatch withdraws one that has passed
 its deadline or whose thread was deleted, and an operator interrupting the job
@@ -396,8 +368,8 @@ The expected server speaks MCP over streamable HTTP and offers
 is assumed: DisPatch validates the returned bytes are a real image over 10 KB
 before any of it reaches a chat window.
 
-Both routes are on the machine surface (loopback free, remote needs the API
-key) and are refused to a locked browser tab. See
+Both routes are on the machine surface (loopback free while `machine_loopback_trust` is on, remote needs the API
+key). See
 [agents.md](agents.md#asking-for-a-generated-image) for the agent-facing side.
 
 ### DeepSeek Harness (`dsh`)
@@ -414,7 +386,7 @@ A coding-agent pane for
 (`npm i -g @deepseek-ai/dsh`). `auto` turns the pane on only when a `dsh`
 binary is found at boot, so an install without it never grows a stray
 sidebar entry. The pane is **admin-only** — a headless job is code
-execution — and Safe Mode never sees it or its state frames.
+execution — and no other role sees it or its state frames.
 
 What it does:
 
@@ -466,9 +438,9 @@ Routes: `GET /api/harness/status`, `POST /api/harness/{start,stop,restart}`,
 /api/harness/jobs`, `POST /api/harness/jobs/cancel`, `GET
 /api/harness/jobs/<id>`, `GET|POST /api/harness/sessions`, `GET
 /api/harness/sessions/<id>`, `POST
-/api/harness/sessions/<id>/{stop,dismiss}`. All 403 in Safe Mode; 404 when
+/api/harness/sessions/<id>/{stop,dismiss}`. All 403 for anyone but an Admin; 404 when
 disabled. None is on the machine-inbound surface, so an on-box agent without an
-unlocked session is refused too — the session API is operator-browser-only.
+Admin session is refused too — the session API is operator-browser-only.
 
 ### StudioForge control panel
 
@@ -497,12 +469,12 @@ everything behind a remote front door would inherit whatever access the panel
 grants — and a panel like this typically has no password of its own. If the
 frame does not load, the honest answer is the note and the link, not a proxy.
 
-Admin-only, twice over: the rail button never renders in Safe Mode, and
-`/api/studioforge/*` 403s a locked session independently. With no PIN set the
+Admin-only, twice over: the rail button never renders for another role, and
+`/api/studioforge/*` 403s it independently. With no PIN set the
 feature stays off entirely.
 
 Route: `GET /api/studioforge/status` → `{url, reachable, checked_at}`.
-403 in Safe Mode or with no PIN; 404 when disabled or unconfigured.
+403 for anyone but an Admin or with no PIN; 404 when disabled or unconfigured.
 
 ### Tools (`<DATA_DIR>/tools.yaml`)
 
@@ -520,7 +492,7 @@ tools:
     root: /abs/path/results  # served read-only at /tools/<id>/
     entry: report.html       # default index.html
     enabled: true            # default true
-    safe: false              # true = also shown in Safe Mode
+    safe: false              # legacy 3.x flag: kept, never read
     refresh:                 # optional, static only; FILE-ONLY
       argv: [uv, run, crucibleforge, report]   # fixed argv, never a shell string
       cwd: /abs/path         # default: root
@@ -561,8 +533,8 @@ tools:
   installed extension registers, and usually **opt-in**: a tool is on only
   with a row saying `enabled: true`. Settings → Plugins & Apps (Apps & tools) can switch them on and
   off, and a save never leaves `enabled: false` rows for them behind. Like
-  every builtin they are unlocked-tier only and never listed or served in
-  Safe Mode. When the extension is NOT installed, its rows are **dormant**:
+  every builtin they are Admin-only (`use_tools`) and never listed or served to
+  another role. When the extension is NOT installed, its rows are **dormant**:
   kept verbatim through every load and save, never listed, logged once —
   they work again the day it is back (until 2.2.0 such a row invalidated the
   whole file).
@@ -584,16 +556,17 @@ tools:
   included), dotfiles, secret-shaped names (the Local Viewer's deny list) and
   files over 64 MB — all as one uniform 404. HTML runs under `sandbox
   allow-scripts allow-forms allow-popups` (no `allow-same-origin`). With a PIN
-  set, an unlocked browser asking for a page is redirected to a short-lived,
+  set, an Admin's browser asking for a page is redirected to a short-lived,
   client-bound `/tools/_t/<ticket>/…` URL so the sandboxed page's own
   stylesheets and scripts (which carry no cookie) still load.
-- **refresh** runs only for an unlocked operator (`POST
+- **refresh** runs only for an Admin (`POST
   /api/tools/<id>/refresh`, 409 while running), `shell=False`, with every
   `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PIN`/`*_PASSWORD` env name removed. The
   Settings tab can edit titles/icons/enabled and add or remove static/url
   tools, but can never introduce or change a `refresh` block.
-- Safe Mode sees only `safe: true` static/url tools, without paths or argv
-  (and `safe: true` apps).
+- Tool panels are Admin-only; another role gets 403 for every tool id, and an app
+  is available to a profile that holds the permission its manifest names. The
+  `safe` flag is legacy data and is never read.
 - **app** rows carry only `id, kind, enabled, trusted`. An app's title, icon,
   order and so on come from its own `app.yaml` — see [apps.md](apps.md).
   Repo apps (`apps/<id>/` in the install) are loaded and **on by default**; a
@@ -655,13 +628,13 @@ edits a row that already exists, so an operator's changes stand:
   - id: jobboard
     name: Job Board
     avatar: jobboard-face.png
-    hide_unlocked: true      # shown nowhere: the Tools tile is the way in, not a rail bot
+    hide_unlocked: true      # legacy 3.x flag the loader still writes (inert in 4.0)
     safe: false
     agent: scout             # the OpenClaw agent the board's turns run on
 ```
 
-A hidden bot is left out of `/api/bots` and the WebSocket roster but is still
-resolved by id everywhere the board needs it (threads, avatar, agent routing).
+The board is Admin-only (the app-backed bot is never offered to another role) and the
+bot is still resolved by id everywhere the board needs it (threads, avatar, agent routing).
 
 ## Everything else the code reads
 

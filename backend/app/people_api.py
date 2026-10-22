@@ -479,7 +479,7 @@ async def auth_own_pin(request: Request, payload: OwnPinIn):
     """Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.
 
     Confirmed with the current PIN (an Admin without a PIN yet confirms with the password).
-    The protected Admin's PIN is the install PIN and changes through ``/api/auth/setup``; a Basic
+    The Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted
     profile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like
     every other credential check."""
     pr = _caller(request)

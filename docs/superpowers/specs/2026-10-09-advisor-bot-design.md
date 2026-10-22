@@ -1,4 +1,6 @@
 # Advisor bot — design (2026-10-09)
+> **Historical design note.** Written for 3.x. In 4.0 an advisor's corpus belongs to one profile
+> (`advisor.corpus_profile`) and there is no locked turn; see [../../advisor.md](../../advisor.md).
 
 A fast DisPatch chat partner for advice and general conversation. It answers
 straight from a model API (no OpenClaw turn), knows the owner and their projects

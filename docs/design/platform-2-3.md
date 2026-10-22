@@ -1,5 +1,11 @@
 # DisPatch 2.3 — the platform round
 
+> **Superseded in part by 4.0.** This is the 2.3 design note, kept as written. Where it mentions
+> Safe Mode, the locked tier, `tools_locked` or "the PIN" as the line between full and limited
+> access, that model is gone: 4.0 has Admin, User and Basic profiles, a shared no-PIN DisPatch
+> profile that unsigned devices land on, and private chats. The current rules are in
+> [../security.md](../security.md); the 4.0 design record is in [multi-user.md](multi-user.md).
+
 *Design note, 2026-10-14. The brief, in the owner's words: "setup DisPatch as a
 platform that facilitates these chats, with speech being an add-on package, tools
 being add-on packages, and it should have the ability to directly chat with APIs";
@@ -35,14 +41,14 @@ pane ids are pre-declared, and nothing lists the installed add-ons.
 |---|---|---|
 | Direct-API bot | **A direct-API bot is an advisor-backend bot.** The UI calls it "Direct API". The `advisor:` block keeps its name in YAML (compatibility) and gains sensible defaults: no owner, no corpus, no agents, tools on. The old `api:` backend keeps working as "legacy direct API (no tools)". | One backend to document, test and improve; tools and fallback for free. |
 | Default roster | `DEFAULT_BOTS` becomes **Atlas** (`atlas`, 🌍, direct API, tools on, `safe: true`, no provider yet). The agent-CLI `quick`/`smart` pair goes. | A fresh install must have a bot that works the moment a key is entered. |
-| First run | On an **empty database** DisPatch seeds two threads on Atlas: **"Meet Atlas"** (his introduction: what he is, where to put the key, his tools, how to disable or remove him) and **"How DisPatch works"** (the tour: bots and backends, Connect an AI, Safe Mode and the PIN, reactions and pictures, the voice add-on, apps and tools, agents, remote access — each with "how to turn it on" and a screenshot). | The explainer lives where people already look. Replying in the tour thread asks Atlas, who has the tour in context. |
+| First run | On an **empty database** DisPatch seeds two threads on Atlas: **"Meet Atlas"** (his introduction: what he is, where to put the key, his tools, how to disable or remove him) and **"How DisPatch works"** (the tour: bots and backends, Connect an AI, profiles and the PIN, reactions and pictures, the voice add-on, apps and tools, agents, remote access — each with "how to turn it on" and a screenshot). | The explainer lives where people already look. Replying in the tour thread asks Atlas, who has the tour in context. |
 | Connect an AI | The AI tab **connects a bot** (Atlas by default, any direct-API bot, or a new one) by writing `advisor.providers[0]` from the preset: provider, base URL, model, key (stored 0600 in config.yaml, or an env name). Test before save. A "Lookups" switch (= `advisor.tools`). | "Put in your key and I'll work." |
 | Bots tab | Per bot: rename, emoji, model hint; **Add bot** (direct API or agent), **Remove bot** (threads kept); lookups on/off for direct-API bots; the existing flags. | The owner manages bots without editing YAML. |
 | Quick actions | ChatForge's twelve canned prompts, ported: `backend/app/quick_actions.py` (defaults + `<data>/quick-actions.yaml` overrides/hidden), chips on the **desktop** empty-thread state, a composer pill that modifies the next send (`action` id travels with the message; the server expands it into the prompt; the stored row keeps the typed text and `metadata.action`). Works for every backend. | The brief; and it is the one ChatForge feature that fits a chat app one-to-one. |
 | Settings order | **Bots · Theme · Device · Voice · Plugins · AI models · Reactions · Health · Security.** | Day-to-day first (bots, look, this device, voice), setup after (plugins, AI), rare last. |
 | Plugins tab | New. Three groups: **Add-ons** (every discovered extension: name, version, state, install-wide on/off kept in `<data>/extensions.yaml`; the voice add-on's install command when absent), **Apps & tools** (the existing Tools table moves here), **Built-in lookups** (install-wide switch for `app/livetools`, per-bot note). | One place that answers "what is installed and what is on". |
 | Add-in tabs | `shell.settings.pane(id, …)` accepts any new id matching `[a-z][a-z0-9-]{1,30}`: the shell creates the tab button and pane on demand, titled by the spec (`title` key or text), placed after Voice. Pre-declared ids keep their place. | "Allow adding tabs for add-ins or plugins." |
-| Tools as packages | `ctx.register_live_tools([...])` on the extension context: a package adds tool specs to the live-tools registry (same spec shape as `livetools/registry.py`); the per-bot `tools` list and `tools_locked` accept their names. Built-in lookups stay in-tree (zero-install), listed as a plugin with a switch. | Add-on tools without forcing every install to pip-install the basics. |
+| Tools as packages | `ctx.register_live_tools([...])` on the extension context: a package adds tool specs to the live-tools registry (same spec shape as `livetools/registry.py`); the per-bot `tools` list accepts their names (`tools_locked`, which this note once described, was removed in 4.0). Built-in lookups stay in-tree (zero-install), listed as a plugin with a switch. | Add-on tools without forcing every install to pip-install the basics. |
 | Speech | Already a package (DisPatch_Voice). The Plugins tab and the README present it as such; nothing moves. | Done in 2.2. |
 | Version | **2.3.0**, one commit, deployed and pushed together. | The brief. |
 
@@ -62,7 +68,7 @@ moving `app/livetools` out of the repo.
 
 ### Quick actions
 
-- `GET /api/quick-actions` — `{actions: [{id, label, hint, tools: bool}]}` in display order, hidden ones left out. Public (Safe Mode too; chips are not shown there anyway).
+- `GET /api/quick-actions` — `{actions: [{id, label, hint, tools: bool}]}` in display order, hidden ones left out. Public to any signed-in profile.
 - Send paths (`/ws` `send`, `POST /api/threads/{id}/messages`, retry/resend) accept `action: "<id>"`. The server stores the user row with the typed text and `metadata: {action: {id, label}}`, and runs the turn on `expand(action, text)`. Unknown action → 422 / WS error `bad_action`.
 - `<data>/quick-actions.yaml`: `{hidden: [ids], actions: [{id, label, instructions, hint?, tools?: bool}]}` (an entry with a built-in id overrides it; ≤ 50 entries; label ≤ 40, instructions ≤ 4000).
 

@@ -1,9 +1,10 @@
 # Locale TODO: strings that still need a real translation
 
-DisPatch Chat 3.0 (profiles, roles and policy) added the keys below. English (`en`) is complete. Japanese
-(`ja`) is complete for the profiles/roles strings and still carries placeholders for the 244 W5 keys (last
-section). For the other six locales every key listed here carries the English text prefixed with the
-locale code, for example `[de] Sign in`, so the gap is visible in the UI and greppable:
+DisPatch Chat 3.0 (profiles, roles and policy) added the keys below, and 4.0 (chat-first profiles) renamed the roles
+and reworded or added more (listed in the wave notes of the 4.0 build; the 4.0 translations are filled in a separate
+pass). English (`en`) is complete. Japanese (`ja`) is complete for the profiles/roles strings and still carries
+placeholders for the 244 W5 keys (last section). For the other six locales every key listed here carries the English
+text prefixed with the locale code, for example `[de] Sign in`, so the gap is visible in the UI and greppable:
 
     grep -rn "\"\[de\] " frontend/static/locales/de.json
 
@@ -12,9 +13,11 @@ real translation and delete the prefix; when a locale has no `[xx] ` values left
 
 "New" keys did not exist before 3.0. "Reworded" keys existed with a translation that used the retired terms
 (Safe Mode, locked device, Unlocked, full access); the translation was replaced by the new English wording
-because a stale term next to the new UI is worse than an untranslated sentence. Terms to use: **Restricted**
-(was Safe Mode / locked device / limited), **Owner** and **Admin** (was Unlocked / operator / full session),
-**Member**, **sign in** (was unlock).
+because a stale term next to the new UI is worse than an untranslated sentence. Terms to use (4.0):
+**Admin** (the first Admin is protected; was Owner / Unlocked / operator / full session), **User** (was Member),
+**Basic** (was Restricted / Safe Mode / locked device / limited), **sign in** (was unlock). Never use Restricted,
+Safe Mode, Owner or Member in a new string. The sections below still list the 3.0 key names; 3.x wording quoted in
+them is history.
 
 ## de: German (154 new, 27 reworded)
 

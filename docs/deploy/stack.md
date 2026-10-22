@@ -21,7 +21,7 @@ docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env p
 ```
 
 Open <http://localhost:8765> and finish the **setup wizard**: a fresh container is closed to the
-network until an owner exists, and the wizard asks for the one-time setup token printed by
+network until the first Admin exists, and the wizard asks for the one-time setup token printed by
 `docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env logs dispatch`
 (`SETUP TOKEN: ...`). Then drop your GGUF files in the folder `STUDIOFORGE_MODELS` points at
 (default `deploy/compose/models/`) and load one from StudioForge's panel at <http://localhost:8080>.
@@ -120,15 +120,15 @@ The same commands as [accounts.md](../accounts.md), with the stack's flags and t
 P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
 $P exec dispatch python -m app users list
 $P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
-printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile member --password-stdin
+printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile user --password-stdin
 $P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
 $P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
 ```
 
 (The root filesystem is read-only; the commands only write the volume.) If you have nothing but the volume, create
 `/data/RESET_LOGIN` and restart DisPatch: `$P exec dispatch sh -c ': > /data/RESET_LOGIN' && $P restart dispatch`, then
-`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the owner's sign-in and opens setup (the
-wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the owner's
+`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the first Admin's sign-in and opens setup (the
+wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the first Admin's
 password instead. `DISPATCH_RESET_OWNER=1` in the repository's `.env` (the stack's `dispatch` service reads it; `stack.env` only feeds compose substitutions, not the container), then `$P up -d`, does the empty-file reset once per value.
 StudioForge has its own accounts: `$P exec studioforge studioforge users passwd <name>` (see its docs).
 
@@ -151,7 +151,7 @@ StudioForge has its own accounts: `$P exec studioforge studioforge users passwd 
   prebuilt llama.cpp engine once (about 150 MB from github.com; `SF_ENGINE_BOOTSTRAP=0` skips it, and the
   [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md) covers the
   offline alternatives). Allow about a minute before the first model load.
-- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an owner (the setup
+- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an Admin (the setup
   wizard) and the StudioForge connection carries an API key (above).
 - **Find servers** in DisPatch probes loopback and the Docker host, not the compose hostname: use
   **Add by address** with `http://studioforge:1234/v1` (or keep the seeded connection) to add the

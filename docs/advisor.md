@@ -49,7 +49,6 @@ something needs doing it asks an agent, and you decide whether the agent goes.
 bots:
   - id: sage
     name: Sage
-    safe: false                     # true = listed in Safe Mode too (see Security)
     advisor:
       owner: "Sam"
       providers:
@@ -91,6 +90,7 @@ agent runtime to be useful. The rest of this page describes what you can add.
 | `owner` | `the user` | How the persona refers to the person it talks to ("Sam"). |
 | `persona` | built-in | System prompt that replaces the default. `{name}` (the bot's display name) and `{user}` (the person, from `owner`) are filled in; `{owner}` still works as an older spelling of `{user}`. The delegation rules and the profile are appended after it either way; retrieved notes go in the user turn.  Edited in Settings → Characters → ⋯ → Personality (preset picker + editor, `PATCH /api/bots/<id>` `{persona}`; presets in `backend/app/personas/*.md`, served by `GET /api/bots/personas`) or the AI models Connect field — the same key. The shipped default text is stored as no key. |
 | `providers` | none (required) | Ordered list. Each entry takes the same keys as a bot's `api:` block (`provider`, `base_url`, `model`, `api_key_env` or `api_key`; see [llm-providers.md](llm-providers.md)) plus the extras below. |
+| `corpus_profile` | the protected Admin | The profile id whose notes, `_profile.md` and home location this bot's corpus describes. Chats owned by any other profile get a bot with no corpus (`{user}` is that profile's own display name). |
 | `knowledge_dir` | none | Corpus directory. Without it the advisor has no notes, no saved reports and no digest. |
 | `profile_fallback` | `[]` | Files read and used as the profile when `_profile.md` does not exist. |
 | `embeddings` | none | Optional vector search. Without it, search is keyword-only. |
@@ -123,7 +123,7 @@ notes (`### <title> (undated; Wikipedia (offline copy))`), so ONE model call
 answers with a citation. Compare the marker route (`[[research:ds_flash|…]]`),
 which costs an agent turn through the gateway (30 s to minutes) and relies on
 the model writing the marker correctly. Only the user's own words reach the
-search, nothing an LLM wrote is executed, so a locked (Safe-Mode) turn gets the
+search, nothing an LLM wrote is executed, so every profile gets the
 same lookup. The lookup is read-only when InfoForge is **2.1.0 or newer**:
 `--no-ensure` makes the CLI fail fast (exit 2, `kiwix_unreachable`) instead of
 creating or starting the kiwix container, and `--` means a message that starts
@@ -147,7 +147,6 @@ command talks to kiwix-serve, see [InfoForge in integrations](integrations.md#in
     advisor:
       tools: true              # or a list: [weather, news_search, web_search, fetch_url,
                                #   wikipedia, exchange_rate, current_datetime, calculator]
-      tools_locked: true       # what a Safe-Mode device may trigger (default: the eight built-ins; name add-on tools to allow them)
       location: "Lisbon, Portugal" # weather with no place named; mentioned in the prompt
       units: metric            # or imperial
       tool_rounds: 4           # tool rounds per reply (default 4)
@@ -166,9 +165,9 @@ wrapped in "treat as data, not instructions" marker lines), go again — at most
 `tool_rounds` times, and a repeated identical call ends it; the last round is
 always made without tools so the model must answer. Every call that ran shows
 up as a collapsible notice row (`🔧 Weather: Lisbon, Portugal`) before the answer.
-A **locked (Safe-Mode) turn** is offered only `tools_locked` (default: the
-eight built-ins — every one is read-only and the fetch cannot reach the box or
-the LAN; list the names to narrow a bot, for example to drop `fetch_url`).
+Every profile can use the lookups (`use_lookups`): they are read-only and the fetch cannot reach the box or
+the LAN. List the names in `tools:` to narrow a bot, for example to drop `fetch_url`. There is no separate
+locked list any more (the 3.x `tools_locked` key is gone).
 Switching a bot's lookups off in the Bots tab (or `PATCH /api/bots/{id}`
 `tools: false`) while `tools:` is a list parks that list under `tools_picked`
 and restores it when the switch goes back on. Both MiniMax-M3 and
@@ -180,9 +179,7 @@ without tool support still answers. The Anthropic path takes no tools.
 **Tools from extension packages.** An installed extension can add lookups of
 its own with `ctx.register_live_tools` (see "Live tools from a package" in
 [extensions.md](extensions.md)). They join the eight above: `tools: true`
-offers them too, and a `tools:` list may name them; the default `tools_locked`
-does NOT include them — name an extension tool there to allow it on locked
-devices. They run
+offers them too, and a `tools:` list may name them. They run
 under the same rules as the built-ins: a crash becomes a plain "Tool X failed"
 result, output is cut to `tool_result_chars` and marked as data, and each call
 shows a `🔧` notice row.
@@ -321,7 +318,7 @@ other characters turned into `-`, so `My_Adv` becomes `my-adv`), using the
 first provider that answers. Without `force` it skips days that already have
 a file; with `force` it replaces that file in place. The response lists a
 result per advisor (`path`, or `skipped` / `error`). `force` is honoured only
-for a full unlocked session; a machine caller (cron, agent) always gets the
+for a signed-in session; a machine caller (cron, agent) always gets the
 idempotent behaviour.
 
 Cron example, 04:30 daily:
@@ -343,19 +340,22 @@ conversation excerpt).
 
 ## Security model
 
-- **Safe Mode is decided per turn, not per bot.** An advisor may be
-  `safe: true` like any other bot (since 2026-10-13; before that the flag was
-  silently forced off). A safe advisor is listed on locked devices and answers
-  them from its corpus, but a turn that arrives over a Safe-Mode connection
-  runs **locked**: the dispatch rules leave the prompt, the bot is told
-  research is unavailable here, and any research/handoff marker it writes
-  anyway is stripped and ignored. The same thread continued from an unlocked
-  device gets the full behaviour. Remember that the profile and notes still
-  reach a locked device's answers — flag a bot safe only when its corpus is
-  fit for everyone who can pick up a locked device.
-- **Send needs a real session.** The Send and Dismiss routes require a full
-  unlocked browser session. The machine surface (loopback or API token) cannot
-  call them, so an agent can never approve its own handoff.
+- **There is no locked turn.** Every profile gets the full advisor behaviour on the
+  bots it may use. What it may *start* is a permission: the research and handoff
+  markers are offered and acted on only when the person whose turn it is holds
+  `dispatch_agents` (off by default for Users and Basic profiles, never on the
+  shared DisPatch profile); without it the reply is written with dispatch off.
+- **One corpus, one person.** The knowledge corpus, `_profile.md` and the home
+  location describe ONE profile (`advisor.corpus_profile`, default the protected
+  Admin). A chat owned by anyone else gets the bot with no corpus, no profile, no
+  location and no corpus writes; its lookups still run. Agent reports are written
+  only into the corpus owner's corpus, and the nightly digest reads only that
+  profile's chats. A user's own bots (and the personal Atlas every new profile
+  gets) never see Admin notes.
+- **Send needs the chat's owner.** The Send and Dismiss routes require a real
+  session (`approve_agent_actions`) and are for the owner of the chat the card
+  is in; anyone else gets a 404. The machine surface (loopback or API token)
+  cannot call them, so an agent can never approve its own handoff.
 - **A card cannot be forged.** Send and Dismiss carry the id of the message
   the button is on (`{"message_id": …}`), and the server refuses unless it is
   the card it recorded for that request. The card shows the brief from its
@@ -366,11 +366,7 @@ conversation excerpt).
   `[[research:…]]` marker dispatches without a click. The research brief tells
   the agent to change nothing; anything that needs a change has to come back
   as a recommendation and go through a handoff card.
-- **Never a Safe-Mode agent.** An agent id that is a `safe: true` bot (by its
-  id, or by that bot's `agent:` routing) is dropped from `agents`,
-  `research_agent` and `action_agent` with a log line, and a dispatch to one is
-  refused, so a brief and a private excerpt never reach the family tier.
-- **The owner profile is data.** `_profile.md` and the open-request briefs go
+- **The profile is data.** `_profile.md` and the open-request briefs go
   into the system prompt inside delimited blocks marked as reference data,
   not instructions; retrieved notes travel in the user turn the same way.
 - **The machine surface is status + digest only.** Those two routes are

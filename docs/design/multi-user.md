@@ -7,7 +7,20 @@ accounts, ahead of a public open-source release. Written against the code as of
 [← Back to the README](../../README.md) · Companion document:
 [Remote Access & Authentication Design](remote-access-and-auth.md)
 
-> **Status (3.0.0, 2026-10-18): implemented, in part.** The access-control core of this
+> **Superseded by 4.0 (chat-first profiles).** This design note is kept as the record of the 3.0
+> model and is **no longer current**. What 4.0 changed, in short: three roles (**Admin, User,
+> Basic**) replace owner/admin/member/restricted; the first Admin is protected; every conversation
+> and every File Server record belongs to one profile and Admins cannot open another profile's
+> chats; **there is no Restricted tier, Safe Mode, decoy view, supervision, per-profile budget or
+> quiet hours**; the shared no-PIN **DisPatch** profile is what lock and unsigned devices land on
+> (or the profile list, by setting); every new profile gets its own Atlas, Reset to default
+> starts a profile over, copying a bot copies setup only, API keys are household connections, and
+> voice clones are per profile. The thread-ownership and sharing sections that this note marked
+> "not built" were built differently: read [../security.md](../security.md),
+> [../characters.md](../characters.md) and [../privacy.md](../privacy.md) for the current rules and
+> the CHANGELOG entry for 4.0.0.
+
+> **Status of the 3.0 build (3.0.0, 2026-10-18): implemented, in part.** The access-control core of this
 > design shipped; the sharing model did not. Read the sections below as the design and
 > this block as what exists. Everything marked *shipped* is enforced on the server and
 > covered by `backend/tests/test_people_api.py`, `test_g5_access.py`, `test_route_table.py`
@@ -495,7 +508,6 @@ moment accounts exist.
 | `POST /api/upload` `upload_media` | open, decoy quota | **G** + per-user quota (`_decoy_upload_used` re-keyed from IP → `user_id`) |
 | `GET /api/media` `serve_media` | decoy-blocked | **M** (see §3.4 on capability URLs) |
 | `/media/*` **StaticFiles mount** | **unauthenticated** | replace mount with a gated route — see §3.4 |
-| `POST /api/drop` `drop_file` | open | **G** |
 | `POST /api/files` `file_upload` | *no handler gate* | **M**, `owner_id = p.user_id`, `visibility='private'` |
 | `GET /api/files` `file_list` | *no handler gate* | **M**, returns own + `house` + `thread`-visible; **A** sees all |
 | `GET /api/files/{id}/download` `file_download` | `_block_fileserver_read` | file owner / house / thread-ACL / **A** |
@@ -606,8 +618,7 @@ The three thread sources that have no user context need explicit rules:
 
 ### 3.4 Files and media — three tiers, and one honest limitation
 
-**Chat attachments** (`files.source='chat'`, posted via `upload_media` /
-`drop_file`): `visibility='thread'`, `thread_id` set. They inherit the ACL of
+**Chat attachments** (`files.source='chat'`, posted via `upload_media`): `visibility='thread'`, `thread_id` set. They inherit the ACL of
 the thread they were posted into. This is the only correct rule — a file
 attached to a house thread must be readable by the house, and a file attached to
 a private thread must not be.
