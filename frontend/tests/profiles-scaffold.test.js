@@ -36,7 +36,7 @@ test('the four profile modules export inert init/render entry points', async () 
   assert.equal(accountReset.initAccountReset({}), undefined);
   assert.equal(accountReset.renderAccountReset(null, {}), undefined);
   assert.equal(peoplePerms.initPeoplePerms({}), undefined);
-  assert.equal(peoplePerms.renderPeoplePerms(null, {}), undefined);
+  assert.equal(await peoplePerms.renderPeoplePerms(null, {}), undefined);   // no pane: nothing to mount
 });
 
 test('SECTION_HOOKS names the sections and a failing hook stops nothing', () => {

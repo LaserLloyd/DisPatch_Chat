@@ -1,84 +1,54 @@
-// Settings -> Characters: what the 3.0 character model adds to each row.
+// Settings -> Characters: the household roster (Admins only).
 //
-//   Who can see it  one select per row (3.2) for the two server flags: Everyone,
-//                   Members and up, Restricted profiles only, Hidden. Lossless:
-//                   whoCanSee / flagsForWho are a 4-row truth table over
-//                   (safe, hide_unlocked), the same one config.Bot.audience reads.
-//   Details panel   per character: its connection and model, a one-line description,
-//                   which profiles may see it, and a link to Voice -> Voices for this
-//                   character (the voice add-on owns that section; this only opens it).
+// A household character is one every profile may be given. 4.0 replaced the old "who can see
+// it" select (audience / safe flags) with two things that live elsewhere or here:
 //
-// The rows themselves, the feature switches and the save are main.js's (and
-// bots-edit.js); this module builds the panel. The server is the authority: it
-// refuses a connection for an agent character, an unknown profile, and so on, and
-// its sentence is what the person reads.
+//   Which profiles get it   People -> a profile -> Household bots (people-perms.js).
+//   Hide from lists         the `hidden` flag, Admin-only vocabulary: a hidden bot stays out
+//                           of the bot lists but opens from a link and shows for a profile
+//                           that has it ticked.
+//   Copy to a profile       an Admin copies the setup (name, picture, personality, voice,
+//                           backend; never chats) into a User's or Admin's own bots. Agent
+//                           bots can't be copied.
+//   Delete                  with the numbers of chats it leaves behind, and "Hide instead".
+//
+// The rows themselves, the feature switches and the save are main.js's (and bots-edit.js);
+// this module builds the Details panel and the delete flow. The server is the authority: it
+// refuses a connection for an agent character, an unknown profile, and so on, and its
+// sentence is what the person reads.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=1';
+import { w5 as realApi } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
+import { tk, askDialog, profileCalls, errorText } from './people-perms.js?v=1';
 
 // ------------------------------------------------------------------ pure
 
-export const AUDIENCES = ['members', 'restricted', 'all'];
-const AUDIENCE_KEYS = { members: 'chars.audience_members', restricted: 'chars.audience_restricted', all: 'chars.audience_all' };
-export const audienceLabel = (a) => t(AUDIENCE_KEYS[a] || AUDIENCE_KEYS.members);
+/** Is the character kept off the bot lists? (`hidden`; `hide_unlocked` is the 3.x name.) */
+export function isHidden(bot) {
+  if (!bot) return false;
+  if (typeof bot.hidden === 'boolean') return bot.hidden;
+  if (bot.flags && typeof bot.flags.hidden === 'boolean') return bot.flags.hidden;
+  return !!bot.hide_unlocked;
+}
 
-/** "Who can see it", in the order the select lists them. */
-export const WHO_OPTIONS = ['everyone', 'members', 'restricted', 'hidden'];
-const WHO_FLAGS = {
-  everyone: { safe: true, hide_unlocked: false },      // audience "all"
-  members: { safe: false, hide_unlocked: false },      // audience "members", on the rail
-  restricted: { safe: true, hide_unlocked: true },     // audience "restricted"
-  hidden: { safe: false, hide_unlocked: true },        // "members", off every rail (open by link)
-};
-/** The select's value for a roster row (its `safe` / `hide_unlocked` flags). */
-export function whoCanSee(bot) {
-  const safe = !!(bot && bot.safe);
-  const hide = !!(bot && bot.hide_unlocked);
-  if (safe) return hide ? 'restricted' : 'everyone';
-  return hide ? 'hidden' : 'members';
-}
-/** The flags to send for a select value (a copy; unknown values are refused). */
-export function flagsForWho(value) {
-  const f = WHO_FLAGS[value];
-  if (!f) throw new Error(`unknown visibility ${value}`);
-  return { ...f };
-}
-/** Does going from `from` to `to` let Restricted profiles see a character they could not? */
-export const widensToRestricted = (from, to) => !WHO_FLAGS[from].safe && WHO_FLAGS[to].safe;
+/** Can this character be given a connection? Agent and app characters are answered elsewhere. */
+export const takesConnection = (orig) => !!orig && (orig.backend_kind === 'direct' || orig.backend_kind === 'legacy-api');
 
-/** Set who can see the character `id` in the roster `getRoster()` returns, and
- *  hand back an undo. Both look the character up by id at the time they run:
- *  the roster may have been reordered, filtered or reloaded in between, so a
- *  row index captured at change time could point at someone else. */
-export function setWho(getRoster, id, to) {
-  const find = () => (getRoster() || []).find((b) => b && b.id === id);
-  const bot = find();
-  if (!bot) return null;
-  const from = whoCanSee(bot);
-  Object.assign(bot, flagsForWho(to));
-  return {
-    from,
-    undo() {
-      const b = find();
-      if (!b) return false;
-      Object.assign(b, flagsForWho(from));
-      return true;
-    },
-  };
-}
+/** Agent bots run commands on this computer; they can't be copied. */
+export const isAgentBot = (bot) => !!bot && (bot.backend_kind === 'agent' || bot.backend_kind === 'app'
+  || (bot.backend && bot.backend.kind === 'agent') || bot.backend === 'agent' || bot.backend === 'app');
+
+/** Profiles a household bot can be copied into: those that own bots (not Basic), enabled. */
+export const copyTargets = (profiles) =>
+  (profiles || []).filter((p) => p && p.role !== 'basic' && !p.disabled);
 
 /** The PATCH body for what changed between a character as the server returned it and the form. */
 export function diffCharacter(orig, form) {
   const out = {};
   const be = orig.backend || {};
   if (form.description !== undefined && form.description !== (orig.description ?? '')) out.description = form.description;
-  if (form.audience && form.audience !== orig.audience) out.audience = form.audience;
-  if (form.profiles !== undefined) {
-    const a = [...(orig.profiles || [])].sort();
-    const b = [...form.profiles].sort();
-    if (JSON.stringify(a) !== JSON.stringify(b)) out.profiles = form.profiles;
-  }
+  if (form.hidden !== undefined && !!form.hidden !== isHidden(orig)) out.hidden = !!form.hidden;
   if (form.connection !== undefined && (form.connection || '') !== (be.connection || '')) {
     out.connection = form.connection || null;
     if (form.connection && form.model) out.model = form.model;
@@ -92,11 +62,51 @@ export function diffCharacter(orig, form) {
   return out;
 }
 
-/** Can this character be given a connection? Agent and app characters are answered elsewhere. */
-export const takesConnection = (orig) => !!orig && (orig.backend_kind === 'direct' || orig.backend_kind === 'legacy-api');
-
 /** Hash the voice section may read to open on this character's voice. Documented in docs/characters.md. */
 export const voiceHash = (id) => `#voice/voices/${encodeURIComponent(id)}`;
+
+// ------------------------------------------------------------------ calls
+
+/** Hide or show a household character. Resolves to the saved row. */
+export function setCharacterHidden(id, hidden, api = realApi) {
+  return api.patchCharacter(id, { hidden: !!hidden });
+}
+
+/**
+ * Delete a household character: the numbers first (chats that stay, in how many profiles),
+ * then a dialog with "Hide instead" beside the delete. Resolves 'deleted', 'hidden' or null.
+ *   ctx: { toast, reload?, api? }
+ */
+export async function removeCharacter(bot, ctx) {
+  const api = ctx.api || realApi;
+  let pv;
+  try { pv = await profileCalls.characterDeletePreview(bot.id); } catch (e) {
+    ctx.toast(errorText(e), true);
+    return null;
+  }
+  const r = await askDialog({
+    title: tk('chars.remove_title', { name: bot.name }),
+    body: tk('chars.remove_body', { chats: pv.chats || 0, profiles: pv.profiles || 0 }),
+    okText: tk('chars.remove_button'),
+    altText: isHidden(bot) ? '' : tk('chars.remove_hide'),
+  });
+  if (!r) return null;
+  try {
+    if (r === 'alt') {
+      await setCharacterHidden(bot.id, true, api);
+      ctx.toast(tk('chars.hidden_saved', { name: bot.name }));
+      if (ctx.reload) await ctx.reload();
+      return 'hidden';
+    }
+    await profileCalls.deleteCharacter(bot.id);
+    ctx.toast(tk('chars.removed', { name: bot.name }));
+    if (ctx.reload) await ctx.reload();
+    return 'deleted';
+  } catch (e) {
+    ctx.toast(errorText(e), true);
+    return null;
+  }
+}
 
 // ------------------------------------------------------------------ DOM
 
@@ -107,11 +117,52 @@ function field(label, input, hint) {
   return el('div', { class: 'sec-field people-field' }, kids);
 }
 
-/** Build the details panel for one character. Resolves after its data has loaded.
- *  `ctx.skip` leaves fields out that the caller draws elsewhere: 'audience' (the
- *  row's Who can see it select) and 'personality' (the row's Personality editor). */
+/** "Copy to a profile": pick one, copy the setup. Never offered for an agent bot. */
+function copySection(bot, orig, people, ctx, calls) {
+  const box = el('div', { class: 'chr-copy dev-group-body', role: 'group', 'aria-label': t('copybot.to_profile') });
+  box.append(el('h4', { class: 'chr-drawer-title', text: t('copybot.to_profile') }));
+  if (isAgentBot(orig)) {
+    box.append(el('p', { class: 'muted', text: t('copybot.agent_refused') }));
+    return box;
+  }
+  const targets = copyTargets(people);
+  if (!targets.length) { box.append(el('p', { class: 'muted', text: t('perms.household_none') })); return box; }
+  const pick = el('select', { class: 'ui-select', 'aria-label': t('copybot.pick_profile') },
+    targets.map((p) => el('option', { value: p.id, text: p.name })));
+  const note = el('p', { class: 'people-field-hint', role: 'note' });
+  const syncNote = () => {
+    const p = targets.find((x) => x.id === pick.value);
+    // An Admin copying into their own profile can see and edit the copy.
+    note.textContent = p && p.id !== ctx.meId ? t('copybot.admin_note', { profile: p.name }) : '';
+  };
+  pick.addEventListener('change', syncNote);
+  syncNote();
+  const go = el('button', { type: 'button', class: 'btn-secondary', text: tk('chars.copy_button') });
+  const err = el('p', { class: 'lock-error', role: 'alert', hidden: '' });
+  go.addEventListener('click', async () => {
+    const p = targets.find((x) => x.id === pick.value);
+    if (!p) return;
+    go.disabled = true;
+    err.hidden = true;
+    try {
+      const r = await calls.cloneTo(bot.id, p.id);
+      ctx.toast(t('copybot.done', { profile: p.name }) + (r && r.voice_cleared ? ` ${t('copybot.voice_cleared')}` : ''));
+    } catch (e) {
+      err.textContent = e && e.code === 'not_copyable' ? t('copybot.agent_refused') : errorText(e);
+      err.hidden = false;
+    } finally { go.disabled = false; }
+  });
+  box.append(el('p', { class: 'people-field-hint', text: t('copybot.what') }),
+    el('div', { class: 'cxn-actions' }, [pick, go]), note, err);
+  return box;
+}
+
+/** Build the details panel for one household character. Resolves after its data has loaded.
+ *  `ctx.skip` leaves fields out that the caller draws elsewhere ('personality': the row's
+ *  Personality editor). `ctx.calls` replaces the profile calls in tests. */
 export async function characterPanel(bot, ctx) {
   const api = ctx.api || realApi;
+  const calls = ctx.calls || profileCalls;
   const skip = new Set(ctx.skip || []);
   const panel = el('div', { class: 'chr-panel dev-group', role: 'group', 'aria-label': t('chars.details_aria', { name: bot.name }) });
   panel.append(el('p', { class: 'muted', text: t('chars.loading') }));
@@ -119,6 +170,7 @@ export async function characterPanel(bot, ctx) {
   let conns = [];
   let presets = { presets: [] };
   let people = [];
+  let meId = '';
   try {
     const [all, cx, pr, pp] = await Promise.all([
       api.allCharacters(), api.connections().catch(() => ({ connections: [] })),
@@ -126,7 +178,8 @@ export async function characterPanel(bot, ctx) {
     orig = (all.characters || []).find((c) => c.id === bot.id);
     conns = cx.connections || [];
     presets = pr;
-    people = (pp.profiles || []).filter((p) => p.role === 'member' || p.role === 'restricted');
+    people = pp.profiles || [];
+    meId = typeof pp.me === 'string' ? pp.me : '';
   } catch (e) {
     panel.textContent = errorText(e);
     return panel;
@@ -135,20 +188,10 @@ export async function characterPanel(bot, ctx) {
   panel.textContent = '';
 
   const desc = el('input', { type: 'text', class: 'ui-input', maxlength: '400', value: orig.description || '' });
-  const aud = el('select', { class: 'ui-select' }, AUDIENCES.map((a) => el('option', { value: a, text: audienceLabel(a) })));
-  aud.value = orig.audience;
-  const visBox = el('fieldset', { class: 'chr-visibility' }, [
-    el('legend', { text: t('chars.visibility') }), el('p', { class: 'muted', text: t('chars.visibility_hint') })]);
-  const checks = people.map((p) => {
-    const id = `chr-vis-${bot.id}-${p.id}`;
-    const cb = el('input', { type: 'checkbox', id, class: 'ui-checkbox', value: p.id });
-    cb.checked = (orig.profiles || []).includes(p.id);
-    visBox.append(el('label', { class: 'bkp-check', for: id }, [cb, ' ', `${p.name} (${t(`role.${p.role}`)})`]));
-    return cb;
-  });
-  if (!people.length) visBox.append(el('p', { class: 'muted', text: t('chars.visibility_none') }));
+  const hide = el('input', { type: 'checkbox', role: 'switch', class: 'ui-checkbox', id: `chr-hide-${bot.id}`.replace(/[^a-zA-Z0-9_-]/g, '-') });
+  hide.checked = isHidden(orig);
 
-  const form = { api };
+  const form = {};
   if (takesConnection(orig)) {
     const conn = el('select', { class: 'ui-select' }, [
       el('option', { value: '', text: t('chars.no_connection') }),
@@ -172,8 +215,8 @@ export async function characterPanel(bot, ctx) {
     form.conn = conn; form.model = model; form.pers = skip.has('personality') ? null : pers;
     panel.append(
       field(t('chars.connection'), conn, t('chars.connection_hint')),
-      field(t('chars.model'), model), models,
-      skip.has('personality') ? null : field(t('chars.personality'), pers, t('chars.personality_hint')));
+      field(t('chars.model'), model), models);
+    if (!skip.has('personality')) panel.append(field(t('chars.personality'), pers, t('chars.personality_hint')));
     if (!conns.length) {
       const go = el('button', { type: 'button', class: 'btn-secondary', text: t('chars.add_connection') });
       go.addEventListener('click', () => ctx.openTab && ctx.openTab('connections'));
@@ -183,7 +226,12 @@ export async function characterPanel(bot, ctx) {
     panel.append(el('p', { class: 'muted', text: t('chars.agent_note') }));
   }
   panel.append(field(t('chars.description'), desc),
-    skip.has('audience') ? null : field(t('chars.audience'), aud, t('chars.audience_hint')), visBox);
+    el('div', { class: 'dev-group-body chr-hide' }, [
+      el('div', { class: 'dev-row chr-feature', dataset: { feature: 'hidden' } }, [
+        el('label', { class: 'dev-row-text', for: hide.id }, [
+          el('strong', { text: tk('chars.hidden') }), el('span', { class: 'dev-row-hint', text: tk('chars.hidden_hint') })]),
+        hide])]),
+    copySection(bot, orig, people, { ...ctx, meId }, calls));
 
   const voice = el('button', { type: 'button', class: 'btn-secondary chr-voice', text: t('chars.voice_link') });
   voice.addEventListener('click', () => {
@@ -194,10 +242,7 @@ export async function characterPanel(bot, ctx) {
   const close = el('button', { type: 'button', class: 'btn-secondary', text: t('common.close') });
   const err = el('p', { class: 'lock-error', role: 'alert', hidden: '' });
   save.addEventListener('click', async () => {
-    const values = {
-      description: desc.value, audience: skip.has('audience') ? undefined : aud.value,
-      profiles: checks.filter((c) => c.checked).map((c) => c.value),
-    };
+    const values = { description: desc.value, hidden: hide.checked };
     if (form.conn) {
       values.connection = form.conn.value; values.model = form.model.value.trim();
       if (form.pers) values.personality = form.pers.value;

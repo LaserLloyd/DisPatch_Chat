@@ -142,8 +142,11 @@ const DYNAMIC = [
     built: '4.0 Foundation: reserved for the wave packages' },
   { re: /^lock\.(target_title|target_default|target_list|target_hint|landed)$/,
     built: '4.0 Foundation: reserved for WP-FE-CORE / WP-FE-PEOPLE' },
-  { re: /^people\.(type_label|type_admin|type_user|type_basic|type_admin_hint|type_user_hint|type_basic_hint|protected|protected_hint|no_credential_warning|downgrade_title|downgrade_confirm|lock_target_badge)$/,
-    built: '4.0 Foundation: reserved for WP-FE-PEOPLE' },
+  // js/people.js  typeLabel() / typeHint():  t(`people.type_${role}`), role from TYPES (user | basic | admin)
+  { re: /^people\.type_(admin|user|basic)(_hint)?$/, built: 'people.js  t(`people.type_${role}`)' },
+  // js/people-perms.js  permissionsPanel():  t(`perms.${r.perm}`), perm from PERM_ORDER
+  { re: /^perms\.(use_chat|use_voice|attach_files|use_lookups|manage_history|use_notifications|files_upload|files_read|use_images|voice_lab|create_characters|choose_backend|dispatch_agents|approve_agent_actions)$/,
+    built: 'people-perms.js  t(`perms.${r.perm}`)' },
 ];
 
 test('every key in en.json is used by the app', () => {
