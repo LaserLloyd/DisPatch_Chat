@@ -247,20 +247,20 @@
       <!-- theme.js only supplies the swatch icon; the click is wired in
            main.js to open Settings → Theme, which is the one place a palette
            can be changed. The old Dark ☾ ↔ Light ☀ cycle is gone. -->
-      <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme" aria-label="Choose a theme" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria">🎨</button>
+      <button class="gear-btn theme-toggle-btn" id="theme-toggle" title="Theme" aria-label="Choose a theme" data-i18n-attr="title=nav.theme;aria-label=nav.theme_aria"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#palette"/></svg></button>
       <!-- 3.0: who is using this device. Visible for a signed-in or bound profile;
            opens the Switch profile / Lock menu. main.js paints it. -->
       <button class="gear-btn profile-chip hidden" id="profile-chip" type="button" aria-controls="profile-menu" title="Profile" aria-label="Profile" data-i18n-attr="title=chip.title;aria-label=chip.title"></button>
-      <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
+      <button class="gear-btn lock-now-btn hidden" id="lock-now" title="Lock now" aria-label="Lock now" data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#lock"/></svg></button>
       <!-- 3.0 agents: Tasks. js/tasks.js shows it for a profile that may assign tasks, and
            paints a dot while an approval is waiting. -->
-      <button class="gear-btn tasks-btn hidden" id="tasks-btn" type="button" title="Tasks" aria-label="Tasks" data-i18n-attr="title=tasks.nav_title;aria-label=tasks.nav_aria">📋</button>
-      <button class="gear-btn fs-chip hidden" id="fs-chip" title="File Server — drop files for your assistants" aria-label="Open File Server" data-i18n-attr="title=nav.fileserver_title;aria-label=nav.fileserver_aria">📁</button>
+      <button class="gear-btn tasks-btn hidden" id="tasks-btn" type="button" title="Tasks" aria-label="Tasks" data-i18n-attr="title=tasks.nav_title;aria-label=tasks.nav_aria"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#clipboard-list"/></svg></button>
+      <button class="gear-btn fs-chip hidden" id="fs-chip" title="File Server — drop files for your assistants" aria-label="Open File Server" data-i18n-attr="title=nav.fileserver_title;aria-label=nav.fileserver_aria"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#folder"/></svg></button>
       <!-- ⚡ Reaction manager, 🩺 Host dashboard and 🔌 Connect an AI used to sit
            here. They are tabs inside Settings now: all three are admin surfaces
            opened rarely, and on a phone this rail IS the Bots page — six glyphs
            above the roster read as clutter, not navigation. -->
-      <button class="gear-btn" id="manage-bots" title="Settings" aria-label="Settings" data-i18n-attr="title=nav.settings;aria-label=nav.settings">⚙</button>
+      <button class="gear-btn" id="manage-bots" title="Settings" aria-label="Settings" data-i18n-attr="title=nav.settings;aria-label=nav.settings"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#settings"/></svg></button>
       </div>
     </nav>
 
@@ -291,8 +291,8 @@
           <div class="tl-botname" id="tl-botname" data-i18n="app.name">DisPatch Chat</div>
           <div class="muted tl-model" id="tl-model" data-i18n="threads.pick_bot">Pick a bot to begin</div>
         </div>
-        <button class="icon-btn ghost" id="search-btn" title="Search messages" aria-label="Search messages" data-i18n-attr="title=threads.search;aria-label=threads.search">🔍</button>
-        <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat" data-i18n-attr="title=threads.new_chat;aria-label=threads.new_chat">＋</button>
+        <button class="icon-btn ghost" id="search-btn" title="Search messages" aria-label="Search messages" data-i18n-attr="title=threads.search;aria-label=threads.search"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#search"/></svg></button>
+        <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat" data-i18n-attr="title=threads.new_chat;aria-label=threads.new_chat"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#plus"/></svg></button>
         <button class="icon-btn ghost collapse-btn" id="collapse-threads" title="Collapse chat list" aria-label="Collapse chat list" data-i18n-attr="title=threads.collapse;aria-label=threads.collapse">«</button>
       </header>
       <div class="threads" id="threads"></div>
@@ -301,7 +301,7 @@
     <!-- Chat view -->
     <section class="panel chatview" id="chatview">
       <header class="chat-header">
-        <button class="back-btn" id="back-btn" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+        <button class="back-btn" id="back-btn" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
         <button class="icon-btn ghost expand-btn" id="expand-threads" title="Show chat list" aria-label="Show chat list" data-i18n-attr="title=threads.expand;aria-label=threads.expand" hidden>»</button>
         <img class="ch-avatar" id="ch-avatar" alt="" />
         <!-- dir="auto" on the two header lines: both hold CONTENT (a bot's name,
@@ -327,12 +327,12 @@
           <span class="icn" data-icon="chip" aria-hidden="true"></span>
           <span class="model-chip-label" id="ch-modelchip-label"></span>
         </button>
-        <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden>⧉</button>
+        <button class="icon-btn ghost" id="popout-btn" title="Open in its own window" aria-label="Open in its own window" data-i18n-attr="title=chat.popout;aria-label=chat.popout" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></button>
         <!-- Extension actions (js/ext-sdk.js chatHeader.addAction): an installed
              add-on puts its header button here — the voice add-on's
              microphone. Empty and hidden without one; unlocked tier only. -->
         <span class="chat-actions-ext" id="chat-actions-ext" hidden></span>
-        <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
+        <button class="icon-btn ghost" id="thread-menu-btn" title="Thread actions" aria-label="Thread actions" data-i18n-attr="title=chat.menu;aria-label=chat.menu" aria-haspopup="menu" aria-expanded="false"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#ellipsis"/></svg></button>
         <div class="menu model-picker" id="model-picker" hidden role="dialog" aria-label="Model and thinking" data-i18n-attr="aria-label=chat.model_chip">
           <div class="mp-row">
             <label for="mp-model" data-i18n="chat.model_picker_model">Model</label>
@@ -354,7 +354,7 @@
           <button data-act="assign" id="thread-menu-assign" hidden><span class="icn" data-icon="forward" aria-hidden="true"></span><span data-i18n="tasks.menu_assign">Assign task…</span></button>
           <button data-act="pin" id="thread-menu-pin"><span class="icn" data-icon="pin" aria-hidden="true"></span><span data-i18n="chat.pin">Pin</span></button>
           <button data-act="rename"><span class="icn" data-icon="rename" aria-hidden="true"></span><span data-i18n="chat.rename">Rename</span></button>
-          <button data-act="sync"><span class="icn" aria-hidden="true">⤓</span><span data-i18n="chat.sync">Recover missing messages</span></button>
+          <button data-act="sync"><span class="icn" aria-hidden="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="16" height="16"><use href="/static/ui-theme/icons.svg#download"/></svg></span><span data-i18n="chat.sync">Recover missing messages</span></button>
           <button data-act="transcript"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="chat.transcript">View transcript</span></button>
           <button data-act="archive"><span class="icn" data-icon="archive" aria-hidden="true"></span><span data-i18n="chat.archive">Archive</span></button>
           <button data-act="delete" class="danger"><span class="icn" data-icon="trash" aria-hidden="true"></span><span data-i18n="chat.delete_thread">Delete</span></button>
@@ -370,12 +370,12 @@
 
       <div class="messages" id="messages">
         <div class="empty-state" id="chat-empty">
-          <div class="empty-emoji">💬</div>
+          <div class="empty-emoji"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="60" height="60"><use href="/static/ui-theme/icons.svg#message-circle"/></svg></div>
           <p data-i18n="chat.empty">Pick a bot and start chatting.</p>
         </div>
       </div>
 
-      <button class="scroll-bottom hidden" id="scroll-bottom" aria-label="Scroll to bottom" data-i18n-attr="aria-label=chat.scroll_bottom"><span class="sb-arrow">↓</span><span class="sb-count hidden" id="sb-count"></span></button>
+      <button class="scroll-bottom hidden" id="scroll-bottom" aria-label="Scroll to bottom" data-i18n-attr="aria-label=chat.scroll_bottom"><span class="sb-arrow"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-down"/></svg></span><span class="sb-count hidden" id="sb-count"></span></button>
 
       <div class="composer" id="composer">
         <div class="retry-chip hidden" id="retry-chip" role="status">
@@ -389,14 +389,14 @@
             <span class="reply-chip-label" id="reply-chip-label"></span>
             <span class="reply-chip-excerpt" id="reply-chip-excerpt"></span>
           </div>
-          <button type="button" class="reply-chip-cancel" id="reply-chip-cancel" aria-label="Cancel reply" data-i18n-attr="aria-label=composer.reply_cancel">×</button>
+          <button type="button" class="reply-chip-cancel" id="reply-chip-cancel" aria-label="Cancel reply" data-i18n-attr="aria-label=composer.reply_cancel"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
         </div>
         <!-- Quick actions: the picked action's pill (js/quick-actions.js).
              Hidden while nothing is picked. -->
         <div class="qa-bar" id="qa-bar" hidden></div>
         <div class="attach-preview hidden" id="attach-preview"></div>
         <div class="composer-row">
-          <button class="icon-btn ghost attach-btn" id="attach-btn" title="Attach file" aria-label="Attach file" data-i18n-attr="title=composer.attach;aria-label=composer.attach">＋</button>
+          <button class="icon-btn ghost attach-btn" id="attach-btn" title="Attach file" aria-label="Attach file" data-i18n-attr="title=composer.attach;aria-label=composer.attach"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#plus"/></svg></button>
           <!-- Quick actions menu: the bolt opens the list (hidden until the
                server has served at least one action). -->
           <span class="quick-wrap">
@@ -415,8 +415,8 @@
                swapping the button would take that away. Hidden by default and
                shown only for an unlocked session with a turn in flight —
                Safe Mode never sees it (the server 403s the abort anyway). -->
-          <button class="stop-btn hidden" id="stop" aria-label="Stop reply" title="Stop reply" data-i18n-attr="aria-label=composer.stop;title=composer.stop">⏹</button>
-          <button class="send-btn" id="send" aria-label="Send" data-i18n-attr="aria-label=composer.send" disabled>↑</button>
+          <button class="stop-btn hidden" id="stop" aria-label="Stop reply" title="Stop reply" data-i18n-attr="aria-label=composer.stop;title=composer.stop"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#square"/></svg></button>
+          <button class="send-btn" id="send" aria-label="Send" data-i18n-attr="aria-label=composer.send" disabled><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-up"/></svg></button>
         </div>
         <div class="composer-foot">
           <span class="char-count" id="char-count" hidden></span>
@@ -433,7 +433,7 @@
            default model, and one-shot headless jobs. -->
       <div class="terminal-view harness-view hidden" id="harness-view">
         <header class="terminal-head">
-          <button class="back-btn" id="harness-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <button class="back-btn" id="harness-back" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
           <span class="terminal-avatar-mini harness-avatar-mini" data-icon="terminal" aria-hidden="true">dsh</span>
           <div class="terminal-head-info">
             <div class="terminal-title" data-i18n="harness.name">DeepSeek Harness</div>
@@ -444,7 +444,7 @@
             <button class="harness-tab" id="harness-tab-jobs" role="tab" aria-selected="false" data-i18n="harness.tab_jobs">Headless jobs</button>
             <button class="harness-tab" id="harness-tab-sessions" role="tab" aria-selected="false" data-i18n="harness.tab_sessions">Sessions</button>
           </div>
-          <a class="icon-btn ghost" id="harness-open" href="http://127.0.0.1:3080/" target="_blank" rel="noopener" title="Open the dsh Web UI in a new tab" aria-label="Open in new tab" data-i18n-attr="title=harness.open_title;aria-label=harness.open_title">↗</a>
+          <a class="icon-btn ghost" id="harness-open" href="http://127.0.0.1:3080/" target="_blank" rel="noopener" title="Open the dsh Web UI in a new tab" aria-label="Open in new tab" data-i18n-attr="title=harness.open_title;aria-label=harness.open_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
         </header>
         <div class="terminal-body harness-body">
           <!-- Pane 1: the embedded Web UI (or a reason it can't be shown). -->
@@ -472,8 +472,8 @@
               <div class="harness-job-row">
                 <label class="harness-label" for="harness-cwd" data-i18n="harness.cwd_label">Working directory</label>
                 <input type="text" id="harness-cwd" data-i18n-attr="placeholder=harness.cwd_placeholder" placeholder="~ (home) or a folder under it" autocomplete="off" spellcheck="false" />
-                <button type="submit" class="btn-primary" id="harness-run" data-i18n="harness.run">▶ Run</button>
-                <button type="button" class="btn-secondary danger-text hidden" id="harness-cancel" data-i18n="harness.cancel">■ Cancel</button>
+                <button type="submit" class="btn-primary" id="harness-run"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#play"/></svg> <span data-i18n="harness.run">Run</span></button>
+                <button type="button" class="btn-secondary danger-text hidden" id="harness-cancel"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#square"/></svg> <span data-i18n="harness.cancel">Cancel</span></button>
               </div>
             </form>
             <div class="harness-jobs" id="harness-jobs" aria-live="polite"></div>
@@ -492,7 +492,7 @@
                 <select id="harness-session-model" class="harness-model-select" aria-label="Session model" data-i18n-attr="aria-label=harness.model">
                   <option value="" data-i18n="harness.session_model_default">Default model</option>
                 </select>
-                <button type="submit" class="btn-primary" id="harness-session-run" data-i18n="harness.run">▶ Run</button>
+                <button type="submit" class="btn-primary" id="harness-session-run"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#play"/></svg> <span data-i18n="harness.run">Run</span></button>
               </div>
             </form>
             <div class="harness-jobs" id="harness-sessions" aria-live="polite"></div>
@@ -516,9 +516,9 @@
                href="https://www.laserlloyd.com/projects/studioforge-gpu-only-llm-server/"
                target="_blank" rel="noopener noreferrer"
                title="About StudioForge — laserlloyd.com" data-i18n-attr="title=harness.sf_link_title">★</a>  <!-- scrub-ok: public project, article live on laserlloyd.com -->
-            <button class="btn-secondary" id="harness-start" data-i18n="harness.start">▶ Start</button>
-            <button class="btn-secondary" id="harness-restart" data-i18n="harness.restart">⟳ Restart</button>
-            <button class="btn-secondary danger-text" id="harness-stop" data-i18n="harness.stop">■ Stop</button>
+            <button class="btn-secondary" id="harness-start"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#play"/></svg> <span data-i18n="harness.start">Start</span></button>
+            <button class="btn-secondary" id="harness-restart"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#refresh-cw"/></svg> <span data-i18n="harness.restart">Restart</span></button>
+            <button class="btn-secondary danger-text" id="harness-stop"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#square"/></svg> <span data-i18n="harness.stop">Stop</span></button>
           </div>
         </div>
       </div>
@@ -530,13 +530,13 @@
            feature is configured with an address. -->
       <div class="terminal-view studioforge-view hidden" id="studioforge-view">
         <header class="terminal-head">
-          <button class="back-btn" id="studioforge-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <button class="back-btn" id="studioforge-back" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
           <span class="terminal-avatar-mini studioforge-avatar-mini" data-icon="tools" aria-hidden="true">SF</span>
           <div class="terminal-head-info">
             <div class="terminal-title" data-i18n="studioforge.name">StudioForge</div>
             <div class="muted terminal-subtitle" id="studioforge-subtitle" data-i18n="studioforge.subtitle">LLM rig control panel</div>
           </div>
-          <a class="icon-btn ghost" id="studioforge-open" href="#" target="_blank" rel="noopener" title="Open the StudioForge panel in a new tab" aria-label="Open in new tab" data-i18n-attr="title=studioforge.open_title;aria-label=studioforge.open_title">↗</a>
+          <a class="icon-btn ghost" id="studioforge-open" href="#" target="_blank" rel="noopener" title="Open the StudioForge panel in a new tab" aria-label="Open in new tab" data-i18n-attr="title=studioforge.open_title;aria-label=studioforge.open_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
         </header>
         <div class="terminal-body studioforge-body">
           <div class="studioforge-pane" id="studioforge-pane">
@@ -576,13 +576,13 @@
            two panels above. -->
       <div class="terminal-view mail-view hidden" id="mail-view">
         <header class="terminal-head">
-          <button class="back-btn" id="mail-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
-          <span class="terminal-avatar-mini mail-avatar-mini" data-icon="mail" aria-hidden="true">✉</span>
+          <button class="back-btn" id="mail-back" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
+          <span class="terminal-avatar-mini mail-avatar-mini" data-icon="mail" aria-hidden="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#mail"/></svg></span>
           <div class="terminal-head-info">
             <div class="terminal-title" data-i18n="mail.name">Emails</div>
             <div class="muted terminal-subtitle" id="mail-subtitle" data-i18n="mail.subtitle">MailForge dashboard</div>
           </div>
-          <a class="icon-btn ghost" id="mail-open" href="#" target="_blank" rel="noopener" title="Open the MailForge dashboard in a new tab" aria-label="Open in new tab" data-i18n-attr="title=mail.open_title;aria-label=mail.open_title">↗</a>
+          <a class="icon-btn ghost" id="mail-open" href="#" target="_blank" rel="noopener" title="Open the MailForge dashboard in a new tab" aria-label="Open in new tab" data-i18n-attr="title=mail.open_title;aria-label=mail.open_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
         </header>
         <div class="terminal-body mail-body">
           <div class="mail-pane" id="mail-pane">
@@ -591,7 +591,7 @@
                  never sit in repo content or in DisPatch's own page markup. -->
             <iframe class="mail-frame hidden" id="mail-frame" title="MailForge dashboard" data-i18n-attr="title=mail.frame_title" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" allow=""></iframe>
             <div class="mail-note hidden" id="mail-note">
-              <div class="empty-emoji" aria-hidden="true">✉</div>
+              <div class="empty-emoji" aria-hidden="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="60" height="60"><use href="/static/ui-theme/icons.svg#mail"/></svg></div>
               <p id="mail-note-text"></p>
               <p class="muted" id="mail-note-hint"></p>
             </div>
@@ -613,8 +613,8 @@
            + the same terminal-view chrome as the panels above. -->
       <div class="terminal-view clients-view hidden" id="clients-view">
         <header class="terminal-head">
-          <button class="back-btn" id="clients-back" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
-          <span class="terminal-avatar-mini clients-avatar-mini" data-icon="users" aria-hidden="true">👥</span>
+          <button class="back-btn" id="clients-back" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
+          <span class="terminal-avatar-mini clients-avatar-mini" data-icon="users" aria-hidden="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#users"/></svg></span>
           <div class="terminal-head-info">
             <div class="terminal-title" data-i18n="clients.name">Clients</div>
             <div class="muted terminal-subtitle" id="clients-subtitle" data-i18n="clients.subtitle">Client pipeline</div>
@@ -637,7 +637,7 @@
            chrome as Clients; unlocked only, never in Safe Mode. -->
       <div class="terminal-view ext-tool-view hidden" id="ext-tool-view">
         <header class="terminal-head">
-          <button class="back-btn" id="ext-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <button class="back-btn" id="ext-tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
           <span class="terminal-avatar-mini tool-avatar-mini" id="ext-tool-icon" aria-hidden="true"></span>
           <div class="terminal-head-info">
             <div class="terminal-title" id="ext-tool-title"></div>
@@ -663,15 +663,15 @@
            allow="" drops every permission-policy feature. -->
       <div class="terminal-view tool-view hidden" id="tool-view">
         <header class="terminal-head">
-          <button class="back-btn" id="tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back">‹</button>
+          <button class="back-btn" id="tool-back" type="button" aria-label="Back" data-i18n-attr="aria-label=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
           <span class="terminal-avatar-mini tool-avatar-mini" id="tool-icon" aria-hidden="true"></span>
           <div class="terminal-head-info">
             <div class="terminal-title" id="tool-title"></div>
             <div class="muted terminal-subtitle" id="tool-updated" aria-live="polite"></div>
           </div>
-          <button class="btn-secondary tool-refresh hidden" id="tool-refresh" type="button" title="Regenerate this page now" data-i18n-attr="title=tools.refresh_title" data-i18n="tools.refresh">↻ Refresh</button>
-          <a class="icon-btn ghost" id="tool-open" href="#" target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab" data-i18n-attr="title=tools.open_tab;aria-label=tools.open_tab">↗</a>
-          <button class="icon-btn ghost" id="tool-close" type="button" title="Close tool" aria-label="Close tool" data-i18n-attr="title=tools.close;aria-label=tools.close">✕</button>
+          <button class="btn-secondary tool-refresh hidden" id="tool-refresh" type="button" title="Regenerate this page now" data-i18n-attr="title=tools.refresh_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#refresh-cw"/></svg> <span data-i18n="tools.refresh">Refresh</span></button>
+          <a class="icon-btn ghost" id="tool-open" href="#" target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab" data-i18n-attr="title=tools.open_tab;aria-label=tools.open_tab"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
+          <button class="icon-btn ghost" id="tool-close" type="button" title="Close tool" aria-label="Close tool" data-i18n-attr="title=tools.close;aria-label=tools.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
         </header>
         <details class="tool-error hidden" id="tool-error">
           <summary id="tool-error-summary"></summary>
@@ -693,9 +693,9 @@
   <nav class="mobile-tabs" id="mobile-tabs">
     <!-- The label needs its own element so the DOM pass can replace it without
          eating the glyph span next to it (data-i18n writes textContent). -->
-    <button data-view="bots" class="tab active" aria-current="page"><span>🤖</span><span class="tab-label" data-i18n="nav.tab_bots">Bots</span></button>
-    <button data-view="threads" class="tab"><span>💬</span><span class="tab-label" data-i18n="nav.tab_chats">Chats</span></button>
-    <button data-action="new-chat" id="tab-new-chat" class="tab"><span>✏️</span><span class="tab-label" data-i18n="nav.tab_new_chat">New chat</span></button>
+    <button data-view="bots" class="tab active" aria-current="page"><span><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="19" height="19"><use href="/static/ui-theme/icons.svg#bot"/></svg></span><span class="tab-label" data-i18n="nav.tab_bots">Bots</span></button>
+    <button data-view="threads" class="tab"><span><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="19" height="19"><use href="/static/ui-theme/icons.svg#messages-square"/></svg></span><span class="tab-label" data-i18n="nav.tab_chats">Chats</span></button>
+    <button data-action="new-chat" id="tab-new-chat" class="tab"><span><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="19" height="19"><use href="/static/ui-theme/icons.svg#plus"/></svg></span><span class="tab-label" data-i18n="nav.tab_new_chat">New chat</span></button>
   </nav>
 
   <!-- Settings (3.2): seven sections in two groups instead of thirteen tabs.
@@ -712,7 +712,7 @@
       <header class="modal-header settings-header">
         <button type="button" class="icon-btn ghost settings-back" id="settings-back" hidden title="All sections" aria-label="All sections" data-i18n-attr="title=settings.back;aria-label=settings.back"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <h2 id="settings-title"><span class="settings-title-root" data-i18n="settings.title">Settings</span><span class="settings-title-pane" id="settings-title-pane" hidden></span></h2>
-        <button class="icon-btn ghost" id="bm-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        <button class="icon-btn ghost" id="bm-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
       </header>
 
       <div class="settings-body">
@@ -894,7 +894,7 @@
         <div class="chars-head" data-anchor="roster">
           <p class="muted modal-hint" data-i18n="chars.roster_hint">Who you talk to, in the order the menu bar shows them. Drag a row to move it. Every change applies straight away.</p>
           <div class="chars-toolbar" data-anchor="add">
-            <button type="button" class="btn-primary chars-add-btn" id="chars-add" aria-haspopup="menu" aria-expanded="false" aria-controls="chars-add-menu"><span data-i18n="chars.add">Add</span><span class="chars-caret" aria-hidden="true">▾</span></button>
+            <button type="button" class="btn-primary chars-add-btn" id="chars-add" aria-haspopup="menu" aria-expanded="false" aria-controls="chars-add-menu"><span data-i18n="chars.add">Add</span><span class="chars-caret" aria-hidden="true"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="12" height="12"><use href="/static/ui-theme/icons.svg#chevron-down"/></svg></span></button>
             <button type="button" class="btn-secondary chars-reorder-btn" id="chars-reorder" aria-pressed="false" data-i18n="chars.reorder">Reorder</button>
           </div>
           <div class="menu chars-add-menu" id="chars-add-menu" role="menu" aria-label="Add a character" data-i18n-attr="aria-label=chars.add_menu_aria" hidden></div>
@@ -981,7 +981,7 @@
         <h2><span class="icn" data-icon="folder" aria-hidden="true"></span><span data-i18n="files.title">File Server</span></h2>
         <div class="fs-header-actions">
           <button class="btn-primary" id="fs-upload-btn"><span class="icn" data-icon="upload" aria-hidden="true"></span><span data-i18n="files.upload">Upload</span></button>
-          <button class="icon-btn ghost" id="fs-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+          <button class="icon-btn ghost" id="fs-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
         </div>
       </header>
       <p class="muted modal-hint" data-i18n="files.hint">Drop files here to share them with your assistants. Drag &amp; drop works too.</p>
@@ -995,7 +995,7 @@
     <div class="modal crop-modal" role="dialog" aria-modal="true" aria-label="Crop avatar" data-i18n-attr="aria-label=crop.aria">
       <header class="modal-header">
         <h2 id="crop-title" data-i18n="crop.title">Crop avatar</h2>
-        <button class="icon-btn ghost" id="crop-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        <button class="icon-btn ghost" id="crop-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
       </header>
       <p class="muted modal-hint" data-i18n="crop.hint">Drag the square over the face. The full-resolution original is saved too.</p>
       <div class="crop-stage" id="crop-stage">
@@ -1024,7 +1024,7 @@
   <div class="lock-screen hidden" id="lock-screen" role="dialog" aria-modal="true"
        aria-labelledby="lock-title" aria-describedby="lock-sub">
     <div class="lock-card">
-      <div class="lock-emoji">🔒</div>
+      <div class="lock-emoji"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="40" height="40"><use href="/static/ui-theme/icons.svg#lock"/></svg></div>
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
       <p class="lock-sub" id="lock-sub" data-i18n="lock.enter_pin">Enter your PIN</p>
       <!-- Profile tiles + credential form (js/signin.js) replace the keypad when
@@ -1114,7 +1114,7 @@
     <input id="cmdk-input" class="cmdk-input" type="text" placeholder="Search bots, this bot’s chats, and actions…" data-i18n-attr="placeholder=cmdk.placeholder" autocomplete="off" spellcheck="false" />
     <div id="cmdk-list" class="cmdk-list"></div>
     <div class="cmdk-foot">
-      <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="cmdk.navigate">navigate</span></span>
+      <span><kbd><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="11" height="11"><use href="/static/ui-theme/icons.svg#arrow-up"/></svg></kbd><kbd><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="11" height="11"><use href="/static/ui-theme/icons.svg#arrow-down"/></svg></kbd> <span data-i18n="cmdk.navigate">navigate</span></span>
       <span><kbd>↵</kbd> <span data-i18n="cmdk.open">open</span></span>
       <span><kbd>esc</kbd> <span data-i18n="cmdk.close">close</span></span>
     </div>
@@ -1125,7 +1125,7 @@
     <div class="modal search-modal" role="dialog" aria-modal="true" aria-label="Search messages" data-i18n-attr="aria-label=search.aria">
       <header class="modal-header">
         <h2><span class="icn" data-icon="search" aria-hidden="true"></span><span data-i18n="search.title">Search messages</span></h2>
-        <button class="icon-btn ghost" id="search-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        <button class="icon-btn ghost" id="search-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
       </header>
       <div class="search-box">
         <input id="search-input" type="text" placeholder="Search all conversations…" data-i18n-attr="placeholder=search.placeholder" autocomplete="off" spellcheck="false" />
@@ -1139,7 +1139,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-label="Recovery and export" data-i18n-attr="aria-label=recovery.aria">
       <header class="modal-header">
         <h2><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="recovery.title">Recovery &amp; Export</span></h2>
-        <button class="icon-btn ghost" id="recover-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        <button class="icon-btn ghost" id="recover-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
       </header>
       <div class="recover-section">
         <p class="recover-hint" data-i18n="recovery.export_hint">Export every message to an open, re-readable file — generated locally.</p>
@@ -1151,7 +1151,7 @@
         <hr class="rule" />
         <p class="recover-hint" data-i18n="recovery.restore_hint">Restore any messages that didn’t save to DisPatch from the backup copy (the OpenClaw transcripts). Safe to run repeatedly — it only adds what’s missing.</p>
         <div class="recover-row">
-          <button class="btn-primary" id="recover-all" data-i18n="recovery.restore_all">⤓ Restore all missing messages</button>
+          <button class="btn-primary" id="recover-all"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#download"/></svg> <span data-i18n="recovery.restore_all">Restore all missing messages</span></button>
           <button class="btn-secondary" id="browse-sessions"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="recovery.browse_sessions">Browse agent sessions</span></button>
         </div>
         <div class="recover-result" id="recover-result"></div>
@@ -1165,14 +1165,14 @@
     <div class="modal tx-modal" role="dialog" aria-modal="true" aria-label="Transcript" data-i18n-attr="aria-label=transcript.aria">
       <header class="modal-header">
         <h2 id="tx-title"><span class="icn" data-icon="history" aria-hidden="true"></span><span data-i18n="transcript.title">Transcript</span></h2>
-        <button class="icon-btn ghost" id="tx-close" aria-label="Close" data-i18n-attr="aria-label=common.close">✕</button>
+        <button class="icon-btn ghost" id="tx-close" aria-label="Close" data-i18n-attr="aria-label=common.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
       </header>
       <div class="tx-toolbar">
         <span class="muted" id="tx-summary"></span>
         <div class="tx-filter" id="tx-filter"></div>
         <!-- margin-inline-start, not margin-left: this is the flex "push to the
              far end" idiom, which has to follow the reading direction. -->
-        <button class="btn-primary push-end" id="tx-import" hidden data-i18n="transcript.import_missing">⤓ Import missing</button>
+        <button class="btn-primary push-end" id="tx-import" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#download"/></svg> <span data-i18n="transcript.import_missing">Import missing</span></button>
       </div>
       <div class="tx-list" id="tx-list"></div>
     </div>

@@ -1,7 +1,7 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=20';
+import { loadScript, loadStyle, escapeHtml, spriteIconHtml } from './util.js?v=20';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
@@ -392,17 +392,17 @@ const TEX_CHARS = {
   Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
   Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
   times: '×', div: '÷', pm: '±', mp: '∓', cdot: '·', ast: '∗', star: '⋆',
-  approx: '≈', sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝',
+  approx: '≈', sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝',  // forgeui: allow-icons
   neq: '≠', ne: '≠', leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫',
   infty: '∞', partial: '∂', nabla: '∇', sum: '∑', prod: '∏', int: '∫',
   sqrt: '√', angle: '∠', perp: '⊥', parallel: '∥', degree: '°', deg: '°',
-  rightarrow: '→', to: '→', longrightarrow: '⟶', leftarrow: '←', gets: '←',
+  rightarrow: '→', to: '→', longrightarrow: '⟶', leftarrow: '←', gets: '←',  // forgeui: allow-icons
   leftrightarrow: '↔', Rightarrow: '⇒', implies: '⇒', Leftarrow: '⇐',
-  Leftrightarrow: '⇔', iff: '⇔', uparrow: '↑', downarrow: '↓', mapsto: '↦',
+  Leftrightarrow: '⇔', iff: '⇔', uparrow: '↑', downarrow: '↓', mapsto: '↦',  // forgeui: allow-icons
   in: '∈', notin: '∉', ni: '∋', subset: '⊂', subseteq: '⊆', supset: '⊃',
   supseteq: '⊇', cup: '∪', cap: '∩', emptyset: '∅', varnothing: '∅',
   forall: '∀', exists: '∃', nexists: '∄', neg: '¬', land: '∧', lor: '∨',
-  therefore: '∴', because: '∵', ldots: '…', dots: '…', cdots: '⋯',
+  therefore: '∴', because: '∵', ldots: '…', dots: '…', cdots: '⋯',  // forgeui: allow-icons
   quad: ' ', qquad: '  ', ',': ' ', ';': ' ', '%': '%', '&': '&', '_': '_',
   '$': '$', '#': '#', '{': '{', '}': '}',
 };
@@ -1197,7 +1197,8 @@ function renderChecklist(md) {
 const CALLOUT_RE =
   /^\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>\s*)?/i;
 const CALLOUT_ICONS = {
-  note: 'ℹ️', tip: '💡', important: '❗', warning: '⚠️', caution: '🛑',
+  note: spriteIconHtml('info', 16), tip: spriteIconHtml('info', 16), important: spriteIconHtml('triangle-alert', 16),
+  warning: spriteIconHtml('triangle-alert', 16), caution: spriteIconHtml('circle-x', 16),
 };
 
 // --- marked renderer overrides (Control UI parity) -------------------------

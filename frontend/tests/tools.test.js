@@ -168,7 +168,8 @@ test('menu rows: the theme\'s line icons, typed emoji kept, the active row marke
   assert.equal(mod.toolIconName({ kind: 'static', icon: 'chart' }), 'chart');
   assert.equal(mod.toolIconName({ kind: 'static', icon: 'nope' }), null);
   assert.equal(mod.toolIconName({ kind: 'static', icon: '' }), null);
-  assert.equal(mod.toolGlyph({ kind: 'static' }).textContent, '🧩', 'no icon at all → the default glyph');
+  assert.ok(String(mod.toolGlyph({ kind: 'static' }).querySelector('use').getAttribute('href')).endsWith('#puzzle'),
+    'no icon at all → the puzzle icon');
   // The open tool's row is marked the way a bot tile is.
   row('benchmark').click();
   pointerClick(win, win.document.getElementById('tools-menu-btn'));

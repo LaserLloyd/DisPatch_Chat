@@ -224,7 +224,7 @@ function buildMenu() {
       class: `qm-item${isCurrent ? ' is-current' : ''}`, type: 'button', role: 'menuitem', tabindex: '-1',
       title: a.hint || a.label, dataset: { action: a.id },
     }, [
-      el('span', { class: 'qm-check', 'aria-hidden': 'true', text: isCurrent ? '✓' : '' }),
+      el('span', { class: 'qm-check', 'aria-hidden': 'true' }, isCurrent ? [railIcon(RAIL_ICONS.tick)] : []),
       el('span', { class: 'qm-label', text: a.label }),
       a.tools ? el('span', { class: 'qm-tag', text: t('quick.web') }) : null,
     ]);

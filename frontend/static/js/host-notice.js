@@ -26,7 +26,7 @@
 // code -- docs/security.md "What you are trusting".
 
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 
 /** sessionStorage: "<role>:<profile id>" the popup was last shown for in this tab. */
 export const SEEN_KEY = 'dispatch-signin-notice';
@@ -64,8 +64,8 @@ export function maybeShowSignInNotice({
 
   const close = el('button', {
     type: 'button', class: 'privacy-card-close', 'aria-label': t('common.close'),
-    title: t('common.close'), text: '✕',
-  });
+    title: t('common.close'),
+  }, [spriteIcon('x', 16)]);
   const ok = el('button', { type: 'button', class: 'btn-primary privacy-card-ok', text: t('host_notice.card_ok') });
   const parts = [
     close,

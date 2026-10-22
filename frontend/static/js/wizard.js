@@ -15,7 +15,7 @@
 
 import { w5 as realApi, errorText } from './w5-api.js?v=1';
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 import { describeTest } from './connections.js?v=2';
 
 export const STEPS = ['owner', 'connection', 'voice', 'family', 'network', 'done'];
@@ -149,7 +149,7 @@ export function openWizard(initial, ctx = {}) {
       else if (done) cls.push('done');
       if (OPTIONAL.has(s)) cls.push('optional');
       progress.append(el('li', { class: cls.join(' '), 'aria-current': s === step ? 'step' : null }, [
-        el('span', { class: 'wizard-dot', 'aria-hidden': 'true', text: done && s !== step ? '✓' : String(i + 1) }),
+        el('span', { class: 'wizard-dot', 'aria-hidden': 'true' }, [done && s !== step ? spriteIcon('check', 12) : String(i + 1)]),
         el('span', { class: 'wizard-step-label', text: stepLabel(s) }),
         OPTIONAL.has(s) ? el('span', { class: 'sr-only', text: ` (${t('wiz.optional')})` }) : null,
       ]));
@@ -292,7 +292,7 @@ export function openWizard(initial, ctx = {}) {
     const list = el('ul', { class: 'wizard-checklist' });
     for (const s of state.steps || []) {
       list.append(el('li', { class: s.done ? 'done' : '' }, [
-        el('span', { 'aria-hidden': 'true', text: s.done ? '✓ ' : (s.skipped ? '– ' : '○ ') }),
+        el('span', { 'aria-hidden': 'true' }, [s.done ? spriteIcon('check', 14) : (s.skipped ? '–' : '○'), ' ']),
         el('strong', { text: s.title }), s.hint && !s.done ? el('span', { class: 'muted', text: ` ${s.hint}` }) : null]));
     }
     content.append(el('p', { text: t('wiz.done_intro') }), list, actions(btn(t('wiz.finish'), 'btn-primary', async () => {

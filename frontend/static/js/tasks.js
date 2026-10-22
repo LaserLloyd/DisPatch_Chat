@@ -21,7 +21,7 @@
 
 import { api as realApi } from './api.js?v=35';
 import { t, relTime } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=1';
 
 export const FILTER_STATES = ['', 'queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled'];
@@ -192,7 +192,7 @@ export function createTasksUi(deps = {}) {
   function buildPage() {
     if (backdrop) return;
     const title = el('h2', { id: 'tasks-title', text: t('tasks.title') });
-    const close = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close'), text: '✕' });
+    const close = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close') }, [spriteIcon('x', 18)]);
     close.addEventListener('click', closePage);
     const assignBtn = el('button', { type: 'button', class: 'btn-primary', id: 'tasks-assign', text: t('tasks.assign') });
     assignBtn.addEventListener('click', () => openAssign({}));
@@ -360,7 +360,7 @@ export function createTasksUi(deps = {}) {
     const prevFocus = document.activeElement;
     const usable = agents.filter((a) => a.available !== false);
     const heading = el('h2', { id: 'assign-title', text: t('tasks.assign') });
-    const closeBtn = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close'), text: '✕' });
+    const closeBtn = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close') }, [spriteIcon('x', 18)]);
     const select = el('select', { id: 'assign-agent', required: '' },
       usable.map((a) => el('option', { value: a.id, text: `${a.name} · ${a.backend_label || a.backend}` })));
     if (agentId && usable.some((a) => a.id === agentId)) select.value = agentId;

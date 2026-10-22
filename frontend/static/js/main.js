@@ -7,7 +7,7 @@ import { ChatSocket } from './ws.js?v=10';
 import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
 import { installChecklists, applyChecklistState } from './checklist.js?v=13';
 import { classifyNotice, noticeHeadline } from './notice.js?v=4';
-import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, RAIL_ICONS } from './util.js?v=20';
+import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, spriteIcon, RAIL_ICONS } from './util.js?v=20';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -1560,8 +1560,8 @@ function altPagerEl(msg, bubble, mdOpts) {
   const pages = alts.concat([{ content: msg.content || '' }]);
   let idx = pages.length - 1;
   const label = el('span', { class: 'alt-pos' });
-  const prev = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_prev'), 'aria-label': t('msg.alt_prev'), text: '‹' });
-  const next = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_next'), 'aria-label': t('msg.alt_next'), text: '›' });
+  const prev = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_prev'), 'aria-label': t('msg.alt_prev') }, [spriteIcon('chevron-left', 14)]);
+  const next = el('button', { class: 'alt-btn', type: 'button', title: t('msg.alt_next'), 'aria-label': t('msg.alt_next') }, [spriteIcon('chevron-right', 14)]);
   const paint = () => {
     // What Copy reads: the page on screen, not always the live reply.
     msg._shownContent = pages[idx].content || '';
@@ -2318,14 +2318,14 @@ function typingEl() {
   const bot = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
   const bubble = el('div', { class: 'bubble typing-bubble', title: t('progress.title') }, [
     el('span', { class: 'dots' }, [el('span'), el('span'), el('span')]),
-    el('span', { class: 'typing-hint', text: t(progressOpen ? 'progress.hint_hide' : 'progress.hint_show') }),
+    el('span', { class: 'typing-hint' }, [t(progressOpen ? 'progress.hint_hide' : 'progress.hint_show'), ' ', spriteIcon(progressOpen ? 'chevron-down' : 'chevron-right', 12)]),
   ]);
   const panel = el('div', { class: 'progress-panel' });
   if (!progressOpen) panel.hidden = true;
   bubble.addEventListener('click', () => {
     progressOpen = !progressOpen;
     panel.hidden = !progressOpen;
-    bubble.querySelector('.typing-hint').textContent = t(progressOpen ? 'progress.hint_hide' : 'progress.hint_show');
+    bubble.querySelector('.typing-hint').replaceChildren(t(progressOpen ? 'progress.hint_hide' : 'progress.hint_show'), ' ', spriteIcon(progressOpen ? 'chevron-down' : 'chevron-right', 12));
     if (progressOpen) renderProgressPanel();
   });
   const wrap = el('div', { class: 'typing' }, [
@@ -4812,14 +4812,14 @@ function renderBotManager() {
     const hiddenTag = isHidden(bot) ? el('span', { class: 'bm-parked', text: t('profiles.hidden_badge') }) : null;
     const paintRow = () => { row.classList.toggle('bm-row--hidden', isHidden(bmBots.find((b) => b.id === bot.id) || bot)); };
 
-    // ▲/▼: HTML5 drag never fires on touch, so these are the reorder affordance that
+    // Up/down chevrons: HTML5 drag never fires on touch, so these are the reorder affordance that
     // works everywhere; shown on a phone in Reorder mode, always on a desktop row's hover.
     const moveBtn = (dir) => {
       const b = el('button', {
-        type: 'button', class: 'bm-move-btn', text: dir < 0 ? '▲' : '▼',
+        type: 'button', class: 'bm-move-btn',
         title: t(dir < 0 ? 'settings.move_up' : 'settings.move_down'),
         'aria-label': t(dir < 0 ? 'settings.move_up_aria' : 'settings.move_down_aria', { name: bot.name }),
-      });
+      }, [spriteIcon(dir < 0 ? 'chevron-up' : 'chevron-down', 12)]);
       if ((dir < 0 && idx === 0) || (dir > 0 && idx === bmBots.length - 1)) b.disabled = true;
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -4881,7 +4881,7 @@ function renderBotManager() {
     });
 
     const row = el('div', { class: 'bm-row', draggable: 'true', dataset: { idx, bot: bot.id } }, [
-      el('span', { class: 'bm-handle', 'aria-hidden': 'true', text: '⠿' }),
+      el('span', { class: 'bm-handle', 'aria-hidden': 'true' }, [spriteIcon('grip-vertical', 18)]),
       el('div', { class: 'bm-move' }, [moveBtn(-1), moveBtn(1)]),
       avatarImg,
       el('div', { class: 'bm-name-block' }, [
@@ -6249,7 +6249,7 @@ function sessionEventEl(ev) {
     case 'say':
       return el('div', { class: 'hs-ev hs-say', text: ev.text });
     case 'step':
-      return el('div', { class: 'hs-ev hs-step', text: `▸ step ${ev.step}` });
+      return el('div', { class: 'hs-ev hs-step' }, [spriteIcon('chevron-right', 12), ` step ${ev.step}`]);
     case 'end':
       return el('div', { class: 'hs-ev hs-end', text: `— ${ev.reason}` });
     case 'model':
@@ -6273,7 +6273,7 @@ function harnessSessionCard(s) {
   card.append(el('div', { class: 'harness-job-task', text: s.title || s.task }));
   const actions = el('div', { class: 'harness-session-actions' });
   if (s.active) {
-    const stop = el('button', { class: 'btn-secondary danger-text', type: 'button', text: t('harness.stop') });
+    const stop = el('button', { class: 'btn-secondary danger-text', type: 'button' }, [spriteIcon('square', 14), ` ${t('harness.stop')}`]);
     stop.addEventListener('click', () => harnessStopSession(s.id));
     actions.append(stop);
   } else {
@@ -6704,7 +6704,7 @@ function renderMailSessionPanel() {
   const wrap = dom['threads'];
   wrap.innerHTML = '';
   wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
-    el('div', { class: 'empty-emoji', text: '✉' }),
+    el('div', { class: 'empty-emoji' }, [spriteIcon('mail', 60)]),
     el('p', { text: t('mail.session_panel_heading') }),
     el('p', { class: 'muted', text: t('mail.session_panel_body') }),
   ]));
@@ -6841,7 +6841,7 @@ function renderClientsSessionPanel() {
   const wrap = dom['threads'];
   wrap.innerHTML = '';
   wrap.append(el('div', { class: 'empty-list terminal-session-note' }, [
-    el('div', { class: 'empty-emoji', text: '👥' }),
+    el('div', { class: 'empty-emoji' }, [spriteIcon('users', 60)]),
     el('p', { text: t('clients.session_panel_heading') }),
     el('p', { class: 'muted', text: t('clients.session_panel_body') }),
   ]));
@@ -9499,7 +9499,7 @@ function iconifyChrome() {
   // compared trimmed and exactly, so a button that merely contains a ✕ inside
   // a longer label is left alone.
   for (const b of document.querySelectorAll('.icon-btn')) {
-    if (b.textContent.trim() === '✕') b.replaceChildren(railIcon(RAIL_ICONS.close));
+    if (b.textContent.trim() === '✕') b.replaceChildren(railIcon(RAIL_ICONS.close));  // forgeui: allow-icons
   }
 }
 
@@ -9852,7 +9852,7 @@ function renderTranscript(meta) {
     fwrap.append(chip);
   }
   const imp = dom['tx-import'];
-  if (txState.threadId && txState.missing > 0) { imp.hidden = false; setI18nText(imp, 'transcript.import_count', { count: txState.missing }); }
+  if (txState.threadId && txState.missing > 0) { imp.hidden = false; setI18nText(imp.querySelector('[data-i18n]') || imp, 'transcript.import_count', { count: txState.missing }); }
   else imp.hidden = true;
   renderTxList();
 }
@@ -10111,7 +10111,7 @@ function cmdkBuild(q) {
   const m = (s) => !ql || (s || '').toLowerCase().includes(ql);
   const items = [];
   for (const a of cmdkActions()) if (m(a.label)) items.push({ ...a, group: t('cmdk.group_actions') });
-  for (const b of visibleBots()) if (m(b.name)) items.push({ icon: b.emoji || '🤖', label: b.name, sub: b.model_hint || '', group: t('cmdk.group_bots'), run: () => selectBot(b.id) });
+  for (const b of visibleBots()) if (m(b.name)) items.push({ icon: b.emoji || RAIL_ICONS.bots, label: b.name, sub: b.model_hint || '', group: t('cmdk.group_bots'), run: () => selectBot(b.id) });
   // threadTitle() so untitled threads read 'New Chat' here too — the palette
   // must name a thread exactly like the thread list does.
   for (const th of state.threads) { const title = threadTitle(th); if (m(title)) items.push({ icon: RAIL_ICONS.messages, label: title, sub: t('cmdk.sub_chat'), group: t('cmdk.group_chats'), run: () => openThread(th.id) }); }

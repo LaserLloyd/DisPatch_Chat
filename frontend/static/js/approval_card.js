@@ -12,7 +12,7 @@
 //
 // Pure DOM, no network: the caller passes `onAnswer(decision, scope)`.
 
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 
 let seq = 0;
@@ -63,7 +63,7 @@ export function approvalCardEl(approval, { canAnswer = true, onAnswer = async ()
     root.className = `approval-card approval-${v.state}`;
     const kids = [
       el('div', { class: 'approval-head' }, [
-        el('span', { class: 'approval-icon', 'aria-hidden': 'true', text: v.state === 'pending' ? '⏸' : v.state === 'allow' ? '✓' : '✕' }),
+        el('span', { class: 'approval-icon', 'aria-hidden': 'true' }, [spriteIcon(v.state === 'pending' ? 'pause' : v.state === 'allow' ? 'check' : 'x', 16)]),
         el('strong', { id: titleId, class: 'approval-title', text: t('approval.title', { tool: v.tool }) }),
         el('span', { class: 'approval-state', text: t(STATE_KEYS[v.state]) }),
       ]),
