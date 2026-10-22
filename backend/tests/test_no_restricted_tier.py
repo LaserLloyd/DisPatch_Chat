@@ -103,7 +103,7 @@ def test_no_shipped_yaml_is_made_for_a_restricted_audience():
     assert not bad, f"audience: restricted in shipped files: {sorted(set(bad))}"
 
 
-def test_no_tracked_file_names_a_kids_bot():
+def test_no_tracked_file_names_a_removed_pack_bot():
     tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True,
                              text=True, check=True).stdout.split()
     needle = "kids" + "_"            # split so this file does not match itself
