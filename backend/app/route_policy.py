@@ -333,6 +333,8 @@ _r(("GET",), "/api/people/{profile_id}/delete/preview", _R(P.MANAGE_USERS, note=
 _r(("POST",), "/api/people/{profile_id}/delete", _R(P.MANAGE_USERS, note="deletes the profile and its content after a confirm token"))
 
 # ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
+_r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
+   note="AI build: a draft bot from a description; nothing is saved or logged"))
 
 # ---- WP-SCALE-OPS: maintenance, storage, retention (app/maintenance_api.py), all P.ADMIN_SYSTEM
 
