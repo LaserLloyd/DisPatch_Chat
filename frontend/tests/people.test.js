@@ -625,122 +625,6 @@ async function mountPeople(role = 'owner', over = {}) {
   return { win, pane, rec };
 }
 
-test('People tab: a row per profile with role badge and PIN / password / disabled indicators', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const { pane } = await mountPeople('owner');
-  const rows = [...pane.querySelectorAll('.people-row')];
-  assert.equal(rows.length, 4);
-  const text = (r) => r.textContent.replace(/\s+/g, ' ');
-  assert.match(text(rows[0]), /Boss.*Owner.*PIN set.*Password set/);
-  assert.match(text(rows[2]), /Sam.*Member.*PIN set/);
-  assert.doesNotMatch(text(rows[2]), /password/i, 'only the Owner and Admins have a password');
-  assert.match(text(rows[3]), /Kid.*Restricted.*No PIN.*Disabled/);
-  // The Owner row has no Edit button (nobody edits the Owner here); the others do.
-  assert.equal(rows[0].querySelector('button'), null);
-  assert.ok(rows[1].querySelector('button[aria-label="Edit Ops"]'));
-});
-
-test('People tab: an Admin manages everyone but the Owner, other Admins included, and has Machine access', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const { pane } = await mountPeople('admin');
-  const editable = [...pane.querySelectorAll('.people-row')].filter((r) => r.querySelector('button')).map((r) => r.dataset.person);
-  assert.ok(!editable.includes('o1'), 'THE Owner is never editable by an Admin');
-  assert.ok(editable.includes('m1') && editable.includes('r1'), editable.join());
-  pane.querySelector('#people-add').click();
-  const roles = [...pane.querySelectorAll('#people-editor select option')].map((o) => o.value);
-  assert.deepEqual(roles, ['admin', 'member', 'restricted'], 'an Admin can add an Admin');
-});
-
-test('People tab: the Owner sees the Admin role only when they have a password', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const withPw = await mountPeople('owner');
-  withPw.pane.querySelector('#people-add').click();
-  assert.deepEqual([...withPw.pane.querySelectorAll('#people-editor select option')].map((o) => o.value), ['admin', 'member', 'restricted']);
-  const p = PEOPLE(); p.owner_has_password = false;
-  const noPw = await mountPeople('owner', { people: p });
-  noPw.pane.querySelector('#people-add').click();
-  assert.deepEqual([...noPw.pane.querySelectorAll('#people-editor select option')].map((o) => o.value), ['member', 'restricted']);
-  assert.match(noPw.pane.querySelector('.people-admin-note').textContent, /set your own password/);
-});
-
-test('People tab: creating a Member posts the PIN and budgets from the form', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const { pane, win } = await mountPeople('owner');
-  pane.querySelector('#people-add').click();
-  const ed = pane.querySelector('#people-editor');
-  const byLabel = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  byLabel('Name').value = 'Pat';
-  byLabel('PIN').value = '2468';
-  byLabel('Minutes per day').value = '60';
-  byLabel('From').value = '21:00';
-  byLabel('Until').value = '07:30';
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Add person').click();
-  await tick(); await tick();
-  const post = apiCalls.find((c) => c.key === 'POST /api/people');
-  assert.deepEqual(post.body, { name: 'Pat', role: 'member', pin: '2468', budgets: { minutes_per_day: 60, quiet_hours: '21:00-07:30' } });
-  void win;
-});
-
-test('People tab: a bad budget is refused in the form, before any request', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  pane.querySelector('#people-add').click();
-  const ed = pane.querySelector('#people-editor');
-  const byLabel = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  byLabel('Name').value = 'Pat';
-  byLabel('PIN').value = '2468';
-  byLabel('Minutes per day').value = '5000';
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Add person').click();
-  await tick();
-  assert.equal(apiCalls.some((c) => c.key === 'POST /api/people'), false);
-  assert.equal(ed.querySelector('.people-error').textContent, 'Minutes per day must be a whole number from 1 to 1440.');
-});
-
-test('People tab: editing sends only the change, and Delete asks first', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const { pane, rec } = await mountPeople('owner');
-  pane.querySelector('[data-person="r1"] button').click();
-  const ed = pane.querySelector('#people-editor');
-  const field = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  assert.equal(field('Minutes per day').value, '45');
-  assert.equal(field('From').value, '20:30');
-  assert.equal(field('Sign out after (minutes)').value, '15');
-  assert.equal(ed.querySelector('.people-disabled-row input').checked, true);
-  field('Minutes per day').value = '30';
-  ed.querySelector('.people-disabled-row input').checked = false;
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
-  await tick(); await tick();
-  const patch = apiCalls.find((c) => c.key === 'PATCH /api/people/r1');
-  assert.deepEqual(patch.body, { budgets: { minutes_per_day: 30, quiet_hours: '20:30-07:00' }, disabled: false });
-
-  pane.querySelector('[data-person="m1"] button').click();
-  apiCalls.length = 0;
-  [...pane.querySelectorAll('#people-editor button')].find((b) => b.textContent === 'Delete').click();
-  await tick(); await tick();
-  assert.equal(rec.confirms.length, 1);
-  assert.match(rec.confirms[0], /Delete Sam\?.*2 chats/);
-  assert.ok(apiCalls.some((c) => c.key === 'POST /api/people/m1/delete' && c.body.confirm_token === 'del-tok'));
-  assert.ok(!apiCalls.some((c) => c.key === 'DELETE /api/people/m1'), 'the 3.x DELETE answers 409 in 4.0');
-});
-
-test('People tab: a role change goes through the role route, with the counts when it deletes', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
-  const { pane, rec } = await mountPeople('owner', { routes: {
-    'GET /api/people/m1/role/preview?role=restricted': () => [200, { counts: { bots: 2, chats: 3, pictures: 0, voices: 1 }, token: 'role-tok', deletes: true }],
-    'POST /api/people/m1/role': () => [200, { id: 'm1', role: 'basic' }],
-    'PATCH /api/people/m1': () => [200, {}],
-  } });
-  pane.querySelector('[data-person="m1"] button').click();
-  const ed = pane.querySelector('#people-editor');
-  const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === 'Role');
-  const sel = ed.querySelector(`#${l.getAttribute('for')}`);
-  sel.value = 'restricted';
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
-  await tick(); await tick(); await tick();
-  assert.equal(rec.confirms.length, 1);
-  assert.match(rec.confirms[0], /3 chats/);
-  const post = apiCalls.find((c) => c.key === 'POST /api/people/m1/role');
-  assert.deepEqual(post.body, { role: 'restricted', confirm_token: 'role-tok' });
-  assert.ok(!apiCalls.some((c) => c.key === 'PATCH /api/people/m1' && c.body && 'role' in c.body), 'no role in the PATCH');
-});
-
 test('People tab: This device lists remembered devices with Forget only (4.0: no binding)', { skip: dom.skip }, async () => {
   const { pane } = await mountPeople('owner');
   assert.equal(pane.querySelector('#people-device-select'), null);
@@ -753,18 +637,7 @@ test('People tab: This device lists remembered devices with Forget only (4.0: no
   }
 });
 
-test('People tab: activity is a real table with a caption and counts only', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  const table = pane.querySelector('.people-table');
-  assert.ok(table.querySelector('caption'));
-  assert.deepEqual([...table.querySelectorAll('thead th')].map((h) => h.textContent),
-    ['Day', 'Sign-ins', 'Messages', 'New chats', 'Uploads', 'Feedback', 'Limit hits']);
-  assert.ok([...table.querySelectorAll('th[scope="col"]')].length >= 7);
-  assert.match(table.querySelector('tbody tr').textContent, /2026-10-17/);
-  assert.match(pane.querySelector('.people-audit').textContent, /Profile created/);
-});
-
-test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
+test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: dom.skip }, async () => {
   const { pane, rec } = await mountPeople('owner');
   const group = pane.querySelector('#people-machine');
   assert.ok(group);

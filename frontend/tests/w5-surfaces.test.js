@@ -245,13 +245,13 @@ test('connection form payload: a blank key keeps the stored one; clear and env a
   assert.deepEqual(C.formDefaults({ id: 'ollama', label: 'Ollama', base_url: 'http://127.0.0.1:11434/v1', key: 'none', capabilities: ['chat'] }).needsKey, false);
 });
 
-test('character diff: only what changed; connection and model travel together', async () => {
+test('character diff: only what changed; connection and model travel together; hidden is the Admin flag', async () => {
   const K = await fresh('characters.js').catch(() => null);
   if (!K) return;
-  const orig = { audience: 'members', description: '', profiles: ['a'], backend: { connection: 'c1', model: 'm1' }, personality: { preset: 'default' }, backend_kind: 'direct' };
-  assert.deepEqual(K.diffCharacter(orig, { audience: 'members', description: '', profiles: ['a'], connection: 'c1', model: 'm1', personality: 'default' }), {});
-  assert.deepEqual(K.diffCharacter(orig, { audience: 'restricted', description: 'Hi', profiles: [], connection: 'c2', model: 'x', personality: 'tutor' }),
-    { description: 'Hi', audience: 'restricted', profiles: [], connection: 'c2', model: 'x', personality: 'tutor' });
+  const orig = { description: '', hidden: false, backend: { connection: 'c1', model: 'm1' }, personality: { preset: 'default' }, backend_kind: 'direct' };
+  assert.deepEqual(K.diffCharacter(orig, { description: '', hidden: false, connection: 'c1', model: 'm1', personality: 'default' }), {});
+  assert.deepEqual(K.diffCharacter(orig, { hidden: true, description: 'Hi', connection: 'c2', model: 'x', personality: 'tutor' }),
+    { description: 'Hi', hidden: true, connection: 'c2', model: 'x', personality: 'tutor' });
   assert.deepEqual(K.diffCharacter(orig, { connection: '', model: '' }), { connection: null });
   assert.deepEqual(K.diffCharacter(orig, { connection: 'c1', model: 'm2' }), { model: 'm2' });
   assert.deepEqual(K.diffCharacter(orig, { personality: 'custom' }), {});
@@ -494,25 +494,23 @@ test('Characters: the Details panel loads, shows only what applies, and saves a 
   const K = await fresh('characters.js');
   const patched = [];
   const api = {
-    allCharacters: async () => ({ characters: [{ id: 'nova', name: 'Nova', audience: 'members', description: '', profiles: [],
+    allCharacters: async () => ({ characters: [{ id: 'nova', name: 'Nova', description: '', hidden: false,
       backend: { kind: 'direct', connection: 'c1', model: 'm1' }, backend_kind: 'direct', personality: { preset: 'default' } }] }),
     connections: async () => ({ connections: [{ id: 'c1', name: 'LM Studio', type_label: 'LM Studio', models: ['m1', 'm2'], default_model: 'm1' }] }),
     personalities: async () => ({ presets: [{ id: 'default', title: 'Default', description: '' }, { id: 'tutor', title: 'Tutor', description: '' }] }),
-    people: async () => ({ profiles: [{ id: 'p1', name: 'Mia', role: 'restricted' }, { id: 'p2', name: 'Boss', role: 'owner' }] }),
+    people: async () => ({ profiles: [{ id: 'p1', name: 'Mia', role: 'basic' }, { id: 'p2', name: 'Boss', role: 'admin' }], me: 'p2' }),
     patchCharacter: async (id, body) => { patched.push([id, body]); return {}; },
   };
   const panel = await K.characterPanel({ id: 'nova', name: 'Nova' }, { api, toast() {}, openTab() {}, reload: async () => {} });
   win.document.body.append(panel);
   const labels = [...panel.querySelectorAll('label')].map((l) => l.textContent);
   assert.ok(labels.includes(EN.chars.connection) && labels.includes(EN.chars.model) && labels.includes(EN.chars.personality));
-  assert.match(panel.textContent, /Mia/, 'Restricted profile listed for visibility');
-  assert.doesNotMatch(panel.textContent, /Boss/, 'the owner always sees everything: not offered');
-  const sel = [...panel.querySelectorAll('select')];
-  sel.find((s) => [...s.options].some((o) => o.value === 'restricted')).value = 'restricted';
-  panel.querySelector('input[type=checkbox][value="p1"]').checked = true;
+  assert.doesNotMatch(panel.textContent, /Mia/, 'a Basic profile owns no bots, so it is not a copy target');
+  assert.match(panel.textContent, /Boss/, 'an Admin can copy into their own bots');
+  panel.querySelector('.chr-hide input').checked = true;
   [...panel.querySelectorAll('button')].find((b) => b.textContent === EN.chars.save).click();
   await tick(); await tick();
-  assert.deepEqual(patched, [['nova', { audience: 'restricted', profiles: ['p1'] }]]);
+  assert.deepEqual(patched, [['nova', { hidden: true }]]);
 });
 
 test('Wizard: owner step validates before it calls the server', { skip: dom.skip }, async () => {
