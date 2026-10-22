@@ -469,6 +469,148 @@ OWNER_INDEX_DDL = ("CREATE INDEX IF NOT EXISTS idx_threads_owner_bot_updated "
                    "ON threads(owner_profile_id, bot_id, updated_at DESC)")
 
 
+# --------------------------------------------------------------------------- #
+# 4.0 scale and retention (migration 011_scale, BUILD-PLAN-v2 §1.13): the design target is
+# 20 profiles x 3 years (about 1-2M messages) with no slowdowns. One source of truth for the
+# tables and indexes: migration 011 builds them on an existing database (inside its backup),
+# and Database.connect / accounts.connect re-assert them with IF NOT EXISTS (cheap no-ops) so
+# a fresh install, or a table created after 011 ran, gets them too.
+# --------------------------------------------------------------------------- #
+
+#: Tables the daily maintenance task (app/maintenance.py) and the image-retention rule use.
+SCALE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS maintenance_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started TEXT NOT NULL,            -- ISO UTC, one row per step per run
+    finished TEXT,
+    step TEXT NOT NULL,               -- e.g. prune_activity, image_retention, wal_checkpoint
+    rows INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    ms INTEGER NOT NULL DEFAULT 0,
+    error TEXT                        -- NULL = ok
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_runs(started);
+CREATE INDEX IF NOT EXISTS idx_maintenance_runs_step ON maintenance_runs(step, started);
+-- "Is this image still referenced?": one row per /media/<name> a message shows (attachment,
+-- text or metadata), with the newest referencing message's created_at. 011 backfills it; the
+-- nightly job keeps it current from the messages newer than maintenance_state
+-- 'media_refs.rowid' (a rowid watermark: a recovered message keeps an old created_at).
+CREATE TABLE IF NOT EXISTS media_refs (
+    name TEXT PRIMARY KEY,
+    last_ref_at TEXT NOT NULL
+);
+-- Images the retention rule deleted: /media/<name> answers 410 + X-Image-Expired: 1.
+CREATE TABLE IF NOT EXISTS media_expired (
+    name TEXT PRIMARY KEY,
+    expired_at TEXT NOT NULL,
+    kind TEXT NOT NULL                -- reaction_spent | imagestudio | chat_pic | image_job | avatar_pool_spent | ...
+);
+CREATE TABLE IF NOT EXISTS storage_stats (
+    area TEXT PRIMARY KEY,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    files INTEGER NOT NULL DEFAULT 0,
+    measured_at TEXT NOT NULL
+);
+-- Small key/value state of the maintenance task (watermarks, last weekly FTS optimize).
+CREATE TABLE IF NOT EXISTS maintenance_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+#: ``(table, name, DDL)`` for every index 011 adds. Each one is proven by
+#: ``tests/test_query_plans.py`` (the query that needs it) and the ``-m scale`` benchmark.
+SCALE_INDEXES: tuple[tuple[str, str, str], ...] = (
+    # The rail / thread list per owner, all characters (GET /api/threads without bot_id, the
+    # hello first page) and the Archived view: equality on owner + archived + pinned, then the
+    # keyset (updated_at, id) in index order - no sort, no scan.
+    ("threads", "idx_threads_owner_list",
+     "CREATE INDEX IF NOT EXISTS idx_threads_owner_list ON threads"
+     "(owner_profile_id, is_archived, is_pinned, updated_at DESC, id DESC)"),
+    # The same per character (GET /api/threads?bot_id=..., what the rail asks today).
+    ("threads", "idx_threads_owner_bot_list",
+     "CREATE INDEX IF NOT EXISTS idx_threads_owner_bot_list ON threads"
+     "(owner_profile_id, bot_id, is_archived, is_pinned, updated_at DESC, id DESC)"),
+    # Unread dots: only threads with something newer than the last read are candidates
+    # (add_message keeps updated_at >= every message's created_at), so the summary reads a
+    # handful of index entries instead of every thread of the profile.
+    ("threads", "idx_threads_owner_unread",
+     "CREATE INDEX IF NOT EXISTS idx_threads_owner_unread ON threads(owner_profile_id) "
+     "WHERE is_archived = 0 AND (last_read_at IS NULL OR last_read_at < updated_at)"),
+    # File Server list per owner.
+    ("files", "idx_files_owner_created",
+     "CREATE INDEX IF NOT EXISTS idx_files_owner_created ON files(owner_profile_id, created_at DESC)"),
+    # Foreign-key children: a message delete (wipe, Reset, thread delete) looks up its
+    # image_jobs rows (ON DELETE CASCADE); without an index that is a scan per message.
+    ("image_jobs", "idx_image_jobs_message",
+     "CREATE INDEX IF NOT EXISTS idx_image_jobs_message ON image_jobs(message_id)"),
+    ("sessions", "idx_sessions_device",
+     "CREATE INDEX IF NOT EXISTS idx_sessions_device ON sessions(device_id)"),
+    # Prune by time (the maintenance task deletes older-than-N rows in bounded batches).
+    ("activity", "idx_activity_category_ts",
+     "CREATE INDEX IF NOT EXISTS idx_activity_category_ts ON activity(category, ts)"),
+    ("task_events", "idx_task_events_ts",
+     "CREATE INDEX IF NOT EXISTS idx_task_events_ts ON task_events(ts)"),
+    ("tasks", "idx_tasks_finished",
+     "CREATE INDEX IF NOT EXISTS idx_tasks_finished ON tasks(finished_at)"),
+    ("job_events", "idx_job_events_created",
+     "CREATE INDEX IF NOT EXISTS idx_job_events_created ON job_events(created_at)"),
+    ("job_feedback", "idx_job_feedback_created",
+     "CREATE INDEX IF NOT EXISTS idx_job_feedback_created ON job_feedback(created_at)"),
+    ("usage_daily", "idx_usage_daily_day",
+     "CREATE INDEX IF NOT EXISTS idx_usage_daily_day ON usage_daily(day)"),
+    ("transcript_seen", "idx_transcript_seen_created",
+     "CREATE INDEX IF NOT EXISTS idx_transcript_seen_created ON transcript_seen(created_at)"),
+    ("image_jobs", "idx_image_jobs_state_updated",
+     "CREATE INDEX IF NOT EXISTS idx_image_jobs_state_updated ON image_jobs(state, updated_at)"),
+    ("sessions", "idx_sessions_last_seen",
+     "CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen)"),
+    ("devices", "idx_devices_last_seen",
+     "CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen)"),
+    ("approvals", "idx_approvals_decided",
+     "CREATE INDEX IF NOT EXISTS idx_approvals_decided ON approvals(decided_at)"),
+    # agent_spend needs none: its primary key starts with ``day``.
+)
+
+#: ``/media/<name>`` inside a message (attachment, text, a ``[[media:...]]`` marker, metadata).
+#: Not preceded by a word or path character, so ``~/.openclaw/media/x`` is not a match.
+MEDIA_NAME_RE = re.compile(r"(?<![\w./-])/media/([A-Za-z0-9_][A-Za-z0-9._/-]{0,250})")
+
+
+def media_names_in(*texts: str | None) -> set[str]:
+    """Every ``/media/<name>`` name the given texts mention (no traversal, no trailing dot)."""
+    out: set[str] = set()
+    for text in texts:
+        if not text or "/media/" not in text:
+            continue
+        for m in MEDIA_NAME_RE.finditer(text):
+            name = m.group(1).rstrip("./")
+            if name and ".." not in name.split("/"):
+                out.add(name)
+    return out
+
+
+def sqlite_tables(con: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def missing_scale_indexes(con: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """The SCALE_INDEXES rows whose table exists but whose index does not (read only)."""
+    tables = sqlite_tables(con)
+    have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    return [row for row in SCALE_INDEXES if row[0] in tables and row[1] not in have]
+
+
+def ensure_scale_schema(con: sqlite3.Connection) -> int:
+    """Create the 011 tables and every index whose table exists (idempotent). Returns how many
+    indexes were built now. Synchronous: migration 011 and accounts.connect call it."""
+    con.executescript(SCALE_SCHEMA)
+    todo = missing_scale_indexes(con)
+    for _table, _name, ddl in todo:
+        con.execute(ddl)
+    return len(todo)
+
+
 #: Default of the ``principal`` argument on the thread readers: no owner filter (the server's
 #: own housekeeping). A sentinel, not None - None would read as "nobody" by mistake.
 _ALL_OWNERS: Any = object()
@@ -663,6 +805,16 @@ class Database:
             OWNER_INDEX_DDL,
         ):
             await self._db.execute(ddl)
+        await self._db.commit()
+        # 4.0 scale (011_scale): the maintenance tables and every index whose table exists.
+        # IF NOT EXISTS no-ops once 011 has run; on a fresh install (011 ran before these
+        # tables existed) this is where the thread / message indexes are built.
+        await self._db.executescript(SCALE_SCHEMA)
+        have = {r[0] for r in await self._db.execute_fetchall(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','index')")}
+        for table, name, ddl in SCALE_INDEXES:
+            if table in have and name not in have:
+                await self._db.execute(ddl)
         await self._db.commit()
         await self._setup_fts()
 

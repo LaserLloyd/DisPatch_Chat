@@ -80,6 +80,9 @@ def v3(tmp_path, monkeypatch):
     con.execute("INSERT OR IGNORE INTO schema_migrations (id, applied_at, app_version) "
                 "VALUES ('010_profiles', '2026-10-22T00:00:00+00:00', '4.0.0')")
     con.execute("DROP INDEX IF EXISTS idx_threads_owner_bot_updated")
+    for idx in ("idx_threads_owner_list", "idx_threads_owner_bot_list",   # 011_scale's, on the
+                "idx_threads_owner_unread", "idx_files_owner_created"):   # columns dropped below
+        con.execute(f"DROP INDEX IF EXISTS {idx}")
     con.execute("ALTER TABLE threads DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE files DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE profiles DROP COLUMN backends")
