@@ -661,6 +661,14 @@ class Bot:
     pack: str = ""
     # One line for the character picker.
     description: str = ""
+    # 4.0 ownership (data model only - nothing reads these yet): ``household`` (the
+    # default: managed by the Owner/Admins, everyone has their own chats with it) or
+    # ``personal`` (belongs to the one profile ``owner_profile``); ``cloned_from`` is the
+    # character id a copy was made from. Written to config.yaml only when not default,
+    # so an existing roster keeps the file it has always had.
+    scope: str = "household"
+    owner_profile: str = ""
+    cloned_from: str = ""
 
     @property
     def audience(self) -> str:
@@ -843,6 +851,15 @@ def shipped_default_bots() -> list[Bot]:
 DEFAULT_BOTS: list[Bot] = shipped_default_bots()
 
 
+#: Character scopes (4.0). Anything else on disk reads as the default, household.
+SCOPES = ("household", "personal")
+
+
+def parse_scope(value) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in SCOPES else "household"
+
+
 def _bot_entry(b: Bot) -> dict:
     """The ONE place a Bot becomes a config.yaml record.
 
@@ -897,6 +914,12 @@ def _bot_entry(b: Bot) -> dict:
         entry["pack"] = b.pack
     if b.description:
         entry["description"] = b.description
+    if b.scope != "household":
+        entry["scope"] = b.scope
+    if b.owner_profile:
+        entry["owner_profile"] = b.owner_profile
+    if b.cloned_from:
+        entry["cloned_from"] = b.cloned_from
     if b.api:
         entry["api"] = dict(b.api)
     if b.advisor:
@@ -1043,6 +1066,9 @@ def load_bots() -> list[Bot]:
                 if isinstance(e.get("profiles"), list) else [],
                 pack=str(e.get("pack") or "")[:48],
                 description=str(e.get("description") or "")[:400],
+                scope=parse_scope(e.get("scope")),
+                owner_profile=str(e.get("owner_profile") or "").strip()[:64],
+                cloned_from=str(e.get("cloned_from") or "").strip()[:64],
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,

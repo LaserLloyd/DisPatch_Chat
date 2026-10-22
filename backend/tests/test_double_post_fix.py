@@ -124,7 +124,7 @@ async def test_clean_copy_then_directive_copy_posts_once(wired, monkeypatch):
     mid-text. Only the first may post."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="ws-first")
+    t = await p._db.create_thread(bot_id="main", title="ws-first", owner_profile_id=None)
 
     clean = "The zip is at files/site.zip, enjoy."
     with_directive = "The zip is at files/site.zip, enjoy. [[reply_to_current]]"
@@ -144,7 +144,7 @@ async def test_directive_copy_then_clean_copy_posts_once(wired, monkeypatch):
     redacted WS copy second. Still exactly one message."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="tail-first")
+    t = await p._db.create_thread(bot_id="main", title="tail-first", owner_profile_id=None)
 
     with_directive = "Here you go: [[reply_to:agent:main:thread:abc123]] done."
     clean = "Here you go: done."
@@ -166,7 +166,7 @@ async def test_leading_directive_still_stripped_and_deduped(wired, monkeypatch):
     post for a leading-token reply delivered twice."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="leading")
+    t = await p._db.create_thread(bot_id="main", title="leading", owner_profile_id=None)
 
     with_directive = "[[reply_to_current]] Fresh batch is ready."
     clean = "Fresh batch is ready."
@@ -201,7 +201,7 @@ async def test_old_turn_redelivery_within_window_is_suppressed(wired, monkeypatc
     whole-thread scan can see it."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="old-turn")
+    t = await p._db.create_thread(bot_id="main", title="old-turn", owner_profile_id=None)
 
     text = "Done. No new items today."
     assert await main._deliver_assistant_text(t.id, text) is not None
@@ -221,7 +221,7 @@ async def test_old_turn_redelivery_outside_window_still_posts(wired, monkeypatch
     beyond the ~5-minute horizon must still get through."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="old-turn-expired")
+    t = await p._db.create_thread(bot_id="main", title="old-turn-expired", owner_profile_id=None)
 
     text = "Done. No new items today."
     first = await main._deliver_assistant_text(t.id, text)
@@ -246,7 +246,7 @@ async def test_source_id_delivery_is_not_subject_to_the_window(wired, monkeypatc
     source-less deliveries (the legacy tail paths)."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="identity")
+    t = await p._db.create_thread(bot_id="main", title="identity", owner_profile_id=None)
 
     text = "Same words, new identity."
     assert await main._deliver_assistant_text(t.id, text, source_id="gw:test:1") is not None
@@ -265,7 +265,7 @@ async def test_distinct_texts_are_never_collapsed_by_the_window(wired, monkeypat
     the horizon are both posted."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="distinct")
+    t = await p._db.create_thread(bot_id="main", title="distinct", owner_profile_id=None)
 
     assert await main._deliver_assistant_text(t.id, "First answer.") is not None
     await _simulate_new_turn(p, t.id)
@@ -374,7 +374,7 @@ async def test_complete_then_abridged_twin_posts_once(wired, monkeypatch):
     post, and it is the complete one."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="twin-complete-first")
+    t = await p._db.create_thread(bot_id="main", title="twin-complete-first", owner_profile_id=None)
 
     full = await main._deliver_assistant_text(t.id, _TWIN_COMPLETE)
     assert full is not None
@@ -395,7 +395,7 @@ async def test_abridged_then_complete_twin_upgrades_to_single_complete_post(wire
     abridged bubble)."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="twin-abridged-first")
+    t = await p._db.create_thread(bot_id="main", title="twin-abridged-first", owner_profile_id=None)
 
     abridged = await main._deliver_assistant_text(t.id, _TWIN_ABRIDGED)
     assert abridged is not None
@@ -414,7 +414,7 @@ async def test_distinct_messages_sharing_only_a_short_prefix_both_post(wired, mo
     short opening (well under the 60-char floor) are both delivered."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="short-prefix-distinct")
+    t = await p._db.create_thread(bot_id="main", title="short-prefix-distinct", owner_profile_id=None)
 
     a = "The answer is definitely A. Here is why: it has been the case for years."
     b = "The answer is definitely B. Here is why: the evidence points elsewhere."
@@ -433,7 +433,7 @@ async def test_equal_length_twin_keeps_the_first(wired, monkeypatch):
     suppressed."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="equal-length-twin")
+    t = await p._db.create_thread(bot_id="main", title="equal-length-twin", owner_profile_id=None)
 
     head = "The opening of this reply is identical for both recordings. " * 2
     first = head + "AAA"
@@ -465,7 +465,7 @@ async def test_concurrent_turn_reply_and_backfill_post_once(wired, monkeypatch,
 
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="race")
+    t = await p._db.create_thread(bot_id="main", title="race", owner_profile_id=None)
     text = "A long considered reply. " * 40
 
     turn = main._deliver_assistant_text(t.id, text)

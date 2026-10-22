@@ -233,7 +233,7 @@ def test_api_turn_streams_into_a_bubble_that_the_row_claims(db_env, monkeypatch)
         _sse("Streaming ", "for ", "real.", model="live-model", usage=9)))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "go")
         await llm_api.run_api_turn(thread.id, "llm-custom", "go")
         return (await db.list_messages(thread.id, 50))[0], await db.get_thread(thread.id)
@@ -270,7 +270,7 @@ def test_api_turn_that_fails_mid_stream_retires_its_bubble(db_env, monkeypatch):
         stream=_BreaksAfterFirstChunk()))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "go")
         await llm_api.run_api_turn(thread.id, "llm-custom", "go")
         return (await db.list_messages(thread.id, 50))[0], await db.get_thread(thread.id)

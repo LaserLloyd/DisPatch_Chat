@@ -391,7 +391,7 @@ def test_retry_of_a_plain_message_has_no_opts(app_client):
 
 async def test_regenerate_options_carry_the_action(app_client):
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     row = await db.add_message(tid, "user", "typed",
                                metadata={"action": {"id": "explain", "label": "Explain this"}})
     assert main._action_of(row.metadata) == "explain"
@@ -403,19 +403,19 @@ async def test_regenerate_options_carry_the_action(app_client):
 # --------------------------------------------------------------------------- #
 
 async def test_compose_expands_the_action(app_client):
-    tid = (await app_client.db.create_thread("main")).id
+    tid = (await app_client.db.create_thread("main", owner_profile_id=None)).id
     out = await main._compose_agent_text(tid, "wrld", main.TurnOptions(action="proof"))
     assert out == quick_actions.expand(quick_actions.find("proof"), "wrld")
 
 
 async def test_compose_unknown_action_falls_back_to_the_typed_text(app_client):
-    tid = (await app_client.db.create_thread("main")).id
+    tid = (await app_client.db.create_thread("main", owner_profile_id=None)).id
     assert await main._compose_agent_text(tid, "wrld", main.TurnOptions(action="gone")) == "wrld"
 
 
 async def test_quote_still_prefixes_an_expanded_prompt(app_client):
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     q = await db.add_message(tid, "assistant", "earlier reply")
     out = await main._compose_agent_text(
         tid, "wrld", main.TurnOptions(reply_to=q.id, action="proof"))

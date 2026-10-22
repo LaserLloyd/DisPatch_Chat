@@ -159,7 +159,7 @@ async def test_funnel_demotes_tool_warning(monkeypatch, tmp_path):
             return None
         monkeypatch.setattr(main.manager, "broadcast", _noop)
 
-        await db.create_thread(bot_id="main", thread_id="t1")
+        await db.create_thread(bot_id="main", thread_id="t1", owner_profile_id=None)
         warn = await main._deliver_assistant_text("t1", WARN)
         prose = await main._deliver_assistant_text("t1", "Zombies are gone.")
         assert warn is not None and (warn.metadata or {}).get("sub") is True
@@ -185,7 +185,7 @@ async def test_inject_path_also_demotes(monkeypatch, tmp_path):
             return None
         monkeypatch.setattr(main.manager, "broadcast", _noop)
 
-        await db.create_thread(bot_id="main", thread_id="t2")
+        await db.create_thread(bot_id="main", thread_id="t2", owner_profile_id=None)
         msg = await main._persist_and_broadcast_message("t2", "assistant", WARN)
         assert (msg.metadata or {}).get("sub") is True
         user = await main._persist_and_broadcast_message("t2", "user", WARN)
@@ -334,7 +334,7 @@ async def test_gap_sweep_is_idempotent(tmp_path, monkeypatch):
     await db.connect()
     monkeypatch.setattr(main, "db", db)
     try:
-        t = await db.create_thread(bot_id="main", title="sweep")
+        t = await db.create_thread(bot_id="main", title="sweep", owner_profile_id=None)
         await db.add_message(thread_id=t.id, role="assistant", content="Only once.")
 
         calls = []
@@ -389,7 +389,7 @@ async def test_ws_backfill_does_not_replay_an_earlier_turn(_main_db):
     turn re-posts. A backfill is a replay of history; it must dedup against
     the WHOLE thread, the same rule every other replay path already follows."""
     db = _main_db
-    t = await db.create_thread(bot_id="main", title="outage")
+    t = await db.create_thread(bot_id="main", title="outage", owner_profile_id=None)
     await db.add_message(t.id, "user", "first question")
     await db.add_message(t.id, "assistant", "Done. The zip is ready.")   # CLI path
     await db.add_message(t.id, "user", "second question")
@@ -425,7 +425,7 @@ async def test_ws_backfill_does_not_refire_reactions(_main_db, monkeypatch):
     from types import SimpleNamespace
 
     db = _main_db
-    t = await db.create_thread(bot_id="main", title="refire")
+    t = await db.create_thread(bot_id="main", title="refire", owner_profile_id=None)
     fired: list[list[str]] = []
 
     async def _record(ids, thread_id, bot_id, *, autopilot=False):

@@ -109,7 +109,7 @@ async def test_media_message_not_reimported_after_source_file_is_deleted(
     """The exact live failure: deliver, delete the temp source, sweep again."""
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     src = _png(tmp_path / "agent-batch" / "1-profile.png", b"profile-bytes")
     text = f"Five renders, all cooked and served hot ⚡\n[[media:{src}|① Profile]]"
     _write_transcript(monkeypatch_root, "main",
@@ -138,7 +138,7 @@ async def test_two_captionless_images_in_one_turn_stay_distinct(
     """
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     a = _png(tmp_path / "shots" / "a.png", b"aaaa")
     b = _png(tmp_path / "shots" / "b.png", b"bbbb")
     _write_transcript(monkeypatch_root, "main",
@@ -200,7 +200,7 @@ def test_a_path_shown_in_code_is_not_salvaged_into_a_picture(tmp_path):
 async def test_reply_that_fired_a_reaction_is_not_reimported(monkeypatch_root: Path):
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     text = "Done and verified. Three files updated.\n\n:react:task_complete:"
     _write_transcript(monkeypatch_root, "main",
                       openclaw.session_key_for("main", th.id), "sid-1", [text])
@@ -237,7 +237,7 @@ async def test_upgrading_does_not_re_post_history(monkeypatch_root: Path, tmp_pa
     """
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     _png(config.MEDIA_DIR / "legacyuuid.png", b"served-bytes")
     await db.add_message(th.id, "assistant",
                          "Five renders ⚡\n[[media:/media/legacyuuid.png|① Profile]]")
@@ -256,7 +256,7 @@ async def test_backfill_still_delivers_a_genuine_gap(monkeypatch_root: Path):
     """It marks what is present, not everything — a real gap survives it."""
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.add_message(th.id, "assistant", "the reply that landed")
     _write_transcript(monkeypatch_root, "main",
                       openclaw.session_key_for("main", th.id), "sid-1",
@@ -305,7 +305,7 @@ def test_payload_that_lost_its_picture_lines_defers_to_the_transcript():
 async def test_one_block_delivered_by_three_paths_posts_once_with_pictures(tmp_path):
     """narration → payload → reconciler, the real in-turn sequence."""
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     a = _png(tmp_path / "a-tight.png", b"aaa")
     b = _png(tmp_path / "b-tight.png", b"bbb")
     transcript = (f"Here are the cropped images:\n\n**Test 1**\nMEDIA:{a}\n\n"
@@ -333,7 +333,7 @@ async def test_sweep_considers_each_transcript_item_exactly_once(
     """
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     _write_transcript(monkeypatch_root, "main",
                       openclaw.session_key_for("main", th.id), "sid-1",
                       ["the only reply"])
@@ -363,7 +363,7 @@ async def test_bare_path_reply_not_duplicated_after_source_deletion(tmp_path):
     """The live shape: deliver a bare-path reply, wipe the scratch file, and a
     redundant path (follower/reconciler/sweep) re-offers the same raw text."""
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     src = _png(tmp_path / "scratch" / "shot.png", b"shot-bytes")
     raw = f"Here is the screenshot {src} enjoy"
 
@@ -513,7 +513,7 @@ async def test_reaction_trace_row_does_not_hide_an_in_turn_duplicate():
     part of the turn, not its boundary; other system rows keep boundary duty
     (in user-less mirror threads they are all that separates turns)."""
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.add_message(th.id, "user", "do the thing")
     text = "Done and verified. Three files updated."
     assert await main._deliver_assistant_text(th.id, text) is not None
@@ -537,7 +537,7 @@ async def test_second_look_reply_already_delivered_by_the_gateway_posts_once(
     from app import openclaw
 
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     pic = _png(tmp_path / "fix" / "one.png", b"fix-bytes")
     fix_text = f"My bad — wrong directive format. Here they are properly:\n[[media:{pic}|One]]"
 

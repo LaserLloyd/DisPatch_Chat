@@ -682,7 +682,7 @@ async def test_a_report_landing_mid_stream_leaves_the_bubble_alone(tmp_path, mon
     main._provisional_runs.clear()
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         main._open_provisional(thread.id, "run:advisor-live")
         await main._deliver_assistant_text(
             thread.id, "🔎 **Back with an answer — x** (from worker)\n\nbody " * 8,
@@ -757,7 +757,7 @@ async def test_two_similar_notices_both_land_with_source_ids(tmp_path, monkeypat
     main._delivered.clear()
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         text = "⚠️ worker couldn't finish: check the rebate rules for this year (timeout)"
         a = await main._deliver_assistant_text(thread.id, text, source_id="advisor:r1:failed")
         b = await main._deliver_assistant_text(thread.id, text, source_id="advisor:r2:failed")
@@ -1419,7 +1419,7 @@ async def test_interrupting_mid_stream_keeps_exactly_the_shown_prefix(funnel):
     stub.replies = ["You have two things this afternoon. The dentist is at three, "
                     "and the school call is at four thirty. "
                     "[[research:worker|Find the dentist's phone number]]"]
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     await db.add_message(thread.id, "user", "what's on this afternoon")
     task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on this afternoon",
                                                 voice=VOICE))
@@ -1459,7 +1459,7 @@ async def test_interrupting_mid_stream_keeps_exactly_the_shown_prefix(funnel):
 
 async def test_interrupting_for_a_merge_keeps_nothing(funnel):
     db, frames = funnel.db, funnel.frames
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     await db.add_message(thread.id, "user", "what's on")
     task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on"))
     await _until(lambda: any(f["type"] == "stream_chunk" for f in frames))
@@ -1472,7 +1472,7 @@ async def test_interrupting_for_a_merge_keeps_nothing(funnel):
 async def test_interrupting_before_any_text_keeps_nothing(funnel):
     db, frames, stub = funnel.db, funnel.frames, funnel.stub
     stub.delay_s = 2.0
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     await db.add_message(thread.id, "user", "what's on")
     task = asyncio.create_task(advisor.run_turn(thread.id, "adv", "what's on"))
     await _until(lambda: stub.chat_requests())
@@ -1484,7 +1484,7 @@ async def test_interrupting_before_any_text_keeps_nothing(funnel):
 async def test_an_adopted_run_lands_as_one_ordinary_reply(funnel):
     db, frames, stub = funnel.db, funnel.frames, funnel.stub
     stub.words_per_s = 15
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     await db.add_message(thread.id, "user", "earlier")
     run = await advisor.speculate(thread.id, "adv", "what's on", voice=VOICE)
     await _until(lambda: len(run.text.split()) >= 3)
@@ -1503,7 +1503,7 @@ async def test_two_advisor_turns_with_the_same_reply_both_land(funnel):
     identical reply. Each turn's reply now carries its own identity."""
     db, stub = funnel.db, funnel.stub
     stub.replies = ["Sure, done.", "Sure, done."]
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     for ask in ("lights on", "and the porch"):
         await db.add_message(thread.id, "user", ask)
         main._forget_thread_delivery(thread.id)
@@ -1536,7 +1536,7 @@ async def test_a_second_abort_during_the_keep_partial_wind_down(
     _slow_frames(monkeypatch, frames, kinds={"stream_done", "message_update"}, delay=0.05)
     stub.replies = ["You have two things this afternoon. The dentist is at three, and "
                     "the school call is at four thirty. Want a reminder before each one?"]
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     tid = thread.id
     main._ext_turns.clear()
     if via_ext:
@@ -1576,7 +1576,7 @@ async def test_adoption_under_a_slow_broadcast_keeps_the_chunks_in_order(
     stub.words_per_s = 80
     reply = " ".join(f"w{i:02d}" for i in range(60)) + "."
     stub.replies = [reply]
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     await db.add_message(thread.id, "user", "earlier")
     run = await advisor.speculate(thread.id, "adv", "what's on", voice=VOICE)
     await _until(lambda: len(run.text.split()) >= 5)
@@ -1598,7 +1598,7 @@ async def test_a_merge_after_a_short_advisor_reply_landed_leaves_no_orphan(funne
     row) leaves nothing answering the deleted question."""
     db, frames, stub = funnel.db, funnel.frames, funnel.stub
     stub.replies = ["Two things."]
-    thread = await db.create_thread(bot_id="adv")
+    thread = await db.create_thread(bot_id="adv", owner_profile_id=None)
     main._ext_turns.clear()
     uid = await main._ext_submit_turn("voice", thread.id, "what's on", instructions=VOICE)
     await _until(lambda: any(f["type"] == "stream_done" and f.get("message") for f in frames))

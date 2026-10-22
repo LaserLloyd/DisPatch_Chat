@@ -42,7 +42,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, ownership
 
 log = logging.getLogger("local-chat.firstrun")
 
@@ -86,7 +86,7 @@ async def seed_one(db, deliver, name: str, *, force: bool = False) -> str:
     text = _read_guide(fname)
     if not text:
         raise KeyError(name)
-    thread = await db.create_thread(BOT_ID, title=title)
+    thread = await db.create_thread(BOT_ID, title=title, owner_profile_id=ownership.owner_id())
     await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
                   dedup_recent_window=False)
     log.info("guide %s posted on demand (thread %s)", name, thread.id)
@@ -174,7 +174,10 @@ async def seed_if_first_run(
             text = _read_guide(fname)
             if not text:
                 continue
-            thread = await db.create_thread(BOT_ID, title=title)
+            # The Owner's - or, on a brand-new install, nobody's until the Owner
+            # is created (accounts.create_profile adopts unowned rows then).
+            thread = await db.create_thread(BOT_ID, title=title,
+                                            owner_profile_id=ownership.owner_id())
             made.append(thread.id)
             await deliver(thread.id, text, metadata={"seeded": True},
                           source_id=f"firstrun:{fname}",

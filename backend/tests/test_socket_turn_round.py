@@ -135,7 +135,7 @@ async def test_a_persisted_row_closes_the_bubble_it_was_streamed_into(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         main._open_provisional(thread.id, "run:abc")
         msg = await main._deliver_assistant_text(thread.id, "the finished reply")
         assert msg is not None
@@ -154,7 +154,7 @@ async def test_a_reply_with_no_bubble_still_arrives_as_a_plain_message(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         await main._deliver_assistant_text(thread.id, "no stream ran for this")
         assert [f["type"] for f in frames if f["type"] in
                 ("message", "stream_done")] == ["message"]
@@ -169,7 +169,7 @@ async def test_the_simulated_stream_is_skipped_when_the_real_one_ran(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         long_reply = "The sea is grey and the sky is grey. " * 20
         main._open_provisional(thread.id, "run:xyz")
         await main._deliver_assistant_text(thread.id, long_reply, stream=True)
@@ -186,7 +186,7 @@ async def test_the_simulated_stream_still_runs_on_the_fallback_path(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         await main._deliver_assistant_text(
             thread.id, "The sea is grey and the sky is grey. " * 20,
             stream=True)
@@ -202,7 +202,7 @@ async def test_a_streamed_reply_moves_the_thread_list(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         await main._deliver_assistant_text(
             thread.id, "The sea is grey and the sky is grey. " * 20,
             stream=True)
@@ -256,7 +256,7 @@ async def test_a_failed_upgrade_leaves_the_family_the_copy_they_already_read(
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         abridged = "A" * 200
         await db.add_message(thread.id, "assistant", abridged)
         main._delivered.clear()
@@ -280,7 +280,7 @@ async def test_a_successful_upgrade_still_leaves_exactly_one_copy(wired):
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         abridged = "B" * 200
         await db.add_message(thread.id, "assistant", abridged)
         main._delivered.clear()
@@ -601,7 +601,7 @@ async def test_the_indicator_stops_before_the_media_repair_pass(wired,
     db, frames = wired
     await db.connect()
     try:
-        thread = await db.create_thread(bot_id="main")
+        thread = await db.create_thread(bot_id="main", owner_profile_id=None)
         monkeypatch.setattr(main, "SETTINGS",
                             replace(main.SETTINGS, gateway_ws="1"))
         monkeypatch.setattr(main, "_gateway_router", object(), raising=False)
@@ -700,7 +700,7 @@ async def test_run_agent_turn_dispatches_to_the_overridden_agent(
     try:
         config._write_bots([config._bot_entry(
             config.Bot(id="jobboard", name="Jobs", agent="scout"))])
-        thread = await db.create_thread(bot_id="jobboard")
+        thread = await db.create_thread(bot_id="jobboard", owner_profile_id=None)
 
         calls = []
 
@@ -746,7 +746,7 @@ def test_gateway_resolve_thread_honours_the_agent_override(tmp_path,
     async def _run():
         await db.connect()
         try:
-            thread = await db.create_thread(bot_id="jobboard")
+            thread = await db.create_thread(bot_id="jobboard", owner_profile_id=None)
             resolved = await main._gateway_resolve_thread(
                 f"agent:scout:{thread.id}")
             assert resolved == (thread.id, "jobboard")
@@ -780,7 +780,7 @@ def test_gateway_resolve_thread_still_works_with_no_override(tmp_path,
     async def _run():
         await db.connect()
         try:
-            thread = await db.create_thread(bot_id="main")
+            thread = await db.create_thread(bot_id="main", owner_profile_id=None)
             resolved = await main._gateway_resolve_thread(
                 f"agent:main:{thread.id}")
             assert resolved == (thread.id, "main")

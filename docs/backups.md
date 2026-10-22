@@ -7,7 +7,7 @@ Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): 
 |---|---|---|
 | **Encrypted archive** (`archives/dispatch-<time>.dpbk`) | Everything you need on a new computer: a consistent copy of `chats.db`, the roster and settings files, avatars, the reaction pack, the connection API keys, and (if asked) pictures and files | **Back up now**, or the schedule |
 | **Snapshot** (`chats-<time>.db`) | The rotating, plain SQLite copy of the database | DisPatch, every 6 hours (`system.backup_interval`, `system.backup_keep`) |
-| **Before upgrade** (`<new version>-<time>/`, e.g. `3.0.0-20261018-065040`) | The files a migration is about to change (`chats.db`, `config.yaml`, `security.yaml`, `trusted-devices.yaml`); written only when a step is pending | `uv run python -m app.migrate`, and the server on start; the newest 5 are kept |
+| **Before upgrade** (`<new version>-<time>/`, e.g. `3.0.0-20261018-065040`) | The files a migration is about to change (`chats.db`, `config.yaml`, `security.yaml`, `trusted-devices.yaml`, `push-subscriptions.json`, `apps-data/imagestudio/images.jsonl`); written only when a step is pending | `uv run python -m app.migrate`, and the server on start; the newest 5 are kept |
 
 ## Encrypted archives
 

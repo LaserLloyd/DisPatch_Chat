@@ -630,7 +630,7 @@ def test_run_api_turn_persists_the_reply_and_clears_thinking(db_env, monkeypatch
     _mock_http(monkeypatch, handler)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "are you there?")
         await llm_api.run_api_turn(thread.id, "llm-custom", "are you there?")
         msgs, _ = await db.list_messages(thread.id, 50)
@@ -663,7 +663,7 @@ def test_run_api_turn_uses_the_configured_system_prompt(db_env, monkeypatch):
         or httpx.Response(200, json={"choices": [{"message": {"content": "Arr."}}]})))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
 
@@ -680,7 +680,7 @@ def test_run_api_turn_defaults_the_system_prompt_to_the_bots_name(db_env, monkey
         or httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
 
@@ -709,7 +709,7 @@ def test_run_api_turn_error_paths_never_hang_the_thread(db_env, monkeypatch,
     monkeypatch.setattr(main.manager, "broadcast", capture)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
         msgs, _ = await db.list_messages(thread.id, 50)
@@ -745,7 +745,7 @@ def test_run_api_turn_reports_an_unreachable_provider(db_env, monkeypatch):
     monkeypatch.setattr(main.manager, "broadcast", capture)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
         return await db.get_thread(thread.id)
@@ -770,7 +770,7 @@ def test_run_api_turn_reports_an_empty_reply_instead_of_an_empty_bubble(
     monkeypatch.setattr(main.manager, "broadcast", capture)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
         msgs, _ = await db.list_messages(thread.id, 50)
@@ -797,7 +797,7 @@ def test_run_api_turn_reports_a_misconfigured_bot(db_env, monkeypatch):
     monkeypatch.setattr(main.manager, "broadcast", capture)
 
     async def go():
-        thread = await db.create_thread("llm-broken")
+        thread = await db.create_thread("llm-broken", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-broken", "hi")
         return await db.get_thread(thread.id)
@@ -817,7 +817,7 @@ def test_run_api_turn_sends_prior_context(db_env, monkeypatch):
         or httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "my name is Sam")
         await db.add_message(thread.id, "assistant", "Nice to meet you, Sam.")
         await db.add_message(thread.id, "user", "what is my name?")
@@ -846,7 +846,7 @@ def test_main_routes_an_api_bot_away_from_the_agent_cli(db_env, monkeypatch):
         200, json={"choices": [{"message": {"content": "direct reply"}}]}))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await main.run_agent_turn(thread.id, "llm-custom", "hi")
         msgs, _ = await db.list_messages(thread.id, 50)
@@ -865,7 +865,7 @@ def test_reaction_markers_are_still_stripped_on_the_api_path(db_env, monkeypatch
         "choices": [{"message": {"content": "Sure thing. :react:nope:"}}]}))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi")
         msgs, _ = await db.list_messages(thread.id, 50)
@@ -1090,7 +1090,7 @@ def test_a_repeated_reply_in_a_later_turn_still_lands(db_env, monkeypatch):
         200, json={"choices": [{"message": {"content": "Sure, I can do that."}}]}))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         for ask in ("turn the porch light on", "and the kitchen one"):
             await db.add_message(thread.id, "user", ask)
             main._forget_thread_delivery(thread.id)     # as run_agent_turn does
@@ -1146,7 +1146,7 @@ def test_voice_section_goes_in_the_system_prompt_and_the_user_turn_stays_clean(
         or httpx.Response(200, json={"choices": [{"message": {"content": "Arr."}}]})))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "what's the weather")
         await llm_api.run_api_turn(thread.id, "llm-custom", "what's the weather", voice=VOICE)
 
@@ -1167,7 +1167,7 @@ def test_no_voice_means_no_change_to_the_prompt(db_env, monkeypatch):
         or httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "hi")
         await llm_api.run_api_turn(thread.id, "llm-custom", "hi",
                                    voice=_NS(system="", trailer="x"))
@@ -1240,7 +1240,7 @@ def test_speculate_persists_and_broadcasts_nothing_then_adoption_reuses_the_call
     frames = _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "earlier question")
         head = (await db.list_messages(thread.id, 5))[0][-1].id
         run = await llm_api.speculate(thread.id, "llm-custom", "lights on", voice=VOICE)
@@ -1276,8 +1276,8 @@ def test_a_foreign_or_dead_run_is_discarded_and_the_turn_calls_afresh(db_env, mo
     _voice_env(monkeypatch, db)
 
     async def go():
-        t1 = await db.create_thread("llm-custom")
-        t2 = await db.create_thread("llm-custom")
+        t1 = await db.create_thread("llm-custom", owner_profile_id=None)
+        t2 = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(t1.id, "user", "x")
         await db.add_message(t2.id, "user", "y")
         foreign = await llm_api.speculate(t1.id, "llm-custom", "x")
@@ -1306,7 +1306,7 @@ def test_a_failed_speculation_is_not_adopted(db_env, monkeypatch):
     _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "x")
         run = await llm_api.speculate(thread.id, "llm-custom", "x")
         await asyncio.wait({run._task}, timeout=2)
@@ -1326,7 +1326,7 @@ def test_discard_closes_the_provider_call_within_a_second(db_env, monkeypatch):
         _voice_env(monkeypatch, db)
 
         async def go():
-            thread = await db.create_thread("llm-custom")
+            thread = await db.create_thread("llm-custom", owner_profile_id=None)
             await db.add_message(thread.id, "user", "x")
             run = await llm_api.speculate(thread.id, "llm-custom", "x")
             for _ in range(100):
@@ -1362,7 +1362,7 @@ def test_an_unadopted_run_expires(db_env, monkeypatch):
         _voice_env(monkeypatch, db)
 
         async def go():
-            thread = await db.create_thread("llm-custom")
+            thread = await db.create_thread("llm-custom", owner_profile_id=None)
             run = await llm_api.speculate(thread.id, "llm-custom", "x")
             await asyncio.sleep(0.6)
             return run, run._task.cancelled()
@@ -1387,7 +1387,7 @@ def test_cancel_keep_partial_mid_delivery_reports_the_row(db_env, monkeypatch):
     frames = _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "talk")
         task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
         for _ in range(300):
@@ -1416,7 +1416,7 @@ def test_cancel_before_the_reply_exists_persists_nothing(db_env, monkeypatch, ke
         _voice_env(monkeypatch, db)
 
         async def go():
-            thread = await db.create_thread("llm-custom")
+            thread = await db.create_thread("llm-custom", owner_profile_id=None)
             await db.add_message(thread.id, "user", "x")
             task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "x"))
             for _ in range(200):
@@ -1441,7 +1441,7 @@ def test_cancel_of_a_finished_turn_is_a_no_op(db_env, monkeypatch):
     _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "x")
         task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "x"))
         await task
@@ -1461,7 +1461,7 @@ def test_an_api_turn_after_an_interruption_sees_only_what_was_heard(db_env, monk
     upto = reply.index(" The dentist")
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "what's on")
         await db.add_message(thread.id, "assistant", reply, metadata={"voice_heard": {
             "upto": upto, "interrupted": True, "heard": reply[:upto],
@@ -1502,7 +1502,7 @@ def test_a_second_cancel_waits_for_the_first_instead_of_cancelling_again(
     frames = _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "talk")
         task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
         assert await _wait_for(frames, "stream_chunk")
@@ -1547,7 +1547,7 @@ def test_the_interrupted_stamp_reaches_every_screen(db_env, monkeypatch):
     frames = _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "talk")
         task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
         assert await _wait_for(frames, "stream_chunk")
@@ -1573,7 +1573,7 @@ def test_a_merge_waits_for_a_reply_that_was_already_landing(db_env, monkeypatch)
     frames = _voice_env(monkeypatch, db)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         await db.add_message(thread.id, "user", "talk")
         task = asyncio.create_task(llm_api.run_api_turn(thread.id, "llm-custom", "talk"))
         assert await _wait_for(frames, "stream_chunk")
@@ -1615,7 +1615,7 @@ def test_retracting_a_merged_question_takes_its_api_answer_with_it(
     _ext_env(monkeypatch, db, frames)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         uid = await main._ext_submit_turn("voice", thread.id, "what's on")
         if phase == "landing":
             assert await _wait_for(frames, "stream_chunk")
@@ -1652,7 +1652,7 @@ def test_retraction_spares_rows_that_are_not_the_direct_answer(db_env, monkeypat
     _ext_env(monkeypatch, db, frames)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         tid = thread.id
         q = await db.add_message(tid, "user", "first", metadata={"voice": True})
         gone_a = await db.add_message(tid, "assistant", "a", source_id=llm_api.reply_source_id("api"))
@@ -1685,7 +1685,7 @@ def test_retract_of_a_typed_row_deletes_nothing(db_env, monkeypatch):
     _ext_env(monkeypatch, db, frames)
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         q = await db.add_message(thread.id, "user", "typed")
         await db.add_message(thread.id, "assistant", "a",
                              source_id=llm_api.reply_source_id("api"))
@@ -1710,7 +1710,7 @@ def test_a_speculation_is_tracked_and_its_failure_is_not_a_dead_task(
         llm_api._hooks, track=lambda t: (tracked.append(t), main._track(t))))
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         run = await llm_api.speculate(thread.id, "llm-custom", "hi")
         await asyncio.wait({run._task})
         await asyncio.wait(set(tracked), timeout=1)
@@ -1733,7 +1733,7 @@ def test_shutdown_cancels_a_tracked_speculation_in_order(db_env, monkeypatch):
             llm_api._hooks, track=tracked.append))
 
         async def go():
-            thread = await db.create_thread("llm-custom")
+            thread = await db.create_thread("llm-custom", owner_profile_id=None)
             run = await llm_api.speculate(thread.id, "llm-custom", "hi")
             for _ in range(200):
                 if stub.chat_requests():
@@ -1754,7 +1754,7 @@ def test_an_adopting_turn_leaves_feedback_notes_pending(db_env, monkeypatch):
     _api_bot()
 
     async def go():
-        thread = await db.create_thread("llm-custom")
+        thread = await db.create_thread("llm-custom", owner_profile_id=None)
         rated = await db.add_message(thread.id, "assistant", "An earlier answer.",
                                      metadata={"feedback": {"vote": "down",
                                                             "pending": True}})

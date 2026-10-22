@@ -224,7 +224,7 @@ async def test_compose_agent_text_prepends_the_quote(app_client):
     """_compose_agent_text is the ONE place a quote is added to the prompt —
     pinned directly, independent of the WS plumbing above."""
     db = app_client.db
-    tid = (await db.create_thread("main", title="quote")).id
+    tid = (await db.create_thread("main", title="quote", owner_profile_id=None)).id
     quoted = await db.add_message(tid, "user", "what time is the flight?")
     opts = main.TurnOptions(reply_to=quoted.id)
     composed = await main._compose_agent_text(tid, "6am, don't be late", opts)
@@ -237,7 +237,7 @@ async def test_compose_agent_text_with_no_reply_to_is_unchanged(app_client):
     """Absent is not null: a turn with no quote is untouched, exactly like
     every other optional TurnOptions field."""
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     assert await main._compose_agent_text(tid, "plain text", None) == "plain text"
     assert await main._compose_agent_text(
         tid, "plain text", main.TurnOptions()) == "plain text"
@@ -257,7 +257,7 @@ async def test_reply_directive_id_form_is_resolved_into_metadata(app_client):
     composer's own Reply action writes.
     """
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     target = await db.add_message(tid, "user", "what's the weather tomorrow?")
     msg = await main._persist_and_broadcast_message(
         tid, "assistant", f"[[reply_to:{target.id}]] Sunny and warm.")
@@ -269,7 +269,7 @@ async def test_reply_directive_id_form_is_resolved_into_metadata(app_client):
 
 async def test_reply_directive_current_form_resolves_to_last_user_message(app_client):
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     await db.add_message(tid, "user", "first question")
     last = await db.add_message(tid, "user", "second, more recent question")
     msg = await main._persist_and_broadcast_message(
@@ -282,8 +282,8 @@ async def test_reply_directive_id_outside_thread_is_refused(app_client):
     """A bot must not be able to make its reply appear to quote a message it
     never saw — an id from another thread resolves to nothing."""
     db = app_client.db
-    tid_a = (await db.create_thread("main")).id
-    tid_b = (await db.create_thread("main")).id
+    tid_a = (await db.create_thread("main", owner_profile_id=None)).id
+    tid_b = (await db.create_thread("main", owner_profile_id=None)).id
     elsewhere = await db.add_message(tid_a, "user", "only in thread A")
     msg = await main._persist_and_broadcast_message(
         tid_b, "assistant", f"[[reply_to:{elsewhere.id}]] Sure thing.")
@@ -292,7 +292,7 @@ async def test_reply_directive_id_outside_thread_is_refused(app_client):
 
 async def test_reply_directive_unknown_id_is_refused(app_client):
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     msg = await main._persist_and_broadcast_message(
         tid, "assistant", "[[reply_to:not-a-real-id]] Sure thing.")
     assert "reply_to" not in (msg.metadata or {})
@@ -303,7 +303,7 @@ async def test_reply_directive_current_form_ignored_on_an_old_replay(app_client)
     thread's newest user message happens to be TODAY — see allow_current in
     _extract_reply_directive. The explicit id form is unaffected."""
     db = app_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     original_target = await db.add_message(tid, "user", "original question")
     # Time passes; the thread moves on before the old reply is recovered.
     await db.add_message(tid, "user", "an unrelated later question")
@@ -396,7 +396,7 @@ async def test_pending_feedback_note_reaches_next_turn(real_turn_client):
     `agent_text` below fails outright — this is the test named in the report.
     """
     db = real_turn_client.db
-    tid = (await db.create_thread("main")).id
+    tid = (await db.create_thread("main", owner_profile_id=None)).id
     reply = await db.add_message(tid, "assistant", "The build is green.")
 
     r = real_turn_client.post(f"/api/messages/{reply.id}/feedback",

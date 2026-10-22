@@ -91,7 +91,7 @@ def _write_transcript(root: Path, bot: str, session_key: str, session_id: str,
 
 async def test_fts_search_and_miss():
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.add_message(th.id, "assistant", "the quick brown fox jumps")
     await db.add_message(th.id, "user", "tell me about pineapples please")
     hits = await db.search_messages("pineapples")
@@ -105,7 +105,7 @@ async def test_fts_search_and_miss():
 
 async def test_export_dump_and_count():
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main", title="T")
+    th = await db.create_thread(bot_id="main", title="T", owner_profile_id=None)
     for i in range(5):
         await db.add_message(th.id, "assistant", f"msg {i}")
     assert await db.count_messages() == 5
@@ -117,7 +117,7 @@ async def test_export_dump_and_count():
 
 async def test_reset_inflight_and_durability():
     db = await _fresh_db()
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_status(th.id, "thinking")
     stranded = await db.reset_inflight_threads()
     assert stranded and stranded[0]["id"] == th.id
@@ -133,7 +133,7 @@ async def test_reset_inflight_and_durability():
 async def test_transcript_recover_is_idempotent(monkeypatch_root: Path):
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     key = openclaw.session_key_for("main", th.id)
     _write_transcript(monkeypatch_root, "main", key, "sid-1",
                       ["alpha reply", "beta reply", "gamma reply"])
@@ -154,7 +154,7 @@ async def test_recover_multiturn_idempotent(monkeypatch_root: Path):
     """
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
-    th = await db.create_thread(bot_id="main")
+    th = await db.create_thread(bot_id="main", owner_profile_id=None)
     key = openclaw.session_key_for("main", th.id)
     replies = ["alpha reply", "beta reply", "gamma reply"]
     _write_transcript(monkeypatch_root, "main", key, "sid-mt", replies)
@@ -261,8 +261,8 @@ async def test_stale_error_status_is_cleared_on_boot():
     """A failed turn cannot resume across a restart, so 'error' at boot is
     stale — seven threads on the live box wore one for up to three weeks."""
     db = await _fresh_db()
-    bad = await db.create_thread(bot_id="main")
-    good = await db.create_thread(bot_id="main")
+    bad = await db.create_thread(bot_id="main", owner_profile_id=None)
+    good = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_status(bad.id, "error")
 
     cleared = await db.clear_stale_error_threads()
@@ -276,8 +276,8 @@ async def test_error_and_thinking_are_cleared_independently():
     """The two resets must not swallow each other's rows: 'thinking' rows are
     returned for transcript reconciliation, 'error' rows are not."""
     db = await _fresh_db()
-    t_think = await db.create_thread(bot_id="main")
-    t_err = await db.create_thread(bot_id="main")
+    t_think = await db.create_thread(bot_id="main", owner_profile_id=None)
+    t_err = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_status(t_think.id, "thinking")
     await db.update_thread_status(t_err.id, "error")
 
@@ -292,8 +292,8 @@ async def test_only_file_rows_whose_blob_is_absent_are_purged(tmp_path):
     files_dir = tmp_path / "files"
     files_dir.mkdir()
     (files_dir / "alive.bin").write_bytes(b"still here")
-    kept = await db.add_file("Alive.pdf", "alive.bin", 10, "application/pdf")
-    ghost = await db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf")
+    kept = await db.add_file("Alive.pdf", "alive.bin", 10, "application/pdf", owner_profile_id=None)
+    ghost = await db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf", owner_profile_id=None)
 
     purged = await db.delete_files_missing_from(files_dir)
     assert [r["id"] for r in purged] == [ghost["id"]]

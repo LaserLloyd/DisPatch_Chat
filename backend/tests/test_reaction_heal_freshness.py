@@ -137,7 +137,7 @@ async def test_fresh_followup_still_fires(rx_env, monkeypatch):
 
     monkeypatch.setattr(main.manager, "broadcast", _noop)
     monkeypatch.setattr(main, "_fire_marker_reactions", _capture)
-    await main.db.create_thread(bot_id="main", thread_id="t-fresh")
+    await main.db.create_thread(bot_id="main", thread_id="t-fresh", owner_profile_id=None)
     msg = await main._persist_and_broadcast_message(
         "t-fresh", "assistant", "Done. :react:nice:",
         metadata={"followup": True}, created_at=now_iso(), source_id="s-fresh")
@@ -158,7 +158,7 @@ async def test_old_replay_stays_silent(rx_env, monkeypatch):
 
     monkeypatch.setattr(main.manager, "broadcast", _noop)
     monkeypatch.setattr(main, "_fire_marker_reactions", _capture)
-    await main.db.create_thread(bot_id="main", thread_id="t-old")
+    await main.db.create_thread(bot_id="main", thread_id="t-old", owner_profile_id=None)
     stale = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     msg = await main._persist_and_broadcast_message(
         "t-old", "assistant", "Old news. :react:nice:",
@@ -183,7 +183,7 @@ async def test_refused_fire_leaves_a_sub_row(rx_env, monkeypatch):
     monkeypatch.setattr(main.manager, "broadcast", _noop)
     baseline = reactions.fire_failure_stats()["failures_24h"]
     # A thread owned by a bot with reactions OFF: the fire path refuses it.
-    await main.db.create_thread(bot_id="NoSuchBot", thread_id="t-refuse")
+    await main.db.create_thread(bot_id="NoSuchBot", thread_id="t-refuse", owner_profile_id=None)
     await main._persist_and_broadcast_message(
         "t-refuse", "assistant", "Hi there :react:nice:")
     msgs, _ = await main.db.list_messages("t-refuse")
@@ -264,7 +264,7 @@ async def test_two_markers_fire_once_and_leave_no_refusal_row(rx_env, monkeypatc
     ids = [r.id for r in reactions.load().reactions][:2]
     assert len(ids) == 2
     baseline = reactions.fire_failure_stats()["failures_24h"]
-    await main.db.create_thread(bot_id="main", thread_id="t-two")
+    await main.db.create_thread(bot_id="main", thread_id="t-two", owner_profile_id=None)
     await main._persist_and_broadcast_message(
         "t-two", "assistant", f"Good morning :react:{ids[0]}: and :react:{ids[1]}:")
     msgs, _ = await main.db.list_messages("t-two")

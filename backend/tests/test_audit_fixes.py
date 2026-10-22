@@ -329,7 +329,7 @@ async def test_crashed_turn_import_recovers_repeated_reply(tmp_path, monkeypatch
         monkeypatch.setattr(main.manager, "broadcast", _noop)
         openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
 
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         key = openclaw.session_key_for("main", th.id)
         # Transcript: two turns whose replies are TEXTUALLY IDENTICAL ("Done.").
         sdir = monkeypatch_root / "main" / "sessions"
@@ -398,7 +398,7 @@ async def test_thread_preview_skips_tool_warning_sub_messages(tmp_path):
     db = Database(tmp_path / "t.db")
     await db.connect()
     try:
-        t = await db.create_thread(bot_id="main", title="preview test")
+        t = await db.create_thread(bot_id="main", title="preview test", owner_profile_id=None)
         await db.add_message(thread_id=t.id, role="user", content="do the thing")
         await db.add_message(thread_id=t.id, role="assistant",
                              content="Here is the real answer.")
@@ -467,7 +467,7 @@ async def test_post_delivery_failure_does_not_mark_a_delivered_turn_as_error(
     monkeypatch.setattr(main, "_media_second_look", boom)
     monkeypatch.setattr(main, "_reconcile_transcript", no_reconcile)
 
-    t = await db.create_thread(bot_id="main", title="delivered")
+    t = await db.create_thread(bot_id="main", title="delivered", owner_profile_id=None)
     try:
         await main.run_agent_turn(t.id, "main", "do the thing")
         stored = [m.content for m in await db.dump_messages(t.id)

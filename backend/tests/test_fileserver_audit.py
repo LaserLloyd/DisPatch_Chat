@@ -509,8 +509,8 @@ def test_boot_sweep_purges_records_with_no_blob(fs_env):
     (tmp / "files" / "real.bin").write_bytes(b"blob")
 
     async def _seed():
-        kept = await main.db.add_file("Real.pdf", "real.bin", 4, "application/pdf")
-        await main.db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf")
+        kept = await main.db.add_file("Real.pdf", "real.bin", 4, "application/pdf", owner_profile_id=None)
+        await main.db.add_file("Ghost.pdf", "ghost.bin", 999, "application/pdf", owner_profile_id=None)
         return kept
     kept = asyncio.run(_seed())
 
@@ -529,8 +529,8 @@ def test_boot_sweep_refuses_to_purge_when_the_blob_dir_is_gone(fs_env):
     make_client()
 
     async def _seed():
-        await main.db.add_file("A.pdf", "a.bin", 1, "application/pdf")
-        await main.db.add_file("B.pdf", "b.bin", 2, "application/pdf")
+        await main.db.add_file("A.pdf", "a.bin", 1, "application/pdf", owner_profile_id=None)
+        await main.db.add_file("B.pdf", "b.bin", 2, "application/pdf", owner_profile_id=None)
     asyncio.run(_seed())
 
     # Point at a path that does not exist — the "mount went away" shape.

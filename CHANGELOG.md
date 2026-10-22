@@ -7,6 +7,34 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ownership groundwork (data model only)
+
+Groundwork for per-profile privacy. **Nothing anyone can see or do changes in this step**: who may read a chat,
+a file or a character is decided exactly as before.
+
+- **Every conversation and every File Server record has an owner** (`threads.owner_profile_id`,
+  `files.owner_profile_id`, index on `threads(owner_profile_id, bot_id, updated_at)`). New ones are stamped where
+  they are made: a person's chats and uploads are theirs (REST, WebSocket, `/api/upload`, `/api/files`,
+  `/api/drop`, session import); machine posts (`/api/inject`, `/api/daily`), gateway mirrors, first-run guides,
+  the Job Board's monthly thread and blobs an agent drops into the File Server are the Owner's. An unsigned
+  device's chats belong to the install's only Restricted profile, or the Owner when there are none or several.
+  On an install without an Owner yet the owner stays empty until the Owner is created, which adopts them.
+  Daily threads keep `daily-<character>-<date>` for the Owner (cron-compatible); another profile's would be
+  `daily-<character>-<date>-<first 8 of its id>` (nothing creates one yet).
+- **The owner never leaves the server**: it is excluded from every thread payload and file record (REST,
+  WebSocket, export).
+- **Migration `009_ownership`** (`python -m app.migrate --dry-run` shows the table first). Rule: nobody gains
+  access. A chat with a character only one (non-Owner) profile may use goes to that profile; a chat with a
+  character made for Restricted profiles goes to the install's only Restricted profile; everything else, and
+  every file, to the Owner. `--assign <character>=<profile>` (repeatable) and `--all-to-owner` override it.
+  Characters are not changed (the dry run lists the ones that could become someone's personal character). Push
+  subscriptions record their device's profile; ones whose device is no longer remembered are dropped. The
+  pre-migration backup now also holds `push-subscriptions.json` and the Image Studio ledger. Backups are named
+  `4.0.0-<stamp>`.
+- Stored, not yet used: `profiles.backends` (`{}` = inherit) and the character fields `scope`
+  (`household` | `personal`, absent = household), `owner_profile`, `cloned_from` (written to config.yaml only
+  when set).
+
 ### Settings, simpler
 
 - **Seven sections instead of thirteen tabs.** Settings is grouped by who it is for. *You*: Appearance (theme,

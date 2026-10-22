@@ -105,7 +105,7 @@ def wired(tmp_path, monkeypatch):
 
 async def _seed(db, *, bot_id="main", reply="Paris, of course."):
     """A thread with one question and one answer, the shape regenerate acts on."""
-    thread = await db.create_thread(bot_id=bot_id)
+    thread = await db.create_thread(bot_id=bot_id, owner_profile_id=None)
     user = await db.add_message(thread.id, "user", "what is the capital of France?")
     assistant = await db.add_message(thread.id, "assistant", reply,
                                      metadata={"model": "old-model"})

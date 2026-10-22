@@ -21,7 +21,7 @@ keyed by endpoint and live only for as long as no PIN is set.
 Files (both 0600, in the data dir)
 ----------------------------------
 ``push-vapid.json``          the VAPID keypair, generated once.
-``push-subscriptions.json``  ``{"devices": {key: {endpoint, keys, created, ua}}}``.
+``push-subscriptions.json``  ``{"devices": {key: {endpoint, keys, created, ua, profile_id?}}}``.
 
 The push service answering 404/410 means the browser dropped the
 subscription; it is deleted. Anything else is logged and kept.
@@ -235,7 +235,10 @@ def open_key(endpoint: str) -> str:
     return "open:" + hashlib.sha256(endpoint.encode()).hexdigest()
 
 
-def subscribe(key: str, sub: Any, *, ua: str = "") -> None:
+def subscribe(key: str, sub: Any, *, ua: str = "", profile_id: str | None = None) -> None:
+    """``profile_id`` (4.0): the profile the subscribing device is signed in as, recorded
+    beside the subscription. Not consulted when sending yet - every live device is still
+    pinged, as before."""
     clean = validate(sub)
     with _lock:
         subs = _load_subs()
@@ -244,6 +247,8 @@ def subscribe(key: str, sub: Any, *, ua: str = "") -> None:
         for k in [k for k, v in subs.items() if v.get("endpoint") == clean["endpoint"]]:
             subs.pop(k, None)
         subs[key] = {**clean, "created": int(time.time()), "ua": str(ua)[:160]}
+        if profile_id:
+            subs[key]["profile_id"] = str(profile_id)
         while len(subs) > MAX_DEVICES:
             subs.pop(min(subs, key=lambda k: subs[k].get("created", 0)))
         _save_subs(subs)

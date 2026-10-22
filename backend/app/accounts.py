@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     session_timeout INTEGER,                   -- seconds of inactivity; NULL = role default
     created        TEXT NOT NULL,
     disabled       INTEGER NOT NULL DEFAULT 0,
-    epoch          INTEGER NOT NULL DEFAULT 0  -- bumped to invalidate every session of the profile
+    epoch          INTEGER NOT NULL DEFAULT 0, -- bumped to invalidate every session of the profile
+    backends       TEXT NOT NULL DEFAULT '{}'  -- 4.0: JSON {allowed, default, models}; {} = inherit
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_name ON profiles(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_one_owner ON profiles(role) WHERE role = 'owner';
@@ -111,6 +112,12 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 """
 
+#: ALTERs for columns added to a table after it first shipped (idempotent: a duplicate
+#: column is ignored).
+_ADDED_COLUMNS = (
+    "ALTER TABLE profiles ADD COLUMN backends TEXT NOT NULL DEFAULT '{}'",
+)
+
 #: Tables this module owns, in drop-safe (children first) order.
 TABLES = ("sessions", "devices", "usage_daily", "activity", "profiles", "account_rev", "schema_migrations")
 
@@ -161,6 +168,12 @@ def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
         if key not in _ready:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
+            # Columns added after a table first shipped (CREATE TABLE IF NOT EXISTS leaves an
+            # existing table as it is). Migration 009_ownership reports this one; adding it
+            # here too means no reader ever meets a profiles table without it.
+            for ddl in _ADDED_COLUMNS:
+                with contextlib.suppress(sqlite3.OperationalError):    # already there
+                    con.execute(ddl)
             _ready.add(key)
         yield con
     finally:
@@ -182,6 +195,10 @@ class Profile:
     created: str = ""
     disabled: bool = False
     epoch: int = 0
+    # 4.0: which AI backends this profile may use - {"allowed": [...], "default": ...,
+    # "models": {...}}. {} = inherit the install's (today's behaviour). Stored and read
+    # only for now: nothing consults it yet, and it is not in public().
+    backends: dict = field(default_factory=dict)
 
     @property
     def has_pin(self) -> bool:
@@ -215,7 +232,8 @@ def _row_profile(r: sqlite3.Row) -> Profile:
         budgets=_j(r["budgets"], {}), grants=[str(x) for x in _j(r["grants"], [])],
         denies=[str(x) for x in _j(r["denies"], [])],
         session_timeout=r["session_timeout"], created=r["created"],
-        disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0))
+        disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0),
+        backends=_j(r["backends"], {}) if "backends" in r.keys() else {})
 
 
 #: path -> {id: Profile}. Invalidated by every write in this process.
@@ -337,6 +355,8 @@ def create_profile(name: str, role: str, *, pin_hash: str | None = None,
         except sqlite3.IntegrityError as e:
             raise AccountError("profile_conflict", "That profile could not be created "
                                "(duplicate name or second owner).", 409) from e
+        if role == "owner":
+            _adopt_unowned(con, pid)
         _bump_rev(con)
         invalidate()
     p = get_profile(pid)
@@ -344,8 +364,25 @@ def create_profile(name: str, role: str, *, pin_hash: str | None = None,
     return p
 
 
+def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
+    """The Owner was just created: every thread and file that had no owner yet (made on
+    an install with no Owner - first-run guides, an open install's chats) is the Owner's.
+    So is a row whose owner no longer exists: "remove the lock" on a PIN-only install
+    deletes the Owner row and the next PIN creates a new one with a new id - its chats
+    must follow it, not dangle. The tables live in the same chats.db; on a database
+    without them this is a no-op."""
+    have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for table in ("threads", "files"):
+        if table not in have:
+            continue
+        cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        if "owner_profile_id" in cols:
+            con.execute(f"UPDATE {table} SET owner_profile_id = ? WHERE owner_profile_id IS NULL "
+                        "OR owner_profile_id NOT IN (SELECT id FROM profiles)", (owner_id,))
+
+
 _UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "budgets", "grants",
-              "denies", "session_timeout", "disabled"}
+              "denies", "session_timeout", "disabled", "backends"}
 
 
 def update_profile(profile_id: str, **fields) -> Profile:
@@ -372,7 +409,9 @@ def update_profile(profile_id: str, **fields) -> Profile:
             if cur.role == "owner" and v != "owner":
                 raise AccountError("owner_immutable", "The owner's role cannot be changed.", 409)
             bump = bump or v != cur.role
-        if k in ("budgets",):
+        if k in ("budgets", "backends"):
+            if k == "backends" and not isinstance(v or {}, dict):
+                raise AccountError("profile_field_invalid", "backends must be an object.")
             v = json.dumps(v or {})
         elif k in ("grants", "denies"):
             v = json.dumps(list(v or []))

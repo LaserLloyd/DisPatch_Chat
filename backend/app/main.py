@@ -93,6 +93,7 @@ from . import (
     migrate,
     openclaw,
     openclaw_text,
+    ownership,
     people_api,
     personas,
     plugins_api,
@@ -6358,8 +6359,10 @@ async def _sweep_orphan_blobs() -> None:
             mime = (mimetypes.guess_type(p.name)[0] or "").lower()
             # An agent drops the file under its real name, so name == stored_name;
             # the size counts toward the server-wide storage cap from now on.
+            # Nobody uploaded it through the app: a machine/agent drop -> the Owner.
             await db.adopt_file(p.name[:255], p.name, st.st_size, mime or None,
-                                created, source="fileserver")
+                                created, source="fileserver",
+                                owner_profile_id=ownership.owner_id())
             adopted += 1
         except Exception:
             log.exception("orphan sweep: could not adopt untracked blob %s", p.name)
@@ -7953,7 +7956,8 @@ async def push_subscribe(request: Request):
         if key is None:
             key = push.open_key(clean["endpoint"])
         await asyncio.to_thread(push.vapid_public_key)     # keypair exists
-        push.subscribe(key, clean, ua=request.headers.get("user-agent", ""))
+        push.subscribe(key, clean, ua=request.headers.get("user-agent", ""),
+                       profile_id=ownership.for_request(request))
     except push.PushError as e:
         raise HTTPException(422, str(e)) from None
     return {"ok": True}
@@ -9210,7 +9214,7 @@ async def create_thread(request: Request, payload: dict = Body(...)):
     title = payload.get("title")
     thread = await db.create_thread(
         bot_id=bot_id, title=title if isinstance(title, str) else None,
-        avatar_from_pool=True,
+        avatar_from_pool=True, owner_profile_id=ownership.for_request(request),
     )
     await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
     if SETTINGS.greeting:
@@ -10166,7 +10170,8 @@ async def upload_media(request: Request, file: UploadFile = File(...)):
         size = await _stream_upload(file, FILES_DIR, stored,
                                     max_size=UPLOAD_MAX_DOC, request=request, quota=True)
         mime = ctype or (mimetypes.guess_type(orig)[0] or "")
-        rec = await db.add_file(orig, stored, size, mime)
+        rec = await db.add_file(orig, stored, size, mime,
+                                owner_profile_id=ownership.for_request(request))
         return {"url": f"/api/files/{rec['id']}/download",
                 "id": rec["id"], "name": rec["name"], "size": size,
                 "kind": "document", "mime": mime}
@@ -10219,7 +10224,10 @@ async def _resolve_drop_thread(request: Request, thread_id: str | None):
     bot_id = _drop_notice_bot()
     if not bot_id:
         return None
-    return await db.find_or_create_daily_thread(bot_id, date=local_date())
+    # The shared daily thread (the Owner's id), exactly as before 4.0: a per-profile
+    # drop thread arrives with the inject/daily `profile` round.
+    return await db.find_or_create_daily_thread(bot_id, date=local_date(),
+                                                owner=ownership.owner_id())
 
 
 @app.post("/api/drop")
@@ -10266,7 +10274,8 @@ async def drop_file(
     stored = f"{uuid.uuid4().hex}{Path(orig).suffix.lower()[:16]}"
     size = await _stream_upload(file, FILES_DIR, stored,
                                max_size=cap, request=request, quota=True)
-    rec = await db.add_file(orig, stored, size, ctype or None, source="fileserver")
+    rec = await db.add_file(orig, stored, size, ctype or None, source="fileserver",
+                            owner_profile_id=ownership.for_request(request))
 
     # Bytes are safe from here on — a notice failure must not fail the drop.
     posted_thread: str | None = None
@@ -10337,7 +10346,8 @@ async def file_upload(request: Request, file: UploadFile = File(...)):
     stored = f"{uuid.uuid4().hex}{suffix}"
     size = await _stream_upload(file, FILES_DIR, stored, max_size=FILE_UPLOAD_MAX)
     mime = (file.content_type or "").lower() or (mimetypes.guess_type(orig)[0] or "")
-    rec = await db.add_file(orig, stored, size, mime, source="fileserver")
+    rec = await db.add_file(orig, stored, size, mime, source="fileserver",
+                            owner_profile_id=ownership.for_request(request))
     return rec
 
 
@@ -11062,8 +11072,9 @@ async def inject_message(request: Request, payload: InjectIn):
         bot = config.resolve_bot(payload.bot_id)
         if not bot:
             raise HTTPException(400, "Unknown bot_id")
+        # Machine posts land in the Owner's daily thread (the cron-compatible id).
         thread, created = await db.find_or_create_daily_thread(
-            bot.id, date=payload.date, title=payload.title
+            bot.id, date=payload.date, title=payload.title, owner=ownership.owner_id()
         )
     else:
         raise HTTPException(400, "Provide thread_id or bot_id")
@@ -11102,7 +11113,8 @@ async def ensure_daily_thread(request: Request, payload: DailyThreadIn):
     if not bot:
         raise HTTPException(400, "Unknown bot_id")
     thread, created = await db.find_or_create_daily_thread(
-        bot.id, date=payload.date or local_date(), title=payload.title
+        bot.id, date=payload.date or local_date(), title=payload.title,
+        owner=ownership.owner_id(),
     )
     if created:
         await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
@@ -11488,7 +11500,8 @@ async def openclaw_import_session(request: Request, payload: dict = Body(...)):
     if path is None:
         raise HTTPException(404, "No transcript for that session")
     title = (payload.get("title") or f"Imported · {session_key.split(':')[-1][:18]}")[:120]
-    thread = await db.create_thread(bot_id=bot_id, title=title)
+    thread = await db.create_thread(bot_id=bot_id, title=title,
+                                    owner_profile_id=ownership.for_request(request))
     await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
     count = 0
     for it in openclaw.read_transcript_items(path, include_all=False):
@@ -11699,7 +11712,9 @@ async def _mirror_create_thread(bot: config.Bot, kind: str, tag: str,
             return existing
         return None
     try:
-        thread = await db.create_thread(bot_id=bot.id, title=title, thread_id=tid)
+        # A gateway session nobody started in the app: the Owner's.
+        thread = await db.create_thread(bot_id=bot.id, title=title, thread_id=tid,
+                                        owner_profile_id=ownership.owner_id())
     except Exception:
         log.exception("gateway mirror: could not create thread %s", tid)
         return None
@@ -12818,7 +12833,9 @@ async def _handle_create_thread(ws: WebSocket, data: dict) -> None:
                                 "message": "Daily chat limit reached — "
                                            "try again tomorrow or unlock."})
         return
-    thread = await db.create_thread(bot_id=bot_id, avatar_from_pool=True)
+    thread = await db.create_thread(
+        bot_id=bot_id, avatar_from_pool=True,
+        owner_profile_id=ownership.for_principal(manager.principal_of(ws)))
     await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
     if SETTINGS.greeting:
         bot = config.get_bot(bot_id)

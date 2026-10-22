@@ -150,7 +150,7 @@ async def _add_blob(db: Database, files_dir: Path, name: str, data: bytes,
                     mime: str) -> str:
     """Insert a file row + blob, return its id."""
     stored = f"f{name}"  # keeps the real extension (e.g. .pdf) for ext checks
-    rec = await db.add_file(name, stored, len(data), mime)
+    rec = await db.add_file(name, stored, len(data), mime, owner_profile_id=None)
     (files_dir / stored).write_bytes(data)
     return rec["id"]
 
@@ -275,7 +275,7 @@ async def test_pdf_reaches_agent_gateway_boundary(pdf_env, monkeypatch):
     monkeypatch.setattr(main, "_watch_progress", fake_watch)
     monkeypatch.setattr(main, "_media_second_look", fake_second_look)
 
-    tid = (await db.create_thread("nova", title="pdf test")).id
+    tid = (await db.create_thread("nova", title="pdf test", owner_profile_id=None)).id
     with TestClient(main.app) as client:
         up = client.post("/api/upload",
                          files={"file": ("scale.pdf", pdf_bytes,

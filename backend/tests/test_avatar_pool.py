@@ -182,9 +182,9 @@ def test_first_thread_wears_daily_face_then_pool_draws(pool_env, tmp_path):
         db = Database(tmp_path / "t.db")
         await db.connect()
         try:
-            t1 = await db.create_thread("main", avatar_from_pool=True)
-            t2 = await db.create_thread("main", avatar_from_pool=True)
-            t3 = await db.create_thread("main", avatar_from_pool=True)
+            t1 = await db.create_thread("main", avatar_from_pool=True, owner_profile_id=None)
+            t2 = await db.create_thread("main", avatar_from_pool=True, owner_profile_id=None)
+            t3 = await db.create_thread("main", avatar_from_pool=True, owner_profile_id=None)
             return t1, t2, t3
         finally:
             await db.close()
@@ -225,10 +225,10 @@ def test_ineligible_paths_and_pool_less_bots_never_draw(pool_env, tmp_path):
         await db.connect()
         try:
             # Default (mirror/import/drop shape): no draw, no daily claim.
-            t = await db.create_thread("main")
+            t = await db.create_thread("main", owner_profile_id=None)
             assert t.avatar_snapshot == avatar_snapshots.snapshot_id(_bot())
             # A pool-less bot on the eligible path: plain capture too.
-            await db.create_thread("plain", avatar_from_pool=True)
+            await db.create_thread("plain", avatar_from_pool=True, owner_profile_id=None)
         finally:
             await db.close()
 
@@ -245,8 +245,8 @@ def test_pool_drawn_face_survives_the_rotation_repin(pool_env, tmp_path):
         db = Database(tmp_path / "t.db")
         await db.connect()
         try:
-            t1 = await db.create_thread("main", avatar_from_pool=True)  # daily face
-            t2 = await db.create_thread("main", avatar_from_pool=True)  # pool draw
+            t1 = await db.create_thread("main", avatar_from_pool=True, owner_profile_id=None)  # daily face
+            t2 = await db.create_thread("main", avatar_from_pool=True, owner_profile_id=None)  # pool draw
             # The avatar rotates: every unused unpinned thread re-pins.
             repinned = await db.repin_unused_thread_avatars("main", "newface.png")
             assert t1.id in repinned, "the daily-face thread should follow the rotation"

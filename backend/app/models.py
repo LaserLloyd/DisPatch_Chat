@@ -48,6 +48,11 @@ class ThreadOut(BaseModel):
     # the feature. REDACTED for a locked device (see _redact_thread_dict): a
     # model name is operator configuration, not family-facing.
     prefs: dict | None = None
+    # Which profile this conversation belongs to (4.0 ownership). SERVER-SIDE ONLY:
+    # ``exclude=True`` keeps it out of every model_dump / JSON response and WS frame, so
+    # no client ever learns another profile's id from a thread payload. None = an
+    # install that has no Owner yet (read as the Owner once one exists).
+    owner_profile_id: str | None = Field(default=None, exclude=True)
 
 
 class MessageOut(BaseModel):

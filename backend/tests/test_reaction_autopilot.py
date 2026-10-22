@@ -51,7 +51,7 @@ async def _persist(monkeypatch, thread_id, text, *, hour=DAY_HOUR, metadata=None
 async def test_autopilot_fires_thinking_on_plain_reply(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap", owner_profile_id=None)
     fired = await _persist(monkeypatch, "t-ap", LONG)
     assert fired == [["thinking"]]
 
@@ -59,7 +59,7 @@ async def test_autopilot_fires_thinking_on_plain_reply(rx_env, monkeypatch):
 async def test_autopilot_task_complete_on_done_language(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap2")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap2", owner_profile_id=None)
     fired = await _persist(monkeypatch, "t-ap2",
                            "Deployed and verified end to end — all suites green.")
     assert fired == [["task_complete"]]
@@ -68,7 +68,7 @@ async def test_autopilot_task_complete_on_done_language(rx_env, monkeypatch):
 async def test_autopilot_morning_for_daily_opener(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="daily-main-2099-01-01")
+    await main.db.create_thread(bot_id="main", thread_id="daily-main-2099-01-01", owner_profile_id=None)
     fired = await _persist(monkeypatch, "daily-main-2099-01-01",
                            "Good morning — the overnight chain ran clean.",
                            hour=9)
@@ -83,7 +83,7 @@ async def test_autopilot_morning_for_daily_opener(rx_env, monkeypatch):
 async def test_autopilot_respects_the_skip_rules(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap3")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap3", owner_profile_id=None)
     # Question → the ball is in the user's court.
     assert await _persist(monkeypatch, "t-ap3",
                           "Want me to push the deploy now or hold until morning?") == []
@@ -101,14 +101,14 @@ async def test_autopilot_respects_the_skip_rules(rx_env, monkeypatch):
 async def test_bot_marker_wins_over_autopilot(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap4")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap4", owner_profile_id=None)
     fired = await _persist(monkeypatch, "t-ap4", LONG + " :react:nice:")
     assert fired == [["nice"]]
 
 
 async def test_autopilot_is_off_by_default(rx_env, monkeypatch):
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap5")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap5", owner_profile_id=None)
     assert await _persist(monkeypatch, "t-ap5", LONG) == []
 
 
@@ -124,7 +124,7 @@ async def test_autopilot_fires_on_the_stream_path(rx_env, monkeypatch):
     path every visible final reply takes never fired one."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap6")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap6", owner_profile_id=None)
     assert len(STREAM_LONG) >= main._STREAM_MIN_CHARS   # the streaming branch
     fired = await _persist(monkeypatch, "t-ap6", STREAM_LONG, stream=True)
     assert fired == [["thinking"]]
@@ -134,7 +134,7 @@ async def test_stream_path_honours_replay_freshness(rx_env, monkeypatch):
     """The other half of the drift: a stale replay must not fire anything."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap7")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap7", owner_profile_id=None)
 
     fired: list[list[str]] = []
 
@@ -156,7 +156,7 @@ async def test_stream_path_honours_replay_freshness(rx_env, monkeypatch):
 async def test_stream_path_keeps_the_original_timestamp(rx_env, monkeypatch):
     """_deliver_assistant_text used to drop created_at when stream=True."""
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap8")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap8", owner_profile_id=None)
 
     async def _noop(_frame):
         return None
@@ -178,7 +178,7 @@ async def test_autopilot_falls_back_and_never_notes_a_refusal(rx_env, monkeypatc
     every reply. It must degrade to a mood that exists, silently."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap9")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap9", owner_profile_id=None)
 
     async def _noop(_frame):
         return None
@@ -214,7 +214,7 @@ async def test_autopilot_falls_back_and_never_notes_a_refusal(rx_env, monkeypatc
 async def test_autopilot_stays_silent_when_nothing_resolves(rx_env, monkeypatch):
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap10")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap10", owner_profile_id=None)
 
     async def _noop(_frame):
         return None
@@ -251,7 +251,7 @@ async def test_marker_only_user_message_persists_nothing(rx_env, monkeypatch):
     """`POST /api/inject` with a body of just `:react:random:` used to leave an
     empty bubble: the guard was gated on role == "assistant"."""
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-ap11")
+    await main.db.create_thread(bot_id="main", thread_id="t-ap11", owner_profile_id=None)
 
     async def _noop(_frame):
         return None
@@ -310,7 +310,7 @@ async def test_autopilot_stays_quiet_on_real_alert_text(rx_env, monkeypatch):
     """Every alert that burned an image on 2026-09-07 must now be silent."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-alerts")
+    await main.db.create_thread(bot_id="main", thread_id="t-alerts", owner_profile_id=None)
     for i, text in enumerate(ALERT_SAMPLES):
         fired = await _persist(monkeypatch, "t-alerts", text)
         assert fired == [], f"alert {i} still fired a reaction: {text[:60]!r}"
@@ -324,7 +324,7 @@ async def test_autopilot_still_fires_on_benign_prose(rx_env, monkeypatch):
     """
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-benign")
+    await main.db.create_thread(bot_id="main", thread_id="t-benign", owner_profile_id=None)
     fired = await _persist(
         monkeypatch, "t-benign",
         "Crew dispatched and the verification loop is running clean.")
@@ -339,7 +339,7 @@ async def test_autopilot_skips_machine_injected_rows(rx_env, monkeypatch):
     """
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-inject")
+    await main.db.create_thread(bot_id="main", thread_id="t-inject", owner_profile_id=None)
     fired = await _persist(
         monkeypatch, "t-inject",
         "Crew dispatched and the verification loop is running clean.",
@@ -386,7 +386,7 @@ async def test_a_success_report_that_merely_mentions_failure_still_fires(
     """Position, not vocabulary: the word is mid-body, so it is not an alert."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-success")
+    await main.db.create_thread(bot_id="main", thread_id="t-success", owner_profile_id=None)
     for i, text in enumerate(SUCCESS_REPORTS_THAT_MENTION_FAILURE):
         fired = await _persist(monkeypatch, "t-success", text)
         assert fired != [], (
@@ -398,7 +398,7 @@ async def test_the_alert_guard_only_looks_at_the_opening(rx_env, monkeypatch):
     """The same words lead an alert and are buried in a success report."""
     await main.db.connect()
     _enable_autopilot()
-    await main.db.create_thread(bot_id="main", thread_id="t-pos")
+    await main.db.create_thread(bot_id="main", thread_id="t-pos", owner_profile_id=None)
 
     leading = ("⚠️ The image server is unreachable — image generation is "
                "down and nothing is rendering right now.")

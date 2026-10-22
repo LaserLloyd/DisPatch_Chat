@@ -68,7 +68,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from app import database
+from app import database, ownership
 
 from . import jobs_dedup, jobs_score
 
@@ -166,6 +166,8 @@ async def _ensure_monthly_thread_async(bot_id: str, year: int, month: int):
         bot_id=bot_id,
         title=title,
         avatar_from_pool=False,
+        # The board's monthly thread is written by the job sweep (a machine): the Owner's.
+        owner_profile_id=ownership.owner_id(),
     )
 
 

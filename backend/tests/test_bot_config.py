@@ -89,6 +89,8 @@ def _non_default(f):
         return 42
     if f.default_factory is not dataclasses.MISSING and isinstance(f.default_factory(), list):
         return ["a", "b"]            # a list field (profiles)
+    if f.name == "scope":
+        return "personal"            # the only non-default scope; anything else reads household
     if f.name == "api":
         return {"provider": "openai", "model": "m", "api_key": "k"}
     if f.name == "advisor":

@@ -181,7 +181,7 @@ async def test_native_thread_gap_backfill(monkeypatch_root):
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
     native_id = str(uuid.uuid4())
-    await db.create_thread(bot_id="main", title="native", thread_id=native_id)
+    await db.create_thread(bot_id="main", title="native", thread_id=native_id, owner_profile_id=None)
     # The live funnel already delivered the DisPatch-initiated turn.
     await db.add_message(native_id, "user", "dispatch turn")
     await db.add_message(native_id, "assistant", "dispatch reply")
@@ -208,7 +208,7 @@ async def test_native_thread_deleted_mutes(monkeypatch_root):
     db = await _fresh_db()
     openclaw.OPENCLAW_AGENTS_DIR = monkeypatch_root
     native_id = str(uuid.uuid4())
-    await db.create_thread(bot_id="main", title="native", thread_id=native_id)
+    await db.create_thread(bot_id="main", title="native", thread_id=native_id, owner_profile_id=None)
     f = _write_session(monkeypatch_root, "main", f"agent:main:{native_id}", "sid-n",
                        [_user("q"), _asst("a")])
     state = _fresh_state()
@@ -361,7 +361,7 @@ async def test_sanitize_migration_cleans_and_guards(tmp_path, monkeypatch):
     db = await _fresh_db()
     monkeypatch.setattr(main.config, "DATA_DIR", tmp_path)
     from app import openclaw_text as ot
-    await db.create_thread(bot_id="main", thread_id="t1")
+    await db.create_thread(bot_id="main", thread_id="t1", owner_profile_id=None)
     wall = f"{ot.INTERNAL_RUNTIME_CONTEXT_BEGIN}\njunk\n{ot.INTERNAL_RUNTIME_CONTEXT_END}"
     await db.add_message("t1", "user", wall)                       # scaffolding-only -> deleted
     await db.add_message("t1", "assistant", "keep me <system-reminder>x</system-reminder> done")

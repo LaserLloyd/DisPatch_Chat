@@ -130,7 +130,7 @@ async def test_live_reply_survives_backfilled_longer_twin(wired, monkeypatch):
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="wipe")
+    t = await p._db.create_thread(bot_id="main", title="wipe", owner_profile_id=None)
 
     # Step 1: backfill (say, gap item 3) lands first.
     backfill = await main._deliver_assistant_text(
@@ -170,7 +170,7 @@ async def test_live_reply_survives_when_backfilled_arrives_second(wired, monkeyp
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="wipe-flipped")
+    t = await p._db.create_thread(bot_id="main", title="wipe-flipped", owner_profile_id=None)
 
     live = await main._deliver_assistant_text(
         t.id, SHORT_LIVE,
@@ -210,7 +210,7 @@ async def test_source_id_dedup_is_still_identity_based(wired, monkeypatch):
     for source_id messages to double-post after the fix."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="identity")
+    t = await p._db.create_thread(bot_id="main", title="identity", owner_profile_id=None)
 
     text = "Same gateway id, same body, two paths."
     first = await main._deliver_assistant_text(
@@ -241,7 +241,7 @@ async def test_source_less_twin_replacement_unchanged(wired, monkeypatch):
     is loudly broken by tests instead of silently regressing."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="source-less")
+    t = await p._db.create_thread(bot_id="main", title="source-less", owner_profile_id=None)
 
     # First the abridged (source-less) copy lands — like a transcript tail.
     abridged = await main._deliver_assistant_text(t.id, SHORT_LIVE)

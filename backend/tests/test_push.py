@@ -291,7 +291,7 @@ def test_a_finished_turn_with_a_new_reply_pings_once(env, sent, monkeypatch):
     monkeypatch.setattr(main, "_run_agent_turn", fake_turn)
 
     async def go():
-        thread = await main.db.create_thread(bot)
+        thread = await main.db.create_thread(bot, owner_profile_id=None)
         await main.db.add_message(thread.id, "user", "hi")
         await main.run_agent_turn(thread.id, bot, "hi")
         # A second turn that adds nothing must not re-announce the first reply.

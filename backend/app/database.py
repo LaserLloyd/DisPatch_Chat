@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS threads (
     updated_at  TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'idle',
     is_archived INTEGER NOT NULL DEFAULT 0,
-    is_pinned   INTEGER NOT NULL DEFAULT 0
+    is_pinned   INTEGER NOT NULL DEFAULT 0,
+    -- 4.0 ownership: the profile this conversation belongs to (accounts.profiles.id).
+    -- NULL only while an install has no Owner yet; read as the Owner. Server-side only.
+    owner_profile_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_threads_bot_updated ON threads(bot_id, updated_at DESC);
@@ -90,7 +93,10 @@ CREATE TABLE IF NOT EXISTS files (
     size        INTEGER NOT NULL DEFAULT 0,
     mime        TEXT,
     created_at  TEXT NOT NULL,
-    source      TEXT NOT NULL DEFAULT 'chat'
+    source      TEXT NOT NULL DEFAULT 'chat',
+    -- 4.0 ownership: who put this file here (uploads: the caller; machine and agent
+    -- drops: the Owner). NULL only while the install has no Owner. Server-side only.
+    owner_profile_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at DESC);
@@ -358,6 +364,20 @@ def local_date() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def daily_thread_id(bot_id: str, date: str, owner: str | None) -> str:
+    """``daily-<bot>-<date>`` for the Owner (or no owner: an install without one), so
+    every cron and agent that posts to "today" keeps working; another profile's daily
+    thread gets ``-<first 8 of its profile id>`` on the end."""
+    base = f"daily-{bot_id}-{date}"
+    if not owner:
+        return base
+    from . import accounts
+    own = accounts.get_owner()
+    if own is None or own.id == owner:
+        return base
+    return f"{base}-{owner[:8]}"
+
+
 def new_id() -> str:
     return str(uuid.uuid4())
 
@@ -444,6 +464,19 @@ def current_year_month(now: datetime | None = None) -> tuple[int, int]:
 # have no glyph, no width and — crucially — no bidi semantics. See the comment
 # at the query for why the previous U+2068/U+2069 pair had to go.
 # Distinct from markdown.js's own U+E300/U+E301 placeholder tokens.
+#: The per-profile thread list (4.0 ownership). Also created by migration 009_ownership.
+OWNER_INDEX_DDL = ("CREATE INDEX IF NOT EXISTS idx_threads_owner_bot_updated "
+                   "ON threads(owner_profile_id, bot_id, updated_at DESC)")
+
+
+def _public_file(row) -> dict:
+    """A files row as every caller has always seen it: without the owner column, which
+    stays server-side (ask :meth:`Database.file_owner`)."""
+    d = dict(row)
+    d.pop("owner_profile_id", None)
+    return d
+
+
 FTS_MARK_OPEN = "\ue000"
 FTS_MARK_CLOSE = "\ue001"
 
@@ -546,6 +579,11 @@ class Database:
             # backfill from the old PK column (which was thread_id).
             "ALTER TABLE job_events ADD COLUMN job_id TEXT",
             "ALTER TABLE job_feedback ADD COLUMN job_id TEXT",
+            # 4.0 ownership (migration 009_ownership assigns the existing rows; this
+            # only makes sure the columns exist on a database the migration has not
+            # seen, e.g. one a test builds). NULL = "the Owner" until assigned.
+            "ALTER TABLE threads ADD COLUMN owner_profile_id TEXT",
+            "ALTER TABLE files ADD COLUMN owner_profile_id TEXT",
         ):
             try:
                 await self._db.execute(ddl)
@@ -583,6 +621,9 @@ class Database:
             "ON job_events(job_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_job_feedback_job "
             "ON job_feedback(job_id, created_at)",
+            # Same reason: owner_profile_id exists only after the ALTER loop on an
+            # upgraded database. The per-profile thread list reads this index.
+            OWNER_INDEX_DDL,
         ):
             await self._db.execute(ddl)
         await self._db.commit()
@@ -1023,11 +1064,18 @@ class Database:
         thread_id: str | None = None,
         status: str = "idle",
         avatar_from_pool: bool = False,
+        *,
+        owner_profile_id: str | None,
     ) -> ThreadOut:
         """``avatar_from_pool`` marks an ELIGIBLE creation path: user-created
         threads and the daily rollover draw from the bot's avatar pool (when
         it has one), while mirror/import/drop threads keep the plain capture —
-        they arrive in bursts and must never drain the pool."""
+        they arrive in bursts and must never drain the pool.
+
+        ``owner_profile_id`` is REQUIRED (keyword, no default) so no creation path can
+        forget it: the caller's profile for a person, the Owner for a machine, a
+        mirror or a seed (``app.ownership``). None only on an install with no Owner
+        yet; creating the Owner adopts those rows (accounts.create_profile)."""
         tid = thread_id or new_id()
         ts = now_iso()
         snap: str | None = None
@@ -1056,9 +1104,9 @@ class Database:
             # every thread INSERT.
             snap = await asyncio.to_thread(avatar_snapshots.snapshot_id, bot)
         await self.db.execute(
-            "INSERT INTO threads (id, bot_id, title, created_at, updated_at, status, is_archived, is_pinned, avatar_snapshot, avatar_pinned) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
-            (tid, bot_id, title, ts, ts, status, snap, pinned),
+            "INSERT INTO threads (id, bot_id, title, created_at, updated_at, status, is_archived, is_pinned, avatar_snapshot, avatar_pinned, owner_profile_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)",
+            (tid, bot_id, title, ts, ts, status, snap, pinned, owner_profile_id),
         )
         await self.db.commit()
         return ThreadOut(
@@ -1070,7 +1118,15 @@ class Database:
             # avatar at the exact moment it was created — the one response the
             # client uses to render the new row.
             avatar_url=avatar_snapshots.url_for(tid, snap),
+            owner_profile_id=owner_profile_id,
         )
+
+    async def thread_owner(self, thread_id: str) -> str | None:
+        """The owner profile id of a thread (None: no such thread, or not assigned yet)."""
+        cur = await self.db.execute(
+            "SELECT owner_profile_id FROM threads WHERE id = ?", (thread_id,))
+        row = await cur.fetchone()
+        return row[0] if row else None
 
     async def _claim_daily_face(self, bot_id: str) -> bool:
         """Take today's daily-face slot for a bot. True exactly once per day.
@@ -1379,16 +1435,21 @@ class Database:
         ]
 
     async def find_or_create_daily_thread(
-        self, bot_id: str, date: str | None = None, title: str | None = None
+        self, bot_id: str, date: str | None = None, title: str | None = None,
+        *, owner: str | None,
     ) -> tuple[ThreadOut, bool]:
         """Find-or-create a stable daily thread for a bot.
 
         Daily threads use a deterministic id (`daily-<bot>-<date>`) so OpenClaw
         cron/timers can post to "today" repeatedly without spawning duplicates.
         Returns (thread, created).
+
+        ``owner`` (required): whose daily thread. The Owner (or None, an install
+        without one) keeps the cron-compatible ``daily-<bot>-<date>``; any other
+        profile gets its own ``daily-<bot>-<date>-<first 8 of its id>``.
         """
         d = date or local_date()
-        tid = f"daily-{bot_id}-{d}"
+        tid = daily_thread_id(bot_id, d, owner)
         existing = await self.get_thread(tid)
         if existing:
             return existing, False
@@ -1399,7 +1460,7 @@ class Database:
             # delete an unused daily thread) draws from the pool instead.
             thread = await self.create_thread(
                 bot_id=bot_id, title=title or f"Daily · {d}", thread_id=tid,
-                avatar_from_pool=True,
+                avatar_from_pool=True, owner_profile_id=owner,
             )
             return thread, True
         except sqlite3.IntegrityError:
@@ -1765,14 +1826,16 @@ class Database:
 
     async def add_file(
         self, name: str, stored_name: str, size: int, mime: str | None,
-        source: str = "chat",
+        source: str = "chat", *, owner_profile_id: str | None,
     ) -> dict:
+        """``owner_profile_id`` (required): the uploader's profile; the Owner for a
+        machine or agent drop. Not part of the returned record (server-side only)."""
         fid = new_id()
         ts = now_iso()
         await self.db.execute(
-            "INSERT INTO files (id, name, stored_name, size, mime, created_at, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (fid, name, stored_name, size, mime, ts, source),
+            "INSERT INTO files (id, name, stored_name, size, mime, created_at, source, owner_profile_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (fid, name, stored_name, size, mime, ts, source, owner_profile_id),
         )
         await self.db.commit()
         return {"id": fid, "name": name, "stored_name": stored_name,
@@ -1780,7 +1843,7 @@ class Database:
 
     async def adopt_file(
         self, name: str, stored_name: str, size: int, mime: str | None,
-        created_at: str, source: str = "fileserver",
+        created_at: str, source: str = "fileserver", *, owner_profile_id: str | None,
     ) -> dict:
         """Insert a row for a blob that is ALREADY on disk.
 
@@ -1790,9 +1853,9 @@ class Database:
         """
         fid = new_id()
         await self.db.execute(
-            "INSERT INTO files (id, name, stored_name, size, mime, created_at, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (fid, name, stored_name, size, mime, created_at, source),
+            "INSERT INTO files (id, name, stored_name, size, mime, created_at, source, owner_profile_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (fid, name, stored_name, size, mime, created_at, source, owner_profile_id),
         )
         await self.db.commit()
         return {"id": fid, "name": name, "stored_name": stored_name,
@@ -1804,7 +1867,7 @@ class Database:
             "SELECT * FROM files ORDER BY created_at DESC, rowid DESC"
         )
         rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        return [_public_file(r) for r in rows]
 
     async def total_file_bytes(self) -> int:
         """Sum of all recorded blob sizes (chat + fileserver). Backs the
@@ -1816,7 +1879,13 @@ class Database:
     async def get_file(self, file_id: str) -> dict | None:
         cur = await self.db.execute("SELECT * FROM files WHERE id = ?", (file_id,))
         row = await cur.fetchone()
-        return dict(row) if row else None
+        return _public_file(row) if row else None
+
+    async def file_owner(self, file_id: str) -> str | None:
+        """The owner profile id of a file (None: no such file, or not assigned yet)."""
+        cur = await self.db.execute("SELECT owner_profile_id FROM files WHERE id = ?", (file_id,))
+        row = await cur.fetchone()
+        return row[0] if row else None
 
     async def delete_file(self, file_id: str) -> dict | None:
         f = await self.get_file(file_id)
@@ -1831,7 +1900,7 @@ class Database:
         cur = await self.db.execute(
             "SELECT * FROM files WHERE created_at <= ?", (cutoff_iso,)
         )
-        rows = [dict(r) for r in await cur.fetchall()]
+        rows = [_public_file(r) for r in await cur.fetchall()]
         if rows:
             await self.db.execute(
                 "DELETE FROM files WHERE created_at <= ?", (cutoff_iso,)
@@ -2254,6 +2323,8 @@ class Database:
             avatar_snapshot=snap,
             avatar_url=avatar_snapshots.url_for(row["id"], snap),
             prefs=prefs,
+            # Excluded from every dump (models.ThreadOut): server-side only.
+            owner_profile_id=row["owner_profile_id"] if "owner_profile_id" in keys else None,
         )
 
     @staticmethod

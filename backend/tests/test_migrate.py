@@ -42,8 +42,8 @@ def legacy(tmp_path, monkeypatch):
     async def _build():
         db = Database(d / "chats.db")
         await db.connect()
-        await db.create_thread("kid", "hello", thread_id="t1")
-        await db.create_thread("helper", "world", thread_id="t2")
+        await db.create_thread("kid", "hello", thread_id="t1", owner_profile_id=None)
+        await db.create_thread("helper", "world", thread_id="t2", owner_profile_id=None)
         await db.close()
     asyncio.run(_build())
     # A 2.x security.yaml (no 3.0 keys) with a real PIN hash.
@@ -127,7 +127,7 @@ def test_applying_does_what_the_dry_run_said(legacy):
 def test_a_backup_is_taken_first_and_it_is_complete(legacy):
     rep = migrate.run()
     b = rep.backup
-    assert b is not None and b.parent == legacy / "backups" and b.name.startswith("3.0.0-")
+    assert b is not None and b.parent == legacy / "backups" and b.name.startswith(migrate.TARGET_VERSION + "-")
     assert {p.name for p in b.iterdir()} >= {"chats.db", "config.yaml", "security.yaml"}
     # The backup is the ORIGINAL: a 2.x database (no accounts tables) with its rows.
     con = sqlite3.connect(b / "chats.db")
@@ -207,7 +207,7 @@ def test_the_cli_prints_the_plan(legacy, capsys):
     out = capsys.readouterr().out
     assert "backup:" in out
     assert migrate.main(["--dry-run", "--data-dir", str(legacy)]) == 0
-    assert "already on 3.0" in capsys.readouterr().out
+    assert "already on 4.0" in capsys.readouterr().out
 
 
 def test_starting_the_server_migrates_and_the_owner_unlocks_with_the_old_pin(legacy, monkeypatch):

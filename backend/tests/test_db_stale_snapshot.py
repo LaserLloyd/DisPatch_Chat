@@ -30,7 +30,7 @@ async def test_a_single_row_read_then_a_foreign_commit_does_not_lock_the_next_wr
     db = Database(tmp_path / "chats.db")
     await db.connect()
     try:
-        thread = await db.create_thread("main", "t")
+        thread = await db.create_thread("main", "t", owner_profile_id=None)
         first = await db.add_message(thread.id, "user", "one")
         # Every single-row getter below used to leave its statement active.
         assert await db.get_message(first.id) is not None
@@ -51,7 +51,7 @@ async def test_a_read_still_being_consumed_cannot_lock_another_coroutines_write(
     db = Database(tmp_path / "chats.db")
     await db.connect()
     try:
-        thread = await db.create_thread("main", "t")
+        thread = await db.create_thread("main", "t", owner_profile_id=None)
         for i in range(3):
             await db.add_message(thread.id, "user", f"m{i}")
         cur = await db.db.execute("SELECT id FROM messages WHERE thread_id = ?", (thread.id,))

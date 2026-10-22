@@ -142,7 +142,7 @@ def test_resolving_a_face_never_burns_it(rx_env):
 async def test_mood_is_not_stamped_without_a_matching_face(rx_env, monkeypatch):
     _enable_autopilot("main")
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-noface")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-noface", owner_profile_id=None)
     msg = await _persist(monkeypatch, "t-mood-noface", PLAIN_REPLY)
     # Autopilot picked "thinking" for this text (see test_reaction_autopilot's
     # identical case) but no face exists for it yet — must NOT be stamped, or
@@ -154,7 +154,7 @@ async def test_mood_is_stamped_once_a_face_exists(rx_env, monkeypatch):
     _enable_autopilot("main")
     _drop_mood_face("main", "thinking")
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-face")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-face", owner_profile_id=None)
     msg = await _persist(monkeypatch, "t-mood-face", PLAIN_REPLY)
     assert msg.metadata is not None
     assert msg.metadata["mood"] == "thinking"
@@ -165,7 +165,7 @@ async def test_mood_stamp_leaves_other_metadata_alone(rx_env, monkeypatch):
     _enable_autopilot("main")
     _drop_mood_face("main", "thinking")
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-merge")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-merge", owner_profile_id=None)
     msg = await _persist(monkeypatch, "t-mood-merge", PLAIN_REPLY,
                          metadata={"model": "some/model"})
     assert msg.metadata["mood"] == "thinking"
@@ -177,7 +177,7 @@ async def test_no_mood_stamped_when_autopilot_is_off(rx_env, monkeypatch):
     # autopilot pick, nothing to stamp, regardless of what faces exist.
     _drop_mood_face("main", "thinking")
     await main.db.connect()
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-off")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-off", owner_profile_id=None)
     msg = await _persist(monkeypatch, "t-mood-off", PLAIN_REPLY)
     assert (msg.metadata or {}).get("mood") is None
 
@@ -211,7 +211,7 @@ async def test_mood_face_never_touches_thread_avatar_snapshot(rx_env, monkeypatc
 
     _enable_autopilot("main")
     _drop_mood_face("main", "thinking")
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-noavatar")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-noavatar", owner_profile_id=None)
     msg = await _persist(monkeypatch, "t-mood-noavatar", PLAIN_REPLY)
     assert msg.metadata["mood"] == "thinking"
 
@@ -229,7 +229,7 @@ async def test_mood_face_never_touches_thread_avatar_snapshot(rx_env, monkeypatc
 
 async def test_mood_face_route_serves_the_resolved_file(rx_env):
     client = _unlocked(rx_env)
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-route")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-route", owner_profile_id=None)
     face_bytes = _drop_mood_face("main", "thinking", "x")
     msg = await main.db.add_message("t-mood-route", "assistant", "hi there",
                                     metadata={"mood": "thinking"})
@@ -244,7 +244,7 @@ async def test_mood_face_route_serves_the_resolved_file(rx_env):
 
 async def test_mood_face_route_404s_cleanly(rx_env):
     client = _unlocked(rx_env)
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-404")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-404", owner_profile_id=None)
     # No such message at all.
     assert client.get("/api/messages/does-not-exist/mood-face").status_code == 404
     # A message with no mood.
@@ -260,7 +260,7 @@ async def test_mood_face_route_404s_cleanly(rx_env):
 async def test_mood_face_route_denies_safe_mode_for_an_unsafe_bot(rx_env):
     # "main" (conftest's TEST_BOTS) is NOT flagged safe.
     unlocked = _unlocked(rx_env)
-    await main.db.create_thread(bot_id="main", thread_id="t-mood-safe")
+    await main.db.create_thread(bot_id="main", thread_id="t-mood-safe", owner_profile_id=None)
     _drop_mood_face("main", "thinking")
     msg = await main.db.add_message("t-mood-safe", "assistant", "hi",
                                     metadata={"mood": "thinking"})

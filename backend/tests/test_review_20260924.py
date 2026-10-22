@@ -169,7 +169,7 @@ async def test_regenerate_keeps_rows_that_were_not_the_bots_turn(wired, monkeypa
     db, _ = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         u = await db.add_message(th.id, "user", "q")
         await db.add_message(th.id, "assistant", "the real previous answer")
         await db.add_message(th.id, "system", "⚠️ backup finished (cron alert)")
@@ -209,7 +209,7 @@ async def test_a_failed_regenerate_restores_only_what_it_removed(wired, monkeypa
     db, frames = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         u = await db.add_message(th.id, "user", "q")
         old = await db.add_message(th.id, "assistant", "old answer")
         await db.add_message(th.id, "assistant", "Morning brief: …",
@@ -238,7 +238,7 @@ async def test_a_second_regenerate_is_refused_while_the_first_is_in_flight(wired
     db, frames = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         await db.add_message(th.id, "user", "q1")
         await db.add_message(th.id, "assistant", "a1")
         await db.add_message(th.id, "user", "q2")
@@ -277,7 +277,7 @@ async def test_edit_rerun_leaves_the_question_alone_when_the_rewind_is_refused(w
     db, frames = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         u = await db.add_message(th.id, "user", "original question")
         await db.add_message(th.id, "assistant", "answer to original")
         monkeypatch.setattr(main, "_gateway_client", Gw(supports=False))
@@ -306,7 +306,7 @@ async def test_edit_rerun_stores_the_edit_once_the_rewind_succeeded(wired, monke
     db, frames = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         u = await db.add_message(th.id, "user", "original question")
         await db.add_message(th.id, "assistant", "answer to original")
         gw = Gw(entries=[("e1", "original question")])
@@ -361,7 +361,7 @@ async def test_an_api_bot_is_sent_the_users_message_once(wired, monkeypatch):
                                      api={"provider": "custom",
                                           "base_url": "http://127.0.0.1:9/v1",
                                           "model": "m"}))
-        th = await db.create_thread(bot_id="llm-custom")
+        th = await db.create_thread(bot_id="llm-custom", owner_profile_id=None)
         await db.add_message(th.id, "user", "first question")
         ans = await db.add_message(th.id, "assistant", "first answer")
         await db.add_message(th.id, "user", "follow up please")
@@ -553,7 +553,7 @@ async def test_regenerate_carries_the_quote_into_the_rerun(wired, monkeypatch):
     db, _ = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         await db.add_message(th.id, "user", "q1")
         a1 = await db.add_message(th.id, "assistant", "a1")
         u = await db.add_message(th.id, "user", "what did you mean?",
@@ -579,7 +579,7 @@ async def test_a_feedback_note_quotes_the_reply_it_rates(wired):
     db, _ = wired
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main")
+        th = await db.create_thread(bot_id="main", owner_profile_id=None)
         r = await db.add_message(th.id, "assistant", "The capital of Australia is **Sydney**.\nMore…",
                                  metadata={"feedback": {"vote": "down", "reason": "inaccurate",
                                                         "pending": True}})

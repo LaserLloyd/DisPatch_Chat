@@ -112,7 +112,7 @@ async def test_a_threads_saved_model_reaches_the_gateway_call(turn_env, monkeypa
 
     monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
 
-    t = await db.create_thread(bot_id="main")
+    t = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_prefs(t.id, {"model": "big-model", "thinking": "high"})
 
     await main.run_agent_turn(t.id, "main", "hello")
@@ -138,7 +138,7 @@ async def test_no_saved_prefs_means_no_override_is_sent(turn_env, monkeypatch):
 
     monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
 
-    t = await db.create_thread(bot_id="main")
+    t = await db.create_thread(bot_id="main", owner_profile_id=None)
     await main.run_agent_turn(t.id, "main", "hello")
 
     assert captured == {"model": None, "thinking": None}
@@ -160,7 +160,7 @@ async def test_a_callers_own_opts_win_over_the_threads_saved_prefs(turn_env, mon
 
     monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
 
-    t = await db.create_thread(bot_id="main")
+    t = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_prefs(t.id, {"model": "saved-model", "thinking": "low"})
     opts = main.TurnOptions(model="explicit-model", thinking="max")
     await main.run_agent_turn(t.id, "main", "hello", opts)
@@ -190,7 +190,7 @@ async def test_a_refusal_reaches_the_operator_verbatim_and_runs_once(turn_env, m
 
     monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
 
-    t = await db.create_thread(bot_id="main")
+    t = await db.create_thread(bot_id="main", owner_profile_id=None)
     await db.update_thread_prefs(t.id, {"thinking": "ultra"})
 
     await main.run_agent_turn(t.id, "main", "hello")
@@ -225,7 +225,7 @@ async def test_a_plain_agent_error_is_not_tagged_refused(turn_env, monkeypatch):
 
     monkeypatch.setattr(main, "_send_with_gateway_retry", fake_send)
 
-    t = await db.create_thread(bot_id="main")
+    t = await db.create_thread(bot_id="main", owner_profile_id=None)
     await main.run_agent_turn(t.id, "main", "hello")
 
     errors = [f for f in frames if f.get("type") == "error"]
@@ -540,7 +540,7 @@ def test_an_advisor_turn_gets_the_thread_model_pref(turn_env, monkeypatch, tmp_p
     monkeypatch.setattr(advisor, "run_turn", fake_run_turn)
 
     async def go():
-        t = await db.create_thread(bot_id="advisor", title="t")
+        t = await db.create_thread(bot_id="advisor", title="t", owner_profile_id=None)
         await db.update_thread_prefs(t.id, {"model": "Qwen3.8-27B"})
         await main.run_agent_turn(t.id, "advisor", "hi")
 

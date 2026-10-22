@@ -148,7 +148,7 @@ async def test_every_spoken_payload_reaches_a_visible_bubble(wired, monkeypatch)
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="conservation")
+    t = await p._db.create_thread(bot_id="main", title="conservation", owner_profile_id=None)
 
     spoken = ["Scoping it now.", "Here is the answer, and a question for you."]
     warning = "⚠️ 🛠️ Exec failed: `show ~/notes/x.md` (exit 1)"
@@ -177,7 +177,7 @@ async def test_a_reply_is_never_silently_dropped_by_a_sanitizer(wired, monkeypat
 
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="fidelity")
+    t = await p._db.create_thread(bot_id="main", title="fidelity", owner_profile_id=None)
 
     quoted = ("The opener is:\n\n```\n" + openclaw_text.INTERNAL_RUNTIME_CONTEXT_BEGIN
               + "\n```\n\nAnd this sentence is the actual answer.")
@@ -198,7 +198,7 @@ async def test_the_same_reply_delivered_twice_is_shown_once(wired, monkeypatch):
     must not replay the conversation at the family."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="uniqueness")
+    t = await p._db.create_thread(bot_id="main", title="uniqueness", owner_profile_id=None)
 
     text = "Done. The zip is at files/site.zip."
     await main._deliver_assistant_text(t.id, text)
@@ -218,7 +218,7 @@ async def test_indentation_survives_a_message_that_fires_a_reaction(wired, monke
     message, flattening code blocks and nested lists into nonsense."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="fidelity2")
+    t = await p._db.create_thread(bot_id="main", title="fidelity2", owner_profile_id=None)
 
     code = "def f(x):\n    if x:\n        return 1\n    return 0"
     await main._deliver_assistant_text(t.id, f":react:facepalm:\n\n```python\n{code}\n```")
@@ -233,7 +233,7 @@ async def test_a_quoted_reaction_marker_is_not_stripped_from_the_sentence(wired,
     """An agent explaining the syntax must keep its sentence intact."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="fidelity3")
+    t = await p._db.create_thread(bot_id="main", title="fidelity3", owner_profile_id=None)
 
     text = "No files — the `:react:check_in:` is a reaction marker, not an attachment."
     await main._deliver_assistant_text(t.id, text)
@@ -259,7 +259,7 @@ async def test_a_turn_with_nothing_visible_raises_no_unread_dot(wired, monkeypat
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="visibility")
+    t = await p._db.create_thread(bot_id="main", title="visibility", owner_profile_id=None)
     await p._db.add_message(thread_id=t.id, role="user", content="do the thing")
     await p._db.mark_thread_read(t.id) if hasattr(p._db, "mark_thread_read") else None
 
@@ -305,7 +305,7 @@ async def test_messages_appear_in_the_order_they_were_said(wired, monkeypatch):
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="order")
+    t = await p._db.create_thread(bot_id="main", title="order", owner_profile_id=None)
 
     said = [f"part {i}" for i in range(1, 8)]
     for text in said:
@@ -331,7 +331,7 @@ async def test_a_recovered_message_keeps_its_original_time(wired, monkeypatch):
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="recovery-order")
+    t = await p._db.create_thread(bot_id="main", title="recovery-order", owner_profile_id=None)
 
     original = "2026-08-07T08:56:14+00:00"
     await p._db.add_message(thread_id=t.id, role="assistant",
@@ -361,7 +361,7 @@ async def test_the_sweep_supplies_the_original_time(wired, monkeypatch, tmp_path
     orig_root = openclaw.OPENCLAW_AGENTS_DIR
     openclaw.OPENCLAW_AGENTS_DIR = root
     try:
-        t = await p._db.create_thread(bot_id="main", title="sweep-time")
+        t = await p._db.create_thread(bot_id="main", title="sweep-time", owner_profile_id=None)
         key = openclaw.session_key_for("main", t.id)
         sdir = root / "main" / "sessions"
         sdir.mkdir(parents=True)
@@ -395,7 +395,7 @@ async def test_an_old_backfill_does_not_regress_the_thread_clock(wired, monkeypa
     worse, out of the sweep's sight."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="clock")
+    t = await p._db.create_thread(bot_id="main", title="clock", owner_profile_id=None)
 
     await p._db.add_message(t.id, "assistant", "today's reply")
     now_updated = (await p._db.get_thread(t.id)).updated_at
@@ -418,7 +418,7 @@ async def test_silence_is_never_reported_as_success(wired, monkeypatch):
     """
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    t = await p._db.create_thread(bot_id="main", title="arrives")
+    t = await p._db.create_thread(bot_id="main", title="arrives", owner_profile_id=None)
 
     delivered = await main._deliver_assistant_text(t.id, "a real answer")
     assert delivered is not None, "a deliverable message reported nothing"
@@ -449,7 +449,7 @@ async def test_a_backup_succeeds_while_the_app_is_reading(tmp_path):
     db = Database(tmp_path / "chats.db")
     await db.connect()
     try:
-        th = await db.create_thread("t-backup", "main", "Backup race")
+        th = await db.create_thread("t-backup", "main", "Backup race", owner_profile_id=None)
         for i in range(30):
             await db.add_message(th.id if hasattr(th, "id") else "t-backup",
                                  "assistant", f"line {i}")
@@ -504,8 +504,8 @@ async def test_an_error_notice_still_lights_the_unread_dot(wired, monkeypatch):
     dot-less is a failure that reports nothing, this box's dominant defect."""
     p = wired
     monkeypatch.setattr(main, "db", p._db)
-    quiet = await p._db.create_thread(bot_id="main", title="quiet")
-    loud = await p._db.create_thread(bot_id="main", title="loud")
+    quiet = await p._db.create_thread(bot_id="main", title="quiet", owner_profile_id=None)
+    loud = await p._db.create_thread(bot_id="main", title="loud", owner_profile_id=None)
 
     for lvl in ("info", "ok", "warn"):
         await main._persist_and_broadcast_message(
@@ -537,7 +537,7 @@ async def test_the_notice_backfill_collapses_old_status_lines_only(tmp_path, mon
     db = Database(tmp_path / "chats.db")
     await db.connect()
     try:
-        th = await db.create_thread(bot_id="main", title="history")
+        th = await db.create_thread(bot_id="main", title="history", owner_profile_id=None)
         inj = {"origin": "inject"}
         rows = {
             "🔧 Run `bench-1` recovered after 3h01m": ("info", inj),
