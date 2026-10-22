@@ -68,15 +68,12 @@ def test_tools_config_parses_true_lists_and_unknown_names(adv_env):
     _with_tools()
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
     assert cfg.tools == list(livetools.TOOL_NAMES)
-    assert cfg.tools_locked == list(livetools.TOOL_NAMES), "locked devices get every lookup by default"
-    _with_tools(["weather", "NEWS_SEARCH", "nope"], tools_locked=["weather"],
+    _with_tools(["weather", "NEWS_SEARCH", "nope"],
                 location="  Lisbon,  Portugal ", units="Imperial", tool_rounds=2)
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
     assert cfg.tools == ["news_search", "weather"]           # canonical order, unknown dropped
-    assert cfg.tools_locked == ["weather"]
     assert cfg.location == "Lisbon, Portugal" and cfg.units == "imperial" and cfg.tool_rounds == 2
     assert cfg.offered_tools() == ["news_search", "weather"]
-    assert cfg.locked_down().offered_tools() == ["weather"]
 
 
 def test_the_prompt_mentions_tools_only_when_some_are_offered(adv_env):
@@ -177,17 +174,6 @@ def test_the_round_limit_is_enforced(adv_env, monkeypatch):
     assert [c[0] for c in reg.calls] == ["weather"]
     assert seen[2][1] is None
     assert seen[2][0][-1]["content"] == advisor.TOOL_NOTE_LIMIT
-
-
-def test_a_locked_turn_is_offered_only_the_locked_tools(adv_env, monkeypatch):
-    tmp_path, _ = adv_env
-    _with_tools(["web_search", "weather", "fetch_url"], tools_locked=["weather"])
-    reg = _Registry()
-    _install(monkeypatch, reg)
-    seen = _rounds(monkeypatch, [llm_api.StreamResult(text="Plain answer.")])
-    advisor.bind(_rec_hooks(tmp_path)[0])
-    asyncio.run(advisor.run_turn("t1", "adv", "q", locked=True))
-    assert [s["function"]["name"] for s in seen[0][1]] == ["weather"]
 
 
 def test_no_tools_means_the_old_streaming_call_untouched(adv_env, monkeypatch):

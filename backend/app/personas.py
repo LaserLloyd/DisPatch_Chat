@@ -6,9 +6,8 @@ module is the one place both are read and written, so the Bots tab's
 Personality editor and the AI models Connect field can never disagree.
 
 The persona is only the FIRST block of a direct bot's system prompt: the date,
-RULES / LOCKED_RULES, the tool sentences, the voice section and the profile are
-appended by :func:`advisor.build_system_prompt` and are not editable here. A
-Safe-Mode turn still gets LOCKED_RULES whatever the persona says.
+RULES, the tool sentences, the voice section and the profile are appended by
+:func:`advisor.build_system_prompt` and are not editable here.
 
 Presets are data: ``personas/<id>.md`` files with a small front-matter block
 (``title``, ``description``, ``order``) and the persona text as the body. The

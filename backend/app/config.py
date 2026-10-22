@@ -692,13 +692,9 @@ class Bot:
         add-on. Never a gate: Safe Mode is `safe` alone."""
         return bool(self.safe or not self.hide_unlocked)
 
-    # An advisor MAY be a Safe-Mode bot (2026-10-13; until then the
-    # constructor forced `safe` off for every advisor and the Bot Manager's
-    # shield silently reverted). What a locked family device must never do is
-    # steer an exec-capable agent through an LLM-written brief, and that is
-    # enforced per TURN, not per bot: a turn arriving over a Safe-Mode
-    # connection runs with dispatch off (TurnOptions.locked ->
-    # advisor.run_turn(locked=True)), an unlocked turn keeps everything.
+    # Whether an advisor turn may start agent work is decided per TURN, not per
+    # bot: the caller's `dispatch_agents` permission becomes
+    # advisor.run_turn(dispatch=...).
 
     @property
     def agent_id(self) -> str:
@@ -827,9 +823,8 @@ def shipped_default_bots() -> list[Bot]:
     # then a message to it is answered with a one-line "not connected yet"
     # notice rather than an error.
     #
-    # `safe: true` so the limited tier (Safe Mode, family devices) has something
-    # to talk to out of the box. A Safe-Mode turn on an advisor runs "locked":
-    # no delegation, and only the `tools_locked` subset of the lookups.
+    # Every profile can use it: a turn in someone else's thread never reads the
+    # Admin's knowledge corpus (advisor.scoped_to_thread).
     #
     # `avatar`: the repo ships the Atlas picture in app/default_avatars/; on
     # start-up firstrun.install_default_avatars() copies any missing file of it

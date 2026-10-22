@@ -114,30 +114,3 @@ def test_a_locked_device_cannot_change_it(env, method, path, body):
 def test_a_null_is_refused_rather_than_guessed(env):
     c = _unlocked(env)
     assert c.patch("/api/bots/atlas", json={"hide_unlocked": None}).status_code == 422
-
-
-# --------------------------------------------------------------------------- #
-# The locked prompt of a bot with nothing to lock (the kids' animals)
-# --------------------------------------------------------------------------- #
-
-def _cfg(**kw) -> advisor.AdvisorConfig:
-    base = {"bot_id": "kid", "name": "Lulu", "owner": "the child", "persona": "You are {name}.",
-                "providers": [{"provider": "custom", "model": "m"}], "knowledge_dir": None,
-                "profile_fallback": [], "embeddings": None, "research_agent": "", "action_agent": "",
-                "agents": [], "dispatch_timeout_s": 60, "retrieval_chars": 1000, "history_chars": 1000,
-                "safe": True, "locked": True}
-    base.update(kw)
-    return advisor.AdvisorConfig(**base)
-
-
-def test_a_locked_turn_with_no_agents_and_no_tools_gets_no_safe_mode_paragraph():
-    system = advisor.build_system_prompt(_cfg(), "", [], "Saturday")
-    assert system.startswith("You are Lulu.")
-    assert "Safe Mode" not in system and "marker" not in system
-    assert "About the child" not in system
-
-
-def test_a_locked_turn_with_agents_still_gets_it():
-    system = advisor.build_system_prompt(_cfg(agents=["worker"], research_agent="worker"),
-                                         "", [], "Saturday")
-    assert advisor.LOCKED_RULES.split("{")[0].strip() in system

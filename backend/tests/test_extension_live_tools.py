@@ -130,17 +130,15 @@ def test_results_are_truncated_and_bad_arguments_are_results(adv_env):
 
 # -- the advisor sees them ---------------------------------------------------- #
 
-def test_tools_true_offers_built_ins_and_extension_tools_but_locked_turns_only_built_ins(adv_env):
+def test_tools_true_offers_built_ins_and_extension_tools(adv_env):
     _load()
     _with_tools()
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
     assert cfg.tools == [*livetools.TOOL_NAMES, "dice"]
-    assert cfg.tools_locked == list(livetools.TOOL_NAMES), "add-on tools reach a locked turn only when named"
-    assert cfg.locked_down().offered_tools() == list(livetools.TOOL_NAMES)
-    _with_tools(["dice", "nope"], tools_locked=["weather"])
+    assert cfg.offered_tools() == [*livetools.TOOL_NAMES, "dice"]
+    _with_tools(["dice", "nope"])
     cfg = advisor.AdvisorConfig.from_bot(config.get_bot("adv"))
-    assert cfg.tools == ["dice"] and cfg.tools_locked == ["weather"]
-    assert cfg.locked_down().offered_tools() == []
+    assert cfg.tools == ["dice"] and cfg.offered_tools() == ["dice"]
 
 
 def test_the_model_calls_an_extension_tool_and_a_notice_row_shows(adv_env, monkeypatch):
@@ -211,7 +209,7 @@ def test_the_switch_off_hides_every_tool_and_the_prompt_sentence(adv_env, monkey
 
     (tmp_path / "tools.yaml").write_text("livetools:\n  enabled: false\n")
     assert tools.livetools_enabled() is False
-    assert cfg.offered_tools() == [] and cfg.locked_down().offered_tools() == []
+    assert cfg.offered_tools() == []
     assert advisor._tool_schemas(cfg) == []
     assert "live lookups" not in advisor.build_system_prompt(cfg, "", [], "today")
     status = asyncio.run(advisor.status())
