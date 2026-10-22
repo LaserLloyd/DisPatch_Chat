@@ -49,13 +49,18 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        the default profile, as a User; otherwise ``lock_target: profile_list``;
                        ``--default-profile <id|name>`` picks it explicitly); config.yaml
                        ``hide_unlocked`` -> ``hidden`` and a character ``profiles`` list folds into
-                       those profiles' ``household_bots``. FOUNDATION: registered with stub
-                       plan/apply (it plans nothing and is never recorded); WP-MIG implements it
+                       those profiles' ``household_bots``, then is cleared. The default profile
+                       becomes a User whose ``household_bots`` = the non-agent bots it could
+                       reach; every other Restricted profile stays Restricted (Basic) with the
+                       same computed list. Members, Admins and the Owner keep ``"all"``. Roles and
+                       lists are raw writes: nobody is signed out. Always recorded on its first
+                       run, even with nothing to change, so the auto-run rule never fires later
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml,
-trusted-devices.yaml, push-subscriptions.json and the Image Studio ledger
-(apps-data/imagestudio/images.jsonl). The newest five are kept. ``--restore <dir>`` puts
+trusted-devices.yaml, push-subscriptions.json, the Image Studio ledger
+(apps-data/imagestudio/images.jsonl) and prompt files (prompts*.json), quick-actions.yaml and
+voice-acks.yaml. The newest five are kept. ``--restore <dir>`` puts
 them back.
 """
 
@@ -99,6 +104,7 @@ class Report:
     backup: Path | None = None
     dry_run: bool = False
     ownership: OwnershipPlan | None = None
+    profiles: ProfilesPlan | None = None
 
     @property
     def pending(self) -> bool:
@@ -121,7 +127,13 @@ def _db_file() -> Path:
 
 
 def _ro_uri(path: Path) -> str:
-    return path.resolve().as_uri() + "?mode=ro"
+    """Read-only URI. A WAL database that was closed cleanly has no ``-wal``/``-shm`` beside
+    it, and a plain read-only open would CREATE both (the dry run must leave the directory
+    byte-identical): with neither present nobody has it open, so it is opened immutable."""
+    uri = path.resolve().as_uri() + "?mode=ro"
+    if not Path(str(path) + "-wal").exists() and not Path(str(path) + "-shm").exists():
+        uri += "&immutable=1"
+    return uri
 
 
 def _table_names(path: Path) -> set[str]:
@@ -270,8 +282,9 @@ def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False,
         rep.ownership = p9
 
     if "010_profiles" not in done:
-        rep.actions.extend(Action("010_profiles", line)
-                           for line in plan_profiles(default_profile=default_profile))
+        p10 = profiles_plan(default_profile=default_profile)
+        rep.actions.extend(Action("010_profiles", line) for line in p10.lines())
+        rep.profiles = p10
     return rep
 
 
@@ -280,19 +293,317 @@ def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False,
 # --------------------------------------------------------------------------- #
 
 
+@dataclass
+class ProfileRow:
+    """One profile as 010 leaves it."""
+    id: str
+    name: str
+    old_stored: str              # the profiles.role word today (display only)
+    new_stored: str              # the word 010 leaves there
+    new_role: Role
+    protected: bool
+    household: str | list[str]   # "all" or the list of household bot ids
+    is_default: bool = False
+    write: bool = False          # does 010 UPDATE this row?
+
+
+@dataclass
+class ProfilesPlan:
+    add_column: bool = False
+    rows: list[ProfileRow] = field(default_factory=list)
+    default_id: str | None = None
+    default_name: str = ""
+    default_reason: str = ""
+    gains: list[str] = field(default_factory=list)
+    lock_target: str = "profile_list"
+    sec_exists: bool = False
+    sec_changes: list[tuple[str, object, object]] = field(default_factory=list)
+    hidden: list[str] = field(default_factory=list)          # bot ids that get hidden: true
+    folds: list[tuple[str, list[str]]] = field(default_factory=list)   # (bot id, profile ids)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def config_changes(self) -> bool:
+        return bool(self.hidden or self.folds)
+
+    def lines(self) -> list[str]:
+        out: list[str] = []
+        if self.add_column:
+            out.append("add column: profiles.household_bots (default \"all\")")
+        width = max((len(r.name) for r in self.rows), default=0)
+        for r in self.rows:
+            role = r.new_role.value + (" (protected)" if r.protected else "")
+            if r.new_role is Role.ADMIN:
+                hb = "every household bot (Admin)"
+            elif r.household == "all":
+                hb = "all"
+            else:
+                hb = ", ".join(r.household) if r.household else "none"
+            out.append(f"profile {r.name!r:<{width + 2}} {r.old_stored} -> {role} -> household: {hb}"
+                       + ("  [default profile]" if r.is_default else ""))
+        if self.default_id:
+            out.append(f"default profile: {self.default_name} ({self.default_reason}); unsigned "
+                       "devices and the lock screen land on it with no PIN, and everyone who uses "
+                       "it shares its bots and chats")
+            out.append(f"{self.default_name} gains: " + (", ".join(self.gains) if self.gains else
+                       "nothing (it already was a User)")
+                       + "; never on the default profile: agent bots, voice cloning")
+        else:
+            out.append(f"no default profile ({self.default_reason})"
+                       + ("; the lock screen shows the profile list" if self.sec_exists else ""))
+        for bid in self.hidden:
+            out.append(f"character {bid!r}: hide_unlocked -> hidden")
+        for bid, pids in self.folds:
+            names = [self._name(p) for p in pids]
+            out.append(f"character {bid!r}: profile list [{', '.join(names)}] folded into "
+                       "household_bots, then cleared")
+        for key, old, new in self.sec_changes:
+            out.append(f"security.yaml: {key}: {_show(old)} -> {_show(new)}")
+        out.extend(self.notes)
+        return out                   # never empty: the lock-target line is always there
+
+    def _name(self, pid: str) -> str:
+        return next((r.name for r in self.rows if r.id == pid), pid)
+
+
+def _show(v) -> str:
+    return "(unset)" if v is None else str(v)
+
+
+def _base_bots() -> dict[str, config.Bot]:
+    return {b.id: b for b in getattr(config, "DEFAULT_BOTS", [])}
+
+
+def _bot_3x(entry: dict, base: config.Bot | None) -> config.Bot:
+    """A roster entry with the 3.x access fields resolved exactly as ``config.load_bots``
+    resolves them (audience over the legacy flags, the shipped default as fallback)."""
+    flags = config.reconcile_flags(entry.get("audience"), config.fold_visible(
+        entry.get("visible"),
+        bool(entry.get("safe", base.safe if base else False)),
+        bool(entry.get("hide_unlocked", base.hide_unlocked if base else False))))
+    raw_profiles = entry.get("profiles")
+    return config.Bot(
+        id=str(entry["id"]), name=str(entry.get("name") or entry["id"]),
+        profiles=[str(x) for x in raw_profiles if isinstance(x, str)]
+        if isinstance(raw_profiles, list) else [],
+        scope=config.parse_scope(entry.get("scope")), **flags)
+
+
+def _is_agent_entry(entry: dict) -> bool:
+    """An OpenClaw (gateway) bot: neither the direct ``advisor:`` backend nor an ``api:`` block.
+    Neither falls back to a shipped default (``config.load_bots`` reads them raw too)."""
+    return not isinstance(entry.get("api"), dict) and not (
+        isinstance(entry.get("advisor"), dict) and entry.get("advisor"))
+
+
+def _reach_3x(pid: str, bots: list[tuple[config.Bot, dict]]) -> list[str]:
+    """The household bots a 3.x Restricted profile ``pid`` could reach (audience all or
+    restricted, and ``pid`` in the character's profile list when it has one), minus agent bots
+    (a Basic profile reaches those only with dispatch_agents, which 010 never grants)."""
+    return [b.id for b, e in bots
+            if b.scope == "household" and b.safe and (not b.profiles or pid in b.profiles)
+            and not _is_agent_entry(e)]
+
+
+def _raw_security() -> tuple[bool, dict | None]:
+    """(file exists, parsed mapping or None). Read raw: auth.load() may WRITE."""
+    sec = Path(auth.SECURITY_PATH)
+    if not sec.exists():
+        return False, None
+    try:
+        parsed = yaml.safe_load(sec.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return True, None
+    return True, parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_default(ref: str, profiles: list[accounts.Profile]) -> accounts.Profile:
+    p = _resolve_profile(ref, profiles, flag="--default-profile")
+    if p.role is Role.ADMIN:
+        raise MigrateError(f"--default-profile: {p.name} is an Admin; the default profile is a "
+                           "shared profile everyone lands on without a PIN")
+    if p.has_pin or p.has_password:
+        raise MigrateError(f"--default-profile: {p.name} has a PIN or password; the default "
+                           "profile is opened without one (remove it first)")
+    if p.disabled:
+        raise MigrateError(f"--default-profile: {p.name} is disabled")
+    return p
+
+
+def profiles_plan(*, default_profile: str | None = None) -> ProfilesPlan:
+    """Read-only: what 010_profiles would do to the data directory as it is now.
+
+    Never raises on its own data (anything ambiguous gets ``lock_target: profile_list``); an
+    explicit ``default_profile`` that is unknown, an Admin, has a credential or is disabled
+    raises :class:`MigrateError` (the CLI's exit 2)."""
+    from .contracts import permissions as perms
+
+    out = ProfilesPlan()
+    dbp = _db_file()
+    have = _table_names(dbp)
+    if "profiles" in have:
+        con = sqlite3.connect(_ro_uri(dbp), uri=True)
+        try:
+            out.add_column = "household_bots" not in _columns(con, "profiles")
+        finally:
+            con.close()
+    profiles = _ro_profiles(dbp)
+    by_id = {p.id: p for p in profiles}
+    owner = next((p for p in profiles if p.protected), None)
+
+    base = _base_bots()
+    entries = _raw_roster() or []
+    bots = [(_bot_3x(e, base.get(str(e["id"]))), e) for e in entries]
+
+    # -- 2. the default profile and the lock target --------------------------------------
+    sec_exists, raw_sec = _raw_security()
+    out.sec_exists = sec_exists
+    raw = raw_sec or {}
+    anon = "none" if str(raw.get("anonymous_access") or "").strip().lower() == "none" else "restricted"
+    chosen: accounts.Profile | None = None
+    if default_profile is not None:
+        chosen = _resolve_default(default_profile, profiles)
+        if not sec_exists or raw_sec is None:
+            raise MigrateError("--default-profile: this install has no readable security.yaml "
+                               "(an open install has no lock screen)")
+        out.default_reason = "--default-profile"
+    elif str(raw.get("lock_target") or "").strip().lower() == "default_profile" \
+            and raw.get("default_profile") is not None:
+        hit = by_id.get(str(raw.get("default_profile")).strip())
+        if hit is not None and hit.role is not Role.ADMIN and not hit.disabled \
+                and not (hit.has_pin or hit.has_password):
+            chosen, out.default_reason = hit, "already named in security.yaml"
+        else:
+            out.default_reason = "security.yaml names a default profile that can't be one"
+    elif not sec_exists or raw_sec is None:
+        out.default_reason = ("no security.yaml: an open install" if not sec_exists
+                              else "security.yaml could not be read")
+    elif owner is None:
+        out.default_reason = "no Owner yet: an open install"
+    elif anon == "none":
+        out.default_reason = "anonymous_access: none (unsigned devices saw only the sign-in screen)"
+    else:
+        cands = [p for p in profiles if p.role is Role.BASIC and not p.disabled
+                 and not p.has_pin and not p.has_password]
+        if len(cands) == 1:
+            chosen = cands[0]
+            out.default_reason = ("the only PIN-less Restricted profile, and unsigned devices "
+                                  "already had Restricted access")
+        else:
+            out.default_reason = (f"{len(cands)} PIN-less Restricted profiles, so no guess"
+                                  if cands else "no PIN-less Restricted profile")
+    if chosen is not None:
+        out.default_id, out.default_name = chosen.id, chosen.name
+        out.lock_target = "default_profile"
+
+    if sec_exists and raw_sec is not None:
+        # Written explicitly even when the value is the default, so the Admin can see it.
+        old_lt = str(raw["lock_target"]).strip().lower() if raw.get("lock_target") else None
+        old_dp = str(raw["default_profile"]).strip() if raw.get("default_profile") else None
+        if "lock_target" not in raw or old_lt != out.lock_target:
+            out.sec_changes.append(("lock_target", old_lt, out.lock_target))
+        if "default_profile" not in raw or old_dp != out.default_id:
+            out.sec_changes.append(("default_profile", old_dp, out.default_id))
+
+    # -- 1. household_bots, roles ---------------------------------------------------------
+    for p in profiles:
+        old = accounts.stored_role(p.role, protected=p.protected)
+        is_default = p.id == out.default_id
+        role, household, write = p.role, p.household_bots, out.add_column
+        if p.role is Role.BASIC:
+            if household == "all":                      # not computed yet (010 writes lists)
+                household, write = _reach_3x(p.id, bots), True
+            if is_default:
+                role, write = Role.USER, True
+        out.rows.append(ProfileRow(
+            id=p.id, name=p.name, old_stored=old,
+            new_stored=accounts.stored_role(role, protected=p.protected), new_role=role,
+            protected=p.protected, household=household, is_default=is_default, write=write))
+
+    if chosen is not None:
+        before = perms.effective_permissions(chosen.role, chosen.grants, chosen.denies)
+        after = perms.effective_permissions(Role.USER, chosen.grants, chosen.denies, lock_target=True)
+        out.gains = sorted(str(x) for x in after - before)
+
+    # -- 3. config.yaml ---------------------------------------------------------------------
+    rows = {r.id: r for r in out.rows}
+    for b, e in bots:
+        if b.hide_unlocked and not e.get("hidden"):
+            out.hidden.append(b.id)
+        if not b.profiles:
+            continue
+        out.folds.append((b.id, list(b.profiles)))
+        for pid in b.profiles:
+            r = rows.get(pid)
+            if r is None:
+                out.notes.append(f"NOTE: character {b.id!r} lists an unknown profile {pid!r} "
+                                 "(dropped)")
+            elif r.new_role is not Role.ADMIN and isinstance(r.household, list) \
+                    and b.id not in r.household:
+                out.notes.append(f"NOTE: character {b.id!r} lists {r.name}, who could not use it "
+                                 "before; not added to its household bots")
+        wider = [r.name for r in out.rows if r.new_role is Role.USER and r.household == "all"
+                 and r.id not in b.profiles]
+        if wider:
+            out.notes.append(f"NOTE: character {b.id!r} was limited to its profile list; with "
+                             f"the list cleared, {', '.join(wider)} (household: all) can use it too")
+    return out
+
+
 def plan_profiles(*, default_profile: str | None = None) -> list[str]:
     """Read-only: the 010_profiles report lines (profile -> old stored role -> new role ->
     household list; the capabilities the default profile gains; bot flag changes; the
-    security.yaml diff). ``[]`` = nothing to do. Never raises (an ambiguous install gets
-    ``lock_target: profile_list``); an unknown ``default_profile`` raises MigrateError.
-
-    FOUNDATION STUB: plans nothing, so ``run`` never applies or records 010 yet."""
-    return []
+    security.yaml diff). Never empty: 010 is recorded on its first run even when it changes
+    nothing, so the auto-run rule can never fire later on a 4.0 install. Never raises on the
+    data (an ambiguous install gets ``lock_target: profile_list``); a bad explicit
+    ``default_profile`` raises MigrateError."""
+    return profiles_plan(default_profile=default_profile).lines()
 
 
 def apply_profiles(*, default_profile: str | None = None) -> None:
-    """Apply 010_profiles (the backup was taken by ``run``). FOUNDATION STUB."""
-    raise NotImplementedError("migrate.apply_profiles: WP-MIG")
+    """Apply 010_profiles (the backup was taken by ``run``). Re-planned here, after 001-009.
+
+    Order, so an interrupted run resumes correctly: security.yaml first (a re-run reads the
+    default profile back from it), then the profiles rows in one transaction (lists are only
+    computed for rows still on "all"), then config.yaml (the profile lists the computation
+    reads are cleared last). Raw writes, no epoch bump: no session, device or remembered
+    device is signed out or touched."""
+    pp = profiles_plan(default_profile=default_profile)
+    if pp.sec_changes and pp.sec_exists:
+        cfg = auth.load()
+        cfg.lock_target = pp.lock_target
+        cfg.default_profile = pp.default_id
+        auth._write(cfg)
+        auth._bust_cache()
+    import json
+    writes = [r for r in pp.rows if r.write]
+    if pp.add_column or writes:
+        with accounts.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                if "household_bots" not in _columns(con, "profiles"):
+                    con.execute("ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'")
+                for r in writes:
+                    con.execute("UPDATE profiles SET role = ?, household_bots = ? WHERE id = ?",
+                                (r.new_stored, json.dumps(r.household), r.id))
+                accounts._bump_rev(con)
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+        accounts.invalidate()
+    if pp.config_changes:
+        roster = _raw_roster()
+        if roster is not None:
+            hide = set(pp.hidden)
+            fold = {bid for bid, _ in pp.folds}
+            for e in roster:
+                bid = str(e["id"])
+                if bid in hide:
+                    e["hidden"] = True
+                if bid in fold:
+                    e.pop("profiles", None)
+            config._write_bots(roster)
 
 
 # --------------------------------------------------------------------------- #
@@ -379,8 +690,17 @@ def _bot_of(entry: dict) -> config.Bot:
 
 
 def _could_use(bot: config.Bot, prof: accounts.Profile) -> bool:
-    from . import characters, policy
-    return characters.may_use(bot, policy.profile_principal(prof))
+    """Could ``prof`` use ``bot`` under the 3.x rules 009 was written against (audience, then
+    the profile list; Admins everything)? Frozen here on purpose: 4.0's ``characters.may_use``
+    asks other questions (household lists, personal bots), and 009's never-widen rule is
+    about what a profile could read BEFORE the upgrade."""
+    if prof.role is Role.ADMIN:
+        return True
+    if bot.profiles and prof.id not in bot.profiles:
+        return False
+    if prof.role is Role.BASIC:
+        return bot.audience in ("all", "restricted")
+    return True
 
 
 def _default_target(bot: config.Bot | None, by_id: dict[str, accounts.Profile],
@@ -397,7 +717,8 @@ def _default_target(bot: config.Bot | None, by_id: dict[str, accounts.Profile],
     return None, "default"
 
 
-def _resolve_profile(ref: str, profiles: list[accounts.Profile]) -> accounts.Profile:
+def _resolve_profile(ref: str, profiles: list[accounts.Profile], *,
+                     flag: str = "--assign") -> accounts.Profile:
     want = ref.strip()
     hit = next((p for p in profiles if p.id == want), None) \
         or next((p for p in profiles if p.name.casefold() == want.casefold()), None)
@@ -405,7 +726,7 @@ def _resolve_profile(ref: str, profiles: list[accounts.Profile]) -> accounts.Pro
         pre = [p for p in profiles if p.id.startswith(want)]
         hit = pre[0] if len(pre) == 1 else None
     if hit is None:
-        raise MigrateError(f"--assign: no profile {ref!r} (use its name or id)")
+        raise MigrateError(f"{flag}: no profile {ref!r} (use its name or id)")
     return hit
 
 
@@ -609,12 +930,28 @@ PUSH_SUBS_REL = "push-subscriptions.json"
 IMAGE_LEDGER_REL = "apps-data/imagestudio/images.jsonl"
 
 
-def _backed_up_files() -> list[tuple[str, Path]]:
-    """(name inside the backup, live path) for every file besides chats.db."""
+#: 010_profiles' additions to the set (BUILD-PLAN-v2 §1.6 step 4): files the 4.0 profile code
+#: rewrites per profile, so the pre-upgrade copy is the one a hard rollback wants.
+QUICK_ACTIONS_REL = "quick-actions.yaml"
+VOICE_ACKS_REL = "voice-acks.yaml"
+IMAGE_PROMPTS_GLOB = "apps-data/imagestudio/prompts*.json"
+
+
+def _backed_up_files(prompts_from: Path | None = None) -> list[tuple[str, Path]]:
+    """(name inside the backup, live path) for every file besides chats.db. The Image Studio
+    prompt files (``prompts.json``, ``prompts-<profile>.json``) are found by globbing
+    ``prompts_from`` (default: the data directory; ``restore`` passes the backup)."""
     data = Path(config.DATA_DIR)
-    return [("config.yaml", Path(config.CONFIG_PATH)), ("security.yaml", Path(auth.SECURITY_PATH)),
-            ("trusted-devices.yaml", Path(auth.TRUSTED_PATH)),
-            (PUSH_SUBS_REL, data / PUSH_SUBS_REL), (IMAGE_LEDGER_REL, data / IMAGE_LEDGER_REL)]
+    out = [("config.yaml", Path(config.CONFIG_PATH)), ("security.yaml", Path(auth.SECURITY_PATH)),
+           ("trusted-devices.yaml", Path(auth.TRUSTED_PATH)),
+           (PUSH_SUBS_REL, data / PUSH_SUBS_REL), (IMAGE_LEDGER_REL, data / IMAGE_LEDGER_REL),
+           (QUICK_ACTIONS_REL, data / QUICK_ACTIONS_REL), (VOICE_ACKS_REL, data / VOICE_ACKS_REL)]
+    root = Path(prompts_from) if prompts_from is not None else data
+    for f in sorted(root.glob(IMAGE_PROMPTS_GLOB)):
+        if f.is_file():
+            rel = f.relative_to(root).as_posix()
+            out.append((rel, data / rel))
+    return out
 
 
 def backup(version: str = TARGET_VERSION) -> Path:
@@ -654,7 +991,7 @@ def restore(src: Path) -> list[str]:
     if not src.is_dir():
         raise FileNotFoundError(f"{src} is not a backup directory")
     restored = []
-    for name, target in (("chats.db", _db_file()), *_backed_up_files()):
+    for name, target in (("chats.db", _db_file()), *_backed_up_files(prompts_from=src)):
         f = src / name
         if f.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -763,9 +1100,8 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
         _apply_ownership(ownership_plan(assign=assign, all_to_owner=all_to_owner))
     _record("009_ownership")
     if "010_profiles" in steps:
-        # Recorded only when it actually ran (unlike the steps above): until WP-MIG lands,
-        # plan_profiles() plans nothing, and a database must not be marked as migrated by
-        # the stub.
+        # Recorded only when it ran. plan() always lists 010 until it is recorded, so in
+        # practice it runs (and is recorded) on the first start of every data directory.
         apply_profiles(default_profile=default_profile)
         _record("010_profiles")
     rep.applied = sorted(steps)
