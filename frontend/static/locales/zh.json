@@ -773,7 +773,7 @@
   "reactions": {
     "locked": "[zh] Sign in as Owner to manage reactions",
     "add_heading": "添加一张反应图片",
-    "upload": "⤒ 上传图片",
+    "upload": "上传图片",
     "generate": "生成",
     "generate_placeholder": "描述一张反应图片…",
     "generate_unavailable": "这台机器上没有配置出图 CLI",

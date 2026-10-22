@@ -490,7 +490,7 @@ function renderManager() {
   const add = el('section', { class: 'rx-section' });
   add.append(el('h3', { class: 'rx-h3', text: t('reactions.add_heading') }));
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
-  const uploadBtn = el('button', { class: 'btn-secondary', text: t('reactions.upload') });
+  const uploadBtn = el('button', { class: 'btn-secondary' }, [spriteIcon('upload', 14), ` ${t('reactions.upload')}`]);
   uploadBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async () => {
     const f = fileInput.files && fileInput.files[0];

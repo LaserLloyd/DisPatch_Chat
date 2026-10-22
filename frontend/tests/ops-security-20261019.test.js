@@ -57,8 +57,8 @@ test('dashboard: a permission 403 (an Admin on the Owner\'s Health tab) is not a
   assert.equal(n, 0);
 });
 
-test('dashboard: a real downgrade (403 decoy) still hands off to the lock handler', dom, async () => {
-  const n = await mountWith(403, { detail: 'Unlock for full access', decoy: true });
+test('dashboard: a real downgrade (403 locked) still hands off to the lock handler', dom, async () => {
+  const n = await mountWith(403, { detail: 'Sign in to continue', locked: true });
   assert.equal(n, 1);
 });
 

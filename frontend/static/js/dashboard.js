@@ -86,7 +86,7 @@ async function getJSON(url) {
     }
     const err = new Error(`${r.status}: ${detail}`);
     err.status = r.status;
-    err.locked = r.status === 401 || !!(body && (body.locked || body.decoy));
+    err.locked = r.status === 401 || !!(body && body.locked);
     throw err;
   }
   return r.json();
@@ -353,9 +353,9 @@ async function refresh() {
   } catch (e) {
     D.error = cleanErr(e);
     // Locked out mid-session: hand off to main.js and get out of the way. Only a real
-    // downgrade (401, or a 403 that says decoy/locked) is that: since 3.0 an Admin is
-    // signed in but the dashboard is the Owner's (admin_system), and treating that 403
-    // as "locked" flipped the Admin's whole UI to the Restricted view.
+    // downgrade (401, or a 403 that says locked) is that: a signed-in profile that
+    // merely lacks the permission (admin_system) gets a plain 403, and treating that
+    // as "locked" would sign the whole UI out.
     if (e.locked) {
       stopPolling();
       closeDashboard();

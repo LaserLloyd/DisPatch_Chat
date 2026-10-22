@@ -773,7 +773,7 @@
   "reactions": {
     "locked": "リアクションを管理するにはオーナーとしてサインインしてください",
     "add_heading": "リアクションを追加",
-    "upload": "⤒ 画像をアップロード",
+    "upload": "画像をアップロード",
     "generate": "生成",
     "generate_placeholder": "リアクション画像の内容を入力…",
     "generate_unavailable": "このマシンでは画像生成 CLI を使えません",

@@ -833,7 +833,7 @@
   "reactions": {
     "locked": "[ar] Sign in as Owner to manage reactions",
     "add_heading": "إضافة تفاعل",
-    "upload": "⤒ رفع صورة",
+    "upload": "رفع صورة",
     "generate": "توليد",
     "generate_placeholder": "صِف صورة تفاعل…",
     "generate_unavailable": "أداة توليد الصور غير متاحة على هذا الجهاز",

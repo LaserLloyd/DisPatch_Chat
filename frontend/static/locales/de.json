@@ -785,7 +785,7 @@
   "reactions": {
     "locked": "[de] Sign in as Owner to manage reactions",
     "add_heading": "Reaktion hinzufügen",
-    "upload": "⤒ Bild hochladen",
+    "upload": "Bild hochladen",
     "generate": "Erzeugen",
     "generate_placeholder": "Reaktionsbild beschreiben…",
     "generate_unavailable": "Bild-CLI ist auf diesem Rechner nicht verfügbar",

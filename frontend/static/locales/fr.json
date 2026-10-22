@@ -796,7 +796,7 @@
   "reactions": {
     "locked": "[fr] Sign in as Owner to manage reactions",
     "add_heading": "Ajouter une réaction",
-    "upload": "⤒ Envoyer une image",
+    "upload": "Envoyer une image",
     "generate": "Générer",
     "generate_placeholder": "Décris une réaction…",
     "generate_unavailable": "CLI d’images indisponible sur cette machine",

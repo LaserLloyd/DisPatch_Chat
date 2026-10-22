@@ -444,9 +444,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .bubble th.md-th { position: relative; cursor: pointer; user-select: none; -webkit-user-select: none; padding-inline-end: 22px; }
 .bubble th.md-th:hover, .bubble th.md-th:focus-visible { background: color-mix(in oklab, var(--bg-hover) 70%, var(--accent) 30%); }
 .bubble th.md-th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.bubble th.md-th::after { content: '⇅'; position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; opacity: .35; }
-.bubble th.md-th[aria-sort="ascending"]::after { content: '▲'; opacity: 1; color: var(--accent-text); }
-.bubble th.md-th[aria-sort="descending"]::after { content: '▼'; opacity: 1; color: var(--accent-text); }
+.bubble th.md-th::after {
+  content: ""; position: absolute; inset-inline-end: 7px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; opacity: .4; background: currentColor;
+  -webkit-mask: var(--ico-arrow-up-down) center / contain no-repeat; mask: var(--ico-arrow-up-down) center / contain no-repeat;
+}
+.bubble th.md-th[aria-sort="ascending"]::after { opacity: 1; background: var(--accent-text); -webkit-mask-image: var(--ico-arrow-up); mask-image: var(--ico-arrow-up); }
+.bubble th.md-th[aria-sort="descending"]::after { opacity: 1; background: var(--accent-text); -webkit-mask-image: var(--ico-arrow-down); mask-image: var(--ico-arrow-down); }
 /* The grip sits MOSTLY inside its own header (12 of 16px; 20 of 26px on touch):
    a grip centred on the column border lost to Chrome's touch-target adjustment,
    which snapped the finger to the neighbouring header and sorted instead. */
@@ -589,11 +593,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .bm-list { padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 /* Avatar pools section (Bots pane, below the roster) */
 .ap-panel { margin: 4px 14px 12px; border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.ap-title { margin: 0 0 8px; font-size: 14px; }
 .ap-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
 .ap-name { font-weight: 600; min-width: 72px; }
 .ap-stats { flex: 1 1 auto; font-size: 12px; }
-.ap-warn { color: #c0392b; font-size: 12px; }
+.ap-warn { color: var(--error-text); font-size: 12px; }
 .ap-editor { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
 .ap-editor .bm-avatar-btn { align-self: flex-start; }
 .ap-ta { width: 100%; resize: vertical; box-sizing: border-box; }
@@ -612,7 +615,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    longer ones still ellipsize. 9ch fits "Assistant" outright and leaves any
    longer name legible ("Alphabet…" rather than "Alp…"). */
 .bm-name { flex: 1 1 9ch; font-weight: 600; min-width: 9ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Row = handle + ▲▼ + avatar + name + safe + photo + switch: needs more than
+/* Row = handle + up/down + avatar + name + photo + switch: needs more than
    the 420px default or the visibility switch clips off the right edge. The
    width now comes from .settings-modal (which has to hold the dashboard's card
    grid too) — comfortably more than the 640px this row was tuned to. */
@@ -711,9 +714,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .stab-glyph { width: 22px; height: 22px; }
   .settings-nav .stab-glyph .rail-icon { width: 20px; height: 20px; }
   .stab-summary { display: block; }
-  .stab-chevron { display: block; flex: none; width: 8px; height: 8px; border: solid var(--text-secondary);
-    border-width: 0 2px 2px 0; transform: rotate(-45deg); margin-inline-end: 4px; }
-  [dir="rtl"] .stab-chevron { transform: rotate(135deg); }
+  .stab-chevron { display: block; flex: none; width: 18px; height: 18px; background: var(--text-secondary);
+    -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; margin-inline-end: 2px; }
+  [dir="rtl"] .stab-chevron { transform: scaleX(-1); }
   .snav-heading { margin-inline: 4px; }
 }
 
@@ -811,10 +814,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   font-size: 12px; font-weight: 600; color: var(--text-secondary);
 }
 .theme-revision { margin: 0; padding: 0 18px 16px; font-size: 12px; }
-
-/* Contextual footer: one group per tab, and the whole bar hides when the
-   active tab has no actions of its own. */
-.settings-actions { display: flex; flex: 1; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 /* Lock now is a security action, not a device preference — it rides with the
    PIN controls rather than the footer's Set/Remove pair. */
 /* `.sec-body` in the selector: .bm-actions (declared further down, same
@@ -830,12 +829,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   padding: 11px 18px; border-radius: var(--radius-md); z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.5);
   max-width: 90vw; font-size: 14px;
 }
-/* The voice chat overlay (the voice add-on's voice.css; it sets
-   body.drive-open) is z 1000. A toast raised from inside it ("Voice chat
-   ended", a refused open) must land on top, not underneath where nobody can
-   see it. Scoped to the overlay being open so the app's normal stacking
-   (lock screen above toasts) is unchanged. */
-body.drive-open .toast { z-index: 1100; }
 .toast.error { border-color: var(--error); }
 .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: center; z-index: 150; pointer-events: none; }
 .reconnect-card { margin-top: 10px; background: var(--warning); color: var(--on-warning-fill); padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -947,8 +940,12 @@ body.drive-open .toast { z-index: 1100; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sub-details summary::-webkit-details-marker { display: none; }
-.sub-details summary::before { content: "▸ "; }
-.sub-details[open] summary::before { content: "▾ "; }
+.sub-details summary::before {
+  content: ""; display: inline-block; width: 14px; height: 14px; margin-inline-end: 4px; vertical-align: -2px;
+  background: currentColor;
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+}
+.sub-details[open] summary::before { -webkit-mask-image: var(--ico-chevron-down); mask-image: var(--ico-chevron-down); }
 .sub-details summary:hover { color: var(--text-secondary); }
 .sub-content { padding: 4px 12px 10px; font-size: 13.5px; color: var(--text-secondary); }
 .sub-content pre { font-size: 12px; }
@@ -1049,7 +1046,6 @@ body.drive-open .toast { z-index: 1100; }
   padding: 9px 16px; border-radius: var(--radius-md); font-weight: 600; font-size: 14px;
 }
 .btn-secondary:hover { border-color: var(--accent); }
-.bm-footer { justify-content: space-between; }
 .fs-modal { width: min(640px, 94vw); max-height: 88vh; }
 .fs-modal.drop-hot { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .fs-header-actions { display: flex; gap: 10px; align-items: center; }
@@ -1190,12 +1186,12 @@ body.drive-open .toast { z-index: 1100; }
   }
   /* The gear rail on a phone: ONE ROW OF ICONS, not a stack of full-width bars.
      Four 100%-wide 48px buttons plus margins ate ~380px — roughly 40% of a
-     390x844 screen — for controls a family member touches maybe once a week,
+     390x844 screen — for controls touched maybe once a week,
      while the actual content (the bots) sat squeezed at the top. As a row it
      costs ~64px.
      The captions stay. They were added deliberately (see the data-label note
      below) because a bare glyph mislabelled the theme toggle and the lock
-     button, and on a family phone this rail IS the navigation; "icons only"
+     button, and on a phone this rail IS the navigation; "icons only"
      would be tidier and less usable. */
   .app[data-view="bots"] .gear-row > .gear-btn {
     /* Share the row evenly, but never below a comfortable tap target. */
@@ -1210,7 +1206,7 @@ body.drive-open .toast { z-index: 1100; }
      The label TEXT is not written here. It comes from data-label, which
      main.js fills from the locale files (applyRailLabels) on boot and on every
      language switch: a CSS `content:` string is English forever, and on a
-     family phone this rail is the entire navigation. attr() yields "" for a
+     phone this rail is the entire navigation. attr() yields "" for a
      button with no data-label, so an un-labelled button simply shows its glyph
      — which is also what ⚡ and 🩺 used to do PERMANENTLY, having been added
      without a `content:` rule of their own. */
@@ -1237,14 +1233,6 @@ body.drive-open .toast { z-index: 1100; }
     flex-wrap: wrap; flex-shrink: 0;
     max-height: 40dvh; overflow-y: auto;
   }
-  /* The locked side's only upload entry point — it earns a primary-ish
-     treatment here because on a family phone this IS the Bots page's action. */
-  .app[data-view="bots"] #drop-btn {
-    color: var(--accent-text);
-    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
-    background: var(--accent-wash);
-  }
-
   /* --- Threads + chat views --- */
   .app[data-view="threads"] .threadlist { display: flex; width: 100vw; border-inline-end: none; }
   .app[data-view="chat"] .chatview { display: flex; }
@@ -1744,7 +1732,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .msg.assistant.streaming .msg-col { max-width: var(--assistant-col); }
 .typing-col { max-width: var(--assistant-col); }
 .msg.streaming > .msg-col > .bubble { background: transparent; border: none; padding: 2px 0 0; font-size: 15px; line-height: 1.6; }
-.stream-pre { font-size: 15px; line-height: 1.6; }
 .stream-cursor { background: var(--accent-hover); }
 .msg.streaming .msg-avatar { align-self: flex-start; margin-top: 2px; }
 
@@ -2093,7 +2080,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 24px; text-align: center; color: var(--text-secondary);
 }
-.harness-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #1d4ed8; }
+.harness-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--accent-text); }
 .harness-note p { max-width: 46ch; margin: 0; }
 /* Headless jobs pane. */
 .harness-job-form { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 8px; border-bottom: 1px solid var(--border-strong); background: var(--bg-secondary); }
@@ -2187,7 +2174,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   justify-content: center; gap: 10px; padding: 24px; text-align: center;
   color: var(--text-secondary);
 }
-.studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #b45309; }
+.studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--warning-text, var(--warning)); }
 .studioforge-note p { max-width: 46ch; margin: 0; }
 .terminal-dot.studioforge-up { background: var(--success-text); box-shadow: 0 0 8px color-mix(in oklab, var(--success-text) 60%, transparent); }
 .terminal-dot.studioforge-down { background: var(--error-text); }
@@ -2296,16 +2283,12 @@ body.tool-full #collapse-threads { display: none; }
   padding: 10px 12px; color: var(--text-primary); font-size: 15px; width: 100%;
 }
 .llm-body select:focus { outline: none; border-color: var(--accent); }
-/* The Lookups switch (2.3.0): a plain checkbox on one line with its word. */
-.llm-check { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer; }
-.llm-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 .llm-body textarea {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px;
   padding: 10px 12px; color: var(--text-primary); font-size: 14px;
   font-family: inherit; resize: vertical; min-height: 64px;
 }
 .llm-body textarea:focus { outline: none; border-color: var(--accent); }
-.llm-sublabel { margin-top: 4px; }
 .llm-docs { font-size: 12.5px; color: var(--accent-text); align-self: flex-start; }
 .llm-test-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* The result line is the whole feedback surface for Test: it has to be able to
@@ -2316,13 +2299,6 @@ body.tool-full #collapse-threads { display: none; }
 }
 .llm-result.good { color: var(--success-text); }
 .llm-result.bad { color: var(--error-text); }
-.llm-advanced { border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.llm-advanced summary {
-  font-size: 13px; color: var(--text-secondary); cursor: pointer;
-  list-style: revert; padding: 2px 0;
-}
-.llm-advanced summary:hover { color: var(--text-primary); }
-.llm-advanced[open] { display: flex; flex-direction: column; gap: 12px; }
 
 /* First-run card in the empty chat area. Bigger than the "pick a bot" prompt
    it replaces, because on a fresh install it is the only thing to do. */
@@ -2540,8 +2516,10 @@ details.json-collapse > summary {
 }
 details.json-collapse > summary::-webkit-details-marker { display: none; }
 details.json-collapse > summary::before {
-  content: '▸';
-  color: var(--text-muted);
+  content: "";
+  width: 14px; height: 14px; flex: none;
+  background: var(--text-muted);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
   transition: transform .15s;
   display: inline-block;
 }
@@ -2681,103 +2659,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
    positioning of its own, so without this it escapes to the nearest positioned
    ancestor and renders off-screen. */
 .composer { position: relative; }
-
-.reaction-picker {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 8px;
-  right: 8px;
-  max-width: 420px;
-  z-index: 60;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, .45);
-  display: flex;
-  flex-direction: column;
-  max-height: min(52vh, 380px);
-  animation: fade-in .12s ease both;
-}
-.reaction-picker.hidden { display: none; }
-
-.reaction-picker-head {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-strong);
-}
-.reaction-search {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: 7px 10px;
-  font: inherit;
-  font-size: 13px;
-}
-.reaction-search:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.reaction-manage-btn {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  padding: 0 10px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-.reaction-manage-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-
-.reaction-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 8px;
-  padding: 10px;
-  overflow-y: auto;
-}
-.reaction-cell {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  transition: border-color .12s, transform .12s;
-}
-.reaction-cell:hover { border-color: var(--accent); transform: translateY(-1px); }
-.reaction-cell:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.reaction-thumb {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-}
-.reaction-cell-name {
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: center;
-  line-height: 1.15;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-/* One-shot pool image: fired once, then gone for good. */
-.reaction-cell.pool { border-style: dashed; }
-/* The "surprise" cell uses a glyph where the others use a thumbnail. */
-.reaction-surprise {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 30px; line-height: 1;
-}
-.reaction-cell.pool .reaction-cell-name::after {
-  content: " · once";
-  color: var(--accent-text);
-  font-weight: 600;
-}
 .reaction-empty {
   grid-column: 1 / -1;
   padding: 18px 10px;
@@ -2785,19 +2666,13 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   color: var(--text-muted);
   font-size: 13px;
 }
-.reaction-picker-note {
-  padding: 8px 10px;
-  border-top: 1px solid var(--border-strong);
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
 
 /* ---- In-transcript trace chip ---- */
 
 /* Image jobs — the bubble that is waiting for a picture (js/imagejobs.js).
    Never contains an image, in any state: the pending card is a spinner and a
    line of text, and a FINISHED job is rendered by the ordinary markdown path,
-   so Safe Mode and No-Image Mode need no rule of their own here. */
+   so No-Image Mode needs no rule of their own here. */
 .image-job-bubble { padding-block: 9px; }
 .image-job-card { display: flex; align-items: center; gap: 9px; }
 .image-job-spinner {
@@ -2905,8 +2780,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 .rx-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rx-gen-row .rx-input { flex: 1; }
 .rx-num { width: 86px; }
-
-.rx-list { display: flex; flex-direction: column; gap: 8px; }
 .rx-row {
   display: flex;
   align-items: center;
@@ -2917,15 +2790,9 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   border-radius: var(--radius-md);
 }
 .rx-row-thumb { width: 46px; height: 46px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--bg-primary); }
-.rx-row-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.rx-row-fields .rx-input { width: 100%; padding: 5px 8px; font-size: 12.5px; }
 .rx-row-meta { display: flex; gap: 10px; align-items: center; font-size: 11px; }
 .rx-row-id { background: var(--code-inline); padding: 1px 5px; border-radius: 4px; font-family: var(--font-mono); }
 .rx-row-src { text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
-.rx-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.rx-row-actions .btn-secondary { padding: 5px 9px; font-size: 12px; }
-.rx-safe { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); cursor: pointer; }
-.rx-safe input { accent-color: var(--accent); }
 
 .rx-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; padding: 6px 0; }
 .rx-field-label { font-size: 13px; }
@@ -2940,9 +2807,7 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 
 @media (max-width: 768px) {
   .reaction-card { width: min(360px, 92vw); }
-  .reaction-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
   .rx-row { flex-wrap: wrap; }
-  .rx-row-actions { width: 100%; justify-content: flex-end; }
   .reaction-embed { width: min(320px, 94%); }
 }
 
@@ -2952,7 +2817,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   .reaction-overlay, .reaction-picker { animation: none; }
   .reaction-card, .reaction-card.in { animation: none; transform: none; opacity: 1; }
   .reaction-trace-row.expanded .reaction-embed { animation: none; }
-  .reaction-cell:hover { transform: none; }
 }
 
 /* Reaction traces are centred dividers, not bubbles — no avatar column. */
@@ -2992,13 +2856,8 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   .llm-body select, .llm-body textarea,
   .lang-select, #bm-lang,
   .rx-input { min-height: 44px; font-size: 16px; }
-  .rx-row-fields .rx-input { padding: 8px 10px; }
   /* ▶ test-fire: 44 tall already, but a 31px-wide glyph button is a miss. */
   .rx-row-test { min-width: 44px; }
-  /* Checkbox rows: the LABEL is the tap target, so give it the height and the
-     box enough size to read as one. */
-  .rx-safe { min-height: 44px; }
-  .rx-safe input { width: 18px; height: 18px; }
   /* Text-only disclosure controls — 19px tall each. */
   .dash-log-toggle,
   .llm-advanced summary { min-height: 44px; display: flex; align-items: center; }
@@ -3132,13 +2991,12 @@ a.markdown-file-link > code,
 
 /* --- Directional glyph content --- */
 
-/* F48 · Collapsed disclosure points to the reading start. NBSP, not a plain
-   space: a trailing ASCII space collapses at an RTL run boundary. */
-[dir="rtl"] .sub-details summary::before { content: "◂\00a0"; }
+/* F48 · A collapsed disclosure points to the reading start. */
+[dir="rtl"] .sub-details:not([open]) summary::before { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 
 /* F49/F50 · JSON collapse caret + its open-state rotation.
-   `◂` needs counter-clockwise to end up pointing down. */
-[dir="rtl"] details.json-collapse > summary::before { content: '◂'; }
+   the left chevron needs counter-clockwise to end up pointing down. */
+[dir="rtl"] details.json-collapse > summary::before { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 [dir="rtl"] details.json-collapse[open] > summary::before { transform: rotate(-90deg); }
 
 /* --- Animation / gradient sweep direction --- */
@@ -4024,6 +3882,7 @@ body.tools-sheet-open::after {
 .step.status-done .step-glyph { color: var(--success); }
 .step.status-current .step-glyph { color: var(--accent-text); }
 .step.status-upcoming .step-glyph { color: var(--text-muted); }
+
 .step-title { flex: 1 1 auto; }
 .gate-tag { font-size: var(--step--1); color: var(--warning-text); border: 1px solid var(--warning); border-radius: var(--radius-sm); padding: 1px 6px; }
 .step-body { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -4257,8 +4116,12 @@ body.tools-sheet-open::after {
   font-size: 12px; color: var(--text-muted); min-width: 0;
 }
 .notice-summary::-webkit-details-marker { display: none; }
-.notice-summary::after { content: '▸'; font-size: 10px; opacity: .7; flex: none; }
-.notice-details[open] > .notice-summary::after { content: '▾'; }
+.notice-summary::after {
+  content: ""; width: 12px; height: 12px; opacity: .7; flex: none; background: currentColor;
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+}
+.notice-details[open] > .notice-summary::after { -webkit-mask-image: var(--ico-chevron-down); mask-image: var(--ico-chevron-down); }
+[dir="rtl"] .notice-details:not([open]) > .notice-summary::after { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 .notice-summary:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .notice-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-muted); }
 .notice-error .notice-dot { background: var(--error-text); }
@@ -4297,11 +4160,6 @@ body.tools-sheet-open::after {
   overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
   padding: 8px 0 2px; border-top: 1px solid var(--border-strong);
 }
-.tool-list-head {
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--text-muted); line-height: 1.2;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 .tool-avatar {
   display: flex; align-items: center; justify-content: center;
   background: var(--bg-tertiary); color: var(--text-secondary);
@@ -4331,7 +4189,6 @@ body.tools-sheet-open::after {
 .terminal-sidedot.tools-sidedot.error { background: var(--error-text); }
 @media (min-width: 769px) {
   :root[data-avatar-style="minimal"] .tool-list { align-items: stretch; padding: 6px 8px 2px; gap: 4px; }
-  :root[data-avatar-style="minimal"] .tool-list-head { padding-inline-start: 12px; }
   /* Minimal rows name every bot in its own hue; a tool has no persona hue,
      so its label is plain text in the theme's colour. */
   :root[data-avatar-style="minimal"] .tool-btn .bot-name-label,
@@ -4483,6 +4340,7 @@ body.tools-sheet-open::after {
 .advisor-state { opacity: .75; }
 .advisor-done .advisor-state { color: var(--success-text); opacity: 1; }
 .advisor-failed .advisor-state { color: var(--error-text); opacity: 1; }
+
 .advisor-error { flex-basis: 100%; opacity: .75; font-size: .92em; overflow-wrap: anywhere; }
 .advisor-actions { display: inline-flex; gap: 8px; margin-inline-start: auto; }
 .advisor-actions .busy { opacity: .6; cursor: progress; }
@@ -4584,7 +4442,6 @@ body.tools-sheet-open::after {
 .bm-add { margin-top: 4px; padding: 9px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
 .bm-add .bm-add-open { display: inline-flex; align-items: center; gap: 6px; }
 .bm-add .bm-add-form { border-top: 0; padding-top: 0; }
-.bm-instant-hint { padding-top: 0; }
 
 /* ========================================================================= *
  * Settings -> Bots -> Personality (js/personality.js, 2.3.6)
@@ -4768,14 +4625,12 @@ body.tools-sheet-open::after {
 .people-form { display: flex; flex-direction: column; gap: 10px; }
 .people-field input, .people-field select { width: 100%; max-width: 360px; }
 .people-field-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
-.people-group-label { font-size: 12.5px; color: var(--text-secondary); }
 .people-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
 .people-actions-extra { border-top: 1px solid var(--border-strong); padding-top: 10px; }
 .people-disabled-row { align-self: flex-start; }
 .people-error[hidden] { display: none; }
 .people-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .people-device { flex-wrap: wrap; }
-.people-device-pick select { max-width: 260px; }
 .people-subtitle { margin: 0 0 6px; font-size: 13.5px; }
 .people-table-wrap { overflow-x: auto; max-width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
 .people-table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--text-primary); }
@@ -4799,8 +4654,6 @@ body.tools-sheet-open::after {
 @media (prefers-reduced-motion: reduce) {
   .signin-tile { transition: none; }
 }
-.bm-audience { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; }
-.bm-row--hidden .bm-audience { opacity: .45; }
 
 /* ---------------------------------------------------------------------------
    "Stored on the host computer" (js/host-notice.js): the Settings -> Security
@@ -4916,7 +4769,7 @@ body.tools-sheet-open::after {
 @media (prefers-reduced-motion: reduce) { .chat-drop-target { transition: none; } }
 
 /* ===================== Settings 3.2: sections, disclosures, rows ===================== */
-/* Advanced ▸ and subsection disclosures: a quiet summary row at the bottom of a
+/* Advanced and subsection disclosures: a quiet summary row at the bottom of a
    section (Advanced) or a titled card with a one-line hint (Reactions, Agents…). */
 .settings-adv, .settings-sub { margin: 16px 18px 0; }
 .settings-adv:last-child, .settings-sub:last-child { margin-bottom: 18px; }
@@ -4928,11 +4781,12 @@ body.tools-sheet-open::after {
 }
 .settings-adv > summary::-webkit-details-marker, .settings-sub > summary::-webkit-details-marker { display: none; }
 .settings-adv > summary::before, .settings-sub > summary::before {
-  content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
-  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease;
+  content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+  transition: transform .15s ease;
 }
-[dir="rtl"] .settings-adv > summary::before, [dir="rtl"] .settings-sub > summary::before { transform: rotate(135deg); }
-.settings-adv[open] > summary::before, .settings-sub[open] > summary::before { transform: rotate(45deg); }
+[dir="rtl"] .settings-adv > summary::before, [dir="rtl"] .settings-sub > summary::before { transform: scaleX(-1); }
+.settings-adv[open] > summary::before, .settings-sub[open] > summary::before { transform: rotate(90deg); }
 .settings-adv > summary:focus-visible, .settings-sub > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .settings-adv > summary { background: none; border-style: dashed; color: var(--text-secondary); font-size: 13px; }
 .settings-sub-hint { flex: 1 1 100%; margin-inline-start: 17px; font-size: 12.5px; font-weight: 400; color: var(--text-secondary); }
@@ -5095,18 +4949,18 @@ body.tools-sheet-open::after {
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
   background: var(--bg-tertiary); font-size: 14px; font-weight: 600; color: var(--text-primary); }
 #qs-box > summary::-webkit-details-marker { display: none; }
-#qs-box > summary::before { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
-  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
-#qs-box[open] > summary::before { transform: rotate(45deg); }
-[dir="rtl"] #qs-box:not([open]) > summary::before { transform: rotate(135deg); }
+#qs-box > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; transition: transform .15s ease; }
+#qs-box[open] > summary::before { transform: rotate(90deg); }
+[dir="rtl"] #qs-box:not([open]) > summary::before { transform: scaleX(-1); }
 @media (max-width: 899px) { #qs-box { margin-inline: 12px; } }
 /* ---- Reactions manager (3.2): a grid of the pack, one edit sheet ---- */
 .rx-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 0; min-height: 32px; }
 .rx-fold > summary::-webkit-details-marker { display: none; }
-.rx-fold > summary::before { content: ""; width: 7px; height: 7px; border: solid var(--text-secondary); border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
-[dir="rtl"] .rx-fold:not([open]) > summary::before { transform: rotate(135deg); }
+.rx-fold > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary); -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; transition: transform .15s ease; }
+[dir="rtl"] .rx-fold:not([open]) > summary::before { transform: scaleX(-1); }
 .rx-fold[open] > summary { margin-bottom: 10px; }
-.rx-fold[open] > summary::before { transform: rotate(45deg); }
+.rx-fold[open] > summary::before { transform: rotate(90deg); }
 .rx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
 .rx-tile {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px;
