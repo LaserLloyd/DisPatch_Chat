@@ -173,24 +173,13 @@ async def images_restore(request: Request, payload: RestoreIn | None = None):
 
 def _my_archive(profile_id: str) -> int | None:
     from . import accounts
-    with accounts.connect() as con:
-        cols = {r[1] for r in con.execute("PRAGMA table_info(profiles)")}
-        if "archive_after_months" not in cols:
-            return None
-        row = con.execute("SELECT archive_after_months FROM profiles WHERE id = ?", (profile_id,)).fetchone()
-    return int(row[0]) if row and row[0] else None
+    prof = accounts.get_profile(profile_id)
+    return prof.archive_after_months if prof is not None else None
 
 
 def _set_my_archive(profile_id: str, months: int | None) -> None:
-    import contextlib
-    import sqlite3
-
     from . import accounts
-    with accounts._lock, accounts.connect() as con:
-        with contextlib.suppress(sqlite3.OperationalError):          # migration 011 adds it; be safe
-            con.execute("ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER")
-        con.execute("UPDATE profiles SET archive_after_months = ? WHERE id = ?", (months, profile_id))
-        accounts._bump_rev(con)
+    accounts.update_profile(profile_id, archive_after_months=months)
 
 
 def _me(request: Request) -> str:

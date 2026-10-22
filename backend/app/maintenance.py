@@ -58,28 +58,6 @@ POLL_SECONDS = 60
 CLOSED_JOB_STATES = ("no", "applied", "archived", "duplicate")
 FINISHED_TASK_STATES = ("succeeded", "failed", "cancelled")
 
-#: ``maintenance_runs`` (migration 011); created here too, identically, if a build runs without it.
-RUNS_DDL = """
-CREATE TABLE IF NOT EXISTS maintenance_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started TEXT NOT NULL,
-    finished TEXT,
-    step TEXT NOT NULL,
-    rows INTEGER NOT NULL DEFAULT 0,
-    bytes INTEGER NOT NULL DEFAULT 0,
-    ms INTEGER NOT NULL DEFAULT 0,
-    error TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_runs(started);
-CREATE INDEX IF NOT EXISTS idx_maintenance_runs_step ON maintenance_runs(step, started);
-CREATE TABLE IF NOT EXISTS storage_stats (
-    area TEXT PRIMARY KEY,
-    bytes INTEGER NOT NULL DEFAULT 0,
-    files INTEGER NOT NULL DEFAULT 0,
-    measured_at TEXT NOT NULL
-);
-"""
-
 _RUN_LOCK = threading.Lock()
 _STORAGE_LOCK = threading.Lock()
 _task: asyncio.Task | None = None
@@ -170,7 +148,13 @@ def connect() -> sqlite3.Connection:
     con.execute("PRAGMA busy_timeout=10000")
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA journal_mode=WAL")
-    con.executescript(RUNS_DDL)
+    # Housekeeping is idempotent, so it does not need the app's fsync-per-commit durability: a lost
+    # delete simply happens again tomorrow. NORMAL in WAL mode skips the fsync that shows up as a
+    # stall for whoever is writing next. The checkpoint is ours too (after every batch and step, and
+    # TRUNCATE at the end) so an app writer never pays for the one our deletes made necessary.
+    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA wal_autocheckpoint=0")
+    con.execute("PRAGMA cache_size=-65536")
     mi.ensure_schema(con)
     return con
 
@@ -202,20 +186,38 @@ def _count(ctx: Ctx, table: str, where: str, params: tuple) -> int:
     return int(ctx.con.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", params).fetchone()[0])
 
 
+#: A delete batch should hold the write lock for about this long (the task adapts its batch size to
+#: it; BATCH is the ceiling). The reference budget for any one stall is 250 ms.
+TARGET_BATCH_SECONDS = 0.05
+MIN_BATCH = 200
+
+
 def _delete_batches(ctx: Ctx, table: str, where: str, params: tuple = ()) -> int:
-    """Delete rows of ``table`` matching ``where`` in batches of ``ctx.batch`` (each its own
-    transaction). Dry run: the count. Idempotent: a second run finds nothing."""
+    """Delete rows of ``table`` matching ``where`` in batches (each its own transaction). The batch
+    starts at 1,000 rows and grows toward ``ctx.batch`` (5,000) while a batch stays well inside
+    :data:`TARGET_BATCH_SECONDS`, and shrinks when a table with many indexes is slower. Dry run: the
+    count. Idempotent: a second run finds nothing."""
     if ctx.dry:
         return _count(ctx, table, where, params)
     total = 0
+    size = min(1000, ctx.batch)
     while True:
+        t0 = time.perf_counter()
         cur = ctx.con.execute(
             f"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {where} LIMIT ?)",
-            (*params, ctx.batch))
+            (*params, size))
         n = cur.rowcount
+        took = time.perf_counter() - t0
         total += n
-        if n < ctx.batch:
+        if n < size:
             return total
+        # Keep the write-ahead log small ourselves: otherwise whichever app writer commits next
+        # pays for the checkpoint (a visible stall for a chat message).
+        ctx.con.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
+        if took < TARGET_BATCH_SECONDS / 2:
+            size = min(ctx.batch, size * 2)
+        elif took > TARGET_BATCH_SECONDS:
+            size = max(MIN_BATCH, int(size * TARGET_BATCH_SECONDS / took))
         time.sleep(ctx.sleep)
 
 
@@ -243,8 +245,10 @@ def step_sync_media_index(ctx: Ctx) -> tuple[int, int]:
 def step_prune_activity(ctx: Ctx) -> tuple[int, int]:
     act = int(cfg("system.retention.activity_days"))
     aud = int(cfg("system.retention.audit_days"))
-    n = _delete_batches(ctx, "activity", "category != 'audit' AND ts < ?", (ctx.cutoff_iso(act),))
+    # equality on the category keeps idx_activity_category_ts usable; "anything else" is a safety net
+    n = _delete_batches(ctx, "activity", "category = 'activity' AND ts < ?", (ctx.cutoff_iso(act),))
     n += _delete_batches(ctx, "activity", "category = 'audit' AND ts < ?", (ctx.cutoff_iso(aud),))
+    n += _delete_batches(ctx, "activity", "category NOT IN ('activity','audit') AND ts < ?", (ctx.cutoff_iso(act),))
     return n, 0
 
 
@@ -309,9 +313,8 @@ def step_prune_transcript_seen(ctx: Ctx) -> tuple[int, int]:
     if not _table_exists(ctx.con, "transcript_seen"):
         return 0, 0
     cut = ctx.cutoff_iso(int(cfg("system.retention.transcript_seen_days")))
-    n = _delete_batches(ctx, "transcript_seen", "created_at < ?", (cut,))
-    n += _delete_batches(ctx, "transcript_seen", "thread_id NOT IN (SELECT id FROM threads)")
-    return n, 0
+    # rows of a deleted thread go with it (ON DELETE CASCADE); this is the age rule only
+    return _delete_batches(ctx, "transcript_seen", "created_at < ?", (cut,)), 0
 
 
 def step_prune_sessions(ctx: Ctx) -> tuple[int, int]:
@@ -819,6 +822,8 @@ def run_nightly(*, now: datetime | None = None, steps: list[str] | None = None, 
                     error = f"{type(e).__name__}: {e}"[:500]
                     log.exception("maintenance step %s failed", name)
                 ms = int((time.monotonic() - t0) * 1000)
+                with contextlib.suppress(Exception):
+                    con.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
                 finished = _iso(datetime.now(UTC))
                 results.append({"step": name, "rows": int(rows), "bytes": int(nbytes), "ms": ms, "error": error,
                                 "note": ctx.note, **({"images": ctx.extra["images"]} if "images" in ctx.extra else {})})
