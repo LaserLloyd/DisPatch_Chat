@@ -152,8 +152,8 @@ def test_counts_are_numbers_for_this_profile_only(scratch):
     s.thread(None)                                         # reads as the protected Admin's
     profiles_service.create_personal(a.id, {"name": "x"})
     ext_profile_hooks.register_profile_data("voice", count=lambda pid: {"voices": 4} if pid == a.id else {})
-    assert profiles_service.content_counts(a.id) == {"bots": 1, "chats": 2, "pictures": 1, "voices": 4}
-    assert profiles_service.content_counts(b.id) == {"bots": 0, "chats": 1, "pictures": 0, "voices": 0}
+    assert profiles_service.content_counts(a.id) == {"bots": 1, "chats": 2, "pictures": 1, "voices": 4, "files": 0}
+    assert profiles_service.content_counts(b.id) == {"bots": 0, "chats": 1, "pictures": 0, "voices": 0, "files": 0}
     assert profiles_service.content_counts(admin.id)["chats"] == 1
 
 

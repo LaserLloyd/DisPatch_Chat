@@ -1,5 +1,5 @@
 """Reaction-image tests: the registry, the one-shot pool, the fire chokepoint,
-the per-bot gate, and the Safe-Mode matrix.
+the per-bot gate, and who may curate.
 
 Hermetic like the rest of tests/: throwaway data dirs, no external image
 generator, nothing touches a live data dir or a real agent gateway.
@@ -112,7 +112,7 @@ def _fake_pool_item(suffix=".png", category="default", stem=None, bot_id=None):
 def test_starter_pack_seeds_and_is_safe(rx_env):
     pack = reactions.load()
     assert len(pack.reactions) >= 10
-    assert all(r.safe for r in pack.reactions), "starter cards ship Safe-Mode visible"
+    assert all(r.safe for r in pack.reactions), "starter cards keep their 3.x safe flag"
     assert all(reactions.image_path(r).is_file() for r in pack.reactions)
 
 
@@ -278,7 +278,7 @@ def test_pool_config_migrates_the_old_total_shape(rx_env):
 
 def test_pool_list_marks_one_shot_entries(rx_env):
     _fake_pool_item()
-    items = reactions.list_for(decoy=False)
+    items = reactions.list_for()
     pool_items = [i for i in items if i.get("pool")]
     assert len(pool_items) == 1
     assert pool_items[0]["source"] == "pool"
@@ -523,7 +523,7 @@ def test_pool_consume_race_refunds_the_rate_limiter(rx_env, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Safe Mode
+# Who may curate, who may read
 # --------------------------------------------------------------------------- #
 
 
@@ -583,8 +583,7 @@ def test_on_box_agent_can_read_and_edit_the_prompt_bank(rx_env):
 def test_on_box_agent_gets_the_true_list(rx_env):
     """GET /api/reactions is session-exempt for machines: `dispatch-react
     --list` and on-box agents must see the REAL pack, pool detail and
-    reaction_bots — while a sessionless browser tab on loopback still gets the
-    Safe-Mode view, exactly like the fire endpoint."""
+    reaction_bots — while a sessionless browser tab on loopback is nobody (401)."""
     unlocked = _unlocked(rx_env)
     src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
     secret_id = unlocked.post("/api/reactions",
@@ -602,32 +601,8 @@ def test_on_box_agent_gets_the_true_list(rx_env):
     assert body["can_manage"] is False
 
     tab = rx_env()
-    # 4.0: a sessionless browser tab is nobody (no Safe-Mode view): sign in first
+    # 4.0: a sessionless browser tab is nobody: sign in first
     assert tab.get("/api/reactions", headers=BROWSER).status_code == 401
-
-
-def test_redactor_drops_unsafe_reaction_frames(rx_env):
-    safe = {"type": "reaction", "reaction_id": "facepalm", "safe": True, "bot_id": "alpha"}
-    assert main.redact_for_decoy(safe) is not None
-    unsafe = {"type": "reaction", "reaction_id": "x", "safe": False}
-    assert main.redact_for_decoy(unsafe) is None
-    # Safe reaction, but attributed to a bot Safe Mode can't see.
-    assert main.redact_for_decoy(
-        {"type": "reaction", "reaction_id": "facepalm", "safe": True, "bot_id": "main"}) is None
-    # Pool telemetry is management detail.
-    assert main.redact_for_decoy({"type": "reaction_pool", "pool": {}}) is None
-
-
-def test_redactor_anonymises_an_unsafe_trace(rx_env):
-    msg = {"id": "1", "content": "⚡ Nova reacted · Secret", "media_url": None,
-           "metadata": {"kind": "reaction", "reaction_id": "secret",
-                        "reaction_name": "Secret", "reaction_safe": False, "actor": "Nova"}}
-    out = main._redact_message_dict(msg)
-    assert out["content"] == "⚡ Nova reacted"
-    assert "reaction_id" not in out["metadata"] and "reaction_name" not in out["metadata"]
-    # A safe reaction keeps its identity.
-    msg["metadata"]["reaction_safe"] = True
-    assert main._redact_message_dict(msg)["metadata"]["reaction_id"] == "secret"
 
 
 # --------------------------------------------------------------------------- #
@@ -749,7 +724,7 @@ def test_part_and_dotfiles_are_not_stock(rx_env):
     (d / "notes.txt").write_bytes(b"x")
     assert reactions.pool_draw() is None
     assert reactions.pool_categories() == {}
-    assert not [i for i in reactions.list_for(decoy=False) if i.get("pool")]
+    assert not [i for i in reactions.list_for() if i.get("pool")]
 
 
 # --------------------------------------------------------------------------- #
@@ -1373,7 +1348,7 @@ def test_a_bot_without_a_pool_falls_back_to_the_pack(rx_env):
     assert status["remaining"] == 0 and status["moods"] == {}
     assert status["needs_refill"] is False and status["deficit"] == 0
     assert reactions.pool_draw(bot_id=COMPANION) is None
-    assert not [i for i in reactions.list_for(decoy=False, bot_id=COMPANION)
+    assert not [i for i in reactions.list_for(bot_id=COMPANION)
                 if i.get("pool")]
 
     # A mood key still fires — it falls through to the shared pack card.
@@ -1388,26 +1363,11 @@ def test_the_manager_list_shows_every_bots_pool(rx_env):
     _enable_reactions(COMPANION)
     mine = _fake_pool_item(category="mad")
     theirs = _fake_pool_item(category="mad", bot_id=COMPANION)
-    ids = {i["id"] for i in reactions.list_for(decoy=False) if i.get("pool")}
+    ids = {i["id"] for i in reactions.list_for() if i.get("pool")}
     assert ids == {mine, theirs}
-    scoped = {i["id"] for i in reactions.list_for(decoy=False, bot_id=COMPANION)
+    scoped = {i["id"] for i in reactions.list_for(bot_id=COMPANION)
               if i.get("pool")}
     assert scoped == {theirs}
-
-
-def test_safe_mode_sees_safe_pool_images_from_any_bot(rx_env):
-    """Safe Mode is decided by the POOL's safe flag, per bot — a companion
-    marked safe is visible to a locked device even though the default bot's
-    pool is not."""
-    _enable_reactions(COMPANION)
-    mine = _fake_pool_item(category="mad")
-    theirs = _fake_pool_item(category="mad", bot_id=COMPANION)
-    st = reactions.pool_load(COMPANION)
-    st.config.safe = True
-    reactions.pool_save(st, COMPANION)
-
-    ids = reactions.safe_ids()
-    assert theirs in ids and mine not in ids
 
 
 # --------------------------------------------------------------------------- #
@@ -1711,40 +1671,6 @@ def test_reads_still_degrade_to_the_default_bot(rx_env):
 def test_an_omitted_bot_id_still_means_the_default_pool(rx_env):
     assert reactions.require_bot_id("") == reactions.default_bot_id()
     assert reactions.require_bot_id(None) == reactions.default_bot_id()
-
-
-# --------------------------------------------------------------------------- #
-# safe_ids() is memoised against directory mtimes
-# --------------------------------------------------------------------------- #
-
-
-def test_safe_ids_does_not_rewalk_unchanged_pools(rx_env, monkeypatch):
-    """It sits on the Safe-Mode redactor's request path and walked every mood
-    folder plus the ever-growing spent/ store on EVERY call."""
-    st = reactions.pool_load()
-    st.config.safe = True
-    reactions.pool_save(st)
-    mood = reactions._moods_dir() / "happy"
-    mood.mkdir(parents=True, exist_ok=True)
-    (mood / "a.png").write_bytes(b"x")
-    reactions.invalidate()
-
-    walks: list[str] = []
-    real = reactions._mood_files
-    monkeypatch.setattr(reactions, "_mood_files",
-                        lambda d: (walks.append(str(d)), real(d))[1])
-
-    first = reactions.safe_ids()
-    assert walks, "the first call must actually walk the pool"
-    n = len(walks)
-    assert reactions.safe_ids() == first
-    assert len(walks) == n, "the second call re-walked unchanged directories"
-
-    # A new image changes its folder's mtime, so the cache must reopen.
-    (mood / "b.png").write_bytes(b"y")
-    grown = reactions.safe_ids()
-    assert len(walks) > n
-    assert grown > first
 
 
 def test_full_reaction_pool_clears_a_stale_error(rx_env, monkeypatch):

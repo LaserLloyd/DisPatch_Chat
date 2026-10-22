@@ -865,12 +865,13 @@ async def _database(db, *, deep: bool) -> dict:
 
 
 async def _connections() -> dict:
-    """Live WebSocket clients, split by access tier — counts ONLY.
+    """Live WebSocket clients, split into signed in and lapsed — counts ONLY.
 
+    "limited" counts the sockets whose session has lapsed (or that predate the PIN):
+    they receive nothing attributable until they reconnect (ws.ConnectionManager._lapsed).
     No addresses, no user agents, no tokens, not even a per-connection id: the
-    operator needs to know "three devices are watching, one of them is limited",
-    and nothing on this page should be able to tell them which family member is
-    in the kitchen. The manager's per-connection map is read read-only; if its
+    operator needs to know "three devices are watching, one of them has lapsed",
+    and nothing on this page should be able to tell them who is where. The manager's per-connection map is read read-only; if its
     internals ever change we still report the total and say the split is
     unavailable, rather than guessing.
     """
@@ -881,11 +882,11 @@ async def _connections() -> dict:
            "tiers_available": False}
     try:
         conns = getattr(manager, "_conns", None)
-        is_safe = getattr(manager, "_is_safe", None)
-        if isinstance(conns, dict) and callable(is_safe):
+        lapsed = getattr(manager, "_lapsed", None)
+        if isinstance(conns, dict) and callable(lapsed):
             limited = 0
             for meta in list(conns.values()):
-                if is_safe(meta):
+                if lapsed(meta):
                     limited += 1
             out["limited"] = limited
             out["full"] = max(0, out["total"] - limited)

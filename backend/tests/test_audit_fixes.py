@@ -146,28 +146,22 @@ def test_ws_send_without_client_msg_id_gets_no_ack(app_client):
         assert "client_msg_id" not in msg
 
 
-def test_decoy_redactor_default_denies_unknown_frames(app_client):
-    """The redactor used to end in `return frame`, so any frame type nobody
-    had considered went to locked devices verbatim — which is how the
-    avatar_pool frame (non-safe bot ids, data-dir paths, rig errors) got
-    there. Unknown types must be dropped, not passed."""
-    assert main.redact_for_decoy({"type": "avatar_pool", "pools": {}}) is None
-    assert main.redact_for_decoy({"type": "something_new", "x": 1}) is None
-    assert main.redact_for_decoy({"x": 1}) is None            # no type at all
-    # …and the frames Safe Mode legitimately needs still get through.
-    assert main.redact_for_decoy({"type": "ack", "client_msg_id": "c",
-                                  "status": "ok"}) is not None
-    assert main.redact_for_decoy({"type": "pong"}) is not None
-    assert main.redact_for_decoy({"type": "error", "message": "nope"}) is not None
-    assert main.redact_for_decoy(
-        {"type": "hello", "bots": [], "decoy": True}) is not None
-    assert main.redact_for_decoy(
-        {"type": "messages", "thread_id": "t", "messages": []}) is not None
-    assert main.redact_for_decoy(
-        {"type": "threads_list", "bot_id": "alpha", "threads": []}) is not None
-    assert main.redact_for_decoy(
-        {"type": "thread_deleted", "bot_id": "alpha",
-         "thread_id": "t"}) is not None
+def test_operator_frames_never_reach_a_profile_without_the_permission(app_client):
+    """The 3.x redactor was an allow-list for locked devices. The 4.0 scoper narrows every
+    socket: an operator frame (pool telemetry: bot ids, data-dir paths, rig errors) needs the
+    permission behind it, and a principal-less socket gets nothing attributable."""
+    from app import policy
+    basic = policy.Principal(kind="profile", role="basic", profile_id="b", name="B",
+                             permissions=frozenset({"use_chat"}))
+    assert main.scope_frame_for_principal({"type": "avatar_pool", "pools": {}}, basic) is None
+    assert main.scope_frame_for_principal({"type": "reaction_pool", "pool": {}}, basic) is None
+    assert main.scope_frame_for_principal({"type": "harness_state"}, basic) is None
+    # ...and the neutral frames a socket needs still get through.
+    for fr in ({"type": "ack", "client_msg_id": "c", "status": "ok"}, {"type": "pong"},
+               {"type": "error", "message": "nope"}, {"type": "hello", "bots": []}):
+        assert main.scope_frame_for_principal(fr, basic) is not None, fr
+    assert main.scope_frame_for_principal({"type": "messages", "thread_id": "t", "messages": []},
+                                          None) is None
 
 
 def test_ws_send_strips_reaction_markers(app_client):

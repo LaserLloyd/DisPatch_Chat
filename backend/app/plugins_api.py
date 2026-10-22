@@ -1,8 +1,8 @@
 """Settings -> Plugins: one place that answers "what is installed and what is on".
 
 Contract: docs/design/platform-2-3.md section 3. Three routes, all operator-only
-(a Safe-Mode or machine caller gets the same 403 the other admin routes give;
-``main._decoy_blocked`` also bars the prefix one layer earlier):
+(a non-Admin or machine caller gets the same 403 the other admin routes give;
+the route table's manage_plugins also bars the prefix one layer earlier):
 
   * ``GET  /api/plugins`` -- extensions (the host's registry plus the operator's
     on/off), the Tools rows (the same ones ``/api/tools`` returns), the

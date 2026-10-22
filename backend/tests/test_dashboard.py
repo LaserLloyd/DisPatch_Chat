@@ -299,10 +299,10 @@ def test_connections_report_counts_but_never_identity(dash_env, monkeypatch):
     no addresses, tokens or user agents may appear in it."""
     dash_env()
     monkeypatch.setattr(manager, "pin_set", lambda: False)
-    monkeypatch.setattr(manager, "is_session_live", None)
-    fake = {object(): {"decoy": True, "token": None},
-            object(): {"decoy": False, "token": None},
-            object(): {"decoy": False, "token": None}}
+    monkeypatch.setattr(manager, "is_session_live", lambda tok: tok != "dead")
+    fake = {object(): {"token": "dead", "principal": None},
+            object(): {"token": "live", "principal": None},
+            object(): {"token": "live", "principal": None}}
     monkeypatch.setattr(manager, "_conns", fake)
 
     conns = asyncio.run(dashboard._connections())

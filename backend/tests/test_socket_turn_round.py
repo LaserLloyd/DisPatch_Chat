@@ -89,41 +89,42 @@ def wired(tmp_path, monkeypatch):
 # Safe Mode
 # --------------------------------------------------------------------------- #
 
-def test_streaming_frames_are_scoped_by_bot_exactly_like_a_message():
-    """The reason they were excluded was leakage, not the frame type.
+def _basic(bots=("alpha",)):
+    from app import policy
+    return policy.Principal(kind="profile", role="basic", profile_id="b1", name="B",
+                            permissions=frozenset({"use_chat", "dispatch_agents"}))
 
-    A locked device may watch a SAFE bot's reply arrive as it is typed, and
-    must learn nothing at all about any other bot — the same rule `message`
-    has always obeyed.
-    """
+
+def test_streaming_frames_are_scoped_by_owner_and_character_exactly_like_a_message():
+    """A streaming frame follows the same rules as `message`: only the thread owner's sockets,
+    and only for a character the owner may use."""
+    from app import ownership, policy
+    ownership.remember("t-stream", "b1")
     for kind in ("stream_start", "stream_chunk", "turn_status"):
-        assert kind in main._DECOY_FRAME_ALLOW
-        unsafe = {"type": kind, "thread_id": "t1", "bot_id": "main",
-                  "text": "secret", "phase": "tool:x", "message_id": "run:1"}
-        assert main.redact_for_decoy(unsafe) is None, (
-            f"{kind} for a non-safe bot must not reach a locked device")
-        safe = {**unsafe, "bot_id": "alpha"}
-        assert main.redact_for_decoy(safe) is not None
+        assert kind in main._BOT_SCOPED_FRAMES and kind in main._THREAD_FRAMES
+        frame = {"type": kind, "thread_id": "t-stream", "bot_id": "alpha",
+                 "text": "secret", "phase": "tool:x", "message_id": "run:1"}
+        other = policy.Principal(kind="profile", role="user", profile_id="u2", name="U",
+                                 permissions=frozenset({"use_chat"}))
+        assert main.scope_frame_for_principal(frame, other) is None, kind
+        assert main.scope_frame_for_principal(frame, None) is None, kind
 
 
 def test_an_unattributed_streaming_frame_fails_closed():
-    """Fail-closed is the direction: no bot means no delivery."""
+    """Fail-closed is the direction: no known owner means no delivery."""
+    from app import policy
     frame = {"type": "stream_chunk", "thread_id": "unknown-thread",
              "message_id": "run:1", "text": "hi"}
-    assert main.redact_for_decoy(frame) is None
+    assert main.scope_frame_for_principal(frame, policy.open_principal()) is None
 
 
-def test_a_delta_reaching_a_locked_device_carries_no_path_or_marker():
-    """The explicit Safe-Mode requirement, end to end through the redactor."""
+def test_a_delta_carries_no_path_or_marker():
+    """What the sanitizer hands the transport: no host path, no internal marker."""
     raw = "look [[media:/srv/pics/x.png|c]] :react:morning: at this"
     clean = main._sanitize_delta(raw)
-    frame = main.redact_for_decoy({"type": "stream_chunk", "thread_id": "t1",
-                                   "bot_id": "alpha", "message_id": "run:1",
-                                   "text": clean})
-    assert frame is not None
-    assert "/srv/pics" not in frame["text"]
-    assert ":react:" not in frame["text"]
-    assert "[[media:" not in frame["text"]
+    assert "/srv/pics" not in clean
+    assert ":react:" not in clean
+    assert "[[media:" not in clean
 
 
 # --------------------------------------------------------------------------- #

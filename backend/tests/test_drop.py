@@ -1,10 +1,12 @@
-"""Locked-side one-way drop (`POST /api/drop`).
+"""The File Server drop (`POST /api/drop`, ``files_upload``).
 
-The drop is the ONLY upload entry point a Safe-Mode device gets on its own, so
-these tests pin the two halves of its contract:
+4.0 pins:
 
-  * it works without a session (that is the whole point), and
-  * it stays one-way — the sender can never read back what it just sent.
+  * every role may drop (an unsigned device too: it is the lock-target default profile);
+  * the file is the dropper's (``source='fileserver'``): a Basic dropper can never read
+    it back (no ``files_read``), and nobody else can either;
+  * the chat notice lands only in a chat the dropper owns - the protected Admin's drop
+    falls back to its daily thread, anyone else's falls back to no notice at all.
 
 Same hermetic style as the rest of tests/: throwaway DB + monkeypatched data
 dirs, nothing touches the live data dir or ~/.openclaw.
@@ -23,7 +25,7 @@ from app.database import Database
 
 @pytest.fixture
 def drop_env(tmp_path, monkeypatch):
-    """Isolated data dir + DB, PIN set (so unauthenticated == Safe Mode)."""
+    """Isolated data dir + DB, PIN set (so unauthenticated == the default profile)."""
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "config.yaml")
     monkeypatch.setattr(config, "MEDIA_DIR", tmp_path / "media")
@@ -45,7 +47,6 @@ def drop_env(tmp_path, monkeypatch):
     main._ACK_SEEN.clear()
     main._delivered.clear()
     main._thread_bot.clear()
-    main._decoy_upload_used.clear()
 
     with TestClient(main.app, client=("testclient", 50000)) as client:
         auth.set_pin("1234")
@@ -71,23 +72,24 @@ def _unlock(client):
 
 
 # --------------------------------------------------------------------------- #
-# The point of the feature: a locked device can send.
+# Every role may drop; the notice follows the dropper.
 # --------------------------------------------------------------------------- #
 
-def test_locked_device_can_drop_without_a_session(drop_env):
+def test_an_unsigned_device_can_drop_as_the_default_profile(drop_env):
     r = _drop(drop_env)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["name"] == "report.pdf"
     assert body["size"] == 5
-    assert body["notice"] is True          # posted into a safe bot's daily thread
-    assert body["thread_id"]
+    # Not the protected Admin's file, and no chat of its own named: no notice anywhere.
+    assert body["notice"] is False and body["thread_id"] is None
 
 
 def test_drop_posts_a_notice_naming_the_file(drop_env):
+    _unlock(drop_env)                       # the protected Admin drops
     r = _drop(drop_env, name="taxes.pdf", body=b"x" * 2048)
     tid = r.json()["thread_id"]
-    _unlock(drop_env)                       # read it back as the operator
+    assert tid
     msgs = drop_env.get(f"/api/threads/{tid}/messages").json()["messages"]
     notice = [m for m in msgs if (m.get("metadata") or {}).get("kind") == "drop"]
     assert len(notice) == 1
@@ -99,62 +101,50 @@ def test_drop_posts_a_notice_naming_the_file(drop_env):
     assert not notice[0]["media_url"]
 
 
-def test_the_notice_lands_in_a_chat_the_sender_cannot_read(drop_env):
-    """4.0: the notice (with its [[doc:]] link) goes to the protected Admin's daily thread;
-    the sender - here the shared default profile - cannot open that chat (404)."""
-    tid = _drop(drop_env, name="secret.pdf").json()["thread_id"]
-    r = drop_env.get(f"/api/threads/{tid}/messages", headers={"origin": "http://testserver"})
-    assert r.status_code == 404
+def test_nobodys_file_name_lands_in_someone_elses_chat(drop_env):
+    """4.0: the default profile's drop never posts into the protected Admin's chats (the file
+    name is the dropper's business): named or not, no notice there."""
     _unlock(drop_env)
-    full = drop_env.get(f"/api/threads/{tid}/messages").json()["messages"]
-    full_notice = [m for m in full if (m.get("metadata") or {}).get("kind") == "drop"][0]
-    assert "[[doc:" in full_notice["content"]
+    admins = drop_env.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    drop_env.post("/api/auth/lock")
+    body = _drop(drop_env, name="secret.pdf", thread_id=admins).json()
+    assert body["thread_id"] is None and body["notice"] is False
+    _unlock(drop_env)
+    msgs = drop_env.get(f"/api/threads/{admins}/messages").json()["messages"]
+    assert not [m for m in msgs if (m.get("metadata") or {}).get("kind") == "drop"]
 
 
 # --------------------------------------------------------------------------- #
 # One-way: sending must not grant reading.
 # --------------------------------------------------------------------------- #
 
-def test_sender_cannot_read_back_what_it_dropped(drop_env):
+def test_a_basic_dropper_cannot_read_back_what_it_dropped(drop_env):
+    from app import accounts
+    lobby = next(p for p in accounts.list_profiles() if p.name == "Lobby")
+    accounts.update_profile(lobby.id, role="basic")      # an Admin made the default profile Basic
     fid = _drop(drop_env).json()["id"]
-    # The blobs stay unreadable outright (403). The LIST joined the machine
-    # surface 2026-08-14 — for this remote keyless sender that means 401 from
-    # the API-key check instead of the old decoy 403: refused either way, and
-    # still one-way (browser-403 / remote-401 / loopback-agents-only pinned in
-    # test_inbound_thread_mgmt.py).
     for path in (f"/api/files/{fid}/download", f"/api/files/{fid}/raw"):
-        assert drop_env.get(path).status_code == 403, path
-    assert drop_env.get("/api/files").status_code == 401
+        assert drop_env.get(path, headers={"origin": "http://testserver"}).status_code == 403, path
+    # The LIST is on the machine surface: this keyless remote caller is refused by the
+    # API-key check (401) - or, as a browser, by files_read (403).
+    assert drop_env.get("/api/files").status_code in (401, 403)
+    # ...and the protected Admin cannot open it either: it is the dropper's file.
+    _unlock(drop_env)
+    assert drop_env.get(f"/api/files/{fid}/download").status_code == 404
 
 
 def test_dropped_file_is_tagged_fileserver_not_chat(drop_env):
-    """`source='fileserver'` keeps `_block_fileserver_read` barring the blob even
-    if the /api/files* path gate were ever loosened."""
-    fid = _drop(drop_env).json()["id"]
+    """`source='fileserver'` is what makes `_file_access` ask for files_read."""
     _unlock(drop_env)
+    fid = _drop(drop_env).json()["id"]
     files = drop_env.get("/api/files").json()["files"]
     rec = [f for f in files if f["id"] == fid][0]
     assert rec["source"] == "fileserver"
 
 
 # --------------------------------------------------------------------------- #
-# Thread targeting: a locked caller may not write into a non-safe conversation.
+# Thread targeting: only a chat the dropper owns.
 # --------------------------------------------------------------------------- #
-
-def test_locked_caller_cannot_target_an_unsafe_bots_thread(drop_env):
-    _unlock(drop_env)
-    unsafe = drop_env.post("/api/threads", json={"bot_id": "main"}).json()
-    assert unsafe["bot_id"] == "main"
-    drop_env.post("/api/auth/lock")
-
-    landed = _drop(drop_env, thread_id=unsafe["id"]).json()["thread_id"]
-    # Silently redirected to the default safe thread rather than honoured.
-    assert landed != unsafe["id"]
-
-    _unlock(drop_env)
-    msgs = drop_env.get(f"/api/threads/{unsafe['id']}/messages").json()["messages"]
-    assert not [m for m in msgs if (m.get("metadata") or {}).get("kind") == "drop"]
-
 
 def test_drop_honours_a_thread_the_sender_owns(drop_env):
     import yaml
@@ -169,6 +159,7 @@ def test_drop_honours_a_thread_the_sender_owns(drop_env):
 
 
 def test_unknown_thread_id_falls_back_rather_than_failing(drop_env):
+    _unlock(drop_env)                       # the protected Admin: its daily thread
     body = _drop(drop_env, thread_id="does-not-exist").json()
     assert body["notice"] is True
     assert body["thread_id"]

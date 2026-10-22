@@ -97,7 +97,7 @@ def test_reset_by_the_profile_itself(team):
     _chat(max_, bot["id"])
     p = max_.get("/api/me/reset/preview").json()
     # bots = the one made here plus the Atlas the profile got when it was created
-    assert p["counts"] == {"bots": 2, "chats": 1, "pictures": 0, "voices": 0} and p["outcome"] == "atlas"
+    assert p["counts"] == {"bots": 2, "chats": 1, "pictures": 0, "voices": 0, "files": 0} and p["outcome"] == "atlas"
     r = max_.post("/api/me/reset", json={"token": p["token"]})
     assert r.status_code == 200, r.text
     assert r.json()["deleted"]["chats"] == 1 and r.json()["keeps_voices"] is True
@@ -138,7 +138,7 @@ def test_an_admin_resets_a_profile_from_people_without_seeing_content(team):
     pid = team["ids"]["Max"]
     p = eve.get(f"/api/people/{pid}/reset/preview")
     assert p.status_code == 200
-    assert "SENT-API" not in p.text and set(p.json()["counts"]) == {"bots", "chats", "pictures", "voices"}
+    assert "SENT-API" not in p.text and set(p.json()["counts"]) == {"bots", "chats", "pictures", "voices", "files"}
     r = eve.post(f"/api/people/{pid}/reset", json={"token": p.json()["token"]})
     assert r.status_code == 200 and r.json()["deleted"]["chats"] == 1
     assert "SENT-API" not in r.text
@@ -298,7 +298,7 @@ def test_user_to_basic_by_an_admin_needs_the_confirmation_and_signs_the_person_o
     assert r.status_code == 200, r.text
     assert r.json()["role"] == "basic" and r.json()["household_bots"] == ["otter"]
     assert accounts.get_profile(max_id).role is Role.BASIC
-    assert profiles_service.content_counts(max_id) == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0}
+    assert profiles_service.content_counts(max_id) == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0, "files": 0}
     assert team["Max"].get("/api/me/characters").status_code in (401, 403)         # signed out
 
 

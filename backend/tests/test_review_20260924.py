@@ -143,7 +143,6 @@ class FakeWS:
 
 
 def _ws_env(monkeypatch, frames):
-    monkeypatch.setattr(main.manager, "conn_decoy", lambda w: False)
     # 4.0: every /ws thread action checks the socket's person owns the thread; these fake
     # sockets are an unclaimed install's (everyone is the Owner).
     monkeypatch.setattr(main.manager, "principal_of", lambda w: main.policy.open_principal())

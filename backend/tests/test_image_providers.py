@@ -288,8 +288,8 @@ def test_routes_are_operator_only(env):
                          ("get", "/api/plugins/catalog")]:
         kw = {"json": {}} if method in ("put", "post") else {}
         assert getattr(c, method)(path, **kw).status_code in (401, 403), path
-    assert main._decoy_blocked("POST", "/api/guide/seed")
-    assert main._decoy_blocked("GET", "/api/llm/image")
+    assert main._signed_out_blocked("POST", "/api/guide/seed")
+    assert main._signed_out_blocked("GET", "/api/llm/image")
 
 
 def test_the_test_button_makes_one_generation_and_stores_nothing(env, monkeypatch):

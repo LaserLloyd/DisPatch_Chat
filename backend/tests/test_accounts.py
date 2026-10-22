@@ -175,37 +175,6 @@ def test_updates_bump_the_epoch_only_when_they_must(world):
     assert accounts.update_profile(p.id, pin_hash="y").epoch == e0 + 3
 
 
-def test_charging_a_budget_is_atomic_and_never_overshoots(world):
-    ok = [accounts.usage_charge("s", "turn", 5) for _ in range(8)]
-    assert ok == [True] * 5 + [False] * 3
-    assert accounts.usage_get("s", "turn") == 5
-    # Concurrent chargers share the limit exactly.
-    results = []
-
-    def work():
-        results.append(accounts.usage_charge("t", "turn", 10))
-    ts = [threading.Thread(target=work) for _ in range(25)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    assert sum(results) == 10 and accounts.usage_get("t", "turn") == 10
-
-
-def test_usage_map_keeps_the_dict_spelling_working(world):
-    m = accounts.UsageMap("upload_bytes")
-    assert m.get("1.2.3.4", 0) == 0
-    m["1.2.3.4"] = 7
-    assert m.get("1.2.3.4") == 7 and "1.2.3.4" in m
-    m.clear()
-    assert m.get("1.2.3.4", 0) == 0
-    a = accounts.UsageMap("action:", tuple_keys=True)
-    accounts.usage_charge("ip1", "action:turn", 3)
-    assert a.get(("ip1", "turn")) == 1
-    a.clear()
-    assert a.get(("ip1", "turn"), 0) == 0
-
-
 # --------------------------------------------------------------------------- #
 # the role -> permission matrix and the decision function
 # --------------------------------------------------------------------------- #
@@ -249,7 +218,8 @@ def test_authorize_decisions():
     assert (d.allowed, d.status, d.code) == (False, 401, "signin_required")
     assert policy.authorize(kid, R(Permission.USE_CHAT)).allowed
     d = policy.authorize(kid, R(Permission.MANAGE_SETTINGS))
-    assert (d.allowed, d.status, d.code) == (False, 403, "safe_mode")
+    # 4.0: a Basic profile meets the same named refusal as anyone (no Safe-Mode decoy)
+    assert (d.allowed, d.status, d.code, d.required) == (False, 403, "permission_denied", "manage_settings")
     d = policy.authorize(member, R(Permission.MANAGE_SETTINGS))
     assert (d.allowed, d.code) == (False, "permission_denied")
     assert policy.authorize(owner, R(Permission.ADMIN_SYSTEM)).allowed

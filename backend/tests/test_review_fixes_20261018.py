@@ -70,8 +70,8 @@ def test_device_binding_is_gone_and_a_member_cannot_forget_other_devices(family,
 
 def test_the_owner_and_an_admin_still_manage_members(family):
     owner = family["owner"]
-    assert owner.patch(f"/api/people/{family['eve_id']}", json={"grants": ["dispatch_agents"],
-                                                                 "budgets": {"turns": 5}}).status_code == 200
+    assert owner.patch(f"/api/people/{family['eve_id']}",
+                       json={"grants": ["dispatch_agents"]}).status_code == 200
 
 
 # --------------------------------------------------------------------------- #

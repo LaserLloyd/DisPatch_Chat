@@ -90,13 +90,16 @@ def test_a_reset_leaves_no_trace_of_the_profile_in_the_data_directory(scratch):
     assert {m: files for m, files in after.items() if m in ca["markers"] and files} == {}, \
         "traces of the reset profile remain"
     assert all(after[m] for m in cb["markers"]), "the other profile lost something"
-    # File Server drops are the profile's files, not its conversations: kept.
-    assert all(after[m] for m in ca["keep"] + cb["keep"])
+    # 4.0 (WP-DEL): the reset profile's File Server files go too (they are its private
+    # content, counted as "files"); the other profile's stay.
+    assert not any(after[m] for m in ca["keep"]), "the reset profile's File Server files remain"
+    assert all(after[m] for m in cb["keep"])
+    assert deleted["files"] >= 1
     # A picture another message still shows stays; so does a snapshot another thread still uses.
     assert ca["shared"].exists() and ca["shared_snap"].exists()
     assert not ca["own"].exists() and not ca["snap"].exists() and not ca["chat_blob"].exists()
     assert cb["own"].exists() and cb["snap"].exists() and cb["chat_blob"].exists()
-    assert ca["drop_blob"].exists()
+    assert not ca["drop_blob"].exists() and cb["drop_blob"].exists()
 
 
 def test_reset_gives_an_admin_or_user_a_fresh_atlas_and_keeps_the_profile(scratch):
@@ -110,7 +113,7 @@ def test_reset_gives_an_admin_or_user_a_fresh_atlas_and_keeps_the_profile(scratc
     mine = s.personal(u.id)
     assert len(mine) == 1 and mine[0].id != old.id and mine[0].name == "Atlas"
     assert accounts.get_profile(u.id).name == "Bram"
-    assert profiles_service.content_counts(u.id) == {"bots": 1, "chats": 0, "pictures": 0, "voices": 0}
+    assert profiles_service.content_counts(u.id) == {"bots": 1, "chats": 0, "pictures": 0, "voices": 0, "files": 0}
 
 
 def test_reset_leaves_a_basic_profile_with_its_assigned_household_list(scratch):
@@ -223,7 +226,7 @@ def test_wiping_twice_is_harmless(scratch):
     s.thread(u.id)
     first = profiles_service.wipe_profile_content(u.id)
     second = profiles_service.wipe_profile_content(u.id)
-    assert first["chats"] == 1 and second == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0}
+    assert first["chats"] == 1 and second == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0, "files": 0}
 
 
 def test_the_database_stays_healthy_and_the_other_chats_searchable(scratch):

@@ -52,9 +52,8 @@ Auth matrix (unchanged in effect by the move to an app):
   a no-PIN install, or an on-box machine. Since 2026-09-15 none of them was
   operator-only (the manage verbs were lifted onto the agent tier), so none
   uses ``ctx.require_operator``.
-- Reads keep their Safe-Mode redaction to the empty shape — belt-and-braces
-  under the loader's router gate, which already refuses Safe Mode with the
-  uniform decoy 403 (the app is not ``safe: true``).
+- Reads are refused by the loader's router gate to anyone without the app's
+  manifest permission (``manage_agents``: the Admins' tracker).
 - ``tools.yaml`` ``{id: jobboard, kind: app, enabled: false}`` 404s it all.
 """
 from __future__ import annotations
@@ -95,19 +94,6 @@ MAX_TAGS = 32
 # --------------------------------------------------------------------------- #
 
 
-def _is_decoy(request: Request) -> bool:
-    """A locked Safe-Mode caller ("decoy" in the shell's vocabulary). The
-    shell's auth gate stamps ``request.state.decoy``."""
-    return bool(getattr(getattr(request, "state", None), "decoy", False))
-
-
-def _safe_mode_redact(jobs_payload: dict) -> dict:
-    """The empty shape on Safe-Mode reads — never leak job rows to a
-    locked session.
-    """
-    return {"jobs": [], "next_cursor": None}
-
-
 def _require_access(request: Request) -> None:
     """403 unless the caller is the operator or an on-box machine — the
     shell's ``ctx.require_access``. Every write route calls it."""
@@ -121,7 +107,7 @@ def _db():
 
 
 async def _broadcast(kind: str, **fields) -> None:
-    """An ``app:jobboard:<kind>`` WS frame (Safe Mode never receives it)."""
+    """An ``app:jobboard:<kind>`` WS frame (only sockets holding the app's permission)."""
     await CTX.broadcast({"type": f"app:{APP_ID}:{kind}", **fields})
 
 
@@ -537,14 +523,9 @@ async def list_jobs(
 ):
     """The board view. Filterable by state, source agent, tag, thread.
 
-    A Safe-Mode caller gets the empty shape — never the row contents,
-    matching the existing redaction pattern.
-
     ``thread_id`` filters to one monthly discussion thread — the chat
     panel uses this to paint the messages for a specific month.
     """
-    if _is_decoy(request):
-        return _safe_mode_redact({})
     db = _db()
     rows = await db.list_jobs(state=state, source_agent=source_agent,
                              tag=tag, thread_id=thread_id, limit=limit)
@@ -569,9 +550,7 @@ async def list_jobs(
 
 @router.get("/profile")
 async def get_profile(request: Request):
-    """The current preference profile. Decoy callers get the empty shape."""
-    if _is_decoy(request):
-        return _profile_to_json(jobs_score.empty_profile())
+    """The current preference profile."""
     db = _db()
     p = await db.get_job_profile()
     if not p:
@@ -594,13 +573,7 @@ async def list_months(request: Request,
     payload so the frontend month picker doesn't have to parse the
     thread title itself. The thread is also returned so the UI can
     navigate straight into the chat.
-
-    Safe-Mode callers get an empty list — a locked device must never
-    see job metadata, even the title of a monthly thread (the title
-    embeds the year/month).
     """
-    if _is_decoy(request):
-        return {"months": [], "current": None}
     db = _db()
     rows = await db.list_monthly_threads(bot_id)
     out: list[dict] = []
@@ -641,8 +614,6 @@ async def current_month(request: Request,
     accidentally creating an empty thread (e.g. the dispatchctl CLI's  # scrub-ok: dispatchctl is the project's CLI tool name, not a private identifier
     status read).
     """
-    if _is_decoy(request):
-        return {"thread": None, "month": None}
     year, month = _current_year_month()
     label = database.jobs_month_label(year, month)
     key = database.jobs_month_key(year, month)
@@ -674,8 +645,6 @@ async def get_month(request: Request, key: str,
         year, month = database.parse_jobs_month_key(key)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if _is_decoy(request):
-        return {"thread": None, "messages": [], "jobs": [], "score": None}
     db = _db()
     thread = await db.find_monthly_thread(bot_id, year, month)
     if thread is None:
@@ -775,15 +744,12 @@ async def list_feedback(
 
     Machine-readable without a session from loopback, exactly like
     ``GET /api/jobs`` (the shell puts a mounted app's whole API on the
-    machine-inbound surface). Safe-Mode/decoy
-    callers get the empty shape.
+    machine-inbound surface).
 
     MUST stay registered before ``/{job_id}`` — see the route-order note
     at the top of the read-paths section, "feedback" would otherwise be
     swallowed as a job_id.
     """
-    if _is_decoy(request):
-        return {"feedback": []}
     db = _db()
     rows = await db.list_recent_feedback(since=since, limit=limit)
     return {
@@ -812,8 +778,6 @@ async def get_job(request: Request, job_id: str):
     The chat panel resolves a message_id → job via this endpoint when
     the user opens the vote UI inside an existing chat.
     """
-    if _is_decoy(request):
-        return {"thread": None, "job": None, "events": [], "score": None}
     db = _db()
     job = await db.get_job(job_id)
     if not job:

@@ -555,9 +555,8 @@ class TaskManager:
         return store.get_task(row["task_id"]) or row
 
     async def _thread_postable(self, tid: str | None) -> bool:
-        """May the manager write a line about a task into this thread? Only into one that exists
-        and that a Restricted profile cannot read: what an agent was asked, and what it answered,
-        is not for them (the same rule the API applies when a task is attached to a thread)."""
+        """May the manager write a line about a task into this thread? Only into one that still
+        exists (the API made sure, when the task was attached, that it is the dispatcher's own)."""
         if not tid or self.hooks.deliver is None:
             return False
         if self.hooks.thread_info is None:
@@ -566,7 +565,7 @@ class TaskManager:
             info = await self.hooks.thread_info(tid)
         except Exception:
             return False
-        return bool(info) and not info.get("restricted_visible", True)
+        return bool(info)
 
     async def _post_assign_card(self, row: dict[str, Any]) -> None:
         """A line in the originating chat that carries the live task card."""

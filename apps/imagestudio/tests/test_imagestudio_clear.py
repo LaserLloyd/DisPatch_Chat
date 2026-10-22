@@ -14,8 +14,9 @@ from app import config
 BASE = "/api/apps/imagestudio"
 
 
-def _seed(n: int) -> list[dict]:
-    """``n`` ledger rows, oldest first, each with its file in the media store."""
+def _seed(n: int, owner: str | None = None) -> list[dict]:
+    """``n`` ledger rows, oldest first, each with its file in the media store (``owner``: the
+    rows' ``owner_profile_id``; none = a 3.x row, which is the protected Admin's)."""
     led_dir = config.DATA_DIR / "apps-data" / "imagestudio"
     led_dir.mkdir(parents=True, exist_ok=True)
     config.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,6 +29,8 @@ def _seed(n: int) -> list[dict]:
                      "provider": "minimax", "model": "image-01", "ratio": "1:1",
                      "seed": None, "optimizer": False, "reference": False, "batch": "b",
                      "created_at": f"2026-10-19T10:00:{i:02d}+00:00", "day": "2026-10-19"})
+        if owner:
+            rows[-1]["owner_profile_id"] = owner
     with (led_dir / "images.jsonl").open("a", encoding="utf-8") as f:
         f.write("".join(json.dumps(r) + "\n" for r in rows))
     return rows
@@ -138,31 +141,34 @@ def test_unknown_ids_and_bad_orders_are_refused(world):
     assert _file(rows[0])
 
 
-def test_a_member_may_clear_but_not_without_manage_history(world):
+def test_a_user_may_clear_their_own_but_not_without_manage_history(world):
     owner = world.create_owner()
-    world.person(owner, "Max", "member", pin="5555")
-    world.person(owner, "Nia", "member", pin="6666", denies=["manage_history"])
-    rows = _seed(3)
+    max_p = world.person(owner, "Max", "member", pin="5555")
+    nia_p = world.person(owner, "Nia", "member", pin="6666", denies=["manage_history"])
+    rows = _seed(3, nia_p["id"])
     nia = world.client()
     assert world.login(nia, name="Nia", pin="6666").status_code == 200
     assert nia.get(BASE + "/state").json()["can_clear"] is False, "the page hides the action too"
     assert owner.get(BASE + "/state").json()["can_clear"] is True
     r = nia.post(BASE + "/clear", json={"id": rows[2]["id"], "order": "newest"})
     assert r.status_code == 403
-    assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
+    assert len(_ids(nia)) == 3 and all(_file(x) for x in rows)
+    mine = _seed(2, max_p["id"])
     max_ = world.client()
     assert world.login(max_, name="Max", pin="5555").status_code == 200
-    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"}).status_code == 200
-    assert len(_ids(owner)) == 2
+    # 4.0: another profile's picture is "already gone" for this caller (its own ledger)
+    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"}).status_code == 404
+    assert max_.post(BASE + "/clear", json={"id": mine[0]["id"], "order": "newest"}).status_code == 200
+    assert len(_ids(max_)) == 1 and len(_ids(nia)) == 3
 
 
-def test_restricted_and_signed_out_callers_never_reach_it(world):
+def test_basic_and_signed_out_callers_never_reach_it(world):
     owner = world.create_owner()
-    world.person(owner, "Mia", "restricted")
+    world.person(owner, "Mia", "basic")
     rows = _seed(2)
-    kid = world.client()
-    assert world.login(kid, name="Mia").status_code == 200
-    assert kid.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
+    bea = world.client()
+    assert world.login(bea, name="Mia").status_code == 200
+    assert bea.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
     assert world.client().post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code in (401, 403)
     assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)
 

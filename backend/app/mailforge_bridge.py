@@ -28,8 +28,8 @@ reaches the browser after that first navigation is MailForge's own signed
 session cookie, scoped to MailForge's origin.
 
 Every route here is full-session only (see ``_require_mail`` in main.py) and
-belongs in ``_decoy_blocked`` — a Safe-Mode / no-PIN caller must never learn
-the port, let alone the key.
+is refused to a signed-out caller (``_signed_out_blocked``) — only a profile holding
+use_tools:mail may learn the port, let alone the key.
 """
 
 from __future__ import annotations

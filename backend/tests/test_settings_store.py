@@ -160,7 +160,7 @@ def test_restart_pending_is_tracked_from_the_value_at_first_look(tmp_path, monke
     settings_store.set_many({"system.backup_keep": 12})                          # back to what is running
     assert settings_store.resolve("system.backup_keep").restart_pending is False
     # a setting that applies at once is never "pending"
-    assert settings_store.set_many({"people.restricted_daily_turns": 5}).restart_required == ["people.restricted_daily_turns"]
+    assert settings_store.set_many({"people.machine_daily_upload_bytes": 5}).restart_required == ["people.machine_daily_upload_bytes"]
     assert settings_store.set_many({"characters.greeting": True}).restart_required == []
 
 
@@ -440,7 +440,7 @@ def test_ui_sections_follow_the_settings_plan():
     where = {d.key: d.ui_section for d in S.CORE_SETTINGS}
     assert where["people.lock_timeout_seconds"] == "people#signin-rules"
     assert where["people.remember_device_days"] == "people#signin-rules"
-    assert where["people.restricted_daily_turns"] == "people#restricted-limits"
+    assert where["people.machine_daily_upload_bytes"] == "people#machine"
     assert where["people.machine_loopback_trust"] == "people#machine"
     assert where["system.backup_interval"] == "system#backups"
     assert where["system.public_url"] == "system#network"
@@ -466,7 +466,7 @@ def test_duration_and_size_presets_are_valid_values():
             assert S.coerce(d, v) == v, f"{d.key}: preset {v} is refused"
     # The default sits among the presets, so a fresh install shows a named choice.
     for key in ("people.lock_timeout_seconds", "people.session_timeout_user", "system.backup_interval",
-                "system.files_total_max", "people.restricted_daily_upload_bytes"):
+                "system.files_total_max", "people.machine_daily_upload_bytes"):
         d = S.get_def(key)
         assert d.default in d.presets, key
 

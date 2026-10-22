@@ -104,9 +104,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_profile ON sessions(profile_id);
 
 CREATE TABLE IF NOT EXISTS usage_daily (
-    subject TEXT NOT NULL,                     -- profile id, or device:<id> / ip:<addr> when anonymous
+    subject TEXT NOT NULL,                     -- "machine" (the upload guard); 3.x rows: profile/device/ip
     day     TEXT NOT NULL,                     -- local YYYY-MM-DD
-    kind    TEXT NOT NULL,                     -- turn | thread | feedback | upload_bytes | active_seconds
+    kind    TEXT NOT NULL,                     -- upload_bytes (3.x also turn | thread | feedback | active_seconds)
     amount  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (subject, day, kind)
 );
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS activity (
     ts         TEXT NOT NULL,
     category   TEXT NOT NULL DEFAULT 'activity',   -- 'activity' | 'audit'
     kind       TEXT NOT NULL,
-    profile_id TEXT,                               -- who did it (NULL = anonymous / machine)
+    profile_id TEXT,                               -- who did it (NULL = a machine; 3.x: an anonymous device)
     subject    TEXT NOT NULL DEFAULT '',
     detail     TEXT NOT NULL DEFAULT ''
 );
@@ -659,7 +659,7 @@ def list_sessions(profile_id: str | None = None) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Daily usage (budgets)
+# Daily usage counters (4.0: only the machine upload guard - people have no daily limits)
 # --------------------------------------------------------------------------- #
 
 
@@ -685,37 +685,6 @@ def usage_add(subject: str, kind: str, amount: int) -> int:
             con.execute("ROLLBACK")
             raise
     return total
-
-
-def usage_charge(subject: str, kind: str, limit: int, amount: int = 1) -> bool:
-    """Atomically charge ``amount`` unless that would exceed ``limit``. False = spent."""
-    if amount > limit:
-        return False
-    with _lock, connect() as con:
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            row = con.execute("SELECT amount FROM usage_daily WHERE subject=? AND day=? AND kind=?",
-                              (subject, today(), kind)).fetchone()
-            used = int(row["amount"]) if row else 0
-            if used + amount > limit:
-                con.execute("COMMIT")
-                return False
-            con.execute(
-                "INSERT INTO usage_daily (subject,day,kind,amount) VALUES (?,?,?,?) "
-                "ON CONFLICT(subject,day,kind) DO UPDATE SET amount = amount + excluded.amount",
-                (subject, today(), kind, amount))
-            con.execute("COMMIT")
-            return True
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
-
-
-def usage_today(subject: str) -> dict[str, int]:
-    with connect() as con:
-        rows = con.execute("SELECT kind, amount FROM usage_daily WHERE subject=? AND day=?",
-                           (subject, today())).fetchall()
-    return {r["kind"]: int(r["amount"]) for r in rows}
 
 
 def prune(keep_days: int = 35) -> None:
@@ -792,47 +761,3 @@ def update_profile_hash_silently(profile_id: str, column: str, value: str) -> No
         con.execute(f"UPDATE profiles SET {column} = ? WHERE id = ?", (value, profile_id))
         _bump_rev(con)
         invalidate()
-
-
-class UsageMap:
-    """A dict-shaped view of today's ``usage_daily`` rows for one kind.
-
-    The 2.x per-IP counters were plain dicts (``main._decoy_upload_used``,
-    ``_decoy_action_used``) that tests and tools read and clear. They are now rows
-    in SQLite - so they survive a restart and can be keyed by profile - and this
-    adapter keeps the dict spelling working: ``m.get(subject, 0)``, ``m[subject] = n``,
-    ``m.clear()``. With ``tuple_keys`` the key is ``(subject, action)`` and the kind is
-    ``<prefix><action>``."""
-
-    def __init__(self, kind: str, tuple_keys: bool = False) -> None:
-        self.kind = kind
-        self.tuple_keys = tuple_keys
-
-    def _split(self, key) -> tuple[str, str]:
-        if self.tuple_keys:
-            subject, action = key
-            return str(subject), f"{self.kind}{action}"
-        return str(key), self.kind
-
-    def get(self, key, default: int = 0) -> int:
-        subject, kind = self._split(key)
-        v = usage_get(subject, kind)
-        return v if v else default
-
-    def __getitem__(self, key) -> int:
-        return self.get(key, 0)
-
-    def __setitem__(self, key, value: int) -> None:
-        subject, kind = self._split(key)
-        with _lock, connect() as con:
-            con.execute("INSERT OR REPLACE INTO usage_daily (subject,day,kind,amount) VALUES (?,?,?,?)",
-                        (subject, today(), kind, max(0, int(value))))
-
-    def __contains__(self, key) -> bool:
-        subject, kind = self._split(key)
-        return usage_get(subject, kind) > 0
-
-    def clear(self) -> None:
-        pattern = self.kind + ("%" if self.tuple_keys else "")
-        with _lock, connect() as con:
-            con.execute("DELETE FROM usage_daily WHERE kind LIKE ? AND day = ?", (pattern, today()))

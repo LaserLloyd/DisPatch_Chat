@@ -1,7 +1,7 @@
 """The thread-websocket gate the host owns (app/extensions.py, CONTRACTS §B.1
-rule 3 and rule 9): Origin==Host → the thread exists → an unlocked session, or
-(since 2.3.4) a locked device on a thread it can see — a `safe` bot's, its
-turns stamped locked like a typed Safe-Mode send → max_total →
+rule 3 and rule 9): Origin==Host → the thread exists → a session (or the
+lock-target default profile) that owns the thread and may use its character →
+max_total →
 per-session slots → the extension's handler. Refusals 1–3 close
 1008 BEFORE accept; "busy" and "nothing provides this" are accept-then-1013
 for authorised callers only. Plus the uvicorn frame cap the live unit runs
@@ -69,22 +69,22 @@ def test_unknown_thread_is_refused(ext_env):
     assert KNOBS.sockets == []
 
 
-def test_a_safe_bots_thread_from_an_unlocked_device(ext_env):
+def test_a_household_bots_thread_from_a_signed_in_device(ext_env):
     c, _ = ext_env
     install()
-    tid = thread_for(c, "alpha")                      # a Safe-Mode bot
+    tid = thread_for(c, "alpha")
     unlock(c)
     KNOBS.handler_mode = "hold"
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         ws.receive_text()
         assert _live(ws) is True
     sock = KNOBS.sockets[-1]
-    assert sock.thread.id == tid and sock.bot.safe is True and sock.locked is False
+    assert sock.thread.id == tid and sock.bot.id == "alpha"
+    assert not hasattr(sock, "locked") and not hasattr(sock.bot, "safe")      # 4.0: no Safe Mode
 
 
 # --------------------------------------------------------------------------- #
-# Locked devices (2.3.4): the threads a locked device can see (`safe` bots),
-# every turn locked
+# Signed-out devices
 # --------------------------------------------------------------------------- #
 
 
@@ -124,17 +124,15 @@ def _set_bot(bot_id: str, **fields) -> None:
     config._invalidate_bots_cache()
 
 
-def test_a_locked_device_is_refused_on_a_hidden_safe_bots_thread(ext_env):
-    """The threads a locked device may use are the ones its chat list shows:
-    a `safe` bot that is LISTED (main._safe_bot_ids — the main /ws refuses a
-    Safe-Mode send to a hidden bot's thread, so does the extension gate)."""
+def test_a_signed_out_device_is_refused_on_a_hidden_bots_thread(ext_env):
+    """A hidden bot's thread opens for its signed-in owner; a signed-out device is nobody."""
     c, _ = ext_env
     install()
     unlock(c)
     _add_bot("ghost", safe=True, visible=False)
     tid = thread_for(c, "ghost")
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()                       # unlocked: a hidden bot is fine
+        ws.receive_text()                       # signed in: a hidden bot is fine
     lock(c)
     refused(c, f"/ws/voice/{tid}", headers=ORIGIN)
 
@@ -170,12 +168,11 @@ def test_gated_socket_reaches_the_handler_with_a_bot_view(ext_env):
     unlock(c)
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         ready = json.loads(ws.receive_text())
-        assert ready == {"type": "ready", "bot": "main", "backend": "gateway", "token": True,
-                         "locked": False}
+        assert ready == {"type": "ready", "bot": "main", "backend": "gateway", "token": True}
         ws.send_text("hi")
         assert ws.receive_text() == "echo:hi"
     sock = KNOBS.sockets[0]
-    assert sock.thread.id == tid and sock.bot.safe is False
+    assert sock.thread.id == tid and sock.bot.id == "main"
     assert not hasattr(sock.bot, "api")
 
 

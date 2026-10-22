@@ -231,7 +231,7 @@ async def test_a_users_typo_marker_is_not_a_fire_failure(rx_env):
 
 async def test_a_resolvable_marker_does_not_tick_the_counter(rx_env):
     """The other half of the guarantee: a working fire stays uncounted."""
-    known = reactions.list_for(decoy=False)[0]["id"]
+    known = reactions.list_for()[0]["id"]
     baseline = reactions.fire_failure_stats()["failures_24h"]
     _, ids = reactions.extract_markers(f"Yes :react:{known}:")
     assert ids == [known]

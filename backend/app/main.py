@@ -86,7 +86,6 @@ from . import (
     harness_sessions,
     image_jobs,
     image_providers,
-    limits,
     llm_api,
     localview,
     mailforge_bridge,
@@ -189,24 +188,11 @@ _TEXT_MIMES = {
 UPLOAD_MAX_IMAGE = 25 * 1024 * 1024    # 25MB
 UPLOAD_MAX_VIDEO = 200 * 1024 * 1024   # 200MB
 UPLOAD_MAX_DOC = 50 * 1024 * 1024      # 50MB for documents
-# Safe-Mode availability guard: decoy (no-PIN) clients get a modest per-client
-# daily upload budget so an unauthenticated LAN/tailnet peer can't fill the
-# disk through POST /api/upload. Full sessions are unaffected. Env override is
-# for tests. In-memory by design: resets on restart, which is fine for a
-# best-effort availability cap.
-DECOY_UPLOAD_QUOTA = int(config.env("DECOY_UPLOAD_QUOTA") or (200 * 1024 * 1024))  # 200MB/day/client
-# Safe Mode may send messages, and every message to a safe bot spawns an agent
-# subprocess — a billed model turn. Without a cap an unauthenticated LAN or
-# tailnet peer can run the operator's API bill up indefinitely and fill the DB
-# with threads, while _agent_sem only caps CONCURRENCY, not rate. Same shape as
-# DECOY_UPLOAD_QUOTA: per-client, per-day, in-memory, resets on restart.
-DECOY_TURN_QUOTA = int(config.env("DECOY_TURN_QUOTA", "200"))
-DECOY_THREAD_QUOTA = int(config.env("DECOY_THREAD_QUOTA", "50"))
-# Rating a reply is cheap (no model turn) but still an unauthenticated write,
-# so it gets the same daily-budget shape as every other decoy action rather
-# than an unlimited one. Generous: a real family device rating replies all
-# day will never come close.
-DECOY_FEEDBACK_QUOTA = int(config.env("DECOY_FEEDBACK_QUOTA", "100"))
+# Machine upload guard (plumbing, not a per-profile limit - SPEC section 5): an agent or cron
+# holding machine:upload may store at most this many bytes a day through /api/upload, so a
+# looping agent cannot fill the disk. Counted in chats.db (accounts.usage_daily) under the
+# subject "machine". People have no daily limits of any kind. Env override is for tests.
+MACHINE_UPLOAD_QUOTA = int(config.env("MACHINE_UPLOAD_QUOTA") or (200 * 1024 * 1024))  # 200MB/day
 # Server-wide storage ceiling across ALL stored blobs (chat media + File
 # Server). Prevents even trusted-LAN uploaders from filling the disk over time.
 # Tunable via DISPATCH_FILES_TOTAL_MAX (bytes); 0 disables the cap.
@@ -459,10 +445,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # cheap no-op, so this runs unconditionally on every start.
     await asyncio.to_thread(reactions.migrate_mood_folders)
     await db.connect()
-    # Safe-Mode connections get image/media stripped from every frame; a full
-    # connection whose session lapses is redacted from that moment too.
-    manager.redactor = redact_for_decoy
-    # Every socket is then narrowed to the characters ITS profile may use (3.0
+    # Every socket is narrowed to the characters ITS profile may use (3.0
     # per-profile visibility), broadcasts included - not only the roster and hello.
     manager.scoper = scope_frame_for_principal
     # 4.0 ownership: before a frame goes out, the owner of the thread it names is cached so
@@ -597,8 +580,8 @@ async def _lifespan_shutdown() -> None:
 
 # The interactive API docs are disabled in this deployment: /openapi.json,
 # /docs and /redoc would hand a sessionless caller the complete route + model
-# inventory (harness, inject, recovery, reactions…) — exactly the unlocked
-# feature surface Safe Mode exists to hide, on a service bound to 0.0.0.0.
+# inventory (harness, inject, recovery, reactions…) — the operator surface a
+# stranger must not map, on a service bound to 0.0.0.0.
 #
 # The schema itself is still BUILT — it is served, gated, at /api/openapi.json
 # for a full session or an on-box machine (see openapi_schema below). An agent
@@ -798,7 +781,7 @@ async def media_security_headers(request: Request, call_next):
 _MULTIPART_SLACK = 16 * 1024 * 1024   # boundary/header overhead headroom
 
 # POST re-pins ONE thread's avatar (full image + optional face crop); GET is
-# the browser-facing image route with its own decoy gating. Used by both the
+# the browser-facing image route with its own ownership check. Used by both the
 # upload ceiling below and the inbound machine-surface allowlist.
 _INBOUND_THREAD_AVATAR_RE = re.compile(r"^/api/threads/[^/]+/avatar$")
 
@@ -890,7 +873,6 @@ async def auth_gate(request: Request, call_next):
     Added after media_security_headers, so it runs OUTERMOST.
     """
     request.state.session = None
-    request.state.decoy = False
     request.state.machine = False
     request.state.principal = None
     request.state.policy = None
@@ -995,21 +977,14 @@ async def auth_gate(request: Request, call_next):
         return JSONResponse({"detail": "Unknown bot",
                              "error": errors.envelope("not_found", message="Unknown bot")},
                             status_code=404)
-    if principal.is_restricted:
-        if _gated_avatar_static(path) and not _safe_avatar_static(path):
-            return _gate_denial(request, policy.Decision(
-                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
-        item = _restricted_item_denied(method, path)
-        if item:
-            return _gate_denial(request, policy.Decision(
-                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
-        limited = _restricted_limit_denied(principal, req)
-        if limited is not None:
-            return _gate_denial(request, limited, req)
+    if _household_character_item_denied(method, path, principal):
+        # A household character off this profile's list (characters.may_use): its picture
+        # is refused like every other surface of it.
+        return _gate_denial(request, policy.Decision(
+            False, 403, "permission_denied", "Your profile may not use that character.",
+            required="character"), req)
     if sess is not None:
         auth.touch_session(sess.token)
-        if principal.kind == "profile" and principal.is_restricted and not req.public:
-            _note_active_time(principal)
     return await call_next(request)
 
 
@@ -1022,9 +997,6 @@ def _attach_principal(request: Request, principal: policy.Principal,
     request.state.principal = principal
     request.state.policy = policy.Policy(principal)
     request.state.session = sess
-    # The 3.x handlers' "locked caller" flag: a Basic profile until WP-DEL, and nobody (an
-    # unsigned device with no default profile) - fail closed wherever a handler still asks.
-    request.state.decoy = principal.is_restricted or principal.kind == "none"
     request.state.machine = principal.is_machine
 
 
@@ -1065,18 +1037,18 @@ def _scopes_for(cfg) -> set[str]:
     return allowed & set(cfg.machine_scopes)
 
 
-# GET routes shared by the machine surface and a locked tab's own rendering. On a
+# GET routes shared by the machine surface and a browser tab's own rendering. On a
 # plain-http LAN origin (not a trustworthy context) a browser attaches no
-# Sec-Fetch-*/Origin to same-origin GETs, so a locked tab's reads look exactly like
-# a remote machine's; a keyless remote GET degrades to the Restricted view instead
-# of a 401. Mutations are unaffected: browsers attach Origin to every non-GET.
+# Sec-Fetch-*/Origin to same-origin GETs, so a signed-out tab's reads look exactly like
+# a remote machine's; a keyless remote GET is judged as an unsigned device (the lock-target
+# default profile, or nobody = 401) instead of an invalid key. Mutations are unaffected:
+# browsers attach Origin to every non-GET.
 _DEGRADE_GET = frozenset({"/api/reactions", "/api/bots", "/api/threads", "/api/unread",
                           "/api/extensions"})
 
-# Mutations shared the same way: a signed-out device's upload (the composer's
-# attach) must stay the Restricted upload with its daily byte quota when it
-# carries no key, as it was before the route gained a machine scope. A KEYED
-# caller is a machine (machine:upload); a keyless one is never refused here.
+# Mutations shared the same way: a keyless upload (the composer's attach on the lock-target
+# default profile) is an unsigned device's, judged by the route's attach_files permission. A
+# KEYED caller is a machine (machine:upload); a keyless one is never refused here.
 _DEGRADE_POST = frozenset({"/api/upload"})
 
 
@@ -1095,7 +1067,7 @@ def _machine_principal(request: Request, cfg, req, method: str, path: str):
         return policy.machine_principal("api_token", _scopes_for(cfg)), None
     if method == "GET" and (path in _DEGRADE_GET or _INBOUND_THREAD_ONE_RE.match(path)
                             or _INBOUND_THREAD_SUB_RE.match(path)):
-        return None, None                              # falls through to Restricted
+        return None, None                              # falls through to policy.unsigned
     if method == "POST" and path in _DEGRADE_POST and not key:
         return None, None                              # a signed-out device's upload
     return None, JSONResponse({"detail": "Invalid or missing API key",
@@ -1105,8 +1077,6 @@ def _machine_principal(request: Request, cfg, req, method: str, path: str):
 def _gate_denial(request: Request, decision: policy.Decision, req,
                  extra: dict | None = None) -> JSONResponse:
     body: dict[str, Any] = {"detail": decision.detail}
-    if decision.code == "safe_mode":
-        body["decoy"] = True                          # the 2.x marker the frontend keys on
     if decision.required:
         body["required_permission"] = decision.required
     body["error"] = errors.envelope(decision.code, message=decision.detail)
@@ -1600,8 +1570,8 @@ def _normalize_media(media: str | None) -> str | None:
 
 COOKIE_NAME = "lc_session"
 
-# Inline markdown image, e.g. ![alt](url) — stripped (with [[media:...]]) from
-# any text a decoy ("safe view") session would otherwise see.
+# Inline markdown image, e.g. ![alt](url) — stripped (with [[media:...]]) from a
+# reply quote's excerpt (_quote_excerpt).
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 
 
@@ -1636,22 +1606,19 @@ def _quote_excerpt(content: str | None) -> str:
     return text
 
 
-# Inline-image URL capture (Safe-Mode upload allowlist uses the captured URL).
+# Inline-image URL capture (the typed-send filter below keeps only store-resident URLs).
 _IMG_MD_URL_RE = re.compile(r"!\[[^\]]*\]\(([^)]*)\)")
 
 
-def _decoy_keep_uploaded_media(s: str | None) -> str | None:
-    """Safe-Mode SEND filter: keep store-resident upload refs, drop local paths.
+def _keep_uploaded_media_only(s: str | None) -> str | None:
+    """Typed-SEND filter for a sender without ``admin_system``: keep store-resident upload
+    refs, drop local paths.
 
-    The composer "＋" uploads through /api/upload first, so its references always
-    point INTO the served store (/media/<uuid> for images/videos, [[doc:<id>]]
-    for files). Those are safe to deliver — they reach the agent and unlocked
-    devices, while the decoy DISPLAY still fully redacts media (deniability
-    preserved, images stay hidden in the locked view). A directive that points
-    at a local filesystem path (someone TYPING [[media:/home/secret.png]]) is
-    dropped: Safe Mode must never let an unauthenticated sender copy arbitrary
-    local files into the served store. [[doc:<id>]] refs are kept as-is.
-    """
+    The composer "＋" uploads through /api/upload first, so its references always point INTO
+    the served store (/media/<uuid> for images/videos, [[doc:<id>]] for files). A directive
+    that points at a local filesystem path (someone TYPING [[media:/home/x/secret.png]]) would
+    make the server copy that file off the host into the store - host access, which only an
+    Admin (``admin_system``) has. [[doc:<id>]] refs are kept as-is."""
     if not s:
         return s
     s = _IMG_MD_URL_RE.sub(
@@ -1661,70 +1628,12 @@ def _decoy_keep_uploaded_media(s: str | None) -> str | None:
     return s
 
 
-def _redact_message_dict(m: dict) -> dict | None:
-    """The locked-view copy of one message, or ``None`` to hide it entirely.
-
-    Locked DisPatch is a family-safe afterthought, not a second product: the
-    only hard requirement is that nothing — a prompt, a caption, a rig error,
-    a filesystem path — leaks to an unauthenticated viewer. Beyond that, the
-    cheapest correct answer for something Safe Mode has no real use for is to
-    make it not exist there, not to hand-craft a degraded version of it. An
-    image-job placeholder is exactly that case: it names its own prompt in
-    `content`, carries the prompt/caption/rig-error/workflow/seed in
-    `metadata`, and Safe Mode has no bot that can fire one today anyway (that
-    is a config flag, not a structure, so the hide cannot depend on it staying
-    true) — so it is simply not shown, at any stage of its life.
-    """
-    out = dict(m)
-    out["media_url"] = None
-    if out.get("content"):
-        out["content"] = _strip_media_text(out["content"])
-    # A reaction trace names an image. If that reaction isn't flagged safe, the
-    # locked view keeps the fact that *someone reacted* but loses which one —
-    # no name, no id, so nothing points at an image it may not fetch.
-    meta = out.get("metadata")
-    if isinstance(meta, dict) and meta.get("kind") == "reaction" and not meta.get("reaction_safe"):
-        out["metadata"] = {k: v for k, v in meta.items()
-                           if k not in ("reaction_id", "reaction_name")}
-        actor = str(meta.get("actor") or "Someone")
-        out["content"] = f"⚡ {actor} reacted"
-    elif isinstance(meta, dict) and meta.get("kind") == _IMAGE_JOB_KIND:
-        return None
-    return out
-
-
-#: The `metadata.kind` an image-job placeholder carries — hidden outright from
-#: a locked device, see `_redact_message_dict`.
+#: The `metadata.kind` an image-job placeholder carries.
 _IMAGE_JOB_KIND = "image_job"
 
 
-def _redact_thread_dict(t: dict) -> dict:
-    out = dict(t)
-    if out.get("last_message"):
-        out["last_message"] = _strip_media_text(out["last_message"])
-    # A model name is operator configuration, not family-facing — see
-    # ThreadOut.prefs. Dropped outright rather than nulled, same as every
-    # other Safe-Mode redaction here, so a locked device never learns a
-    # per-thread override exists at all.
-    out.pop("prefs", None)
-    return out
-
-
-def _safe_bot_ids() -> set[str]:
-    """Bots flagged for Safe Mode (visible there without a PIN). Cheap: the
-    bot registry is mtime-cached in config.load_bots()."""
-    return {b.id for b in config.load_bots() if b.safe}
-
-
-def _safe_avatar_files() -> set[str]:
-    """Avatar filenames belonging to safe bots. These specific files may be
-    served to a Safe-Mode (decoy) session so the locked view can render the same
-    pictures it already lists — non-safe bots' avatars stay behind the PIN."""
-    return {b.avatar for b in config.load_bots() if b.safe}
-
-
-# thread_id -> bot_id, so the (synchronous) redactor can scope broadcast frames
-# to safe bots. Populated by the async call sites before they broadcast.
+# thread_id -> bot_id, so the (synchronous) scoper can attribute a broadcast frame to its
+# character. Populated by the async call sites before they broadcast.
 _thread_bot: dict[str, str] = {}
 
 
@@ -1738,7 +1647,7 @@ async def _bot_of_thread(thread_id: str) -> str | None:
 
 
 def _frame_bot(frame: dict) -> str | None:
-    """Best-effort bot attribution for a frame (for Safe-Mode scoping)."""
+    """Best-effort bot attribution for a frame (for per-profile character scoping)."""
     if frame.get("bot_id"):
         return frame["bot_id"]
     th = frame.get("thread")
@@ -1750,58 +1659,8 @@ def _frame_bot(frame: dict) -> str | None:
     return None
 
 
-# Every frame type a Safe-Mode connection may receive AT ALL. This list is an
-# ALLOWLIST on purpose: the redactor used to end in `return frame`, so a frame
-# type nobody had thought about was delivered verbatim. That is not theoretical
-# — `avatar_pool` shipped exactly that way and put non-safe bot ids, absolute
-# data-dir paths and rig error strings onto locked family devices. Default-deny
-# means the next new frame is silent for Safe Mode until someone decides
-# otherwise, which is the correct direction for a fail-closed tier.
-#
-# stream_start / stream_chunk / turn_status ARE here now, and the reason they
-# were not is the reason they are safe to be: a media directive straddling two
-# chunks made per-chunk stripping leak. The live transport never strips a
-# chunk — it sanitizes the gateway's CUMULATIVE text and sends the difference,
-# so a directive is whole before it is ever looked at, and a half-written one
-# is held back until it completes (see _sanitize_delta). They are bot-scoped
-# exactly like `message`: a locked device sees a safe bot's reply arrive as it
-# is typed, and learns nothing at all about any other bot.
-#
-# Deliberately NOT here, and why:
-#   progress                     raw reply text, tool args, file paths
-#   harness_state                the DeepSeek Harness pane is full-session
-#                                only — Safe Mode must not learn a job exists
-#   reaction_pool / avatar_pool  pool telemetry: batch sizes, prompts, rig
-#                                errors, absolute paths, every bot's id
-#   message_update               a message that was already delivered, rewritten
-#                                in place (an image job's placeholder becoming
-#                                the picture, or the ⚠️ line). Allowed because
-#                                it carries exactly a `message` frame's payload
-#                                and is redacted by exactly the same rules —
-#                                the bot must be safe, and the media is stripped
-#                                from the copy a locked device receives. A
-#                                locked device that legitimately saw the
-#                                placeholder must see it stop saying "pending",
-#                                or Safe Mode is where failures go to hide.
-_DECOY_FRAME_ALLOW = frozenset({
-    "hello", "bots", "locked", "ack", "pong", "error",
-    "message", "message_update", "stream_done", "message_deleted", "thinking",
-    "stream_start", "stream_chunk", "turn_status",
-    "thread_update", "thread_created", "thread_deleted", "checklist_update",
-    "threads_list", "threads", "messages", "reaction", "message_feedback",
-})
-
-
-#: Frames that must NEVER reach a Restricted / locked socket, stated explicitly even though
-#: "not in _DECOY_FRAME_ALLOW" already drops them: a task's timeline and an approval card
-#: are the agent feature, and a Restricted profile can never see, start or receive output
-#: from agents or tasks (G17). The tests assert every frame type in agents_ws.FRAME_TYPES is
-#: here and none is in the allow-list.
-_DECOY_FRAME_DENY = frozenset(agents_ws.FRAME_TYPES)
-
 #: Frames that are about ONE character (directly by ``bot_id`` or through the thread they
-#: name). Both narrowing passes below scope them: the Safe-Mode redactor to the safe set,
-#: the per-profile scoper to what the socket's profile may use.
+#: name). The per-profile scoper narrows them to what the socket's profile may use.
 _BOT_SCOPED_FRAMES = frozenset({
     "message", "message_update", "stream_done", "thread_update",
     "thread_created", "thread_deleted", "thinking", "message_deleted",
@@ -1811,18 +1670,20 @@ _BOT_SCOPED_FRAMES = frozenset({
 
 
 #: Broadcast frame types that carry an OPERATOR surface, and the permission a non-operator
-#: socket must hold to receive one. Before profiles existed every unredacted socket was the
-#: owner's; a Member socket is unredacted too (it is not Restricted), so without this it got
-#: the coding harness's job/service/model state (host control), the reaction and avatar pool
-#: telemetry (every bot's id, prompts, rig errors, absolute data-dir paths) and an agent
-#: turn's live tool calls - the very frames the Safe-Mode allow-list leaves out, for the
-#: same reasons.
+#: socket must hold to receive one. Before profiles existed every socket was the owner's;
+#: without this a User's socket got the coding harness's job/service/model state (host
+#: control), the reaction and avatar pool telemetry (every bot's id, prompts, rig errors,
+#: absolute data-dir paths) and an agent turn's live tool calls.
 _FRAME_PERMISSION = {
     "harness_state": Permission.ADMIN_SYSTEM,
     "harness_sessions": Permission.ADMIN_SYSTEM,
     "reaction_pool": Permission.MANAGE_CHARACTERS,
     "avatar_pool": Permission.MANAGE_CHARACTERS,
     "progress": Permission.DISPATCH_AGENTS,
+    # An agent task's timeline, approval cards and state: the agent feature (agents_ws also
+    # sends them to the task's owner only - this holds even for a frame forced through the
+    # global broadcast).
+    **dict.fromkeys(agents_ws.FRAME_TYPES, Permission.DISPATCH_AGENTS),
 }
 
 #: Frames about one character that the per-profile scoper narrows besides
@@ -1885,7 +1746,7 @@ def _frame_app_permission(t: str) -> str | None:
 def scope_frame_for_principal(frame: dict, principal, targeted: bool = False) -> dict | None:
     """Per-profile visibility on EVERY outgoing frame (4.0 ownership + characters).
 
-    Installed as ``manager.scoper`` and run after the Safe-Mode redactor, per connection.
+    Installed as ``manager.scoper`` and run for every live connection.
     There is no Admin short-circuit anywhere in here (Fable amendment 15):
 
     - **no principal** (a socket that has not finished its handshake, an observer that
@@ -1940,87 +1801,8 @@ def _roster_row_visible(row: dict, principal) -> bool:
     return characters.visible_to(b, principal)
 
 
-def redact_for_decoy(frame: dict):
-    """Make a frame safe for a Safe-Mode connection.
-
-    Returns a redacted copy, the frame unchanged, or ``None`` to DROP it.
-
-    - A frame type not in :data:`_DECOY_FRAME_ALLOW` is dropped outright.
-    - Frames about bots NOT flagged safe are dropped entirely — Safe Mode must
-      not even learn those conversations exist.
-    - Bot-list frames are filtered down to the safe set.
-    """
-    t = frame.get("type")
-    if t in _DECOY_FRAME_DENY or t not in _DECOY_FRAME_ALLOW:
-        return None
-
-    safe = _safe_bot_ids()
-
-    # A reaction overlay is an image pushed onto the screen, so it obeys the
-    # same rule as any other media: Safe Mode sees it only when the reaction is
-    # explicitly flagged safe AND (if it is attributed at all) it came from a
-    # safe bot's thread. Fail closed — an unflagged reaction simply doesn't
-    # exist for a locked device.
-    if t == "reaction":
-        if not frame.get("safe"):
-            return None
-        bot = _frame_bot(frame)
-        if bot is not None and bot not in safe:
-            return None
-        return frame
-
-    if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
-        return {**frame, "bots": [b for b in frame["bots"]
-                                  if isinstance(b, dict) and b.get("id") in safe]}
-
-    # Scope per-thread frames to safe bots. For content-bearing frames an
-    # unknown attribution drops the frame (safe default). Plain "error" frames
-    # are only dropped when they're attributed to an unsafe bot — validation
-    # errors with no bot context must still reach the requester.
-    if t in _BOT_SCOPED_FRAMES:
-        bot = _frame_bot(frame)
-        if bot not in safe:
-            return None
-    if t == "error":
-        bot = _frame_bot(frame)
-        if bot is not None and bot not in safe:
-            return None
-
-    if (t in ("message", "message_update", "stream_done")
-            and isinstance(frame.get("message"), dict)):
-        redacted = _redact_message_dict(frame["message"])
-        # An image-job placeholder redacts to nothing (see
-        # _redact_message_dict) — the whole frame is dropped, same as an
-        # unsafe bot's frame above, rather than delivered with a null message.
-        if redacted is None:
-            return None
-        return {**frame, "message": redacted}
-    if t in ("thread_update", "thread_created") and isinstance(frame.get("thread"), dict):
-        return {**frame, "thread": _redact_thread_dict(frame["thread"])}
-    if t in ("threads_list", "threads", "messages"):
-        key = "messages" if t == "messages" else "threads"
-        items = frame.get(key)
-        if isinstance(items, list):
-            fn = _redact_message_dict if t == "messages" else _redact_thread_dict
-            kept = []
-            for x in items:
-                if not isinstance(x, dict):
-                    kept.append(x)
-                    continue
-                r = fn(x)
-                if r is not None:      # an image-job row hides outright
-                    kept.append(r)
-            return {**frame, key: kept}
-    return frame
-
-
 def _session_of(request: Request):
     return getattr(request.state, "session", None)
-
-
-def _is_decoy(request: Request) -> bool:
-    """True when this request is being served Safe Mode (no full session)."""
-    return bool(getattr(request.state, "decoy", False))
 
 
 def _browser_request(request: Request) -> bool:
@@ -2127,21 +1909,13 @@ def _gated_avatar_static(path: str) -> bool:
     return any(seg.lower().startswith("avatars") for seg in path.split("/"))
 
 
-def _safe_avatar_static(path: str) -> bool:
-    """The ONE avatar shape Safe Mode may fetch: a safe bot's own file,
-    directly under the live /static/avatars/ directory — no nesting (backup
-    subdirs), no sibling directories. Everything else stays behind the PIN."""
-    if not path.startswith("/static/avatars/"):
-        return False
-    fname = path[len("/static/avatars/"):]
-    return "/" not in fname and fname in _safe_avatar_files()
 # Thread management OPENCLAW.md has always documented as available to on-box
 # agents: list/read a thread, create/rename/pin/archive/delete one, delete a
 # message, mark read, unread counts. Until 2026-08-14 only the POST-message
 # half was actually exempt — every agent following the doc's read/manage
 # examples got a 403 and flailed (same story as the avatar routes above).
-# Each route keeps its own _is_safe_mode_caller/_deny_decoy_* guard, so a
-# sessionless BROWSER still gets exactly the Safe-Mode view it always had.
+# Each route keeps its own ownership and character checks (_require_thread,
+# _require_bot_use), so a sessionless BROWSER is judged as the unsigned device it is.
 _INBOUND_THREAD_ONE_RE = re.compile(r"^/api/threads/[^/]+$")
 _INBOUND_THREAD_SUB_RE = re.compile(r"^/api/threads/[^/]+/(?:messages|read)$")
 
@@ -2156,13 +1930,11 @@ def _is_inbound(method: str, path: str) -> bool:
     return bool(req is not None and req.machine)
 
 
-def _decoy_blocked(method: str, path: str) -> bool:
-    """Would the gate refuse a signed-out (Restricted) caller this request?
-
-    Not a deny-list any more - the answer is derived from the route table
-    (``app/route_policy.py``) - but the question is still the one tests, the
-    dashboard and a curious operator ask. Scoped routes count as reachable (the
-    handler narrows the answer); a path no route matches is not blocked."""
+def _signed_out_blocked(method: str, path: str) -> bool:
+    """Would the gate refuse a signed-out caller (the lock-target default profile, else
+    nobody) this request? Derived from the route table (``app/route_policy.py``); the
+    question tests, the dashboard and a curious operator ask. Scoped routes count as
+    reachable (the handler narrows the answer); a path no route matches is not blocked."""
     _, req = _route_index.match("GET" if method.upper() == "HEAD" else method.upper(), path)
     if req is None:
         return False
@@ -2170,23 +1942,26 @@ def _decoy_blocked(method: str, path: str) -> bool:
     return not d.allowed
 
 
-#: Item-level rules a Restricted caller meets on a scoped route.
-_AVATAR_ITEM_RE = re.compile(r"^/api/bots/([^/]+)/avatar(?:/thumb|/history(?:/[^/]+)?)?$")
-_REACTION_IMAGE_RE = re.compile(r"^/api/reactions/([^/]+)/image$")
+#: A character's picture by id (``/api/bots/<id>/avatar``, its thumb and its history).
+_AVATAR_ITEM_RE = re.compile(r"^/api/bots/([^/]+)/avatar(?:/full|/thumb|/history(?:/[^/]+)?)?$")
 
 
-def _restricted_item_denied(method: str, path: str) -> bool:
-    """True when a Restricted caller asks for a SPECIFIC thing it may not have: a
-    character outside its audience, a reaction image not flagged safe."""
+def _household_character_item_denied(method: str, path: str, principal) -> bool:
+    """True when a read names the picture of a HOUSEHOLD character ``principal`` may not use
+    (``characters.may_use``: off a User's or Basic profile's list, or agent-backed without
+    ``dispatch_agents``) - by id or by its ``/static/avatars/`` file. Refused 403, as the
+    character's every other surface is. Personal characters are :func:`_foreign_character_item`'s
+    (404). The 4.0 replacement of the 3.x Safe-Mode avatar gate."""
     if method not in ("GET", "HEAD"):
         return False
+    bot = None
     m = _AVATAR_ITEM_RE.match(path)
     if m:
-        return m.group(1) not in _safe_bot_ids()
-    m = _REACTION_IMAGE_RE.match(path)
-    if m:
-        return m.group(1) not in reactions.safe_ids()
-    return False
+        bot = config.resolve_bot(m.group(1))
+    elif _gated_avatar_static(path):
+        bot = _bot_for_avatar(path)
+    return bot is not None and not characters.is_personal(bot) \
+        and not characters.may_use(bot, principal)
 
 
 #: Paths that name ONE character (4.0): another profile's personal character answers 404
@@ -2201,13 +1976,16 @@ def _avatar_stem(name: str) -> str:
     return _AVATAR_STEM_SUFFIX_RE.sub("", stem).lower()
 
 
-def _personal_bot_for_avatar(path: str) -> config.Bot | None:
-    """The personal character whose avatar file ``/static/avatars/...<file>`` is, if any."""
+def _bot_for_avatar(path: str, *, personal: bool = False) -> config.Bot | None:
+    """The character whose avatar file ``/static/avatars/...<file>`` is, if any (only a
+    personal one with ``personal=True``)."""
     stem = _avatar_stem(path)
     if not stem:
         return None
     for b in config.load_bots():
-        if characters.is_personal(b) and b.avatar and _avatar_stem(b.avatar) == stem:
+        if personal and not characters.is_personal(b):
+            continue
+        if b.avatar and _avatar_stem(b.avatar) == stem:
             return b
     return None
 
@@ -2223,72 +2001,54 @@ def _foreign_character_item(method: str, path: str, principal) -> bool:
         return bot is not None and characters.is_personal(bot) \
             and not characters.may_use(bot, principal)
     if _gated_avatar_static(path):
-        bot = _personal_bot_for_avatar(path)
+        bot = _bot_for_avatar(path, personal=True)
         return bot is not None and not characters.may_use(bot, principal)
     return False
 
 
-def _restricted_limit_denied(principal: policy.Principal, req) -> policy.Decision | None:
-    """Time limits / quiet hours of a Restricted PROFILE (not an anonymous device)."""
-    if principal.kind != "profile" or req.public or req.permission not in (
-            "use_chat", "use_voice", "manage_history"):
-        return None
-    return limits.check(principal)
-
-
-def _note_active_time(principal: policy.Principal) -> None:
-    limits.note_active(principal)
-
-
-def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
-    """403 a Safe-Mode request that targets a bot not flagged for Safe Mode.
-
-    4.0 (``characters.may_use``): a character this caller may not use is refused - 404 for
-    another profile's PERSONAL character (Admins included: its existence is private), 403
-    for a household one left off the caller's list. An unknown id passes here: the route
-    answers its own 404, and the caller's own thread with a character since deleted stays
-    readable (ownership has already been checked on thread routes)."""
-    if _is_decoy(request) and bot_id not in _safe_bot_ids():
-        raise HTTPException(403, "Unlock for full access")
+def _require_bot_use(request: Request, bot_id: str | None) -> None:
+    """Refuse a character this caller may not use (``characters.may_use``): 404 for another
+    profile's PERSONAL character (Admins included: its existence is private), 403 for a
+    household one left off the caller's list. An unknown id passes here: the route answers
+    its own 404, and the caller's own thread with a character since deleted stays readable
+    (ownership has already been checked on thread routes)."""
     pr = policy.of(request).principal
     bot = config.resolve_bot(bot_id) if bot_id else None
     if bot is None or characters.may_use(bot, pr):
         return
     if characters.is_personal(bot):
         raise HTTPException(404, "Unknown bot")
-    raise policy.denied(pr, "character")
+    raise policy.denied(pr, "character", "Your profile may not use that character.")
 
 
-async def _deny_decoy_thread(request: Request, thread_id: str, *, write: bool = True):
+async def _thread_access(request: Request, thread_id: str, *, write: bool = True):
     """The thread, after both access rules, or the refusal:
 
-    * **ownership (4.0)**: 404 unless the caller owns the thread. This used to be skipped
-      for every Owner/Admin and machine - the operator short-circuit that let the Owner open
-      every profile's chats;
-    * **the character** (``characters.may_use``): 403 for a Restricted caller outside the safe
-      set, and for any profile left off the character's ``profiles`` list."""
+    * **ownership (4.0)**: 404 unless the caller owns the thread (no Admin short-circuit);
+    * **the character** (:func:`_require_bot_use`): 403 for a household one off the caller's
+      list, 404 for another profile's personal one."""
     pr = policy.of(request).principal
     thread = await ownership.require_thread(db, pr, thread_id, write=write)
     _thread_bot.setdefault(thread.id, thread.bot_id)
-    _deny_decoy_bot(request, thread.bot_id)
+    _require_bot_use(request, thread.bot_id)
     return thread
 
 
 async def _require_thread(request: Request, thread_id: str, *, write: bool = False):
     """A thread route's whole check: the canonical id (case-insensitive, 404 when there is
-    none), then :func:`_deny_decoy_thread`. Returns the thread."""
+    none), then :func:`_thread_access`. Returns the thread."""
     thread_id = await _canonical_thread_id(thread_id)
-    return await _deny_decoy_thread(request, thread_id, write=write)
+    return await _thread_access(request, thread_id, write=write)
 
 
 async def _require_message(request: Request, message_id: str, *, write: bool = True):
     """``(message, thread)`` for a message route: 404 unless the message exists AND its thread
-    passes :func:`_deny_decoy_thread` (``write``: the owner only)."""
+    passes :func:`_thread_access` (``write``: the owner only)."""
     msg = await db.get_message(message_id)
     if not msg:
         raise HTTPException(404, "Message not found")
     try:
-        thread = await _deny_decoy_thread(request, msg.thread_id, write=write)
+        thread = await _thread_access(request, msg.thread_id, write=write)
     except HTTPException as e:
         if e.status_code == 404:
             raise HTTPException(404, "Message not found") from None
@@ -2318,119 +2078,40 @@ async def _canonical_thread_id(thread_id: str) -> str:
     return canonical
 
 
-# Daily budgets of a Restricted caller (3.0). They used to be in-memory per-IP dicts
-# that reset on restart and lumped together every device behind one address. They
-# are now rows in chats.db (accounts.usage_daily), charged to the PROFILE when a
-# Restricted profile is signed in (or its device is bound), and to the client
-# address only for an anonymous device. The two names below are dict-shaped views
-# of today's rows, kept so tools and tests that read or clear them still work.
-_decoy_upload_used = accounts.UsageMap("upload_bytes")
-_decoy_action_used = accounts.UsageMap("action:", tuple_keys=True)
-_decoy_upload_day: str = ""        # retained for old test fixtures; unused
+#: The machine upload guard's counter subject (accounts.usage_daily): every machine caller
+#: shares one daily byte budget (MACHINE_UPLOAD_QUOTA).
+_MACHINE_UPLOAD_SUBJECT = "machine"
 
 
-def _quota_ip(headers, peer: str) -> str:
-    """The identity an anonymous device's daily budget is charged to (policy.py)."""
-    return policy.quota_ip(headers, peer)
-
-
-def _budget_subject(headers, peer: str, principal: policy.Principal | None) -> str:
-    """Who a Restricted caller's budget belongs to: its profile, else its address."""
-    if principal is not None and principal.profile_id and principal.is_restricted:
-        return principal.profile_id
-    return _quota_ip(headers, peer)
-
-
-def _request_quota_ip(request: Request) -> str:
-    """The budget subject of a request (named for the 2.x per-IP counter it replaces)."""
-    client = getattr(request, "client", None)
-    return _budget_subject(getattr(request, "headers", None) or {},
-                           client.host if client else "?",
-                           getattr(request.state, "principal", None))
-
-
-#: profile budget key (People & Profiles) for each charged kind
-_BUDGET_KEYS = {"turn": "turns", "thread": "threads", "feedback": "feedback"}
-
-
-def _budget_limit(subject: str, kind: str, default: int) -> int:
-    """The daily limit for ``kind``: the profile's own, else the install default."""
-    prof = accounts.get_profile(subject) if subject else None
-    if prof is None:
-        return default
-    b = prof.budgets or {}
-    if kind == "upload_bytes":
-        mb = b.get("upload_mb")
-        return int(mb) * 1024 * 1024 if isinstance(mb, int) else default
-    v = b.get(_BUDGET_KEYS.get(kind, ""))
-    return int(v) if isinstance(v, int) else default
-
-
-def _decoy_quota_left(request: Request) -> int | None:
-    """Bytes a Restricted caller - or a machine (machine:upload: an agent or cron
-    handing a document back) - may still upload today; None for everyone else.
-    A looping agent must not be able to fill the disk."""
-    if not (_is_decoy(request) or policy.of(request).machine):
+def _machine_quota_left(request: Request) -> int | None:
+    """Bytes a machine caller (machine:upload: an agent or cron handing a document back) may
+    still upload today; None for a person, who has no daily limit. A looping agent must not be
+    able to fill the disk."""
+    if not policy.of(request).machine:
         return None
-    subject = _request_quota_ip(request)
-    limit = _budget_limit(subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
-    return max(0, limit - accounts.usage_get(subject, "upload_bytes"))
+    return max(0, MACHINE_UPLOAD_QUOTA - accounts.usage_get(_MACHINE_UPLOAD_SUBJECT, "upload_bytes"))
 
 
-def _decoy_quota_add(request: Request, n: int) -> None:
-    subject = _request_quota_ip(request)
-    accounts.usage_add(subject, "upload_bytes", n)
+def _machine_quota_add(n: int) -> None:
+    accounts.usage_add(_MACHINE_UPLOAD_SUBJECT, "upload_bytes", n)
     if n > 0:
-        accounts.log_activity("upload", profile_id=subject if accounts.get_profile(subject) else None,
-                              subject=subject, detail=f"{n} bytes")
+        accounts.log_activity("upload", profile_id=None, subject=_MACHINE_UPLOAD_SUBJECT,
+                              detail=f"{n} bytes")
 
 
-def _decoy_over_quota(request: Request) -> bool:
-    """True once this caller's SHARED running total exceeds the daily budget.
-
-    Read live (not from a per-request snapshot) so overlapping uploads all
-    contend on the same counter - closes the TOCTOU window where each request
-    read the full remaining budget before any of them committed their bytes."""
-    subject = _request_quota_ip(request)
-    return accounts.usage_get(subject, "upload_bytes") > _budget_limit(
-        subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
-
-
-def _decoy_action_allowed(subject: str, action: str, limit: int) -> bool:
-    """Charge one unit of a Restricted daily action budget. False once spent."""
-    subject = subject or "?"
-    ok = accounts.usage_charge(subject, f"action:{action}", _budget_limit(subject, action, limit))
-    pid = subject if accounts.get_profile(subject) else None
-    # The activity summary the Owner sees (and the Restricted UI discloses): counts
-    # of what was done, never what was said.
-    accounts.log_activity(action if ok else "limit_hit", profile_id=pid, subject=subject,
-                          detail="" if ok else action)
-    return ok
-
-
-def _ws_client_ip(ws: WebSocket) -> str:
-    """Same budget identity as the REST path - see _budget_subject."""
-    return _budget_subject(ws.headers, ws.client.host if ws.client else "?",
-                           manager.principal_of(ws))
-
-
-def _deny_decoy_mutation(request: Request) -> None:
-    """Safe Mode is VIEW + SEND only. Destructive/management ops (delete a message
-    or thread, rename, pin, archive) require a full PIN session even for the safe
-    bots — otherwise an unauthenticated tailnet client could permanently delete or
-    rename the family's chat history through the decoy view."""
-    if _is_decoy(request):
-        raise HTTPException(403, "Unlock for full access")
+def _machine_over_quota() -> bool:
+    """True once the machines' SHARED running total exceeds the daily guard. Read live (not
+    from a per-request snapshot) so overlapping uploads all contend on the same counter."""
+    return accounts.usage_get(_MACHINE_UPLOAD_SUBJECT, "upload_bytes") > MACHINE_UPLOAD_QUOTA
 
 
 def _require_full_access(request: Request) -> None:
-    """In-handler lock for the routes the gate has already declared: anybody but a
-    Restricted caller. A second lock on the same door - the route's own declared
-    permission is the first, enforced by ``auth_gate`` - kept so a handler called
-    from anywhere but the middleware chain still refuses a Restricted caller.
-    An authenticated machine passes (on-box agents list files this way)."""
+    """In-handler lock for the routes the gate has already declared: anybody who is
+    somebody (a profile, a machine, an open install), never nobody. A second lock on the
+    same door - the route's own declared permission is the first, enforced by ``auth_gate`` -
+    kept so a handler called from anywhere but the middleware chain still fails closed."""
     pol = policy.of(request)
-    if pol.restricted or pol.principal.kind == "none":
+    if pol.principal.kind == "none":
         raise policy.denied(pol.principal, "authenticated")
 
 
@@ -2921,9 +2602,9 @@ def _sanitize_delta(text: str) -> str:
     Delta text is raw model output. It still carries `[[media:/abs/path]]`,
     `[[doc:…]]`, `[[pic:…]]`, `:react:…:` and the gateway's internal-context
     scaffolding — every one of which the persisted copy has stripped since
-    long before streaming existed. A locked family device must never see an
-    absolute path or an internal marker in a provisional bubble that the
-    finished message would not have shown it.
+    long before streaming existed. No device may see an absolute path or an
+    internal marker in a provisional bubble that the finished message would not
+    have shown it.
 
     Applied to the CUMULATIVE text, never to a chunk: a directive split across
     two deltas is whole here, and a directive that is only half-written yet is
@@ -3070,7 +2751,7 @@ async def _persist_and_stream_message(
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
                                created_at=created_at)
-    bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(thread_id)   # lets the scoper attribute frames
 
     is_sub = bool(metadata and metadata.get("sub"))
     # THE REAL STREAM WINS. When the gateway's live deltas already painted this
@@ -3126,13 +2807,13 @@ async def fire_reaction(
     key: str, *, actor: str, actor_kind: str = "user",
     thread_id: str | None = None, bot_id: str | None = None,
     duration_ms: int | None = None, caption: str | None = None,
-    trace: bool = True, require_safe: bool = False,
+    trace: bool = True,
 ) -> dict:
     """Resolve, rate-limit and broadcast one reaction overlay.
 
     The single chokepoint for every trigger path — the composer picker, the
     inbound API, the CLI, and `:react:<id>:` markers inside an agent reply — so
-    the enabled flag, the rate limits and the Safe-Mode rule are enforced once.
+    the enabled flag and the rate limits are enforced once.
     Raises :class:`reactions.ReactionError` (which carries an HTTP status).
 
     The reaction itself lives in the chat: when ``trace`` is set and the
@@ -3180,8 +2861,6 @@ async def fire_reaction(
             raise reactions.ReactionError(
                 "No fresh reaction images on hand right now", 503)
         raise reactions.ReactionError(f"No such reaction: {key}", 404)
-    if require_safe and not r.safe:
-        raise reactions.ReactionError("Unlock for full access", 403)
     # Prove the image is actually there before every screen in the house is told
     # to display it (a hand-deleted blob would otherwise pop an empty card).
     reactions.image_path(r)
@@ -3374,7 +3053,7 @@ async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:
 # ⚠️ line instead. There is no branch that leaves it saying "pending".
 #
 # See app/image_jobs.py for the rig client and the rules; this half owns the
-# message, the broadcast and the Safe-Mode scoping.
+# message, the broadcast and the per-owner frame scoping.
 # --------------------------------------------------------------------------- #
 
 #: How often the worker sweeps open jobs.
@@ -3559,7 +3238,7 @@ def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
     """What the thread says while the render is in flight.
 
     Deliberately readable on its own: this exact string is what a No-Image-Mode
-    device and a Safe-Mode device render (they get no card), and it is what
+    device renders (it gets no card), and it is what
     lands in the thread list preview. "Generating an image…" with nothing else
     is a worse trace than one that says what of."""
     what = spec.caption or spec.prompt
@@ -3907,10 +3586,8 @@ async def _broadcast_message_update(msg: MessageOut, thread_id: str) -> None:
     """Tell open clients that an EXISTING message changed.
 
     A second `message` frame would append a duplicate bubble, so this is its
-    own type — and being its own type means it had to be added to
-    _DECOY_FRAME_ALLOW deliberately, which is the point of that list being
-    default-deny. It carries the same payload as `message` and is redacted by
-    the same rules.
+    own type. It carries the same payload as `message` and is scoped by the
+    same rules (it is in _BOT_SCOPED_FRAMES / _THREAD_FRAMES).
     """
     bot_id = await _bot_of_thread(thread_id)
     await manager.broadcast({"type": "message_update", "thread_id": thread_id,
@@ -4159,7 +3836,7 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
     ``_ingest_content_media`` — the same directive rewrite every agent-sent
     picture goes through. That is not ceremony: it is what records the media
     origin, what produces the `/media/<uuid>` URL the lightbox and the dedup
-    ledger expect, and what makes No-Image Mode and Safe Mode strip this
+    ledger expect, and what makes No-Image Mode strip this
     picture by the rules they already have, with no new code on either side.
 
     Success is defined as the REWRITE happening. If the directive comes back
@@ -6909,7 +6586,7 @@ async def _resolve_doc_refs(text: str) -> str:
     # Bounds. Without them a single 64KB message packing ~1,450 repeats of one
     # [[doc:<id>]] made 1,450 sequential whole-file read_text() calls ON THE
     # EVENT LOOP and assembled a ~218MB prompt string — an unauthenticated
-    # freeze-plus-cost attack, since Safe Mode may both drop a file and send a
+    # freeze-plus-cost attack, since any profile may both drop a file and send a
     # message naming it. Cap how many refs one message may expand, expand each
     # distinct document only once, and read only what we are willing to keep.
     expanded = 0
@@ -7193,11 +6870,6 @@ class TurnOptions(NamedTuple):
                    agent reads. Never stored on the user's row.
       prefetched   a SpeculativeRun the direct backend ADOPTS instead of
                    starting a new call (voice chat's speculative start)
-      locked       the turn came over a Safe-Mode (decoy) connection. An
-                   advisor then answers without acting on any research/
-                   handoff marker (advisor.run_turn(locked=True)); a locked
-                   family device never steers an agent through an LLM-written
-                   brief. Gateway/API bots ignore it (they never dispatch).
       dispatch     False when the person whose turn it is may not run agents
                    (no dispatch_agents): an advisor then neither offers nor acts
                    on research/handoff markers (advisor.run_turn(dispatch=False))
@@ -7215,7 +6887,6 @@ class TurnOptions(NamedTuple):
     reply_to: str | None = None
     voice: Any = None
     prefetched: Any = None
-    locked: bool = False
     action: str | None = None
     dispatch: bool = True
 
@@ -7242,9 +6913,8 @@ async def _pending_feedback_lines(thread_id: str) -> list[str]:
 
     Every line is built from two closed enums (MessageFeedbackIn.vote /
     .reason) and a message id — never from caller-supplied text, which is the
-    whole point: this is reachable from a locked Safe-Mode device, and a
-    fixed template is what keeps that device from ever injecting prose into
-    what the agent reads.
+    whole point: any profile that may chat can vote, and a fixed template is
+    what keeps a vote from ever injecting prose into what the agent reads.
     """
     pending = await db.pending_feedback_messages(thread_id, limit=_FEEDBACK_NOTE_CAP)
     lines: list[str] = []
@@ -7805,12 +7475,7 @@ async def _agents_thread_info(thread_id: str) -> dict | None:
     thread = await db.get_thread(thread_id)
     if not thread:
         return None
-    bot = config.get_bot(thread.bot_id)
-    # A character a Restricted profile may chat with (audience all / restricted), or one that no
-    # longer exists, is a thread whose lines they can read: agent prompts and results never go there.
-    visible = bot is None or bot.audience in ("all", "restricted")
-    return {"bot_id": thread.bot_id, "restricted_visible": visible,
-            "owner_profile_id": thread.owner_profile_id}
+    return {"bot_id": thread.bot_id, "owner_profile_id": thread.owner_profile_id}
 
 
 # Hand the task manager the three pieces of this module it needs. Lambdas re-resolve the
@@ -7955,7 +7620,7 @@ async def health(request: Request):
 
     The test is the same one the auth gate's machine branch uses (loopback
     socket, no proxy header, no browser fingerprint), so nothing reachable
-    from a browser tab widens by it — a locked tab on this very box still gets
+    from a browser tab widens by it — a signed-out tab on this very box still gets
     the two-field body, because a browser stamps Sec-Fetch-*/Origin and a
     remote caller is not on loopback.
     """
@@ -8064,8 +7729,8 @@ async def openapi_schema(request: Request):
 
     /openapi.json, /docs and /redoc stay disabled: on a service bound to
     0.0.0.0 they hand a stranger the whole route and model inventory
-    (harness, inject, recovery, reactions), which is precisely what Safe Mode
-    exists to hide.
+    (harness, inject, recovery, reactions), the operator surface a stranger
+    must not map.
 
     That reasoning never applied to a process on this box. An agent calling
     this API cold has to be TOLD what the routes are, and the alternative to
@@ -8231,12 +7896,11 @@ def _push_device_key(request: Request) -> str | None:
 
     A REMEMBERED device's token hash (so revoking the device revokes its
     pushes), or — on an install with no PIN at all — None, meaning "key it by
-    endpoint". Safe Mode, a machine caller and a plain idle-expiring session
-    are all refused: a ping about every thread is unlocked-tier state, and an
-    ordinary session dies after ten idle minutes, long before any push.
+    endpoint". A machine caller, the shared default profile (no session) and a plain
+    idle-expiring session are all refused (use_notifications is the route's permission):
+    a ping is about this profile's own chats, and an ordinary session dies after ten
+    idle minutes, long before any push.
     """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
     from urllib.parse import urlparse
     origin = request.headers.get("origin")
     if origin and urlparse(origin).netloc != request.headers.get("host", ""):
@@ -8245,7 +7909,7 @@ def _push_device_key(request: Request) -> str | None:
         return None
     session = _session_of(request)
     if session is None:
-        raise HTTPException(403, "Unlock for full access")
+        raise HTTPException(403, "Notifications need a signed-in, remembered device.")
     if not session.persistent:
         raise HTTPException(
             403, "Notifications need a remembered device: lock, then unlock "
@@ -8311,9 +7975,9 @@ async def auth_status(request: Request):
     pr = policy.of(request).principal
     claimed = policy.claimed(cfg)
     sess = _session_of(request)            # middleware attaches it for /api/auth
-    # "authed" keeps its 2.x meaning: an unlocked profile (not Restricted). 4.0: the
-    # lock-target default profile an unsigned device lands on counts (it has no session).
-    authed = (bool(sess) or pr.via == "default") and not pr.is_restricted
+    # "authed": a profile is in use - a session, or the lock-target default profile an
+    # unsigned device lands on (it has no session). Every role counts (4.0: no Restricted tier).
+    authed = bool(sess) or pr.via == "default"
     prof = pr.profile
     setup_required = (not claimed and not policy.allow_open_install()
                       and not policy.is_loopback_origin(
@@ -8321,7 +7985,7 @@ async def auth_status(request: Request):
     return {
         "pin_set": cfg.pin_set,
         "authenticated": authed,
-        "decoy": claimed and not authed,       # Restricted (was Safe Mode) = claimed, not unlocked
+        "decoy": claimed and not authed,       # nobody: the sign-in screen (3.x key the shell reads)
         # 3.0: accounts
         "claimed": claimed,
         # 4.0: where a lock and an unsigned device land, and (signed in on it) whether this is
@@ -8343,7 +8007,8 @@ async def auth_status(request: Request):
         "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
         "needs_password": bool(prof and prof.role is Role.ADMIN and not prof.has_password),
         "profiles": people_api.lock_screen_profiles() if claimed else [],
-        "disclosure": people_api.DISCLOSURE if (claimed and pr.is_restricted) else None,
+        "disclosure": (people_api.DISCLOSURE if claimed and pr.kind == "profile"
+                       and not pr.can(Permission.VIEW_ACTIVITY) else None),
         "lock_timeout_seconds": cfg.lock_timeout,
         "min_pin_length": auth.MIN_PIN_LENGTH,
         # Absolute local paths — recon for an unauthenticated caller on a
@@ -8384,8 +8049,8 @@ async def auth_status(request: Request):
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not claimed)
-                     # A locked device mounts add-ons too (2.3.4: voice on
-                     # the bots it can see) — the count and nothing else.
+                     # Nobody signed in (the sign-in screen) mounts add-ons too:
+                     # the count and nothing else.
                      else {"extensions": extensions.ok_count()}),
     }
 
@@ -8427,7 +8092,7 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
 async def auth_lock(request: Request):
     """Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):
     the default profile (``lock_target: default_profile``) or the profile list. The push
-    subscription of the session being closed goes with it (a locked device pings nobody)."""
+    subscription of the session being closed goes with it (a signed-out device pings nobody)."""
     old = request.cookies.get(COOKIE_NAME)
     if old:
         with contextlib.suppress(Exception):
@@ -8466,7 +8131,8 @@ async def auth_forget_devices(request: Request):
     the calling session survives but demoted to normal idle-expiry."""
     sess = _session_of(request)
     if sess is None:
-        return JSONResponse({"detail": "Unlock for full access"}, status_code=403)
+        return JSONResponse({"detail": "Sign in first: forgetting devices keeps this session."},
+                            status_code=403)
     auth.forget_all_trusted(keep_session_token=sess.token)
     return {"ok": True, "trusted_devices": 0}
 
@@ -8625,7 +8291,7 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
             and any(not p.protected for p in accounts.list_profiles())):
         # Removing the only Owner credential while other people have profiles would leave
         # an install with a household but no owner: closed to every other device ("setup
-        # required"), the Members and Restricted profiles locked out with it. 2.x could
+        # required"), every other profile locked out with it. 2.x could
         # simply drop the lock; with profiles the PIN must be replaced instead.
         return JSONResponse(
             {"detail": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
@@ -8646,15 +8312,15 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
 # All of them are configuration surface — the probe reaches out to a host the
 # operator typed, and the connect route writes an API key to disk — so they get
 # the SAME gate the dashboard uses, re-derived from `auth` rather than trusted
-# from middleware state. `/api/llm` is also in `_decoy_blocked`, which turns a
-# Safe-Mode caller away a layer earlier; neither lock depends on the other.
+# from middleware state. The route table's manage_connections turns everyone but an
+# Admin away a layer earlier; neither lock depends on the other.
 
 
 def _require_operator(request: Request) -> None:
-    """A signed-in person (Owner/Admin/Member), not a machine and not Restricted. The
-    gate already required the route's own permission; this is the second lock."""
+    """A signed-in person, not a machine and not nobody. The gate already required the
+    route's own permission (an Admin's manage_connections); this is the second lock."""
     pol = policy.of(request)
-    if pol.restricted or pol.machine:
+    if pol.machine or pol.principal.kind == "none":
         raise policy.denied(pol.principal, "authenticated")
 
 
@@ -8676,7 +8342,6 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 @app.get("/api/advisor/status", responses=problem.MACHINE)
 async def advisor_status(request: Request):
     """Each advisor's provider chain, knowledge index and recent requests."""
-    _deny_agent_route_to_browser(request)
     out = await advisor.status()
     # 4.0: a request's brief is lifted from a conversation, so only requests made from a
     # chat the caller may read are listed (a machine: the protected Admin's).
@@ -8707,7 +8372,6 @@ async def advisor_digest(request: Request, day: str | None = None,
     idempotent behaviour, so a loop on the machine surface cannot burn
     provider spend or churn the corpus.
     """
-    _deny_agent_route_to_browser(request)
     if day is not None and not _DAY_RE.match(day):
         raise HTTPException(422, "day must be YYYY-MM-DD")
     full = _session_of(request) is not None or not auth.load().pin_set
@@ -8821,7 +8485,7 @@ async def llm_test(payload: dict = Body(...)):
 # --------------------------------------------------------------------------- #
 # Image generation provider (2.3.7, app/image_providers.py)
 #
-# Under /api/llm on purpose: the prefix is already decoy-blocked, and these are
+# Under /api/llm on purpose: the prefix is already Admin-only, and these are
 # the same kind of configuration surface as Connect an AI (a key goes to disk,
 # a Test reaches a host the operator typed). Never returns a key.
 # --------------------------------------------------------------------------- #
@@ -8873,10 +8537,15 @@ async def llm_image_test(payload: dict = Body(...)):
         raise HTTPException(422, str(e)) from e
     except image_jobs.ImageJobError as e:
         return {"ok": False, "error": e.message}
-    spec = image_jobs.ImageSpec(
-        prompt=str(payload.get("prompt") or "").strip()[:300]
-        or "A small red paper boat on a calm blue pond, simple illustration",
-        ratio="1:1", backend="api")
+    try:
+        # ImageSpec refuses a prompt over the image hard lines (and a bad ratio) with a
+        # ValueError: that is the operator's input, a 422, not a 500.
+        spec = image_jobs.ImageSpec(
+            prompt=str(payload.get("prompt") or "").strip()[:300]
+            or "A small red paper boat on a calm blue pond, simple illustration",
+            ratio="1:1", backend="api")
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
     try:
         data = await image_providers.generate(res, spec)
     except image_jobs.ImageJobError as e:
@@ -8970,8 +8639,8 @@ async def llm_connect(payload: dict = Body(...)):
         raise _llm_error(e) from e
     # Every open tab is holding the roster from before this bot existed. Push
     # the new one exactly the way the Bot Manager's own save does — the WS
-    # redactor filters that frame to safe bots per connection, so a Safe-Mode
-    # device does not learn a non-safe bot appeared.
+    # scoper filters that frame per connection (characters.visible_to), so a
+    # profile does not learn of a bot it may not use.
     await manager.broadcast(
         {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()]})
     if backend == "legacy-api":
@@ -8991,14 +8660,13 @@ def _character_http_error(e: characters.CharacterError) -> HTTPException:
     return exc
 
 
-@app.get("/api/bots", responses=problem.SAFE_MODE)
+@app.get("/api/bots", responses=problem.FORBIDDEN)
 async def get_bots(request: Request):
     """The roster as this client is allowed to see it.
 
     Session-exempt for machines so an on-box agent gets the TRUE roster (see
-    _is_inbound). Everyone else sees the characters their audience (and, for a Member or
-    Restricted profile, the character's profile list) allows - characters.may_use."""
-    _is_safe_mode_caller(request)
+    _is_inbound). Everyone else sees the characters its profile may use and that are on
+    its rail (characters.visible_bots)."""
     bots = await asyncio.to_thread(config.load_bots)
     return {"bots": [b.to_dict() for b in characters.visible_bots(policy.of(request).principal, bots)]}
 
@@ -9069,7 +8737,7 @@ async def remove_bot_route(request: Request, bot_id: str):
 
 async def _broadcast_roster() -> None:
     """Tell every open tab the roster changed -- the same frame the Bot
-    Manager's own save sends (the WS redactor filters it for Safe Mode)."""
+    Manager's own save sends (the WS scoper filters it per profile)."""
     await manager.broadcast({"type": "bots",
                              "bots": [b.to_dict() for b in config.load_bots()]})
 
@@ -9130,15 +8798,12 @@ async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
 
 @app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
 async def get_bot_avatar(request: Request, bot_id: str):
-    # Safe Mode may see a SAFE bot's face by design, so mark a session-less
-    # browser as decoy and then apply the per-bot rule — rather than the strict
-    # agents-only guard used on /avatar/full. Without the first call the inbound
-    # allowlist would let a locked tab read a non-safe bot's avatar.
-    _is_safe_mode_caller(request)
+    # A character the caller may use (characters.may_use): the face of one off its list is
+    # refused, like every other surface of that character.
     bot = config.resolve_bot(bot_id)
     if bot:
-        bot_id = bot.id  # canonical — the decoy gate matches safe ids exactly
-    _deny_decoy_bot(request, bot_id)
+        bot_id = bot.id  # canonical — the may_use check keys on it
+    _require_bot_use(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     # bot.avatar comes from config.yaml (trusted, local) — contain it anyway.
@@ -9153,18 +8818,14 @@ async def get_bot_avatar(request: Request, bot_id: str):
 async def get_bot_avatar_full(request: Request, bot_id: str):
     """Full-resolution avatar: `<stem>-full.<ext>` if present, else the regular one.
 
-    Had NO gate of its own — it relied entirely on the middleware's decoy
-    blocklist. Adding avatar routes to the inbound allowlist took that away and
-    left a locked browser tab able to fetch any bot's full-resolution face.
-    Guarded here now, where it cannot be removed by a change somewhere else.
-    Full-res is PIN-gated even for safe bots, which is why this is the strict
-    agents-yes/browser-no guard rather than the per-bot one.
+    A character the caller may use (_require_bot_use), checked here as well as at the
+    gate, where it cannot be removed by a change somewhere else.
     """
-    _deny_agent_route_to_browser(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     bot_id = bot.id
+    _require_bot_use(request, bot_id)
     base = config.AVATAR_DIR.resolve()
     # Same resolution rule the snapshotter uses (avatar_snapshots._full_sibling):
     # the face's own extension first, then stale cross-extension leftovers by
@@ -9191,21 +8852,19 @@ async def get_bot_avatar_thumb(request: Request, bot_id: str):
     """The 128×128 thumbnail: `<stem>-thumb.<ext>` if present, else the face
     downscaled on the fly.
 
-    Safe Mode may see a SAFE bot's thumbnail by design — same rule as the
-    main `/avatar` route. Thumbnail is a small image (≤6 KB), so unlike the
-    full-res the cost of leaking one is negligible and the PIN gate would
-    be more friction than protection.
+    A character the caller may use (_require_bot_use) — same rule as the main
+    `/avatar` route.
 
     Falls back to the face crop when no thumb file was ever written (the
     pre-thumb deploys have only `<stem>-face.<ext>`). Browser-side scaling
     is wasteful but not broken, and the upload path will create a real
     thumb on the next avatar change.
     """
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     bot_id = bot.id
+    _require_bot_use(request, bot_id)
     base = config.AVATAR_DIR.resolve()
     face_path = (config.AVATAR_DIR / bot.avatar).resolve()
     if not (face_path == base or base in face_path.parents):
@@ -9397,15 +9056,8 @@ async def upload_bot_avatar(
     corner and side length of the square), else a centered square. Works from
     the browser crop UI and from curl alike.
     """
-    # Session-exempt for ON-BOX AGENTS, still closed to a locked browser tab.
-    #
-    # _deny_decoy_mutation is wrong here now: the inbound allowlist clears
-    # request.state.decoy for a loopback caller, so that check would pass for a
-    # browser on this machine with no session — i.e. the locked tab, and any
-    # page that can reach loopback. _deny_agent_route_to_browser is the guard
-    # built for exactly this shape (agents yes, browser without a session no),
-    # and it is what the session-exempt reaction routes use.
-    _deny_agent_route_to_browser(request)
+    # Session-exempt for ON-BOX AGENTS (machine:avatars); a person needs
+    # manage_characters (the route's declared permission).
 
     bot = config.resolve_bot(bot_id)
     if not bot:
@@ -9507,7 +9159,7 @@ async def bot_models(request: Request, bot_id: str):
     model override chip.
 
     Operator-only (see _require_operator_session): a model name is
-    configuration, not something Safe Mode or a machine caller needs to see.
+    configuration, not something a non-operator or a machine caller needs to see.
     The gateway's own list, not a guess — offering a model it will refuse is
     a worse experience than not offering it, and only the gateway knows
     which ones this agent is actually allowed to use. An API bot (Connect an
@@ -9560,21 +9212,15 @@ THREAD_PREVIEW_CHARS = 400
 
 @app.get("/api/threads", responses=problem.MACHINE)
 async def list_threads(request: Request, bot_id: str = Query(...), include_archived: bool = False):
-    # Inbound-exempt for machines; a sessionless browser stays Safe Mode.
-    _is_safe_mode_caller(request)
+    # Inbound-exempt for machines (the protected Admin's chats only).
     bot = config.resolve_bot(bot_id)
     if bot:
         bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
-    _deny_decoy_bot(request, bot_id)
+    _require_bot_use(request, bot_id)
     # 4.0: the caller's OWN chats with this character.
     threads = await db.list_threads(bot_id, include_archived=include_archived,
                                     principal=policy.of(request).principal)
     out = [t.model_dump() for t in threads]
-    # Redact BEFORE truncating: the cut can land inside a [[media:…]]
-    # directive, and a half directive no longer matches the strip regex, so
-    # a locked device would see the head of a remote URL or a local path.
-    if _is_decoy(request):
-        out = [_redact_thread_dict(t) for t in out]
     for t in out:
         # A PREVIEW, not the message: the UI shows 80 plain-text chars, and
         # shipping every thread's full last body made this ~242 KB a poll for
@@ -9587,21 +9233,12 @@ async def list_threads(request: Request, bot_id: str = Query(...), include_archi
 
 @app.post("/api/threads", responses=problem.MACHINE)
 async def create_thread(request: Request, payload: dict = Body(...)):
-    # Inbound-exempt for machines; a sessionless browser stays Safe Mode
-    # (decoy creation keeps its daily quota below).
-    _is_safe_mode_caller(request)
+    # Inbound-exempt for machines; a person needs a character it may use (characters.may_use).
     bot = config.resolve_bot(payload.get("bot_id"))
     if not bot:
         raise HTTPException(400, "Unknown or missing bot_id")
     bot_id = bot.id  # canonical — a lowercased id must not fork a thread
-    _deny_decoy_bot(request, bot_id)
-    # A locked device may start a conversation, but under the same daily budget
-    # the WS path charges — without this the REST endpoint was an unmetered way
-    # for a Safe-Mode caller to create unlimited threads.
-    if _is_decoy(request):
-        ip = _request_quota_ip(request)
-        if not _decoy_action_allowed(ip, "thread", DECOY_THREAD_QUOTA):
-            raise HTTPException(429, "Daily limit reached on this device")
+    _require_bot_use(request, bot_id)
     title = payload.get("title")
     thread = await db.create_thread(
         bot_id=bot_id, title=title if isinstance(title, str) else None,
@@ -9616,10 +9253,8 @@ async def create_thread(request: Request, payload: dict = Body(...)):
 
 @app.get("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def get_thread(request: Request, thread_id: str):
-    _is_safe_mode_caller(request)
     thread = await _require_thread(request, thread_id)
-    data = thread.model_dump()
-    return _redact_thread_dict(data) if _is_decoy(request) else data
+    return thread.model_dump()
 
 
 @app.get("/api/bots/{bot_id}/avatar/history")
@@ -9632,13 +9267,10 @@ async def bot_avatar_history(request: Request, bot_id: str):
     thread that started under it, so "the one from last Tuesday" resolves to
     something concrete.
     """
-    # Mark a session-less BROWSER as Safe Mode before the bot check, or the
-    # inbound exemption would let a locked tab read a non-safe bot's history.
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if bot:
-        bot_id = bot.id  # canonical — snapshots and the decoy gate key on it
-    _deny_decoy_bot(request, bot_id)
+        bot_id = bot.id  # canonical — snapshots and the may_use check key on it
+    _require_bot_use(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     # 4.0: built from the caller's OWN threads - how many chats somebody else started, and
@@ -9665,26 +9297,16 @@ async def bot_avatar_history_image(request: Request, bot_id: str, snapshot_id: s
     id — including one only a non-safe bot ever wore — be fetched by naming a
     safe bot in the URL.
     """
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if bot:
         bot_id = bot.id                    # canonical, as the sibling list route
-    _deny_decoy_bot(request, bot_id)
+    _require_bot_use(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     threads = await db.all_threads(include_archived=True, principal=policy.of(request).principal)
     if snapshot_id not in {e["id"] for e in avatar_snapshots.history(bot_id, threads)}:
         raise HTTPException(404, "No such avatar snapshot")
     full_path = avatar_snapshots.path_for_full(snapshot_id) if full else None
-    if full:
-        # Full resolution is PIN-gated even for safe bots, the same as
-        # get_bot_avatar_full and the thread ?full=1 route. This route is on the
-        # inbound allowlist, so the middleware blocklist is skipped and this
-        # inline guard is the only thing withholding a safe bot's untouched
-        # original from a locked device. (Without it, Safe Mode could pull
-        # full-res past avatars via the history list — thumbnails only is the
-        # rule, uniformly.)
-        _deny_agent_route_to_browser(request)
     path = full_path or avatar_snapshots.path_for(snapshot_id)
     if not path:
         raise HTTPException(404, "No such avatar snapshot")
@@ -9706,7 +9328,6 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
     from having uploaded that image — including the broadcast that refreshes
     every connected device.
     """
-    _deny_agent_route_to_browser(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
@@ -9770,21 +9391,16 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
     Served BY THREAD, not by snapshot hash, and that is the security design
     rather than a convenience. Snapshots are content-addressed, so the id says
     nothing about which bot it belongs to — a hash-keyed route would have had to
-    reverse-map it to decide whether a Safe-Mode session may see it, and the
-    obvious "any thread references it" answer leaks a non-safe bot's face the
-    moment one safe bot ever shared the same picture. Going through the thread
-    means the existing _deny_decoy_bot rule applies unchanged: if you may not
-    see the thread, you may not see its avatar.
+    reverse-map it to decide who may see it, and the obvious "any thread references
+    it" answer leaks one character's face the moment another ever shared the same
+    picture. Going through the thread means ownership and _require_bot_use apply
+    unchanged: if you may not see the thread, you may not see its avatar.
 
     Immutable by construction (the filename IS the hash of the bytes), so it is
     safe to cache hard.
     """
     thread = await _require_thread(request, thread_id)
     thread_id = thread.id
-    if full:
-        # Full resolution is PIN-gated even for safe bots, same as
-        # /api/bots/<id>/avatar/full — Safe Mode sees thumbnails only.
-        _deny_agent_route_to_browser(request)
     full_path = avatar_snapshots.path_for_full(thread.avatar_snapshot or "") if full else None
     path = full_path or avatar_snapshots.path_for(thread.avatar_snapshot or "")
     if not path:
@@ -9834,7 +9450,6 @@ async def pin_thread_avatar(
     thumbnail and its lightbox are the same picture by construction, and the
     thread's avatar URL changes with the pin (cache-busted by snapshot hash).
     """
-    _deny_agent_route_to_browser(request)
     thread = await _require_thread(request, thread_id, write=True)
     thread_id = thread.id
 
@@ -9905,8 +9520,8 @@ async def get_message_mood_face(request: Request, message_id: str):
     this route never writes to the thread's own avatar_snapshot; the thread
     keeps the face it was born under regardless of any reply's mood.
 
-    Gated exactly like GET /api/threads/{id}/avatar: full-session sees any
-    bot, Safe Mode only a safe bot's own thread (_deny_decoy_thread).
+    Gated exactly like GET /api/threads/{id}/avatar: the caller's own thread, with a
+    character it may use (_thread_access).
     """
     msg, _thread = await _require_message(request, message_id, write=False)
     mood = (msg.metadata or {}).get("mood") if isinstance(msg.metadata, dict) else None
@@ -9932,14 +9547,10 @@ async def get_message_mood_face(request: Request, message_id: str):
 async def get_messages(request: Request, thread_id: str,
                        limit: int = Query(200, ge=1, le=500),
                        before_id: str | None = None):
-    _is_safe_mode_caller(request)
     thread = await _require_thread(request, thread_id)
     thread_id = thread.id
     msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before_id)
     out = [m.model_dump() for m in msgs]
-    if _is_decoy(request):
-        # An image-job placeholder hides outright — see _redact_message_dict.
-        out = [r for m in out if (r := _redact_message_dict(m)) is not None]
     return {
         "thread_id": thread_id,
         "messages": out,
@@ -9957,10 +9568,8 @@ _THREAD_PREF_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}")
 
 @app.patch("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def patch_thread(request: Request, thread_id: str, payload: dict = Body(...)):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     thread_id = await _canonical_thread_id(thread_id)
-    await _deny_decoy_thread(request, thread_id)
+    await _thread_access(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
     # Every field is gated and validated BEFORE any is written, so a request
@@ -10028,22 +9637,12 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
 async def mark_read(request: Request, thread_id: str):
     """Mark a thread read (clears its unread indicator on every device).
 
-    THE MISSING `_deny_decoy_mutation` HERE IS DELIBERATE — every sibling
-    route (patch, delete, archive) has one, so its absence looks like an
-    oversight and has been "fixed" by review more than once.
-
-    Safe Mode is view + send, and this endpoint is the *view* half writing
-    down that the view happened: the locked tab calls it when a family member
-    opens a thread on the tablet, and denying it would leave a dot that never
-    clears on exactly the devices the tier exists for. The blast radius is one
-    boolean on a thread the caller is already allowed to READ — Safe Mode's
-    bot gate still applies through `_deny_decoy_thread` below, so a locked
-    caller can no more clear a non-safe bot's dot than see it. Nothing is
-    created, renamed, deleted or sent.
+    ``use_chat``, not ``manage_history``: this is the *view* half writing down that the
+    view happened, on a thread the caller owns (_thread_access). Nothing is created,
+    renamed, deleted or sent.
     """
-    _is_safe_mode_caller(request)
     thread_id = await _canonical_thread_id(thread_id)
-    await _deny_decoy_thread(request, thread_id)
+    await _thread_access(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
     await db.mark_thread_read(thread_id)
@@ -10087,13 +9686,8 @@ async def _abort_thread_turn(thread_id: str) -> dict:
 
 @app.post("/api/threads/{thread_id}/abort", responses=problem.MACHINE)
 async def abort_turn(request: Request, thread_id: str):
-    """Stop a turn in flight.
-
-    A MUTATION, and gated like every other one: Safe Mode may view and send,
-    never cancel. A locked tablet that could abort a turn could silence any
-    conversation in the house.
-    """
-    _deny_decoy_mutation(request)
+    """Stop a turn in flight: ``manage_history`` (the route's permission), on the
+    caller's own thread."""
     _require_full_access(request)
     thread = await _require_thread(request, thread_id, write=True)
     return await _abort_thread_turn(thread.id)
@@ -10102,12 +9696,8 @@ async def abort_turn(request: Request, thread_id: str):
 @app.get("/api/unread", responses=problem.MACHINE)
 async def unread_summary(request: Request):
     """Threads with unread bot messages, across all bots (for sidebar dots)."""
-    _is_safe_mode_caller(request)
     # 4.0: the caller's OWN chats only (the sidebar dots of nobody else's conversations).
     unread = await db.unread_summary(principal=policy.of(request).principal)
-    if _is_decoy(request):
-        safe = _safe_bot_ids()
-        unread = [u for u in unread if u.get("bot_id") in safe]
     # Per-profile visibility: a thread id of a character made for someone else is not listed.
     pr = policy.of(request).principal
     unread = [u for u in unread if characters.may_use_id(u.get("bot_id"), pr)]
@@ -10116,8 +9706,6 @@ async def unread_summary(request: Request):
 
 @app.delete("/api/messages/{message_id}", responses=problem.MACHINE)
 async def delete_message_endpoint(request: Request, message_id: str):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
@@ -10183,13 +9771,9 @@ async def edit_message_endpoint(request: Request, message_id: str,
                                 payload: dict = Body(...)):
     """Rewrite a message's text, or take it out of the model's context.
 
-    Full session only. Safe Mode is VIEW + SEND, and editing the transcript is
-    neither — `_deny_decoy_mutation` is the same gate the sibling delete and
-    checklist routes carry, stated here because a locked tablet rewriting what
-    somebody said is the worst version of this feature.
+    ``manage_history`` (the route's permission) on the caller's own thread, the same
+    gate the sibling delete and checklist routes carry.
     """
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
@@ -10236,11 +9820,8 @@ async def update_message_checklist(request: Request, message_id: str,
     The frontend renders a ```checklist fenced table as an interactive widget;
     this is where its checked rows are stored, on the message itself, so the
     state survives a reload and reaches every other device via the broadcast
-    below. Full-session only — Safe Mode is VIEW + SEND, so a locked device
-    sees the checkboxes but cannot change them (_deny_decoy_mutation).
+    below. ``manage_history`` (the route's permission) on the caller's own thread.
     """
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     msg, _thread = await _require_message(request, message_id)
     if not _CHECKLIST_FENCE_RE.search(msg.content or ""):
         raise HTTPException(400, "Message is not a checklist")
@@ -10316,7 +9897,7 @@ async def update_message_checklist(request: Request, message_id: str,
     stored.setdefault("checked", [])
     meta["checklist"] = stored
     await db.update_message_metadata(message_id, meta)
-    bot_id = await _bot_of_thread(msg.thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(msg.thread_id)   # lets the scoper attribute frames
     await manager.broadcast({
         "type": "checklist_update",
         "thread_id": msg.thread_id,
@@ -10327,42 +9908,32 @@ async def update_message_checklist(request: Request, message_id: str,
     return {"ok": True, "message_id": message_id, "checklist": stored}
 
 
-@app.post("/api/messages/{message_id}/feedback",
-          responses={**problem.MACHINE, **problem.RATE_LIMITED})
+@app.post("/api/messages/{message_id}/feedback", responses=problem.MACHINE)
 async def message_feedback(request: Request, message_id: str,
                            payload: MessageFeedbackIn):
     """Rate one of the bot's own replies: thumbs up/down, optional reason.
 
     FEATURE 28. `vote` and `reason` are closed Pydantic Literals
-    (MessageFeedbackIn) — that is the entire security property. This route is
-    reachable from a locked Safe-Mode device, and the vote it records is later
-    quoted back into the agent's own prompt (_compose_agent_text /
+    (MessageFeedbackIn) — that is the entire security property. The vote it
+    records is later quoted back into the agent's own prompt (_compose_agent_text /
     _pending_feedback_lines): nothing free-text ever reaches that quote,
     because nothing free-text is accepted here.
 
     The vote is stored `pending: true` and surfaces on the thread's NEXT turn
     as a fixed-template line, then marked delivered so it is never repeated.
 
-    Tier: allowed in Safe Mode for SAFE bots (the family is exactly who rates
-    a reply) — _deny_decoy_thread scopes it the same way every other
-    thread-scoped decoy-readable route does — and rate-limited by the same
-    daily-budget mechanism as every other decoy action (DECOY_FEEDBACK_QUOTA).
+    ``use_chat`` on the caller's own thread (_require_message -> _thread_access).
     """
-    _is_safe_mode_caller(request)
     msg, _thread = await _require_message(request, message_id)
     if msg.role != "assistant" or bool((msg.metadata or {}).get("sub")):
         raise HTTPException(
             400, "Feedback only applies to one of the bot's own replies")
-    if _is_decoy(request):
-        ip = _request_quota_ip(request)
-        if not _decoy_action_allowed(ip, "feedback", DECOY_FEEDBACK_QUOTA):
-            raise HTTPException(429, "Daily limit reached on this device")
     note = {"vote": payload.vote, "reason": payload.reason,
             "at": now_iso(), "pending": True}
     updated = await db.merge_message_metadata(message_id, {"feedback": note})
     if updated is None:
         raise HTTPException(404, "Message not found")
-    bot_id = await _bot_of_thread(msg.thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(msg.thread_id)   # lets the scoper attribute frames
     await manager.broadcast({
         "type": "message_feedback",
         "thread_id": msg.thread_id,
@@ -10375,8 +9946,6 @@ async def message_feedback(request: Request, message_id: str,
 
 @app.delete("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def delete_thread(request: Request, thread_id: str, hard: bool = False):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     # Ownership caches the owner before the row goes, so the thread_deleted frame below can
     # still be attributed (and sent to the owner's other devices only).
     thread = await _require_thread(request, thread_id, write=True)
@@ -10426,9 +9995,9 @@ async def _stream_upload(
     - Writes to a temp `.part`, fsyncs, then os.replace()s into place, so a crash
       mid-write never leaves a torn blob under the final (listed) name.
     - Enforces the per-file `max_size` (413), the server-wide storage cap (507),
-      and — when `quota` and the request is a decoy — the daily per-client byte
-      budget (429) using shared LIVE accounting with refund-on-failure (so
-      concurrent decoy uploads can't each spend the full budget).
+      and — when `quota` and the caller is a MACHINE — the 200 MB/day machine upload
+      guard (429) using shared LIVE accounting with refund-on-failure (so concurrent
+      machine uploads can't each spend the full budget). People have no daily limit.
     Returns bytes written; cleans up the partial and refunds quota on any error.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -10443,10 +10012,9 @@ async def _stream_upload(
         if remaining_total <= 0:
             raise HTTPException(507, "Storage limit reached — free space or delete files")
 
-    is_decoy = bool(quota and request is not None
-                    and _decoy_quota_left(request) is not None)
-    if is_decoy and _decoy_quota_left(request) <= 0:
-        raise HTTPException(429, "Daily upload limit reached — try again tomorrow or unlock")
+    metered = bool(quota and request is not None and _machine_quota_left(request) is not None)
+    if metered and _machine_quota_left(request) <= 0:
+        raise HTTPException(429, "Daily machine upload limit reached — try again tomorrow")
 
     size = 0
     charged = 0
@@ -10463,7 +10031,7 @@ async def _stream_upload(
         #
         # Per-chunk to_thread costs a thread hop against a 1MB write, which is
         # the right trade; keeping the loop's shape matters more, because the
-        # size ceiling and the decoy byte budget are enforced INSIDE it and
+        # size ceiling and the machine byte guard are enforced INSIDE it and
         # must still be able to abort mid-file.
         with part.open("wb") as f:
             while chunk := await file.read(1 << 20):
@@ -10473,11 +10041,11 @@ async def _stream_upload(
                     raise HTTPException(413, f"File too large (max {max_size // (1024*1024)}MB)")
                 if remaining_total is not None and size > remaining_total:
                     raise HTTPException(507, "Storage limit reached — free space or delete files")
-                if is_decoy:
-                    _decoy_quota_add(request, n)     # charge the SHARED live counter
+                if metered:
+                    _machine_quota_add(n)            # charge the SHARED live counter
                     charged += n
-                    if _decoy_over_quota(request):
-                        raise HTTPException(429, "Daily upload limit reached — try again tomorrow or unlock")
+                    if _machine_over_quota():
+                        raise HTTPException(429, "Daily machine upload limit reached — try again tomorrow")
                 await asyncio.to_thread(f.write, chunk)
 
             def _sync_to_disk() -> None:
@@ -10497,10 +10065,10 @@ async def _stream_upload(
         # most are neither: Starlette raises ClientDisconnect when a phone
         # walks out of range mid-upload, and a cancelled request raises
         # CancelledError. Both left the .part file on disk forever AND left the
-        # decoy's daily byte budget charged for an upload that never landed.
+        # machine's daily byte guard charged for an upload that never landed.
         if not published:
-            if is_decoy and charged:
-                _decoy_quota_add(request, -charged)  # refund the failed upload
+            if metered and charged:
+                _machine_quota_add(-charged)         # refund the failed upload
             with contextlib.suppress(OSError):
                 part.unlink(missing_ok=True)
     return size
@@ -10508,12 +10076,12 @@ async def _stream_upload(
 
 @app.post("/api/upload", responses={**problem.MACHINE, **problem.TOO_LARGE})
 async def upload_media(request: Request, file: UploadFile = File(...)):
-    """Upload a file for chat sharing.
+    """Upload a file for chat sharing (``attach_files``; a machine: ``machine:upload``).
 
     Raster images and videos are stored inline for in-bubble rendering; every
-    other file type (documents, archives, binaries — anything) is stored via the
-    File Server and shared as a download link, so the composer "＋" accepts any
-    file from the unlocked side.
+    other file type (documents, archives, binaries — anything) is stored as a
+    ``source='chat'`` file owned by the uploader and shared as a download link, so
+    the composer "＋" accepts any file.
     """
     ctype = (file.content_type or "").lower()
     if ctype in ("", "application/octet-stream"):
@@ -10527,8 +10095,7 @@ async def upload_media(request: Request, file: UploadFile = File(...)):
     is_doc = not is_image and not is_video
 
     # Files → store via File Server (so they get DB records + download URLs).
-    # Safe Mode may send uploads, but on a daily per-client byte budget
-    # (availability guard — see DECOY_UPLOAD_QUOTA). Full sessions: no quota.
+    # A machine is metered by the daily byte guard (MACHINE_UPLOAD_QUOTA); people are not.
     if is_doc:
         orig = (Path(file.filename or "file").name or "file")[:255]
         doc_suffix = Path(orig).suffix.lower()[:16]
@@ -10566,10 +10133,10 @@ def _fmt_bytes(n: int) -> str:
 
 
 def _drop_notice_bot() -> str | None:
-    """Default bot whose daily thread receives drop notices: the first visible
-    safe bot in sidebar order. None when no bot is flagged safe."""
+    """Default bot whose daily thread receives drop notices: the first household
+    character in sidebar order. None when there is none."""
     for b in config.load_bots():
-        if b.safe:
+        if not characters.is_personal(b):
             return b.id
     return None
 
@@ -10577,25 +10144,22 @@ def _drop_notice_bot() -> str | None:
 async def _resolve_drop_thread(request: Request, thread_id: str | None):
     """Pick the thread a drop notice lands in.
 
-    A caller may name a thread (the chat open on their device). A Safe-Mode
-    caller may only name a SAFE bot's thread — anything else silently falls back
-    to the default, so an unauthenticated LAN peer can never write into a
-    conversation it isn't allowed to see. Returns (thread, created) or None when
-    no safe bot exists to receive the notice.
-    """
+    A caller may name a thread (the chat open on their device): one it owns, with a
+    character it may use (ownership + characters.may_use). Otherwise the notice goes to
+    the protected Admin's daily thread - but only when the dropped file is the protected
+    Admin's (a drop by the protected Admin, an open install), so nobody's file name ever
+    lands in someone else's chat. Returns (thread, created) or None."""
+    pr = policy.of(request).principal
     if thread_id:
         thread = await db.get_thread(thread_id)
-        # 4.0: and only a thread the caller owns - anybody else's falls back, like an unsafe one.
-        if (thread and not (_is_decoy(request) and thread.bot_id not in _safe_bot_ids())
-                and ownership.may_see_thread(policy.of(request).principal,
-                                             thread.owner_profile_id, write=True)
-                and characters.may_use_id(thread.bot_id, policy.of(request).principal)):
+        if (thread and ownership.may_see_thread(pr, thread.owner_profile_id, write=True)
+                and characters.may_use_id(thread.bot_id, pr)):
             return thread, False
+    if ownership.for_principal(pr) != ownership.protected_admin_id():
+        return None
     bot_id = _drop_notice_bot()
     if not bot_id:
         return None
-    # The shared daily thread (the Owner's id), exactly as before 4.0: a per-profile
-    # drop thread arrives with the inject/daily `profile` round.
     return await db.find_or_create_daily_thread(bot_id, date=local_date(),
                                                 owner=ownership.owner_id())
 
@@ -10606,22 +10170,13 @@ async def drop_file(
     file: UploadFile = File(...),
     thread_id: str | None = Form(None),
 ):
-    """One-way file drop — the only upload path a LOCKED device gets on its own.
+    """One-way file drop into the File Server (``files_upload``, every role by default).
 
-    Deliberately reachable in Safe Mode (it is NOT in `_decoy_blocked`): a family
-    device can push a file to the box without a PIN. Everything about it is
-    one-way:
-
-    - Bytes land in the File Server store tagged `source="fileserver"`, so
-      `_block_fileserver_read` bars the sender from ever pulling one back even
-      if the `/api/files*` path gate were to change.
-    - The notice posted into chat is TEXT ONLY (no `media_url`), and its
-      `[[doc:...]]` link is stripped by `_strip_media_text` for Safe-Mode
-      viewers — the sender sees that their file arrived and its name, an
-      unlocked viewer gets the download link.
-    - Decoy uploads spend the same daily per-client byte budget as
-      `/api/upload` (`DECOY_UPLOAD_QUOTA`), so this can't be used to fill the
-      disk.
+    - Bytes land in the File Server store tagged `source="fileserver"` and owned by the
+      dropper; reading one back needs ``files_read`` and ownership (`_file_access`), so a
+      Basic profile drops files it cannot pull back.
+    - The notice posted into chat is TEXT ONLY (no `media_url`), in a thread the dropper
+      owns (`_resolve_drop_thread`).
 
     The upload is reported as successful once the bytes are safely stored; a
     failure to post the chat notice is logged and surfaced as `notice: false`
@@ -10657,8 +10212,7 @@ async def drop_file(
                 await manager.broadcast(
                     {"type": "thread_created", "thread": thread.model_dump()})
             origin = request.client.host if request.client else "an unknown device"
-            # Line 1 survives Safe-Mode redaction (the sender sees their file
-            # arrived); line 2 is the download link, which does not.
+            # Line 1 says the file arrived; line 2 is the download link (its owner's).
             content = (f"📎 **{orig}** · {_fmt_bytes(size)} · dropped from {origin}\n\n"
                        f"[[doc:{rec['id']}|Download {orig}]]")
             await _persist_and_broadcast_message(
@@ -10674,7 +10228,11 @@ async def drop_file(
 
 @app.get("/api/media")
 async def serve_media(request: Request, path: str = Query(...)):
-    """Serve a local image/video file, but only from allow-listed base directories."""
+    """Serve a local image/video file, but only from allow-listed base directories.
+
+    The media store is every signed-in role's (``use_chat``: the same files `/media/`
+    serves). The agents' own media folders hold what agent bots produced, so they need
+    ``dispatch_agents`` (Admins always)."""
     _require_full_access(request)      # second lock, see _require_full_access
     try:
         candidate = Path(path).resolve(strict=True)
@@ -10682,9 +10240,13 @@ async def serve_media(request: Request, path: str = Query(...)):
         raise HTTPException(404, "Not found")
     if candidate.suffix.lower() not in MEDIA_EXTS:
         raise HTTPException(403, "Forbidden")
+    bases = _allowed_media_bases()
+    if not policy.of(request).can(Permission.DISPATCH_AGENTS):
+        store = MEDIA_DIR.resolve()
+        bases = [b for b in bases if b == store]
     if not any(
         candidate == base or base in candidate.parents
-        for base in _allowed_media_bases()
+        for base in bases
     ):
         raise HTTPException(403, "Forbidden")
     if not candidate.is_file():
@@ -10709,7 +10271,7 @@ def _safe_file_path(stored_name: str) -> Path | None:
 
 @app.post("/api/files")
 async def file_upload(request: Request, file: UploadFile = File(...)):
-    """Upload any file type to the File Server."""
+    """Upload any file type to the File Server (``files_upload``), owned by the uploader."""
     _require_full_access(request)      # second lock, see _require_full_access
     orig = (Path(file.filename or "file").name or "file")[:255]
     suffix = Path(orig).suffix.lower()[:16]
@@ -10723,28 +10285,43 @@ async def file_upload(request: Request, file: UploadFile = File(...)):
 
 @app.get("/api/files", responses=problem.MACHINE)
 async def file_list(request: Request):
+    """The caller's OWN files (``files_read``; 4.0 per owner). A machine lists the
+    protected Admin's (its sphere), an open install everything."""
     _require_full_access(request)      # see _require_full_access: second lock
-    return {"files": await db.list_files()}
+    owners = ownership.readable_owner_ids(policy.of(request).principal)
+    return {"files": await db.list_files(owner_ids=owners)}
 
 
-# File Server uploads (source='fileserver') are full-access only: a locked
-# (Safe-Mode) session can neither list nor read them — the auth gate already
-# bars /api/files* for decoy sessions, and this guard is defence-in-depth so a
-# decoy can never pull a blob even if that gate changes. An UNLOCKED session
-# gets full view + download. On-box agents still consume them straight off disk
-# (FILES_DIR). Chat attachments (source='chat') stay readable for everyone so
-# posted media keeps rendering.
-def _block_fileserver_read(request: Request, rec: dict) -> None:
-    if _is_decoy(request) and (rec.get("source") or "chat") == "fileserver":
-        raise HTTPException(403, "Unlock for full access")
+async def _file_access(request: Request, file_id: str, *, delete: bool = False) -> dict:
+    """The file record, after the 4.0 File Server rules, or the refusal (BUILD-PLAN-v2 §1.11,
+    the replacement of the 3.x Safe-Mode fileserver block):
+
+    * **ownership**: another profile's file is a 404 for everyone, Admins included (its
+      existence is private) - ``ownership.may_see_thread`` semantics: a file with no owner is
+      the protected Admin's, a machine's sphere is the protected Admin's;
+    * **a File Server file** (``source='fileserver'``): listing, downloading and deleting it
+      need ``files_read`` (Users and Admins; a Basic profile uploads only) - 403;
+    * **a chat attachment** (``source='chat'``): its owner downloads it (it renders in their
+      chat) with ``use_chat``; deleting it needs ``manage_history`` - 403."""
+    pr = policy.of(request).principal
+    rec = await db.get_file(file_id)
+    if not rec:
+        raise HTTPException(404, "File not found")
+    owner = await db.file_owner(file_id)
+    if not ownership.may_see_thread(pr, owner, write=True):
+        raise HTTPException(404, "File not found")
+    if (rec.get("source") or "chat") == "fileserver":
+        need = Permission.FILES_READ
+    else:
+        need = Permission.MANAGE_HISTORY if delete else Permission.USE_CHAT
+    if not pr.can(need):
+        raise policy.denied(pr, need)
+    return rec
 
 
 @app.get("/api/files/{file_id}/download")
 async def file_download(file_id: str, request: Request):
-    rec = await db.get_file(file_id)
-    if not rec:
-        raise HTTPException(404, "File not found")
-    _block_fileserver_read(request, rec)
+    rec = await _file_access(request, file_id)
     p = _safe_file_path(rec["stored_name"])
     if not p:
         raise HTTPException(404, "Blob missing")
@@ -10754,10 +10331,7 @@ async def file_download(file_id: str, request: Request):
 @app.get("/api/files/{file_id}/raw")
 async def file_raw(file_id: str, request: Request):
     """Inline serving for previews (images, videos, and text documents)."""
-    rec = await db.get_file(file_id)
-    if not rec:
-        raise HTTPException(404, "File not found")
-    _block_fileserver_read(request, rec)
+    rec = await _file_access(request, file_id)
     mime = rec.get("mime") or ""
     p = _safe_file_path(rec["stored_name"])
     if not p:
@@ -10774,6 +10348,7 @@ async def file_raw(file_id: str, request: Request):
 @app.delete("/api/files/{file_id}")
 async def file_delete(file_id: str, request: Request):
     _require_full_access(request)
+    await _file_access(request, file_id, delete=True)
     rec = await db.delete_file(file_id)
     if not rec:
         raise HTTPException(404, "File not found")
@@ -10785,11 +10360,11 @@ async def file_delete(file_id: str, request: Request):
 
 @app.post("/api/files/wipe")
 async def file_wipe(request: Request, payload: dict = Body(...)):
-    """Delete every file uploaded at or before `before` (ISO timestamp).
+    """Delete every one of the CALLER'S OWN File Server files uploaded at or before
+    `before` (ISO timestamp; ``files_read``, 4.0 per owner).
 
-    Powers the per-day "delete this and previous files" buttons. The sharpest
-    route in the app to leave on a prefix tuple alone — one call empties the
-    File Server — so it re-derives the gate itself.
+    Powers the per-day "delete this and previous files" buttons of the caller's own list:
+    nobody's files but the caller's are touched, Admins included.
     """
     _require_full_access(request)
     cutoff = payload.get("before")
@@ -10802,7 +10377,8 @@ async def file_wipe(request: Request, payload: dict = Body(...)):
         datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(400, "before must be an ISO-8601 timestamp")
-    removed = await db.delete_files_before(cutoff)
+    removed = await db.delete_files_before(
+        cutoff, owner_ids=ownership.readable_owner_ids(policy.of(request).principal))
     for rec in removed:
         p = _safe_file_path(rec["stored_name"])
         if p:
@@ -10824,53 +10400,35 @@ def _raise_for_reaction_error(e: reactions.ReactionError) -> None:
     raise HTTPException(e.status, e.message)
 
 
-def _is_safe_mode_caller(request: Request) -> bool:
-    """Is this caller Restricted (what 2.x called Safe Mode)? The gate decides it once:
-    a browser tab with no session is anonymous = Restricted even on loopback, a
-    machine is not."""
-    return _is_decoy(request)
-
-
-def _deny_agent_route_to_browser(request: Request) -> None:
-    """Full-access gate for a session-exempt route: agents yes, locked tab no."""
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
-
-
-@app.get("/api/reactions", responses=problem.SAFE_MODE)
+@app.get("/api/reactions", responses=problem.MACHINE)
 async def reactions_list(request: Request):
-    """The pack as this client is allowed to see it.
+    """The pack as this client is allowed to see it: the whole pack for every role
+    (4.0), the management affordances and the pool's detail only with ``manage_characters``.
 
-    Safe Mode gets only the reactions flagged `safe` and no management
-    affordances — the same shape the Bot Manager uses for safe bots.
-
-    Session-exempt for machines (see _INBOUND_REACTION) so `dispatch-react
-    --list` and on-box agents get the TRUE pack + pool + reaction_bots — but a
-    browser tab with no session is Safe Mode even on loopback, same as fire.
-    """
-    decoy = _is_safe_mode_caller(request)
+    Session-exempt for machines (see _INBOUND_REACTION) so `dispatch-react --list` and
+    on-box agents get the TRUE pack + pool + reaction_bots."""
+    pol = policy.of(request)
+    manager_view = pol.machine or pol.can(Permission.MANAGE_CHARACTERS)
     pack = reactions.load()
-    items = reactions.list_for(decoy=decoy)
-    # Curation (upload / edit / delete) is full-session only — a tokenless
-    # machine caller reading this list could NOT actually curate, so don't
-    # claim it can. Generation IS session-exempt, so that one stays capability-
-    # based. With no PIN configured the app is fully open (original behaviour).
-    can_manage = (not decoy) and (_session_of(request) is not None
-                                  or not auth.load().pin_set)
+    items = reactions.list_for()
+    pr = pol.principal
     return {
         "reactions": items,
         "settings": pack.settings.to_dict(),
         "categories": sorted({r["category"] for r in items}),
-        "can_manage": can_manage,
-        "can_generate": (not decoy) and reactions.image_cli_available(),
-        # Management detail (prompts, rig errors, batch size) stays behind the PIN;
-        # a locked device only needs to know whether a draw is currently possible.
-        "pool": (reactions.pool_status() if not decoy
+        # Curation (upload / edit / delete) needs a person holding manage_characters - a
+        # machine reading this list could NOT curate, so it is not told it can.
+        "can_manage": (not pol.machine) and pol.can(Permission.MANAGE_CHARACTERS),
+        "can_generate": manager_view and reactions.image_cli_available(),
+        # Management detail (prompts, rig errors, batch size) is the manager's; everyone
+        # else only needs to know whether a draw is currently possible.
+        "pool": (reactions.pool_status() if manager_view
                  else {"remaining": reactions.pool_status()["remaining"]}),
         # Which bots may fire reactions — drives the picker's "off for this bot"
-        # notice, and mirrors the server-side gate in fire_reaction().
+        # notice, and mirrors the server-side gate in fire_reaction(). Only the
+        # characters this caller may use (characters.may_use).
         "reaction_bots": [b.id for b in config.load_bots() if b.reactions
-                          and (b.safe or not decoy)],
+                          and characters.may_use(b, pr)],
     }
 
 
@@ -10879,13 +10437,11 @@ async def reaction_pool_status(request: Request, bot_id: str = Query("")):
     """One bot's pool. Omitting `bot_id` reports the DEFAULT reaction bot's —
     the status object names the bot it describes, so a caller that omitted it
     still knows what it got."""
-    _deny_agent_route_to_browser(request)
     return {"pool": reactions.pool_status(bot_id)}
 
 
 @app.put("/api/reactions/pool")
 async def reaction_pool_config(request: Request, payload: ReactionSettingsIn):
-    _deny_agent_route_to_browser(request)
     try:
         bot_id = payload.target_bot()
     except ValueError as e:
@@ -10908,7 +10464,6 @@ async def reaction_prompts_get(request: Request, bot_id: str = Query("")):
     Per bot: `bot_id` selects whose bank, and only the default reaction bot has
     one materialised for it — a companion's comes back empty until it is
     written (PUT with the same `bot_id`)."""
-    _deny_agent_route_to_browser(request)
     return {"prompts": reactions.bank_load(bot_id),
             "on_hand": reactions.pool_categories(bot_id),
             "path": str(reactions.bank_path(bot_id)),
@@ -10920,7 +10475,6 @@ async def reaction_prompts_put(request: Request, payload: dict = Body(...)):
     """Replace the prompt bank. Takes the same shape GET returns (either the
     whole body or a bare `prompts` object). Applies to the NEXT refill —
     existing images are left alone."""
-    _deny_agent_route_to_browser(request)
     body = payload.get("prompts") if isinstance(payload.get("prompts"), dict) else payload
     bot_id = str(payload.get("bot_id") or "")
     try:
@@ -10943,7 +10497,6 @@ async def reaction_pool_refill(request: Request, replace: bool = Query(False),
     the response returns immediately; `reaction_pool` broadcasts tick the
     manager panel as images land.
     """
-    _deny_agent_route_to_browser(request)
     if not reactions.image_cli_available():
         raise HTTPException(503, "Image CLI not available on this box")
     # A named-but-unknown bot must 404 rather than quietly refill (or REPLACE,
@@ -10981,7 +10534,6 @@ def _raise_for_pool_error(e: avatar_pool.PoolError) -> None:
 async def avatar_pool_status(request: Request):
     """Every pool-enabled bot's shelf. Same machine surface as the reaction
     pool (the watchdog CLI reads this); a sessionless browser is refused."""
-    _deny_agent_route_to_browser(request)
     pools = {}
     for bid in avatar_pool.enabled_bots():
         with contextlib.suppress(Exception):
@@ -10991,7 +10543,6 @@ async def avatar_pool_status(request: Request):
 
 @app.put("/api/avatar-pool/{bot_id}")
 async def avatar_pool_config(request: Request, bot_id: str, payload: dict = Body(...)):
-    _deny_agent_route_to_browser(request)
     values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
     try:
         cfg = avatar_pool.update_config(values, bot_id)
@@ -11007,7 +10558,6 @@ async def avatar_pool_config(request: Request, bot_id: str, payload: dict = Body
 async def avatar_pool_prompts_get(request: Request, bot_id: str):
     """The avatar prompt bank — what the nightly top-up generates. Like the
     reaction bank this is deliberately DATA an on-box agent may rewrite."""
-    _deny_agent_route_to_browser(request)
     try:
         return {"prompts": avatar_pool.bank_load(bot_id),
                 "path": str(avatar_pool.bank_path(bot_id)),
@@ -11018,7 +10568,6 @@ async def avatar_pool_prompts_get(request: Request, bot_id: str):
 
 @app.put("/api/avatar-pool/{bot_id}/prompts")
 async def avatar_pool_prompts_put(request: Request, bot_id: str, payload: dict = Body(...)):
-    _deny_agent_route_to_browser(request)
     # Same check the refill route makes: a bank written for a bot with no
     # avatar pool is a file nothing will ever read, and the 200 makes a typo
     # look like it worked.
@@ -11039,7 +10588,6 @@ async def avatar_pool_refill(request: Request, bot_id: str):
     """Kick a refill now. A pair is two rig calls, so the work happens in a
     background task (under the shared pool lock) and the response returns
     immediately; `avatar_pool` broadcasts tick the panel as pairs land."""
-    _deny_agent_route_to_browser(request)
     if not reactions.image_cli_available():
         raise HTTPException(503, "Image CLI not available on this box")
     if bot_id not in avatar_pool.enabled_bots():
@@ -11065,12 +10613,9 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
     key — the same inbound rules as /api/inject. Browsers have no fire
     control: reactions belong to the bots (the composer button was removed
     for good on 2026-08-01), so the only in-app caller left is the Reaction
-    Manager's Test button, which fires as the enabled reaction bot.
+    Manager's Test button, which fires as the enabled reaction bot. The route is
+    machine-only (machine:reactions); a person is refused at the gate (agents_only).
     """
-    # A locked device gets no fire path at all — not even safe cards.
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
-
     # A bad thread id must refuse loudly. The trace persist downstream
     # swallows its own failures (a fire mustn't die halfway), so without this
     # check a typo'd thread returned ok:true while the trace silently
@@ -11110,9 +10655,9 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
             thread_id=payload.thread_id,
             bot_id=bot.id if bot else payload.bot_id,
             duration_ms=payload.duration_ms, caption=payload.caption,
-            # Safe-Mode callers were already refused above; who *sees* the
-            # overlay is decided per connection by the WS frame filter.
-            trace=payload.trace, require_safe=False,
+            # A machine-only route (the gate refuses a person); who *sees* the
+            # overlay is decided per connection by the WS frame scoper.
+            trace=payload.trace,
         )
     except reactions.ReactionError as e:
         _raise_for_reaction_error(e)
@@ -11124,9 +10669,9 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
 async def image_job_create(request: Request, payload: ImageJobIn):
     """Ask for a picture. Returns in milliseconds; the picture arrives later.
 
-    The gate is the reaction fire's gate, for the same reasons: a locked device
-    gets no path at all, an unknown thread refuses loudly rather than
-    succeeding into nowhere, and the bot must have the capability switched on.
+    ``use_images`` (a person) or ``machine:image_jobs``; an unknown thread refuses
+    loudly rather than succeeding into nowhere, the caller must own the thread, and
+    the bot must have the capability switched on.
     The one addition is that the bot has to be the thread's OWN bot — the
     placeholder is persisted as an assistant message and will be attributed to
     whoever owns the thread regardless, so accepting a mismatch would let one
@@ -11134,9 +10679,6 @@ async def image_job_create(request: Request, payload: ImageJobIn):
     """
     if not _image_jobs_configured():
         raise HTTPException(503, "Image generation isn't configured")
-    # A locked device has no fire path at all — same rule as reactions.
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
 
     canonical = await db.resolve_thread_id(payload.thread_id)
     if canonical is None:
@@ -11211,9 +10753,7 @@ async def image_job_create(request: Request, payload: ImageJobIn):
 
 @app.get("/api/image-jobs/{job_id}", responses=problem.MACHINE)
 async def image_job_status(request: Request, job_id: str):
-    """One job's state. Machine-facing, same gate as creating one."""
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
+    """One job's state. Machine-facing, same gate as creating one (``use_images``)."""
     job = await db.get_image_job(job_id)
     if job is None:
         raise HTTPException(404, "Unknown image job")
@@ -11249,13 +10789,15 @@ async def image_job_callback(request: Request, job_id: str):
     the image server. That is why this route is exempt from the api_token check
     the rest of the machine surface uses (see the auth middleware): the caller
     is a LAN peer, holding a capability scoped to one job, that expires with
-    the job. A browser never reaches here — a locked tab gets Safe Mode's 403.
+    the job. Only the rig calls it: a browser-shaped request is refused before the
+    token is looked at (a page holding a leaked token is not the rig).
 
     The sweep is unchanged and still runs on its own cadence. A callback only
     makes a terminal transition arrive sooner; a callback that never comes is
     the case the sweep has always covered.
     """
-    _deny_agent_route_to_browser(request)
+    if _browser_request(request):
+        raise HTTPException(403, "Only the image server calls this")
     job = await db.get_image_job(job_id)
     if job is None:
         raise HTTPException(404, "Unknown image job")
@@ -11288,8 +10830,6 @@ async def reaction_image(rid: str, request: Request):
     r = reactions.get_for_display(rid)
     if r is None:
         raise HTTPException(404, "Not found")
-    if _is_decoy(request) and not r.safe:
-        raise HTTPException(403, "Unlock for full access")
     try:
         path = reactions.image_path(r)
     except reactions.ReactionError as e:
@@ -11313,7 +10853,6 @@ async def reaction_upload(
     duration_ms: int = Form(0),
 ):
     """Add an image to the pack. `aliases` is comma/space separated."""
-    _deny_decoy_mutation(request)
     data = await file.read(reactions.UPLOAD_MAX + 1)
     if len(data) > reactions.UPLOAD_MAX:
         raise HTTPException(
@@ -11352,7 +10891,6 @@ async def reaction_upload(
 @app.post("/api/reactions/generate")
 async def reaction_generate(request: Request, payload: GenerateReactionIn):
     """Mint a new reaction image on the configured image host via the image CLI."""
-    _deny_agent_route_to_browser(request)
     try:
         # Blocking subprocess with a multi-minute ceiling (cold model load) —
         # off the event loop, or every other client stalls behind it.
@@ -11368,7 +10906,6 @@ async def reaction_generate(request: Request, payload: GenerateReactionIn):
 
 @app.patch("/api/reactions/{rid}")
 async def reaction_patch(rid: str, request: Request, payload: ReactionPatchIn):
-    _deny_decoy_mutation(request)
     try:
         r = reactions.update(rid, **payload.model_dump(exclude_unset=True))
     except reactions.ReactionError as e:
@@ -11378,7 +10915,6 @@ async def reaction_patch(rid: str, request: Request, payload: ReactionPatchIn):
 
 @app.delete("/api/reactions/{rid}")
 async def reaction_delete(rid: str, request: Request):
-    _deny_decoy_mutation(request)
     try:
         reactions.remove(rid)
     except reactions.ReactionError as e:
@@ -11388,7 +10924,6 @@ async def reaction_delete(rid: str, request: Request):
 
 @app.put("/api/reactions/settings")
 async def reaction_settings(request: Request, payload: ReactionSettingsIn):
-    _deny_agent_route_to_browser(request)
     try:
         st = reactions.update_settings(payload.values)
     except (reactions.ReactionError, TypeError, ValueError) as e:
@@ -11401,10 +10936,9 @@ async def reaction_settings(request: Request, payload: ReactionSettingsIn):
 @app.post("/api/reactions/reseed")
 async def reaction_reseed(request: Request):
     """Re-render the built-in starter cards (uploads are left untouched)."""
-    _deny_decoy_mutation(request)
     written = await asyncio.to_thread(reactions.seed_starter_pack, True)
     return {"ok": True, "written": written,
-            "reactions": reactions.list_for(decoy=False)}
+            "reactions": reactions.list_for()}
 
 
 #: Metadata keys only the server may write. An `advisor_handoff` stamp is what
@@ -11430,12 +10964,11 @@ async def inject_message(request: Request, payload: InjectIn):
     Used by OpenClaw cron/timers, e.g. a morning briefing into a daily thread.
     Resolves the target thread, persists, and broadcasts to all clients.
 
-    Session-exempt for MACHINES (see _is_inbound) — but a browser tab with no
-    session is Safe Mode even on loopback, same as the reaction routes: this
-    box's own idle-locked tab must not be able to write into any thread (or
-    fire `:react:` markers) via the machine-to-machine bypass.
+    Session-exempt for MACHINES (see _is_inbound) — a browser tab is judged as
+    the person it is (the gate never hands a browser the machine bypass): this
+    box's own signed-out tab must not be able to write into any thread (or fire
+    `:react:` markers) via the machine-to-machine bypass.
     """
-    _deny_agent_route_to_browser(request)
     pr = policy.of(request).principal
     source_id = f"inject:{payload.delivery_key}" if payload.delivery_key else None
     if source_id:
@@ -11533,7 +11066,6 @@ async def ensure_daily_thread(request: Request, payload: DailyThreadIn):
 
     Session-exempt for machines; a sessionless browser is refused (see
     inject_message)."""
-    _deny_agent_route_to_browser(request)
     bot = config.resolve_bot(payload.bot_id)
     if not bot:
         raise HTTPException(400, "Unknown bot_id")
@@ -11639,7 +11171,7 @@ def _bot_allows_quick_actions(bot_id: str | None) -> bool:
 @app.get("/api/quick-actions")
 async def get_quick_actions():
     """The quick actions in use (defaults + `<data>/quick-actions.yaml`), in
-    display order. Public, Safe Mode included: they are only prompt templates."""
+    display order. Public: they are only prompt templates."""
     return {"actions": quick_actions.views()}
 
 
@@ -11649,7 +11181,6 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 
     Session-exempt for machines; a sessionless browser is refused (see
     inject_message). The frontend never POSTs here — it sends over WS."""
-    _deny_agent_route_to_browser(request)
     # Case-insensitive, same reason as /api/inject: a lowercased session-key id
     # must still hit its mixed-case thread row.
     canonical = await db.resolve_thread_id(thread_id)
@@ -11668,7 +11199,7 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
         # into a thread of a character they may not use (every role, Admins included: 4.0),
         # or - for anyone but an Admin - to put words in a character's (or the system's)
         # mouth: that is the agents' job.
-        _deny_decoy_bot(request, owned.bot_id)
+        _require_bot_use(request, owned.bot_id)
         if role != "user" and not pr.is_admin:
             raise policy.denied(pr, Permission.MANAGE_AGENTS,
                                 "Only an agent, the Owner or an Admin may post as a character or the system.")
@@ -11717,7 +11248,7 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 
 # --------------------------------------------------------------------------- #
 # REST: search · export · transcript bridge · disaster recovery
-# (full-session only — _decoy_blocked bars these for Safe-Mode connections)
+# (signed-in only; search and export read the caller's own chats)
 # --------------------------------------------------------------------------- #
 
 
@@ -11734,7 +11265,7 @@ async def search_messages(request: Request, q: str = Query(...),
         bot = config.resolve_bot(bot_id)
         if bot is not None:
             bot_id = bot.id
-        _deny_decoy_bot(request, bot_id)
+        _require_bot_use(request, bot_id)
     bot_ids = [bot_id] if bot_id else None
     results = await db.search_messages(q, bot_ids=bot_ids, limit=limit, principal=pr)
     # A character made for other profiles is not searched either (characters.may_use).
@@ -12525,7 +12056,7 @@ tools.set_builtin_probes({
 # --------------------------------------------------------------------------- #
 # DeepSeek Harness (dsh): `dsh web` service control + default model + headless
 # jobs. A headless job is code execution, so
-# every surface (status included) is FULL-SESSION ONLY; Safe Mode gets 403.
+# every surface (status included) is the operator's (use_tools:harness).
 # --------------------------------------------------------------------------- #
 
 
@@ -12534,7 +12065,6 @@ def _require_harness(request: Request) -> None:
         raise HTTPException(404, "Harness disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 def _raise_for_harness_error(e: Exception):
@@ -12807,13 +12337,12 @@ _sf_probe_lock = asyncio.Lock()
 def _require_studioforge(request: Request) -> None:
     """404 when the feature is off or unconfigured (an install that was never
     told the panel's address must not even admit the route exists), 403 with no
-    PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    PIN (the route's use_tools:studioforge decides who). Mirrors _require_harness."""
     if (not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url
             or _builtin_off("studioforge")):
         raise HTTPException(404, "StudioForge panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 def _framable(headers) -> bool:
@@ -12897,13 +12426,12 @@ async def studioforge_status(request: Request):
 
 def _require_mail(request: Request) -> None:
     """404 when the feature is off (no MailForge UI runtime files found and
-    not forced on), 403 with no PIN, 403 for a Safe-Mode session. Mirrors
-    _require_harness/_require_studioforge."""
+    not forced on), 403 with no PIN (the route's use_tools:mail decides who).
+    Mirrors _require_harness/_require_studioforge."""
     if not SETTINGS.mail_enabled or _builtin_off("mail"):
         raise HTTPException(404, "Emails panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 @app.get("/api/mail/status")
@@ -12939,12 +12467,11 @@ async def mail_status(request: Request):
 
 def _require_practice(request: Request) -> None:
     """404 when the feature is off (no PIN file found and not forced on), 403
-    with no PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    with no PIN (the route's use_tools:practice decides who). Mirrors _require_harness."""
     if not SETTINGS.practice_enabled or _builtin_off("practice"):
         raise HTTPException(404, "Clients panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 _PRACTICE_PATH_RE = re.compile(r"\A[A-Za-z0-9._/-]{0,256}\Z")
@@ -13013,15 +12540,11 @@ async def practice_links_put(client_id: str, request: Request):
 
 
 async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool = False) -> bool:
-    """False (with an error frame) when a Restricted connection targets a character
-    outside its audience - or, with ``dispatch=True`` (a turn is about to run), when a
-    signed-in profile without ``dispatch_agents`` targets a character whose turns run
-    an AGENT on the host (the OpenClaw backend; a direct provider is just chat).
-
-    A Restricted turn is never a dispatch: it runs LOCKED (no tools, no hand-off)."""
-    if manager.conn_decoy(ws) and bot_id not in _safe_bot_ids():
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
-        return False
+    """False (with an error frame) when the connection's profile may not use the character
+    (``characters.may_use``: off its household list, another profile's personal one) - or,
+    with ``dispatch=True`` (a turn is about to run), when a profile without
+    ``dispatch_agents`` targets a character whose turns run an AGENT on the host (the
+    OpenClaw backend; a direct provider is just chat)."""
     # 4.0 characters.may_use: the same rule as the roster. A turn needs a character that
     # exists; reading / archiving the socket's own thread of a deleted one does not.
     bot_row = config.resolve_bot(bot_id) if bot_id else None
@@ -13038,9 +12561,8 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
         return False
     if (bot_row is None and dispatch) or (
             bot_row is not None and not characters.may_use(bot_row, pr_ws)):
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"
-                                if manager.conn_decoy(ws) else
-                                "Your profile may not use that character."})
+        await manager.send(ws, {"type": "error",
+                                "message": "Your profile may not use that character."})
         return False
     if dispatch:
         pr = manager.principal_of(ws)
@@ -13109,8 +12631,7 @@ def _ack_mark(client_msg_id: str, **fields: Any) -> None:
 async def _ack(ws: WebSocket, client_msg_id: str | None,
                status: str = "ok", reason: str | None = None) -> None:
     """Ack a 'send' on the ORIGINATING connection. No client_msg_id (an old
-    client) ⇒ no ack — backwards compatible. Reasons must stay short + neutral:
-    decoy connections receive these frames too."""
+    client) ⇒ no ack — backwards compatible. Reasons must stay short + neutral."""
     if not client_msg_id:
         return
     frame: dict = {"type": "ack", "client_msg_id": client_msg_id, "status": status}
@@ -13122,15 +12643,13 @@ async def _ack(ws: WebSocket, client_msg_id: str | None,
 def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str,
                      action: str | None = None):
     """run_agent_turn for a turn a socket asked for with no options of its
-    own (a retry, a resend): a Safe-Mode socket's turn runs locked, and a
-    quick action (the id stored on the row) is carried along; any other plain
-    socket calls the three-argument form exactly as before."""
-    locked = manager.conn_decoy(ws)
+    own (a retry, a resend): a quick action (the id stored on the row) and the
+    caller's dispatch_agents are carried along; any other plain socket calls the
+    three-argument form exactly as before."""
     dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
-    if locked or action or not dispatch:
+    if action or not dispatch:
         return run_agent_turn(thread_id, bot_id, text,
-                              TurnOptions(locked=locked, action=action or None,
-                                          dispatch=dispatch))
+                              TurnOptions(action=action or None, dispatch=dispatch))
     return run_agent_turn(thread_id, bot_id, text)
 
 
@@ -13201,7 +12720,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         return
 
     # Quick action: an id the server knows (and the operator has not hidden).
-    # Allowed in Safe Mode too - an action is only text around the message.
+    # Every role (use_chat) - an action is only text around the message.
     action_def = None
     action_raw = data.get("action")
     if action_raw not in (None, "") and not _bot_allows_quick_actions(thread.bot_id):
@@ -13218,9 +12737,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # FEATURE 5 (quote/reply). An id that names no row, or one in ANOTHER
     # thread, is silently ignored rather than rejecting the whole send — same
     # "forgiving of a stale/garbled quote" treatment a bad media path gets.
-    # Allowed in Safe Mode on purpose: a locked device may already send, and
-    # everything it can name here is a message in the same safe-bot thread it
-    # is already allowed to read.
+    # Everything it can name here is a message in the caller's own thread.
     reply_target: MessageOut | None = None
     reply_to_raw = data.get("reply_to")
     if isinstance(reply_to_raw, str) and reply_to_raw.strip():
@@ -13228,19 +12745,12 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         if candidate is not None and candidate.thread_id == thread_id:
             reply_target = candidate
 
-    if manager.conn_decoy(ws):
-        if not _decoy_action_allowed(_ws_client_ip(ws), "turn", DECOY_TURN_QUOTA):
-            await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                    "message": "Daily message limit reached — "
-                                               "try again tomorrow or unlock."})
-            await _ack(ws, cmid, "rejected", "Daily limit reached")
-            return
-        # Safe Mode CAN attach uploads (the "＋" button) but must never ingest a
-        # local path: keep store-resident refs (/media/<uuid>, [[doc:<id>]]) so
-        # they reach the agent + unlocked devices, drop anything pointing at a
-        # local file. The decoy DISPLAY still fully redacts media, so what's sent
-        # here stays invisible in the locked view (images stay hidden).
-        text = (_decoy_keep_uploaded_media(text) or "").strip()
+    sender = manager.principal_of(ws)
+    if sender is None or not sender.can(Permission.ADMIN_SYSTEM):
+        # Copying a file off the host is host access (admin_system): everyone else keeps
+        # store-resident refs (/media/<uuid>, [[doc:<id>]] - what the "＋" upload made) and
+        # loses any directive pointing at a local path (_keep_uploaded_media_only).
+        text = (_keep_uploaded_media_only(text) or "").strip()
         if not text:
             await _ack(ws, cmid, "rejected", "Message could not be sent")
             return
@@ -13261,8 +12771,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             await _ack(ws, cmid, "rejected", "Empty message")
             return
     # The excerpt is computed and stored NOW, on the QUOTING message, so a
-    # locked device rendering its own quote chip later needs no lookup of the
-    # (possibly unsafe-bot) original — see _quote_excerpt.
+    # device rendering the quote chip later needs no lookup of the original
+    # — see _quote_excerpt.
     user_metadata = None
     if reply_target is not None:
         user_metadata = {
@@ -13317,8 +12827,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # single task preserves exactly the ordering the previous straight-line
     # code had, while giving the reader loop back immediately.
     # Read now, not inside the task: the socket may be gone by the time the
-    # turn starts, and a Safe-Mode send must run its turn locked (TurnOptions).
-    locked = manager.conn_decoy(ws)
+    # turn starts.
     dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
 
     async def _publish_then_run() -> None:
@@ -13345,12 +12854,11 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # quote calls run_agent_turn exactly as it always has (three args,
         # opts defaulting on the far side) so nothing about the ordinary send
         # path changes shape.
-        if reply_target is not None or locked or action_def is not None or not dispatch:
+        if reply_target is not None or action_def is not None or not dispatch:
             await run_agent_turn(thread_id, thread.bot_id, text,
                                  TurnOptions(user_msg_id=user_msg.id,
                                             reply_to=(reply_target.id
                                                       if reply_target else None),
-                                            locked=locked,
                                             action=(action_def.id
                                                     if action_def else None),
                                             dispatch=dispatch))
@@ -13369,12 +12877,6 @@ async def _handle_create_thread(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "message": "Unknown bot_id"})
         return
     if not await _ws_bot_allowed(ws, bot_id):
-        return
-    if manager.conn_decoy(ws) and not _decoy_action_allowed(
-            _ws_client_ip(ws), "thread", DECOY_THREAD_QUOTA):
-        await manager.send(ws, {"type": "error",
-                                "message": "Daily chat limit reached — "
-                                           "try again tomorrow or unlock."})
         return
     thread = await db.create_thread(
         bot_id=bot_id, avatar_from_pool=True,
@@ -13408,8 +12910,8 @@ async def _handle_get_messages(ws: WebSocket, data: dict) -> None:
     thread = await _ws_thread(ws, thread_id)
     if thread is None:
         return
-    # Every connection, not only a Restricted one: a Member left off a character's
-    # profile list may not read its threads by id either (characters.may_use).
+    # A profile whose household list leaves a character out may not read its
+    # threads by id either (characters.may_use).
     if not await _ws_bot_allowed(ws, thread.bot_id):
         return
     try:
@@ -13431,11 +12933,8 @@ async def _handle_archive(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    # Archiving is a mutation — Safe Mode is view + send only, so a decoy
-    # connection may not archive even a safe bot's thread.
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
-        return
+    # Archiving is a mutation: manage_history (WS_ACTION_PERMISSIONS, checked before any
+    # handler runs) on the caller's own thread (_ws_thread).
     thread = await _ws_thread(ws, thread_id)
     if thread is None:
         return
@@ -13738,19 +13237,13 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
 
 
 async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
-    """Rewind the session and ask the last question again. Unlocked only.
+    """Rewind the session and ask the last question again.
 
-    Safe Mode deliberately does NOT reach this, and `retry` deliberately still
-    does. Regenerate deletes rows and rewrites an agent's session, and a locked
-    tablet must not be able to do either — but asking again is something the
-    family has been able to do all along, so nothing is taken away from them.
+    ``manage_history`` (WS_ACTION_PERMISSIONS): regenerate deletes rows and rewrites an
+    agent's session; `retry` (asking again in the same session) needs only ``use_chat``.
     """
     thread_id = data.get("thread_id")
     if not thread_id:
-        return
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
         return
     thread = await _ws_thread(ws, thread_id)
     if not thread:
@@ -13784,10 +13277,6 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
     message_id = data.get("message_id")
     content = data.get("content")
     if not thread_id or not message_id or not isinstance(content, str):
-        return
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
         return
     content = content.strip()
     if not content:
@@ -13843,30 +13332,16 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "No message to retry"})
         return
-    # A retry costs exactly what a send costs — one model turn — so it is
-    # charged to the same Safe-Mode daily quota. Without this a locked tab
-    # could loop `retry` for unlimited turns while `send` stayed capped.
-    if manager.conn_decoy(ws) and not _decoy_action_allowed(
-            _ws_client_ip(ws), "turn", DECOY_TURN_QUOTA):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Daily message limit reached — "
-                                           "try again tomorrow or unlock."})
-        return
     _track(asyncio.create_task(_turn_for_socket(
         ws, thread_id, thread.bot_id, last_user.content,
         _action_of(last_user.metadata))))
 
 
 async def _handle_abort(ws: WebSocket, data: dict) -> None:
-    """Stop the turn a thread is waiting on. Unlocked connections only."""
+    """Stop the turn a thread is waiting on: ``manage_history`` (WS_ACTION_PERMISSIONS,
+    the WebSocket's equivalent of the HTTP gate) on the caller's own thread."""
     thread_id = data.get("thread_id")
     if not thread_id:
-        return
-    if manager.conn_decoy(ws):
-        # The same rule as every other mutation, stated here because a
-        # WebSocket never passes through the HTTP middleware that enforces it.
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
         return
     if await _ws_thread(ws, thread_id) is None:
         return
@@ -13892,8 +13367,8 @@ WS_HANDLERS = {
     "archive_thread": _handle_archive,
     "retry": _handle_retry,
     # `retry` and `regenerate` are two different things and both are kept.
-    # retry re-asks inside the session the family already has (Safe Mode can
-    # do it, quota-charged); regenerate rewinds and replaces (unlocked only).
+    # retry re-asks inside the session the caller already has (use_chat);
+    # regenerate rewinds and replaces (manage_history).
     "regenerate": _handle_regenerate,
     "edit_rerun": _handle_edit_rerun,
 }
@@ -13942,32 +13417,24 @@ async def websocket_endpoint(ws: WebSocket):
             if principal is None:
                 await ws.close(code=1008)
                 return
-    decoy = principal.is_restricted
-    await manager.connect(ws, decoy=decoy, token=(session.token if session else None),
-                          principal=principal)
+    await manager.connect(ws, token=(session.token if session else None), principal=principal)
     try:
-        bots = config.load_bots()
-        if decoy:
-            bots = [b for b in bots if b.safe]
-        bots = characters.visible_bots(principal, bots)    # 4.0: what this profile's rail lists
+        bots = characters.visible_bots(principal, config.load_bots())   # this profile's rail
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
-            "decoy": decoy,
             "role": principal.role,
             "profile": people_api.public_profile(principal.profile),
         })
         while True:
             data = await ws.receive_json()
             mtype = data.get("type")
-            current = principal                  # the profile as it is NOW (its budgets too)
-            # A full session that idle-expires drops to Safe Mode: tell the
-            # client so it reconnects (as a Safe-Mode connection). A ping is NOT
+            # A session that idle-expires ends the socket: tell the client so it
+            # reconnects (as whoever an unsigned device is now). A ping is NOT
             # activity (so idle genuinely expires); real actions slide the window.
             if session is not None:
                 live = auth.get_session(session.token)
                 fresh = policy.for_session(live, device_id) if live is not None else None
-                current = fresh or principal
                 if fresh is None:
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
@@ -13975,7 +13442,6 @@ async def websocket_endpoint(ws: WebSocket):
                 if fresh.role != principal.role or fresh.permissions != principal.permissions:
                     principal = fresh            # a role / grant change applies at once
                     manager.set_principal(ws, principal)
-                    decoy = principal.is_restricted
                 if mtype != "ping":
                     auth.touch_session(session.token)
             elif principal.kind == "open" and policy.claimed():
@@ -13999,11 +13465,9 @@ async def websocket_endpoint(ws: WebSocket):
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
                     break
-                current = fresh
                 if fresh.role != principal.role or fresh.permissions != principal.permissions:
                     principal = fresh
                     manager.set_principal(ws, principal)
-                    decoy = principal.is_restricted
             if mtype == "ping":
                 await manager.send(ws, {"type": "pong"})
                 continue
@@ -14011,15 +13475,6 @@ async def websocket_endpoint(ws: WebSocket):
             if handler:
                 ws_req = route_policy.ws_action_requirement(mtype) or policy.Requirement()
                 verdict = policy.authorize(principal, ws_req)
-                if verdict.allowed and current.kind == "profile" and current.is_restricted:
-                    # A Restricted profile's quiet hours and minutes per day hold on the socket
-                    # too - the chat itself runs here, so a gate on HTTP alone left both
-                    # unenforced (and the minutes uncounted) for anyone already connected.
-                    limited = _restricted_limit_denied(current, ws_req)
-                    if limited is not None:
-                        verdict = limited
-                    elif not ws_req.public:
-                        _note_active_time(current)
                 if not verdict.allowed:
                     await manager.send(ws, {
                         "type": "error", "thread_id": data.get("thread_id"),
@@ -14028,8 +13483,8 @@ async def websocket_endpoint(ws: WebSocket):
                         "client_msg_id": data.get("client_msg_id")})
                     continue
                 # One bad statement must not tear down the whole connection:
-                # log, send a NEUTRAL error frame (no exception detail — decoy
-                # connections see these frames) and keep the receive loop alive.
+                # log, send a NEUTRAL error frame (no exception detail) and keep the
+                # receive loop alive.
                 try:
                     await handler(ws, data)
                 except WebSocketDisconnect:
@@ -14073,11 +13528,9 @@ def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
 # as DisPatch Voice. The host itself is generic; below is the part only main
 # can do: a turn submitted, speculated, aborted or annotated on an extension's
 # behalf goes through exactly the persist / broadcast / run_agent_turn path a
-# typed message takes. The host's gate refuses a cross-origin page and, for a
-# locked device, any thread it cannot see (a non-`safe` bot's) before anything
-# here can run; a turn for a thread a locked device's socket is on runs LOCKED
-# (TurnOptions.locked, extensions.turn_locked), exactly like a typed Safe-Mode
-# send, and never adopts a speculative run (those are built unlocked).
+# typed message takes. The host's gate refuses a cross-origin page and any
+# thread the caller does not own (or whose character it may not use) before
+# anything here can run; every turn asks characters.may_use for the thread owner.
 # --------------------------------------------------------------------------- #
 
 
@@ -14197,52 +13650,13 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             await _discard_run(adopted)
         log.info("ext %s: turn on %s refused - the caller may not run agents", ext_id, thread_id)
         raise PermissionError(extensions.DISPATCH_REFUSED)
-    locked = extensions.turn_locked(thread_id)
-    if locked:
-        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
-        # Decided BEFORE the row is persisted, like a Safe-Mode send on the
-        # main /ws (_handle_send): the thread's bot must still be one a locked
-        # device may see, and the turn is charged to that device's daily
-        # Safe-Mode budget (_decoy_action_allowed, the same "turn" action
-        # and DECOY_TURN_QUOTA). Refused = no row, no turn, the extension's
-        # submit raises (the voice add-on tells the listener it could not
-        # send). The budget is spent only while a locked socket is OPEN on
-        # the thread (extensions.locked_client_ip); a turn in the grace
-        # window after it closed runs locked but charges nobody.
-        bot = config.get_bot(thread.bot_id)
-        if not extensions.locked_may_see(bot):
-            if adopted is not None:
-                await _discard_run(adopted)
-            raise PermissionError("Unlock for full access")
-        ip = extensions.locked_client_ip(thread_id)
-        kid = accounts.get_profile(ip) if ip is not None else None
-        if kid is not None and kid.role is Role.BASIC:
-            # The socket belongs to a Restricted PROFILE (extensions.thread_websocket_endpoint):
-            # its quiet hours and minutes hold for a spoken turn exactly as for a typed one.
-            limited = limits.check(policy.profile_principal(kid))
-            if limited is not None:
-                if adopted is not None:
-                    await _discard_run(adopted)
-                raise PermissionError(limited.detail)
-        if ip is not None and not _decoy_action_allowed(ip, "turn", DECOY_TURN_QUOTA):
-            if adopted is not None:
-                await _discard_run(adopted)
-            log.info("ext %s: locked turn on %s refused — the daily Safe-Mode "
-                     "message limit is spent", ext_id, thread_id)
-            raise PermissionError("Daily message limit reached — try again tomorrow or unlock.")
     meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
     user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
     await db.set_title_if_empty(thread_id, _truncate(text, 50))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
-    if locked and adopted is not None:
-        # Never reached in practice (_ext_speculate_turn refuses a locked
-        # thread), but a run built unlocked must never answer a locked turn.
-        await _discard_run(adopted)
-        adopted = None
     turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
                             thinking=thinking or None, prefetched=adopted,
-                            locked=locked,
                             # A caller without dispatch_agents has a socket on this thread:
                             # an advisor's research/handoff markers are not acted on.
                             dispatch=not extensions.turn_dispatch_refused(thread_id))
@@ -14278,7 +13692,7 @@ async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = 
     bot = config.get_bot(thread.bot_id) if thread else None
     backend = extensions.bot_backend_of(bot)
     if (bot is None or backend not in ("advisor", "api") or _turn_running(thread_id)
-            or extensions.turn_locked(thread_id) or not _thread_owner_may_use(thread)):
+            or not _thread_owner_may_use(thread)):
         return None
     old = _speculations.pop(thread_id, None)
     if old is not None:
@@ -14486,7 +13900,6 @@ EXT_HOOKS = extensions.Hooks(
     replies_after=lambda *a, **kw: _ext_replies_after(*a, **kw),
     note_heard=lambda *a, **kw: _ext_note_heard(*a, **kw),
     counters=lambda: dict(_ext_counters),
-    client_ip=_ws_client_ip,
 )
 # Discovery + handshake + setup; never raises (a broken add-on is a state in
 # GET /api/extensions and in Settings → Voice, not a failed boot).
@@ -14559,13 +13972,13 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 # dependency, so it does not rely on auth_gate having run).
 app.include_router(dashboard_routes.router)
 # Local Viewer: /local/file/* + /api/local/*. The router carries its own
-# full-access gate (localview._require_full_access), and _decoy_blocked bars
+# full-access gate (localview._require_full_access), and _signed_out_blocked bars
 # the prefixes one layer earlier — both, deliberately.
 app.include_router(localview.router)
 # Tools: /api/tools* + /tools/<id>/* (static pages from <DATA_DIR>/tools.yaml).
-# Each handler decides operator vs Safe Mode itself (a decoy may see only
-# `safe: true` tools); _decoy_blocked bars refresh + the write path one layer
-# earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
+# Each handler decides operator vs use_tools holder itself; the route table bars
+# refresh + the write path one layer earlier (manage_plugins); /tools/_t/ frame
+# tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
 app.include_router(plugins_api.router)   # Settings -> Plugins (operator only)
 
@@ -14815,8 +14228,8 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 # BEFORE /static, and that order is the whole trick: Starlette matches mounts in
 # order, so this claims /static/avatars/* and the general mount never sees it.
 # Avatars therefore serve from the DATA directory while keeping the URL they
-# have always had -- no frontend change, no config migration, and the Safe-Mode
-# path checks (which match on a path segment starting "avatars") are untouched.
+# have always had -- no frontend change, no config migration, and the gate's
+# avatar checks (which match on a path segment starting "avatars") are untouched.
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")

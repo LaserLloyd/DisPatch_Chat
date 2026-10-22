@@ -86,7 +86,7 @@ def test_another_dispatching_member_gets_only_their_own_frames(aw):
 
 
 @pytest.mark.timeout(60)
-def test_a_restricted_socket_receives_nothing_even_if_a_frame_is_forced_at_it(aw):
+def test_a_socket_without_dispatch_agents_receives_nothing_even_if_a_frame_is_forced_at_it(aw):
     a = make_agent(aw.owner, published=["*"])
     tid = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
     wait_state(aw.owner, tid, "succeeded")
@@ -97,22 +97,26 @@ def test_a_restricted_socket_receives_nothing_even_if_a_frame_is_forced_at_it(aw
     with aw.kid.websocket_connect("/ws") as kid:
         kid.receive_json()
         for fr in frames:
-            # (1) to everyone: the redactor drops it for the Restricted socket
+            # (1) to everyone: the scoper drops it for a socket without dispatch_agents
             aw.owner.portal.call(main.manager.broadcast, fr)
             # (2) to exactly the people who "own" it - the audience predicate still excludes them
             aw.owner.portal.call(agents_ws.publish, fr, aw.eve_id)
-            # (3) even an audience that would match a MEMBER owner id cannot reach a Restricted socket
+            # (3) even an audience that matches everyone cannot reach a socket without the permission
             aw.owner.portal.call(main.manager.broadcast_where, fr, lambda pr: True)
         for sock in (kid,):
             assert [f for f in _ping(sock) if str(f.get("type", "")).startswith("task.")] == []
 
 
-def test_the_new_frames_are_explicitly_denied_to_locked_sockets():
+def test_the_task_frames_need_dispatch_agents_at_the_scoper():
+    from app import policy
+    from app.contracts.permissions import Permission
     assert agents_ws.FRAME_TYPES == {"task.event", "task.approval", "task.update"}
-    assert agents_ws.FRAME_TYPES <= main._DECOY_FRAME_DENY
-    assert not (agents_ws.FRAME_TYPES & main._DECOY_FRAME_ALLOW)
+    assert all(main._FRAME_PERMISSION[t] == Permission.DISPATCH_AGENTS for t in agents_ws.FRAME_TYPES)
+    basic = policy.Principal(kind="profile", role="basic", profile_id="b", name="B",
+                             permissions=frozenset({"use_chat"}))
     for t in agents_ws.FRAME_TYPES:
-        assert main.redact_for_decoy({"type": t, "task_id": "x", "bot_id": "alpha"}) is None
+        assert main.scope_frame_for_principal({"type": t, "task_id": "x"}, basic) is None
+        assert main.scope_frame_for_principal({"type": t, "task_id": "x"}, None) is None
 
 
 def test_who_may_see_a_task_is_one_rule():

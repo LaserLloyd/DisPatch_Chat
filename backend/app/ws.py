@@ -5,13 +5,12 @@ Every server event is broadcast to all connected clients; the frontend decides
 what is relevant to the view it currently shows. This keeps every open client
 in sync (e.g. a proactive daily message from OpenClaw appears everywhere).
 
-Each connection carries a ``decoy`` flag and (for full connections) the session
-token. Outgoing frames are passed through :attr:`ConnectionManager.redactor`
-for any connection that is effectively Safe Mode — either flagged decoy, OR a
-full connection whose session has since expired (checked via
-:attr:`is_session_live`). So a Safe-Mode / lapsed client never receives
-image/media payloads, even on a broadcast that a full client also receives.
-The redactor may return ``None`` to mean "drop this frame for Safe Mode".
+Each connection carries its principal (who it belongs to) and, for a signed-in socket, the
+session token. Every outgoing frame passes through :attr:`ConnectionManager.scoper` with
+that principal (4.0 ownership and character visibility). A connection whose session has
+since lapsed (checked via :attr:`is_session_live`), or a token-less one on an install that
+has gained a PIN since, is scoped as if it had NO principal - it keeps only frames about
+nothing in particular - until it reconnects.
 """
 
 from __future__ import annotations
@@ -24,17 +23,14 @@ from fastapi import WebSocket
 
 class ConnectionManager:
     def __init__(self) -> None:
-        # ws -> {"decoy": bool, "token": str | None, "lock": asyncio.Lock}
+        # ws -> {"token": str | None, "lock": asyncio.Lock, "principal": Principal | None}
         self._conns: dict[WebSocket, dict] = {}
         self._lock = asyncio.Lock()
         # Injected at startup (avoids a circular import on main).
-        self.redactor: Callable[[dict], dict | None] | None = None
-        # (frame, principal) -> frame | None. Applied AFTER the Safe-Mode redactor to
-        # every socket that finished its handshake: per-profile character visibility
-        # (3.0). A Member or Restricted profile left off a character's profile list
-        # must not learn its name, avatar or threads from a later `bots` / `thread_*`
-        # / `message` broadcast - the roster and `hello` were filtered, the broadcasts
-        # were not (the manager had no per-connection identity before 3.0).
+        # (frame, principal) -> frame | None. Applied to every live socket: ownership and
+        # per-profile character visibility (4.0). A profile must not learn another's
+        # chats, or a character it may not use, from a later `bots` / `thread_*` /
+        # `message` broadcast.
         self.scoper: Callable[[dict, object], dict | None] | None = None
         self.is_session_live: Callable[[str], bool] | None = None
         # (frame) -> awaitable, run before every fan-out and targeted send (4.0 ownership):
@@ -64,20 +60,17 @@ class ConnectionManager:
         Used by the add-on host's per-thread subscriptions, whose thread was owner-checked
         when the subscribing socket opened; with ``principal`` given the per-profile scoper
         runs too (4.0)."""
-        meta = {"decoy": False, "token": token, "principal": principal}
+        meta = {"token": token, "principal": principal}
         return self._frame_for(meta, message, scoped=principal is not None)
 
-    async def connect(self, ws: WebSocket, decoy: bool = False, token: str | None = None,
-                      principal=None) -> None:
+    async def connect(self, ws: WebSocket, token: str | None = None, principal=None) -> None:
         await ws.accept()
         async with self._lock:
             # The per-connection lock serializes every send to this socket, so
             # concurrent broadcasts / direct sends can never interleave a
             # frame's bytes on the wire or reorder frames for one client.
-            # ``principal`` (3.0) is who the socket belongs to: a Restricted one is
-            # redacted exactly like the old Safe-Mode connection.
-            self._conns[ws] = {"decoy": decoy, "token": token, "lock": asyncio.Lock(),
-                               "principal": principal}
+            # ``principal`` is who the socket belongs to (the scoper's input).
+            self._conns[ws] = {"token": token, "lock": asyncio.Lock(), "principal": principal}
 
     def principal_of(self, ws: WebSocket):
         meta = self._conns.get(ws)
@@ -87,29 +80,26 @@ class ConnectionManager:
         meta = self._conns.get(ws)
         if meta is not None:
             meta["principal"] = principal
-            meta["decoy"] = bool(principal.is_restricted)
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
             self._conns.pop(ws, None)
 
-    def _is_safe(self, meta: dict) -> bool:
-        if meta.get("decoy"):
-            return True
+    def _lapsed(self, meta: dict) -> bool:
+        """Has this connection lost the identity it was opened with?"""
         pr = meta.get("principal")
-        if pr is not None and getattr(pr, "kind", "") == "profile" and not pr.is_restricted \
-                and not meta.get("token"):
-            # A profile with no live token is the lock-target default profile an unsigned
-            # device landed on (4.0): its role decides, not the missing token.
+        if pr is not None and getattr(pr, "kind", "") == "profile" and not meta.get("token"):
+            # A profile with no token is the lock-target default profile an unsigned device
+            # landed on (4.0): there is no session to lapse (the /ws loop re-resolves it).
             return False
-        # A full connection whose session has lapsed is treated as Safe Mode
-        # immediately (don't wait for it to send a frame).
+        # A connection whose session has lapsed loses its principal immediately (don't
+        # wait for it to send a frame).
         tok = meta.get("token")
         if tok and self.is_session_live is not None and not self.is_session_live(tok):
             return True
         # A token-less full connection only exists while no PIN is set. If a
         # PIN has been set since the handshake, demote it immediately — it must
-        # not keep receiving unredacted frames just because it stayed open.
+        # not keep receiving the open install's frames just because it stayed open.
         if not tok and self.pin_set is not None and self.pin_set():
             return True
         return False
@@ -122,10 +112,10 @@ class ConnectionManager:
         4.0: the scoper runs for EVERY live connection, including one with no principal
         yet (it then drops anything about a thread, a character or an operator surface:
         Fable amendment 15 - the 3.x manager skipped the scoper for those)."""
-        if self._is_safe(meta) and self.redactor is not None:
-            message = self.redactor(message)   # may be None -> drop
-            if message is None:
-                return None
+        if self._lapsed(meta):
+            # Scoped as nobody, whatever ``scoped`` says: frames about a thread, a character
+            # or an operator surface are dropped (fail closed when there is no scoper).
+            return self.scoper(message, None, targeted=targeted) if self.scoper is not None else None
         if scoped and self.scoper is not None:
             return self.scoper(message, meta.get("principal"), targeted=targeted)  # None -> drop
         return message
@@ -216,11 +206,10 @@ class ConnectionManager:
         """Send ``message`` ONLY to sockets whose principal satisfies ``wants``.
 
         For frames that are private to a person (agent task events and approval
-        requests, 3.0): the global :meth:`broadcast` is "everyone, redacted for the
-        Restricted", which is the wrong default for something only a task's owner and an
-        Owner/Admin may see. A socket with no principal (it has not finished its
-        handshake) never matches, a Restricted/lapsed socket is also dropped by the
-        redactor (:meth:`_frame_for`), and the observers - the add-on host's open-stream
+        requests): the global :meth:`broadcast` is "everyone, scoped", which is the wrong
+        default for something only a task's owner may see. A socket with no principal (it
+        has not finished its handshake) never matches, a lapsed socket is also dropped by
+        the scoper (:meth:`_frame_for`), and the observers - the add-on host's open-stream
         snapshot - are deliberately NOT called: a task frame is not conversation.
         Returns how many sockets were sent to.
         """
@@ -250,11 +239,6 @@ class ConnectionManager:
                 for ws in dead:
                     self._conns.pop(ws, None)
         return len(sends) - len(dead)
-
-    def conn_decoy(self, ws: WebSocket) -> bool:
-        """Is this connection effectively Safe Mode (decoy or lapsed session)?"""
-        meta = self._conns.get(ws)
-        return self._is_safe(meta) if meta is not None else True
 
     @property
     def count(self) -> int:

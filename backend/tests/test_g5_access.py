@@ -118,10 +118,11 @@ def test_the_denial_names_the_missing_permission(clients):
     r = clients["kid"].put("/api/tools", json={"tools": []})
     assert r.status_code == 403
     body = r.json()
-    assert body["detail"] == "Unlock for full access"          # the 2.x wording, unchanged
-    assert body["decoy"] is True                               # the 2.x marker, unchanged
+    # 4.0: a Basic profile meets the ordinary named refusal (no Safe-Mode decoy body)
+    assert body["detail"] == "Your profile does not have permission to do that."
+    assert "decoy" not in body
     assert body["required_permission"] == "manage_plugins"
-    assert body["error"]["code"] == "safe_mode" and body["error"]["fix"]
+    assert body["error"]["code"] == "permission_denied" and body["error"]["fix"]
 
 
 def test_a_member_is_stopped_where_a_restricted_profile_is_and_a_bit_earlier(world, clients):
@@ -151,26 +152,28 @@ def _roster(client):
     return {b["id"]: b for b in client.get("/api/bots").json()["bots"]}
 
 
-def test_a_restricted_tool_list_is_only_the_safe_tools(world, clients, tmp_path_factory):
+def test_a_basic_profile_gets_no_tool_panel_whatever_its_safe_flag(world, clients, tmp_path_factory):
     from app import tools
     page = tmp_path_factory.mktemp("site")        # outside the data dir, which a tool may not serve
     (page / "index.html").write_text("<p>hi</p>")
     root = page.as_posix()
     manifest = [
         "tools:",
-        f"  - {{id: kids, title: Kids, kind: static, root: '{root}', entry: index.html, safe: true}}",
+        f"  - {{id: flagged, title: Flagged, kind: static, root: '{root}', entry: index.html, safe: true}}",
         f"  - {{id: grown, title: Grownups, kind: static, root: '{root}', entry: index.html, safe: false}}",
     ]
     (config.DATA_DIR / "tools.yaml").write_text("\n".join(manifest) + "\n")
     tools._reset_state()
     ids = {t["id"] for t in clients["kid"].get("/api/tools").json()["tools"]}
-    assert "kids" in ids and "grown" not in ids
-    assert clients["kid"].get("/tools/kids/index.html").status_code == 200
+    # 4.0: tool panels are Admin-only (use_tools never in a User's or Basic column); the 3.x
+    # ``safe`` flag no longer opens one.
+    assert "flagged" not in ids and "grown" not in ids
+    assert clients["kid"].get("/tools/flagged/index.html").status_code == 403
     assert clients["kid"].get("/tools/grown/index.html").status_code == 403
     assert clients["kid"].get("/api/tools/grown/status").status_code == 403
-    # A Member sees both (no host paths); the Owner sees the paths too.
+    # The Owner sees both, with the paths.
     owner_ids = {t["id"]: t for t in clients["owner"].get("/api/tools").json()["tools"]}
-    assert {"kids", "grown"} <= set(owner_ids) and "root" in owner_ids["grown"]
+    assert {"flagged", "grown"} <= set(owner_ids) and "root" in owner_ids["grown"]
 
 
 # --------------------------------------------------------------------------- #

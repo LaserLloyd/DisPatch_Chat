@@ -313,23 +313,3 @@ def test_a_throttled_client_gets_no_more_setup_token_comparisons(world, monkeypa
     r = lan.post("/api/auth/setup", json={"password": "owner-pass1", "setup_token": auth.setup_token()})
     assert r.status_code == 429, r.text
     assert not accounts.has_owner()
-
-
-# O-9 ------------------------------------------------------------------------ #
-
-def test_quiet_hours_hold_on_the_chat_socket(world):
-    from datetime import datetime, timedelta
-    owner = world.create_owner(world.client())
-    mia = world.person(owner, "Mia", "restricted")
-    kid = world.client(LAN)
-    assert world.login(kid, profile_id=mia["id"]).status_code == 200
-    with kid.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["type"] == "hello"
-        now = datetime.now()
-        inside = f"{(now - timedelta(minutes=5)).strftime('%H:%M')}-{(now + timedelta(minutes=5)).strftime('%H:%M')}"
-        accounts.update_profile(mia["id"], budgets={"quiet_hours": inside})   # the Owner sets it later
-        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
-        f = ws.receive_json()
-        assert f["type"] == "error" and f.get("code") == "quiet_hours", f
-        ws.send_json({"type": "ping"})                      # liveness is not chat
-        assert ws.receive_json()["type"] == "pong"

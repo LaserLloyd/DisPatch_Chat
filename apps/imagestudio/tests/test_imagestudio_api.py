@@ -71,7 +71,7 @@ def _gen(c, **over):
 
 # ---------------------------------------------------------------- security
 
-def test_locked_cookieless_and_forged_callers_get_the_decoy_403_everywhere(env, provider):
+def test_cookieless_and_forged_callers_get_the_403_everywhere(env, provider):
     from app import auth
     auth.set_pin("4321")
     for cookies in ({}, {"lc_session": "forged-cookie"}):
@@ -80,10 +80,10 @@ def test_locked_cookieless_and_forged_callers_get_the_decoy_403_everywhere(env, 
             c.cookies.set(k, v)
         for path in ROUTES_GET:
             r = c.get(BASE + path)
-            assert r.status_code == 403, (path, r.status_code)
-            assert r.json().get("decoy") is True
+            assert r.status_code in (401, 403), (path, r.status_code)
+            assert "images" not in r.json()
         r = _gen(c)
-        assert r.status_code == 403 and r.json().get("decoy") is True
+        assert r.status_code in (401, 403)
         assert provider.requests == [], "a refused caller never reaches the provider"
 
 
