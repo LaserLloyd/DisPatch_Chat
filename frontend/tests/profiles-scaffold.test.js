@@ -69,7 +69,7 @@ test('main.js wires the four modules once and index.html loads profiles.css', ()
   assert.ok(sw.includes("'/static/profiles.css'"));
 });
 
-test('uiIcon draws the RAIL_ICONS icon, labelled or decorative', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
+test('uiIcon draws the ThemeForge sprite icon, labelled or decorative', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
   const win = new jsdom.JSDOM('<!doctype html><html><body></body></html>').window;
   const prev = globalThis.document;
   globalThis.document = win.document;
@@ -77,7 +77,7 @@ test('uiIcon draws the RAIL_ICONS icon, labelled or decorative', { skip: domSkip
     const plain = uiIcon('gear');
     assert.equal(plain.getAttribute('aria-hidden'), 'true');
     assert.equal(plain.dataset.icon, 'gear');
-    assert.equal(plain.querySelectorAll('path').length, RAIL_ICONS.gear.length);
+    assert.equal(plain.querySelector('use').getAttribute('href'), '/static/ui-theme/icons.svg#settings');
     const named = uiIcon('gear', { label: 'Settings', size: 20 });
     assert.equal(named.getAttribute('aria-hidden'), null);
     assert.equal(named.getAttribute('role'), 'img');

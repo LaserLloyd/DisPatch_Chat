@@ -75,6 +75,12 @@ declare global {
   type UIStringKey = 'cancel' | 'ok' | 'confirm' | 'input' | 'message' | 'value' | 'copy' | 'copied' |
     'copyFailed' | 'reset' | 'resetNamed' | 'basic' | 'advanced' | 'setByEnv';
 
+  /** An icon in ui-theme/icons.svg (docs/ICONS.md). */
+  type UIIconName = /*@icon-names*/'plus' | 'x' | 'check' | 'pencil' | 'trash' | 'copy' | 'save' | 'download' | 'upload' | 'refresh-cw' | 'undo-2' | 'reply' | 'search' | 'link' | 'unlink' | 'external-link' | 'pin' | 'archive' | 'tag' | 'flag' | 'eraser' | 'eye' | 'eye-off' | 'sliders-horizontal' | 'user-plus' | 'list-checks' | 'menu' | 'ellipsis' | 'ellipsis-vertical' | 'chevron-down' | 'chevron-up' | 'chevron-right' | 'chevron-left' | 'arrow-left' | 'arrow-right' | 'arrow-up' | 'arrow-down' | 'arrow-up-down' | 'grip-vertical' | 'list' | 'maximize-2' | 'info' | 'triangle-alert' | 'circle-check' | 'circle-x' | 'ban' | 'circle-question-mark' | 'bell' | 'clock' | 'history' | 'activity' | 'cloud-off' | 'settings' | 'wrench' | 'palette' | 'sun' | 'moon' | 'folder' | 'file-text' | 'book-open' | 'clipboard-list' | 'paperclip' | 'image' | 'image-off' | 'camera' | 'message-circle' | 'messages-square' | 'mail' | 'mail-open' | 'inbox' | 'send' | 'chart-column' | 'puzzle' | 'code' | 'music' | 'target' | 'user' | 'users' | 'bot' | 'brain' | 'sparkles' | 'life-buoy' | 'lock' | 'lock-open' | 'key' | 'shield' | 'shield-check' | 'shield-alert' | 'monitor' | 'smartphone' | 'terminal' | 'cpu' | 'database' | 'gauge' | 'power' | 'plug' | 'globe' | 'flask-conical' | 'zap' | 'play' | 'pause' | 'square' | 'mic' | 'thumbs-up' | 'thumbs-down'/*@end-icon-names*/;
+
+  /** How emojify() draws emoji: as icons, in the text colour, or in their own colours. */
+  type UIEmojiStyle = 'icon' | 'text' | 'color';
+
   interface UISettingController {
     /** Re-read the control and show or hide the reset button. */
     update(): void;
@@ -86,14 +92,22 @@ declare global {
     alert(options: UIDialogOptions | string): Promise<void>;
     prompt(options: UIPromptOptions | string): Promise<string | null>;
     toast(message: string, options?: { kind?: 'info' | 'success' | 'warning' | 'danger'; timeout?: number }): HTMLElement;
+    /** An <svg class="ui-icon"> that uses the sprite; decorative (aria-hidden) unless it has a label. */
+    icon(name: UIIconName, options?: { label?: string; size?: 'sm' | 'md' | 'lg'; className?: string }): SVGSVGElement;
+    /** The icon an emoji or symbol stands for ('⚙️' -> 'settings'), or null. */
+    iconFor(text: string): UIIconName | null;
+    /** Every icon name, in display order. */
+    icons(): UIIconName[];
+    /** Draw the emoji in an element's text in one style (default 'icon'); returns how many changed. */
+    emojify(root: Node, style?: UIEmojiStyle): number;
     /** Copy an element's text (a .ui-copy, a code block, an input's value) or a string. Resolves true on success. */
     copy(target: Element | string): Promise<boolean>;
     /** Mark a field invalid with a message (aria-invalid, aria-describedby, announced); an empty message clears it. */
     validate(field: Element, message: string | null | undefined, options?: { focus?: boolean; announce?: boolean }): HTMLElement | null;
     /** Wire a .ui-setting row: reset-to-default, translated badges, env lock. */
     setting(row: Element, options?: { default?: string | boolean; onReset?: (control: HTMLElement, row: Element) => void }): UISettingController;
-    /** Say something politely to assistive technology. */
-    announce(message: string): void;
+    /** Say something politely to assistive technology; `from` (optional) places the live region inside the modal dialog that holds it. */
+    announce(message: string, from?: Element | null): void;
     /** Wire copy buttons and data-default settings rows under a root (default: the document). */
     init(root?: ParentNode): void;
     /** A word by key; data-ui-str-<key> on the element or an ancestor wins. {placeholders} are filled from vars. */

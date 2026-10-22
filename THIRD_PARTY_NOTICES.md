@@ -16,6 +16,13 @@ onnx-asr, soundfile and the rest) are credited in that package's own
 further plugin licensed GPL-3.0-or-later. DisPatch never downloads, imports
 or redistributes any of them.
 
+**ThemeForge (themes and icons).** `frontend/static/ui-theme/` is the
+ThemeForge 2.0.1 drop-in bundle (https://github.com/LaserLloyd/ThemeForge),
+vendored whole and checked by `python -m forgeui vendor --check`. The code,
+tokens and the 105 line icons in `icons.svg` are licensed MIT-0 (no conditions,
+no notice needed); the licence text ships beside them in `icons-LICENSE.txt`.
+DisPatch's own overlay for it is `frontend/overlays/dispatch-extra.css`.
+
 **Default avatar.** The Atlas avatar in `backend/app/default_avatars/` was
 generated with MiniMax image-01. MiniMax's terms leave rights in the output
 with the user while MiniMax keeps a service licence, and AI-generated images

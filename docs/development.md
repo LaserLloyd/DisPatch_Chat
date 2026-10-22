@@ -40,7 +40,7 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 against an old module, which usually shows up as a blank screen.
 
 **The themes are a vendored bundle, not code.** `frontend/static/ui-theme/` is
-the ForgeUI 1.2 bundle (the `ThemeForge` repository), copied in whole and
+the ThemeForge 2.0 bundle (the `ThemeForge` repository), copied in whole and
 verified by `files.json`: `ui-theme.js` (the theme runtime, the first and only
 blocking script in `<head>`), `ui-theme.css` (the tokens for every theme),
 `ui-components.css` / `ui-components.js` (the component layer and its

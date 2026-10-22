@@ -1,7 +1,7 @@
-/* GENERATED component layer: ThemeForge 1.2.0, drop-in bundle (ui-theme/).
+/* GENERATED component layer: ThemeForge 2.0.1, drop-in bundle (ui-theme/).
    https://github.com/LaserLloyd/ThemeForge . Do not edit this copy: update the whole
    folder (python ui-theme/update.py) and keep app styles in the app.
-   body sha256: a0deda9ab3942418 */
+   body sha256: 225edf0411c02cc3 */
 /* ============================================================================
    components.css — the component layer. Theme-agnostic.
    ----------------------------------------------------------------------------
@@ -15,8 +15,8 @@
 
    Naming: .ui-<block>, .ui-<block>--<variant>, .ui-<block>__<part>. State
    comes from native attributes (:disabled, :checked, [aria-pressed],
-   [aria-selected], [aria-current], [aria-invalid], [aria-busy]), never from
-   extra state classes. Most selectors are one class (0-1-0). Logical
+   [aria-selected], [aria-current], [aria-invalid], [aria-busy], [aria-sort]),
+   never from extra state classes. Most selectors are one class (0-1-0). Logical
    properties throughout, so the layer works right-to-left.
 
    States read the same way in every theme, by shape as well as colour:
@@ -240,6 +240,49 @@
   color: var(--text-link);
   font-family: var(--font-mono);
   font-size: .86em;
+}
+
+/* ---- Icons and emoji ----------------------------------------------------------
+   <svg class="ui-icon" aria-hidden="true"><use href="/static/ui-theme/icons.svg#settings"/></svg>
+   105 outline icons (names in docs/ICONS.md). They draw in currentColor, so they take
+   the colour of their text, and with the theme's --icon-stroke. 1.25em by default;
+   --sm 16px, --md 20px, --lg 24px, or set --ui-icon-size. A button whose only content
+   is an icon needs an aria-label.
+
+   Emoji, three ways (UIComponents.emojify(element, style) applies one to text):
+     icon    an emoji in app chrome (⚙ 🗑 📁) becomes the outline icon above
+     text    an emoji someone typed, in the text colour:  <span class="ui-emoji">👍</span>
+     colour  an emoji that keeps its colours (reactions): <span class="ui-emoji--color">🎉</span>
+   Faces have no text glyph in system fonts; they turn monochrome once the page loads
+   Noto Emoji (see --font-emoji). */
+
+.ui-icon {
+  display: inline-block;
+  flex: none;
+  inline-size: var(--ui-icon-size, 1.25em);
+  block-size: var(--ui-icon-size, 1.25em);
+  vertical-align: -0.25em;
+  overflow: visible;
+}
+.ui-icon--sm { --ui-icon-size: 16px; }
+.ui-icon--md { --ui-icon-size: 20px; }
+.ui-icon--lg { --ui-icon-size: 24px; }
+.ui-icon--muted   { color: var(--text-secondary); }
+.ui-icon--accent  { color: var(--text-link); }
+.ui-icon--success { color: var(--success-text); }
+.ui-icon--warning { color: var(--warning-text); }
+.ui-icon--danger  { color: var(--danger-text); }
+.ui-icon--info    { color: var(--info-text); }
+
+.ui-emoji {
+  font-family: var(--font-emoji);
+  font-style: normal;
+  font-variant-emoji: text;
+}
+.ui-emoji--color {
+  font-style: normal;
+  font-variant-emoji: emoji;
+  filter: var(--media-filter);
 }
 
 /* ---- Buttons ----------------------------------------------------------------
@@ -836,7 +879,8 @@
 /* ---- Tables --------------------------------------------------------------------------
    <div class="ui-table-wrap"><table class="ui-table">…</table></div>
    Numbers: <td class="num">. Variants: --hover, --compact. A selected row:
-   <tr aria-selected="true">. */
+   <tr aria-selected="true">. A sortable header: <th aria-sort="ascending"> holding a
+   <button class="ui-table__sort"> and its arrow icon (see the sort rules below). */
 
 .ui-table-wrap {
   overflow-x: auto;
@@ -868,6 +912,35 @@
 .ui-table tr[aria-selected="true"] td { background: var(--accent-subtle); }
 .ui-table tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--selected); }
 .ui-table tr[aria-selected="true"] td:first-child:dir(rtl) { box-shadow: inset -3px 0 0 var(--selected); }
+
+/* Sortable headers. The app sorts its rows and keeps aria-sort and the icon in step; the icon
+   stays quiet until the column is sorted. The button takes the header's type: font: inherit does
+   not reach text-transform or letter-spacing, which the browser's button style resets, so those
+   are inherited by name (Arabic sets the header's tracking to 0, and the button follows). */
+.ui-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* A 24px target that takes no more room in the row than its text: the negative margin
+     hands back what the minimum adds (1lh is the label's line). */
+  min-block-size: 24px;
+  margin-block: min(0px, (1lh - 24px) / 2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: inherit;
+  text-transform: inherit;
+}
+.ui-table__sort:hover { color: var(--text-primary); }
+.ui-table__sort-icon { --ui-icon-size: 1em; }
+th[aria-sort="none"] .ui-table__sort-icon { color: var(--text-tertiary); }
+th[aria-sort="ascending"] .ui-table__sort,
+th[aria-sort="descending"] .ui-table__sort { color: var(--text-primary); font-weight: var(--fw-semibold); }
+th.num .ui-table__sort { width: 100%; justify-content: flex-end; }
 
 /* ---- Lists ------------------------------------------------------------------------------- */
 

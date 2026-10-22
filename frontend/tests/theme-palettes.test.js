@@ -434,9 +434,9 @@ test('the vendored bundle files carry the ForgeUI stamp; the overlay is app-owne
   // The bundle files identify themselves by version; forgeui.json pins it and
   // the pytest drift check (tests/unit/test_forgeui_vendor.py) verifies every hash.
   const version = read('ui-theme/VERSION').trim();
-  assert.match(version, /^ThemeForge 1\.2\.\d+ [0-9a-f]{12}$/, 'VERSION is not a ForgeUI 1.2.x stamp');
+  assert.match(version, /^ThemeForge 2\.0\.\d+ [0-9a-f]{12}$/, 'VERSION is not a ThemeForge 2.0.x stamp');
   for (const f of ['ui-theme/ui-theme.js', 'ui-theme/ui-theme.css', 'ui-theme/ui-components.css', 'ui-theme/ui-components.js']) {
-    assert.match(read(f), /^\/\* GENERATED [^\n]*: ThemeForge 1\.2\.\d+, drop-in bundle/, `${f} header`);
+    assert.match(read(f), /^\/\* GENERATED [^\n]*: ThemeForge 2\.0\.\d+, drop-in bundle/, `${f} header`);
   }
   // The overlay is NOT a bundle file: no generated header, and it matches its source.
   const overlay = read('ui-theme/adapters/dispatch-extra.css');

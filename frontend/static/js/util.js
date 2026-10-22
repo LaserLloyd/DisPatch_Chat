@@ -190,17 +190,28 @@ export function iconLabel(icon, label) {
   return [railIcon(icon), document.createTextNode(text ? ` ${text}` : '')];
 }
 
-/** One icon: an array of path `d` strings on a 24×24 grid → an <svg>. */
+/** One icon. The shared set (RAIL_ICONS values) draws from the ThemeForge sprite:
+ *  `<svg><use href="/static/ui-theme/icons.svg#name"/></svg>`, the name found through
+ *  ICON_MAP, so a theme's colour and stroke weight apply (`--icon-stroke`). An array of
+ *  path `d` strings that is not in the shared set (an app's own glyph) is drawn inline
+ *  on the same 24x24 grid, as before. */
 export function railIcon(paths) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('rail-icon');
+  const sprite = SPRITE_NAME.get(paths);
+  if (sprite) {
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', `${ICON_SPRITE}#${sprite}`);
+    svg.append(use);
+    return svg;
+  }
   svg.setAttribute('stroke', 'currentColor');
   svg.setAttribute('stroke-width', '1.8');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('rail-icon');
   for (const d of paths) {
     const p = document.createElementNS(SVG_NS, 'path');
     p.setAttribute('d', d);
@@ -547,9 +558,8 @@ export const RAIL_ICONS = {
 
 /** RAIL_ICONS key -> ThemeForge 2.0.1 icon name (BUILD-PLAN-v2 §9). 67 keys, one per
  *  RAIL_ICONS entry; every value exists in ui-theme/icons.json of ThemeForge v2.0.1.
- *  Foundation declares the map only: WP-TF points uiIcon()/railIcon() at the vendored
- *  sprite (`<use href="/static/ui-theme/icons.svg#<name>">`), WP-ICONS replaces chrome
- *  glyphs with it. Until then nothing reads it. */
+ *  railIcon()/uiIcon() draw the icon from the vendored sprite
+ *  (`<use href="/static/ui-theme/icons.svg#<name>">`) through this map. */
 export const ICON_MAP = Object.freeze({
   nim: 'image-off', privacy: 'eye-off', avatars: 'user', link: 'link', moon: 'moon', sun: 'sun',
   lock: 'lock', unlock: 'lock-open', folder: 'folder', upload: 'upload',
@@ -568,16 +578,19 @@ export const ICON_MAP = Object.freeze({
   database: 'database', help: 'circle-question-mark', user: 'user', brain: 'brain', eye: 'eye',
 });
 
+const ICON_SPRITE = '/static/ui-theme/icons.svg';
+// RAIL_ICONS value (the path array itself) -> sprite symbol name. railIcon() takes the
+// array, so callers stay as they are.
+const SPRITE_NAME = new Map(Object.entries(RAIL_ICONS).map(([key, paths]) => [paths, ICON_MAP[key]]));
+
 /** One named chrome icon: `uiIcon('gear')` or `uiIcon('gear', { label: 'Settings', size: 20 })`.
  *
- *  Foundation: draws the existing RAIL_ICONS paths (no behaviour change: the same <svg>
- *  railIcon() makes), `size` sets width/height in px, and `label` makes the icon an
- *  image with that accessible name instead of aria-hidden decoration. WP-TF swaps the
- *  body for the ThemeForge sprite through ICON_MAP; callers stay as they are. An unknown
- *  name returns null. */
+ *  Draws the ThemeForge sprite symbol ICON_MAP names (the same <svg> railIcon() makes),
+ *  `size` sets width/height in px, and `label` makes the icon an image with that
+ *  accessible name instead of aria-hidden decoration. An unknown name returns null. */
 export function uiIcon(name, { label = '', size = 0 } = {}) {
   const paths = RAIL_ICONS[name];
-  if (!paths) return null;
+  if (!paths || !ICON_MAP[name]) return null;
   const svg = railIcon(paths);
   svg.dataset.icon = name;
   if (size > 0) {
