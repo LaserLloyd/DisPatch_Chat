@@ -19,11 +19,19 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   acted on only when the person whose turn it is holds `dispatch_agents` (typed, voice, retry, regenerate, app
   turns); anyone else gets the reply with dispatch off - no marker in the prompt, none acted on - and nothing
   else restricted (lookups, pictures and notes as before; Safe-Mode rules stay for Restricted). The handoff
-  card's Send and Dismiss (`/api/advisor/requests/{id}/send|dismiss`) need `dispatch_agents` too.
+  card's Send and Dismiss (`/api/advisor/requests/{id}/send|dismiss`) need `dispatch_agents` too. A voice
+  call's permission is re-read on every turn, so a grant or revocation mid-call takes effect at once.
+- **Apps:** the caller behind `ctx.dispatch_turn` is recorded by the host on every app route (it was lost when
+  the route used `Depends(ctx.require_access)`); a call with no recorded caller starts no agent turn.
+- **A removed character's chats no longer reach the agent** under its old id: a turn on a character missing
+  from config.yaml is refused with a "no longer exists" message, and it counts as agent-backed everywhere.
+- **Documented truth about Restricted + agents** (docs/security.md): a locked turn does not restrict a gateway
+  character, whose agent runs with its own configuration. The protection is the audience you give it.
 - **The boot File Server sweep no longer purges on missing storage.** When the blob directory is gone, or
   resolves but more than 20% (and more than 10) of the records have no blob, nothing is deleted; the journal
-  gets an ERROR and `/api/health` goes `degraded` with `file_sweep_skipped` (counts only). A few phantom
-  records are still cleaned up as before.
+  gets an ERROR and `/api/health` goes `degraded` with `file_sweep_skipped` (counts only; also when the check
+  itself fails). The share counts the records from before that boot adopted untracked blobs. The flag clears
+  on the next restart that finds the storage healthy. A few phantom records are still cleaned up as before.
 - Extensions: `ctx.db()`'s `create_thread`, `add_file`, `adopt_file` (`owner_profile_id=`) and
   `find_or_create_daily_thread` (`owner=`) require the owner keyword since the ownership groundwork below
   (docs/extensions.md). `EXT_API` stays 1.

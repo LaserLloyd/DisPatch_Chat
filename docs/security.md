@@ -69,8 +69,13 @@ permission each route and WebSocket action requires is in
   whatever anyone types.
 - **Dispatching an agent is its own permission.** A character backed by an agent
   on the host (OpenClaw) runs with your user's rights. A Member cannot talk to
-  one until you grant `dispatch_agents`; a Restricted profile's turn on such a
-  character always runs *locked*.
+  one until you grant `dispatch_agents`. A Restricted profile is not refused, but
+  "locked" does **not** tame an agent: a gateway character runs with its own
+  OpenClaw configuration, tools included, whoever talks to it. The only protection
+  is which characters you give a Restricted audience: mark an agent character
+  `restricted`/`all` (or `safe`) only if its agent is one you would hand to a child.
+  An advisor's research and hand-off markers need `dispatch_agents` too; without
+  it the advisor answers with them switched off.
 - **Shared devices.** In **Settings → People & Access → This device** you can
   bind a browser to a Member or Restricted profile: the kitchen tablet then opens
   as "Mia" with nobody signing in. Admins and the Owner cannot be a device
@@ -151,9 +156,12 @@ or other profiles. A running server follows within a second. Commands for every 
   nobody bound (or one whose site data was wiped) is an anonymous guest, on the
   default Restricted budgets (`DISPATCH_DECOY_*`) charged per address; set
   `anonymous_access: none` to show such a device nothing but the sign-in page.
-- **Guardrails.** Restricted turns run locked: no tools, no lookups beyond the
-  character's allow-list, no agent hand-offs, and the guardrail system prompt and
-  the output filter hook stay in place.
+- **Guardrails.** Restricted turns run locked: on a direct or advisor character
+  that means no tools, no lookups beyond the character's allow-list, no agent
+  hand-offs, and the guardrail system prompt and the output filter hook stay in
+  place. A gateway (agent) character ignores the lock and runs its agent as
+  configured, so keep agent characters out of the Restricted audience unless the
+  agent itself is safe for a child.
 - **Activity summary.** The Owner (and Admins with `view_activity`) can see counts
   per day — logins, messages, new conversations, uploads, limits hit — never the
   content. The summary is not the only view, though: the chats themselves belong
