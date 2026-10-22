@@ -1925,6 +1925,63 @@ def locked_client_ip(thread_id: str) -> str | None:
     return str(row[2] or "?")
 
 
+def runs_agent(bot) -> bool:
+    """Does a turn on this character run an AGENT on the host (the OpenClaw gateway
+    backend, which can use tools and run commands)? A direct provider (``api``) or an
+    advisor is only a model call."""
+    return bot is not None and bot_backend_of(bot) == "gateway"
+
+
+def may_dispatch(principal, bot) -> bool:
+    """May ``principal`` start a turn on ``bot``? The ONE rule every turn entry point
+    applies (typed /ws sends, retries, regenerate, edit & re-run, extension turns, app
+    turns): an agent-backed character needs ``dispatch_agents``. A Restricted caller's
+    turn always runs LOCKED (no tools, no hand-off), so it is not a dispatch; no
+    principal = an unclaimed/open install, where everyone is the owner."""
+    if principal is None or not runs_agent(bot):
+        return True
+    if principal.is_restricted:
+        return True
+    return bool(principal.can(Permission.DISPATCH_AGENTS))
+
+
+DISPATCH_REFUSED = ("Your profile may not run agents. Ask the Owner for the "
+                    "dispatch_agents permission.")
+
+#: thread id -> [open extension sockets whose principal may NOT dispatch agents,
+#: monotonic time the last one closed]. Extension turns (``ctx.submit_turn``) carry no
+#: caller, so the host remembers who has a socket on the thread - the same pattern as
+#: the locked registry above, with the same grace window (a turn committed on hang-up).
+_nodispatch_threads: dict[str, list] = {}
+
+
+def _nodispatch_open(thread_id: str) -> None:
+    row = _nodispatch_threads.setdefault(thread_id, [0, 0.0])
+    row[0] += 1
+
+
+def _nodispatch_closed(thread_id: str) -> None:
+    row = _nodispatch_threads.get(thread_id)
+    if row is None:
+        return
+    row[0] = max(0, row[0] - 1)
+    row[1] = time.monotonic()
+
+
+def turn_dispatch_refused(thread_id: str) -> bool:
+    """Must an extension turn on this thread be refused if its character runs an agent?
+    True while a socket of a profile without ``dispatch_agents`` is open on it, and for
+    LOCKED_GRACE_S after the last one closed. Fail closed: another caller's extension turn
+    on the same thread in that window is refused too - never the reverse."""
+    row = _nodispatch_threads.get(thread_id)
+    if row is None:
+        return False
+    if row[0] > 0 or time.monotonic() - row[1] < LOCKED_GRACE_S:
+        return True
+    _nodispatch_threads.pop(thread_id, None)
+    return False
+
+
 def turn_locked(thread_id: str) -> bool:
     """Must an extension turn on this thread run locked? True while a locked
     device's extension socket is open on it, and for LOCKED_GRACE_S after the
@@ -2006,6 +2063,13 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         # this one here exactly as in the roster, /ws and the REST thread routes.
         await ws.close(code=POLICY)
         return
+    # 3b. An agent-backed character (its turns run an agent on the host) needs
+    # dispatch_agents, exactly as a typed send on /ws does (main._ws_bot_allowed). Said
+    # with a real 1008 + reason after accept: the client stops and says why, no retry.
+    if not may_dispatch(principal, bot):
+        log.info("ext: /ws/%s/ refused on %s: the profile may not run agents", name, thread_id)
+        await _accept_then_close(ws, POLICY, DISPATCH_REFUSED)
+        return
     # Rule 9: nothing claims this name — the gate ran, so say why with a real
     # code instead of an unmatched-route 1006 the client would retry.
     spec = websocket_spec(name)
@@ -2067,6 +2131,12 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             except Exception:
                 client_ip = "?"
         _locked_open(thread_id, client_ip)
+    # Remembered for ctx.submit_turn, which is told no caller (defence in depth behind 3b:
+    # a character switched to an agent backend while this socket is open).
+    nodispatch = (principal is not None and not principal.is_restricted
+                  and not principal.can(Permission.DISPATCH_AGENTS))
+    if nodispatch:
+        _nodispatch_open(thread_id)
     try:
         # Inside the try: a handshake cancelled mid-eviction (shutdown) still
         # gives its slot back in the finally below.
@@ -2090,6 +2160,8 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     finally:
         if locked:
             _locked_closed(thread_id)
+        if nodispatch:
+            _nodispatch_closed(thread_id)
         cur = _slots.get((name, key))
         if cur is not None and me in cur:
             cur.remove(me)

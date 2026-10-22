@@ -173,7 +173,12 @@ def test_a_member_opens_a_voice_call(ext_env):
     try:
         _person(c, "Max", "member", pin="5555")
         member = _signed_in(client, ("203.0.113.95", 44005), name="Max", pin="5555")
-        tid = thread_for(member, "main")
+        # A direct-model character: an agent-backed one needs dispatch_agents, as a typed
+        # send does (tests/test_voice_agent_gate.py).
+        from app import config
+        config.upsert_bot(config.Bot(id="adv", name="Sage", advisor={
+            "providers": [{"provider": "custom", "base_url": "http://p/v1", "model": "m"}]}))
+        tid = thread_for(member, "adv")
         with member.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
             ready = json.loads(ws.receive_text())
             assert ready["type"] == "ready" and ready["token"] is True and ready["locked"] is False

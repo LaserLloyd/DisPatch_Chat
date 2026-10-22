@@ -43,6 +43,7 @@ things an app may reach through :class:`Hooks`.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import hashlib
 import importlib.util
 import logging
@@ -339,10 +340,24 @@ def _permission_for(request: Request) -> str:
     return la.manifest.permission if la is not None else "use_tools"
 
 
+#: The Policy of the request whose app route is running, recorded by require_access /
+#: require_operator (every app route calls one first). ``ctx.dispatch_turn`` takes no
+#: caller, so the shell reads it from here to apply the same agent rule as /ws. A
+#: ContextVar: each request runs in its own context, so nothing leaks between callers.
+_caller: contextvars.ContextVar[Any] = contextvars.ContextVar("dispatch_app_caller", default=None)
+
+
+def current_caller():
+    """The Policy recorded for the app request in progress, or None (no app route ran)."""
+    return _caller.get()
+
+
 def require_operator(request: Request) -> None:
     """A person holding the app's permission. Never a machine, never Restricted."""
     from . import policy
-    if not policy.of(request).can(_permission_for(request)):
+    pol = policy.of(request)
+    _caller.set(pol)
+    if not pol.can(_permission_for(request)):
         raise AppDecoy
 
 
@@ -353,6 +368,7 @@ def require_access(request: Request) -> None:
     if _is_decoy(request):
         raise AppDecoy
     pol = policy.of(request)
+    _caller.set(pol)
     if pol.machine or pol.can(_permission_for(request)):
         return
     raise AppDecoy

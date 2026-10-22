@@ -12007,6 +12007,13 @@ def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
     bot = config.get_bot(bot_id)
     if bot is None:
         return False
+    # The caller of the app route that asked (apps_loader.current_caller: set by the
+    # app's require_access / require_operator). A person needs dispatch_agents for an
+    # agent-backed character, as on /ws; an authenticated machine (a cron) may.
+    pol = apps_loader.current_caller()
+    if pol is not None and not pol.machine and not extensions.may_dispatch(pol.principal, bot):
+        log.info("app turn on %s refused: the caller may not run agents", thread_id)
+        return False
     if not bot.api and not openclaw.cli_available():
         return False
     _track(asyncio.create_task(run_agent_turn(thread_id, bot_id, text)))
@@ -12534,9 +12541,8 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
     if dispatch:
         pr = manager.principal_of(ws)
         bot = config.get_bot(bot_id) if bot_id else None
-        if (pr is not None and not pr.is_restricted and bot is not None
-                and not (bot.api or bot.advisor) and not pr.can(Permission.DISPATCH_AGENTS)):
-            msg = "Your profile may not run agents. Ask the Owner for the dispatch_agents permission."
+        if not extensions.may_dispatch(pr, bot):
+            msg = extensions.DISPATCH_REFUSED
             await manager.send(ws, {"type": "error", "code": "permission_denied", "message": msg,
                                     "error": errors.envelope("permission_denied", message=msg),
                                     "required_permission": "dispatch_agents"})
@@ -12623,7 +12629,10 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         await _ack(ws, cmid, "ok")
         if not seen.get("scheduled") and seen.get("thread_id"):
             # Stored but never dispatched (see _ACK_SEEN). Finish the job
-            # rather than confirming a turn that was never started.
+            # rather than confirming a turn that was never started - after the
+            # same gate a fresh send passes (the id is the client's own string).
+            if not await _ws_bot_allowed(ws, seen.get("bot_id"), dispatch=True):
+                return
             log.warning("resend of %s: the message was stored but its turn "
                         "never ran — dispatching it now", cmid)
             seen["scheduled"] = True
@@ -13597,6 +13606,16 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             with contextlib.suppress(Exception):
                 prefetched.stale = True
             await _discard_run(prefetched)
+    if (extensions.runs_agent(config.get_bot(thread.bot_id))
+            and extensions.turn_dispatch_refused(thread_id)):
+        # The typed /ws rule (_ws_bot_allowed dispatch=True) for a spoken or typed voice
+        # turn: a profile without dispatch_agents has a socket on this thread, and its
+        # character runs an agent on the host. Refused = no row, no turn; the extension's
+        # submit raises (the voice add-on says it could not send).
+        if adopted is not None:
+            await _discard_run(adopted)
+        log.info("ext %s: turn on %s refused - the caller may not run agents", ext_id, thread_id)
+        raise PermissionError(extensions.DISPATCH_REFUSED)
     locked = extensions.turn_locked(thread_id)
     if locked:
         log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
