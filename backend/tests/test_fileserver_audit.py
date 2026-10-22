@@ -540,3 +540,78 @@ def test_boot_sweep_refuses_to_purge_when_the_blob_dir_is_gone(fs_env):
         assert len(asyncio.run(main.db.list_files())) == 2      # nothing deleted
     finally:
         main.FILES_DIR = tmp / "files"
+
+
+# Mass-missing guard (security review 2026-10-21, L1): FILES_DIR resolves, but the blobs
+# are not there - a share remounted empty, a symlink re-pointed at a fresh directory, a
+# partial restore. Every row looks orphaned; the sweep must purge nothing and say so.
+
+def _seed_rows(n: int, *, prefix: str = "r") -> None:
+    async def go():
+        for i in range(n):
+            await main.db.add_file(f"{prefix}{i}.pdf", f"{prefix}{i}.bin", 1, "application/pdf",
+                                   owner_profile_id=None)
+    asyncio.run(go())
+
+
+def test_boot_sweep_purges_nothing_when_the_symlinked_store_is_missing(fs_env):
+    """The live shape: files/ is a symlink whose target is absent at boot."""
+    make_client, tmp = fs_env
+    make_client()
+    _seed_rows(3)
+    link = tmp / "files-link"
+    link.symlink_to(tmp / "not-mounted")
+    main.FILES_DIR = link
+    try:
+        asyncio.run(main._sweep_orphan_blobs())
+        assert len(asyncio.run(main.db.list_files())) == 3
+        assert main._file_sweep_skipped == {"reason": "files_dir_missing"}
+    finally:
+        main.FILES_DIR = tmp / "files"
+        main._file_sweep_skipped = None
+
+
+def test_boot_sweep_purges_nothing_when_most_blobs_are_missing(fs_env):
+    """An EMPTY directory where 40 records' blobs should be: nothing is purged, the
+    health check goes degraded and carries the counts."""
+    make_client, tmp = fs_env
+    client = make_client()
+    _seed_rows(40)
+    (tmp / "files").mkdir(parents=True, exist_ok=True)
+    try:
+        asyncio.run(main._sweep_orphan_blobs())
+        assert len(asyncio.run(main.db.list_files())) == 40
+        assert main._file_sweep_skipped == {"reason": "mass_missing", "missing": 40, "total": 40}
+        assert client.get("/api/health").json()["status"] == "degraded"
+    finally:
+        main._file_sweep_skipped = None
+
+
+def test_boot_sweep_still_purges_a_few_phantoms(fs_env):
+    """Normal housekeeping is unchanged: 3 phantoms among 30 healthy rows go (10%)."""
+    make_client, tmp = fs_env
+    make_client()
+    d = tmp / "files"
+    d.mkdir(parents=True, exist_ok=True)
+    _seed_rows(30, prefix="ok")
+    for i in range(30):
+        (d / f"ok{i}.bin").write_bytes(b"x")
+    _seed_rows(3, prefix="ghost")
+    asyncio.run(main._sweep_orphan_blobs())
+    names = {r["stored_name"] for r in asyncio.run(main.db.list_files())}
+    assert len(names) == 30 and not any(n.startswith("ghost") for n in names)
+    assert main._file_sweep_skipped is None
+
+
+def test_boot_sweep_purges_a_large_minority_of_phantoms(fs_env):
+    """Above the record floor but under the share (12 of 100 = 12%): purged as before."""
+    make_client, tmp = fs_env
+    make_client()
+    d = tmp / "files"
+    d.mkdir(parents=True, exist_ok=True)
+    _seed_rows(88, prefix="ok")
+    for i in range(88):
+        (d / f"ok{i}.bin").write_bytes(b"x")
+    _seed_rows(12, prefix="ghost")
+    asyncio.run(main._sweep_orphan_blobs())
+    assert len(asyncio.run(main.db.list_files())) == 88

@@ -6318,6 +6318,16 @@ async def _migrate_machine_notices() -> None:
     log.info("notice migration: %d injected status line(s) collapsed to notices", changed)
 
 
+#: The boot sweep purges phantom file records only while they are a few: more than
+#: ORPHAN_PURGE_MIN_RECORDS AND more than this share of the table missing at once
+#: reads as missing storage, and nothing is purged (see _sweep_orphan_blobs).
+ORPHAN_PURGE_MIN_RECORDS = 10
+ORPHAN_PURGE_MAX_FRACTION = 0.2
+#: Set when the last boot sweep refused to purge (``{"reason", "missing", "total"}``);
+#: /api/health reports it and goes "degraded".
+_file_sweep_skipped: dict | None = None
+
+
 async def _sweep_orphan_blobs() -> None:
     """Reconcile the files table against FILES_DIR/MEDIA_DIR on boot.
 
@@ -6381,13 +6391,32 @@ async def _sweep_orphan_blobs() -> None:
         dir_ok = FILES_DIR.is_dir()
     except OSError:
         dir_ok = False
+    global _file_sweep_skipped
+    _file_sweep_skipped = None
     if not dir_ok:
         log.error("orphan sweep: %s does not resolve to a directory — skipping "
                   "the phantom-record purge (every row would look orphaned)",
                   FILES_DIR)
+        _file_sweep_skipped = {"reason": "files_dir_missing"}
+        return
+    # Mass-missing guard (the reaction pack heal has the same one): a directory that
+    # resolves but is EMPTY or half-there - a share remounted before its data, a
+    # symlink re-pointed at a fresh dir, a partial restore - also makes every row look
+    # orphaned. A handful of phantoms is normal housekeeping; a large share of the
+    # table is a storage fault, and deleting the records would turn it into data loss.
+    try:
+        gone, total = await db.files_missing_from(FILES_DIR)
+    except Exception:
+        log.exception("orphan sweep: could not check file records against disk")
+        return
+    if len(gone) > ORPHAN_PURGE_MIN_RECORDS and len(gone) > total * ORPHAN_PURGE_MAX_FRACTION:
+        log.error("orphan sweep: %d of %d file record(s) have no blob in %s — that reads "
+                  "as missing storage, not phantoms; purging NOTHING. Fix the storage "
+                  "(or restore the blobs) and restart.", len(gone), total, FILES_DIR)
+        _file_sweep_skipped = {"reason": "mass_missing", "missing": len(gone), "total": total}
         return
     try:
-        purged = await db.delete_files_missing_from(FILES_DIR)
+        purged = await db.delete_file_rows(gone)
     except Exception:
         log.exception("orphan sweep: could not purge file records with no blob")
         return
@@ -7666,7 +7695,8 @@ async def health(request: Request):
         and backup_age > SETTINGS.backup_interval * 2)
     degraded = (_db_integrity_ok is False
                 or any(v["stale"] for v in loops.values())
-                or backup_stale or _last_backup_ok is False)
+                or backup_stale or _last_backup_ok is False
+                or _file_sweep_skipped is not None)
     body = {
         # "ok" unless something we can actually name is wrong. A liveness
         # field nobody reads is the same as no field at all, so a stale loop
@@ -7687,6 +7717,9 @@ async def health(request: Request):
         "data_dir": str(config.DATA_DIR),
         "last_backup_ok": _last_backup_ok,
         "last_backup_at": _last_backup_at,
+        # The boot File Server sweep found storage missing and purged nothing
+        # (counts only, never names or paths). None = it ran normally.
+        "file_sweep_skipped": _file_sweep_skipped,
         # Additive companions to the two latching fields above: how long ago
         # the last attempt was, and whether that is longer than the cadence
         # allows. Existing consumers reading last_backup_ok are untouched.

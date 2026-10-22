@@ -1018,13 +1018,23 @@ class Database:
         case must skip the purge entirely, not run it. Here we only ever test
         one specific file at a time, and delete by primary key.
         """
+        gone, _total = await self.files_missing_from(files_dir)
+        return await self.delete_file_rows(gone)
+
+    async def files_missing_from(self, files_dir) -> tuple[list[dict], int]:
+        """``(rows whose blob is absent from files_dir, total rows)`` - read only. The boot
+        sweep looks before it purges: a share remounted empty looks exactly like 100%
+        phantoms (main._sweep_orphan_blobs)."""
         rows = await self.list_files()
-        gone = [r for r in rows if not (files_dir / r["stored_name"]).is_file()]
-        for r in gone:
+        return [r for r in rows if not (files_dir / r["stored_name"]).is_file()], len(rows)
+
+    async def delete_file_rows(self, rows: list[dict]) -> list[dict]:
+        """Delete these file rows by primary key; returns them."""
+        for r in rows:
             await self.db.execute("DELETE FROM files WHERE id = ?", (r["id"],))
-        if gone:
+        if rows:
             await self.db.commit()
-        return gone
+        return rows
 
     # -- export (full, unpaginated dump) ----------------------------------- #
 
