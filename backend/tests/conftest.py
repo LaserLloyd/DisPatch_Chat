@@ -26,6 +26,56 @@ from app import config as config_module
 from app import openclaw
 
 
+# --------------------------------------------------------------------------- #
+# No test ever opens the real install's database (fail closed, whole session).
+#
+# 2026-10-23: a test that entered the app's lifespan without its own Database opened
+# main.db - built at import from the REAL data directory - and ran schema statements on the
+# live chats.db (the per-test guards below redirect config paths, not an object made at
+# import). The app now re-derives that path in the lifespan and refuses a live path under
+# pytest (accounts.refuse_live_db_under_pytest); this wraps sqlite3.connect for the whole
+# session as well, so any other route to that file (a direct sqlite3.connect, aiosqlite,
+# a read-only URI) fails before a byte is read or written.
+# --------------------------------------------------------------------------- #
+
+def _sqlite_target(database) -> str | None:
+    """The file path a sqlite3.connect() argument names (None: memory / not a file)."""
+    if isinstance(database, bytes):
+        database = database.decode("utf-8", "replace")
+    text = os.fspath(database) if not isinstance(database, str) else database
+    if not text or text == ":memory:" or text.startswith("file::memory:"):
+        return None
+    if text.startswith("file:"):
+        from urllib.parse import unquote, urlsplit
+        parts = urlsplit(text)
+        text = unquote(parts.path or parts.netloc)
+        if not text or "mode=memory" in (parts.query or ""):
+            return None
+    return text
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _never_open_the_live_database():
+    import sqlite3
+
+    from app import accounts
+    real = sqlite3.connect
+
+    def guarded(database, *args, **kwargs):
+        target = _sqlite_target(database)
+        if target is not None and accounts.is_live_db_path(target):
+            raise RuntimeError(
+                f"test tried to open {target}: that is the real install's data "
+                f"({accounts.LIVE_DATA_DIR} / {accounts.IMPORT_DB_PATH}). Use a scratch directory.")
+        return real(database, *args, **kwargs)
+
+    sqlite3.connect = guarded
+    try:
+        yield guarded
+    finally:
+        sqlite3.connect = real
+
+
 @pytest.fixture
 def monkeypatch_root(tmp_path):
     """A fresh synthetic OpenClaw agents-dir root, restored after the test.

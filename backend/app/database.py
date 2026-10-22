@@ -493,8 +493,6 @@ CREATE TABLE IF NOT EXISTS maintenance_runs (
     ms INTEGER NOT NULL DEFAULT 0,
     error TEXT                        -- NULL = ok
 );
-CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_runs(started);
-CREATE INDEX IF NOT EXISTS idx_maintenance_runs_step ON maintenance_runs(step, started);
 -- "Is this image still referenced?": one row per /media/<name> a message shows (attachment,
 -- text or metadata), with the newest referencing message's created_at. 011 backfills it; the
 -- nightly job keeps it current from the messages newer than maintenance_state
@@ -525,6 +523,11 @@ CREATE TABLE IF NOT EXISTS maintenance_state (
 #: ``(table, name, DDL)`` for every index 011 adds. Each one is proven by
 #: ``tests/test_query_plans.py`` (the query that needs it) and the ``-m scale`` benchmark.
 SCALE_INDEXES: tuple[tuple[str, str, str], ...] = (
+    # The maintenance task's own run log (Storage card: last run per step).
+    ("maintenance_runs", "idx_maintenance_runs_started",
+     "CREATE INDEX IF NOT EXISTS idx_maintenance_runs_started ON maintenance_runs(started)"),
+    ("maintenance_runs", "idx_maintenance_runs_step",
+     "CREATE INDEX IF NOT EXISTS idx_maintenance_runs_step ON maintenance_runs(step, started)"),
     # The rail / thread list per owner, all characters (GET /api/threads without bot_id, the
     # hello first page) and the Archived view: equality on owner + archived + pinned, then the
     # keyset (updated_at, id) in index order - no sort, no scan.
@@ -601,21 +604,111 @@ def sqlite_tables(con: sqlite3.Connection) -> set[str]:
     return {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
-def missing_scale_indexes(con: sqlite3.Connection) -> list[tuple[str, str, str]]:
-    """The SCALE_INDEXES rows whose table exists but whose index does not (read only)."""
+def norm_sql(sql: str | None) -> str:
+    """A DDL statement as compared: ``IF NOT EXISTS`` dropped, whitespace collapsed, case and
+    a trailing semicolon ignored (sqlite_master keeps the text as it was written)."""
+    text = re.sub(r"--[^\n]*", " ", sql or "")                     # comments
+    text = re.sub(r"\bIF\s+NOT\s+EXISTS\b", " ", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip().rstrip(";").strip().lower()
+    return re.sub(r"\s*([(),])\s*", r"\1", text)
+
+
+def _master_sql(con: sqlite3.Connection, kind: str, name: str) -> str | None:
+    row = con.execute("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
+                      (kind, name)).fetchone()
+    return row[0] if row else None
+
+
+def scale_index_drift(con: sqlite3.Connection) -> list[tuple[str, str, str, str]]:
+    """``(table, name, DDL, why)`` for every SCALE_INDEXES row whose table exists but whose
+    index is ``missing`` or ``stale`` (exists with another definition - an older build's).
+    Read only. ``CREATE INDEX IF NOT EXISTS`` alone would keep a stale one silently."""
     tables = sqlite_tables(con)
-    have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    return [row for row in SCALE_INDEXES if row[0] in tables and row[1] not in have]
+    out = []
+    for table, name, ddl in SCALE_INDEXES:
+        if table not in tables:
+            continue
+        have = _master_sql(con, "index", name)
+        if have is None:
+            out.append((table, name, ddl, "missing"))
+        elif norm_sql(have) != norm_sql(ddl):
+            out.append((table, name, ddl, "stale"))
+    return out
+
+
+def missing_scale_indexes(con: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """The SCALE_INDEXES rows that would be (re)built now: missing or stale (read only)."""
+    return [(t, n, d) for t, n, d, _why in scale_index_drift(con)]
+
+
+def _table_shape(con: sqlite3.Connection, table: str) -> list[tuple]:
+    return [(r[1], (r[2] or "").upper(), r[3], r[4], r[5])
+            for r in con.execute(f"PRAGMA table_info({table})")]
+
+
+def _reference_shapes() -> dict[str, list[tuple]]:
+    ref = sqlite3.connect(":memory:")
+    try:
+        ref.executescript(SCALE_SCHEMA)
+        return {t: _table_shape(ref, t) for t in sqlite_tables(ref)}
+    finally:
+        ref.close()
+
+
+def reconcile_scale_tables(con: sqlite3.Connection) -> list[str]:
+    """Make each 011 table match SCALE_SCHEMA: create a missing one; an existing one with
+    another shape gets its missing columns added (the 011 tables only ever gain columns), and
+    is rebuilt from scratch only when it is EMPTY and still differs. Returns what it changed."""
+    changed: list[str] = []
+    want = _reference_shapes()
+    have_tables = sqlite_tables(con)
+    for table, shape in want.items():
+        if table not in have_tables:
+            continue
+        cur = _table_shape(con, table)
+        if cur == shape:
+            continue
+        names = {c[0] for c in cur}
+        for col, ctype, notnull, dflt, _pk in shape:
+            if col not in names:
+                extra = f" NOT NULL DEFAULT {dflt}" if notnull and dflt is not None else (
+                    f" DEFAULT {dflt}" if dflt is not None else "")
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ctype}{extra}")
+                changed.append(f"{table}.{col} added")
+        if _table_shape(con, table) != shape:
+            if con.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is None:
+                con.execute(f"DROP TABLE {table}")
+                changed.append(f"{table} rebuilt (empty, another shape)")
+            else:
+                log.warning("011 table %s has another shape and holds rows; left as it is", table)
+    con.executescript(SCALE_SCHEMA)                        # creates the missing / dropped ones
+    return changed
 
 
 def ensure_scale_schema(con: sqlite3.Connection) -> int:
-    """Create the 011 tables and every index whose table exists (idempotent). Returns how many
-    indexes were built now. Synchronous: migration 011 and accounts.connect call it."""
-    con.executescript(SCALE_SCHEMA)
-    todo = missing_scale_indexes(con)
-    for _table, _name, ddl in todo:
+    """The 011 tables and every index whose table exists, each matching its definition
+    (idempotent): a missing object is created, a stale index (an older build's definition) is
+    dropped and built again. Returns how many indexes were (re)built. Synchronous: migration
+    011 and Database.connect (in a thread) call it."""
+    reconcile_scale_tables(con)
+    todo = scale_index_drift(con)
+    for _table, name, ddl, why in todo:
+        if why == "stale":
+            con.execute(f"DROP INDEX IF EXISTS {name}")
         con.execute(ddl)
     return len(todo)
+
+
+def ensure_trigger(con: sqlite3.Connection, name: str, ddl: str) -> bool:
+    """Create trigger ``name`` from ``ddl``, replacing one with another definition. True when
+    it changed anything."""
+    have = _master_sql(con, "trigger", name)
+    if have is not None and norm_sql(have) == norm_sql(ddl):
+        return False
+    if have is not None:
+        con.execute(f"DROP TRIGGER IF EXISTS {name}")
+    con.execute(ddl)
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -708,7 +801,7 @@ def ensure_owner_fts(con: sqlite3.Connection) -> str:
     # The owner column and its trigger exist with or without FTS5.
     if "owner_profile_id" not in _cols(con, "messages"):
         con.execute("ALTER TABLE messages ADD COLUMN owner_profile_id TEXT")
-    con.execute(THREAD_OWNER_TRIGGER)
+    ensure_trigger(con, "threads_owner_au", THREAD_OWNER_TRIGGER)
     row = con.execute("SELECT sql FROM sqlite_master WHERE name = 'messages_fts'").fetchone()
     state = "ok"
     if row is not None and "owner_profile_id" not in (row[0] or ""):
@@ -724,8 +817,8 @@ def ensure_owner_fts(con: sqlite3.Connection) -> str:
             backfill_message_owners(con)
             con.execute(FTS_TABLE_DDL)
             con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        for ddl in FTS_TRIGGERS:
-            con.execute(ddl)
+        for name, ddl in zip(_FTS_TRIGGER_NAMES, FTS_TRIGGERS, strict=True):
+            ensure_trigger(con, name, ddl)
         if state == "ok":
             # The 3.x server rebuilt the whole index on every start (seconds at 1M rows). Now
             # only when it has lost rows (a crash between a write and its trigger cannot happen
@@ -876,6 +969,8 @@ class Database:
             raise
 
     async def _open_and_migrate(self) -> None:
+        from . import accounts
+        accounts.refuse_live_db_under_pytest(self.path)      # fail closed in a test run
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # isolation_level=None -> autocommit: each statement commits on its own.
         # Critical because a single connection is shared across many coroutines;
@@ -999,13 +1094,14 @@ class Database:
         # 4.0 scale (011_scale): the maintenance tables and every index whose table exists.
         # IF NOT EXISTS no-ops once 011 has run; on a fresh install (011 ran before these
         # tables existed) this is where the thread / message indexes are built.
-        await self._db.executescript(SCALE_SCHEMA)
-        have = {r[0] for r in await self._db.execute_fetchall(
-            "SELECT name FROM sqlite_master WHERE type IN ('table','index')")}
-        for table, name, ddl in SCALE_INDEXES:
-            if table in have and name not in have:
-                await self._db.execute(ddl)
-        await self._db.commit()
+        def scale() -> int:
+            con = sqlite3.connect(str(self.path), timeout=30, isolation_level=None)
+            try:
+                con.execute("PRAGMA busy_timeout=30000")
+                return ensure_scale_schema(con)
+            finally:
+                con.close()
+        await asyncio.to_thread(scale)
         await self._setup_fts()
 
     async def _migrate_jobs_to_monthly_thread(self) -> None:

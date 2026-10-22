@@ -122,3 +122,74 @@ def test_archive_after_months_is_validated(datadir):
         with pytest.raises(accounts.AccountError):
             accounts.update_profile(p.id, archive_after_months=bad)
     assert accounts.update_profile(p.id, archive_after_months=None).archive_after_months is None
+
+
+def _schema(d):
+    """Every schema object (normalised DDL) plus the column lists of the tables 011 touches."""
+    con = sqlite3.connect(d / "chats.db")
+    try:
+        objs = sorted((t, n, database.norm_sql(s)) for t, n, s in con.execute(
+            "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"))
+        cols = {t: [tuple(r[1:6]) for r in con.execute(f"PRAGMA table_info({t})")]
+                for t in ("profiles", "messages", "threads", "maintenance_runs", "media_refs",
+                          "media_expired", "storage_stats", "maintenance_state")}
+        return objs, cols, con.execute("PRAGMA auto_vacuum").fetchone()[0]
+    finally:
+        con.close()
+
+
+#: What the first 011 commit (64a3bfb) left on a database that met it before the step ran:
+#: the unread index on the owner alone, no stored_name index, and (here) a storage_stats
+#: table from a draft without its ``files`` column.
+FIRST_COMMIT_OBJECTS = [
+    "CREATE INDEX idx_threads_owner_unread ON threads(owner_profile_id) "
+    "WHERE is_archived = 0 AND (last_read_at IS NULL OR last_read_at < updated_at)",
+    "CREATE TABLE maintenance_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started TEXT NOT NULL, "
+    "finished TEXT, step TEXT NOT NULL, rows INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL "
+    "DEFAULT 0, ms INTEGER NOT NULL DEFAULT 0, error TEXT)",
+    "CREATE INDEX idx_maintenance_runs_started ON maintenance_runs(started)",
+    "CREATE TABLE storage_stats (area TEXT PRIMARY KEY, bytes INTEGER NOT NULL DEFAULT 0, "
+    "measured_at TEXT NOT NULL)",
+    "CREATE INDEX idx_threads_owner_list ON threads(owner_profile_id, is_archived, is_pinned, "
+    "updated_at DESC, id DESC)",
+    "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
+]
+
+
+def test_011_over_a_partial_older_copy_ends_exactly_like_a_fresh_011(datadir, tmp_path):
+    import shutil
+    pristine = tmp_path / "pristine"
+    shutil.copytree(datadir, pristine)
+    # A: a fresh 011.
+    migrate.run(take_backup=False)
+    fresh = _schema(datadir)
+    # B: the same data dir, but holding the first commit's objects before 011 runs.
+    shutil.rmtree(datadir)
+    shutil.copytree(pristine, datadir)
+    from app import agents_store, connections, settings_store, tool_manifests
+    accounts.reset_for_tests()                   # every module's "schema is there" cache
+    settings_store.reset_schema_cache()
+    connections.reset_schema_cache()
+    tool_manifests.reset_schema_cache()
+    agents_store.reset_for_tests()
+    with accounts.connect():                     # the accounts tables, as 001 makes them
+        pass
+    con = sqlite3.connect(datadir / "chats.db", isolation_level=None)
+    for ddl in FIRST_COMMIT_OBJECTS:
+        try:
+            con.execute(ddl)
+        except sqlite3.OperationalError as e:    # accounts.connect already added the column
+            assert "duplicate column" in str(e), e
+    con.close()
+    rep = migrate.plan()
+    lines = [a.text for a in rep.actions if a.step == "011_scale"]
+    assert any("rebuild 1 index(es)" in t and "idx_threads_owner_unread" in t for t in lines), lines
+    assert any("storage_stats" in t for t in lines), lines
+    migrate.run(take_backup=False)
+    got = _schema(datadir)
+    assert set(got[0]) ^ set(fresh[0]) == set(), sorted(set(got[0]) ^ set(fresh[0]))
+    assert got == fresh
+    con = sqlite3.connect(datadir / "chats.db")
+    (sql,) = con.execute("SELECT sql FROM sqlite_master WHERE name = 'idx_threads_owner_unread'").fetchone()
+    con.close()
+    assert "owner_profile_id, is_archived" in sql
