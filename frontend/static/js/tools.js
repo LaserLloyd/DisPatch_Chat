@@ -45,7 +45,7 @@
 
 import { api } from './api.js?v=35';
 import { t, relTimeLong } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
@@ -124,19 +124,18 @@ export function isExtFeature(feature) {
 // person's own choice and is shown as typed — content, not chrome (see the
 // note on RAIL_ICONS in util.js) — centred in the same themed tile.
 const ICON_ALIASES = {
-  '📊': 'chart', '📈': 'chart', '📉': 'chart',
-  '🎛': 'tools', '🎚': 'tools',
-  '💻': 'terminal', '🖥': 'terminal', '⌨': 'terminal',
-  '✉': 'mail', '📧': 'mail', '📨': 'mail', '📬': 'mail',
-  '👥': 'users', '👤': 'user',
-  '💼': 'jobs', '📋': 'jobs',
-  '🔗': 'link', '📁': 'folder', '📂': 'folder', '⚙': 'gear',
-  '🔍': 'search', '🔎': 'search', '🗄': 'database', '💾': 'disk',
+  '📊': 'chart', '📈': 'chart', '📉': 'chart',  // forgeui: allow-icons
+  '🎛': 'tools', '🎚': 'tools',  // forgeui: allow-icons
+  '💻': 'terminal', '🖥': 'terminal', '⌨': 'terminal',  // forgeui: allow-icons
+  '✉': 'mail', '📧': 'mail', '📨': 'mail', '📬': 'mail',  // forgeui: allow-icons
+  '👥': 'users', '👤': 'user',  // forgeui: allow-icons
+  '💼': 'jobs', '📋': 'jobs',  // forgeui: allow-icons
+  '🔗': 'link', '📁': 'folder', '📂': 'folder', '⚙': 'gear',  // forgeui: allow-icons
+  '🔍': 'search', '🔎': 'search', '🗄': 'database', '💾': 'disk',  // forgeui: allow-icons
 };
 // Word names people (and app manifests) use for an icon the set already has
 // under another name. `icon: clipboard` is the contract's own example.
 const NAME_ALIASES = { clipboard: 'jobs', briefcase: 'jobs', report: 'chart', console: 'terminal' };
-const DEFAULT_GLYPH = '🧩';
 
 /** The RAIL_ICONS name a tool is drawn with, or null for a typed glyph. */
 export function toolIconName(tool) {
@@ -156,13 +155,15 @@ export function toolGlyph(tool) {
   if (b && b.paths) return railIcon(b.paths);
   const name = toolIconName(tool);
   if (name && RAIL_ICONS[name]) return railIcon(RAIL_ICONS[name]);
-  return el('span', { class: 'tool-glyph-text', text: (tool && String(tool.icon || '').trim()) || DEFAULT_GLYPH });
+  const typed = (tool && String(tool.icon || '').trim()) || '';
+  if (!typed) return spriteIcon('puzzle', 18);          // no icon given: the puzzle piece
+  return el('span', { class: 'tool-glyph-text', text: typed });
 }
 
 /** The rounded tile a tool's glyph sits in — the bot tile's geometry, the
  *  theme's surface and border. `extra` adds size variants (Settings rows). */
 export function toolTile(tool, extra = '') {
-  const icon = !!toolIconName(tool);
+  const icon = !!toolIconName(tool) || !String((tool && tool.icon) || '').trim();
   return el('span', {
     class: 'bot-avatar tool-avatar ' + (icon ? 'tool-avatar-icon' : 'tool-avatar-glyph') + (extra ? ' ' + extra : ''),
     'aria-hidden': 'true',
@@ -208,7 +209,7 @@ let draftDirty = false;
 let addOpen = false;
 let settingsHost = null;
 let settingsOpts = null;     // { toolSettings(feature, host) }: a built-in tool's own settings
-const openGears = new Set(); // built-in features whose ⚙ settings row is open
+const openGears = new Set(); // built-in features whose gear settings row is open
 let saveTimer = null;
 
 const $ = (id) => document.getElementById(id);
@@ -498,7 +499,7 @@ function menuButton(entries, bots, mode) {
   btn.append(el('span', { class: 'bot-name-label', text: label }));
   btn.append(el('span', { class: groupDotClass(mode, bots) }));
   // Phone row only (CSS hides it on the rail): the "opens more" affordance.
-  btn.append(el('span', { class: 'tools-menu-chevron', 'aria-hidden': 'true', text: '›' }));
+  btn.append(el('span', { class: 'tools-menu-chevron', 'aria-hidden': 'true' }, [spriteIcon('chevron-right', 16)]));
   return btn;
 }
 
@@ -578,8 +579,8 @@ function menuRow(tool) {
   row.addEventListener('click', () => { closeToolsMenu(); openTool(tool.id); });
   row.append(toolTile(tool, 'tool-avatar-row'));
   row.append(el('span', { class: 'tools-item-label', text: title }));
-  // The "leaves DisPatch" affordance, the same ↗ the pane header uses.
-  if (openMode(tool) === 'window') row.append(el('span', { class: 'muted tools-item-ext', 'aria-hidden': 'true', text: '↗' }));
+  // The "leaves DisPatch" affordance, the same external-link icon the pane header uses.
+  if (openMode(tool) === 'window') row.append(el('span', { class: 'muted tools-item-ext', 'aria-hidden': 'true' }, [spriteIcon('external-link', 14)]));
   if (b) {
     const dot = deps.builtinDot(b.feature);
     if (dot) row.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
@@ -954,7 +955,9 @@ function paintRefreshBtn(tool) {
   const show = !!(tool && tool.has_refresh) && !deps.state.decoy;
   btn.classList.toggle('hidden', !show);
   btn.disabled = refreshing;
-  btn.textContent = refreshing ? t('tools.refreshing') : t('tools.refresh');
+  const lbl = btn.querySelector('[data-i18n]');
+  if (lbl) { lbl.setAttribute('data-i18n', refreshing ? 'tools.refreshing' : 'tools.refresh'); lbl.textContent = refreshing ? t('tools.refreshing') : t('tools.refresh'); }
+  else btn.textContent = refreshing ? t('tools.refreshing') : t('tools.refresh');
   btn.setAttribute('aria-busy', refreshing ? 'true' : 'false');
 }
 
@@ -1559,9 +1562,9 @@ function toolRow(tool, idx) {
   if (!builtin) {
     rmCell.append(el('button', {
       type: 'button', class: 'icon-btn ghost tools-remove',
-      'aria-label': t('tools.remove', { name }), title: t('tools.remove', { name }), text: '🗑',
+      'aria-label': t('tools.remove', { name }), title: t('tools.remove', { name }),
       onclick: () => { draft.splice(idx, 1); draftDirty = true; renderSettings(); saveSoon(); },
-    }));
+    }, [railIcon(RAIL_ICONS.trash)]));
   }
   row.append(rmCell);
   return row;
@@ -1676,8 +1679,8 @@ function renderSettings() {
   else {
     host.append(el('button', {
       type: 'button', class: 'btn-secondary tools-add-btn', id: 'tools-add',
-      text: t('tools.add'), onclick: () => { addOpen = true; renderSettings(); const f = $('tools-add-id'); if (f) f.focus(); },
-    }));
+      onclick: () => { addOpen = true; renderSettings(); const f = $('tools-add-id'); if (f) f.focus(); },
+    }, [spriteIcon('plus', 14), ` ${t('tools.add')}`]));
   }
 }
 

@@ -1,3 +1,4 @@
+import { spriteIcon } from './util.js?v=20';
 // Rail layout — which static rail buttons sit on the bar and which live in the
 // "Tools & more" popup (js/tools.js), in what order.
 //
@@ -255,17 +256,18 @@ export function openArrangeDialog({ t, el, labelOf, visible, onChange }) {
       const ul = el('ul', { class: 'rail-arrange-list', 'aria-label': t(zone === 'rail' ? 'rail.on_bar' : 'rail.in_menu') });
       ids.forEach((id, i) => {
         const name = labelOf(id);
-        const act = (key, label, fn, disabled = false) => {
-          const b = el('button', { type: 'button', class: 'btn-secondary rail-arrange-btn', text: label,
-            'aria-label': `${label}: ${name}`, dataset: { key: `${id}:${key}` } });
+        const act = (key, label, fn, disabled = false, icon = null) => {
+          const b = el('button', { type: 'button', class: 'btn-secondary rail-arrange-btn',
+            'aria-label': icon ? t(icon === 'arrow-up' ? 'settings.move_up_aria' : 'settings.move_down_aria', { name }) : `${label}: ${name}`,
+            dataset: { key: `${id}:${key}` } }, [icon ? spriteIcon(icon, 14) : label]);
           if (disabled) b.disabled = true;
           b.addEventListener('click', () => { focusKey = `${id}:${key}`; onChange(saveLayout(fn(loadLayout()))); paint(); });
           return b;
         };
         ul.append(el('li', { class: 'rail-arrange-row', dataset: { id } }, [
           el('span', { class: 'rail-arrange-name', text: name }),
-          act('up', '↑', (l) => nudgeItem(l, id, -1), i === 0),
-          act('down', '↓', (l) => nudgeItem(l, id, +1), i === ids.length - 1),
+          act('up', '', (l) => nudgeItem(l, id, -1), i === 0, 'arrow-up'),
+          act('down', '', (l) => nudgeItem(l, id, +1), i === ids.length - 1, 'arrow-down'),
           act('move', t(zone === 'rail' ? 'rail.to_menu' : 'rail.to_bar'),
             (l) => moveItem(l, id, zone === 'rail' ? 'menu' : 'rail', null)),
         ]));

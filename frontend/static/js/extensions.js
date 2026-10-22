@@ -308,15 +308,25 @@ export function createAddinTabs({ doc, tablist, beforeTab, beforePane, reserved 
 
     const isPublic = spec.public === true;
     const title = spec.titleKey ? t(String(spec.titleKey)) : String(spec.title == null ? id : spec.title);
+    // No glyph given: the ThemeForge puzzle icon (drawn through the injected doc).
+    const puzzleIcon = () => {
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = doc.createElementNS(NS, 'svg');
+      for (const [k, v] of [['viewBox', '0 0 24 24'], ['fill', 'none'], ['aria-hidden', 'true'], ['width', '17'], ['height', '17'], ['class', 'rail-icon']]) svg.setAttribute(k, v);
+      const use = doc.createElementNS(NS, 'use');
+      use.setAttribute('href', '/static/ui-theme/icons.svg#puzzle');
+      svg.append(use);
+      return svg;
+    };
     const labelAttrs = { class: 'stab-label', text: title };
     if (spec.titleKey) labelAttrs['data-i18n'] = String(spec.titleKey);
-    const glyph = typeof spec.glyph === 'string' && spec.glyph ? spec.glyph.slice(0, 4) : '🧩';
+    const glyph = typeof spec.glyph === 'string' && spec.glyph ? spec.glyph.slice(0, 4) : '';   // none given: the puzzle icon
     const button = mk('button', {
       class: 'settings-tab' + (isPublic ? '' : ' admin-only') + (!isPublic && isLocked() ? ' hidden' : ''),
       id: `stab-${id}`, role: 'tab', 'data-tab': id, 'aria-selected': 'false',
       'aria-controls': `spane-${id}`, tabindex: '-1', 'data-addin': owner || '',
     }, [
-      mk('span', { class: 'stab-glyph', 'aria-hidden': 'true', text: glyph }),
+      mk('span', glyph ? { class: 'stab-glyph', 'aria-hidden': 'true', text: glyph } : { class: 'stab-glyph', 'aria-hidden': 'true' }, glyph ? [] : [puzzleIcon()]),
       mk('span', labelAttrs),
     ]);
     const root = mk('div', { class: 'ext-pane', id: `ext-pane-${id}` });

@@ -17,7 +17,7 @@
 //
 // Theme names are proper nouns and are deliberately NOT translated.
 import { applyDom, hasDictionary } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
 
 // The badge labels are the only translated strings on a card. Literal keys,
 // never `t('theme.mode_' + mode)`: the i18n guard test reads keys out of the
@@ -79,7 +79,7 @@ function card(ui, t) {
       el('span', { class: 'theme-card-name', text: t.name }),
       el('span', { class: 'theme-card-mode', 'data-i18n': MODE_KEY[mode], text: MODE_FALLBACK[mode] }),
     ]),
-    el('span', { class: 'theme-check', 'aria-hidden': 'true', text: '✓' }),
+    el('span', { class: 'theme-check', 'aria-hidden': 'true' }, [spriteIcon('check', 12)]),
   ]);
 }
 

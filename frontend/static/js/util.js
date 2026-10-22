@@ -583,6 +583,29 @@ const ICON_SPRITE = '/static/ui-theme/icons.svg';
 // array, so callers stay as they are.
 const SPRITE_NAME = new Map(Object.entries(RAIL_ICONS).map(([key, paths]) => [paths, ICON_MAP[key]]));
 
+/** Any ThemeForge sprite symbol by its own name (`spriteIcon('play')`), for chrome that has
+ *  no RAIL_ICONS key (the 67-key map stays the shared set). Same <svg class="rail-icon">
+ *  as railIcon(), so the per-context size rules apply; `size` is the fallback width/height
+ *  attribute when none does. */
+export function spriteIcon(name, size = 16) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.classList.add('rail-icon');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `${ICON_SPRITE}#${name}`);
+  svg.append(use);
+  return svg;
+}
+
+/** The same icon as markup, for template strings: `spriteIconHtml('check')`. */
+export function spriteIconHtml(name, size = 16) {
+  return `<svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="${size}" height="${size}"><use href="${ICON_SPRITE}#${name}"/></svg>`;
+}
+
 /** One named chrome icon: `uiIcon('gear')` or `uiIcon('gear', { label: 'Settings', size: 20 })`.
  *
  *  Draws the ThemeForge sprite symbol ICON_MAP names (the same <svg> railIcon() makes),

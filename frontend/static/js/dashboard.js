@@ -37,7 +37,7 @@
 //     would read worse than leaving the pair consistent;
 //   * NOT the numeric formatting (bytes, durations, clock). Unit symbols are
 //     near-universal and the values are diagnostic — see docs/dashboard.md.
-import { el, railIcon, RAIL_ICONS, iconLabel } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, iconLabel, spriteIcon } from './util.js?v=20';
 
 // ===================== State =====================
 
@@ -99,7 +99,8 @@ const T = (key, vars) => ctx.t(key, vars);
 // ===================== Formatting =====================
 
 const LEVEL_KEY = { ok: 'dash.level_ok', warn: 'dash.level_warn', fail: 'dash.level_fail' };
-const LEVEL_GLYPH = { ok: '✓', warn: '!', fail: '✕' };
+const LEVEL_ICON = { ok: 'check', warn: 'triangle-alert', fail: 'x' };
+const levelGlyph = (level, fallback, size = 14) => spriteIcon(LEVEL_ICON[level] || fallback, size);
 
 function fmtBytes(n) {
   if (n === null || n === undefined || isNaN(n)) return '—';
@@ -424,7 +425,7 @@ function paintBanner() {
   const d = D.data;
   const level = d ? d.status : 'unknown';
   nodes.banner.className = `dash-banner level-${level}`;
-  nodes.bannerDot.textContent = LEVEL_GLYPH[level] || '…';
+  nodes.bannerDot.replaceChildren(levelGlyph(level, 'ellipsis'));
   nodes.bannerTitle.textContent = d
     ? (LEVEL_KEY[level] ? T(LEVEL_KEY[level]) : T('dash.level_unknown'))
     : T('dash.checking');
@@ -696,7 +697,7 @@ function paintFindings() {
   const order = { fail: 0, warn: 1, ok: 2 };
   for (const f of [...list].sort((a, b) => (order[a.level] ?? 3) - (order[b.level] ?? 3))) {
     const item = el('div', { class: `dash-finding level-${f.level}` });
-    item.append(el('span', { class: 'dash-finding-pill', text: LEVEL_GLYPH[f.level] || '?' }));
+    item.append(el('span', { class: 'dash-finding-pill' }, [levelGlyph(f.level, 'circle-question-mark', 12)]));
     const main = el('div', { class: 'dash-finding-main' }, [
       el('div', { class: 'dash-finding-title', text: f.title }),
       el('div', { class: 'dash-finding-detail', text: f.detail }),

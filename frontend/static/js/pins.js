@@ -156,7 +156,7 @@ export function visiblePins() {
 export function renderPinnedRail(container, { decoy = false, t = null, onChange = null } = {}) {
   if (!container) return;
   container.querySelectorAll('.pin-btn').forEach((el) => el.remove());
-  const anchor = container.querySelector('#manage-bots');   // pins sit before ⚙
+  const anchor = container.querySelector('#manage-bots');   // pins sit before Settings
   for (const entry of visiblePins()) {
     const btn = document.createElement('button');
     btn.className = 'gear-btn pin-btn';

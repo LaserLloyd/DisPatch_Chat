@@ -17,7 +17,7 @@
 // your keystrokes. The chat carries on underneath; dismissing takes one click.
 //
 import { api } from './api.js?v=35';
-import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, iconLabel, glyphless, spriteIcon } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { nimEnabled } from './nim.js?v=5';
 
@@ -260,7 +260,7 @@ function showReaction(ev) {
     ovImg.alt = ev.name ? t('reactions.alt', { name: ev.name }) : t('reactions.alt_generic');
     ovTitle.textContent = ev.name || ev.reaction_id;
     const who = ev.actor || t(ev.actor_kind === 'agent' ? 'common.assistant' : 'common.you');
-    ovMeta.textContent = `${ev.actor_kind === 'agent' ? '⚡' : '🫵'} ${who}`;
+    ovMeta.replaceChildren(spriteIcon(ev.actor_kind === 'agent' ? 'zap' : 'user', 14), ` ${who}`);
     if (ev.caption) {
       ovCaption.textContent = ev.caption;
       ovCaption.hidden = false;
@@ -466,7 +466,7 @@ function renderManager() {
     ctx.toast(t('reactions.saved'));
   });
   for (const c of [enabled, dur, cool, queue]) c.addEventListener('change', saveBehaviour);
-  const reseedBtn = el('button', { class: 'btn-secondary', text: t('reactions.reseed') });
+  const reseedBtn = el('button', { class: 'btn-secondary' }, [spriteIcon('refresh-cw', 14), ` ${t('reactions.reseed')}`]);
   reseedBtn.title = t('reactions.reseed_title');
   reseedBtn.addEventListener('click', async () => {
     await withBusy(async () => {
@@ -593,7 +593,7 @@ function editSheet(r) {
   });
   name.addEventListener('change', patch);
   aliases.addEventListener('change', patch);
-  const test = el('button', { class: 'btn-secondary rx-row-test', text: `▶ ${t('reactions.test_button')}`, title: t('reactions.test') });
+  const test = el('button', { class: 'btn-secondary rx-row-test', title: t('reactions.test') }, [spriteIcon('play', 14), ` ${t('reactions.test_button')}`]);
   // App-wide test pop, fired as the enabled reaction bot (agents-only API).
   test.addEventListener('click', () => fireReaction(r.id, { thread_id: null, trace: false }));
   const del = el('button', { class: 'btn-secondary danger-text rx-row-del' }, iconLabel(RAIL_ICONS.trash, t('common.delete')));
@@ -693,11 +693,11 @@ function poolSection() {
     fieldRow(t('reactions.pool_daily_add'), dailyAdd, t('reactions.pool_daily_add_hint')),
     fieldRow(t('reactions.pool_refill_spent'), refillSpent, t('reactions.pool_refill_spent_hint')),
   );
-  const topUp = el('button', { class: 'btn-secondary', text: t('reactions.pool_topup') });
+  const topUp = el('button', { class: 'btn-secondary' }, [spriteIcon('arrow-up', 14), ` ${t('reactions.pool_topup')}`]);
   topUp.disabled = !pool.available;
   topUp.title = t(pool.available ? 'reactions.pool_topup_title' : 'reactions.pool_topup_disabled');
   topUp.addEventListener('click', () => runRefill(false));
-  const replaceNow = el('button', { class: 'btn-secondary', text: t('reactions.pool_replace') });
+  const replaceNow = el('button', { class: 'btn-secondary' }, [spriteIcon('refresh-cw', 14), ` ${t('reactions.pool_replace')}`]);
   replaceNow.disabled = !pool.available;
   replaceNow.title = t('reactions.pool_replace_title');
   replaceNow.addEventListener('click', () => runRefill(true));
@@ -865,7 +865,7 @@ function paintEmbed(row, ev) {
   // legacy purge): collapse back to the chip, never a broken picture.
   img.onerror = () => collapseReactionRow(row);
   name.textContent = ev.name || ev.reaction_id;
-  actor.textContent = `${ev.actor_kind === 'agent' ? '⚡' : '🫵'} ${who(ev)}`;
+  actor.replaceChildren(spriteIcon(ev.actor_kind === 'agent' ? 'zap' : 'user', 14), ` ${who(ev)}`);
   if (ev.caption) { caption.textContent = ev.caption; caption.hidden = false; }
   else { caption.textContent = ''; caption.hidden = true; }
 }
