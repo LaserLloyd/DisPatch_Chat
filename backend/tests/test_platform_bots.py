@@ -486,8 +486,13 @@ def test_connect_writes_the_provider_into_atlas(env):
     assert (body["provider"], body["model"], body["backend"]) == ("openai", "gpt-4o", "direct")
     adv = config.get_bot("atlas").advisor
     assert adv["tools"] is True
-    assert adv["providers"] == [{"provider": "openai", "base_url": "https://api.openai.com/v1",
-                                 "model": "gpt-4o", "api_key": "sk-SECRET-2"}]
+    # 4.0: through a household Connection; the key is in the secret store, not config.yaml.
+    (entry,) = adv["providers"]
+    cid = entry.pop("connection")
+    assert entry == {"provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4o"}
+    from app import connections
+    assert connections.credential(connections.get(cid)) == "sk-SECRET-2"
+    assert "sk-SECRET-2" not in (env.tmp_path / "config.yaml").read_text()
     assert oct((env.tmp_path / "config.yaml").stat().st_mode & 0o777) == "0o600"
 
 
@@ -538,7 +543,10 @@ def test_reconnect_keeps_the_fallback_chain_behind_the_first_provider(env):
     assert r.status_code == 200, r.text
     provs = config.get_bot("atlas").advisor["providers"]
     assert [p["model"] for p in provs] == ["gpt-4o-mini", "local-27b"]
-    assert provs[1]["read_timeout_s"] == 180 and provs[0]["api_key"] == "KEEP"
+    # The 3.x inline key moved into the connection the first entry now names.
+    from app import connections
+    assert provs[1]["read_timeout_s"] == 180 and "api_key" not in provs[0]
+    assert connections.credential(connections.get(provs[0]["connection"])) == "KEEP"
 
 
 def test_reconnect_keeps_the_key_and_every_other_field(env):
@@ -554,7 +562,8 @@ def test_reconnect_keeps_the_key_and_every_other_field(env):
     r = c.post("/api/llm/connect", json={"provider": "openai", "model": "gpt-4o-mini"})
     assert r.status_code == 200, r.text
     b = config.get_bot("atlas")
-    assert b.advisor["providers"][0]["api_key"] == "KEEP"
+    from app import connections
+    assert connections.credential(connections.get(b.advisor["providers"][0]["connection"])) == "KEEP"
     assert b.advisor["providers"][0]["max_tokens"] == 777
     assert b.advisor["providers"][0]["model"] == "gpt-4o-mini"
     assert (b.advisor["owner"], b.advisor["knowledge_dir"], b.advisor["agents"]) == (

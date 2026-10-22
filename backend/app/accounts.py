@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -182,6 +183,42 @@ def new_id() -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: The real install's data directory, and the chats.db the data directory resolved to when
+#: this module was imported (before any test moved it). Under pytest nothing may open either:
+#: see :func:`refuse_live_db_under_pytest`.
+LIVE_DATA_DIR = Path.home() / ".local" / "share" / "local-chat"
+IMPORT_DB_PATH = Path(config.DATA_DIR) / "chats.db"
+
+
+def _resolved(p: Path | str) -> Path:
+    try:
+        return Path(p).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return Path(p).expanduser().absolute()
+
+
+def is_live_db_path(path: Path | str) -> bool:
+    """Is ``path`` inside the real install's data directory, or the import-time chats.db?"""
+    p = _resolved(path)
+    for root in (LIVE_DATA_DIR,):
+        r = _resolved(root)
+        if p == r or r in p.parents:
+            return True
+    return p == _resolved(IMPORT_DB_PATH)
+
+
+def refuse_live_db_under_pytest(path: Path | str) -> None:
+    """Fail closed: a test run never opens the real install's database. (2026-10-23 a test that
+    entered the app's lifespan without its own Database ran schema statements on the live
+    chats.db.) Outside pytest this does nothing."""
+    import sys
+    if "pytest" not in sys.modules or os.environ.get("DISPATCH_ALLOW_LIVE_DB_IN_TESTS") == "1":
+        return
+    if is_live_db_path(path):
+        raise RuntimeError(f"refusing to open {path} under pytest: that is the real install's "
+                           "data. Point config.DATA_DIR (and the Database) at a scratch directory.")
+
+
 def db_path() -> Path:
     return Path(config.DATA_DIR) / "chats.db"
 
@@ -189,6 +226,7 @@ def db_path() -> Path:
 @contextlib.contextmanager
 def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     path = path or db_path()
+    refuse_live_db_under_pytest(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
     con.row_factory = sqlite3.Row

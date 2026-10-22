@@ -55,13 +55,15 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        same computed list. Members, Admins and the Owner keep ``"all"``. Roles and
                        lists are raw writes: nobody is signed out. Always recorded on its first
                        run, even with nothing to change, so the auto-run rule never fires later
-``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent,
-                       ``IF NOT EXISTS`` only) the maintenance tables (``maintenance_runs``,
+``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent)
+                       the maintenance tables (``maintenance_runs``,
                        ``media_refs``, ``media_expired``, ``storage_stats``,
                        ``maintenance_state``), ``profiles.archive_after_months`` (NULL = off),
                        the indexes of ``database.SCALE_INDEXES`` (per-owner thread lists and
                        unread, File Server, foreign-key children, the time columns the daily
-                       maintenance prunes by), ``media_refs`` backfilled from every message,
+                       maintenance prunes by), ``messages.owner_profile_id`` (the thread's
+                       owner) and the search index rebuilt with it (owner-scoped search),
+                       ``media_refs`` backfilled from every message,
                        and ``auto_vacuum = INCREMENTAL`` made real by one ``VACUUM`` (the one
                        long step on a large database; logged). Recorded when it ran
 
@@ -649,12 +651,24 @@ def scale_plan() -> list[str]:
     try:
         if "profiles" not in tables or "archive_after_months" not in _columns(con, "profiles"):
             lines.append("add column: profiles.archive_after_months (NULL = off: no chat is archived)")
-        todo = database.missing_scale_indexes(con)
-        if todo:
-            lines.append(f"create {len(todo)} index(es): " + ", ".join(n for _t, n, _d in todo))
+        drift = database.scale_index_drift(con)
+        new = [n for _t, n, _d, why in drift if why == "missing"]
+        stale = [n for _t, n, _d, why in drift if why == "stale"]
+        if new:
+            lines.append(f"create {len(new)} index(es): " + ", ".join(new))
+        if stale:
+            lines.append(f"rebuild {len(stale)} index(es) an older build defined differently: "
+                         + ", ".join(stale))
+        ref = database._reference_shapes()
+        odd = [t for t in ref if t in tables and database._table_shape(con, t) != ref[t]]
+        if odd:
+            lines.append("bring table(s) to the 4.0 shape: " + ", ".join(sorted(odd)))
         if "messages" in tables:
             n = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
             lines.append(f"backfill media_refs from {n} message(s)")
+        if database.fts_needs_upgrade(con):
+            lines.append("message search: messages get their thread's owner and the search index "
+                         "is rebuilt with it (a profile's search ranks only its own messages)")
         mode = con.execute("PRAGMA auto_vacuum").fetchone()[0]
         if mode != _AUTO_VACUUM_INCREMENTAL:
             size = dbp.stat().st_size
@@ -711,6 +725,7 @@ def apply_scale() -> None:
     import time
     from . import database
     dbp = _db_file()
+    accounts.refuse_live_db_under_pytest(dbp)
     with accounts.connect():             # the accounts tables (and the archive column) exist
         pass
     con = sqlite3.connect(str(dbp), timeout=30, isolation_level=None)
@@ -719,9 +734,17 @@ def apply_scale() -> None:
         if "archive_after_months" not in _columns(con, "profiles"):
             with contextlib.suppress(sqlite3.OperationalError):     # a racing writer added it
                 con.execute("ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER")
+        col = {r[1]: (r[2] or "").upper() for r in con.execute("PRAGMA table_info(profiles)")}
+        if col.get("archive_after_months") != "INTEGER":
+            # Only an INTEGER column has ever been written; anything else is not ours.
+            raise MigrateError("profiles.archive_after_months exists with another type "
+                               f"({col.get('archive_after_months')!r}); restore the backup")
         t0 = time.monotonic()
         built = database.ensure_scale_schema(con)
         log.info("011_scale: %d index(es) built in %.1f s", built, time.monotonic() - t0)
+        t0 = time.monotonic()
+        fts = database.ensure_owner_fts(con)
+        log.info("011_scale: owner-scoped search index %s in %.1f s", fts, time.monotonic() - t0)
         t0 = time.monotonic()
         names = _backfill_media_refs(con)
         log.info("011_scale: media_refs backfilled (%d name(s)) in %.1f s", names,

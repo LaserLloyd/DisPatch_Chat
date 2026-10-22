@@ -76,6 +76,7 @@ from . import (
     characters,
     client_links,
     config,
+    connections,
     credentials,
     dashboard_routes,
     extensions,
@@ -111,6 +112,7 @@ from . import (
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .contracts import errors
 from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission, Role
+from . import database
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
@@ -138,6 +140,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 db = Database(config.DB_PATH)
+#: The instance made at import. Its path was fixed from the data directory at IMPORT time; the
+#: lifespan re-derives it from ``config.DATA_DIR`` (see _lifespan_startup), so a process that
+#: moved the data directory afterwards - every test does - never opens the old path.
+_IMPORT_DB = db
 
 # Per-thread locks serialise agent turns; a global semaphore caps concurrent
 # subprocesses so we never overwhelm the local models.
@@ -444,6 +450,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # folders). Marker-guarded: an already-migrated or brand-new data dir is a
     # cheap no-op, so this runs unconditionally on every start.
     await asyncio.to_thread(reactions.migrate_mood_folders)
+    if db is _IMPORT_DB and db._db is None:
+        # The migration above ran on config.DATA_DIR; the database opened here must be the
+        # same file. (A test that entered the lifespan without its own Database used to open
+        # the REAL install's chats.db here and run the schema statements on it.)
+        db.path = Path(config.DATA_DIR) / "chats.db"
     await db.connect()
     # Every socket is narrowed to the characters ITS profile may use (3.0
     # per-profile visibility), broadcasts included - not only the roster and hello.
@@ -848,6 +859,51 @@ async def limit_upload_body(request: Request, call_next):
                 if declared > ceiling:
                     return JSONResponse({"detail": "File too large"}, status_code=413)
     return await call_next(request)
+
+
+#: What an image the retention rule deleted answers (BUILD-PLAN-v2 §1.13.6): 410 Gone, not
+#: 404, with ``X-Image-Expired: 1`` so the client draws its "image expired" placeholder.
+EXPIRED_MEDIA_HEADER = "X-Image-Expired"
+
+
+def _expired_media_response(name: str | None) -> Response | None:
+    if not name:
+        return None
+    return JSONResponse({"detail": "This image has expired.", "expired": True}, status_code=410,
+                        headers={EXPIRED_MEDIA_HEADER: "1", "Cache-Control": "no-cache"})
+
+
+async def _expired_media_name(path: str) -> str | None:
+    """``path`` (a ``/media/<name>`` URL path, or a file path ``/api/media`` was asked for)
+    when its name is in ``media_expired``, else None. The table is keyed by the name under
+    the media store (``<name>`` of ``/media/<name>``), or by the absolute path for an image
+    kept elsewhere."""
+    p = str(path or "")
+    if p.startswith("/media/"):
+        keys = [p[len("/media/"):]]
+    else:
+        keys = [p]
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            keys.insert(0, Path(p).resolve().relative_to(MEDIA_DIR.resolve()).as_posix())
+    from urllib.parse import unquote
+    keys = [unquote(k) for k in keys if k]
+    try:
+        return await db.media_expired_name(keys)
+    except Exception:
+        return None
+
+
+@app.middleware("http")
+async def expired_media(request: Request, call_next):
+    """A ``/media/`` file that is not there: 410 + ``X-Image-Expired`` when the retention rule
+    deleted it, the plain 404 otherwise. Runs inside the gate (added before it), so only a
+    caller allowed to read ``/media/`` ever learns that a name existed."""
+    response = await call_next(request)
+    if response.status_code == 404 and request.url.path.startswith("/media/"):
+        gone = _expired_media_response(await _expired_media_name(request.url.path))
+        if gone is not None:
+            return gone
+    return response
 
 
 @app.middleware("http")
@@ -1636,6 +1692,24 @@ _IMAGE_JOB_KIND = "image_job"
 _thread_bot: dict[str, str] = {}
 
 
+async def _prune_thread_bot() -> int:
+    """Forget the ``_thread_bot`` entries of threads that no longer exist. A thread deleted
+    here pops its own entry; a profile wipe or Reset (profiles_service, its own connection)
+    deletes threads without this module seeing them, so the session-purge loop calls this
+    every five minutes. One primary-key IN query per 500 cached ids."""
+    ids = list(_thread_bot)
+    gone: list[str] = []
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cur = await db.db.execute(
+            f"SELECT id FROM threads WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        alive = {r[0] for r in await cur.fetchall()}
+        gone += [t for t in chunk if t not in alive]
+    for tid in gone:
+        _thread_bot.pop(tid, None)
+    return len(gone)
+
+
 async def _bot_of_thread(thread_id: str) -> str | None:
     bot = _thread_bot.get(thread_id)
     if bot is None:
@@ -1950,7 +2024,7 @@ def _household_character_item_denied(method: str, path: str, principal) -> bool:
     (``characters.may_use``: off a User's or Basic profile's list, or agent-backed without
     ``dispatch_agents``) - by id or by its ``/static/avatars/`` file. Refused 403, as the
     character's every other surface is. Personal characters are :func:`_foreign_character_item`'s
-    (404). The 4.0 replacement of the 3.x Safe-Mode avatar gate."""
+    (404)."""
     if method not in ("GET", "HEAD"):
         return False
     bot = None
@@ -2173,6 +2247,10 @@ async def _session_purge_loop() -> None:
                 auth.purge_expired()
             except Exception:
                 log.exception("session purge pass failed; loop continues")
+            try:
+                await _prune_thread_bot()
+            except Exception:
+                log.exception("thread-cache prune failed; loop continues")
             _loop_beat("session_purge", 300)
     except asyncio.CancelledError:
         _loop_beats.pop("session_purge", None)   # shutdown, not a fault
@@ -7671,7 +7749,7 @@ async def health(request: Request):
         "background_loops": loops,
         "gateway_ok": await _gateway_ok(),
         # Count only — refusal details (bot names, reasons) stay in the
-        # journal and the unlocked UI.
+        # journal and the signed-in UI.
         # The window the *_24h counters below actually cover: they live in
         # memory, so they start at zero with the process.
         "counters_since": _PROCESS_STARTED_AT.isoformat(timespec="seconds"),
@@ -8011,13 +8089,13 @@ async def auth_status(request: Request):
         "lock_timeout_seconds": cfg.lock_timeout,
         "min_pin_length": auth.MIN_PIN_LENGTH,
         # Absolute local paths — recon for an unauthenticated caller on a
-        # 0.0.0.0-bound service, and only the Security panel (unlocked) shows
+        # 0.0.0.0-bound service, and only the Security panel (an Admin's) shows
         # them. Empty strings keep the response shape stable for the client.
         "recovery_path": str(auth.RECOVERY_PATH) if authed and pr.is_admin else "",
         "config_path": str(auth.SECURITY_PATH) if authed and pr.is_admin else "",
         # Remembered-device ("keep this device unlocked") feature. The days
         # value is public — the unlock overlay needs it to offer the checkbox —
-        # but the device COUNT is only revealed to an unlocked session.
+        # but the device COUNT is only revealed to a signed-in session.
         "remember_days": cfg.remember_days,
         "remembered": bool(sess and sess.persistent),
         "trusted_devices": auth.trusted_count() if authed and pr.is_admin else 0,
@@ -8109,7 +8187,7 @@ async def auth_lock(request: Request):
 async def auth_remember_config(request: Request, payload: dict = Body(...)):
     """Toggle the remember-device feature (0 = off, N = sliding days).
 
-    Requires an unlocked session once a PIN exists. Enabling only makes the
+    Requires a signed-in session once a PIN exists. Enabling only makes the
     unlock screen OFFER the checkbox — becoming remembered still takes a
     correct PIN — and disabling forgets every remembered device.
     """
@@ -8367,7 +8445,7 @@ async def advisor_digest(request: Request, day: str | None = None,
 
     Run by a nightly cron on the box; idempotent unless `force`. `force`
     (rewrite an existing digest, one cloud call per advisor) is honoured for
-    a real unlocked session only: a machine caller always gets the
+    a real signed-in session only: a machine caller always gets the
     idempotent behaviour, so a loop on the machine surface cannot burn
     provider spend or churn the corpus.
     """
@@ -8392,7 +8470,7 @@ async def _require_advisor_request_owned(request: Request, rid: str) -> None:
 @app.post("/api/advisor/requests/{rid}/send",
           dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
 async def advisor_request_send(request: Request, rid: str, payload: AdvisorActionIn):
-    """The handoff card's Send button. A real unlocked session only: the
+    """The handoff card's Send button. A real signed-in session only: the
     machine surface must never be able to approve its own handoff."""
     await _require_advisor_request_owned(request, rid)
     try:
@@ -8622,7 +8700,7 @@ async def llm_connect(payload: dict = Body(...)):
             if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) \
                     or max_tokens < 0 or max_tokens > 1_000_000:
                 raise HTTPException(422, "max_tokens must be a whole number")
-            bot = await asyncio.to_thread(llm_api.connect_direct, llm_api.DirectConnectSpec(
+            spec = llm_api.DirectConnectSpec(
                 provider=str(payload.get("provider") or ""),
                 model=str(payload.get("model") or ""),
                 base_url=str(payload.get("base_url") or ""),
@@ -8633,9 +8711,19 @@ async def llm_connect(payload: dict = Body(...)):
                 emoji=str(payload.get("emoji") or ""),
                 persona=str(payload.get("system_prompt") or ""),
                 tools=tools, max_tokens=max_tokens,
-            ))
+            )
+            # 4.0: through a household Connection (the key in the secret store, shared by
+            # every profile's bots), the way the setup wizard and the Connections page do it.
+            # A provider no connection type speaks keeps the 3.x inline entry.
+            bot = await asyncio.to_thread(_connect_direct_via_connection, spec)
+            if bot is None:
+                bot = await asyncio.to_thread(llm_api.connect_direct, spec)
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
+    except connections.ConnectionError_ as e:
+        raise HTTPException(e.status, str(e)) from e
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
     # Every open tab is holding the roster from before this bot existed. Push
     # the new one exactly the way the Bot Manager's own save does — the WS
     # scoper filters that frame per connection (characters.visible_to), so a
@@ -8646,6 +8734,135 @@ async def llm_connect(payload: dict = Body(...)):
         return {"bot": bot.to_admin_dict()}
     row = _bot_row(bot)
     return {**row, "bot": row}
+
+
+def _connection_for(provider: Any, base_url: str, key: str, key_env: str,
+                    current: str | None, model: str) -> tuple[Any, bool]:
+    """``(connection, created)`` for a Connect submission: an existing household connection of
+    the same type and address that holds the same key (a pasted key is compared with each
+    stored one; an environment variable by name) - or, when the form sent no key, the bot's
+    current connection, else one that already has a key - otherwise a new one (the key goes to
+    the secret store, never config.yaml). One provider account then serves every profile."""
+    type_id = connections.TYPE_BY_PROVIDER[provider.id]
+    want = base_url.rstrip("/")
+    cands = [c for c in connections.list_all()
+             if c.type == type_id and c.base_url.rstrip("/") == want]
+    match = None
+    if key:
+        match = next((c for c in cands if connections.credential(c) == key), None)
+    elif key_env:
+        match = next((c for c in cands if c.credential_ref == "env:" + key_env), None)
+    else:
+        match = (next((c for c in cands if c.id == current), None)
+                 or next((c for c in cands if c.credential_ref), None)
+                 or (None if provider.key_required else next(iter(cands), None)))
+        if match is None and provider.key_required:
+            raise llm_api.ApiError(f"{provider.label} needs an API key",
+                                   "Paste a key, or name an environment variable that "
+                                   "holds one and make sure it is set for this process.")
+    if match is not None:
+        return match, False
+    if key_env and not connections.env_name_ok(key_env):
+        raise llm_api.ApiError("That environment variable cannot hold the key",
+                               "Name one that ends in _KEY, _TOKEN, _SECRET or _PASSWORD.")
+    # The Admin's own Connect panel has always reached any address (a local model server on
+    # this box or the LAN included), so the private-address guard is not applied here.
+    c = connections.create(type=type_id, base_url=base_url, api_key=key, api_key_env=key_env,
+                           default_model=model, allow_private=True, key_optional=bool(key_env))
+    return c, True
+
+
+def _connect_direct_via_connection(spec: llm_api.DirectConnectSpec) -> config.Bot | None:
+    """``POST /api/llm/connect`` (backend ``direct``) in 4.0: find or create the household
+    Connection, then point the target bot at it (``characters.with_connection``: the first
+    provider entry is replaced, a fallback chain behind it is kept). The same checks and
+    answers as :func:`llm_api.connect_direct`; None when no connection type speaks the
+    provider (the caller keeps the inline 3.x entry). A new connection becomes the household
+    default when there is none, and every profile's own Atlas still without a connection is
+    pointed at it - the wizard's rule - so a User's bots are connected too."""
+    import dataclasses as _dc
+    provider = llm_api.PROVIDER_BY_ID.get((spec.provider or "").strip())
+    if provider is None or provider.id not in connections.TYPE_BY_PROVIDER:
+        return None
+    target = (spec.target or "").strip() or llm_api.DEFAULT_DIRECT_TARGET
+    existing = config.resolve_bot(target)
+    if existing is None:
+        if not llm_api._NEW_BOT_ID_RE.match(target):
+            raise llm_api.ApiError("That bot id is not allowed",
+                                   "Use 1-32 characters from a-z, 0-9, '-' and '_'.")
+    elif characters.is_personal(existing):
+        # Somebody's own bot is theirs to set up (My bots); to this household panel it does
+        # not exist, as everywhere else an Admin looks.
+        raise characters.CharacterError("bot_not_found", "Unknown bot", 404)
+    elif not config.is_direct(existing):
+        raise llm_api.ApiError(
+            "That bot already exists and is not a direct-API bot",
+            f"{target!r} uses the {'legacy API' if existing.api else 'agent'} backend. Choose a "
+            "different name, or remove it first.")
+    base_url = llm_api.normalize_base_url(spec.base_url or provider.base_url)
+    model = (spec.model or "").strip() or (provider.models[0] if provider.models else "")
+    if not model:
+        raise llm_api.ApiError("A model is required",
+                               "Run Test connection to list the models this provider "
+                               "offers, or type the model name in.")
+    key = (spec.api_key or "").strip()
+    key_env = (spec.api_key_env or "").strip()
+    first = characters.first_entry(existing) if existing is not None else None
+    same = bool(first) and first.get("provider") == provider.id
+    if not key and not key_env and same and not first.get("connection"):
+        # A 3.x inline key on the same provider moves into the connection (a re-save from the
+        # panel sends no key: a saved key never comes back out of the API).
+        key = str(first.get("api_key") or "").strip()
+        key_env = str(first.get("api_key_env") or "").strip()
+    conn, created = _connection_for(provider, base_url, key, key_env,
+                                    (first or {}).get("connection") if same else None, model)
+    raw = (spec.persona or "").strip()[:llm_api.MAX_PERSONA_CHARS]
+    try:
+        persona = personas.normalise(raw)
+    except ValueError as e:
+        raise llm_api.ApiError("That system prompt cannot be saved", str(e)) from e
+    reset = bool(raw) and not persona
+    tools_on = bool(spec.tools)
+
+    def shape(b: config.Bot) -> config.Bot:
+        hint = b.model_hint
+        b = characters.with_connection(b, conn.id, model)
+        adv = config.set_direct_tools(b.advisor, tools_on)
+        if persona:
+            adv["persona"] = persona
+        elif reset:
+            adv.pop("persona", None)
+        entry = dict(adv["providers"][0])
+        if not same:                       # another provider's tuning does not carry over
+            for k in ("max_tokens", "read_timeout_s", "extra_body"):
+                entry.pop(k, None)
+        if spec.max_tokens and int(spec.max_tokens) > 0:
+            entry["max_tokens"] = int(spec.max_tokens)
+        if provider.extra_body and "extra_body" not in entry:
+            entry["extra_body"] = dict(provider.extra_body)    # e.g. MiniMax: thinking off
+        adv["providers"] = [entry, *adv["providers"][1:]]
+        return _dc.replace(
+            b, advisor=adv,
+            name=(spec.name or "").strip() or b.name,
+            emoji=(spec.emoji or "").strip() or b.emoji or llm_api._EMOJI_BY_PROVIDER.get(provider.id, "🌍"),
+            model_hint=model if hint in ("", "Direct API") else hint)
+
+    if existing is not None:
+        bot = config.update_bot(existing.id, shape)
+    else:
+        bot = config.upsert_bot(shape(config.Bot(
+            id=target, name=(spec.name or "").strip() or target,
+            emoji=(spec.emoji or "").strip() or "🌍", model_hint="",
+            safe=False, reactions=False, advisor={"providers": [], "tools": tools_on})))
+    if created:
+        from . import profiles_service, settings_store
+        if not connections.default_id():
+            settings_store.set_many({"connections.default": conn.id})
+        try:
+            profiles_service.connect_unconnected_atlases(conn.id, model)
+        except Exception:
+            log.warning("could not connect the profiles' own Atlases", exc_info=True)
+    return bot
 
 
 # /api/bots* are the 2.x names of the character API. The work lives in app/characters.py
@@ -9209,25 +9426,57 @@ async def bot_models(request: Request, bot_id: str):
 THREAD_PREVIEW_CHARS = 400
 
 
-@app.get("/api/threads", responses=problem.MACHINE)
-async def list_threads(request: Request, bot_id: str = Query(...), include_archived: bool = False):
-    # Inbound-exempt for machines (the protected Admin's chats only).
-    bot = config.resolve_bot(bot_id)
-    if bot:
-        bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
-    _require_bot_use(request, bot_id)
-    # 4.0: the caller's OWN chats with this character.
-    threads = await db.list_threads(bot_id, include_archived=include_archived,
-                                    principal=policy.of(request).principal)
+def _thread_rows(threads) -> list[dict]:
+    """Thread-list rows as the client gets them. The last message is a PREVIEW, not the
+    message: the UI shows 80 plain-text chars, and shipping every thread's full last body made
+    a thread list ~242 KB a poll for a busy bot. The message itself is one GET away."""
     out = [t.model_dump() for t in threads]
     for t in out:
-        # A PREVIEW, not the message: the UI shows 80 plain-text chars, and
-        # shipping every thread's full last body made this ~242 KB a poll for
-        # a busy bot. The message itself is one GET away.
         lm = t.get("last_message")
         if lm and len(lm) > THREAD_PREVIEW_CHARS:
             t["last_message"] = lm[:THREAD_PREVIEW_CHARS] + "…"
-    return {"bot_id": bot_id, "threads": out}
+    return out
+
+
+async def _thread_page(principal, *, bot_id: str | None = None, archived: bool | None = False,
+                       cursor: str | None = None, limit: int = database.THREAD_PAGE_DEFAULT
+                       ) -> tuple[list[dict], str | None]:
+    """One page of ``principal``'s OWN threads (pinned first on page one), without the
+    threads of characters it may no longer use. A cursor that is not ours is a 400."""
+    try:
+        threads, nxt = await db.list_threads_page(
+            bot_id=bot_id, archived=archived, cursor=cursor, limit=limit, principal=principal,
+            allow_bot=None if bot_id else (lambda b: characters.may_use_id(b, principal)))
+    except database.CursorError:
+        raise HTTPException(400, "Invalid cursor") from None
+    return _thread_rows(threads), nxt
+
+
+@app.get("/api/threads", responses=problem.MACHINE)
+async def list_threads(request: Request, bot_id: str | None = None,
+                       include_archived: bool = False, archived: bool = False,
+                       cursor: str | None = Query(None, max_length=600),
+                       limit: int = Query(database.THREAD_PAGE_DEFAULT, ge=1,
+                                          le=database.THREAD_PAGE_MAX)):
+    """The caller's OWN threads, one page at a time (4.0 scale): page one is every pinned
+    thread plus the ``limit`` (default 50) most recently updated others; ``next_cursor``
+    (null at the end) fetches the next page. ``bot_id``: one character's threads (what 3.x
+    clients ask; on a small install page one is the whole 3.x answer), else every character's.
+    ``archived=1``: the Archived view. ``include_archived=1`` (3.x): both, merged."""
+    # Inbound-exempt for machines (the protected Admin's chats only).
+    pr = policy.of(request).principal
+    if bot_id:
+        bot = config.resolve_bot(bot_id)
+        if bot:
+            bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
+        _require_bot_use(request, bot_id)
+    else:
+        bot_id = None
+        policy.of(request).require(Permission.USE_CHAT)  # a page of every character: a person
+    rows, nxt = await _thread_page(pr, bot_id=bot_id,
+                                   archived=True if archived else (None if include_archived else False),
+                                   cursor=cursor, limit=limit)
+    return {"bot_id": bot_id, "threads": rows, "next_cursor": nxt}
 
 
 @app.post("/api/threads", responses=problem.MACHINE)
@@ -9544,11 +9793,15 @@ async def get_message_mood_face(request: Request, message_id: str):
 
 @app.get("/api/threads/{thread_id}/messages", responses=problem.MACHINE)
 async def get_messages(request: Request, thread_id: str,
-                       limit: int = Query(200, ge=1, le=500),
-                       before_id: str | None = None):
+                       limit: int = Query(100, ge=1, le=500),
+                       before_id: str | None = Query(None, max_length=200),
+                       before: str | None = Query(None, max_length=200)):
+    """The newest ``limit`` messages (default 100), oldest first; ``before`` (or the 3.x name
+    ``before_id``: a message id of this thread) pages further back, ``has_more`` says whether
+    there is more. A keyset read on ``(created_at, rowid)`` - the same cost on page 1 and 500."""
     thread = await _require_thread(request, thread_id)
     thread_id = thread.id
-    msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before_id)
+    msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before or before_id)
     out = [m.model_dump() for m in msgs]
     return {
         "thread_id": thread_id,
@@ -10132,6 +10385,9 @@ async def serve_media(request: Request, path: str = Query(...)):
     try:
         candidate = Path(path).resolve(strict=True)
     except (OSError, RuntimeError):
+        gone = _expired_media_response(await _expired_media_name(path))
+        if gone is not None:
+            return gone
         raise HTTPException(404, "Not found")
     if candidate.suffix.lower() not in MEDIA_EXTS:
         raise HTTPException(403, "Forbidden")
@@ -10188,8 +10444,7 @@ async def file_list(request: Request):
 
 
 async def _file_access(request: Request, file_id: str, *, delete: bool = False) -> dict:
-    """The file record, after the 4.0 File Server rules, or the refusal (BUILD-PLAN-v2 §1.11,
-    the replacement of the 3.x Safe-Mode fileserver block):
+    """The file record, after the 4.0 File Server rules, or the refusal (BUILD-PLAN-v2 §1.11):
 
     * **ownership**: another profile's file is a 404 for everyone, Admins included (its
       existence is private) - ``ownership.may_see_thread`` semantics: a file with no owner is
@@ -12836,10 +13091,19 @@ async def _handle_get_threads(ws: WebSocket, data: dict) -> None:
     if not await _ws_bot_allowed(ws, bot_id):
         return
     # 4.0: the socket's person's OWN chats with this character.
-    threads = await db.list_threads(bot_id, principal=manager.principal_of(ws))
+    # Paged like GET /api/threads (4.0 scale): page one unless the frame names a cursor.
+    try:
+        limit = max(1, min(database.THREAD_PAGE_MAX, int(data.get("limit") or database.THREAD_PAGE_DEFAULT)))
+    except (TypeError, ValueError):
+        limit = database.THREAD_PAGE_DEFAULT
+    cursor = data.get("cursor") if isinstance(data.get("cursor"), str) else None
+    try:
+        rows, nxt = await _thread_page(manager.principal_of(ws), bot_id=bot_id, cursor=cursor,
+                                       limit=limit)
+    except HTTPException:
+        return                                   # a cursor that is not ours
     await manager.send(ws, {
-        "type": "threads_list", "bot_id": bot_id,
-        "threads": [t.model_dump() for t in threads],
+        "type": "threads_list", "bot_id": bot_id, "threads": rows, "next_cursor": nxt,
     })
 
 
@@ -13361,11 +13625,21 @@ async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws, token=(session.token if session else None), principal=principal)
     try:
         bots = characters.visible_bots(principal, config.load_bots())   # this profile's rail
+        # 4.0 scale: the first page of this profile's OWN threads (every character, pinned
+        # first) and the cursor for the next one - never all of them. Best effort: a failure
+        # here leaves the client to ask GET /api/threads.
+        try:
+            first, next_cursor = await _thread_page(principal)
+        except Exception:
+            log.warning("hello: the first thread page failed", exc_info=True)
+            first, next_cursor = [], None
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
             "role": principal.role,
             "profile": people_api.public_profile(principal.profile),
+            "threads": first,
+            "next_cursor": next_cursor,
         })
         while True:
             data = await ws.receive_json()
@@ -14089,7 +14363,7 @@ async def guide_seed(request: Request, name: str, force: bool = False):
     if not machine:
         _require_operator(request)
     elif force:
-        raise HTTPException(403, "force needs an unlocked session")
+        raise HTTPException(403, "force needs a signed-in session")
     if name not in firstrun.GUIDES:
         raise HTTPException(404, "Unknown guide")
     try:
