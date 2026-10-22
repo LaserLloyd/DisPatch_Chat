@@ -315,6 +315,8 @@ _r("GET", "/api/settings/defaults", public("default theme / language / avatar st
 # ---- WP-PROF: profile lifecycle (app/profiles_api.py): reset, my characters, export, copies
 
 # ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
+_r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
+   note="AI build: a draft bot from a description; nothing is saved or logged"))
 
 # ---- WP-SCALE-OPS: maintenance, storage, retention (app/maintenance_api.py), all P.ADMIN_SYSTEM
 
