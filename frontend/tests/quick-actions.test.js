@@ -230,7 +230,7 @@ test('sendMessage puts the action id in the WS frame, and clears the pill after 
 
 test('main.js renders the tag, switches chips by viewport, and handles bad_action', () => {
   assert.match(MAIN, /actionTagEl\(msg\.metadata\)/);
-  assert.match(MAIN, /!state\.decoy && !isMobile\(\)\) \? quickWelcomeChips\(\)/);
+  assert.match(MAIN, /!isMobile\(\)\) \? quickWelcomeChips\(\)/);
   assert.match(MAIN, /data\.code === 'bad_action'/);
   assert.match(MAIN, /wireQuickActions\(\{ announce \}\)/);
   assert.match(MAIN, /api\.quickActions/);
@@ -390,5 +390,5 @@ test('with no served actions the empty chat still gets the "Upload to chat" chip
   assert.deepEqual([...out[0].querySelectorAll('.qa-chip')].map((b) => b.dataset.upload), ['1']);
   m.setUpload(null);
   assert.deepEqual(m.welcomeChips(), []);
-  assert.match(MAIN, /if \(\(!quick\.length \|\| !quickActionList\(\)\.length\) && !state\.decoy && quickOk\)/);
+  assert.match(MAIN, /if \(\(!quick\.length \|\| !quickActionList\(\)\.length\) && quickOk\)/);
 });

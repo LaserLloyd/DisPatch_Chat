@@ -277,11 +277,10 @@ test('wizard: where it starts, the next step, and the bodies it sends', async ()
   assert.equal(W.ownerError({ password: 'long-enough', pin: '', confirm: 'other' }), 'wiz.owner_pw_mismatch');
   assert.equal(W.ownerError({ password: '', pin: '12', confirm: '' }), 'wiz.owner_pin_short');
   assert.equal(W.ownerError({ password: 'long-enough', pin: '1234', confirm: 'long-enough' }), '');
+  // A PIN is optional on both types; blank rows are skipped.
   assert.deepEqual(W.familyPayload([
-    { role: 'member', name: ' Max ', pin: '5555' }, { role: 'restricted', name: 'Mia', pin: '9999' }, { role: 'member', name: '', pin: '' }],
-  { animals: true, assistants: false }), {
-    people: [{ name: 'Max', role: 'member', pin: '5555' }, { name: 'Mia', role: 'restricted' }],
-    install_animal_friends: true, install_assistants: false });
+    { role: 'user', name: ' Max ', pin: '5555' }, { role: 'basic', name: 'Mia', pin: '' }, { role: 'user', name: '', pin: '' }]), {
+    people: [{ name: 'Max', role: 'user', pin: '5555' }, { name: 'Mia', role: 'basic' }] });
 });
 
 test('backup: what each row offers, and the schedule sentence', async () => {
@@ -539,7 +538,7 @@ test('Wizard: owner step validates before it calls the server', { skip: dom.skip
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.owner_create).click();
   await tick(); await tick();
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0], { name: 'Owner', password: 'long-enough-pw' });  // scrub-ok: test fixture, not a real credential
+  assert.deepEqual(seen[0], { name: 'Admin', password: 'long-enough-pw' });  // scrub-ok: test fixture, not a real credential
   // "Set up later" dismisses for the session and the wizard is not offered again
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.later).click();
   assert.equal(win.document.querySelector('.wizard'), null);
@@ -624,7 +623,7 @@ test('main.js: hooks the new modules, registers the locked handler and starts th
   assert.ok(SW.includes("'/static/w5.css'"));
   assert.match(MAIN, /w5SetOnLocked\(\(\) => handleLocked\(\)\);/);
   assert.match(MAIN, /await refreshAuthAndBoot\(\);\s+[\s\S]{0,400}applyDeviceDefaults\(\);\s+(?:const wizard = await )?maybeStartWizard\(/);
-  assert.match(MAIN, /characterPanel\(bot, \{ \.\.\.characterCtx\(\), skip: \['audience', 'personality'\]/);
+  assert.match(MAIN, /characterPanel\(bot, \{ \.\.\.characterCtx\(\), skip: \['personality'\]/);
   assert.match(MAIN, /case 'connections':\s+await mountConnectionsSection\(pane\)/);
   assert.match(MAIN, /const ctl = await mountConnections\(host, \{/);
   assert.match(MAIN, /function mountSchemaHosts\(pane/);

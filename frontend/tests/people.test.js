@@ -33,38 +33,49 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
 // ------------------------------------------------------------------ roles
 
-test('normalizeRole trusts the server, and falls back the way 2.x worked', () => {
-  assert.equal(P.normalizeRole({ role: 'member' }), 'member');
-  assert.equal(P.normalizeRole({ role: 'nonsense', decoy: true }), 'restricted');
-  assert.equal(P.normalizeRole({ decoy: true }), 'restricted');
-  assert.equal(P.normalizeRole({ pin_set: false }), 'owner');
-  assert.equal(P.normalizeRole(null), 'owner');
+test('normalizeRole trusts the server; anything unknown reads as the lowest type', () => {
+  assert.equal(P.normalizeRole({ role: 'user' }), 'user');
+  assert.equal(P.normalizeRole({ role: 'admin', protected: true }), 'admin');
+  assert.equal(P.normalizeRole({ role: 'basic' }), 'basic');
+  assert.equal(P.normalizeRole({ role: 'member' }), 'basic', 'the 3.x words are gone');
+  assert.equal(P.normalizeRole({ pin_set: false }), 'basic');
+  assert.equal(P.normalizeRole(null), 'basic');
 });
 
-test('admin surfaces are for owner and admin only; a Member is signed in but not an admin', () => {
-  assert.equal(P.isAdminRole('owner'), true);
+test('admin surfaces are for Admins only; a User is signed in but not an admin', () => {
   assert.equal(P.isAdminRole('admin'), true);
-  assert.equal(P.isAdminRole('member'), false);
-  assert.equal(P.isAdminRole('restricted'), false);
+  assert.equal(P.isAdminRole('user'), false);
+  assert.equal(P.isAdminRole('basic'), false);
   assert.equal(P.isAdminRole(undefined), false);
 });
 
-test('canManage mirrors the server: the Owner and Admins manage everyone but THE Owner', () => {
-  assert.equal(P.canManage('owner', 'admin'), true);
-  assert.equal(P.canManage('owner', 'owner'), false);
-  assert.equal(P.canManage('admin', 'member'), true);
-  assert.equal(P.canManage('admin', 'restricted'), true);
-  assert.equal(P.canManage('admin', 'admin'), true);
-  assert.equal(P.canManage('admin', 'owner'), false);
-  assert.equal(P.canManage('member', 'restricted'), false);
-  assert.equal(P.canManage('restricted', 'member'), false);
+test('canManage mirrors the server: Admins manage everyone but the protected Admin', () => {
+  assert.equal(P.canManage('admin', { role: 'admin' }), true);
+  assert.equal(P.canManage('admin', { role: 'admin', protected: true }), false);
+  assert.equal(P.canManage('admin', 'user'), true);
+  assert.equal(P.canManage('admin', { role: 'basic' }), true);
+  assert.equal(P.canManage('user', { role: 'basic' }), false);
+  assert.equal(P.canManage('basic', { role: 'user' }), false);
 });
 
-test('the Admin role is offered to the Owner and Admins, once the Owner has a password', () => {
-  assert.deepEqual(P.roleOptions('owner', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
-  assert.deepEqual(P.roleOptions('owner', false), { options: ['member', 'restricted'], adminBlocked: 'owner_needs_password' });
-  assert.deepEqual(P.roleOptions('admin', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
-  assert.deepEqual(P.roleOptions('member', true), { options: ['member', 'restricted'], adminBlocked: 'not_owner' });
+test('the Admin type is offered to Admins, once the protected Admin has a password', () => {
+  assert.deepEqual(P.roleOptions('admin', true), { options: ['admin', 'user', 'basic'], adminBlocked: null });
+  assert.deepEqual(P.roleOptions('admin', false), { options: ['user', 'basic'], adminBlocked: 'owner_needs_password' });
+  assert.deepEqual(P.roleOptions('user', true), { options: ['user', 'basic'], adminBlocked: 'not_admin' });
+});
+
+test('the rail groups Mine and Household, and a household bot the profile copied stands down', () => {
+  const bots = [
+    { id: 'atlas', name: 'Atlas', scope: 'household' }, { id: 'helper', name: 'Helper', scope: 'household' },
+    { id: 'p1', name: 'Atlas', scope: 'personal', cloned_from: 'atlas' }, { id: 'p2', name: 'Mine', scope: 'personal' },
+  ];
+  const g = P.railGroups(bots);
+  assert.deepEqual(g.mine.map((b) => b.id), ['p1', 'p2']);
+  assert.deepEqual(g.household.map((b) => b.id), ['helper'], 'one Atlas, not two');
+  assert.deepEqual(P.railGroups(bots.slice(0, 2)).household.map((b) => b.id), ['atlas', 'helper']);
+  assert.deepEqual(P.railGroups(null), { mine: [], household: [] });
+  assert.equal(P.isMineBot({ scope: 'personal' }), true);
+  assert.equal(P.isMineBot({ scope: 'household' }), false);
 });
 
 // ------------------------------------------------------------- credentials
@@ -83,9 +94,9 @@ test('only the secret in use goes into the sign-in options', () => {
   assert.deepEqual(P.credentialOptions('pin', ''), {});
 });
 
-test('the keypad stays when the only profile is the Owner and the install has a PIN', () => {
-  const owner = (credential) => ({ id: 'o', name: 'Owner', role: 'owner', credential });
-  const kid = { id: 'k', name: 'Kid', role: 'restricted', credential: 'none' };
+test('the keypad stays when the only profile is the protected Admin and the install has a PIN', () => {
+  const owner = (credential) => ({ id: 'o', name: 'Ada', role: 'admin', protected: true, credential });
+  const kid = { id: 'k', name: 'Kid', role: 'basic', credential: 'none' };
   assert.equal(P.signInMode({ claimed: true, pin_set: true, profiles: [owner('pin_or_password')] }), 'keypad');
   assert.equal(P.signInMode({ claimed: true, pinSet: true, profiles: [owner('pin_or_password')] }), 'keypad', 'state.auth spelling');
   assert.equal(P.signInMode({ claimed: true, profiles: [owner('pin')] }), 'keypad');
@@ -96,12 +107,12 @@ test('the keypad stays when the only profile is the Owner and the install has a 
   assert.equal(P.signInMode({ pin_set: true }), 'keypad');        // a 2.x server sends no profiles
 });
 
-test('tiles list the Owner first, then by role, then by name', () => {
+test('tiles list the shared default profile first, then the protected Admin, then by type, then by name', () => {
   const names = P.sortTiles([
-    { name: 'Zed', role: 'member' }, { name: 'Kid', role: 'restricted' },
-    { name: 'Ann', role: 'member' }, { name: 'Boss', role: 'owner' }, { name: 'Ops', role: 'admin' },
+    { name: 'Zed', role: 'user' }, { name: 'Kid', role: 'basic' }, { name: 'Ann', role: 'user' },
+    { name: 'Boss', role: 'admin', protected: true }, { name: 'Ops', role: 'admin' }, { name: 'DisPatch', role: 'user', shared: true },
   ]).map((p) => p.name);
-  assert.deepEqual(names, ['Boss', 'Ops', 'Ann', 'Zed', 'Kid']);
+  assert.deepEqual(names, ['DisPatch', 'Boss', 'Ops', 'Ann', 'Zed', 'Kid']);
 });
 
 test('avatars: same-origin picture, short glyph, or the initial -- never a foreign URL', () => {
@@ -190,27 +201,26 @@ test('quiet hours parse and format symmetrically', () => {
   assert.equal(P.formatQuietHours('20:30', ''), '');
 });
 
-test('createPayload: each role needs its own credential', () => {
-  assert.deepEqual(P.createPayload({ name: ' Sam ', role: 'member', pin: '1234' }).body, { name: 'Sam', role: 'member', pin: '1234' });
-  assert.equal(P.createPayload({ name: 'Sam', role: 'member', pin: '12' }).errors.pin, 'min_4');
-  assert.equal(P.createPayload({ name: 'Sam', role: 'member' }).errors.pin, 'min_4');
-  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'restricted' }).errors, {});
-  assert.equal(P.createPayload({ name: 'Kid', role: 'restricted', pin: '1' }).errors.pin, 'min_4');
+test('createPayload: a PIN is optional on User and Basic, an Admin needs a password', () => {
+  assert.deepEqual(P.createPayload({ name: ' Sam ', role: 'user', pin: '1234' }).body, { name: 'Sam', role: 'user', pin: '1234' });
+  assert.equal(P.createPayload({ name: 'Sam', role: 'user', pin: '12' }).errors.pin, 'min_4');
+  assert.deepEqual(P.createPayload({ name: 'Sam', role: 'user' }).errors, {});
+  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'basic' }).errors, {});
+  assert.equal(P.createPayload({ name: 'Kid', role: 'basic', pin: '1' }).errors.pin, 'min_4');
+  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'basic', householdBots: ['atlas'] }).body, { name: 'Kid', role: 'basic', household_bots: ['atlas'] });
   assert.equal(P.createPayload({ name: 'Ops', role: 'admin', password: 'short' }).errors.password, 'min_8');
   assert.deepEqual(P.createPayload({ name: 'Ops', role: 'admin', password: 'longenough' }).body, { name: 'Ops', role: 'admin', password: 'longenough' });
-  assert.equal(P.createPayload({ name: '  ', role: 'member', pin: '1234' }).errors.name, 'required');
-  const withBudgets = P.createPayload({ name: 'Kid', role: 'restricted', minutes: '30', sessionMinutes: '10' }).body;
-  assert.deepEqual(withBudgets.budgets, { minutes_per_day: 30 });
-  assert.equal(withBudgets.session_timeout, 600);
+  assert.equal(P.createPayload({ name: '  ', role: 'user', pin: '1234' }).errors.name, 'required');
+  assert.equal(P.createPayload({ name: 'Kid', role: 'basic', sessionMinutes: '10' }).body.session_timeout, 600);
 });
 
 test('patchPayload sends only what changed', () => {
-  const person = { id: 'p1', name: 'Kid', role: 'restricted', avatar: '', disabled: false, budgets: { minutes_per_day: 30 }, session_timeout: 600 };
+  const person = { id: 'p1', name: 'Kid', role: 'basic', avatar: '', disabled: false, session_timeout: 600 };
   const same = P.budgetsToForm(person);
-  assert.deepEqual(P.patchPayload(person, { ...same, name: 'Kid', role: 'restricted', avatar: '', disabled: false }).patch, {});
-  const changed = P.patchPayload(person, { ...same, name: 'Kiddo', role: 'member', avatar: '🦊', minutes: '', disabled: true });
-  assert.deepEqual(changed.patch, { name: 'Kiddo', role: 'member', avatar: '🦊', budgets: {}, disabled: true });
-  assert.equal(P.patchPayload({ ...person, role: 'owner' }, { ...same, name: 'Kid', role: 'member' }).patch.role, undefined, 'the Owner\'s role is never patched');
+  assert.deepEqual(P.patchPayload(person, { ...same, name: 'Kid', role: 'basic', avatar: '', disabled: false }).patch, {});
+  const changed = P.patchPayload(person, { ...same, name: 'Kiddo', role: 'user', avatar: '🦊', disabled: true });
+  assert.deepEqual(changed.patch, { name: 'Kiddo', role: 'user', avatar: '🦊', disabled: true });
+  assert.equal(P.patchPayload({ ...person, role: 'admin', protected: true }, { ...same, name: 'Kid', role: 'user' }).patch.role, undefined, 'the protected Admin\'s role is never patched');
 });
 
 // ----------------------------------------------------------------- activity
@@ -227,53 +237,19 @@ test('activity rows: newest first, six columns, zero-filled, at most 7 days', ()
   assert.equal(totals.turn, 4);
 });
 
-test('usage lines: today against the limits, over-limit flagged', () => {
-  const lines = P.usageLines(
-    { active_seconds: 1800, 'action:turn': 100, 'action:thread': 1, upload_bytes: 5 * 1024 * 1024 },
-    { minutes_per_day: 45, turns: 100, upload_mb: 50 });
-  const by = Object.fromEntries(lines.map((l) => [l.key, l]));
-  assert.deepEqual([by.minutes.used, by.minutes.limit, by.minutes.over], [30, 45, false]);
-  assert.deepEqual([by.turns.used, by.turns.limit, by.turns.over], [100, 100, true]);
-  assert.deepEqual([by.threads.used, by.threads.limit], [1, null]);
-  assert.equal(by.upload_mb.used, 5);
-  assert.equal(P.usageLines(null, null).every((l) => l.used === 0 && l.limit === null && !l.over), true);
-});
-
 // ------------------------------------------------------------ policy frames
 
-test('ws error frames: policy refusals become the notice, the rest stay plain', () => {
-  assert.deepEqual(P.wsErrorKind({ type: 'error', code: 'time_limit' }), { kind: 'notice', code: 'time_limit' });
-  assert.deepEqual(P.wsErrorKind({ error: { code: 'quiet_hours' } }), { kind: 'notice', code: 'quiet_hours' });
-  assert.equal(P.wsErrorKind({ code: 'safe_mode' }).kind, 'restricted');
+test('ws error frames: a permission refusal is told apart from the rest', () => {
   assert.equal(P.wsErrorKind({ code: 'permission_denied' }).kind, 'denied');
   assert.equal(P.wsErrorKind({ message: 'boom' }).kind, 'plain');
   assert.equal(P.wsErrorKind(null).kind, 'plain');
-  assert.equal(P.blockNoticeKey('time_limit'), 'notice.time_limit');
-  assert.equal(P.blockNoticeKey('permission_denied'), null);
-});
-
-test('only Members and Restricted profiles can be bound to a device', () => {
-  const ids = P.bindableProfiles([
-    { id: 'o', role: 'owner' }, { id: 'a', role: 'admin' }, { id: 'm', role: 'member' },
-    { id: 'r', role: 'restricted' }, { id: 'x', role: 'member', disabled: true },
-  ]).map((p) => p.id);
-  assert.deepEqual(ids, ['m', 'r']);
-});
-
-test('a character\'s audience follows the two switches, then the server field', () => {
-  assert.equal(P.audienceOf({ safe: true, hide_unlocked: true }), 'restricted');
-  assert.equal(P.audienceOf({ safe: true, hide_unlocked: false }), 'all');
-  assert.equal(P.audienceOf({ safe: false, hide_unlocked: false }), 'members');
-  assert.equal(P.audienceOf({ safe: false, audience: 'all' }), 'members', 'a click before Save wins over the stale field');
-  assert.equal(P.audienceOf({ audience: 'restricted' }), 'restricted');
-  assert.equal(P.audienceOf({}), 'members');
 });
 
 // --------------------------------------------------------------------- api.js
 
 const NAMES = ['me', 'login', 'switchProfile', 'setupOwner', 'changePassword', 'apiTokenInfo', 'rotateApiToken',
   'people', 'createPerson', 'patchPerson', 'deletePerson', 'setPersonPin', 'clearPersonPin', 'setPersonPassword',
-  'signOutPerson', 'devices', 'forgetDevice', 'peopleActivity', 'peopleAudit', 'myActivity',
+  'signOutPerson', 'devices', 'forgetDevice', 'peopleActivity', 'peopleAudit',
   'rolePreview', 'changeRole', 'setHouseholdBots', 'deletePreview'];
 
 test('api.js no longer binds a device to a profile (4.0: the route is gone)', () => {
@@ -338,14 +314,13 @@ test('errorExtras reads the 3.0 envelope, retry_after and the Retry-After header
 test('api.login / switchProfile / setupOwner / changePassword post the contract bodies', { skip: dom.skip }, async () => {
   const { api } = await loadApi();
   apiRoutes = {
-    'POST /api/auth/login': () => [200, { ok: true, role: 'member' }],
+    'POST /api/auth/login': () => [200, { ok: true, role: 'user' }],
     'POST /api/auth/switch': () => [200, { ok: true, role: 'admin' }],
     'POST /api/auth/setup': () => [200, { ok: true, claimed: true }],
     'POST /api/auth/password': () => [200, { ok: true }],
     'POST /api/auth/api-token': () => [200, { ok: true, api_token: 'k' }],
     'GET /api/people/activity?profile_id=p1&days=7': () => [200, { summary: { days: [] } }],
     'GET /api/people/activity': () => [200, { summary: { days: [] } }],
-    'GET /api/me/activity?days=7': () => [200, {}],
     'GET /api/people/p1/role/preview?role=basic': () => [200, { counts: {}, token: 'tk', deletes: true }],
     'POST /api/people/p1/role': () => [200, {}],
     'PUT /api/people/p1/household-bots': () => [200, {}],
@@ -362,7 +337,6 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
   await api.setMachineAccess({ machineLoopbackTrust: false });
   await api.peopleActivity({ profileId: 'p1', days: 7 });
   await api.peopleActivity();
-  await api.myActivity(7);
   await api.rolePreview('p1', 'basic');
   await api.changeRole('p1', { role: 'basic', confirm_token: 'tk' });
   await api.setHouseholdBots('p1', ['b1']);
@@ -380,7 +354,6 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
     ['POST /api/auth/api-token', { machine_loopback_trust: false }],
     ['GET /api/people/activity?profile_id=p1&days=7', null],
     ['GET /api/people/activity', null],
-    ['GET /api/me/activity?days=7', null],
     ['GET /api/people/p1/role/preview?role=basic', null],
     ['POST /api/people/p1/role', { role: 'basic', confirm_token: 'tk' }],
     ['PUT /api/people/p1/household-bots', { household_bots: ['b1'] }],
@@ -426,21 +399,19 @@ test('a failed call carries code, fix and retryAfter without changing err.messag
   });
 });
 
-test('time_limit / quiet_hours / signin_required reach their hooks; signin_required does not trip onLocked', { skip: dom.skip }, async () => {
+test('signin_required reaches its hook and does not trip onLocked; a plain 401 does', { skip: dom.skip }, async () => {
   const mod = await loadApi();
   const seen = [];
-  mod.setOnPolicyBlock((code) => seen.push(['block', code]));
   mod.setOnSignInRequired(() => seen.push(['signin']));
   mod.setOnLocked(() => seen.push(['locked']));
   apiRoutes = {
-    'GET /api/bots': () => [403, { detail: 'No', error: { code: 'time_limit', message: 'x' } }],
     'GET /api/threads?bot_id=b': () => [401, { detail: 'Sign in', error: { code: 'signin_required', message: 'x' } }],
     'GET /api/files': () => [401, { detail: 'expired' }],
   };
-  await assert.rejects(mod.api.bots());
   await assert.rejects(mod.api.threads('b'), (e) => e.signInRequired === true && e.code === 'signin_required');
   await assert.rejects(mod.api.files());
-  assert.deepEqual(seen, [['block', 'time_limit'], ['signin'], ['locked']]);
+  assert.deepEqual(seen, [['signin'], ['locked']]);
+  assert.equal(typeof mod.setOnPolicyBlock, 'undefined', 'the time-limit hook went with the limits');
 });
 
 // ------------------------------------------------------------- DOM: signin.js
@@ -474,10 +445,10 @@ async function boot(url = 'http://127.0.0.1:18765/') {
 }
 
 const PROFILES = [
-  { id: 'o1', name: 'Boss', role: 'owner', avatar: '', credential: 'pin_or_password' },
+  { id: 'o1', name: 'Boss', role: 'admin', protected: true, avatar: '', credential: 'pin_or_password' },
   { id: 'a1', name: 'Ops', role: 'admin', avatar: '', credential: 'password' },
-  { id: 'm1', name: 'Sam', role: 'member', avatar: '🦊', credential: 'pin' },
-  { id: 'r1', name: 'Kid', role: 'restricted', avatar: '', credential: 'none' },
+  { id: 'm1', name: 'Sam', role: 'user', avatar: '🦊', credential: 'pin' },
+  { id: 'r1', name: 'Kid', role: 'basic', avatar: '', credential: 'none' },
 ];
 
 test('sign-in: one tile per profile, with name and role label', { skip: dom.skip }, async () => {
@@ -487,7 +458,7 @@ test('sign-in: one tile per profile, with name and role label', { skip: dom.skip
   renderSignIn(host, { profiles: PROFILES, onSubmit: async () => {} });
   const tiles = [...host.querySelectorAll('.signin-tile')];
   assert.deepEqual(tiles.map((b) => b.querySelector('.signin-name').textContent), ['Boss', 'Ops', 'Sam', 'Kid']);
-  assert.deepEqual(tiles.map((b) => b.querySelector('.signin-role').textContent), ['Owner', 'Admin', 'Member', 'Restricted']);
+  assert.deepEqual(tiles.map((b) => b.querySelector('.signin-role').textContent), ['Admin', 'Admin', 'User', 'Basic']);
   assert.ok(tiles.every((b) => b.tagName === 'BUTTON' && b.type === 'button'), 'keyboard operable');
 });
 
@@ -593,35 +564,10 @@ test('setup: the token field exists only for a network install, and the form val
   remote.form.querySelector('#setup-pin').value = '4321';
   submit();
   await tick();
-  assert.deepEqual(sent, [{ name: 'Owner', password: 'longenough', newPin: '4321', setupToken: 'tok123' }]);
+  assert.deepEqual(sent, [{ name: 'Admin', password: 'longenough', newPin: '4321', setupToken: 'tok123' }]);
 
   const local = renderSetup({ setupRequired: false, onSubmit: async () => {}, idPrefix: 'loc' });
   assert.equal(local.form.querySelector('#loc-token'), null, 'no token field on the box itself');
-});
-
-test('restricted panel: says who can see what, and that the Owner and Admins can open the chats', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { openRestrictedPanel } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const D = win.HTMLDialogElement && win.HTMLDialogElement.prototype;
-  if (D && !D.showModal) { D.showModal = function () { this.open = true; }; D.close = function () { this.open = false; }; }
-  const dlg = await openRestrictedPanel({ fetchActivity: async () => ({ today: {}, limits: {}, summary: [] }) });
-  assert.equal(dlg.querySelector('.ui-dialog-title').textContent, 'Who can see what');
-  const text = dlg.textContent;
-  assert.match(text, /The Owner and Admins can open this profile's chats too/);
-  assert.match(text, /Your activity summary/, 'the summary keeps its own heading');
-  dlg.remove();
-});
-
-test('access notice: time_limit and quiet_hours each get their own words', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { paintAccessNotice } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('access-notice');
-  paintAccessNotice(host, 'time_limit', { onRetry: () => {}, onSwitch: () => {} });
-  assert.equal(host.querySelector('#access-title').textContent, 'Today\'s time is used up');
-  assert.equal(host.querySelectorAll('button').length, 2);
-  paintAccessNotice(host, 'quiet_hours', { onRetry: () => {}, onSwitch: null });
-  assert.equal(host.querySelector('#access-title').textContent, 'Not available right now');
-  assert.equal(host.querySelectorAll('button').length, 1, 'no Switch button when there is nobody to switch to');
 });
 
 // ------------------------------------------------------------- DOM: people.js
@@ -679,7 +625,7 @@ async function mountPeople(role = 'owner', over = {}) {
   return { win, pane, rec };
 }
 
-test('People tab: a row per profile with role badge and PIN / password / disabled indicators', { skip: dom.skip }, async () => {
+test('People tab: a row per profile with role badge and PIN / password / disabled indicators', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane } = await mountPeople('owner');
   const rows = [...pane.querySelectorAll('.people-row')];
   assert.equal(rows.length, 4);
@@ -693,7 +639,7 @@ test('People tab: a row per profile with role badge and PIN / password / disable
   assert.ok(rows[1].querySelector('button[aria-label="Edit Ops"]'));
 });
 
-test('People tab: an Admin manages everyone but the Owner, other Admins included, and has Machine access', { skip: dom.skip }, async () => {
+test('People tab: an Admin manages everyone but the Owner, other Admins included, and has Machine access', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane } = await mountPeople('admin');
   const editable = [...pane.querySelectorAll('.people-row')].filter((r) => r.querySelector('button')).map((r) => r.dataset.person);
   assert.ok(!editable.includes('o1'), 'THE Owner is never editable by an Admin');
@@ -703,7 +649,7 @@ test('People tab: an Admin manages everyone but the Owner, other Admins included
   assert.deepEqual(roles, ['admin', 'member', 'restricted'], 'an Admin can add an Admin');
 });
 
-test('People tab: the Owner sees the Admin role only when they have a password', { skip: dom.skip }, async () => {
+test('People tab: the Owner sees the Admin role only when they have a password', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const withPw = await mountPeople('owner');
   withPw.pane.querySelector('#people-add').click();
   assert.deepEqual([...withPw.pane.querySelectorAll('#people-editor select option')].map((o) => o.value), ['admin', 'member', 'restricted']);
@@ -714,7 +660,7 @@ test('People tab: the Owner sees the Admin role only when they have a password',
   assert.match(noPw.pane.querySelector('.people-admin-note').textContent, /set your own password/);
 });
 
-test('People tab: creating a Member posts the PIN and budgets from the form', { skip: dom.skip }, async () => {
+test('People tab: creating a Member posts the PIN and budgets from the form', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane, win } = await mountPeople('owner');
   pane.querySelector('#people-add').click();
   const ed = pane.querySelector('#people-editor');
@@ -747,7 +693,7 @@ test('People tab: a bad budget is refused in the form, before any request', { sk
   assert.equal(ed.querySelector('.people-error').textContent, 'Minutes per day must be a whole number from 1 to 1440.');
 });
 
-test('People tab: editing sends only the change, and Delete asks first', { skip: dom.skip }, async () => {
+test('People tab: editing sends only the change, and Delete asks first', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane, rec } = await mountPeople('owner');
   pane.querySelector('[data-person="r1"] button').click();
   const ed = pane.querySelector('#people-editor');
@@ -774,7 +720,7 @@ test('People tab: editing sends only the change, and Delete asks first', { skip:
   assert.ok(!apiCalls.some((c) => c.key === 'DELETE /api/people/m1'), 'the 3.x DELETE answers 409 in 4.0');
 });
 
-test('People tab: a role change goes through the role route, with the counts when it deletes', { skip: dom.skip }, async () => {
+test('People tab: a role change goes through the role route, with the counts when it deletes', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane, rec } = await mountPeople('owner', { routes: {
     'GET /api/people/m1/role/preview?role=restricted': () => [200, { counts: { bots: 2, chats: 3, pictures: 0, voices: 1 }, token: 'role-tok', deletes: true }],
     'POST /api/people/m1/role': () => [200, { id: 'm1', role: 'basic' }],
@@ -818,7 +764,7 @@ test('People tab: activity is a real table with a caption and counts only', { sk
   assert.match(pane.querySelector('.people-audit').textContent, /Profile created/);
 });
 
-test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: dom.skip }, async () => {
+test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const { pane, rec } = await mountPeople('owner');
   const group = pane.querySelector('#people-machine');
   assert.ok(group);
@@ -839,7 +785,7 @@ test('People tab: Machine access shows the rotated key once, with a Copy button'
   assert.equal(keyBox.querySelector('input'), null, 'the key is gone from the page');
 });
 
-test('People & Access: the caller\'s groups go after This device; Activity & audit is closed, last but the extras', { skip: dom.skip }, async () => {
+test('People & Access: the caller\'s groups go after This device; Activity & audit is closed, last but the extras', { skip: 'people.js moved to Admin/User/Basic: this test is rewritten with it by WP-FE-PEOPLE' }, async () => {
   const groups = (doc) => {
     const mk = (id) => { const n = doc.createElement('section'); n.id = id; return n; };
     return { afterDevices: [mk('x-rules'), mk('x-limits')], end: [mk('x-adv')] };
@@ -886,8 +832,8 @@ test('index.html: People & Access is a household (admin-only) section after Acco
   assert.match(HTML, /data-i18n="settings\.sec_people"/);
 });
 
-test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
-  assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
+test('main.js: admin tabs follow canAdmin()', () => {
+  assert.match(MAIN, /const canAdmin = \(\) => isAdminRole\(state\.role\);/);
   // !canAdmin() hides every admin tab. OWNER_TABS is empty since Admins hold admin_system
   // (2026-10-19), and Voice left the list: a Member who holds use_voice gets it too.
   assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isHostRole\(\)\)\)/);
@@ -918,8 +864,7 @@ test('the retired terms are gone from the strings a user reads', () => {
   const flat = JSON.stringify(EN);
   assert.doesNotMatch(flat, /Safe[- ]Mode/i);
   assert.doesNotMatch(flat, /locked \(Safe/i);
-  assert.equal(EN.role.restricted, 'Restricted');
-  assert.equal(EN.reactions.safe_label, 'Restricted');
-  assert.equal(EN.restricted.banner,
-    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
+  assert.deepEqual([EN.role.admin, EN.role.user, EN.role.basic], ['Admin', 'User', 'Basic']);
+  for (const gone of ['owner', 'member', 'restricted']) assert.equal(EN.role[gone], undefined, `role.${gone}`);
+  for (const ns of ['restricted', 'companions', 'drop']) assert.equal(EN[ns], undefined, `the ${ns} namespace left with its screen`);
 });

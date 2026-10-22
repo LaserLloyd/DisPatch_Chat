@@ -22,7 +22,7 @@ test('Voice is not an admin tab: a Member who holds use_voice gets it once the a
   assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)/);
   assert.match(read('js/settings-nav.js'), /\{ id: 'voice', group: 'you', icon: 'mic', label: 'settings\.sec_voice', perm: 'voice' \}/);
   assert.match(HTML, /class="settings-tab hidden" id="stab-voice"/);
-  assert.match(MAIN, /const voiceTabAllowed = \(\) => !state\.decoy\s+&& \(canAdmin\(\) \|\| \(sessionCan\('use_voice'\) && !!\(paneHost\('voice'\) && paneHost\('voice'\)\.owned\(\)\)\)\);/);
+  assert.match(MAIN, /const voiceTabAllowed = \(\) => \(canAdmin\(\) \|\| \(sessionCan\('use_voice'\) && !!\(paneHost\('voice'\) && paneHost\('voice'\)\.owned\(\)\)\)\);/);
   // Re-decided when the add-on claims or gives back the pane, and on every auth change.
   assert.match(MAIN, /const dispose = host\.claim\(owner, spec\);\s+syncVoiceTab\(\);/);
   assert.match(MAIN, /onChange: \(\) => \{ renderVoicePane\(\); syncVoiceTab\(\); \}/);
@@ -36,11 +36,11 @@ test('sessionCan reads /api/auth/status permissions; an older server falls back 
 
 test('the shell offers can(permission) to add-ons (never true for a Restricted session)', () => {
   assert.match(SDK, /can: \(permission\) => !!call\('can', permission\),/);
-  assert.match(MAIN, /can: \(perm\) => !state\.decoy && sessionCan\(String\(perm \|\| ''\)\),/);
+  assert.match(MAIN, /can: \(perm\) => sessionCan\(String\(perm \|\| ''\)\),/);
   assert.match(MAIN, /from '\.\/ext-sdk\.js\?v=18'/);
 });
 
 test('a Member asks for neither the full roster nor the avatar pools', () => {
   assert.match(MAIN, /allBots: \(\) => \(sessionCan\('manage_characters'\)\s+\? api\.allBots\(\)\.then\(\(r\) => \(r && r\.bots\) \|\| \[\]\)\s+: Promise\.resolve\(state\.bots\.slice\(\)\)\),/);
-  assert.match(MAIN, /async function refreshAvatarPoolPanel\(\) \{\s+if \(state\.decoy \|\| !sessionCan\('manage_characters'\)\) return;/);
+  assert.match(MAIN, /async function refreshAvatarPoolPanel\(\) \{\s+if \(!sessionCan\('manage_characters'\)\) return;/);
 });

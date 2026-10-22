@@ -6,20 +6,11 @@
 let onLocked = null;
 export function setOnLocked(fn) { onLocked = fn; }
 
-// 3.0: a signed-in profile can be refused for POLICY rather than for lack of a
-// session -- its daily time is used up (`time_limit`) or it is inside its quiet
-// hours (`quiet_hours`). Those arrive as 403s with error.code set. main.js
-// registers a handler that swaps the broken UI for a friendly full-screen
-// notice; it is called with (code, err) for every such failure, any URL.
-let onPolicyBlock = null;
-export function setOnPolicyBlock(fn) { onPolicyBlock = fn; }
-export const POLICY_BLOCK_CODES = ['time_limit', 'quiet_hours'];
-
-// security.yaml `anonymous_access: none`: until somebody signs in, every API
-// call except the public auth/health/static ones answers 401 with error.code
-// "signin_required". That is "show the sign-in screen", not an error to
-// toast, and not the session-expired path either (onLocked would drop to
-// Restricted, which this install does not have).
+// Nobody signed in, and no default profile to land on (the install lists its profiles): every
+// API call except the public auth/health/static ones answers 401 with error.code
+// "signin_required". That is "show the sign-in screen", not an error to toast, and not the
+// session-expired path either (onLocked would sign the profile out and land it on the lock
+// target; here there is nothing to land on).
 let onSignInRequired = null;
 export function setOnSignInRequired(fn) { onSignInRequired = fn; }
 
@@ -81,12 +72,11 @@ async function j(url, opts = {}) {
   if (!r.ok) {
     let body = null;
     try { body = await r.json(); } catch {}
-    // If the server has dropped us to Safe Mode (401 Locked, or a 403/flag that
-    // says decoy/locked), tell the app to reconcile. Exclude /api/auth so a
-    // wrong-PIN 401 doesn't recurse.
+    // If the session has ended server-side (a 401), tell the app to reconcile: it lands on the
+    // lock target. Exclude /api/auth so a wrong-PIN 401 doesn't recurse.
     const extras = errorExtras(body, r.headers);
     const signinRequired = extras.code === 'signin_required';
-    const downgraded = !signinRequired && (r.status === 401 || (body && (body.locked || body.decoy)));
+    const downgraded = !signinRequired && (r.status === 401 || (body && body.locked));
     if (downgraded && onLocked && !url.startsWith('/api/auth')) {
       try { onLocked(); } catch {}
     }
@@ -117,9 +107,6 @@ async function j(url, opts = {}) {
     // `detail` (and so err.message) is unchanged for every existing caller.
     Object.assign(err, extras);
     if (signinRequired) err.signInRequired = true;
-    if (err.code && POLICY_BLOCK_CODES.includes(err.code) && onPolicyBlock) {
-      try { onPolicyBlock(err.code, err); } catch {}
-    }
     throw err;
   }
   return r.status === 204 ? null : r.json();
@@ -141,7 +128,7 @@ const UPLOAD_HARD_MAX = 4 * 1024 * 1024 * 1024;   // 4GB
 
 // XHR-based upload so we get real upload-progress events (fetch cannot report
 // them). Resolves with the parsed JSON body; rejects with an Error carrying
-// `.status`, and triggers the lock handler on a 401/decoy downgrade (mirrors j()).
+// `.status`, and triggers the lock handler on a 401 (mirrors j()).
 function xhrUpload(url, file, onProgress, fields) {
   return new Promise((resolve, reject) => {
     if (file.size > UPLOAD_HARD_MAX) {
@@ -162,7 +149,7 @@ function xhrUpload(url, file, onProgress, fields) {
       let body = null;
       try { body = JSON.parse(xhr.responseText); } catch {}
       if (xhr.status >= 200 && xhr.status < 300) { resolve(body); return; }
-      const downgraded = xhr.status === 401 || (body && (body.locked || body.decoy));
+      const downgraded = xhr.status === 401 || (body && body.locked);
       if (downgraded && onLocked && !url.startsWith('/api/auth')) {
         try { onLocked(); } catch {}
       }
@@ -173,9 +160,6 @@ function xhrUpload(url, file, onProgress, fields) {
       const err = new Error(`${xhr.status}: ${detail}`);
       err.status = xhr.status;
       Object.assign(err, errorExtras(body, null));
-      if (err.code && POLICY_BLOCK_CODES.includes(err.code) && onPolicyBlock) {
-        try { onPolicyBlock(err.code, err); } catch {}
-      }
       reject(err);
     };
     xhr.onerror = () => reject(new Error('Network error during upload'));
@@ -227,13 +211,13 @@ export const api = {
   setupPin: (newPin, currentPin) => j('/api/auth/setup', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ new_pin: newPin, current_pin: currentPin }) }),
   recover: (code) => j('/api/auth/recover', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ code }) }),
 
-  // ---- 3.0 profiles, roles and policy -----------------------------------
+  // ---- profiles and sign-in ----------------------------------------------
   // The session cookie is HttpOnly; nothing here ever reads it. Credentials go
   // in the body of the call that checks them and nowhere else.
   me: () => j('/api/auth/me', { timeoutMs: 5000 }),
   login: (profile, opts = {}) => j('/api/auth/login', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(loginBody(profile, opts)) }),
   switchProfile: (profile, opts = {}) => j('/api/auth/switch', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(loginBody(profile, opts)) }),
-  // First run: creates the Owner and signs in. `setupToken` is only needed
+  // First run: creates the first (protected) Admin and signs in. `setupToken` is only needed
   // when the install is reached from the network (see status.setup_required).
   setupOwner: ({ name, password, newPin, setupToken } = {}) => j('/api/auth/setup', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ name, password, new_pin: newPin, setup_token: setupToken })) }),
   changePassword: ({ current, currentPin, newPassword } = {}) => j('/api/auth/password', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ current, current_pin: currentPin, new: newPassword })) }),
@@ -270,10 +254,9 @@ export const api = {
     return j(`/api/people/activity${qs ? `?${qs}` : ''}`);
   },
   peopleAudit: () => j('/api/people/audit'),
-  myActivity: (days) => j(`/api/me/activity${days ? `?days=${encodeURIComponent(days)}` : ''}`),
 
   bots: () => j('/api/bots'),
-  // Quick actions in use (public; Safe Mode too): {actions: [{id, label, hint, tools}]}.
+  // Quick actions in use: {actions: [{id, label, hint, tools}]}.
   quickActions: () => j('/api/quick-actions'),
   allBots: () => j('/api/bots/all'),
   // Per-bot editing (docs/design/platform-2-3.md section 3). Operator only.
@@ -294,10 +277,9 @@ export const api = {
   remove: (tid) => j(`/api/threads/${encodeURIComponent(tid)}?hard=true`, { method: 'DELETE' }),
   // Per-thread model/thinking override (the header model chip). `prefs` is
   // MERGED server-side (db.update_thread_prefs) — a null value removes that
-  // key, an absent one leaves it alone. Operator-only; a decoy or
-  // machine-inbound caller 403s (see main._require_operator_session).
+  // key, an absent one leaves it alone. A machine-inbound caller 403s (see main._require_operator_session).
   setThreadPrefs: (tid, prefs) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ prefs }) }),
-  // The models this bot is ALLOWED to use, for that same picker. Operator-only.
+  // The models this bot is ALLOWED to use, for that same picker.
   botModels: (botId) => j(`/api/bots/${encodeURIComponent(botId)}/models`),
 
   deleteMessage: (mid) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'DELETE' }),
@@ -305,13 +287,13 @@ export const api = {
   // bot's context without removing it from the transcript. Either may be
   // sent alone; the server merges, so one never clears the other.
   editMessage: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }),
-  // Advisor handoff cards (Send / Dismiss). Full session only, server-side.
+  // Advisor handoff cards (Send / Dismiss).
   // `mid` is the card's own message id; the server refuses any other message.
   advisorSend: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/send`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
   advisorDismiss: (rid, mid) => j(`/api/advisor/requests/${encodeURIComponent(rid)}/dismiss`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ message_id: mid }) }),
   // Agents and tasks (3.0). Gated server-side: manage_agents (the Agents page),
   // dispatch_agents (assign, watch, steer, stop) and approve_agent_actions (answer a card).
-  // A Restricted profile gets 403 from every one of these, listing included. The Claude key
+  // A profile without the permission gets 403 from every one of these, listing included. The Claude key
   // and MCP secrets are WRITE-ONLY: nothing here ever returns one.
   agentsAvailable: () => j('/api/agents/available'),
   agents: () => j('/api/agents'),
@@ -357,11 +339,6 @@ export const api = {
   messageFeedback: (mid, body) => j(`/api/messages/${encodeURIComponent(mid)}/feedback`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) }),
 
   upload: (file, onProgress) => xhrUpload('/api/upload', file, onProgress),
-
-  // One-way drop — the locked side's own upload path. Stores the file and posts
-  // a text-only notice into `threadId` (or the default safe bot's daily thread).
-  drop: (file, threadId, onProgress) =>
-    xhrUpload('/api/drop', file, onProgress, { thread_id: threadId }),
 
   uploadAvatar: (botId, file, cropX, cropY, cropSize) => {
     const fd = new FormData();
@@ -418,7 +395,7 @@ export const api = {
   avatarPoolPrompts: (botId) => j(`/api/avatar-pool/${encodeURIComponent(botId)}/prompts`),
   saveAvatarPoolPrompts: (botId, prompts) => j(`/api/avatar-pool/${encodeURIComponent(botId)}/prompts`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ prompts }) }),
 
-  // Local viewer roots (full-session only; the server 403s these in Safe Mode).
+  // Local viewer roots (Admin only; the server 403s anyone else).
   // The viewer's own stat/ls calls do NOT come through here — viewer.js fetches
   // them itself so the module stays usable without importing the app's client.
   localRoots: () => j('/api/local/roots'),
@@ -463,7 +440,7 @@ export const api = {
   practiceLinksPut: (clientId, body) => j(`/api/practice-links/${encodeURIComponent(clientId)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
 
   // Tools (docs/design/2026-09-25-tools-plugins.md). The list is filtered
-  // server-side for Safe Mode; refresh and the write are operator-only.
+  // server-side for the profile; refresh and the write are Admin-only.
   // Refresh runs a real command, so it gets the tool's own ceiling (max
   // 3600 s server-side) instead of the 20 s default.
   tools: () => j('/api/tools'),

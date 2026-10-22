@@ -1,26 +1,19 @@
-// Sign-in, first-run setup and the Restricted experience (DOM half; the
-// decisions live in profiles.js).
+// Sign-in and first-run setup (DOM half; the decisions live in profiles.js).
 //
 //   renderSignIn   profile TILES and the credential prompt a tile asks for
 //                  (password, PIN, both, or nothing), with the 429 countdown.
-//   renderSetup    the form that creates the Owner: full page when the install
+//   renderSetup    the form that creates the first Admin: full page when the install
 //                  is reached from the network (needs the setup token printed in
-//                  the server log), inline in Settings -> Security on the box.
-//   openRestrictedPanel
-//                  the "Who can see what" panel (GET /api/me/activity). Nothing
-//                  opens it any more (2026-10-22); it goes with the Restricted tier.
-//   accessNotice   "today's time is used up" / "not available right now".
-//   profileMenu    the rail chip's Switch profile / Lock menu.
+//                  the server log), inline in Settings -> Account on the box.
+//   attachChipMenu the rail chip and its Switch profile / Lock menu.
 //
-// Nothing here talks to the network on its own except the Restricted panel's
-// read of the profile's own activity: every credential goes out through the
+// Nothing here talks to the network: every credential goes out through the
 // callback main.js passes in, which owns the session state.
 
 import { t } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import {
-  ACTIVITY_COLUMNS, activityRows, avatarSpec, blockNoticeKey, createCountdown, credentialModes,
-  credentialOptions, formatCountdown, sortTiles, usageLines,
+  avatarSpec, createCountdown, credentialModes, credentialOptions, formatCountdown, sortTiles,
 } from './profiles.js?v=2';
 
 const roleLabel = (role) => t(`role.${role}`);
@@ -50,10 +43,9 @@ function errMessage(e, fallbackKey) {
  *   onSubmit   async (profile, {pin?, password?, remember?}) -> resolves on
  *              success, rejects with the api Error otherwise
  *   remember   () -> bool, whether the "keep this device unlocked" box is on
- *   preselect  profile id to open straight to (e.g. a bound device's profile)
  * Returns { reset(), pick(id), destroy() }.
  */
-export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false, preselect = null }) {
+export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false }) {
   let countdown = null;
   let busy = false;
   const tiles = sortTiles(profiles);
@@ -70,6 +62,8 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
         avatar(p, 'signin-avatar'),
         el('span', { class: 'signin-name', text: p.name }),
         el('span', { class: 'signin-role', text: roleLabel(p.role) }),
+        p.protected ? el('span', { class: 'signin-badge', text: t('people.protected') }) : null,
+        p.shared ? el('span', { class: 'signin-badge', text: t('profiles.shared_badge') }) : null,
       ]);
       b.addEventListener('click', () => pick(p));
       return el('li', {}, [b]);
@@ -90,7 +84,7 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     busy = true;
     ui.setBusy(true);
     try {
-      await onSubmit(profile, { ...opts, remember: !!remember() && profile.role !== 'restricted' });
+      await onSubmit(profile, { ...opts, remember: !!remember() });
     } catch (e) {
       ui.clearSecret();
       if (e && e.status === 429 && e.retryAfter) {
@@ -195,7 +189,6 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
   }
 
   showTiles();
-  if (preselect) pick(preselect);
 
   return {
     reset: showTiles,
@@ -309,95 +302,6 @@ export function paintChip(btn, profile, role) {
   btn.setAttribute('aria-label', label);
   btn.title = label;
   btn.dataset.label = (profile && profile.name) || roleLabel(role);
-}
-
-// ---- Restricted panel ------------------------------------------------------------------
-// (The permanent strip is gone since 2026-10-22: the sign-in notice in
-// js/host-notice.js is the one place that says what others can see. Nothing
-// calls openRestrictedPanel any more.)
-
-/** Today's usage against the limits + the 7-day counts, from /api/me/activity. */
-export async function openRestrictedPanel({ fetchActivity }) {
-  const dlg = el('dialog', { class: 'ui-dialog restricted-panel', 'aria-labelledby': 'restricted-title' });
-  const body = el('div', { class: 'ui-dialog-body' });
-  const close = el('button', { type: 'button', class: 'ui-dialog-btn primary', text: t('common.close') });
-  body.append(
-    el('h3', { class: 'ui-dialog-title', id: 'restricted-title', text: t('restricted.panel_title') }),
-    el('p', { class: 'ui-dialog-msg', text: t('restricted.banner') }),
-    // The banner's link promises "who can see what": the activity summary is only
-    // part of it, so say plainly that the Owner and Admins can open the chats too.
-    el('p', { class: 'ui-dialog-msg', text: t('restricted.panel_chats') }),
-    el('h4', { class: 'people-subtitle', text: t('restricted.summary_title') }),
-  );
-  const holder = el('div', { class: 'restricted-holder', 'aria-live': 'polite' }, [
-    el('p', { class: 'muted', text: t('common.loading') })]);
-  body.append(holder, el('div', { class: 'ui-dialog-foot' }, [close]));
-  dlg.append(body);
-  document.body.append(dlg);
-  const done = () => { try { dlg.close(); } catch { /* ignore */ } dlg.remove(); };
-  close.addEventListener('click', done);
-  dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(); });
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) done(); });
-  dlg.showModal();
-  close.focus();
-  try {
-    const r = await fetchActivity();
-    const lines = usageLines(r.today, r.limits);
-    const usage = el('ul', { class: 'restricted-usage' }, lines
-      .filter((l) => l.limit != null || l.used > 0)
-      .map((l) => el('li', { class: l.over ? 'restricted-over' : '' }, [
-        t(`restricted.use_${l.key}`),
-        ': ',
-        el('strong', { text: l.limit != null ? t('restricted.of', { used: l.used, limit: l.limit }) : String(l.used) }),
-      ])));
-    const rows = activityRows(r.summary, 7);
-    const table = rows.length
-      ? el('div', { class: 'people-table-wrap', tabindex: '0', role: 'region', 'aria-label': t('restricted.week') }, [
-        el('table', { class: 'people-table' }, [
-          el('caption', { class: 'people-caption', text: t('restricted.week') }),
-          el('thead', {}, [el('tr', {}, [
-            el('th', { scope: 'col', text: t('people.col_day') }),
-            ...ACTIVITY_COLUMNS.map((c) => el('th', { scope: 'col', class: 'people-num', text: t(`people.col_${c}`) })),
-          ])]),
-          el('tbody', {}, rows.map((row) => el('tr', {}, [
-            el('th', { scope: 'row', text: row.day }),
-            ...ACTIVITY_COLUMNS.map((c) => el('td', { class: 'people-num', text: String(row.counts[c]) })),
-          ]))),
-        ]),
-      ])
-      : el('p', { class: 'muted', text: t('restricted.week_empty') });
-    holder.replaceChildren(
-      el('h4', { class: 'people-subtitle', text: t('restricted.today') }),
-      usage.childNodes.length ? usage : el('p', { class: 'muted', text: t('restricted.today_empty') }),
-      table,
-    );
-  } catch (e) {
-    holder.replaceChildren(el('p', { class: 'muted', text: t('restricted.load_failed') }));
-  }
-  return dlg;
-}
-
-// ---- "Not available right now" notice -------------------------------------------------
-
-/** Fills the full-screen notice for a time_limit / quiet_hours refusal. */
-export function paintAccessNotice(host, code, { onRetry, onSwitch }) {
-  const stem = blockNoticeKey(code) || 'notice.time_limit';
-  const retry = el('button', { type: 'button', class: 'btn-secondary', text: t('notice.check_again') });
-  retry.addEventListener('click', onRetry);
-  const buttons = [retry];
-  if (onSwitch) {
-    const sw = el('button', { type: 'button', class: 'btn-primary', text: t('notice.switch') });
-    sw.addEventListener('click', onSwitch);
-    buttons.unshift(sw);
-  }
-  host.replaceChildren(
-    el('div', { class: 'lock-card access-card' }, [
-      el('div', { class: 'lock-emoji', 'aria-hidden': 'true', text: '🌙' }),
-      el('h2', { id: 'access-title', text: t(`${stem}_title`) }),
-      el('p', { class: 'lock-sub', id: 'access-sub', text: t(`${stem}_body`) }),
-      el('div', { class: 'bm-actions access-actions' }, buttons),
-    ]),
-  );
 }
 
 // ---- Rail chip menu --------------------------------------------------------------------------

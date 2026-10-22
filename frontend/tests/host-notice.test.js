@@ -168,7 +168,7 @@ test('main.js arms the notice at every sign-in and at lock, and shows it through
   assert.match(MAIN, /armSignInNotice\(\);[^\n]*\n\s*\/\/ 3\.0: the install PIN signs in/);
   assert.match(MAIN, /if \(r && r\.profile && !state\.auth\.profile\) state\.auth\.profile = r\.profile;\n  armSignInNotice\(\);/);
   assert.match(MAIN, /armSignInNotice\(\);\n  if \(wasStarted\) await reboot\(\); else \{ await startApp\(\); showSignInNoticeWhenReady\(\); \}/);
-  assert.match(MAIN, /async function goSafe\(announce\) \{\n  armSignInNotice\(\);/);
+  assert.match(MAIN, /async function lockToTarget\(\{ announce = false \} = \{\}\) \{\n  if \(lockBusy\) return;[^\n]*\n  lockBusy = true;\n  try \{\n    armSignInNotice\(\);/);
   assert.match(MAIN, /if \(!wizard\) showSignInNoticeWhenReady\(\);/);
   assert.match(MAIN, /onClosed: \(\) => showSignInNoticeWhenReady\(\)/);
   const fn = MAIN.slice(MAIN.indexOf('function showSignInNoticeWhenReady'), MAIN.indexOf('function showSignInNoticeWhenReady') + 500);

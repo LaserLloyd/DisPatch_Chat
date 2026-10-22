@@ -3,7 +3,7 @@
 // Run: node --test frontend/tests/
 //
 // Pins: the default grouping (profile chip, Tasks, File Server and the theme
-// button in the popup; Lock/Unlock, send-a-file and Settings on the bar);
+// button in the popup; Lock/Unlock and Settings on the bar);
 // moving in, out and along both lists; the layout persisting per device; a
 // Restricted view getting the shipped bar whatever is stored; the real
 // elements moving (so their own visibility rules still apply); drag-and-drop
@@ -46,10 +46,10 @@ async function boot() {
 const R = () => import(`../static/js/railmenu.js?t=${Math.random()}`);
 const ids = (host) => [...host.children].map((n) => n.id).filter(Boolean);
 
-test('default: profile chip, Tasks, File Server and theme in the popup; lock, send-a-file and Settings on the bar', async () => {
+test('default: profile chip, Tasks, File Server and theme in the popup; lock and Settings on the bar', async () => {
   const M = await R();
   assert.deepEqual(M.defaultLayout(), {
-    rail: ['lock-now', 'unlock-btn', 'drop-btn', 'manage-bots'],
+    rail: ['lock-now', 'manage-bots'],
     menu: ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle'],
   });
   for (const id of M.RAIL_ITEMS) assert.ok(HTML.includes(`id="${id}"`), `${id} is a real rail button`);
@@ -61,14 +61,14 @@ test('moving in, out and along both lists; normalize repairs junk and keeps new 
   l = M.moveItem(l, 'manage-bots', 'menu', 'tasks-btn');
   assert.deepEqual(l.menu, ['profile-chip', 'manage-bots', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   l = M.moveItem(l, 'profile-chip', 'rail', 'lock-now');
-  assert.deepEqual(l.rail, ['profile-chip', 'lock-now', 'unlock-btn', 'drop-btn']);
+  assert.deepEqual(l.rail, ['profile-chip', 'lock-now']);
   l = M.moveItem(l, 'tasks-btn', 'rail', null);
   assert.equal(l.rail.at(-1), 'tasks-btn');
   l = M.nudgeItem(l, 'tasks-btn', -1);
-  assert.deepEqual(l.rail.slice(-2), ['tasks-btn', 'drop-btn']);
+  assert.deepEqual(l.rail.slice(-2), ['tasks-btn', 'lock-now']);
   assert.deepEqual(M.nudgeItem(l, 'profile-chip', -1), l, 'the first one cannot move up');
   const n = M.normalizeLayout({ rail: ['manage-bots', 'nope', 'manage-bots', 7], menu: ['lock-now'] });
-  assert.deepEqual(n.rail, ['manage-bots', 'unlock-btn', 'drop-btn']);
+  assert.deepEqual(n.rail, ['manage-bots']);
   assert.deepEqual(n.menu, ['lock-now', 'profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   assert.deepEqual(M.normalizeLayout('garbage'), M.defaultLayout());
 });
@@ -95,7 +95,7 @@ test('applyLayout moves the real buttons; hidden ones stay hidden; pins stay bef
   const tasks = doc.getElementById('tasks-btn');
   const shown = M.applyLayout(M.defaultLayout(), { rail, menu });
   assert.deepEqual(ids(menu), ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
-  assert.deepEqual(ids(rail), ['lock-now', 'unlock-btn', 'drop-btn', 'pin-x', 'manage-bots']);
+  assert.deepEqual(ids(rail), ['lock-now', 'pin-x', 'manage-bots']);
   assert.equal(doc.getElementById('tasks-btn'), tasks, 'the same element, handlers and all');
   assert.equal(tasks.getAttribute('role'), 'menuitem');
   assert.ok(tasks.classList.contains('hidden'), 'its own visibility rule still applies');
@@ -192,8 +192,8 @@ test('"Arrange the bar" moves without dragging, and Reset restores the default',
 test('wiring: main.js applies the layout with the pins, the popup has the section, the key is wiped by privacy mode', () => {
   const main = read('js/main.js');
   assert.match(main, /from '\.\/railmenu\.js\?v=1'/);
-  assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ decoy: state\.decoy, openViewer \}\);\n  applyRailLayout\(\);/);
-  assert.match(main, /applyLayout\(activeLayout\(state\.decoy\)/);
+  assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ openViewer \}\);\n  applyRailLayout\(\);/);
+  assert.match(main, /applyLayout\(activeLayout\(false\)/);
   assert.match(HTML, /<div class="tools-more" id="tools-more" role="none"><\/div>/);
   assert.match(read('js/privacy.js'), /'dispatch-rail-layout'/);
   assert.match(read('sw.js'), /'\/static\/js\/railmenu\.js'/);
