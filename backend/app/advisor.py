@@ -107,6 +107,19 @@ notes and your own knowledge, and say plainly when something is unverified. \
 {owner} can ask again from an unlocked device for a researched answer.
 """
 
+# A turn whose caller may not run agents (a Member without dispatch_agents): the same
+# "no markers" rule as Safe Mode without the Safe-Mode wording - nothing else about the
+# turn is restricted (tools, pictures and the corpus are exactly as for anyone else).
+NO_DISPATCH_RULES = """\
+How you work in this conversation:
+- Research and handoffs to agents are NOT available to the person you are \
+talking to now, and nothing you write can start one. Write no research or \
+handoff marker line of any kind, and never mention that such markers exist.
+- Use the lookup tools offered to you, if any, exactly as your tool rules say; \
+for what no tool covers, answer from the background notes and your own \
+knowledge, and say plainly when something is unverified.
+"""
+
 # --------------------------------------------------------------------------- #
 # Live tools (2026-10-13): the ChatForge lookups, called by the model itself
 # --------------------------------------------------------------------------- #
@@ -296,6 +309,10 @@ class AdvisorConfig:
     # dispatch, the rules leave the prompt and the bot is told why. Set by
     # locked_down(), never from config.yaml.
     locked: bool = False
+    # The caller of this turn may not run agents (no dispatch_agents): markers are
+    # neither offered nor acted on, and that is ALL it changes (unlike `locked`). Set by
+    # dispatch_off(), never from config.yaml.
+    no_dispatch: bool = False
     # Live tools the model may call (livetools.all_tool_names(): built-ins and
     # extension tools; [] =
     # none), the subset a locked turn may still use, and the loop's limits.
@@ -378,11 +395,15 @@ class AdvisorConfig:
 
     @property
     def can_dispatch(self) -> bool:
-        return bool(self.agents) and not self.locked
+        return bool(self.agents) and not self.locked and not self.no_dispatch
 
     def locked_down(self) -> AdvisorConfig:
         """This config for a turn from a locked (Safe-Mode) device."""
         return replace(self, locked=True)
+
+    def dispatch_off(self) -> AdvisorConfig:
+        """This config for a turn whose caller may not run agents (dispatch_agents)."""
+        return replace(self, no_dispatch=True)
 
     def offered_tools(self) -> list[str]:
         """The tool names this turn may call: the bot's list, narrowed to
@@ -1009,6 +1030,8 @@ def build_system_prompt(cfg: AdvisorConfig, profile: str,
         # Mode" and "research markers" only gives a toddler's bot words to
         # repeat.
         out.append(LOCKED_RULES.format(owner=cfg.owner))
+    elif cfg.no_dispatch and cfg.agents:
+        out.append(NO_DISPATCH_RULES)
     if offered:
         home = f" {cfg.owner}'s home location is {cfg.location}." if cfg.location else ""
         out.append(f"{TOOLS_SENTENCE.format(tools=', '.join(offered))}{home} {DATA_SENTENCE}")
@@ -1384,7 +1407,7 @@ class _AdvisorSpeculation(llm_api.SpeculativeRun):
 
 
 async def speculate(thread_id: str, bot_id: str, text: str, *,
-                    voice: Any = None) -> llm_api.SpeculativeRun:
+                    voice: Any = None, dispatch: bool = True) -> llm_api.SpeculativeRun:
     """Start the advisor call a voice turn WILL make, before the turn exists.
 
     Same system prompt (voice section included), history and retrieval as
@@ -1397,6 +1420,8 @@ async def speculate(thread_id: str, bot_id: str, text: str, *,
     """
     h = _h()
     cfg = _advisor_config(bot_id)
+    if not dispatch:
+        cfg = cfg.dispatch_off()        # the same prompt the adopting turn would build
     rows, _ = await h.list_messages(thread_id, HISTORY_ROW_LIMIT)
     run = _AdvisorSpeculation(thread_id, bot_id, text,
                               head_id=getattr(rows[-1], "id", None) if rows else None)
@@ -1417,6 +1442,7 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
                    prefetched: llm_api.SpeculativeRun | None = None,
                    model: str | None = None,
                    locked: bool = False,
+                   dispatch: bool = True,
                    query: str | None = None) -> None:
     """Answer `text` in `thread_id`. Same failure contract as llm_api.run_api_turn.
 
@@ -1447,6 +1473,11 @@ async def run_turn(thread_id: str, bot_id: str, text: str, *,
             # the prompt says so. A prefetched (voice) run never comes locked —
             # voice chat is unlocked-only — so there is nothing to discard here.
             cfg = cfg.locked_down()
+        if not dispatch:
+            # main.TurnOptions.dispatch: the person whose turn it is may not run agents
+            # (no dispatch_agents). Markers are not offered and not acted on; tools,
+            # pictures and the corpus are unchanged.
+            cfg = cfg.dispatch_off()
         run, prefetched = await llm_api.adopt(
             prefetched, thread_id, bot_id, _AdvisorSpeculation), None
         if run is not None:
@@ -1678,6 +1709,10 @@ async def _act_on_markers(cfg: AdvisorConfig, thread_id: str,
                           history: list[dict]) -> None:
     if cfg.locked:
         log.info("advisor %s: locked turn; ignoring %d marker(s)",
+                 cfg.bot_id, len(markers))
+        return
+    if cfg.no_dispatch:
+        log.info("advisor %s: the caller may not run agents; ignoring %d marker(s)",
                  cfg.bot_id, len(markers))
         return
     h = _h()

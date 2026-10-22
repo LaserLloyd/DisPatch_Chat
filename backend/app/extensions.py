@@ -1932,6 +1932,16 @@ def runs_agent(bot) -> bool:
     return bot is not None and bot_backend_of(bot) == "gateway"
 
 
+def caller_may_dispatch(principal) -> bool:
+    """Does the person whose turn it is hold ``dispatch_agents``? None (an unclaimed /
+    open install) and a machine (a cron, an on-box script) count as yes; a Restricted
+    caller never does (its turns run locked anyway). An advisor acts on its research /
+    handoff markers only when this is true (advisor.run_turn(dispatch=...))."""
+    if principal is None or principal.kind in ("open", "machine"):
+        return True
+    return bool(principal.can(Permission.DISPATCH_AGENTS))
+
+
 def may_dispatch(principal, bot) -> bool:
     """May ``principal`` start a turn on ``bot``? The ONE rule every turn entry point
     applies (typed /ws sends, retries, regenerate, edit & re-run, extension turns, app

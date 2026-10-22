@@ -2267,6 +2267,15 @@ def _require_operator_session(request: Request) -> None:
     policy.of(request).require(Permission.MANAGE_CHARACTERS)
 
 
+def _require_agent_handoff(request: Request) -> None:
+    """The advisor's handoff card (Send / Dismiss) starts or settles an AGENT run on the
+    host: the person pressing it needs dispatch_agents as well as the approval permission
+    the route table declares. A machine holds neither."""
+    pol = policy.of(request)
+    pol.require(Permission.APPROVE_AGENT_ACTIONS)
+    pol.require(Permission.DISPATCH_AGENTS)
+
+
 # Liveness of the long-running background loops: {name: (last_beat_ts, period_s)}.
 # A loop that dies takes its duty with it and NOTHING said so — the app kept
 # answering "ok" while sessions stopped being purged and backups stopped being
@@ -6985,6 +6994,11 @@ class TurnOptions(NamedTuple):
                    handoff marker (advisor.run_turn(locked=True)); a locked
                    family device never steers an agent through an LLM-written
                    brief. Gateway/API bots ignore it (they never dispatch).
+      dispatch     False when the person whose turn it is may not run agents
+                   (no dispatch_agents): an advisor then neither offers nor acts
+                   on research/handoff markers (advisor.run_turn(dispatch=False))
+                   - nothing else is restricted. Gateway/API bots ignore it (an
+                   agent-backed character refuses such a caller before the turn).
       action       a quick-action id (app/quick_actions.py): the turn runs on
                    the action's expanded prompt, the stored row keeps the
                    typed text. Applied in _compose_agent_text, for every backend
@@ -6999,6 +7013,7 @@ class TurnOptions(NamedTuple):
     prefetched: Any = None
     locked: bool = False
     action: str | None = None
+    dispatch: bool = True
 
 
 # A vote this box's own /api/messages/{id}/feedback route ever wrote — mirrors
@@ -7220,6 +7235,8 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
             kw["model"] = opts.model
         if opts.locked:
             kw["locked"] = True
+        if not opts.dispatch:
+            kw["dispatch"] = False
         if opts.action:
             kw["query"] = text          # lookups search the typed words, not the template
         async with _thread_locks[thread_id]:
@@ -8383,7 +8400,7 @@ async def advisor_digest(request: Request, day: str | None = None,
 
 
 @app.post("/api/advisor/requests/{rid}/send",
-          dependencies=[Depends(_require_operator_session)])
+          dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
 async def advisor_request_send(rid: str, payload: AdvisorActionIn):
     """The handoff card's Send button. A real unlocked session only: the
     machine surface must never be able to approve its own handoff."""
@@ -8399,7 +8416,7 @@ async def advisor_request_send(rid: str, payload: AdvisorActionIn):
 
 
 @app.post("/api/advisor/requests/{rid}/dismiss",
-          dependencies=[Depends(_require_operator_session)])
+          dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
 async def advisor_request_dismiss(rid: str, payload: AdvisorActionIn):
     try:
         return {"ok": True, "request": await advisor.dismiss_handoff(
@@ -12044,11 +12061,17 @@ def _app_dispatch_turn(thread_id: str, bot_id: str, text: str) -> bool:
     # app's require_access / require_operator). A person needs dispatch_agents for an
     # agent-backed character, as on /ws; an authenticated machine (a cron) may.
     pol = apps_loader.current_caller()
-    if pol is not None and not pol.machine and not extensions.may_dispatch(pol.principal, bot):
+    person = pol.principal if pol is not None and not pol.machine else None
+    if person is not None and not extensions.may_dispatch(person, bot):
         log.info("app turn on %s refused: the caller may not run agents", thread_id)
         return False
     if not bot.api and not openclaw.cli_available():
         return False
+    if person is not None and not extensions.caller_may_dispatch(person):
+        # An advisor asked on behalf of someone without dispatch_agents: no markers acted on.
+        _track(asyncio.create_task(run_agent_turn(thread_id, bot_id, text,
+                                                  TurnOptions(dispatch=False))))
+        return True
     _track(asyncio.create_task(run_agent_turn(thread_id, bot_id, text)))
     return True
 
@@ -12637,10 +12660,19 @@ def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str,
     quick action (the id stored on the row) is carried along; any other plain
     socket calls the three-argument form exactly as before."""
     locked = manager.conn_decoy(ws)
-    if locked or action:
+    dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
+    if locked or action or not dispatch:
         return run_agent_turn(thread_id, bot_id, text,
-                              TurnOptions(locked=locked, action=action or None))
+                              TurnOptions(locked=locked, action=action or None,
+                                          dispatch=dispatch))
     return run_agent_turn(thread_id, bot_id, text)
+
+
+def _dispatch_kw(ws: WebSocket) -> dict:
+    """``{"dispatch": False}`` when this socket's person may not run agents (an advisor
+    then acts on no research/handoff marker), else ``{}`` - a caller who may is called
+    exactly as before."""
+    return {} if extensions.caller_may_dispatch(manager.principal_of(ws)) else {"dispatch": False}
 
 
 def _action_of(metadata: dict | None) -> str | None:
@@ -12820,6 +12852,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # Read now, not inside the task: the socket may be gone by the time the
     # turn starts, and a Safe-Mode send must run its turn locked (TurnOptions).
     locked = manager.conn_decoy(ws)
+    dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
 
     async def _publish_then_run() -> None:
         # The publish must not be able to cancel the turn.
@@ -12845,14 +12878,15 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # quote calls run_agent_turn exactly as it always has (three args,
         # opts defaulting on the far side) so nothing about the ordinary send
         # path changes shape.
-        if reply_target is not None or locked or action_def is not None:
+        if reply_target is not None or locked or action_def is not None or not dispatch:
             await run_agent_turn(thread_id, thread.bot_id, text,
                                  TurnOptions(user_msg_id=user_msg.id,
                                             reply_to=(reply_target.id
                                                       if reply_target else None),
                                             locked=locked,
                                             action=(action_def.id
-                                                    if action_def else None)))
+                                                    if action_def else None),
+                                            dispatch=dispatch))
         else:
             await run_agent_turn(thread_id, thread.bot_id, text)
 
@@ -13123,7 +13157,8 @@ async def _restore_rows(thread_id: str, snapshot: list[dict]) -> None:
 async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
                            *, text: str | None = None,
                            expect_text: str | None = None,
-                           edit_to: str | None = None) -> None:
+                           edit_to: str | None = None,
+                           dispatch: bool = True) -> None:
     """Rewind, drop the superseded rows, ask again, and keep the old answer.
 
     The order is load-bearing. The rewind happens FIRST and nothing is deleted
@@ -13142,7 +13177,8 @@ async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
     """
     try:
         await _regenerate_turn_inner(thread_id, bot_id, user_msg, text=text,
-                                     expect_text=expect_text, edit_to=edit_to)
+                                     expect_text=expect_text, edit_to=edit_to,
+                                     dispatch=dispatch)
     finally:
         _regen_inflight.discard(thread_id)
 
@@ -13150,7 +13186,7 @@ async def _regenerate_turn(thread_id: str, bot_id: str, user_msg: MessageOut,
 async def _regenerate_turn_inner(thread_id: str, bot_id: str,
                                  user_msg: MessageOut, *,
                                  text: str | None, expect_text: str | None,
-                                 edit_to: str | None) -> None:
+                                 edit_to: str | None, dispatch: bool = True) -> None:
     bot = config.get_bot(bot_id)
     is_api = bool(bot is not None and bot.api)
     agent_id = bot.agent_id if bot is not None else bot_id
@@ -13187,7 +13223,7 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
     opts = TurnOptions(user_msg_id=user_msg.id, rewind_entry=entry_id,
                        replaces=tuple(m.id for m in superseded),
                        reply_to=(user_msg.metadata or {}).get("reply_to") or None,
-                       action=_action_of(user_msg.metadata))
+                       action=_action_of(user_msg.metadata), dispatch=dispatch)
     try:
         await run_agent_turn(thread_id, bot_id,
                              user_msg.content if text is None else text, opts)
@@ -13257,7 +13293,7 @@ async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
         return
     _regen_inflight.add(thread_id)
     _track(asyncio.create_task(
-        _regenerate_turn(thread_id, thread.bot_id, last_user)))
+        _regenerate_turn(thread_id, thread.bot_id, last_user, **_dispatch_kw(ws))))
 
 
 async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
@@ -13313,7 +13349,8 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
     _regen_inflight.add(thread_id)
     _track(asyncio.create_task(
         _regenerate_turn(thread_id, thread.bot_id, msg, text=content,
-                         expect_text=msg.content or "", edit_to=content)))
+                         expect_text=msg.content or "", edit_to=content,
+                         **_dispatch_kw(ws))))
 
 
 async def _handle_retry(ws: WebSocket, data: dict) -> None:
@@ -13694,7 +13731,10 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
         adopted = None
     turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
                             thinking=thinking or None, prefetched=adopted,
-                            locked=locked)
+                            locked=locked,
+                            # A caller without dispatch_agents has a socket on this thread:
+                            # an advisor's research/handoff markers are not acted on.
+                            dispatch=not extensions.turn_dispatch_refused(thread_id))
     try:
         await manager.broadcast(frame)
         await _broadcast_thread_update(thread_id)
@@ -13737,6 +13777,8 @@ async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = 
     if not text or fn is None:
         return None
     kw = {"voice": instructions} if instructions is not None else {}
+    if backend == "advisor" and extensions.turn_dispatch_refused(thread_id):
+        kw["dispatch"] = False          # the prompt the adopting turn will build (no markers)
     try:
         run = await fn(thread_id, bot.id, text, **kw)
     except Exception:

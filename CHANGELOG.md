@@ -15,6 +15,11 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or typed-on-the-voice-screen turn is refused server-side, a resent message passes the same check as a fresh
   one, and an app's `ctx.dispatch_turn` checks the person whose request asked. The Owner, Admins, Members
   granted `dispatch_agents`, and Members on direct-model characters are unchanged.
+- **An advisor starts agents only for someone allowed to.** Its research and handoff markers are offered and
+  acted on only when the person whose turn it is holds `dispatch_agents` (typed, voice, retry, regenerate, app
+  turns); anyone else gets the reply with dispatch off - no marker in the prompt, none acted on - and nothing
+  else restricted (lookups, pictures and notes as before; Safe-Mode rules stay for Restricted). The handoff
+  card's Send and Dismiss (`/api/advisor/requests/{id}/send|dismiss`) need `dispatch_agents` too.
 - **The boot File Server sweep no longer purges on missing storage.** When the blob directory is gone, or
   resolves but more than 20% (and more than 10) of the records have no blob, nothing is deleted; the journal
   gets an ERROR and `/api/health` goes `degraded` with `file_sweep_skipped` (counts only). A few phantom
