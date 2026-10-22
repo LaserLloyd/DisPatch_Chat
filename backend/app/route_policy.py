@@ -283,6 +283,7 @@ _r("GET", "/api/characters", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ],
 for _path, _m in (
     ("/api/characters/all", "GET"), ("/api/characters/personas", "GET"), ("/api/characters/order", "PUT"),
     ("/api/characters", "POST"), ("/api/characters/{character_id}", ("GET", "PATCH", "DELETE")),
+    ("/api/characters/{character_id}/delete-preview", "GET"),
     ("/api/starter-packs", "GET"), ("/api/starter-packs/{pack_id}/install", "POST"),
 ):
     _r(_m, _path, _R(P.MANAGE_CHARACTERS))
@@ -313,6 +314,22 @@ _r("GET", "/api/settings/defaults", public("default theme / language / avatar st
 # --------------------------------------------------------------------------- #
 
 # ---- WP-PROF: profile lifecycle (app/profiles_api.py): reset, my characters, export, copies
+_r(("GET",), "/api/me/reset/preview", _R(P.MANAGE_HISTORY, note="counts only, for the caller's own profile"))
+_r(("POST",), "/api/me/reset", _R(P.MANAGE_HISTORY, note="Reset to default for the caller's own profile; every role, the default profile included"))
+_r(("GET", "POST"), "/api/me/characters", _R(P.CREATE_CHARACTERS, note="the caller's own bots"))
+_r(("GET", "PATCH", "DELETE"), "/api/me/characters/{bot_id}", _R(P.CREATE_CHARACTERS, note="the caller's own bot; anyone else's is 404"))
+_r(("POST",), "/api/me/characters/{bot_id}/avatar", _R(P.CREATE_CHARACTERS, note="the caller's own bot"))
+_r(("GET",), "/api/me/export", _R(P.MANAGE_HISTORY, note="the caller's own chats and bot setup"))
+_r(("POST",), "/api/characters/{bot_id}/clone", _R(P.CREATE_CHARACTERS, note="a household bot into the caller's own profile; agent bots refused"))
+_r(("POST",), "/api/characters/{bot_id}/clone-to/{profile_id}", _R(P.MANAGE_USERS, note="an Admin copies setup into a profile; chats are never copied"))
+_r(("POST",), "/api/people/{profile_id}/reset", _R(P.MANAGE_USERS, note="counts only; the protected Admin only by itself"))
+_r(("GET",), "/api/people/{profile_id}/reset/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("GET",), "/api/people/{profile_id}/role/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("POST",), "/api/people/{profile_id}/role", _R(P.MANAGE_USERS, note="to Basic deletes the profile's bots and chats after a confirm token"))
+_r(("PUT",), "/api/people/{profile_id}/household-bots", _R(P.MANAGE_USERS, note="which household bots a profile may use"))
+_r(("PUT",), "/api/people/{profile_id}/backends", _R(P.MANAGE_USERS, note="which connections a profile's own bots may run on"))
+_r(("GET",), "/api/people/{profile_id}/delete/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("POST",), "/api/people/{profile_id}/delete", _R(P.MANAGE_USERS, note="deletes the profile and its content after a confirm token"))
 
 # ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
 

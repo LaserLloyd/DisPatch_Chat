@@ -4,7 +4,7 @@ A fresh clone should not open on an empty chat. On the very first start with an
 EMPTY database, three threads are created on the default bot, Atlas:
 
 * "Meet Atlas"         -- who he is, where to put the key, what he can do;
-* "How DisPatch works" -- the tour: bots, Connect an AI, Safe Mode, add-ons;
+* "How DisPatch works" -- the tour: bots, Connect an AI, profiles, add-ons;
 * "Set up add-ons"     -- the recommended order for everything optional
   (2.3.7), following app/catalog.yaml. ``POST /api/guide/seed?name=…`` posts
   any guide on an existing install.
@@ -31,12 +31,20 @@ Pictures in the guide are plain Markdown, ``![alt](/static/guide/<file>.png)``,
 served from ``frontend/static/guide/`` (same-origin, shipped in the repo).
 
 ``DISPATCH_FIRSTRUN=0`` switches the seed off entirely.
+
+Atlas copies (4.0)
+------------------
+Every Admin and User profile has its own Atlas, a personal copy of the shipped direct-API bot
+(``profiles_service.spawn_atlas``). The first Admin of a fresh install is the one exception: it
+sees the household Atlas this module's seed talks to. :func:`atlas_template` and
+:func:`copy_atlas_avatar` are the two pieces a copy is made from.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -189,3 +197,44 @@ async def seed_if_first_run(
     except Exception:
         log.exception("first-run seed failed (ignored)")
         return []
+
+
+#: The display name of the default (lock-target) profile a fresh install creates.
+DEFAULT_PROFILE_NAME = "DisPatch"
+
+ATLAS_NAME = "Atlas"
+#: ``Bot.pack`` of every personal Atlas copy, so "does this profile have its Atlas yet?" has an
+#: answer that survives a rename.
+ATLAS_PACK = "atlas"
+
+
+def atlas_template() -> config.Bot:
+    """The shipped Atlas as a fresh object, stripped to what a personal copy keeps: name, emoji,
+    quick actions, the lookups switch ON, no provider (the connection is chosen when it is
+    copied), no knowledge folder, no pools, no image jobs, no voice."""
+    shipped = next((b for b in config.shipped_default_bots() if b.id == BOT_ID), None)
+    # Built from the few stable fields, not copied with `replace`: the shipped roster entry
+    # carries household-only settings (flags, pools) that a personal copy must never inherit.
+    return config.Bot(
+        id=BOT_ID, name=ATLAS_NAME, emoji=(shipped.emoji if shipped else "") or "\U0001F30D",
+        model_hint="Direct API", pack=ATLAS_PACK,
+        advisor={"providers": [], "tools": True})
+
+
+def copy_atlas_avatar(bot_id: str) -> str:
+    """Write the shipped Atlas picture (face, full, thumb) for ``bot_id`` into the avatar
+    directory and return the face file name ("" when the source set is not there).
+    Each file goes through a temp name and a rename; an existing file is replaced."""
+    dest_dir = Path(config.AVATAR_DIR)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for role in ("face", "full", "thumb"):
+            src = AVATAR_SRC_DIR / f"atlas-{role}.png"
+            dest = dest_dir / f"{bot_id}-{role}.png"
+            tmp = dest.with_name(f".{dest.name}.partial")
+            shutil.copyfile(src, tmp)
+            tmp.replace(dest)
+    except OSError:
+        log.warning("could not copy the Atlas picture for %s", bot_id, exc_info=True)
+        return ""
+    return f"{bot_id}-face.png"

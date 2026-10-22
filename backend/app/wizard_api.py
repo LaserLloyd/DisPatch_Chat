@@ -10,8 +10,10 @@ step can be driven by a script or a test:
    saves one, Tests it, makes it the default and points the default character at it.
 3. **Voice (optional)** - the state says whether the voice add-on is installed and where its
    section is; the wizard only links to it.
-4. **Family (optional)** - ``POST /api/wizard/family`` creates profiles (members and Restricted
-   children) and installs the Animal Friends pack for the Restricted ones.
+4. **People (optional)** - ``POST /api/wizard/family`` creates profiles - Users (with their own
+   Atlas) and Basic ones (the household bots an Admin picks) - and makes sure the default profile
+   exists: "DisPatch", a User with no PIN that the lock lands on. The first Admin is the protected
+   one from step 1 and sees the household Atlas.
 5. **Network** - ``POST /api/wizard/network``: this computer only (the default) or the home network,
    with the TLS note and the exact flags.
 6. **Done** - ``GET /api/wizard`` returns a checklist of next steps; ``POST /api/wizard/finish`` closes it.
@@ -36,11 +38,11 @@ from . import (
     credentials,
     extensions,
     policy,
+    profiles_service,
     settings_store,
-    starter_packs,
 )
 from .api_common import audit, fail
-from .contracts.permissions import Permission, Role
+from .contracts.permissions import Permission, Role, normalise_role
 
 router = APIRouter()
 
@@ -79,15 +81,17 @@ class Person(BaseModel):
 
     name: str = Field(min_length=1, max_length=40)
     role: Literal["user", "basic", "member", "restricted"] = "user"     # member/restricted: 3.x words
-    pin: str = Field(default="", max_length=128)
+    pin: str = Field(default="", max_length=128)                        # optional on every profile
+    #: Basic only: the household bots this profile gets (default: every bot a Basic profile can use).
+    household_bots: list[str] | None = Field(default=None, max_length=100)
 
 
 class FamilyIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # "ignore", not "forbid": pages from before 4.0 still send the two starter-pack flags,
+    # which no longer do anything.
+    model_config = ConfigDict(extra="ignore")
 
     people: list[Person] = Field(default_factory=list, max_length=20)
-    install_animal_friends: bool = False
-    install_assistants: bool = False
 
 
 class NetworkIn(BaseModel):
@@ -153,7 +157,7 @@ def _checklist() -> list[dict]:
          "skipped": "voice" in skipped,
          "hint": "Install the voice add-on from Settings > Voice." if voice is None else
          ("The voice add-on is installed." if voice.state == "ok" else f"The voice add-on is {voice.state}.")},
-        {"id": "family", "title": "Family and Restricted profiles", "optional": True, "done": bool(others),
+        {"id": "family", "title": "People", "optional": True, "done": bool(others),
          "skipped": "family" in skipped, "hint": "Add people in Settings > People & Access."},
         {"id": "network", "title": "Who can reach DisPatch", "optional": False,
          "done": bool(st.get("network_chosen")),
@@ -207,18 +211,23 @@ async def wizard_connection(request: Request, payload: WizardConnectionIn):
         target = payload.character
         bots = await asyncio.to_thread(config.load_bots)
         if target is None:
-            target = next((b.id for b in bots if config.is_direct(b) and not characters.connection_of(b)),
+            target = next((b.id for b in bots if b.scope == "household" and config.is_direct(b)
+                          and not characters.connection_of(b)),
                           None)
         if target:
             try:
                 model = payload.model or c.default_model or (result.get("models") or [""])[0]
                 bot = await asyncio.to_thread(config.get_bot, target)
-                if bot is not None:
+                if bot is not None and bot.scope == "household":     # a personal bot is its owner's to set up
                     await asyncio.to_thread(config.update_bot, target,
                                             lambda b: characters.with_connection(b, c.id, model))
                     out["assigned"] = {"character": target, "model": model}
             except characters.CharacterError as e:
                 out["assigned_error"] = str(e)
+        # Every profile's own Atlas made before there was a connection answers through this one now.
+        model = payload.model or c.default_model or (result.get("models") or [""])[0]
+        out["personal_connected"] = await asyncio.to_thread(
+            profiles_service.connect_unconnected_atlases, c.id, model)
     audit(request, "wizard.connection", c.id, "ok" if result.get("ok") else str(result.get("problem")))
     await asyncio.to_thread(_save, connection_added=True)
     return out
@@ -228,7 +237,7 @@ async def wizard_connection(request: Request, payload: WizardConnectionIn):
 async def wizard_family(request: Request, payload: FamilyIn):
     def run() -> dict:
         created = []
-        restricted_ids = []
+        basic_ids = []
         for person in payload.people:
             pin_hash = None
             if person.pin:
@@ -236,23 +245,21 @@ async def wizard_family(request: Request, payload: FamilyIn):
                 if bad:
                     raise fail(400, "pin_too_short", bad)
                 pin_hash = credentials.hash_secret(person.pin)
+            role = normalise_role(person.role)
             try:
-                prof = accounts.create_profile(person.name, person.role, pin_hash=pin_hash)
+                household = (profiles_service.basic_default_household()
+                             if person.household_bots is None else person.household_bots) \
+                    if role is Role.BASIC else None
+                prof = accounts.create_profile(person.name, role, pin_hash=pin_hash,
+                                               household_bots=household)
             except accounts.AccountError as e:
                 raise fail(e.status, e.code, str(e)) from e
+            profiles_service.on_profile_created(prof)          # a User gets its own Atlas
             created.append({"id": prof.id, "name": prof.name, "role": prof.role.value})
-            if prof.role is Role.BASIC:
-                restricted_ids.append(prof.id)
-        packs: dict[str, Any] = {}
-        default_conn = connections.default_id() or None
-        for want, pack_id in ((payload.install_animal_friends, "animal_friends"),
-                              (payload.install_assistants, "assistants")):
-            if want:
-                try:
-                    packs[pack_id] = starter_packs.install(pack_id, connection=default_conn)
-                except (starter_packs.PackError, characters.CharacterError) as e:
-                    raise fail(e.status, e.code, str(e)) from e
-        return {"created": created, "restricted": restricted_ids, "packs": packs}
+            if role is Role.BASIC:
+                basic_ids.append(prof.id)
+        default = profiles_service.ensure_default_profile()
+        return {"created": created, "basic": basic_ids, "default_profile": default.id}
 
     out = await asyncio.to_thread(run)
     audit(request, "wizard.family", "", f"{len(out['created'])} profiles")
@@ -276,7 +283,7 @@ async def wizard_network(request: Request, payload: NetworkIn):
             "Start DisPatch listening on the network: uvicorn --host 0.0.0.0 --port 8765, or in Docker set BIND_ADDR=0.0.0.0.",
             "Phones and tablets need HTTPS for install-to-home-screen, push notifications and the microphone. "
             "Put it behind Caddy (the compose file has a profile) or Tailscale Serve; see docs/remote-access.md.",
-            "Anyone on your network can reach the sign-in screen. Use a strong owner password and Restricted profiles for children.",
+            "Anyone on your network can reach the sign-in screen. Use a strong Admin password, and give the people you share with their own profiles.",
         ]
     else:
         notes += ["DisPatch is only reachable from this computer. Start it with --host 127.0.0.1 (the default)."]
@@ -331,6 +338,7 @@ async def wizard_finish(request: Request):
     if not _claimed():
         raise fail(409, "wizard_owner_required", "Create the owner account before finishing.")
     from datetime import UTC, datetime
+    await asyncio.to_thread(profiles_service.ensure_default_profile)   # idempotent; skipped steps still get it
     await asyncio.to_thread(_save, finished=True,
                             finished_at=datetime.now(UTC).isoformat(timespec="seconds"))
     audit(request, "wizard.finish", "")
