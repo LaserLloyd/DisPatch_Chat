@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -68,8 +69,15 @@ def v3(tmp_path, monkeypatch):
         await db.add_file("b.txt", "b.txt", 1, "text/plain", source="fileserver", owner_profile_id=None)
         await db.close()
     asyncio.run(build())
-    migrate.run(take_backup=False)                    # 001-009 recorded ...
+    with monkeypatch.context() as m:                  # 001-009 recorded ...
+        # 010_profiles is not part of this 3.x shape: it would fold (and clear) the
+        # character profile lists 009 reads. It is marked as done below, so these tests
+        # see 009 alone; tests/test_migrate_profiles.py covers 010.
+        m.setattr(migrate, "profiles_plan", lambda **_: SimpleNamespace(lines=list))
+        migrate.run(take_backup=False)
     con = sqlite3.connect(d / "chats.db")             # ... then back to the 3.x shape
+    con.execute("INSERT OR IGNORE INTO schema_migrations (id, applied_at, app_version) "
+                "VALUES ('010_profiles', '2026-10-22T00:00:00+00:00', '4.0.0')")
     con.execute("DROP INDEX IF EXISTS idx_threads_owner_bot_updated")
     con.execute("ALTER TABLE threads DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE files DROP COLUMN owner_profile_id")
