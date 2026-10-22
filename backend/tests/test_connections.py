@@ -440,10 +440,10 @@ def test_only_manage_connections_may_touch_connections(world, owner):
     world.login(member, profile_id=max_["id"], pin="5555")
     stranger = world.client(("203.0.113.51", 40001))
     for c in (member, stranger):
-        assert c.get("/api/connections").status_code == 403
-        assert c.post("/api/connections", json={"type": "lmstudio"}).status_code == 403
-        assert c.post("/api/connections/discover").status_code == 403
-        assert c.post("/api/connections/test", json={"type": "lmstudio"}).status_code == 403
+        assert c.get("/api/connections").status_code in (401, 403)
+        assert c.post("/api/connections", json={"type": "lmstudio"}).status_code in (401, 403)
+        assert c.post("/api/connections/discover").status_code in (401, 403)
+        assert c.post("/api/connections/test", json={"type": "lmstudio"}).status_code in (401, 403)
     # an Admin holds the permission
     world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()

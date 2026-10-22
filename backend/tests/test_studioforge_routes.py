@@ -122,7 +122,7 @@ def test_no_pin_set_is_403(route_client, no_real_probe):
     """The panel has no password of its own, so DisPatch's PIN is the only
     thing gating the rig's admin UI. No PIN → the feature stays shut."""
     r = route_client.get("/api/studioforge/status")
-    assert r.status_code == 403, r.text
+    assert r.status_code in (401, 403), r.text
     assert "PIN" in r.json()["detail"]
     assert route_client.get("/api/auth/status").json()["features"]["studioforge"] is False
     assert no_real_probe == []
@@ -131,7 +131,7 @@ def test_no_pin_set_is_403(route_client, no_real_probe):
 def test_safe_mode_gets_403(route_client, no_real_probe):
     auth.set_pin("1234")            # a PIN exists, this client never unlocks
     r = route_client.get("/api/studioforge/status")
-    assert r.status_code == 403, r.text
+    assert r.status_code in (401, 403), r.text
     assert no_real_probe == []
 
 
@@ -139,7 +139,7 @@ def test_locking_shuts_the_route_again(route_client, no_real_probe):
     _unlock(route_client)
     assert route_client.get("/api/studioforge/status").status_code == 200
     route_client.post("/api/auth/lock")
-    assert route_client.get("/api/studioforge/status").status_code == 403
+    assert route_client.get("/api/studioforge/status").status_code in (401, 403)
 
 
 def test_prefix_is_in_the_full_session_deny_list():

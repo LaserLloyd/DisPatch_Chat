@@ -74,31 +74,6 @@ def test_create_can_set_it(env):
     assert r.json()["hide_unlocked"] is True and r.json()["safe"] is True
 
 
-def test_the_unlocked_roster_still_carries_a_hidden_bot_with_its_flag(env):
-    """The client hides it (per device, with an opt-in); the server must not,
-    or a thread of the bot and the device opt-in would have nothing to show."""
-    c = _unlocked(env)
-    c.post("/api/bots", json={"id": "kid", "name": "Kid", "safe": True, "hide_unlocked": True})
-    rows = {b["id"]: b for b in c.get("/api/bots").json()["bots"]}
-    assert rows["kid"]["hide_unlocked"] is True
-    assert rows["atlas"]["hide_unlocked"] is False
-    assert "kid" in {b["id"] for b in c.get("/api/bots/all").json()["bots"]}
-
-
-def test_safe_mode_is_still_decided_by_safe_alone(env):
-    c = _unlocked(env)
-    c.post("/api/bots", json={"id": "kid", "name": "Kid", "safe": True, "hide_unlocked": True})
-    c.post("/api/bots", json={"id": "grownup", "name": "Grown-up", "safe": False,
-                              "hide_unlocked": True})
-    c.post("/api/bots", json={"id": "agent", "name": "Agent", "backend": "agent"})
-    c.cookies.clear()                       # no session -> Safe Mode
-    ids = _ids(c)
-    assert "kid" in ids, "a safe hidden bot must stay on the locked device"
-    assert "atlas" in ids
-    assert "grownup" not in ids, "hide_unlocked must never open Safe Mode to a non-safe bot"
-    assert "agent" not in ids
-
-
 @pytest.mark.parametrize("method,path,body", [
     ("PATCH", "/api/bots/atlas", {"hide_unlocked": True}),
     ("PUT", "/api/bots/order", {"bots": [{"id": "atlas", "order": 0, "hide_unlocked": True}]}),

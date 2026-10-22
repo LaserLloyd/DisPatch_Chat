@@ -144,6 +144,9 @@ class FakeWS:
 
 def _ws_env(monkeypatch, frames):
     monkeypatch.setattr(main.manager, "conn_decoy", lambda w: False)
+    # 4.0: every /ws thread action checks the socket's person owns the thread; these fake
+    # sockets are an unclaimed install's (everyone is the Owner).
+    monkeypatch.setattr(main.manager, "principal_of", lambda w: main.policy.open_principal())
 
     async def _allowed(w, b, **_kw):
         return True
@@ -442,24 +445,6 @@ def test_the_socket_refusal_branch_keeps_the_wide_signature():
 # --------------------------------------------------------------------------- #
 # 7. Preview: redact, then cut
 # --------------------------------------------------------------------------- #
-
-def test_thread_list_preview_is_redacted_before_it_is_cut(env):
-    client = env()
-    auth.set_pin("1234")
-    body = "x" * (main.THREAD_PREVIEW_CHARS - 20) + \
-        "[[media:https://example.invalid/private/secret-token-abc.png|cap]]"
-    r = client.post("/api/inject", json={"bot_id": "alpha", "content": body})
-    assert r.status_code == 200, r.text
-    locked = env()
-    r = locked.get("/api/threads", params={"bot_id": "alpha"}, headers=BROWSER_HDRS)
-    assert r.status_code == 200, r.text
-    previews = [t["last_message"] for t in r.json()["threads"] if t.get("last_message")]
-    assert previews
-    for p in previews:
-        assert "example.invalid" not in p, p
-        assert "[[media" not in p, p
-        assert len(p) <= main.THREAD_PREVIEW_CHARS + 1
-
 
 # --------------------------------------------------------------------------- #
 # 8. PATCH thread: all-or-nothing, and bounded prefs values

@@ -128,29 +128,122 @@ def character_out(b: Bot) -> dict:
     return row
 
 
-def may_use(b: Bot, principal) -> bool:
-    """May ``principal`` see ``b`` and talk to it? Audience first, then the profile list. Owner,
-    Admin, an open install and machines see everything."""
-    if principal is None or principal.kind in ("open", "machine") or principal.is_admin:
-        return True
-    if principal.kind == "anonymous":
-        return not b.profiles and b.audience in ("all", "restricted")
-    if b.profiles and principal.profile_id not in b.profiles:
+# --------------------------------------------------------------------------- #
+# Who may use a character (4.0, BUILD-PLAN-v2 §1.2; WP-CORE owns this region)
+# --------------------------------------------------------------------------- #
+
+
+def is_personal(b: Bot) -> bool:
+    """A personal character belongs to exactly one profile (``scope: personal``)."""
+    return getattr(b, "scope", "household") == "personal"
+
+
+def is_hidden(b: Bot) -> bool:
+    """The Admin's "keep it off the rail" flag (``hidden``; 3.x ``hide_unlocked`` until
+    migration 010 renames it). Display only: a hidden character still opens by link."""
+    return bool(getattr(b, "hidden", False) or getattr(b, "hide_unlocked", False))
+
+
+def is_agent_backed(b: Bot) -> bool:
+    """Its turns run an agent (or an app's agent) on the host."""
+    return backend_kind(b) in ("agent", "app")
+
+
+def _household_list(principal) -> str | list[str]:
+    prof = getattr(principal, "profile", None)
+    if prof is None and getattr(principal, "profile_id", None):
+        prof = accounts.get_profile(principal.profile_id)
+    hb = getattr(prof, "household_bots", "all") if prof is not None else "all"
+    return hb if hb == "all" else list(hb or [])
+
+
+def may_use(b: Bot | None, principal) -> bool:
+    """May ``principal`` see ``b`` and talk to it? One function, in this order:
+
+    1. an open install (nobody owns it yet): yes;
+    2. a machine (the API key): household characters and the protected Admin's personal ones;
+    3. a personal character: only its owner (``owner_profile``) - never an Admin;
+    4. a household character: an Admin yes; a User when its ``household_bots`` is ``"all"``
+       or names the id; a Basic profile only when its list names the id (``"all"`` gives a
+       Basic profile nothing: the Admin picks its characters);
+    5. an agent-backed household character also needs ``dispatch_agents`` for every
+       non-Admin (an app-backed one - the Job Board - is Admin-only).
+
+    No principal, no character: False. ``audience`` / ``safe`` / the 3.x ``profiles`` list
+    are inert here (migration 010 folds them into ``household_bots``)."""
+    if b is None or principal is None:
         return False
-    if principal.is_restricted:
-        return b.audience in ("all", "restricted")
+    kind = getattr(principal, "kind", "")
+    if kind == "open":
+        return True
+    if kind == "machine":
+        if is_personal(b):
+            from . import ownership
+            own = ownership.protected_admin_id()
+            return bool(own) and b.owner_profile == own
+        return True
+    if kind != "profile":
+        return False
+    me = getattr(principal, "profile_id", None)
+    if not me and getattr(principal, "protected", False):
+        from . import ownership
+        me = ownership.protected_admin_id()
+    if is_personal(b):
+        return bool(me) and bool(b.owner_profile) and b.owner_profile == me
+    if getattr(principal, "is_admin", False):
+        return True
+    role = getattr(principal, "role", None)
+    hb = _household_list(principal)
+    if role == "basic":
+        listed = hb != "all" and b.id in hb
+    else:
+        listed = hb == "all" or b.id in hb
+    if not listed:
+        return False
+    if is_agent_backed(b):
+        if backend_kind(b) == "app":
+            return False
+        return bool(principal.can("dispatch_agents"))
     return True
 
 
-def visible_to(principal, bots: list[Bot] | None = None) -> list[Bot]:
+def _visible(b: Bot, principal) -> bool:
+    if not may_use(b, principal):
+        return False
+    if not is_hidden(b):
+        return True
+    # A hidden household character is still listed for a profile whose explicit list names it.
+    hb = _household_list(principal) if getattr(principal, "kind", "") == "profile" else "all"
+    return hb != "all" and b.id in hb
+
+
+def visible_to(bot_or_principal, principal_or_bots=None):
+    """``visible_to(bot, principal) -> bool``: may use it AND it is listed - not hidden, or
+    the profile's explicit household list names it (rails, ``bots`` / ``hello`` frames,
+    ``/api/bots``, ``ctx.bots_visible``).
+
+    Compat form (3.x callers): ``visible_to(principal, bots=None) -> list[Bot]`` keeps its 3.x
+    meaning, every character the principal may USE (:func:`usable_bots`, hidden ones
+    included: the Characters manager lists them); rails call :func:`visible_bots`."""
+    if isinstance(bot_or_principal, Bot):
+        return _visible(bot_or_principal, principal_or_bots)
+    return usable_bots(bot_or_principal, principal_or_bots)
+
+
+def visible_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
+    return [b for b in (bots if bots is not None else config.load_bots()) if _visible(b, principal)]
+
+
+def usable_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
+    """Every character ``principal`` may use (hidden ones included)."""
     return [b for b in (bots if bots is not None else config.load_bots()) if may_use(b, principal)]
 
 
 def may_use_id(bot_id: str | None, principal) -> bool:
+    """:func:`may_use` by id. An unknown id (or none) is False: fail closed."""
     if not bot_id:
-        return True
-    b = config.resolve_bot(bot_id)
-    return True if b is None else may_use(b, principal)
+        return False
+    return may_use(config.resolve_bot(bot_id), principal)
 
 
 # --------------------------------------------------------------------------- #

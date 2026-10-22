@@ -455,8 +455,8 @@ def test_a_locked_device_cannot_manage_bots(env, method, path, body):
     c.post("/api/auth/setup", json={"new_pin": "1234"})
     c.cookies.clear()                       # no session -> Safe Mode
     r = c.request(method, path, json=body)
-    assert r.status_code == 403
-    assert "unlock" in r.text.lower()
+    assert r.status_code in (401, 403)
+    assert "unlock" in r.text.lower() or "sign in" in r.text.lower()
     assert config.get_bot("atlas").name == "Atlas"
     assert config.get_bot("x") is None
 

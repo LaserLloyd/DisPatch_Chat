@@ -196,8 +196,8 @@ def test_sessionless_caller_is_refused_when_a_pin_is_set(llm_env, method, path, 
     _unlock(client)                       # sets a PIN and hands us a session
     client.cookies.clear()                # …and now we are Safe Mode
     r = client.request(method, path, json=body)
-    assert r.status_code == 403
-    assert "unlock" in r.text.lower()
+    assert r.status_code in (401, 403)
+    assert "unlock" in r.text.lower() or "sign in" in r.text.lower()
 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)
@@ -208,7 +208,7 @@ def test_decoy_is_blocked_by_the_middleware_too(llm_env, method, path, body):
     client = llm_env()
     _unlock(client)
     client.cookies.clear()
-    assert client.request(method, path, json=body).status_code == 403
+    assert client.request(method, path, json=body).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)

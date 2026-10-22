@@ -2505,6 +2505,76 @@
     "Tasks cannot be assigned from a chat that Restricted profiles can read."
    ],
    "seeded": false
+  },
+  {
+   "code": "household_bots_invalid",
+   "status": 422,
+   "message": "household_bots must be \"all\" or a list of character ids.",
+   "fix": "Send \"all\" or a list of household character ids (GET /api/bots/all).",
+   "docs": "household_bots_invalid",
+   "patterns": [
+    "household_bots must be \"all\" or a list of character ids."
+   ]
+  },
+  {
+   "code": "lock_target_fence",
+   "status": 422,
+   "message": "This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it.",
+   "fix": "Grant it to a profile of its own, or make another profile the default first.",
+   "docs": "lock_target_fence",
+   "patterns": [
+    "This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it."
+   ]
+  },
+  {
+   "code": "lock_target_invalid",
+   "status": 422,
+   "message": "Pick an existing, enabled profile.",
+   "fix": "Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.",
+   "docs": "lock_target_invalid",
+   "patterns": [
+    "Pick an existing, enabled profile."
+   ]
+  },
+  {
+   "code": "personal_needs_direct",
+   "status": 409,
+   "message": "This character has no direct AI connection, so it cannot answer.",
+   "fix": "Give the character a connection in its editor (personal characters run on a direct backend only).",
+   "docs": "personal_needs_direct",
+   "patterns": [
+    "This character has no direct AI connection, so it cannot answer."
+   ]
+  },
+  {
+   "code": "use_delete_route",
+   "status": 409,
+   "message": "Delete a profile with POST /api/people/{id}/delete (preview the counts first).",
+   "fix": "GET /api/people/{id}/delete/preview, then POST /api/people/{id}/delete with its token.",
+   "docs": "use_delete_route",
+   "patterns": [
+    "Delete a profile with POST /api/people/{id}/delete (preview the counts first)."
+   ]
+  },
+  {
+   "code": "use_household_route",
+   "status": 409,
+   "message": "Set the household bots with PUT /api/people/{id}/household-bots.",
+   "fix": "Send the list to PUT /api/people/{id}/household-bots.",
+   "docs": "use_household_route",
+   "patterns": [
+    "Set the household bots with PUT /api/people/{id}/household-bots."
+   ]
+  },
+  {
+   "code": "use_role_route",
+   "status": 409,
+   "message": "Change a profile's type with POST /api/people/{id}/role (preview first).",
+   "fix": "GET /api/people/{id}/role/preview, then POST /api/people/{id}/role with its token.",
+   "docs": "use_role_route",
+   "patterns": [
+    "Change a profile's type with POST /api/people/{id}/role (preview first)."
+   ]
   }
  ]
 }

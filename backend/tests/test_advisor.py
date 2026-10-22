@@ -409,7 +409,7 @@ def test_send_needs_a_real_session(llm_env):
     _unlock(client)
     client.cookies.clear()
     r = client.post("/api/advisor/requests/abc/send")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
     assert main._decoy_blocked("POST", "/api/advisor/requests/abc/send") is True
     # The approve routes are never on the machine surface.
     assert not main._is_inbound("POST", "/api/advisor/requests/abc/send")

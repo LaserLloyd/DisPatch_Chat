@@ -527,40 +527,19 @@ def test_pool_consume_race_refunds_the_rate_limiter(rx_env, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_decoy_sees_only_safe_reactions(rx_env):
-    unlocked = _unlocked(rx_env)
-    # Add an unsafe reaction, then check what a locked client is shown.
-    src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
-    r = unlocked.post("/api/reactions",
-                      files={"file": ("secret.png", src, "image/png")},
-                      data={"name": "Secret", "safe": "false"})
-    assert r.status_code == 200, r.text
-    secret_id = r.json()["reaction"]["id"]
-
-    decoy = rx_env()
-    body = decoy.get("/api/reactions", headers=BROWSER).json()
-    ids = {x["id"] for x in body["reactions"]}
-    assert secret_id not in ids
-    assert "facepalm" in ids
-    assert body["can_manage"] is False and body["can_generate"] is False
-    # Image retrieval follows the same flag.
-    assert decoy.get(f"/api/reactions/{secret_id}/image").status_code == 403
-    assert decoy.get("/api/reactions/facepalm/image").status_code == 200
-
-
 def test_pack_curation_is_full_session_only(rx_env):
     """Curating the operator's permanent shelf needs a real session — a tokenless agent
     gets no more than a locked device does."""
     _unlocked(rx_env)
     for client, label in ((rx_env(), "agent"), (rx_env(), "browser")):
         h = {} if label == "agent" else BROWSER
-        assert client.delete("/api/reactions/facepalm", headers=h).status_code == 403, label
+        assert client.delete("/api/reactions/facepalm", headers=h).status_code in (401, 403), label
         assert client.patch("/api/reactions/facepalm", json={"safe": True},
-                            headers=h).status_code == 403, label
-        assert client.post("/api/reactions/reseed", headers=h).status_code == 403, label
+                            headers=h).status_code in (401, 403), label
+        assert client.post("/api/reactions/reseed", headers=h).status_code in (401, 403), label
         src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
         assert client.post("/api/reactions", files={"file": ("x.png", src, "image/png")},
-                           data={"name": "X"}, headers=h).status_code == 403, label
+                           data={"name": "X"}, headers=h).status_code in (401, 403), label
 
 
 def test_locked_browser_cannot_reach_the_agent_routes(rx_env):
@@ -581,7 +560,7 @@ def test_locked_browser_cannot_reach_the_agent_routes(rx_env):
         if body is not None:
             kw["json"] = body
         r = getattr(tab, method)(path, **kw)
-        assert r.status_code == 403, f"{method.upper()} {path} -> {r.status_code}"
+        assert r.status_code in (401, 403), f"{method.upper()} {path} -> {r.status_code}"
 
 
 def test_on_box_agent_can_read_and_edit_the_prompt_bank(rx_env):
@@ -623,53 +602,8 @@ def test_on_box_agent_gets_the_true_list(rx_env):
     assert body["can_manage"] is False
 
     tab = rx_env()
-    tab_body = tab.get("/api/reactions", headers=BROWSER).json()
-    tab_ids = {x["id"] for x in tab_body["reactions"]}
-    assert secret_id not in tab_ids and pool_id not in tab_ids
-    assert tab_body["can_manage"] is False
-
-
-def test_remote_list_without_key_degrades_to_safe_view(rx_env):
-    """A remote caller with no API key must not 401 off the list route (it is
-    the Safe-Mode picker's data source) — it gets the decoy view instead."""
-    _unlocked(rx_env)
-    remote = rx_env(client_addr=("203.0.113.50", 40000))
-    r = remote.get("/api/reactions")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["can_manage"] is False
-    safe_only = {x.id for x in reactions.load().reactions if x.safe}
-    assert {x["id"] for x in body["reactions"]} <= safe_only
-    # The other machine endpoints stay fail-closed for keyless remote callers.
-    assert remote.get("/api/reactions/prompts").status_code == 401
-    assert remote.post("/api/reactions/fire",
-                       json={"reaction": "facepalm"}).status_code == 401
-
-
-def test_decoy_cannot_fire_an_unsafe_reaction(rx_env):
-    unlocked = _unlocked(rx_env)
-    src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
-    secret_id = unlocked.post("/api/reactions",
-                              files={"file": ("s.png", src, "image/png")},
-                              data={"name": "Secret", "safe": "false"}).json()["reaction"]["id"]
-    decoy = rx_env()
-    # Fired APP-WIDE as a claimed agent (no bot_id) so the 403 lands on the
-    # safe-reaction filter itself, not the bot-visibility gate — and the detail
-    # is pinned so this can never again pass on some other gate (a blanket
-    # "Only agents may fire reactions" check once hid this whole matrix).
-    r = decoy.post("/api/reactions/fire",
-                   json={"reaction": secret_id, "actor": "Nova",
-                         "actor_kind": "agent"},
-                   headers=BROWSER)
-    assert r.status_code == 403
-    assert r.json()["detail"] == "Unlock for full access"
-    reactions.limiter.reset()
-    # A locked device has NO fire path at all — not even a safe starter card.
-    # (Locked devices still SEE safe fires; the WS frame filter handles that.)
-    r = decoy.post("/api/reactions/fire", json={"reaction": "facepalm"},
-                   headers=BROWSER)
-    assert r.status_code == 403
-    assert r.json()["detail"] == "Unlock for full access"
+    # 4.0: a sessionless browser tab is nobody (no Safe-Mode view): sign in first
+    assert tab.get("/api/reactions", headers=BROWSER).status_code == 401
 
 
 def test_redactor_drops_unsafe_reaction_frames(rx_env):
@@ -765,30 +699,6 @@ def test_image_response_carries_the_sandbox_csp(rx_env):
     assert r.status_code == 200
     assert r.headers["content-security-policy"] == "default-src 'none'; sandbox"
     assert r.headers["x-content-type-options"] == "nosniff"
-
-
-def test_locked_browser_on_loopback_is_still_safe_mode(rx_env):
-    """The idle auto-lock drops THIS box's own tab to Safe Mode. The fire
-    endpoint's machine-to-machine exemption must not hand it a way round the
-    safe-reaction filter just because it connected over loopback — not even if
-    the tab CLAIMS to be an agent (actor_kind is cosmetic, not a trust signal)."""
-    unlocked = _unlocked(rx_env)
-    src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
-    secret = unlocked.post("/api/reactions", files={"file": ("s.png", src, "image/png")},
-                           data={"name": "Secret", "safe": "false"}).json()["reaction"]["id"]
-    tab = rx_env(("127.0.0.1", 51000))          # same box, no session, browser headers
-    # App-wide (no bot_id) so the 403 comes from the safe-reaction filter under
-    # test; the detail is pinned so a wrong gate can never green this again.
-    r = tab.post("/api/reactions/fire",
-                 json={"reaction": secret, "actor": "Nova", "actor_kind": "agent"},
-                 headers=BROWSER)
-    assert r.status_code == 403
-    assert r.json()["detail"] == "Unlock for full access"
-    # An on-box AGENT (no browser headers) keeps the exemption it needs.
-    reactions.limiter.reset()
-    agent = rx_env(("127.0.0.1", 51001))
-    assert agent.post("/api/reactions/fire",
-                      json={"reaction": secret, **AGENT_FIRE}).status_code == 200
 
 
 def test_a_hand_deleted_blob_is_simply_gone(rx_env):

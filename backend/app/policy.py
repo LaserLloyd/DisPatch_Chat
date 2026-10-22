@@ -22,12 +22,12 @@ Principals (4.0)
                machine. Everything is allowed - exactly the 2.x "no PIN" behaviour -
                until the owner account is created (``POST /api/auth/setup``).
 
-Transitional (Foundation -> WP-CORE / WP-DEL): the 3.x ``anonymous`` principal (an
-unsigned device on an install with ``anonymous_access: restricted``) still exists so the
-five unsigned sites keep today's behaviour until WP-CORE points them at :func:`unsigned`
-and deletes it; ``Principal.is_restricted`` (= a Basic profile or that anonymous guest)
-lives until WP-DEL removes the Restricted tier. Neither is part of the 4.0 vocabulary
-(``contracts.permissions.PRINCIPAL_KINDS``).
+Nobody (4.0): an unsigned device on an install whose lock target is the profile list (or
+whose default profile is gone) is :func:`nobody` - not a principal kind but the absence of
+one (``kind="none"``). It holds nothing; every non-public route answers it 401
+``signin_required`` and the client shows the sign-in screen with the profile tiles. The 3.x
+``anonymous`` guest and device binding are gone. ``Principal.is_restricted`` (= a
+Basic profile) lives until WP-DEL removes the Restricted tier.
 """
 
 from __future__ import annotations
@@ -88,6 +88,12 @@ class Requirement:
     #: A Restricted caller is refused even though its role holds ``permission`` (the voice
     #: add-on's user reads: a locked device has its own, reduced view).
     not_restricted: bool = False
+    #: 4.0 ownership: which owned thing the route's path parameter names, and so which owner
+    #: check the handler runs - ``thread`` | ``message`` | ``character`` | ``file`` | ``task``
+    #: - or ``none: <why>`` for a parameter that is not a per-profile resource. Set from
+    #: ``route_policy.OWNER_SCOPED``; ``tests/test_route_table.py`` fails a parameterised
+    #: route without it.
+    owner_scoped: str = ""
 
     @property
     def machine_only(self) -> bool:
@@ -108,6 +114,8 @@ class Requirement:
             d["scoped"] = True
         if self.not_restricted:
             d["not_restricted"] = True
+        if self.owner_scoped:
+            d["owner_scoped"] = self.owner_scoped
         if self.note:
             d["note"] = self.note
         return d
@@ -137,11 +145,6 @@ AUTHENTICATED = Requirement(authenticated=True)
 # --------------------------------------------------------------------------- #
 
 
-#: What the transitional 3.x ``anonymous`` guest holds (exactly the 3.x Restricted set, so
-#: nothing an unsigned device may do changed in Foundation). Goes with :func:`anonymous`.
-_ANONYMOUS_PERMISSIONS = frozenset({Permission.USE_CHAT.value, Permission.USE_VOICE.value})
-
-
 def is_lock_target(profile: accounts.Profile | None,
                    cfg: auth.SecurityConfig | None = None) -> bool:
     """Is ``profile`` the current lock target - the default profile every unsigned device
@@ -166,7 +169,7 @@ def effective_permissions(profile: accounts.Profile,
 
 @dataclass(frozen=True)
 class Principal:
-    kind: str                                   # profile | machine | open (| anonymous, transitional)
+    kind: str                                   # profile | machine | open (| none: nobody)
     role: str | None = None                     # a Role value: admin | user | basic (None for machine)
     profile_id: str | None = None
     name: str = ""
@@ -174,7 +177,7 @@ class Principal:
     machine_scopes: frozenset[str] = frozenset()
     session_token: str | None = None
     device_id: str | None = None
-    via: str = ""                               # cookie | device | default | api_token | loopback | callback | open | anonymous
+    via: str = ""                               # cookie | default | api_token | loopback | callback | open | unsigned
     profile: accounts.Profile | None = field(default=None, compare=False, repr=False)
     #: The first Admin (accounts.Profile.protected). An open install counts as protected too.
     protected: bool = False
@@ -187,9 +190,8 @@ class Principal:
     @property
     def is_restricted(self) -> bool:
         """TRANSITIONAL shim until WP-DEL removes the Restricted tier: a Basic profile (the
-        3.x Restricted role) or the transitional anonymous guest. New code must not use it:
-        ask for a named permission instead."""
-        return self.kind == "anonymous" or self.role == Role.BASIC.value
+        3.x Restricted role). New code must not use it: ask for a named permission instead."""
+        return self.kind == "profile" and self.role == Role.BASIC.value
 
     @property
     def is_admin(self) -> bool:
@@ -227,11 +229,10 @@ class Principal:
                 "permissions": sorted(self.permissions) if self.kind != "open" else ["*"]}
 
 
-def anonymous(device_id: str | None = None) -> Principal:
-    """TRANSITIONAL (deleted by WP-CORE): the 3.x unsigned guest, a Basic caller holding only
-    chat and voice."""
-    return Principal(kind="anonymous", role=Role.BASIC.value, name="Guest",
-                     permissions=_ANONYMOUS_PERMISSIONS, device_id=device_id, via="anonymous")
+def nobody(device_id: str | None = None) -> Principal:
+    """No principal: an unsigned device with no lock-target default profile to land on (or a
+    capability URL, which carries its own credential). Holds nothing."""
+    return Principal(kind="none", name="", device_id=device_id, via="unsigned")
 
 
 def open_principal() -> Principal:
@@ -272,15 +273,6 @@ def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
     return profile_principal(prof, token=token, device_id=device_id)
 
 
-def for_device(device_id: str | None) -> Principal | None:
-    """A device bound to a default profile opens as that profile - never an Admin.
-    (Device binding is removed in 4.0: WP-CORE deletes this.)"""
-    prof = accounts.default_profile_for_device(device_id)
-    if prof is None or prof.role is Role.ADMIN:
-        return None
-    return profile_principal(prof, device_id=device_id, via="device")
-
-
 def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
     """Who an unsigned device is (4.0, BUILD-PLAN-v2 §1.4): the lock-target default profile,
     or nobody.
@@ -289,9 +281,9 @@ def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
     enabled -> that profile, as a ``profile`` principal with ``via="default"`` (shared by
     everyone who reaches the port: the lock-target fence keeps agents and voice cloning off
     it). Otherwise ``None``: the caller shows the sign-in screen with the profile tiles.
-    No device binding is consulted (4.0 removes it). Foundation lands the final body; WP-CORE points
-    the five unsigned sites at it (main ``auth_gate``, ``websocket_endpoint`` x2, the
-    extensions thread socket and ``_session_live_fn``) and deletes :func:`anonymous`."""
+    No device binding is consulted (4.0 removes it). The five unsigned sites ask it: main
+    ``auth_gate``, ``websocket_endpoint`` (handshake and re-check), the extensions thread
+    socket and ``_session_live_fn``."""
     cfg = cfg or auth.load()
     if cfg.lock_target != "default_profile" or not cfg.default_profile:
         return None
@@ -331,6 +323,9 @@ def authorize(principal: Principal, req: Requirement) -> Decision:
             return ALLOW
         return Decision(False, 403, "machine_scope_denied",
                         "This API key is not allowed to call that endpoint.", required=need)
+    if principal.kind == "none":
+        return Decision(False, 401, "signin_required", "Sign in to continue.",
+                        required=need or "authenticated")
     if req.authenticated:
         if principal.signed_in:
             return ALLOW
@@ -404,12 +399,6 @@ class Policy:
             return True
         return bool(safe) and p.is_restricted
 
-    def allowed_bot_ids(self, all_bots: Iterable[config.Bot]) -> set[str]:
-        """Characters this principal may see and talk to (audience filter)."""
-        if self.principal.is_restricted:
-            return {b.id for b in all_bots if b.audience in ("all", "restricted")}
-        return {b.id for b in all_bots}
-
 
 def tool_permission(tool_id: str) -> str:
     return f"{TOOL_PREFIX}{tool_id}"
@@ -437,8 +426,6 @@ def of(request: Request) -> Policy:
     # honour the 2.x flags if something set them, else derive from the cookies.
     if getattr(state, "machine", False):
         pol = Policy(machine_principal("state"))
-    elif getattr(state, "decoy", False):
-        pol = Policy(anonymous())
     else:
         cfg = auth.load()
         if not claimed(cfg):
@@ -446,7 +433,7 @@ def of(request: Request) -> Policy:
         else:
             sess = getattr(state, "session", None) or auth.get_session(
                 request.cookies.get(SESSION_COOKIE))
-            pol = Policy(for_session(sess) or anonymous())
+            pol = Policy(for_session(sess) or unsigned(cfg) or nobody())
     try:
         state.policy = pol
     except Exception:
@@ -520,6 +507,11 @@ class RouteIndex:
                 self._cache.move_to_end(key)
                 return hit
         out = self._match(method, path)
+        from . import extensions
+        if extensions.owns_path(path):
+            # An add-on route's requirement depends on what the add-on declared (4.0: the
+            # voice_lab tier while it registers owned clones): never cached.
+            return out
         with _lookup_lock:
             self._cache[key] = out
             while len(self._cache) > 4096:
@@ -602,7 +594,7 @@ def loopback_socket(request: Request) -> bool:
 
 
 def quota_ip(headers, peer: str) -> str:
-    """The identity an anonymous device's budget and throttle are charged to.
+    """The identity an unsigned device's throttle is charged to.
 
     The socket peer, and ONLY the socket peer, unless the peer is loopback: a bucket
     is a fresh ALLOWANCE, so honouring a caller-writable ``X-Forwarded-For`` would let

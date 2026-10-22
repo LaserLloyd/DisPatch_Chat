@@ -18,12 +18,8 @@ add-on 1.5.0) keeps the old behaviour: every clone route is Admin-only.
 ``ctx.register_profile_data(count=..., purge=...)`` as thin delegates to this module, and
 every thread socket carries ``sock.profile_id``.
 
-Status (Foundation): the signatures are final. :func:`caller` and the registries are real;
-:func:`bots_visible`, :func:`voice_allowed`, :func:`voice_owned_clones_active`,
-:func:`count_profile_data` and :func:`purge_profile_data` still return the
-**legacy-permissive** answers below (every bot, every voice allowed, per-profile clones
-not active, nothing counted or purged). WP-CORE replaces those bodies; the docstrings say
-what each one must do then. ``~/.cache/cfp/voice-host-contract.md`` is the add-on side.
+Every body here is real (WP-CORE). ``~/.cache/cfp/voice-host-contract.md`` is the add-on
+side of the contract.
 """
 
 from __future__ import annotations
@@ -157,18 +153,25 @@ def caller(request: Any) -> Caller | None:
 
 
 # --------------------------------------------------------------------------- #
-# Legacy-permissive bodies (WP-CORE replaces them)
+# The host-side consumers (WP-CORE)
 # --------------------------------------------------------------------------- #
 
 
 def bots_visible(request: Any) -> list:
-    """``ctx.bots_visible(request) -> list[BotView]``: the bots the caller may see.
-
-    WP-CORE: filter ``config.load_bots()`` through ``characters.visible_to(bot, principal)``
-    (a personal bot of another profile is never listed, Admins included; ``None``
-    principal -> []). Legacy (now): every bot, exactly what ``ctx.bots.all()`` returns."""
-    from .extensions import BotRegistryView
-    return BotRegistryView().all()
+    """``ctx.bots_visible(request) -> list[BotView]``: the bots the caller may see -
+    ``config.load_bots()`` through ``characters.visible_to(bot, principal)``. Another
+    profile's personal bot is never listed, Admins included; no principal (or nobody
+    signed in) -> ``[]``."""
+    from . import characters, config, policy
+    from .extensions import bot_view
+    try:
+        principal = policy.of(request).principal
+    except Exception:
+        log.debug("bots_visible(): no policy for this request", exc_info=True)
+        return []
+    if principal is None or getattr(principal, "kind", "") in ("none", ""):
+        return []
+    return [bot_view(b) for b in config.load_bots() if characters.visible_to(b, principal)]
 
 
 def is_household_voice(voice_id: str | None) -> bool:
@@ -182,9 +185,19 @@ def voice_allowed(voice_id: str | None, bot_owner: str | None) -> bool:
     ``voice_id``? Used by ``profiles_service`` (create / copy / patch of personal bots) and
     by the character editor's validator.
 
-    WP-CORE: True for :func:`is_household_voice` ids; otherwise every registered
-    voice-access rule must agree (``fn(voice_id, bot_owner)``; a rule that raises counts as
-    "no"); with no rule registered, True. Legacy (now): True."""
+    True for :func:`is_household_voice` ids; otherwise every registered voice-access rule
+    must agree (``fn(voice_id, bot_owner)``; a rule that raises counts as "no"); with no rule
+    registered (an add-on without per-profile clones), True."""
+    if is_household_voice(voice_id):
+        return True
+    rules = registered_voice_access()
+    for ext_id, fn in rules.items():
+        try:
+            if not fn(str(voice_id), bot_owner):
+                return False
+        except Exception:
+            log.warning("voice_access rule of %s failed; counted as no", ext_id, exc_info=True)
+            return False
     return True
 
 
@@ -193,25 +206,40 @@ def voice_owned_clones_active() -> bool:
 
     ``route_policy.extension_requirement`` reads this: while it is False the old table
     applies (only the three voice reads are ``use_voice``; everything else is
-    ``manage_plugins``, Admin only), so no non-Admin can create a household-wide clone.
-
-    WP-CORE: ``bool(registered_voice_access())``. Legacy (now): False."""
-    return False
+    ``manage_plugins``, Admin only), so no non-Admin can create a household-wide clone."""
+    return bool(registered_voice_access())
 
 
 def count_profile_data(profile_id: str) -> dict[str, int]:
     """Sum of every registered ``count(profile_id)`` (``{"voices": n}``); feeds
-    ``profiles_service.content_counts`` and the downgrade / delete confirmations.
-
-    WP-CORE: call each registered count, ignore (and log) one that raises, sum by key.
-    Legacy (now): {}."""
-    return {}
+    ``profiles_service.content_counts`` and the downgrade / delete confirmations. A count
+    that raises is logged and skipped; non-integer values are ignored."""
+    out: dict[str, int] = {}
+    for ext_id, (count, _purge) in registered_profile_data().items():
+        if count is None:
+            continue
+        try:
+            got = count(profile_id) or {}
+            for k, v in dict(got).items():
+                if isinstance(v, int) and not isinstance(v, bool):
+                    out[str(k)] = out.get(str(k), 0) + v
+        except Exception:
+            log.warning("profile-data count of %s failed", ext_id, exc_info=True)
+    return out
 
 
 def purge_profile_data(profile_id: str) -> int:
     """Ask every add-on to delete what it keeps for ``profile_id``; the total it deleted.
-    Called on profile **deletion** and **User -> Basic downgrade**, never on Reset.
-
-    WP-CORE: call each registered purge, log and continue past one that raises, return the
-    sum. Legacy (now): 0, nothing is called."""
-    return 0
+    Called on profile **deletion** and **User -> Basic downgrade**, never on Reset. A purge
+    that raises is logged and the others still run."""
+    total = 0
+    for ext_id, (_count, purge) in registered_profile_data().items():
+        if purge is None:
+            continue
+        try:
+            n = purge(profile_id)
+            if isinstance(n, int) and not isinstance(n, bool):
+                total += n
+        except Exception:
+            log.warning("profile-data purge of %s failed", ext_id, exc_info=True)
+    return total

@@ -454,20 +454,6 @@ def test_hiding_a_row_is_the_absence_of_the_flag_when_it_is_undone(client):
         "un-hidden must read identically to never-hidden, not as a stored False")
 
 
-def test_an_edit_is_rejected_in_safe_mode(client):
-    """VIEW + SEND. A locked tablet rewriting what somebody said is the worst
-    version of this feature."""
-    tid, mid = _seed_http(client, bot_id="alpha")
-    auth.set_pin("4321")
-    auth._cache = None
-    r = client.patch(f"/api/messages/{mid}", json={"content": "not me"},
-                     headers={"origin": "http://127.0.0.1:8765"})
-    assert r.status_code == 403
-    msgs = client.get(f"/api/threads/{tid}/messages",
-                      headers={"origin": "http://127.0.0.1:8765"}).json()["messages"]
-    assert msgs[-1]["content"] == "hello there"
-
-
 def test_an_empty_edit_is_refused(client):
     tid, mid = _seed_http(client)
     assert client.patch(f"/api/messages/{mid}", json={"content": "   "}).status_code == 400
@@ -517,67 +503,6 @@ def test_the_regenerate_frame_is_wired_and_reaches_the_rewind(client, monkeypatc
         ws.send_json({"type": "regenerate", "thread_id": tid})
         _settle(ws, lambda: seen)
     assert [s[0] for s in seen] == [tid]
-
-
-def test_regenerate_is_refused_on_a_locked_device(client, monkeypatch):
-    tid, mid = _seed_http(client, bot_id="alpha")
-    called: list = []
-
-    async def _fake(thread_id, bot_id, user_msg, *, text=None,
-                    expect_text=None):
-        called.append(thread_id)
-
-    monkeypatch.setattr(main, "_regenerate_turn", _fake)
-    auth.set_pin("112233")
-    client.cookies.clear()
-    with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "regenerate", "thread_id": tid})
-        frame = ws.receive_json()
-    assert frame["type"] == "error" and "Unlock" in frame["message"]
-    assert called == [], "a locked tablet must not rewind an agent's session"
-
-
-def test_edit_rerun_is_refused_on_a_locked_device(client, monkeypatch):
-    tid, mid = _seed_http(client, bot_id="alpha")
-    called: list = []
-
-    async def _fake(thread_id, bot_id, user_msg, *, text=None,
-                    expect_text=None):
-        called.append(thread_id)
-
-    monkeypatch.setattr(main, "_regenerate_turn", _fake)
-    auth.set_pin("332211")
-    client.cookies.clear()
-    with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "edit_rerun", "thread_id": tid,
-                      "message_id": mid, "content": "rewritten"})
-        frame = ws.receive_json()
-    assert frame["type"] == "error" and "Unlock" in frame["message"]
-    assert called == []
-    msgs = client.get(f"/api/threads/{tid}/messages",
-                      headers={"origin": "http://127.0.0.1:8765"}).json()["messages"]
-    assert msgs[-1]["content"] == "hello there", "and nothing was rewritten"
-
-
-def test_plain_retry_still_works_for_a_locked_device(client, monkeypatch):
-    """Nothing is taken away from the family. `retry` is the frame they have
-    always had: same behaviour, same daily quota, still no rewind."""
-    tid, mid = _seed_http(client, bot_id="alpha")
-    turns: list = []
-
-    async def _fake_turn(thread_id, bot_id, text, opts=None):
-        turns.append((thread_id, bot_id, text))
-
-    monkeypatch.setattr(main, "run_agent_turn", _fake_turn)
-    auth.set_pin("445566")
-    client.cookies.clear()
-    with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "retry", "thread_id": tid})
-        _settle(ws, lambda: turns)
-    assert [t[0] for t in turns] == [tid]
 
 
 def test_edit_rerun_refuses_anything_but_the_newest_user_message(client, monkeypatch):

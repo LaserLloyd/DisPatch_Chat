@@ -51,6 +51,14 @@ def _member(c, client, addr=("203.0.113.120", 45001), **body):
     return r.json(), k
 
 
+def _owned_thread(c, owner_id: str, bot_id: str) -> str:
+    """4.0: a User without dispatch_agents cannot start a chat with an agent character at
+    all; the thread is made for it directly (as one that existed before the grant changed)."""
+    from app import main as m
+    t = c.portal.call(lambda: m.db.create_thread(bot_id=bot_id, owner_profile_id=owner_id))
+    return t.id
+
+
 def _refused(k, path):
     with pytest.raises(WebSocketDisconnect) as e:
         with k.websocket_connect(path, headers=ORIGIN) as ws:
@@ -87,8 +95,8 @@ async def _rows(tid):
 def test_a_member_voice_socket_on_an_agent_bot_is_refused_with_a_reason(hh):
     c, client = hh
     KNOBS.handler_mode = "submit"
-    _, member = _member(c, client)
-    tid = thread_for(member, "main")                  # an agent-backed character
+    prof, member = _member(c, client)
+    tid = _owned_thread(c, prof["id"], "main")        # an agent-backed character
     code, reason = _refused(member, f"/ws/voice/{tid}")
     assert code == 1008 and "may not run agents" in reason, (code, reason)
     assert KNOBS.sockets == []                        # the extension never saw the socket
@@ -166,8 +174,8 @@ def test_an_owner_extension_turn_on_an_agent_bot_is_not_refused(hh):
 
 def test_a_resend_replay_passes_the_same_agent_gate(hh):
     c, client = hh
-    _, member = _member(c, client)
-    tid = thread_for(c, "main")
+    prof, member = _member(c, client)
+    tid = _owned_thread(c, prof["id"], "main")
     cmid = "c-00000000-0000-0000-0000-000000000001"
     main._ACK_SEEN[cmid] = {"thread_id": tid, "bot_id": "main", "text": "x", "scheduled": False}
     with member.websocket_connect("/ws") as ws:

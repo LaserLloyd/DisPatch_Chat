@@ -144,11 +144,11 @@ def _security_read(d: SettingDef) -> Any:
         "lock_timeout_seconds": cfg.lock_timeout,
         "remember_device_days": cfg.remember_days,
         "machine_loopback_trust": cfg.machine_loopback_trust,
-        "anonymous_access": cfg.anonymous_access,
-        # 4.0: the dict is keyed by Role value; the setting keys keep their 3.x names until
-        # WP-CORE renames them (session_timeout_user / _basic).
-        "session_timeout_member": cfg.session_timeouts.get("user"),
-        "session_timeout_restricted": cfg.session_timeouts.get("basic"),
+        # 4.0: keyed by Role value (session_timeout_user / _basic in security.yaml).
+        "session_timeout_user": cfg.session_timeouts.get("user"),
+        "session_timeout_basic": cfg.session_timeouts.get("basic"),
+        "lock_target": cfg.lock_target,
+        "default_profile": cfg.default_profile or "",
     }.get(n, MISSING)
 
 
@@ -158,16 +158,25 @@ def _security_write(d: SettingDef, value: Any) -> None:
     if n == "remember_device_days":
         auth.set_remember_days(int(value))          # also forgets devices when it goes to 0
         return
+    if n in ("lock_target", "default_profile"):
+        # Validated and fence-checked in one place (auth.set_lock_target).
+        from . import accounts
+        cfg = auth.load()
+        target = str(value) if n == "lock_target" else cfg.lock_target
+        pid = (str(value) or None) if n == "default_profile" else cfg.default_profile
+        try:
+            auth.set_lock_target(target, pid)
+        except accounts.AccountError as e:
+            raise SettingError(d.key, str(e)) from e
+        return
     with auth._lock:
         cfg = auth.load()
         if n == "lock_timeout_seconds":
             cfg.lock_timeout = int(value)
         elif n == "machine_loopback_trust":
             cfg.machine_loopback_trust = bool(value)
-        elif n == "anonymous_access":
-            cfg.anonymous_access = str(value)
-        elif n in ("session_timeout_member", "session_timeout_restricted"):
-            role = "user" if n == "session_timeout_member" else "basic"
+        elif n in ("session_timeout_user", "session_timeout_basic"):
+            role = "user" if n == "session_timeout_user" else "basic"
             cfg.session_timeouts = {**cfg.session_timeouts, role: int(value)}
         else:                                       # pragma: no cover - schema/adapter drift
             raise SettingError(d.key, f"{d.label}: no writer for this setting")
@@ -489,6 +498,9 @@ _SECRETISH = re.compile(r"(key|token|secret|password|passwd|pin|hash|salt|creden
 _SECURITY_INTERNAL = frozenset({"pin", "pin_hash", "salt", "iterations", "recovery_hash",
                                 "recovery_salt", "api_token"})
 _SECURITY_MAPPED = frozenset({"lock_timeout_seconds", "remember_device_days", "machine_loopback_trust",
+                              "session_timeout_user", "session_timeout_basic",
+                              "lock_target", "default_profile",
+                              # 3.x names: read by auth.load as fallbacks / by migration 010
                               "anonymous_access", "session_timeout_member",
                               "session_timeout_restricted"})
 

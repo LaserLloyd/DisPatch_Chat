@@ -187,9 +187,9 @@ def test_a_file_bound_setting_writes_through_to_its_file(tmp_path, monkeypatch):
     auth._cache = None
     assert settings_store.resolve("people.lock_timeout_seconds").value == 600
     assert settings_store.set_many({"people.lock_timeout_seconds": 900,
-                                    "people.session_timeout_member": 1200}).ok
+                                    "people.session_timeout_user": 1200}).ok
     raw = yaml.safe_load((tmp_path / "security.yaml").read_text())
-    assert raw["lock_timeout_seconds"] == 900 and raw["session_timeout_member"] == 1200
+    assert raw["lock_timeout_seconds"] == 900 and raw["session_timeout_user"] == 1200
     assert auth.lock_timeout() == 900                       # the code that reads the file sees it
     # a hand edit of the file is what the store reports afterwards (the file is the home)
     raw["lock_timeout_seconds"] = 1500
@@ -352,9 +352,9 @@ def test_settings_need_manage_settings(world, owner):
     member = world.client(("203.0.113.52", 40002))
     world.login(member, profile_id=max_["id"], pin="5555")
     for c in (kid, stranger, member):
-        assert c.get("/api/settings").status_code == 403
-        assert c.get("/api/settings/schema").status_code == 403
-        assert c.patch("/api/settings", json={"set": {"system.backup_keep": 3}}).status_code == 403
+        assert c.get("/api/settings").status_code in (401, 403)
+        assert c.get("/api/settings/schema").status_code in (401, 403)
+        assert c.patch("/api/settings", json={"set": {"system.backup_keep": 3}}).status_code in (401, 403)
     # the one public route carries no secrets and works for a stranger
     d = stranger.get("/api/settings/defaults")
     assert d.status_code == 200 and set(d.json()) == {"theme", "language", "avatar_style"}
@@ -407,7 +407,7 @@ def test_a_manage_settings_grant_is_not_host_control(world, owner):
     from app import accounts
     r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
                                         "grants": ["manage_settings"]})
-    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid", r.text
     max_ = world.person(owner, "Max", "member", pin="5555")
     accounts.update_profile(max_["id"], grants=["manage_settings"])      # forged straight into the DB
     member = world.client(("203.0.113.61", 40011))
@@ -465,7 +465,7 @@ def test_duration_and_size_presets_are_valid_values():
         for v in d.presets:
             assert S.coerce(d, v) == v, f"{d.key}: preset {v} is refused"
     # The default sits among the presets, so a fresh install shows a named choice.
-    for key in ("people.lock_timeout_seconds", "people.session_timeout_member", "system.backup_interval",
+    for key in ("people.lock_timeout_seconds", "people.session_timeout_user", "system.backup_interval",
                 "system.files_total_max", "people.restricted_daily_upload_bytes"):
         d = S.get_def(key)
         assert d.default in d.presets, key

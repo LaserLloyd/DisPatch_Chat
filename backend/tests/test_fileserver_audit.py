@@ -163,7 +163,7 @@ def test_decoy_fileserver_read_blocked(fs_env, verb, suffix, headers):
     fid = _upload_fileserver(client)    # upload while open (no PIN yet)
     auth.set_pin("1234")                # cookieless client is now a decoy
     r = client.request(verb, f"/api/files/{fid}{suffix}", headers=headers)
-    assert r.status_code == 403, f"{verb} {suffix} leaked: {r.status_code}"
+    assert r.status_code in (401, 403), f"{verb} {suffix} leaked: {r.status_code}"
 
 
 def test_unlocked_session_can_download_fileserver_blob(fs_env):
@@ -175,14 +175,14 @@ def test_unlocked_session_can_download_fileserver_blob(fs_env):
     client = make_client()
     fid = _upload_fileserver(client)    # upload while open (no PIN yet)
     auth.set_pin("1234")
-    assert client.get(f"/api/files/{fid}/download").status_code == 403  # decoy
+    assert client.get(f"/api/files/{fid}/download").status_code in (401, 403)  # decoy
     assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     r = client.get(f"/api/files/{fid}/download")
     assert r.status_code == 200, r.text
     assert r.content == b"secret-bytes"
     # /raw stays 403 even unlocked for non-previewable MIME types ("Preview
     # not available") — that's a preview policy, not the one-way gate.
-    assert client.get(f"/api/files/{fid}/raw").status_code == 403
+    assert client.get(f"/api/files/{fid}/raw").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #

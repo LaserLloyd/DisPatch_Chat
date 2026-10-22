@@ -122,50 +122,6 @@ def _pump(ws, turns, n=20):
             pass
 
 
-def test_a_decoy_send_marks_the_turn_locked(app_client, monkeypatch):
-    config.upsert_bot(config.Bot(id="adv", name="Sage", safe=True, advisor=ADVISOR))
-    tid = app_client.post("/api/threads", json={"bot_id": "adv"}).json()["id"]
-    turns = _turn_recorder(monkeypatch)
-
-    # Unlocked first: the ordinary send path is unchanged (no opts at all).
-    with app_client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is False
-        ws.send_json({"type": "send", "thread_id": tid, "text": "hi",
-                      "client_msg_id": "cm-open"})
-        _pump(ws, turns)
-    assert turns and turns[0][1] == "adv" and turns[0][3] is None, turns
-    turns.clear()
-
-    auth.set_pin("1234")
-    app_client.cookies.clear()
-    with app_client.websocket_connect("/ws") as ws:
-        hello = ws.receive_json()
-        assert hello["decoy"] is True
-        assert "adv" in {b["id"] for b in hello["bots"]}, "a safe advisor is listed in Safe Mode"
-        ws.send_json({"type": "send", "thread_id": tid, "text": "hello there",
-                      "client_msg_id": "cm-locked"})
-        _pump(ws, turns)
-    assert turns and turns[0][1] == "adv", turns
-    opts = turns[0][3]
-    assert isinstance(opts, main.TurnOptions) and opts.locked is True, opts
-
-
-def test_a_decoy_retry_marks_the_turn_locked(app_client, monkeypatch):
-    config.upsert_bot(config.Bot(id="adv", name="Sage", safe=True, advisor=ADVISOR))
-    tid = app_client.post("/api/threads", json={"bot_id": "adv"}).json()["id"]
-    app_client.post(f"/api/threads/{tid}/messages", json={"role": "user", "content": "again?"})
-    turns = _turn_recorder(monkeypatch)
-    auth.set_pin("1234")
-    app_client.cookies.clear()
-    with app_client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "retry", "thread_id": tid})
-        _pump(ws, turns)
-    assert turns, "the retry never ran"
-    opts = turns[0][3]
-    assert isinstance(opts, main.TurnOptions) and opts.locked is True, opts
-
-
 def test_run_agent_turn_hands_locked_to_the_advisor(app_client, monkeypatch):
     config.upsert_bot(config.Bot(id="adv", name="Sage", safe=True, advisor=ADVISOR))
     tid = app_client.post("/api/threads", json={"bot_id": "adv"}).json()["id"]

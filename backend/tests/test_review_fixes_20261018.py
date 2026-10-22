@@ -25,7 +25,7 @@ def family(world):
     owner = world.create_owner(world.client())
     r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
                                         "grants": ["manage_users"]})
-    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid", r.text
     maxp = world.person(owner, "Max", "member", pin="5555")
     eve = world.person(owner, "Eve", "member", pin="6666")
     max_c = world.client(LAN)
@@ -48,7 +48,7 @@ def test_a_member_cannot_grant_itself_anything(family):
 
 def test_host_control_cannot_be_granted_below_admin(family):
     r = family["owner"].patch(f"/api/people/{family['max_id']}", json={"grants": ["admin_system"]})
-    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid"
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid"
     # And a grant that reaches the database some other way is still not effective.
     prof = accounts.get_profile(family["max_id"])
     forged = dataclasses.replace(prof, grants=["admin_system", "manage_settings"])
@@ -58,25 +58,20 @@ def test_host_control_cannot_be_granted_below_admin(family):
     assert "admin_system" in policy.effective_permissions(admin)   # an Admin holds it by role
 
 
-def test_a_member_cannot_bind_its_device_to_another_profile_or_forget_other_devices(family):
-    r = family["max"].put("/api/people/devices/this", json={"profile_id": family["eve_id"]})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
-    # 4.0: without manage_users a User cannot bind even its own device (device binding goes away).
-    assert family["max"].put("/api/people/devices/this", json={"profile_id": family["max_id"]}).status_code == 403
-    # The Owner binds a (different) device to Eve; Max may not forget it.
-    other = family["owner"]
-    assert other.put("/api/people/devices/this", json={"profile_id": family["eve_id"]}).status_code == 200
-    devices = other.get("/api/people/devices").json()["devices"]
-    eves = next(d["id"] for d in devices if d.get("default_profile_id") == family["eve_id"])
-    assert family["max"].delete(f"/api/people/devices/{eves}").status_code == 403
-    assert other.delete(f"/api/people/devices/{eves}").status_code == 200
+def test_device_binding_is_gone_and_a_member_cannot_forget_other_devices(family, world):
+    # 4.0: the bind route is gone for everyone.
+    assert family["max"].put("/api/people/devices/this", json={"profile_id": family["eve_id"]}).status_code in (403, 404, 405)
+    assert family["owner"].put("/api/people/devices/this", json={"profile_id": None}).status_code in (404, 405)
+    from app import accounts
+    accounts.ensure_device("e" * 64)
+    assert family["max"].delete(f"/api/people/devices/{'e' * 64}").status_code == 403
+    assert family["owner"].delete(f"/api/people/devices/{'e' * 64}").status_code == 200
 
 
 def test_the_owner_and_an_admin_still_manage_members(family):
     owner = family["owner"]
     assert owner.patch(f"/api/people/{family['eve_id']}", json={"grants": ["dispatch_agents"],
                                                                  "budgets": {"turns": 5}}).status_code == 200
-    assert owner.put("/api/people/devices/this", json={"profile_id": family["eve_id"]}).status_code == 200
 
 
 # --------------------------------------------------------------------------- #

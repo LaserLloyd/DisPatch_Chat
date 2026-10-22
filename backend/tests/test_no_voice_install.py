@@ -134,9 +134,10 @@ def test_the_running_app_serves_with_voice_absent(ext_env):
     # non-safe bot's thread is refused before any of that.
     lock(c)
     browser = {"sec-fetch-mode": "cors", "origin": "http://testserver"}
-    assert c.get("/api/extensions", headers=browser).json()["extensions"] == []
-    assert c.get("/api/extensions").json()["extensions"] == []   # keyless remote = locked view
-    assert c.get("/ext/voice/index.js").status_code == 404
+    # 4.0: a signed-out device is nobody (sign in first)
+    assert c.get("/api/extensions", headers=browser).status_code == 401
+    assert c.get("/api/extensions").status_code == 401
+    assert c.get("/ext/voice/index.js").status_code in (401, 404)
     with pytest.raises(WebSocketDisconnect) as e:
         with c.websocket_connect(f"/ws/voice/{tid}", headers={"origin": "http://testserver"}) as ws:
             ws.receive_text()

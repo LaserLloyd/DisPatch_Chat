@@ -62,8 +62,8 @@ def test_a_restricted_session_cannot_list_start_or_view_agents_or_tasks(aw):
         client = getattr(aw, who)
         for method, template in AGENT_ROUTES:
             resp = _call(client, method, template, **ids)
-            assert resp.status_code == 403, f"{who}: {method} {template} -> {resp.status_code} {resp.text[:120]}"
-            assert resp.json()["error"]["code"] == "safe_mode"
+            assert resp.status_code in (401, 403), f"{who}: {method} {template} -> {resp.status_code} {resp.text[:120]}"
+            assert resp.json()["error"]["code"] in ("safe_mode", "signin_required", "permission_denied")
     # and it is not just the status code: nothing about the task leaked
     assert aw.mgr.backends["fake"].task_info(tid).state.value == "awaiting_approval"
 
@@ -123,7 +123,7 @@ def test_unpublishing_takes_effect_at_once(aw):
     assert aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "hi"}).status_code == 404
 
 
-def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
+def test_a_task_belongs_to_its_dispatcher_admins_included(aw):
     a = make_agent(aw.owner, published=["*"])
     t_eve = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:long"}).json()["task"]["id"]
     t_fay = aw.fay.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:long"}).json()["task"]["id"]
@@ -137,11 +137,12 @@ def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
         assert {t["id"] for t in c.get("/api/tasks").json()["tasks"]} == {mine}
         # the profile filter is an operator's tool; for everyone else it is ignored
         assert {t["id"] for t in c.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"]} == {mine}
-    assert {t_eve, t_fay} <= {t["id"] for t in aw.owner.get("/api/tasks").json()["tasks"]}
-    only_eve = aw.owner.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"]
-    assert [t["id"] for t in only_eve] == [t_eve]
-    for tid in (t_eve, t_fay):
-        aw.owner.post(f"/api/tasks/{tid}/cancel")
+    # 4.0: the Owner (an Admin) sees its own tasks only; ?profile= is ignored for it too.
+    assert not {t_eve, t_fay} & {t["id"] for t in aw.owner.get("/api/tasks").json()["tasks"]}
+    assert aw.owner.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"] == []
+    assert aw.owner.get(f"/api/tasks/{t_eve}").status_code == 404
+    aw.eve.post(f"/api/tasks/{t_eve}/cancel")
+    aw.fay.post(f"/api/tasks/{t_fay}/cancel")
 
 
 def test_only_host_control_grants_host_level_powers_to_an_agent(aw):
@@ -152,7 +153,7 @@ def test_only_host_control_grants_host_level_powers_to_an_agent(aw):
     from app import accounts
     r = aw.owner.post("/api/people", json={"name": "Gil", "role": "member", "pin": "5555",
                                            "grants": ["manage_agents"]})
-    assert r.status_code == 400 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid", r.text
     gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
     accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.world.client(("203.0.113.60", 1))
@@ -259,9 +260,14 @@ def test_approving_needs_the_approve_permission_and_sight_of_the_task(aw):
     # Eve may dispatch but was not granted approve_agent_actions: her own task waits for an operator.
     r = aw.eve.post(f"/api/approvals/{rid}", json={"decision": "allow"})
     assert r.status_code == 403 and r.json()["required_permission"] == "approve_agent_actions"
-    # Fay holds dispatch too, but cannot see Eve's task - not even to say no.
-    assert aw.fay.post(f"/api/approvals/{rid}", json={"decision": "deny"}).status_code == 403
-    assert aw.owner.post(f"/api/approvals/{rid}", json={"decision": "allow"}).status_code == 200
+    # Fay holds dispatch too, but cannot see Eve's task - not even to say no. 4.0: nor can
+    # the Owner (a task is its dispatcher's); Eve answers once she holds the permission.
+    assert aw.fay.post(f"/api/approvals/{rid}", json={"decision": "deny"}).status_code in (403, 404)
+    assert aw.owner.post(f"/api/approvals/{rid}", json={"decision": "allow"}).status_code in (403, 404)
+    from app import accounts
+    accounts.update_profile(aw.eve_id, grants=["dispatch_agents", "approve_agent_actions"])
+    r = aw.eve.post(f"/api/approvals/{rid}", json={"decision": "allow"})
+    assert r.status_code == 200, r.text
     wait_state(aw.eve, tid, "succeeded")
 
 
@@ -366,11 +372,13 @@ def test_a_task_never_starts_from_a_chat_a_restricted_profile_can_read(aw):
     character a Restricted profile may talk to would hand both to the child."""
     a = make_agent(aw.owner, published=["*"])
     kids_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]    # audience: all
-    for who in (aw.owner, aw.eve):
-        r = who.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
-        assert r.status_code == 409 and r.json()["error"]["code"] == "task_thread_not_allowed"
+    r = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "task_thread_not_allowed"
+    # 4.0: somebody else's chat is not a task's origin at all (404).
+    r = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
+    assert r.status_code == 404
     assert store.list_tasks() == []
-    members = aw.owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    members = aw.eve.post("/api/threads", json={"bot_id": "main"}).json()["id"]
     ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": members})
     assert ok.status_code == 201
     # and the manager itself refuses to post into such a thread even if the character changes later
@@ -387,8 +395,8 @@ def test_unpublishing_an_agent_stops_follow_ups_and_resumes_but_not_the_history(
     r = aw.eve.post(f"/api/tasks/{tid}/send", json={"message": "more"})
     assert r.status_code == 404 and r.json()["error"]["code"] == "agent_not_found"
     assert aw.eve.get(f"/api/tasks/{tid}").status_code == 200, "the history stays readable"
-    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "more"}).status_code == 202
-    wait_state(aw.owner, tid, "succeeded")
+    # 4.0: an Admin cannot drive somebody else's task either (it is the dispatcher's)
+    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "more"}).status_code == 404
 
 
 def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):

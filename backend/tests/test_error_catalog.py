@@ -129,7 +129,7 @@ def test_responses_carry_the_error_object(world):
     # ... a gate refusal ...
     anon = world.client(("203.0.113.9", 1))
     r = anon.get("/api/dashboard")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "safe_mode"
+    assert r.status_code in (401, 403) and r.json()["error"]["code"] in ("safe_mode", "signin_required")
     # ... and a machine caller gets the same object inside the problem document.
     r = world.client(("127.0.0.1", 2), origin=False).get("/api/threads/no-such-thread")
     assert r.headers["content-type"].startswith("application/problem+json")

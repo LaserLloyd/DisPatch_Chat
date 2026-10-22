@@ -114,11 +114,11 @@ def test_remote_machine_needs_api_token(env):
     tid = _seed_thread(loop)
 
     remote = env(("192.0.2.99", 50000))
-    # Keyless remote GET degrades to the decoy view (a plain-HTTP locked tab
-    # is indistinguishable from this shape — see the auth_gate carve-out), and
-    # decoy + non-safe bot = 403. Keyless remote MUTATIONS stay 401.
+    # Keyless remote GET degrades to an unsigned device (a plain-HTTP signed-out
+    # tab is indistinguishable from this shape): 4.0 = nobody = sign in first (401).
+    # Keyless remote MUTATIONS stay 401.
     r = remote.get("/api/threads", params={"bot_id": "main"})
-    assert r.status_code == 403
+    assert r.status_code == 401
     assert remote.patch(f"/api/threads/{tid}",
                         json={"title": "x"}).status_code == 401
 
@@ -136,68 +136,35 @@ def test_remote_machine_needs_api_token(env):
 # Browser callers: the exemption must NOT leak to a sessionless tab
 # --------------------------------------------------------------------------- #
 
-def test_sessionless_browser_still_safe_mode(env):
+def test_a_sessionless_browser_gets_nothing(env):
+    """4.0: no Safe-Mode view any more - an unsigned tab on an install whose lock target is
+    the profile list is nobody: every thread read and write answers 401 sign-in."""
     client = env()
     auth.set_pin("1234")
-    tid = _seed_thread(client)                        # main = non-safe
-
-    # Non-safe bot: view refused, exactly as before the widening.
-    r = client.get("/api/threads", params={"bot_id": "main"},
-                   headers=BROWSER_HDRS)
-    assert r.status_code == 403
-    assert client.get(f"/api/threads/{tid}/messages",
-                      headers=BROWSER_HDRS).status_code == 403
-
-    # Mutations refused outright.
+    tid = _seed_thread(client)
+    stid = _seed_thread(client, bot_id="alpha", content="pic [[media:/media/x.png|cap]]")
+    for bot in ("main", "alpha"):
+        assert client.get("/api/threads", params={"bot_id": bot},
+                          headers=BROWSER_HDRS).status_code == 401
+    for t in (tid, stid):
+        assert client.get(f"/api/threads/{t}/messages", headers=BROWSER_HDRS).status_code == 401
     assert client.patch(f"/api/threads/{tid}", json={"title": "x"},
-                        headers=BROWSER_HDRS).status_code == 403
-    assert client.delete(f"/api/threads/{tid}",
-                         headers=BROWSER_HDRS).status_code == 403
-
-    # Safe bot: view allowed, media redacted — the Safe-Mode contract.
-    stid = _seed_thread(client, bot_id="alpha",
-                        content="pic [[media:/media/x.png|cap]]")
-    r = client.get(f"/api/threads/{stid}/messages", headers=BROWSER_HDRS)
-    assert r.status_code == 200
-    assert "[[media:" not in (r.json()["messages"][-1]["content"] or "")
-
-    # Unread summary filters to safe bots for the sessionless tab.
-    unread = client.get("/api/unread", headers=BROWSER_HDRS)
-    assert unread.status_code == 200
-    assert all(u["bot_id"] in ("alpha", "beta", "Atlas")
-               for u in unread.json()["unread"])
+                        headers=BROWSER_HDRS).status_code in (401, 403)
+    assert client.get("/api/unread", headers=BROWSER_HDRS).status_code == 401
 
 
-def test_plain_http_remote_tab_keeps_decoy_view(env):
-    """A locked tab on a plain-HTTP origin (LAN IP) sends NO Sec-Fetch-* and
-    no Origin on same-origin GETs — indistinguishable from a remote machine.
-    Its keyless GETs must degrade to the decoy view (what it had before the
-    widening), like the long-standing GET /api/reactions carve-out; keyless
-    mutations from that shape stay fail-closed at 401."""
+def test_a_plain_http_remote_tab_is_nobody_too(env):
+    """A signed-out tab on a plain-HTTP origin sends no Sec-Fetch-* / Origin on GETs, so its
+    keyless reads degrade to an unsigned device - which is nobody (401) in 4.0 - rather than
+    an API-key demand; keyless mutations stay fail-closed at 401."""
     loop = env()
     auth.set_pin("1234")
-    _seed_thread(loop, content="private main body")           # non-safe
-    stid = _seed_thread(loop, bot_id="alpha",
-                        content="pic [[media:/media/x.png|cap]]")
-
-    remote = env(("192.0.2.50", 50000))                     # bare GET shape
-    # Safe bot: 200 with redaction — the locked family view.
-    r = remote.get("/api/threads", params={"bot_id": "alpha"})
-    assert r.status_code == 200, r.text
-    r = remote.get(f"/api/threads/{stid}/messages")
-    assert r.status_code == 200
-    assert "[[media:" not in (r.json()["messages"][-1]["content"] or "")
-    # Non-safe bot: refused as decoy (403), not an API-key demand.
-    assert remote.get("/api/threads",
-                      params={"bot_id": "main"}).status_code == 403
-    # Unread summary filtered to safe bots.
-    u = remote.get("/api/unread")
-    assert u.status_code == 200
-    assert all(x["bot_id"] in ("alpha", "beta", "Atlas")
-               for x in u.json()["unread"])
-    # Keyless remote mutations stay fail-closed.
-    assert remote.patch(f"/api/threads/{stid}",
-                        json={"title": "x"}).status_code == 401
+    stid = _seed_thread(loop, bot_id="alpha", content="hello")
+    remote = env(("192.0.2.50", 50000))
+    assert remote.get("/api/threads", params={"bot_id": "alpha"}).status_code == 401
+    assert remote.get(f"/api/threads/{stid}/messages").status_code == 401
+    assert remote.get("/api/unread").status_code == 401
+    assert remote.patch(f"/api/threads/{stid}", json={"title": "x"}).status_code == 401
     assert remote.delete(f"/api/threads/{stid}").status_code == 401
 
 
@@ -236,7 +203,7 @@ def test_sessionless_browser_still_cannot_list_files(env):
     client = env()
     auth.set_pin("1234")
     r = client.get("/api/files", headers=BROWSER_HDRS)
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 def test_remote_machine_needs_token_for_files_list(env):

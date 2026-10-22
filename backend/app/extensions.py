@@ -1869,9 +1869,13 @@ async def _accept_then_close(ws, code: int, reason: str) -> None:
         await ws.close(code=code, reason=(reason or "unavailable")[:120])
 
 
+_NOT_GIVEN: Any = object()
+
+
 def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
                      locked: bool = False, *, device_id: str | None = None,
-                     who: tuple[str, str | None] | None = None) -> Callable[[], bool]:
+                     who: tuple[str, str | None] | None = None,
+                     owner: Any = _NOT_GIVEN) -> Callable[[], bool]:
     """``ThreadSocket.session_live``: may this socket go on? The add-on asks it all through a
     call (before each turn and while listening), so it also carries the Restricted rules that
     change with the clock: a Restricted profile's quiet hours or used-up minutes end the call
@@ -1898,9 +1902,17 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
             if pr is None:
                 return False
         else:
-            pr = policy.for_device(device_id) or policy.anonymous(device_id)
-            if (pr.kind, pr.profile_id) != who:
-                return False                # re-bound, unbound or disabled since: reconnect
+            # 4.0: no session = the lock-target default profile (policy.unsigned). The lock
+            # target moving, or the profile being disabled, ends the call.
+            pr = policy.unsigned()
+            if pr is None or (pr.kind, pr.profile_id) != who:
+                return False
+        if owner is not _NOT_GIVEN:
+            # 4.0: still the thread owner's call (a session re-resolved to another profile,
+            # or the Owner changing, ends it). Checked beside may_use, never instead of it.
+            from . import ownership
+            if not ownership.may_see_thread(pr, owner, write=True):
+                return False
         return _restricted_limits_ok(pr)
     return session_live
 
@@ -2074,6 +2086,21 @@ def turn_locked(thread_id: str) -> bool:
 router = APIRouter()
 
 
+def _only_agents_missing(bot, principal) -> bool:
+    """``characters.may_use`` said no only because an agent character needs
+    ``dispatch_agents``: step 3b below refuses with that reason instead of a bare 1008."""
+    from . import characters
+    if not characters.is_agent_backed(bot) or characters.is_personal(bot) \
+            or principal.can(Permission.DISPATCH_AGENTS):
+        return False
+    from dataclasses import replace
+    try:
+        granted = replace(principal, permissions=principal.permissions | {Permission.DISPATCH_AGENTS.value})
+    except Exception:
+        return False
+    return characters.may_use(bot, granted)
+
+
 @router.websocket("/ws/{name}/{thread_id}")
 async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     # 1. Origin == Host (pre-accept).
@@ -2098,19 +2125,17 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
             await ws.close(code=POLICY)
             return
     else:
-        # The same principal the HTTP gate and /ws resolve: a session -> that profile; else
-        # the device's default profile (the kitchen tablet, or the device a Restricted child
-        # signed in on); else an anonymous guest = Restricted. Before 2026-10-19 this socket
-        # skipped the device step, so a device-bound Restricted profile's voice call ran as an
-        # anonymous guest - per-address budget, no quiet hours.
+        # The same principal the HTTP gate and /ws resolve (4.0): a session -> that profile;
+        # else the lock-target default profile (policy.unsigned); else nobody - closed, as
+        # "nothing but the sign-in page" covers voice too. No device binding.
         device_id = _ws_device_id(ws)
         session = auth.get_session(ws.cookies.get(_hooks.cookie_name))
         principal = policy.for_session(session, device_id)
         if principal is None:
             session = None
-            principal = policy.for_device(device_id) or policy.anonymous(device_id)
-            if principal.kind == "anonymous" and cfg.anonymous_access == "none":
-                await ws.close(code=POLICY)    # "nothing but the sign-in page" covers voice too
+            principal = policy.unsigned(cfg)
+            if principal is None:
+                await ws.close(code=POLICY)
                 return
         if not principal.can(Permission.USE_VOICE):
             await ws.close(code=POLICY)        # a profile without voice
@@ -2130,11 +2155,18 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     db = _hooks.db()
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
+    from . import ownership
     if (thread is None or bot is None or thread_id in _deleted_threads
             or (locked and not locked_may_see(bot))
-            or (principal is not None and not characters.may_use(bot, principal))):
+            or (principal is not None and not characters.may_use(bot, principal)
+                and not _only_agents_missing(bot, principal))
+            or (principal is not None
+                and not ownership.may_see_thread(principal, getattr(thread, "owner_profile_id", None),
+                                                 write=True))):
         # may_use: a character made for other profiles (its `profiles` list) is closed to
         # this one here exactly as in the roster, /ws and the REST thread routes.
+        # ownership (4.0): a voice call runs turns and hears every reply in the thread, so it
+        # is the thread OWNER's only - the same 1008 as a thread that does not exist.
         await ws.close(code=POLICY)
         return
     # 3b. An agent-backed character (its turns run an agent on the host) needs
@@ -2190,10 +2222,14 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         thread=thread, bot=bot_view(bot), token=token,
         session_live=_session_live_fn(
             token, thread_id, bot.id, locked, device_id=device_id if principal is not None else None,
-            who=(principal.kind, principal.profile_id) if principal is not None else None),
+            who=(principal.kind, principal.profile_id) if principal is not None else None,
+            owner=getattr(thread, "owner_profile_id", None)),
         touch=touch,
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
-        on_replaced=me.replaced.append, locked=locked)
+        on_replaced=me.replaced.append, locked=locked,
+        # 4.0 voice host contract: the principal's profile, which is the thread's owner by
+        # construction (the ownership check above). None on an open install.
+        profile_id=(principal.profile_id or None) if principal is not None else None)
     if locked:
         # Whose daily budget this socket's turns spend: a Restricted profile's own (it follows
         # the person), else the anonymous device's address (main._budget_subject).

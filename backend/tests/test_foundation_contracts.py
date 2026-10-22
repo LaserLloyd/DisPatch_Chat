@@ -136,7 +136,7 @@ def test_caller_mapping():
     assert o.is_admin and o.profile_id is None and o.can("anything")
     assert ext_profile_hooks.caller_of(None) is None
     assert ext_profile_hooks.caller_of(policy.machine_principal("api_token")) is None
-    assert ext_profile_hooks.caller_of(policy.anonymous()) is None
+    assert ext_profile_hooks.caller_of(policy.nobody()) is None
     assert ext_profile_hooks.is_household_voice("") and ext_profile_hooks.is_household_voice("builtin:af")
     assert not ext_profile_hooks.is_household_voice("26-10-abcdef")
 
