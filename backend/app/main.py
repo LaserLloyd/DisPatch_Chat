@@ -140,6 +140,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 db = Database(config.DB_PATH)
+#: The instance made at import. Its path was fixed from the data directory at IMPORT time; the
+#: lifespan re-derives it from ``config.DATA_DIR`` (see _lifespan_startup), so a process that
+#: moved the data directory afterwards - every test does - never opens the old path.
+_IMPORT_DB = db
 
 # Per-thread locks serialise agent turns; a global semaphore caps concurrent
 # subprocesses so we never overwhelm the local models.
@@ -446,6 +450,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # folders). Marker-guarded: an already-migrated or brand-new data dir is a
     # cheap no-op, so this runs unconditionally on every start.
     await asyncio.to_thread(reactions.migrate_mood_folders)
+    if db is _IMPORT_DB and db._db is None:
+        # The migration above ran on config.DATA_DIR; the database opened here must be the
+        # same file. (A test that entered the lifespan without its own Database used to open
+        # the REAL install's chats.db here and run the schema statements on it.)
+        db.path = Path(config.DATA_DIR) / "chats.db"
     await db.connect()
     # Every socket is narrowed to the characters ITS profile may use (3.0
     # per-profile visibility), broadcasts included - not only the roster and hello.

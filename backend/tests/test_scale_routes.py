@@ -229,3 +229,21 @@ def test_the_3x_search_index_is_upgraded_in_place(tmp_path):
                 "VALUES ('delete', 3, 'harbour fog', 'pc')")
     assert database.ensure_owner_fts(con) == "healed"
     con.close()
+
+
+def test_the_lifespan_opens_the_database_of_the_current_data_dir(tmp_path, monkeypatch):
+    """The import-time Database follows config.DATA_DIR into the lifespan: a test (or any
+    process) that moved the data directory never opens the old path's chats.db."""
+    from fastapi.testclient import TestClient
+
+    from app.database import Database
+    d = tmp_path / "moved"
+    d.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", d)
+    monkeypatch.setattr(config, "CONFIG_PATH", d / "config.yaml")
+    fresh = Database(tmp_path / "elsewhere" / "chats.db")      # stands in for the import path
+    monkeypatch.setattr(main, "db", fresh)
+    monkeypatch.setattr(main, "_IMPORT_DB", fresh)
+    with TestClient(main.app):
+        assert main.db.path == d / "chats.db"
+    assert not (tmp_path / "elsewhere").exists()
