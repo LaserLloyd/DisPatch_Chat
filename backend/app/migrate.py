@@ -55,13 +55,15 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        same computed list. Members, Admins and the Owner keep ``"all"``. Roles and
                        lists are raw writes: nobody is signed out. Always recorded on its first
                        run, even with nothing to change, so the auto-run rule never fires later
-``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent,
-                       ``IF NOT EXISTS`` only) the maintenance tables (``maintenance_runs``,
+``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent)
+                       the maintenance tables (``maintenance_runs``,
                        ``media_refs``, ``media_expired``, ``storage_stats``,
                        ``maintenance_state``), ``profiles.archive_after_months`` (NULL = off),
                        the indexes of ``database.SCALE_INDEXES`` (per-owner thread lists and
                        unread, File Server, foreign-key children, the time columns the daily
-                       maintenance prunes by), ``media_refs`` backfilled from every message,
+                       maintenance prunes by), ``messages.owner_profile_id`` (the thread's
+                       owner) and the search index rebuilt with it (owner-scoped search),
+                       ``media_refs`` backfilled from every message,
                        and ``auto_vacuum = INCREMENTAL`` made real by one ``VACUUM`` (the one
                        long step on a large database; logged). Recorded when it ran
 
@@ -655,6 +657,9 @@ def scale_plan() -> list[str]:
         if "messages" in tables:
             n = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
             lines.append(f"backfill media_refs from {n} message(s)")
+        if database.fts_needs_upgrade(con):
+            lines.append("message search: messages get their thread's owner and the search index "
+                         "is rebuilt with it (a profile's search ranks only its own messages)")
         mode = con.execute("PRAGMA auto_vacuum").fetchone()[0]
         if mode != _AUTO_VACUUM_INCREMENTAL:
             size = dbp.stat().st_size
@@ -722,6 +727,9 @@ def apply_scale() -> None:
         t0 = time.monotonic()
         built = database.ensure_scale_schema(con)
         log.info("011_scale: %d index(es) built in %.1f s", built, time.monotonic() - t0)
+        t0 = time.monotonic()
+        fts = database.ensure_owner_fts(con)
+        log.info("011_scale: owner-scoped search index %s in %.1f s", fts, time.monotonic() - t0)
         t0 = time.monotonic()
         names = _backfill_media_refs(con)
         log.info("011_scale: media_refs backfilled (%d name(s)) in %.1f s", names,

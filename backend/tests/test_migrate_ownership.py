@@ -83,6 +83,7 @@ def v3(tmp_path, monkeypatch):
     for idx in ("idx_threads_owner_list", "idx_threads_owner_bot_list",   # 011_scale's, on the
                 "idx_threads_owner_unread", "idx_files_owner_created"):   # columns dropped below
         con.execute(f"DROP INDEX IF EXISTS {idx}")
+    con.execute("DROP TRIGGER IF EXISTS threads_owner_au")             # 011_scale's, on that column too
     con.execute("ALTER TABLE threads DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE files DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE profiles DROP COLUMN backends")

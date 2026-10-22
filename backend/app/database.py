@@ -55,7 +55,11 @@ CREATE TABLE IF NOT EXISTS messages (
     content     TEXT NOT NULL,
     media_url   TEXT,
     created_at  TEXT NOT NULL,
-    metadata    TEXT
+    metadata    TEXT,
+    -- 4.0 scale (011_scale): the thread's owner, copied so search can filter by owner inside
+    -- the full-text index (ensure_owner_fts). Kept in step by add_message and the
+    -- threads_owner_au trigger; never read for access decisions (the thread's owner is).
+    owner_profile_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
@@ -535,11 +539,14 @@ SCALE_INDEXES: tuple[tuple[str, str, str], ...] = (
     # (add_message keeps updated_at >= every message's created_at), so the summary reads a
     # handful of index entries instead of every thread of the profile.
     ("threads", "idx_threads_owner_unread",
-     "CREATE INDEX IF NOT EXISTS idx_threads_owner_unread ON threads(owner_profile_id) "
+     "CREATE INDEX IF NOT EXISTS idx_threads_owner_unread ON threads(owner_profile_id, is_archived) "
      "WHERE is_archived = 0 AND (last_read_at IS NULL OR last_read_at < updated_at)"),
     # File Server list per owner.
     ("files", "idx_files_owner_created",
      "CREATE INDEX IF NOT EXISTS idx_files_owner_created ON files(owner_profile_id, created_at DESC)"),
+    # The orphan sweep asks "does a row own this blob?" per file on disk.
+    ("files", "idx_files_stored_name",
+     "CREATE INDEX IF NOT EXISTS idx_files_stored_name ON files(stored_name)"),
     # Foreign-key children: a message delete (wipe, Reset, thread delete) looks up its
     # image_jobs rows (ON DELETE CASCADE); without an index that is a scan per message.
     ("image_jobs", "idx_image_jobs_message",
@@ -611,6 +618,137 @@ def ensure_scale_schema(con: sqlite3.Connection) -> int:
     return len(todo)
 
 
+# --------------------------------------------------------------------------- #
+# Owner-scoped full-text search (011_scale, strategy B of BUILD-PLAN-v2 §1.13.1)
+#
+# One shared FTS index with an owner post-filter costs time proportional to ALL matches in ALL
+# profiles: bm25 is computed for every match before the owner join can drop it, so searching a
+# common word took ~290 ms at 1M messages and grows with the house. Instead each message
+# carries its thread's owner (``messages.owner_profile_id``, kept in step by add_message and by
+# the ``threads_owner_au`` trigger) and the FTS index has it as an indexed column, so the owner
+# restriction is an FTS column filter: the index only ever ranks the caller's own matches.
+# The SQL owner check stays as well (defence in depth): a stale token could only hide a hit,
+# never show someone else's.
+# --------------------------------------------------------------------------- #
+
+FTS_TABLE_DDL = ("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5("
+                 "content, owner_profile_id, content='messages', content_rowid='rowid')")
+#: The triggers that keep the external-content index in step. ``messages_au`` fires only when
+#: what is indexed changes (not on every metadata merge, as the 3.x trigger did).
+FTS_TRIGGERS = (
+    """CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+           INSERT INTO messages_fts(rowid, content, owner_profile_id)
+               VALUES (new.rowid, new.content, new.owner_profile_id);
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+           INSERT INTO messages_fts(messages_fts, rowid, content, owner_profile_id)
+               VALUES ('delete', old.rowid, old.content, old.owner_profile_id);
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content, owner_profile_id ON messages
+       BEGIN
+           INSERT INTO messages_fts(messages_fts, rowid, content, owner_profile_id)
+               VALUES ('delete', old.rowid, old.content, old.owner_profile_id);
+           INSERT INTO messages_fts(rowid, content, owner_profile_id)
+               VALUES (new.rowid, new.content, new.owner_profile_id);
+       END""",
+)
+#: A conversation that changes hands (an unowned chat adopted by the first Admin) takes its
+#: messages - and so their search entries - with it. Not an FTS trigger: it exists with or
+#: without FTS5, so ``messages.owner_profile_id`` is right either way.
+THREAD_OWNER_TRIGGER = (
+    """CREATE TRIGGER IF NOT EXISTS threads_owner_au AFTER UPDATE OF owner_profile_id ON threads
+       WHEN old.owner_profile_id IS NOT new.owner_profile_id BEGIN
+           UPDATE messages SET owner_profile_id = new.owner_profile_id WHERE thread_id = new.id;
+       END""")
+_FTS_TRIGGER_NAMES = ("messages_ai", "messages_ad", "messages_au")
+#: Rows per batch of the one-time owner backfill.
+_OWNER_BACKFILL_BATCH = 20000
+
+
+def _cols(con: sqlite3.Connection, table: str) -> list[str]:
+    return [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
+
+
+def fts_needs_upgrade(con: sqlite3.Connection) -> bool:
+    """Read only: is the message search index missing, or still the 3.x shape (no owner)?"""
+    if "messages" not in sqlite_tables(con):
+        return False
+    if "owner_profile_id" not in _cols(con, "messages"):
+        return True
+    row = con.execute("SELECT sql FROM sqlite_master WHERE name = 'messages_fts'").fetchone()
+    return row is None or "owner_profile_id" not in (row[0] or "")
+
+
+def backfill_message_owners(con: sqlite3.Connection, *, log_fn=None) -> int:
+    """Give every message its thread's owner (one time, in rowid batches). Returns rows set."""
+    if "owner_profile_id" not in _cols(con, "messages"):
+        con.execute("ALTER TABLE messages ADD COLUMN owner_profile_id TEXT")
+    hi = con.execute("SELECT MAX(rowid) FROM messages").fetchone()[0] or 0
+    done = 0
+    for lo in range(0, hi, _OWNER_BACKFILL_BATCH):
+        cur = con.execute(
+            "UPDATE messages SET owner_profile_id = t.owner_profile_id FROM threads t "
+            "WHERE t.id = messages.thread_id AND messages.rowid > ? AND messages.rowid <= ? "
+            "AND messages.owner_profile_id IS NOT t.owner_profile_id",
+            (lo, lo + _OWNER_BACKFILL_BATCH))
+        done += max(0, cur.rowcount)
+    if log_fn:
+        log_fn(done)
+    return done
+
+
+def ensure_owner_fts(con: sqlite3.Connection) -> str:
+    """Bring the message search index to the owner-scoped shape (sync; 011_scale and
+    Database.connect both call it, idempotent). Returns what it did: ``"ok"`` (nothing to do),
+    ``"healed"`` (rebuilt: the index had lost rows), ``"upgraded"`` (3.x index replaced and
+    rebuilt), ``"created"``, or ``"unavailable"`` (no FTS5: the 3.x triggers are dropped so
+    writes keep working, and search falls back to LIKE). Raises nothing for a missing FTS5."""
+    if "messages" not in sqlite_tables(con):
+        return "ok"
+    # The owner column and its trigger exist with or without FTS5.
+    if "owner_profile_id" not in _cols(con, "messages"):
+        con.execute("ALTER TABLE messages ADD COLUMN owner_profile_id TEXT")
+    con.execute(THREAD_OWNER_TRIGGER)
+    row = con.execute("SELECT sql FROM sqlite_master WHERE name = 'messages_fts'").fetchone()
+    state = "ok"
+    if row is not None and "owner_profile_id" not in (row[0] or ""):
+        state = "upgraded"
+    elif row is None:
+        state = "created"
+    try:
+        if state != "ok":
+            # Old triggers first: they would re-index every row the backfill touches.
+            for name in _FTS_TRIGGER_NAMES:
+                con.execute(f"DROP TRIGGER IF EXISTS {name}")
+            con.execute("DROP TABLE IF EXISTS messages_fts")
+            backfill_message_owners(con)
+            con.execute(FTS_TABLE_DDL)
+            con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        for ddl in FTS_TRIGGERS:
+            con.execute(ddl)
+        if state == "ok":
+            # The 3.x server rebuilt the whole index on every start (seconds at 1M rows). Now
+            # only when it has lost rows (a crash between a write and its trigger cannot happen
+            # inside one transaction, but a restored or hand-edited file can).
+            have = con.execute("SELECT COUNT(*) FROM messages_fts_docsize").fetchone()[0]
+            want = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            if have != want:
+                con.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+                state = "healed"
+    except sqlite3.OperationalError as e:
+        if "fts5" not in str(e).lower() and "no such module" not in str(e).lower():
+            raise
+        for name in _FTS_TRIGGER_NAMES:
+            con.execute(f"DROP TRIGGER IF EXISTS {name}")
+        return "unavailable"
+    return state
+
+
+def fts_owner_term(owner: str) -> str:
+    """An FTS5 column filter that keeps one owner's messages."""
+    return 'owner_profile_id : "' + owner.replace('"', '""') + '"'
+
+
 #: Default of the ``principal`` argument on the thread readers: no owner filter (the server's
 #: own housekeeping). A sentinel, not None - None would read as "nobody" by mistake.
 _ALL_OWNERS: Any = object()
@@ -632,6 +770,58 @@ def _owner_where(principal: Any, owner_ids: set[str | None] | None) -> tuple[str
     from . import ownership
     frag, params = ownership.owner_filter_sql(principal, "t")
     return ("" if frag == "1=1" else frag), params
+
+
+def _owner_values(principal: Any, owner_ids: set[str | None] | None) -> list[str | None] | None:
+    """The owner filter as a list of single ``owner_profile_id`` values (``None`` in it = the
+    NULL-owner rows), for the paged readers: each value is ONE equality seek on the owner
+    index, so the page comes out in index order with no sort (an ``IN (...) OR IS NULL``
+    filter makes SQLite sort every one of the owner's threads). ``None`` = no filter (the
+    server's own housekeeping, an unclaimed install); ``[]`` = nothing."""
+    if owner_ids is None:
+        if principal is _ALL_OWNERS:
+            return None
+        from . import ownership
+        owner_ids = ownership.readable_owner_ids(principal)
+        if owner_ids is None:
+            return None
+    named = sorted(i for i in owner_ids if i is not None)
+    return named + ([None] if None in owner_ids else [])
+
+
+def _owner_eq(value: str | None) -> tuple[str, list]:
+    return ("t.owner_profile_id IS NULL", []) if value is None else ("t.owner_profile_id = ?", [value])
+
+
+#: Thread-list page size: the default, and the most one call may ask for.
+THREAD_PAGE_DEFAULT = 50
+THREAD_PAGE_MAX = 200
+#: Pinned threads ride on page one only; more than this many pinned is not a rail any more.
+PINNED_MAX = 200
+
+
+class CursorError(ValueError):
+    """A thread-list cursor that is not one this server handed out."""
+
+
+def encode_thread_cursor(updated_at: str, thread_id: str) -> str:
+    """The opaque keyset cursor for "threads older than this one" (``next_cursor``)."""
+    import base64
+    raw = _json.dumps([updated_at, thread_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_thread_cursor(cursor: str) -> tuple[str, str]:
+    import base64
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        val = _json.loads(raw)
+    except (ValueError, TypeError) as e:
+        raise CursorError("bad cursor") from e
+    if (not isinstance(val, list) or len(val) != 2
+            or not all(isinstance(x, str) and 0 < len(x) <= 200 for x in val)):
+        raise CursorError("bad cursor")
+    return val[0], val[1]
 
 
 def _file_owner_where(owner_ids: set[str | None] | None) -> tuple[str, list]:
@@ -972,42 +1162,25 @@ class Database:
     fts_ok: bool = False
 
     async def _setup_fts(self) -> None:
-        """Build a contentless FTS5 index mirroring messages.content + triggers.
+        """The owner-scoped FTS5 index mirroring messages.content (:func:`ensure_owner_fts`).
 
         FTS5 is compiled into CPython's bundled SQLite on virtually every build,
         but we degrade gracefully (search falls back to LIKE) if it isn't, so the
-        app never fails to start over search.
+        app never fails to start over search. Run on a private sqlite3 connection in a
+        thread: a one-time upgrade or a heal rebuild can take seconds on a large database.
         """
+        def work() -> str:
+            con = sqlite3.connect(str(self.path), timeout=30, isolation_level=None)
+            try:
+                con.execute("PRAGMA busy_timeout=30000")
+                return ensure_owner_fts(con)
+            finally:
+                con.close()
         try:
-            await self.db.executescript(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
-                    USING fts5(content, content='messages', content_rowid='rowid');
-                CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
-                END;
-                CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                    INSERT INTO messages_fts(messages_fts, rowid, content)
-                        VALUES('delete', old.rowid, old.content);
-                END;
-                CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-                    INSERT INTO messages_fts(messages_fts, rowid, content)
-                        VALUES('delete', old.rowid, old.content);
-                    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
-                END;
-                """
-            )
-            # Rebuild backfills the index from the content table; idempotent and
-            # cheap to re-run at startup for a single-user DB.
-            await self.db.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-            await self.db.commit()
-            self.fts_ok = True
+            state = await asyncio.to_thread(work)
         except Exception:
-            self.fts_ok = False
-            # If FTS5 is unavailable but trigger DDL from a prior (fts-capable)
-            # run persisted, those triggers reference a now-missing messages_fts
-            # and would make EVERY message INSERT/UPDATE/DELETE fail. Drop them so
-            # writes keep working and search simply falls back to LIKE.
+            log.warning("full-text index setup failed; search falls back to LIKE", exc_info=True)
+            state = "unavailable"
             with contextlib.suppress(Exception):
                 await self.db.executescript(
                     "DROP TRIGGER IF EXISTS messages_ai;"
@@ -1015,6 +1188,9 @@ class Database:
                     "DROP TRIGGER IF EXISTS messages_ad;"
                 )
                 await self.db.commit()
+        if state in ("upgraded", "healed"):
+            log.info("full-text index %s", state)
+        self.fts_ok = state != "unavailable"
 
     @staticmethod
     def _fts_query(q: str) -> str:
@@ -1045,35 +1221,10 @@ class Database:
             match = self._fts_query(q)
             if not match:
                 return []
-            sql = (
-                "SELECT m.id, m.thread_id, m.role, m.created_at, t.bot_id, t.title, "
-                # Match delimiters are Private Use Area code points, chosen
-                # because they have NO rendering or layout semantics of their
-                # own. The previous markers were U+2068/U+2069 (bidi isolates):
-                # invisible, but functional — they change directional handling
-                # of the run they enclose, which is a live problem once the UI
-                # renders right-to-left languages, and they are exactly the
-                # characters "trojan source" scanners flag. PUA code points are
-                # inert and effectively absent from real message text.
-                f"       snippet(messages_fts, 0, '{FTS_MARK_OPEN}', '{FTS_MARK_CLOSE}', '…', 12) AS snippet "
-                "FROM messages_fts f "
-                "JOIN messages m ON m.rowid = f.rowid "
-                "JOIN threads t ON t.id = m.thread_id "
-                "WHERE messages_fts MATCH ? "
-            )
-            params: list[Any] = [match]
-            if bot_ids:
-                sql += f"AND t.bot_id IN ({','.join('?' * len(bot_ids))}) "
-                params += list(bot_ids)
-            if own_frag:
-                sql += f"AND {own_frag} "
-                params += own_params
-            sql += "ORDER BY bm25(messages_fts), m.created_at DESC LIMIT ?"
-            params.append(limit)
             try:
-                cur = await self.db.execute(sql, params)
-                rows = await cur.fetchall()
+                rows = await self._search_fts(match, bot_ids, limit, principal)
             except Exception:
+                log.warning("full-text search failed; falling back to LIKE", exc_info=True)
                 rows = []
                 fts_failed = True      # runtime FTS error → use the LIKE fallback
         if not rows and (not self.fts_ok or fts_failed):
@@ -1095,6 +1246,75 @@ class Database:
             cur = await self.db.execute(sql, params)
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def _search_fts(self, match: str, bot_ids: list[str] | None, limit: int,
+                          principal: Any) -> list:
+        """Owner-scoped FTS (see ensure_owner_fts): for each owner value the caller may read,
+        rank ONLY that owner's matches inside the index (``owner_profile_id`` column filter;
+        bm25 weighs the content column alone), take the top rows, then join and check the
+        owner again in SQL.
+
+        ``ORDER BY rank`` (with ``rank MATCH 'bm25(...)'``) is FTS5's own sorter: snippet() is
+        then computed for the rows returned only. Snippets made in a second ``MATCH ... AND
+        rowid IN (...)`` query cost a full index evaluation per row (~0.9 s for 60 hits at 1M
+        messages, measured)."""
+        owners = _owner_values(principal, None)
+        if owners == []:
+            return []
+        # With a character filter some top rows drop out after the join: rank a deeper list.
+        depth = limit if not bot_ids else min(5000, limit * 20)
+        # Match delimiters are Private Use Area code points, chosen because they have NO
+        # rendering or layout semantics of their own. The previous markers were U+2068/U+2069
+        # (bidi isolates): invisible, but functional - they change directional handling of the
+        # run they enclose, which is a live problem once the UI renders right-to-left
+        # languages, and they are exactly the characters "trojan source" scanners flag. PUA
+        # code points are inert and effectively absent from real message text.
+        ranked: list[tuple[float, int, str]] = []
+        for value in (owners if owners is not None else [_ALL_OWNERS]):
+            if value is None:
+                # Unowned rows exist only on an install whose first Admin is not made yet
+                # (creating it adopts them). One index seek says whether to pay for them.
+                cur = await self.db.execute(
+                    "SELECT 1 FROM threads WHERE owner_profile_id IS NULL LIMIT 1")
+                if await cur.fetchone() is None:
+                    continue
+            # Terms always on the content column: a bare prefix term would also match the
+            # owner column's id tokens.
+            expr = f"content : ({match})"
+            if value not in (None, _ALL_OWNERS):
+                expr += f" AND {fts_owner_term(value)}"
+            cur = await self.db.execute(
+                "SELECT rowid, rank, "
+                f"snippet(messages_fts, 0, '{FTS_MARK_OPEN}', '{FTS_MARK_CLOSE}', '…', 12) "
+                "FROM messages_fts WHERE messages_fts MATCH ? AND rank MATCH 'bm25(1.0, 0.0)' "
+                "ORDER BY rank LIMIT ?", (expr, depth))
+            ranked += [(row[1], row[0], row[2]) for row in await cur.fetchall()]
+        if not ranked:
+            return []
+        ranked.sort(key=lambda x: (x[0], -x[1]))
+        order = {rowid: (i, snip) for i, (_r, rowid, snip) in enumerate(ranked)}
+        frag, params = _owner_where(principal, None)
+        where = [frag] if frag else []
+        if bot_ids:
+            where.append(f"t.bot_id IN ({','.join('?' * len(bot_ids))})")
+            params = [*params, *bot_ids]
+        out: list = []
+        ids = list(order)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            cur = await self.db.execute(
+                # CROSS JOIN fixes the order: the ranked rowids drive (a primary-key seek
+                # each); left to itself the planner may walk every message of the owner.
+                "SELECT m.rowid AS _rowid, m.id, m.thread_id, m.role, m.created_at, t.bot_id, t.title "
+                "FROM messages m CROSS JOIN threads t ON t.id = m.thread_id "
+                f"WHERE m.rowid IN ({','.join('?' * len(chunk))})"
+                + (" AND " + " AND ".join(where) if where else ""), [*chunk, *params])
+            out += [dict(r) for r in await cur.fetchall()]
+        out.sort(key=lambda r: order[r["_rowid"]][0])
+        out = out[:limit]
+        for r in out:
+            r["snippet"] = order[r.pop("_rowid")][1]
+        return out
 
     # -- durability / backup ----------------------------------------------- #
 
@@ -1445,6 +1665,13 @@ class Database:
         The OpenClaw gateway lowercases whole session keys, so a thread id
         recovered from one (e.g. "daily-scout-…") may differ in case from the
         real row ("daily-Scout-…")."""
+        # Exact first: the primary key answers it with one seek. The NOCASE form cannot use
+        # the (binary) primary key and scans every thread, so it only runs when the exact
+        # lookup misses - the lowercased-session-key case it exists for.
+        cur = await self.db.execute("SELECT id FROM threads WHERE id = ?", (thread_id,))
+        row = await cur.fetchone()
+        if row:
+            return row[0]
         cur = await self.db.execute(
             "SELECT id FROM threads WHERE id = ? COLLATE NOCASE LIMIT 1",
             (thread_id,),
@@ -1477,6 +1704,77 @@ class Database:
         cur = await self.db.execute(sql, params)
         rows = await cur.fetchall()
         return [self._thread_from_row(r) for r in rows]
+
+    async def list_threads_page(
+        self, *, bot_id: str | None = None, archived: bool | None = False, cursor: str | None = None,
+        limit: int = THREAD_PAGE_DEFAULT, principal: Any = _ALL_OWNERS,
+        owner_ids: set[str | None] | None = None,
+        allow_bot: Any = None,
+    ) -> tuple[list[ThreadOut], str | None]:
+        """One page of the caller's OWN threads (4.0 scale, BUILD-PLAN-v2 §1.13.1): page one
+        (no ``cursor``) is every pinned thread, then the ``limit`` most recently updated
+        unpinned ones; ``next_cursor`` (None at the end) continues the unpinned list in
+        ``(updated_at, id)`` keyset order. ``bot_id``: one character's threads, else every
+        character's. ``archived``: True = the Archived view, False = the rail, None = both
+        (the 3.x ``include_archived``), merged in the same order. The owner filter is
+        the same rule as everywhere (``ownership.readable_owner_ids``): a profile only ever
+        pages through its own threads. ``allow_bot(bot_id) -> bool`` drops the threads of
+        characters the caller may no longer use; the page is topped up from further down so
+        a filtered row does not shorten it (bounded)."""
+        limit = max(1, min(THREAD_PAGE_MAX, int(limit or THREAD_PAGE_DEFAULT)))
+        after = decode_thread_cursor(cursor) if cursor else None
+        owners = _owner_values(principal, owner_ids)
+        if owners == []:
+            return [], None
+        cols = (f"SELECT t.*, {self._LAST_MESSAGE_SQL}, "
+                "(SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS message_count, "
+                f"{self._UNREAD_SQL} FROM threads t ")
+
+        async def rows(pinned: int, key: tuple[str, str] | None, n: int) -> list:
+            out: list = []
+            for value, arch in ((v, a) for v in (owners if owners is not None else [_ALL_OWNERS])
+                                for a in ((0, 1) if archived is None else (1 if archived else 0,))):
+                where, params = [], []
+                if value is not _ALL_OWNERS:
+                    frag, extra = _owner_eq(value)
+                    where.append(frag)
+                    params += extra
+                if bot_id is not None:
+                    where.append("t.bot_id = ?")
+                    params.append(bot_id)
+                where += ["t.is_archived = ?", "t.is_pinned = ?"]
+                params += [arch, pinned]
+                if key is not None:
+                    where.append("(t.updated_at, t.id) < (?, ?)")
+                    params += list(key)
+                sql = (cols + "WHERE " + " AND ".join(where)
+                       + " ORDER BY t.updated_at DESC, t.id DESC LIMIT ?")
+                cur = await self.db.execute(sql, [*params, n])
+                out += await cur.fetchall()
+            out.sort(key=lambda r: (r["updated_at"] or "", r["id"]), reverse=True)
+            return out[:n]
+
+        def keep(r) -> bool:
+            return allow_bot is None or bool(allow_bot(r["bot_id"]))
+
+        page: list = []
+        if after is None:
+            page += [r for r in await rows(1, None, PINNED_MAX) if keep(r)]
+        key, more = after, False
+        got: list = []
+        for _round in range(5):                 # top up a page that the bot filter thinned
+            want = limit - len(got)
+            raw = await rows(0, key, want + 1)
+            more = len(raw) > want
+            raw = raw[:want]
+            got += [r for r in raw if keep(r)]
+            if raw:
+                key = (raw[-1]["updated_at"] or "", raw[-1]["id"])
+            if not more or len(got) >= limit:
+                break
+        page += got
+        nxt = encode_thread_cursor(*key) if (more and key is not None) else None
+        return [self._thread_from_row(r) for r in page], nxt
 
     async def update_thread_status(self, thread_id: str, status: str) -> None:
         await self.db.execute(
@@ -1543,10 +1841,11 @@ class Database:
                 meta.pop(key, None)
             else:
                 meta[key] = value
+        blob = _json.dumps(meta) if meta else None
         await self.db.execute(
-            "UPDATE messages SET metadata = ? WHERE id = ?",
-            (_json.dumps(meta) if meta else None, message_id))
+            "UPDATE messages SET metadata = ? WHERE id = ?", (blob, message_id))
         await self.db.commit()
+        await self._note_media_refs(message_id, blob)
         cur = await self.db.execute(
             "SELECT * FROM messages WHERE id = ?", (message_id,))
         fresh = await cur.fetchone()
@@ -1660,16 +1959,24 @@ class Database:
     async def unread_summary(self, *, principal: Any = _ALL_OWNERS) -> list[dict]:
         """Threads with unread bot messages: [{thread_id, bot_id, unread_since}]. With
         ``principal`` (4.0) only that caller's own threads."""
-        frag, extra = _owner_where(principal, None)
-        cur = await self.db.execute(
-            f"""
-            SELECT t.id AS thread_id, t.bot_id,
-                   {self._UNREAD_SQL}
-            FROM threads t
-            WHERE t.is_archived = 0 {"AND " + frag if frag else ""}
-            """, extra
-        )
-        rows = await cur.fetchall()
+        # Only threads with something newer than their last read can be unread (add_message
+        # keeps updated_at >= every message's created_at), and that is exactly the partial
+        # index idx_threads_owner_unread (011_scale): the WHERE below repeats its terms
+        # verbatim so SQLite may use it. One equality seek per owner value.
+        owners = _owner_values(principal, None)
+        rows: list = []
+        for value in (owners if owners is not None else [_ALL_OWNERS]):
+            frag, extra = ("", []) if value is _ALL_OWNERS else _owner_eq(value)
+            cur = await self.db.execute(
+                f"""
+                SELECT t.id AS thread_id, t.bot_id,
+                       {self._UNREAD_SQL}
+                FROM threads t
+                WHERE {frag + " AND " if frag else ""}t.is_archived = 0
+                  AND (t.last_read_at IS NULL OR t.last_read_at < t.updated_at)
+                """, extra
+            )
+            rows += await cur.fetchall()
         return [
             {"thread_id": r["thread_id"], "bot_id": r["bot_id"], "unread_since": r["unread_since"]}
             for r in rows if r["unread_since"]
@@ -1775,10 +2082,13 @@ class Database:
         # landed at once, timestamped today.
         ts = created_at or now_iso()
         meta_json = _json.dumps(metadata) if metadata else None
+        # owner_profile_id: the thread's, in the same statement (the search index files the
+        # message under it; see ensure_owner_fts).
         await self.db.execute(
-            "INSERT INTO messages (id, thread_id, role, content, media_url, created_at, metadata, source_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (mid, thread_id, role, content, media_url, ts, meta_json, source_id),
+            "INSERT INTO messages (id, thread_id, role, content, media_url, created_at, metadata, "
+            "source_id, owner_profile_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT owner_profile_id FROM threads WHERE id = ?))",
+            (mid, thread_id, role, content, media_url, ts, meta_json, source_id, thread_id),
         )
         # Bump the thread's updated_at so it sorts to the top of the list —
         # but only FORWARD. A recovered message keeps its original created_at
@@ -1792,10 +2102,42 @@ class Database:
             "WHERE id = ?", (ts, thread_id)
         )
         await self.db.commit()
+        await self._note_media_refs(mid, media_url, content, meta_json)
         return MessageOut(
             id=mid, thread_id=thread_id, role=role, content=content,
             media_url=media_url, created_at=ts, metadata=metadata,
         )
+
+    async def _note_media_refs(self, msg_id: str, *texts: str | None) -> None:
+        """Keep ``media_refs`` current at write time (011_scale): every ``/media/`` name a
+        message now shows gets ``last_ref_at`` = that message's ``created_at`` when newer. The
+        maintenance task's watermark pass reconciles the rest; image retention never has to
+        trust a table that is a day behind. Never fails the write it follows."""
+        names = media_names_in(*texts)
+        if not names:
+            return
+        try:
+            await self.db.executemany(
+                "INSERT INTO media_refs (name, last_ref_at) "
+                "SELECT ?, created_at FROM messages WHERE id = ? "
+                "ON CONFLICT(name) DO UPDATE SET last_ref_at = "
+                "MAX(media_refs.last_ref_at, excluded.last_ref_at)",
+                [(n, msg_id) for n in sorted(names)])
+            await self.db.commit()
+        except Exception:
+            log.warning("could not record the media references of a message", exc_info=True)
+
+    async def media_expired_name(self, names: list[str]) -> str | None:
+        """The first of ``names`` the image-retention rule deleted (table ``media_expired``,
+        011_scale), else None. One primary-key seek per name."""
+        for name in names:
+            if not name:
+                continue
+            cur = await self.db.execute("SELECT name FROM media_expired WHERE name = ?", (name,))
+            row = await cur.fetchone()
+            if row:
+                return row[0]
+        return None
 
     async def get_message(self, msg_id: str) -> MessageOut | None:
         cur = await self.db.execute("SELECT * FROM messages WHERE id = ?", (msg_id,))
@@ -1855,6 +2197,7 @@ class Database:
         await self.db.execute(
             "UPDATE messages SET content = ? WHERE id = ?", (content, msg_id))
         await self.db.commit()
+        await self._note_media_refs(msg_id, content)
 
     # Machine posts made before the `metadata.notice` convention existed
     # (2026-09-25), by leading text → notice level. Deliberately narrow: only
@@ -1895,10 +2238,11 @@ class Database:
     async def update_message_metadata(self, msg_id: str,
                                       metadata: dict[str, Any] | None) -> None:
         """Replace a message's metadata blob (callers merge first)."""
+        blob = _json.dumps(metadata) if metadata else None
         await self.db.execute(
-            "UPDATE messages SET metadata = ? WHERE id = ?",
-            (_json.dumps(metadata) if metadata else None, msg_id))
+            "UPDATE messages SET metadata = ? WHERE id = ?", (blob, msg_id))
         await self.db.commit()
+        await self._note_media_refs(msg_id, blob)
 
     # ----------------------------------------------------------------- #
     # Image jobs
