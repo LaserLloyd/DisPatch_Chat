@@ -70,9 +70,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app import image_jobs, image_providers
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from app import image_guard, image_jobs, image_providers
 
 log = logging.getLogger("local-chat.app.imagestudio")
 
@@ -391,6 +392,13 @@ def build(ctx):
         if len(prompt) > PROMPT_MAX:
             raise HTTPException(
                 422, f"The prompt is {len(prompt)} characters; the limit is {PROMPT_MAX}")
+        # Hard lines (adult-only; no sexual imagery of real people). Checked
+        # before any provider or key lookup so a refusal never reaches a
+        # metered API and is the same message the chat path gives.
+        try:
+            image_guard.check_prompt(prompt)
+        except image_guard.ImageGuardError as e:
+            raise HTTPException(422, e.message) from None
         _providers, default = _provider_rows()
         pid = (body.provider or default).strip().lower()
         if not pid:
