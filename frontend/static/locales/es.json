@@ -1685,8 +1685,6 @@
   },
   "restricted": {
     "banner": "El owner puede ver un resumen de la actividad de este perfil. Los chats se guardan en el ordenador anfitrión y son compartidos: cualquiera que pueda usar el mismo personaje puede leerlos, también otros perfiles y los dispositivos sin sesión iniciada si esta instalación lo permite.",
-    "region": "[es] Restricted profile",
-    "more": "¿Quién puede ver qué?",
     "panel_title": "Quién puede ver qué",
     "panel_chats": "El owner y los administradores también pueden abrir los chats de este perfil, como cualquiera que pueda usar el mismo personaje. Abajo está el resumen que ven.",
     "summary_title": "Tu resumen de actividad",

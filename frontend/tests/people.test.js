@@ -583,29 +583,9 @@ test('setup: the token field exists only for a network install, and the form val
   assert.equal(local.form.querySelector('#loc-token'), null, 'no token field on the box itself');
 });
 
-test('restricted banner: slim, non-dismissible, with the disclosure and a link to the panel', { skip: dom.skip }, async () => {
+test('restricted panel: says who can see what, and that the Owner and Admins can open the chats', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { paintRestrictedBanner } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('restricted-banner');
-  let opened = 0;
-  paintRestrictedBanner(host, { show: true, onMore: () => { opened++; } });
-  assert.equal(host.hidden, false);
-  assert.equal(host.querySelector('.restricted-text').textContent,
-    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
-  assert.equal(host.querySelectorAll('button').length, 1, 'only the link; there is no close button');
-  host.querySelector('.restricted-more').click();
-  assert.equal(opened, 1);
-  paintRestrictedBanner(host, { show: false });
-  assert.equal(host.hidden, true);
-  assert.equal(host.childNodes.length, 0);
-});
-
-test('restricted panel: the link says who can see what, and the panel says the Owner and Admins can open the chats', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { paintRestrictedBanner, openRestrictedPanel } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('restricted-banner');
-  paintRestrictedBanner(host, { show: true, onMore: () => {} });
-  assert.equal(host.querySelector('.restricted-more').textContent, 'Who can see what?');
+  const { openRestrictedPanel } = await import(`../static/js/signin.js?t=${Math.random()}`);
   const D = win.HTMLDialogElement && win.HTMLDialogElement.prototype;
   if (D && !D.showModal) { D.showModal = function () { this.open = true; }; D.close = function () { this.open = false; }; }
   const dlg = await openRestrictedPanel({ fetchActivity: async () => ({ today: {}, limits: {}, summary: [] }) });

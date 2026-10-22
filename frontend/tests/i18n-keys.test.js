@@ -142,7 +142,6 @@ const DYNAMIC = [
     built: '4.0 Foundation: reserved for the wave packages' },
   { re: /^lock\.(target_title|target_default|target_list|target_hint|landed)$/,
     built: '4.0 Foundation: reserved for WP-FE-CORE / WP-FE-PEOPLE' },
-  { re: /^host_notice\.(shared|pin_reset)$/, built: '4.0 Foundation: reserved for WP-BANNER' },
   { re: /^people\.(type_label|type_admin|type_user|type_basic|type_admin_hint|type_user_hint|type_basic_hint|protected|protected_hint|no_credential_warning|downgrade_title|downgrade_confirm|lock_target_badge)$/,
     built: '4.0 Foundation: reserved for WP-FE-PEOPLE' },
 ];
