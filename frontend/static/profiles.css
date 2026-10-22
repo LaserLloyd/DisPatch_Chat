@@ -35,6 +35,63 @@
 
 /* ===== WP-FE-YOU: My bots, bot editor, AI build, Reset to default ===== */
 
+/* Body copy inside the three screens: the settings panes' bare <p> renders large. */
+.mb-section p, .yo-editor p, [data-anchor="reset"] > p, [data-anchor="mydata"] > p { font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+[data-anchor="reset"] .ui-btn, [data-anchor="mydata"] .ui-btn { margin-top: 2px; }
+.yo-editor .yo-title, .ar-title { font-size: 15px; }
+
+/* My bots list (js/my-bots.js) */
+.mb-private { margin: 0 0 12px; }
+.mb-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.mb-list { list-style: none; margin: 0 0 12px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.mb-list:empty { display: none; }
+.mb-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border-strong); }
+.mb-row:first-child { border-top: 0; }
+.mb-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg-tertiary); }
+.mb-avatar-emoji { display: inline-flex; align-items: center; justify-content: center; font-size: 20px; }
+.mb-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mb-name { color: var(--text-primary); overflow-wrap: anywhere; }
+.mb-sub { font-size: 12px; overflow-wrap: anywhere; }
+.mb-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.mb-group { margin-top: 18px; }
+.mb-empty { margin: 8px 0 14px; }
+
+/* Bot editor and AI build (js/bot-editor.js) */
+.yo-editor { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.yo-title { margin: 0; font-size: 16px; color: var(--text-primary); }
+.yo-notice { margin: 0; }
+.yo-row { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
+.yo-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.yo-label { font-size: 13px; color: var(--text-secondary); }
+.yo-hint { font-size: 12px; }
+.yo-error { color: var(--error-text); font-size: 13px; }
+.yo-banner { padding: 8px 10px; border: 1px solid var(--error); border-radius: var(--radius-sm); }
+.yo-persona, .yo-desc { width: 100%; min-height: 8em; resize: vertical; font: inherit; box-sizing: border-box; }
+.yo-counter { text-align: right; font-size: 12px; margin-top: 4px; }
+.yo-counter.over { color: var(--error-text); }
+.yo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.yo-foot { justify-content: flex-end; margin-top: 4px; }
+.yo-preview { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--bg-tertiary); display: block; }
+.yo-preview-box { margin-bottom: 4px; }
+.yo-pick-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+.yo-pick-grid[hidden] { display: none; }
+.yo-pick { padding: 0; border: 2px solid transparent; border-radius: 50%; background: none; cursor: pointer; line-height: 0; }
+.yo-pick:hover, .yo-pick:focus-visible { border-color: var(--accent); }
+.yo-pick img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+
+/* Reset to default and My data (js/account-reset.js) */
+.ar-confirm { margin: 12px 0; padding: 14px; border: 1px solid var(--error); border-radius: var(--radius-md); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px; }
+.ar-confirm[hidden] { display: none; }
+.ar-title { margin: 0; font-size: 15px; color: var(--text-primary); }
+.ar-line { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.ar-status { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
+
+@media (max-width: 560px) {
+  .yo-row { grid-template-columns: 1fr; }
+  .mb-row { flex-wrap: wrap; }
+  .mb-actions { width: 100%; justify-content: flex-start; }
+}
+
 /* ===== WP-FE-PEOPLE: People & Access types, permissions, lock target ===== */
 
 /* The confirmation dialog with counts (downgrade, reset, delete). Sits above Settings. */
